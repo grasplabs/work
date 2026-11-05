@@ -25,9 +25,19 @@ const frontendTheme = "/theme.js";
  * frontend's HTML, where it keeps an injected script from running or
  * sending the person's data elsewhere; on API responses it does nothing.
  *
- * - Scripts and styles only from the frontend's own files: no inline
- *   script, no eval, and none of the code this origin serves that we
- *   didn't write. Screens' modules and Apps' npm packages are served here
+ * - Scripts only from the frontend's own files: no inline script, no
+ *   eval, and none of the code this origin serves that we didn't write.
+ *   WebAssembly may compile (`'wasm-unsafe-eval'`, which allows no JS
+ *   eval): the Code view's highlighter (@pierre/diffs' Highlights) is
+ *   lexers compiled to WebAssembly, shipped in those same files.
+ * - Stylesheets only from the frontend's own files, and inline styles:
+ *   the Code view's renderer (@pierre/diffs) writes its lines as HTML
+ *   with `style` attributes, and its theme as a `<style>` in their shadow
+ *   root; without them it shows nothing right. A style runs no code, and
+ *   what injected CSS could fetch to leak the page's text (a `url()` in a
+ *   background or a font) still reaches only this origin (img-src, and
+ *   font-src through default-src).
+ * - Screens' modules and Apps' npm packages are served here
  *   for screens' frames, which have an opaque origin; run in this page,
  *   with its origin and the person's session, they would turn any HTML
  *   injection into script, through a `<script src>` or a `srcdoc` frame
@@ -56,8 +66,8 @@ const frontendTheme = "/theme.js";
 const contentSecurityPolicy = (origin: string): string =>
   policy({
     "default-src": "'self'",
-    "script-src": `${origin}${frontendAssets} ${origin}${frontendTheme}`,
-    "style-src": `${origin}${frontendAssets}`,
+    "script-src": `${origin}${frontendAssets} ${origin}${frontendTheme} 'wasm-unsafe-eval'`,
+    "style-src": `${origin}${frontendAssets} 'unsafe-inline'`,
     "worker-src": "'none'",
     "img-src": "'self' data:",
     "connect-src": "'self'",

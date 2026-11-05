@@ -361,38 +361,6 @@ const expectOverlayOpensAndCloses = async (
   }
 };
 
-/**
- * What the app's policy (style-src: only the frontend's own files) may
- * block on a page, and only there. input-otp adds an empty `<style>` element and fills it through
- * CSSOM; the policy blocks the element, and the kit's stylesheet carries
- * its rules instead (styles.css). Screens allow inline styles, so there it
- * works as upstream.
- */
-const knownViolations: Record<string, readonly RegExp[]> = {
-  // Exactly the one empty element: the event for it, and the console's
-  // report with the hash of the empty string.
-  "input-otp": [
-    /^style-src-elem blocked inline at http:\/\/localhost:\d+\/assets\/[\w.-]+\.js:\d+:\d+$/u,
-    /^Applying inline style violates the following Content Security Policy directive 'style-src http:\/\/localhost:\d+\/assets\/'\. Either the 'unsafe-inline' keyword, a hash \('sha256-47DEQpj8HBSa\+\/TImW\+5JCeuQeRkm5NMpJWZG3hSuFU='\), or a nonce \('nonce-\.\.\.'\) is required to enable inline execution\. The action has been blocked\.$/u,
-  ],
-};
-
-/** The violations left once each known one is matched once, in order. */
-const unexpectedViolations = (
-  violations: readonly string[],
-  known: readonly RegExp[]
-): string[] => {
-  const left = [...known];
-  return violations.filter((violation) => {
-    const at = left.findIndex((pattern) => pattern.test(violation));
-    if (at === -1) {
-      return true;
-    }
-    left.splice(at, 1);
-    return false;
-  });
-};
-
 /** Keyboard behaviour particular to a component, checked on its page. */
 const keyboardChecks: Record<string, (page: Page) => Promise<void>> = {
   // A vertical group moves with the up and down arrows, which only works
@@ -480,8 +448,6 @@ for (const { name, heading, path } of pages) {
     await page.setViewportSize(phone);
     await expectNoSidewaysScroll(page);
 
-    expect(
-      unexpectedViolations(violations, knownViolations[name] ?? [])
-    ).toStrictEqual([]);
+    expect(violations).toStrictEqual([]);
   });
 }

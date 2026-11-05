@@ -41,6 +41,7 @@
  *     (Badge variant="passed" and "attention"), as shadcn's destructive is.
  *   - `destructive` (red) is for errors, a form's error or something that
  *     failed, and for actions that can't be undone. Nothing else is red.
+ *   - `syntax-*`, the hues of highlighted code.
  *   - `faint`, quieter than muted; `scrim`, what lies over the page behind
  *     a dialog; the dashboard's, the brain's and the charts' own colours.
  * And three shadows: a block resting on the page, what floats above it,
@@ -60,9 +61,14 @@
   --font-serif:
     "Newsreader Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     sans-serif;
+  /*
+   * JetBrains Mono, for code wherever it is shown, where the page loads it
+   * (the frontend and the admin bundle it); in an App screen's frame, the
+   * system's monospace.
+   */
   --font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+    "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
   --background: #fbfdff;
   --foreground: #062d22;
   --card: #ffffff;
@@ -113,6 +119,16 @@
   --sidebar-ring: #6fb48a;
   --status-agreed: #1c7148;
   --status-attention: #82560f;
+  /*
+   * Code's colours, wherever code is highlighted (the chat's answers, an
+   * App's Code view): what a word is to the language, in quiet hues that
+   * keep the ink's weight. Comments and punctuation are the muted text,
+   * anything else the text itself.
+   */
+  --syntax-keyword: oklch(0.47 0.14 305);
+  --syntax-string: oklch(0.5 0.11 155);
+  --syntax-constant: oklch(0.53 0.13 55);
+  --syntax-function: oklch(0.47 0.12 250);
   /* Time bars: what is still by hand. */
   --bar-manual: #e0e7e2;
   /* The dashboard's return: measured is the agreed green; expected a light tint of it, still to come. */
@@ -192,6 +208,10 @@
     --sidebar-ring: #6fb48a;
     --status-agreed: #3fae6a;
     --status-attention: #e2b360;
+    --syntax-keyword: oklch(0.78 0.11 305);
+    --syntax-string: oklch(0.8 0.12 155);
+    --syntax-constant: oklch(0.82 0.11 70);
+    --syntax-function: oklch(0.79 0.1 245);
     --bar-manual: #24342d;
     --return-expected: #1f4434;
     --graph-vision: oklch(0.72 0.13 70);
@@ -288,6 +308,10 @@
   --color-tile-foreground: var(--tile-foreground);
   --color-status-agreed: var(--status-agreed);
   --color-status-attention: var(--status-attention);
+  --color-syntax-keyword: var(--syntax-keyword);
+  --color-syntax-string: var(--syntax-string);
+  --color-syntax-constant: var(--syntax-constant);
+  --color-syntax-function: var(--syntax-function);
   --color-bar-manual: var(--bar-manual);
   --color-return-expected: var(--return-expected);
   --color-row-group: var(--row-group);

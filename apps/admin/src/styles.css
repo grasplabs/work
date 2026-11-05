@@ -3,6 +3,8 @@
 @import "@fontsource-variable/geist";
 /* Newsreader, the theme's serif (`font-serif`), for titles and key figures. */
 @import "@fontsource-variable/newsreader/opsz.css";
+/* JetBrains Mono, the theme's code font (`font-mono`). */
+@import "@fontsource-variable/jetbrains-mono";
 
 @source "../";
 

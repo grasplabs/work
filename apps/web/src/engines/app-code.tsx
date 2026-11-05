@@ -1,46 +1,52 @@
 import type { AppFiles, FileDiff, ViewedApp } from "@grasp-os/shared/apps";
 import type { ChatDraft } from "@grasp-os/shared/chat";
-import { Badge } from "@grasp-os/ui/components/badge";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@grasp-os/ui/components/breadcrumb";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  FileTree,
+  FileTreeFile,
+  FileTreeFolder,
+} from "@grasp-os/ui/components/file-tree";
 import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@grasp-os/ui/components/toggle-group";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { FileIcon, FolderIcon, MessageSquareIcon } from "lucide-react";
-import { useEffect, useEffectEvent, useState } from "react";
-import Markdown from "react-markdown";
-import type { Components, Options } from "react-markdown";
-import rehypeHighlight from "rehype-highlight";
+import { CheckIcon, CopyIcon, MessageSquareIcon } from "lucide-react";
+import { Fragment, useEffect, useEffectEvent, useState } from "react";
+import type { ReactNode } from "react";
 
+import { useCopy } from "../copy.ts";
 import type { Session } from "../core.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { changedLines } from "./line-diff.ts";
-import type { DiffPart } from "./line-diff.ts";
+import { CodeDiff, CodeFile, CodeScroller, fileIconOf } from "./code-view.tsx";
+import type { DiffLayout } from "./code-view.tsx";
 
 // An App's code in its workspace, for its builders (app-workspace.tsx's
-// Code view): the files of the build the preview beside it shows, as a
-// tree, the one picked shown highlighted. While the workspace's chat has
-// a draft of the App, that is the draft's files as they are now, read
-// again at each write of the chat's agent; otherwise the version up for
-// review, if any, and its changes against the current version, file by
-// file, or else the current version. Read-only: the App changes through
-// its chat, which the note says. Everything is read with core's own reads
-// for builders (`chats.draftFiles`, `apps.files.read`,
-// `apps.versions.diff`), which refuse anyone else.
+// Code view), as a code editor shows a project, read-only: the files of
+// the build the preview beside it shows as a tree of folders, and the one
+// open highlighted, line by line (code-view.tsx). While the workspace's
+// chat has a draft of the App, that is the draft's files as they are now,
+// read again at each write of the chat's agent; otherwise the version up
+// for review, if any, and its changes against the current version, file
+// by file, or else the current version. The App changes through its chat,
+// which the note says. Everything is read with core's own reads for
+// builders (`chats.draftFiles`, `apps.files.read`, `apps.versions.diff`),
+// which refuse anyone else.
 //
 // What the host generates for an App (`server/_generated/`, `.grasp/`) is
 // never one of its files: core refuses those paths in an App's files and
 // generates them afresh for each build, so they aren't here to show, as
 // Convex's dashboard leaves out `convex/_generated/`.
-//
-// Highlighting is the chat's (answer-markdown.tsx): rehype-highlight by
-// class, coloured from the theme's tokens in styles.css. A file goes
-// through it as one fenced block, its fence longer than any run of
-// backticks in it, so nothing in the file can end the block.
 
 /** Which version's files are shown. */
 type Source = "current" | "draft";
@@ -48,77 +54,16 @@ type Source = "current" | "draft";
 /** What the tab shows: the files, or the draft's changes. */
 type Part = "files" | "changes";
 
-/** The language highlight.js knows a file by, from its extension. */
-const languages: Readonly<Record<string, string>> = {
-  ts: "typescript",
-  tsx: "typescript",
-  mts: "typescript",
-  js: "javascript",
-  jsx: "javascript",
-  mjs: "javascript",
-  json: "json",
-  md: "markdown",
-  css: "css",
-  html: "xml",
-  svg: "xml",
-  sql: "sql",
-  yaml: "yaml",
-  yml: "yaml",
-};
-
-/** A file's language, by its extension; none for one highlight.js lacks. */
-const languageOf = (path: string): string | undefined => {
-  const dot = path.lastIndexOf(".");
-  return dot === -1 ? undefined : languages[path.slice(dot + 1)];
-};
-
-/** Every run of backticks. */
-const backtickRuns = /`+/gu;
-
-/** `text` as one fenced Markdown block in `language`. */
-const fenced = (text: string, language: string | undefined): string => {
-  const longest = Math.max(
-    0,
-    ...[...text.matchAll(backtickRuns)].map(([run]) => run.length)
-  );
-  const fence = "`".repeat(Math.max(3, longest + 1));
-  return `${fence}${language ?? ""}\n${text.replace(/\n$/u, "")}\n${fence}`;
-};
-
-/** Highlighting only a file whose language is known, as in the chat. */
-const highlightPlugins: Options["rehypePlugins"] = [
-  [rehypeHighlight, { detect: false }],
-];
-
-const codeComponents: Components = {
-  pre: ({ children }) => (
-    <pre className="overflow-x-auto p-4 font-mono text-xs leading-relaxed">
-      {children}
-    </pre>
-  ),
-};
-
-/** A file's text, highlighted. */
-const HighlightedFile = ({ path, text }: { path: string; text: string }) => (
-  <Markdown
-    components={codeComponents}
-    rehypePlugins={highlightPlugins}
-    skipHtml
-  >
-    {fenced(text, languageOf(path))}
-  </Markdown>
-);
-
-/** A folder of the tree: its folders, then its files, each by name. */
+/** A folder of the tree: the folders and files in it, by name. */
 interface Folder {
   folders: Map<string, Folder>;
   files: { name: string; path: string }[];
 }
 
-/** The tree of `paths`, folders and files each sorted by name. */
+/** The tree of `paths`. */
 const treeOf = (paths: readonly string[]): Folder => {
   const root: Folder = { folders: new Map(), files: [] };
-  for (const path of [...paths].toSorted()) {
+  for (const path of paths) {
     const parts = path.split("/");
     const name = parts.pop() ?? path;
     let folder = root;
@@ -135,54 +80,189 @@ const treeOf = (paths: readonly string[]): Folder => {
   return root;
 };
 
-/** One folder's entries, its folders open, the picked file marked. */
+const byName = (a: string, b: string): number => a.localeCompare(b);
+
+/**
+ * One folder's entries, as an editor sorts them: its folders, then its
+ * files, each by name. A folder starts open: an App is a few files.
+ */
 const FolderEntries = ({
   folder,
-  picked,
-  onPick,
+  open,
+  onOpen,
 }: {
   folder: Folder;
-  picked: string | undefined;
-  onPick: (path: string) => void;
+  open: string;
+  onOpen: (path: string) => void;
 }) => (
-  <ul className="flex flex-col gap-0.5">
+  <>
     {[...folder.folders.entries()]
-      .toSorted(([a], [b]) => a.localeCompare(b))
+      .toSorted(([a], [b]) => byName(a, b))
       .map(([name, inner]) => (
-        <li className="flex flex-col gap-0.5" key={`folder:${name}`}>
-          <span className="text-muted-foreground flex items-center gap-1.5 px-2 py-1 text-xs">
-            <FolderIcon aria-hidden="true" className="size-3.5 flex-none" />
-            {name}
-          </span>
-          <div className="pl-3">
-            <FolderEntries folder={inner} onPick={onPick} picked={picked} />
-          </div>
-        </li>
+        <FileTreeFolder defaultOpen key={`folder:${name}`} name={name}>
+          <FolderEntries folder={inner} onOpen={onOpen} open={open} />
+        </FileTreeFolder>
       ))}
-    {folder.files.map((file) => (
-      <li key={file.path}>
-        <button
-          aria-current={file.path === picked ? "true" : undefined}
-          className={cn(
-            "hover:bg-muted flex w-full items-center gap-1.5 truncate rounded-md px-2 py-1 text-left font-mono text-xs",
-            file.path === picked && "bg-muted font-medium"
-          )}
-          onClick={() => {
-            onPick(file.path);
-          }}
-          title={file.path}
-          type="button"
-        >
-          <FileIcon
-            aria-hidden="true"
-            className="text-muted-foreground size-3.5 flex-none"
-          />
-          {file.name}
-        </button>
-      </li>
-    ))}
-  </ul>
+    {folder.files
+      .toSorted((a, b) => byName(a.name, b.name))
+      .map((file) => {
+        const Icon = fileIconOf(file.path);
+        return (
+          <FileTreeFile
+            active={file.path === open}
+            icon={<Icon aria-hidden="true" />}
+            key={file.path}
+            onClick={() => {
+              onOpen(file.path);
+            }}
+            title={file.path}
+          >
+            {file.name}
+          </FileTreeFile>
+        );
+      })}
+  </>
 );
+
+/** Where the open file is, folder by folder, as a breadcrumb. */
+const PathCrumbs = ({ path }: { path: string }) => {
+  const { t } = useLingui();
+  const parts = path.split("/");
+  const name = parts.pop() ?? path;
+  return (
+    <Breadcrumb aria-label={t`Open file`} className="min-w-0 flex-1">
+      <BreadcrumbList className="flex-nowrap">
+        {parts.map((part, index) => (
+          // A folder's place in the path is all that tells it apart.
+          <Fragment key={`${index}:${part}`}>
+            <BreadcrumbItem className="min-w-0">{part}</BreadcrumbItem>
+            <BreadcrumbSeparator />
+          </Fragment>
+        ))}
+        <BreadcrumbItem className="min-w-0">
+          <BreadcrumbPage>{name}</BreadcrumbPage>
+        </BreadcrumbItem>
+      </BreadcrumbList>
+    </Breadcrumb>
+  );
+};
+
+/** The lines of `text`; its last newline ends a line, not starts one. */
+const lineCount = (text: string): number =>
+  text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+
+/** The open file's bar: its path, its length, and a way to copy it. */
+const FileBar = ({ path, text }: { path: string; text: string }) => {
+  const { t } = useLingui();
+  const { copied, copy } = useCopy();
+  const lines = lineCount(text);
+  return (
+    <div className="flex flex-none items-center gap-3 border-b py-1.5 ps-4 pe-2">
+      <PathCrumbs path={path} />
+      <span className="text-muted-foreground flex-none text-xs tabular-nums">
+        <Plural one="# line" other="# lines" value={lines} />
+      </span>
+      <Button
+        aria-label={copied ? t`Copied` : t`Copy code`}
+        onClick={() => {
+          void copy(text);
+        }}
+        size="icon-sm"
+        variant="ghost"
+      >
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </Button>
+    </div>
+  );
+};
+
+/** The editor's frame: what it shows, on the page's muted ground. */
+const EditorFrame = ({ children }: { children: ReactNode }) => (
+  <div className="bg-muted flex min-h-0 flex-1 flex-col p-3">
+    <div className="bg-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border md:flex-row">
+      {children}
+    </div>
+  </div>
+);
+
+/** The files of one version: their tree, and the open one's text. */
+const FilesView = ({ files }: { files: AppFiles }) => {
+  const { t } = useLingui();
+  const paths = Object.keys(files);
+  const [asked, setAsked] = useState<string>();
+  // The one asked for while this version has it, else its app.ts, else
+  // its first.
+  const file =
+    asked !== undefined && Object.hasOwn(files, asked)
+      ? asked
+      : (paths.find((path) => path === "app.ts") ?? paths.toSorted()[0]);
+  if (file === undefined) {
+    return (
+      <EditorFrame>
+        <p className="text-muted-foreground p-4 text-sm">
+          <Trans>This version has no files.</Trans>
+        </p>
+      </EditorFrame>
+    );
+  }
+  const text = files[file] ?? "";
+  return (
+    <EditorFrame>
+      <nav
+        aria-label={t`Files`}
+        className="max-h-48 flex-none overflow-y-auto border-b p-2 md:max-h-none md:w-60 md:border-e md:border-b-0"
+      >
+        <FileTree>
+          <FolderEntries folder={treeOf(paths)} onOpen={setAsked} open={file} />
+        </FileTree>
+      </nav>
+      <section
+        aria-label={t`Code of ${file}`}
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
+      >
+        <FileBar path={file} text={text} />
+        {/* Each file its own scroller: a file opens at its top. */}
+        <CodeScroller className="min-h-0 flex-1 overflow-auto" key={file}>
+          <CodeFile path={file} text={text} />
+        </CodeScroller>
+      </section>
+    </EditorFrame>
+  );
+};
+
+/** The draft's changes against the current version, file by file. */
+const ChangesView = ({
+  diffs,
+  layout,
+}: {
+  diffs: readonly FileDiff[];
+  layout: DiffLayout;
+}) => {
+  const { t } = useLingui();
+  return (
+    <EditorFrame>
+      {diffs.length === 0 ? (
+        <p className="text-muted-foreground p-4 text-sm">
+          <Trans>The draft changes no file.</Trans>
+        </p>
+      ) : (
+        <section
+          aria-label={t({
+            message: "Changes",
+            context: "what a draft changes in an app's code",
+          })}
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
+        >
+          <CodeScroller className="min-h-0 flex-1 overflow-auto">
+            {diffs.map((diff) => (
+              <CodeDiff diff={diff} key={diff.path} layout={layout} />
+            ))}
+          </CodeScroller>
+        </section>
+      )}
+    </EditorFrame>
+  );
+};
 
 /**
  * What `read` read for `key`, read again whenever `key` changes; nothing
@@ -225,178 +305,20 @@ const useCoreRead = <T,>(
 };
 
 /** A read not done: that it is being read, or why it failed. */
-const ReadState = ({ loaded }: { loaded: Loaded<unknown> | undefined }) =>
-  loaded === undefined ? (
-    <LoadingLines lines={6} />
-  ) : (
-    <NotLoaded page={loaded} />
-  );
-
-/** The files of one version: their tree, and the picked one's text. */
-const FilesView = ({ files }: { files: AppFiles }) => {
-  const { t } = useLingui();
-  const paths = Object.keys(files);
-  const [asked, setAsked] = useState<string>();
-  // The one asked for while this version has it, else its app.ts, else
-  // its first.
-  const picked =
-    asked !== undefined && Object.hasOwn(files, asked)
-      ? asked
-      : (paths.find((path) => path === "app.ts") ?? paths.toSorted()[0]);
-  if (picked === undefined) {
-    return (
-      <p className="text-muted-foreground">
-        <Trans>This version has no files.</Trans>
-      </p>
-    );
-  }
-  return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row">
-      <nav
-        aria-label={t`Files`}
-        className="flex-none overflow-y-auto rounded-xl border p-2 md:w-64"
-      >
-        <FolderEntries
-          folder={treeOf(paths)}
-          onPick={setAsked}
-          picked={picked}
-        />
-      </nav>
-      <figure className="bg-muted flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl">
-        <figcaption className="text-muted-foreground border-b px-4 py-2 font-mono text-xs">
-          {picked}
-        </figcaption>
-        <div className="min-h-0 flex-1 overflow-auto">
-          <HighlightedFile path={picked} text={files[picked] ?? ""} />
-        </div>
-      </figure>
-    </div>
-  );
-};
-
-/** How a file changed, as its badge says it. */
-const ChangeBadge = ({ change }: { change: FileDiff["change"] }) => {
-  if (change === "added") {
-    return (
-      <Badge variant="passed">
-        <Trans>Added</Trans>
-      </Badge>
-    );
-  }
-  if (change === "deleted") {
-    return (
-      <Badge variant="destructive">
-        <Trans>Deleted</Trans>
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant="secondary">
-      <Trans>Changed</Trans>
-    </Badge>
-  );
-};
-
-/** How many unchanged lines a gap leaves out. */
-const GapText = ({ unchanged }: { unchanged: number }) => (
-  <Plural
-    one="⋯ # unchanged line"
-    other="⋯ # unchanged lines"
-    value={unchanged}
-  />
+const ReadState = ({ loaded }: { loaded: Loaded<unknown> | undefined }) => (
+  <div className="p-4">
+    {loaded === undefined ? (
+      <LoadingLines lines={6} />
+    ) : (
+      <NotLoaded page={loaded} />
+    )}
+  </div>
 );
-
-/** A file's changed lines, as a diff prints them. */
-const ChangedLines = ({ shown }: { shown: readonly DiffPart[] }) => (
-  <pre className="overflow-x-auto py-2 font-mono text-xs leading-relaxed">
-    {shown.map((line, index) => {
-      if (line.kind === "gap") {
-        return (
-          <div
-            className="text-muted-foreground px-4"
-            // Nothing else marks a gap's place.
-            key={`gap-${index}`}
-          >
-            <GapText unchanged={line.lines} />
-          </div>
-        );
-      }
-      if (line.kind === "no-newline") {
-        return (
-          <div
-            className="text-muted-foreground px-4 italic"
-            // It belongs to the line before it, and has no place of its own.
-            key={`no-newline-${index}`}
-          >
-            <Trans>No newline at end of file</Trans>
-          </div>
-        );
-      }
-      const key = `${line.before ?? ""}:${line.after ?? ""}`;
-      if (line.kind === "added") {
-        return (
-          <ins
-            className="bg-status-agreed/10 block px-4 no-underline"
-            key={key}
-          >
-            {`+ ${line.text}`}
-          </ins>
-        );
-      }
-      if (line.kind === "removed") {
-        return (
-          <del className="bg-destructive/10 block px-4 no-underline" key={key}>
-            {`- ${line.text}`}
-          </del>
-        );
-      }
-      return (
-        <div className="px-4" key={key}>
-          {`  ${line.text}`}
-        </div>
-      );
-    })}
-  </pre>
-);
-
-/** One file's changed lines, with a few unchanged ones around them. */
-const FileChange = ({ diff }: { diff: FileDiff }) => {
-  const shown = changedLines(diff);
-  return (
-    <section className="flex flex-col overflow-hidden rounded-xl border">
-      <header className="bg-muted flex items-center gap-2 border-b px-4 py-2">
-        <h3 className="min-w-0 truncate font-mono text-xs">{diff.path}</h3>
-        <ChangeBadge change={diff.change} />
-      </header>
-      {shown === undefined ? (
-        <p className="text-muted-foreground px-4 py-2 text-xs">
-          <Trans>Too many changes to show line by line</Trans>
-        </p>
-      ) : (
-        <ChangedLines shown={shown} />
-      )}
-    </section>
-  );
-};
-
-/** The draft's changes against the current version, file by file. */
-const ChangesView = ({ diffs }: { diffs: readonly FileDiff[] }) =>
-  diffs.length === 0 ? (
-    <p className="text-muted-foreground">
-      <Trans>The draft changes no file.</Trans>
-    </p>
-  ) : (
-    <div className="flex flex-col gap-4">
-      {diffs.map((diff) => (
-        <FileChange diff={diff} key={diff.path} />
-      ))}
-    </div>
-  );
 
 /** Every file of `files`, as added: a draft over no current version. */
 const allAdded = (files: AppFiles): FileDiff[] =>
   Object.entries(files)
-    .toSorted(([a], [b]) => a.localeCompare(b))
+    .toSorted(([a], [b]) => byName(a, b))
     .map(([path, after]) => ({ path, change: "added", after }));
 
 /** One version's files, read. */
@@ -406,7 +328,7 @@ const VersionFiles = ({ app, version }: { app: string; version: number }) => {
     async (session) => await session.apps.files.read(app, version)
   );
   return files?.state === "ready" ? (
-    // A version's own tree: what was picked in another may not be in it.
+    // A version's own tree: what was open in another may not be in it.
     <FilesView files={files.data} key={version} />
   ) : (
     <ReadState loaded={files} />
@@ -415,7 +337,7 @@ const VersionFiles = ({ app, version }: { app: string; version: number }) => {
 
 /**
  * The files of the chat's draft, read again at each of its revisions: the
- * file picked stays picked while the draft still has it.
+ * file open stays open while the draft still has it.
  */
 const ChatDraftFiles = ({
   app,
@@ -443,10 +365,12 @@ const DraftChanges = ({
   app,
   current,
   draft,
+  layout,
 }: {
   app: string;
   current: number | null;
   draft: number;
+  layout: DiffLayout;
 }) => {
   const changes = useCoreRead(
     `${app}/${current ?? ""}/${draft}`,
@@ -456,85 +380,61 @@ const DraftChanges = ({
         : await session.apps.versions.diff(app, current, draft)
   );
   return changes?.state === "ready" ? (
-    <ChangesView diffs={changes.data} />
+    <ChangesView diffs={changes.data} layout={layout} />
   ) : (
     <ReadState loaded={changes} />
   );
 };
 
-/** Whether the files are shown, or the draft's changes. */
-const PartToggle = ({
-  part,
-  onPart,
+/** One choice of a few, as a small segmented control. */
+const Choice = <T extends string>({
+  label,
+  value,
+  options,
+  onChoose,
 }: {
-  part: Part;
-  onPart: (part: Part) => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <ToggleGroup
-      aria-label={t`What to show of the code`}
-      onValueChange={(value: unknown[]) => {
-        const [next] = value;
-        if (next === "files" || next === "changes") {
-          onPart(next);
-        }
-      }}
-      value={[part]}
-    >
-      <ToggleGroupItem value="files">
-        <Trans>Files</Trans>
+  label: string;
+  value: T;
+  options: readonly { value: T; label: ReactNode }[];
+  onChoose: (value: T) => void;
+}) => (
+  <ToggleGroup
+    aria-label={label}
+    onValueChange={(chosen: unknown[]) => {
+      const option = options.find(({ value: each }) => each === chosen[0]);
+      if (option !== undefined) {
+        onChoose(option.value);
+      }
+    }}
+    size="sm"
+    spacing={0}
+    value={[value]}
+    variant="outline"
+  >
+    {options.map((option) => (
+      <ToggleGroupItem key={option.value} value={option.value}>
+        {option.label}
       </ToggleGroupItem>
-      <ToggleGroupItem value="changes">
-        {t({
-          message: "Changes",
-          context: "what a draft changes in an app's code",
-        })}
-      </ToggleGroupItem>
-    </ToggleGroup>
-  );
-};
+    ))}
+  </ToggleGroup>
+);
 
-/** Whether the current version's files are shown, or the draft's. */
-const SourceToggle = ({
-  source,
-  current,
-  draft,
-  onSource,
-}: {
-  source: Source;
-  current: number;
-  draft: number;
-  onSource: (source: Source) => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <ToggleGroup
-      aria-label={t`Which version`}
-      onValueChange={(value: unknown[]) => {
-        const [next] = value;
-        if (next === "current" || next === "draft") {
-          onSource(next);
-        }
-      }}
-      value={[source]}
-    >
-      <ToggleGroupItem value="current">
-        <Trans>Current (version {current})</Trans>
-      </ToggleGroupItem>
-      <ToggleGroupItem value="draft">
-        <Trans>Draft (version {draft})</Trans>
-      </ToggleGroupItem>
-    </ToggleGroup>
-  );
-};
-
-/** The read-only note, above what the view shows. */
+/** The read-only note, at the end of the view's bar. */
 const ReadOnlyNote = () => (
-  <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
-    <MessageSquareIcon aria-hidden="true" className="size-3.5" />
-    <Trans>Read-only. Changes to the code go through the chat.</Trans>
+  <p className="text-muted-foreground flex min-w-0 flex-1 basis-56 items-center justify-end gap-1.5 text-xs">
+    <MessageSquareIcon aria-hidden="true" className="size-3.5 flex-none" />
+    <span className="truncate">
+      <Trans>Read-only. Changes to the code go through the chat.</Trans>
+    </span>
   </p>
+);
+
+/** The view's bar, over what it shows: its choices, and the note. */
+const CodeBar = ({ children }: { children?: ReactNode }) => (
+  <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2">
+    {children}
+    <ReadOnlyNote />
+  </div>
 );
 
 /** What the tab shows once it knows the App's versions. */
@@ -547,8 +447,10 @@ const CodeBody = ({
   current: number | null;
   draft: number | null;
 }) => {
+  const { t } = useLingui();
   const [asked, setAsked] = useState<Source>();
   const [part, setPart] = useState<Part>("files");
+  const [layout, setLayout] = useState<DiffLayout>("unified");
   // The draft's, as the preview shows it, unless the current version's
   // were asked for, or there is no draft.
   const source: Source =
@@ -557,23 +459,74 @@ const CodeBody = ({
       : "current";
   const version = source === "draft" ? draft : current;
   const changes = part === "changes" ? draft : null;
-  const choosesSource = draft !== null && current !== null && changes === null;
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {draft === null ? null : <PartToggle onPart={setPart} part={part} />}
-        {choosesSource ? (
-          <SourceToggle
-            current={current}
-            draft={draft}
-            onSource={setAsked}
-            source={source}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <CodeBar>
+        {draft === null ? null : (
+          <Choice
+            label={t`What to show of the code`}
+            onChoose={setPart}
+            options={[
+              { value: "files", label: <Trans>Files</Trans> },
+              {
+                value: "changes",
+                label: t({
+                  message: "Changes",
+                  context: "what a draft changes in an app's code",
+                }),
+              },
+            ]}
+            value={part}
+          />
+        )}
+        {draft !== null && current !== null && changes === null ? (
+          <Choice
+            label={t`Which version`}
+            onChoose={setAsked}
+            options={[
+              {
+                value: "current",
+                label: <Trans>Current (version {current})</Trans>,
+              },
+              {
+                value: "draft",
+                label: <Trans>Draft (version {draft})</Trans>,
+              },
+            ]}
+            value={source}
           />
         ) : null}
-        <ReadOnlyNote />
-      </div>
+        {changes === null ? null : (
+          <Choice
+            label={t`How changes are shown`}
+            onChoose={setLayout}
+            options={[
+              {
+                value: "unified",
+                label: (
+                  <Trans context="a diff's lines in one column">Unified</Trans>
+                ),
+              },
+              {
+                value: "split",
+                label: (
+                  <Trans context="a diff's old and new lines side by side">
+                    Split
+                  </Trans>
+                ),
+              },
+            ]}
+            value={layout}
+          />
+        )}
+      </CodeBar>
       {changes !== null && (
-        <DraftChanges app={app} current={current} draft={changes} />
+        <DraftChanges
+          app={app}
+          current={current}
+          draft={changes}
+          layout={layout}
+        />
       )}
       {changes === null && version !== null && (
         <VersionFiles app={app} version={version} />
@@ -607,8 +560,8 @@ export const AppCode = ({
   const draft = app.pendingVersion;
   if (building !== undefined) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col gap-3">
-        <ReadOnlyNote />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <CodeBar />
         <ChatDraftFiles
           app={app.id}
           chatId={building.chatId}
@@ -619,7 +572,7 @@ export const AppCode = ({
   }
   if (current === null && draft === null) {
     return (
-      <p className="text-muted-foreground">
+      <p className="text-muted-foreground p-4 md:px-6">
         <Trans>No code yet: Grasp writes the first version in the chat.</Trans>
       </p>
     );

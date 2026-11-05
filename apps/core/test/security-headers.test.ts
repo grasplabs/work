@@ -63,6 +63,8 @@ describe("security headers on the frontend", () => {
       expect(policy.get("script-src")).toStrictEqual([
         `${clientOrigin}/assets/`,
         `${clientOrigin}/theme.js`,
+        // WebAssembly compiles (the Code view's highlighter); eval stays off.
+        "'wasm-unsafe-eval'",
       ]);
       // Would otherwise loosen what script-src allows, per kind of script.
       expect(policy.has("script-src-elem")).toBeFalsy();
@@ -70,12 +72,14 @@ describe("security headers on the frontend", () => {
     }
   });
 
-  it("starts no worker and applies only the frontend's own stylesheets", async () => {
+  it("starts no worker and loads only the frontend's own stylesheets, besides inline styles", async () => {
     for (const response of await eachPage()) {
       const policy = policyOf(response);
       expect(policy.get("worker-src")).toStrictEqual(["'none'"]);
+      // Inline styles for the Code view's renderer (@pierre/diffs).
       expect(policy.get("style-src")).toStrictEqual([
         `${clientOrigin}/assets/`,
+        "'unsafe-inline'",
       ]);
       expect(policy.has("style-src-elem")).toBeFalsy();
     }
@@ -187,7 +191,11 @@ describe("security headers on the screen frame", () => {
       )
     );
     expect(others).toStrictEqual(
-      others.map(() => [`${clientOrigin}/assets/`, `${clientOrigin}/theme.js`])
+      others.map(() => [
+        `${clientOrigin}/assets/`,
+        `${clientOrigin}/theme.js`,
+        "'wasm-unsafe-eval'",
+      ])
     );
   });
 });
