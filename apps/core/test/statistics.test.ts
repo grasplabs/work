@@ -981,6 +981,8 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
       ["pay", "cost_per_run", "", 0.5],
       ["remind", "failing_step", "send", 1],
     ]);
+    // A run of the workflow the App binds as `pay`, for the runs read.
+    await seedRun(watched, "pay");
     // A snapshot's time, after it finished.
     const until = new Date(Date.now() - 60_000).toISOString();
     const signalsRead = async (held: boolean) =>
@@ -1020,7 +1022,7 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
     const heldAfter = await signalsRead(true);
     const current = await signalsRead(false);
     const measured = recorded.filter(({ query }) =>
-      /from "(?:improvement_signals|workflow_runs)"/u.test(query)
+      /from "(?:improvement_signals|workflow_resource_runs)"/u.test(query)
     );
     const plans = await Promise.all(measured.map(planOf));
     expect({

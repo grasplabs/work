@@ -12,7 +12,7 @@ import {
   returned,
   submitProposal,
   holdFiles,
-  slowTestResults,
+  slowVersionReads,
   storedTrees,
   writtenMeanwhile,
   screenBuilds,
@@ -103,9 +103,9 @@ describe("build jobs", { timeout: 180_000 }, () => {
       codeStep(submitProposal),
       says("Submitted."),
     ]);
-    // Keeping the check's test results, after the commit and before the
-    // job records its receipt, takes seconds: long enough to cut it off.
-    const files = slowTestResults(4000);
+    // Reviewing the version, after the commit and before its step ends,
+    // takes seconds: long enough to cut it off.
+    const files = slowVersionReads(4000);
     try {
       await chat.ask("Build an invoice desk for invoices@");
       const job = await submittedJob(chat.stub, chat.chat.id);
@@ -158,9 +158,9 @@ describe("build jobs", { timeout: 180_000 }, () => {
       admin,
       readCollection(chat.agent, collectionId, "HANDBOOK")
     );
-    // The first try is still keeping test results, its receipt unrecorded,
-    // long after its second try has ended.
-    const files = slowTestResults(20_000);
+    // The first try is still reviewing its version long after its second
+    // try has ended.
+    const files = slowVersionReads(20_000);
     try {
       await chat.ask("Build an invoice desk for invoices@");
       const job = await submittedJob(chat.stub, chat.chat.id);
@@ -320,9 +320,9 @@ describe("build jobs", { timeout: 180_000 }, () => {
       codeStep(submitProposal),
       says("Submitted."),
     ]);
-    // The commit's step is still keeping test results when its instance
-    // ends, its receipt unrecorded.
-    const files = slowTestResults(20_000);
+    // The commit's step is still reviewing its version when its instance
+    // ends.
+    const files = slowVersionReads(20_000);
     let job: z.infer<typeof jobRowSchema>;
     try {
       await chat.ask("Build an invoice desk for invoices@");

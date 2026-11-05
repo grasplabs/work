@@ -448,8 +448,7 @@ const checkStep = async (env: Env, step: JobStep): Promise<Checked> => {
  * it commits (authorized again, the draft still at its revision, and the
  * job still open), and once only. A version it recorded it was about to commit
  * and did is its receipt: a commit run again takes it, rather than making
- * another. The tests its check ran are kept with the version, and the
- * draft's revision is dropped.
+ * another. Then the draft's revision is dropped.
  */
 const commitStep = async (
   env: Env,

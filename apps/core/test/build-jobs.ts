@@ -99,17 +99,18 @@ export const holdFiles = (held: (method: string, key: unknown) => boolean) => {
 };
 
 /**
- * Makes every write of a check's test results to core's files take `ms`
- * longer: the files as they were, to set back.
+ * Makes every read of an App version's files from core's files take `ms`
+ * longer, as the review a commit gives its version reads them: the files
+ * as they were, to set back.
  */
-export const slowTestResults = (ms: number): typeof env.FILES => {
+export const slowVersionReads = (ms: number): typeof env.FILES => {
   const { FILES: files } = env;
   env.FILES = new Proxy(files, {
     get: (target, property) => {
       const value: unknown = Reflect.get(target, property);
-      if (property === "put" && typeof value === "function") {
+      if (property === "get" && typeof value === "function") {
         return async (...args: unknown[]): Promise<unknown> => {
-          if (typeof args[0] === "string" && args[0].includes("tests")) {
+          if (typeof args[0] === "string" && args[0].includes("/trees/")) {
             await scheduler.wait(ms);
           }
           return await Reflect.apply(value, target, args);
