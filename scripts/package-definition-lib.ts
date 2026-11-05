@@ -88,13 +88,18 @@ import { graspLockSchema } from "@grasp-os/shared/packages";
 import type { GraspLock, LockedPackage } from "@grasp-os/shared/packages";
 import { selectJsPlugins } from "ultracite/oxlint/js-plugins";
 import shadcnPreset from "ultracite/oxlint/shadcn";
+import { parse } from "yaml";
 import { z } from "zod";
 
 import { designRuleLevels } from "../packages/compiler/src/design-rules.ts";
+import { formatConfig } from "../packages/compiler/src/format-config.ts";
 import {
+  codeExtensions,
   componentsFolder,
+  declarationExtension,
   generatedServerFolder,
   hostGeneratedFolder,
+  screensFolder,
   workflowsFolder,
 } from "../packages/compiler/src/inputs.ts";
 import { screenReferences } from "../packages/compiler/src/kit.ts";
@@ -281,40 +286,28 @@ const newPlan = (): Plan => {
 const jsonText = (value: unknown): string =>
   `${JSON.stringify(value, null, 2)}\n`;
 
+const catalogEntriesSchema = z.record(
+  z.string(),
+  z.union([z.string(), z.number()]).transform(String)
+);
+
+const workspaceCatalogsSchema = z.object({
+  catalog: catalogEntriesSchema.optional(),
+  catalogs: z.record(z.string(), catalogEntriesSchema).optional(),
+});
+
 /**
- * The exact versions `pnpm-workspace.yaml`'s catalog pins, by name: its
- * default `catalog:`, or with `named`, that catalog under `catalogs:`.
+ * The versions `pnpm-workspace.yaml`'s catalog pins, by name: its default
+ * `catalog:`, or with `named`, that catalog under `catalogs:`.
  */
 export const readCatalog = (
   text: string,
   named?: string
 ): Map<string, string> => {
-  const catalog = new Map<string, string>();
-  // The default catalog's entries are indented once; a named catalog's
-  // once more, under its name.
-  let inCatalog = false;
-  let inCatalogs = false;
-  for (const line of text.split("\n")) {
-    if (/^\S/u.test(line)) {
-      inCatalog = named === undefined && line.trim() === "catalog:";
-      inCatalogs = named !== undefined && line.trim() === "catalogs:";
-      continue;
-    }
-    if (inCatalogs && /^ {2}\S/u.test(line)) {
-      inCatalog = line.trim() === `${named}:`;
-      continue;
-    }
-    const entry =
-      /^\s+"?(?<name>[^"\s:#][^":]*?)"?:\s*(?<version>\S+)\s*$/u.exec(line);
-    if (
-      inCatalog &&
-      entry?.groups?.name !== undefined &&
-      entry.groups.version !== undefined
-    ) {
-      catalog.set(entry.groups.name, entry.groups.version);
-    }
-  }
-  return catalog;
+  const { catalog, catalogs } = workspaceCatalogsSchema.parse(parse(text));
+  return new Map(
+    Object.entries((named === undefined ? catalog : catalogs?.[named]) ?? {})
+  );
 };
 
 const exactVersionPattern =
@@ -889,7 +882,7 @@ const planTypeCheck = (project: Plan): void => {
  * compiler's check are outside `app/`.
  */
 const ignoredGlobs = [
-  "**/*.d.ts",
+  `**/*${declarationExtension}`,
   ...[generatedServerFolder, hostGeneratedFolder, workflowsFolder.folder].map(
     (folder) => `app/${folder}**`
   ),
@@ -900,13 +893,16 @@ const ignoredGlobs = [
  * `tidy` formats it, less `ignoredGlobs` (`.prettierignore`). A project
  * whose App has none of it formats nothing, and passes.
  */
-const formatted = '--no-error-on-unmatched-pattern "app/**/*.{ts,tsx}"';
+const formatted = `--no-editorconfig --no-error-on-unmatched-pattern "app/**/*.{${codeExtensions.join(",")}}"`;
 
 /**
  * What the design-system lint holds, as Grasp's screen build lints it
  * (`buildFiles`, compiler worker.ts): the App's screens and components.
  */
-const designLinted = ["app/screens/*.tsx", `app/${componentsFolder.folder}**`];
+const designLinted = [
+  `app/${screensFolder}*.tsx`,
+  `app/${componentsFolder.folder}**`,
+];
 
 /** The compiler's design rules, as the project's oxlint loads them. */
 const designPlugin = "grasp/design-plugin.ts";
@@ -1014,13 +1010,14 @@ const planTooling = (project: Plan, repo: string): void => {
 // JS plugin.
 import { designRules } from "./design-rules.ts";
 
-export default { meta: { name: "grasp" }, ...designRules };
+export default designRules;
 `
   );
   project.add(
     "prettier.config.mjs",
-    `// Ultracite's Prettier config, as Grasp formats App code with it.
-export { default } from "ultracite/prettier";
+    `// Written by Grasp when it exported this App: the Prettier config Grasp
+// formats App code with.
+export default ${JSON.stringify(formatConfig, null, 2)};
 `
   );
   project.add(".prettierignore", `${ignoredGlobs.join("\n")}\n`);

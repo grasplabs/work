@@ -59,11 +59,6 @@ export interface UltraciteRules {
   fixable: string[];
   /** oxlint's name of each rule whose ID in ESLint isn't it. */
   names: Record<string, string>;
-  /**
-   * The ID in ESLint of each name oxlint reads in a disable comment that
-   * isn't it, without oxlint's `eslint/` prefix, which it reads too.
-   */
-  aliases: Record<string, string>;
   /** What oxlint has and nothing here runs (`plugin/rule`): stubs, for disable comments. */
   stubs: string[];
   /** The presets' rules left out: no equivalent the isolate runs. */
@@ -325,30 +320,17 @@ export const ultraciteRules = (): UltraciteRules => {
     }))
     .filter(({ rules: levels }) => Object.keys(levels).length > 0);
 
-  // Every name oxlint reads in a comment, as ESLint's ID: the rule's
-  // equivalent where there is one, which may be another ID (`names`), or
-  // a stub.
-  const aliases: Record<string, string> = {};
-  const stubs: string[] = [];
-  for (const name of fixKinds.keys()) {
-    const id = equivalentOf(name)?.id;
-    if (id === undefined) {
-      const stubId = name.includes("/") ? name : `eslint/${name}`;
-      stubs.push(stubId);
-      if (stubId !== name) {
-        aliases[name] = stubId;
-      }
-    } else if (id !== name) {
-      aliases[name] = id;
-    }
-  }
+  // Every rule oxlint has and nothing here runs, as a stub a disable
+  // comment can name (lint-comments.ts reads a comment's names).
+  const stubs = [...fixKinds.keys()]
+    .filter((name) => equivalentOf(name) === undefined)
+    .map((name) => (name.includes("/") ? name : `eslint/${name}`));
   const ultracite: UltraciteRules = {
     rules,
     reportOnly,
     overrides,
     fixable: [...fixable].toSorted(),
     names,
-    aliases,
     stubs: stubs.toSorted(),
     unmapped: [...unmapped].toSorted(),
   };

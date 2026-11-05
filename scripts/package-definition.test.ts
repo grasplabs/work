@@ -34,6 +34,7 @@ import { parse } from "yaml";
 import { z } from "zod";
 
 import { hostModules } from "../apps/core/src/host-modules.ts";
+import { designCases, designFindings } from "../apps/core/test/design-cases.ts";
 import { steeringCases } from "../apps/core/test/steering-cases.ts";
 import {
   serverEntryPath,
@@ -444,13 +445,13 @@ const run = (
   out: string,
   name: string,
   ...args: string[]
-): { status: number | null; output: string } => {
+): { status: number | null; output: string; stdout: string } => {
   const { scripts } = z
     .object({ scripts: z.record(z.string(), z.string()) })
     .parse(JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8")));
   const script = scripts[name];
   if (script === undefined) {
-    return { status: null, output: `no script ${name}` };
+    return { status: null, output: `no script ${name}`, stdout: "" };
   }
   const ran = spawnSync([script, ...args].join(" "), {
     cwd: out,
@@ -467,8 +468,15 @@ const run = (
       PATH: `${path.join(out, "node_modules/.bin")}${path.delimiter}${process.env.PATH ?? ""}`,
     },
   });
-  return { status: ran.status, output: `${ran.stdout}${ran.stderr}` };
+  return {
+    status: ran.status,
+    output: `${ran.stdout}${ran.stderr}`,
+    stdout: ran.stdout,
+  };
 };
+
+/** A finding of `rulesOf` of the design system's lint: its rules' or the compiler's. */
+const designFinding = / (?:shadcn|grasp)\//u;
 
 /** A rule as oxlint's report codes it: `plugin(rule)`, `eslint(rule)`. */
 const reportCode = /^(?<plugin>[^(]+)\((?<rule>[^)]+)\)$/u;
@@ -488,8 +496,7 @@ const rulesOf = (report: string): string[] =>
         })
       ),
     })
-    // The report, without what @shadcn/lint says after it.
-    .parse(JSON.parse(report.slice(0, report.lastIndexOf("}") + 1)))
+    .parse(JSON.parse(report))
     .diagnostics.map(({ severity, code, filename }) => {
       const { plugin = "", rule = code } = reportCode.exec(code)?.groups ?? {};
       const name = plugin === "eslint" ? rule : `${plugin}/${rule}`;
@@ -1564,7 +1571,8 @@ describe(
       const { out } = scratch();
       // A blueprint's App as Grasp saves an agent's writes (`tidy`), and a
       // component Grasp keeps as it is though oxfmt wouldn't: imports out
-      // of oxfmt's order, and classes Tailwind's sorter would reorder.
+      // of oxfmt's order, and classes Tailwind's sorter would reorder; and
+      // a GraphQL template, whose query Grasp leaves as written.
       const written = await tidy({
         ...blueprintFiles("workflow-map"),
         "components/count.tsx": `import type { ReactNode } from "react";
@@ -1578,6 +1586,12 @@ export const Count = ({ children }: { children: ReactNode }) => (
   </p>
 );
 `,
+        "components/query.ts": `const gql = String.raw;
+
+export const query = gql\`
+  query{ teams { name   } }
+\`;
+`,
       });
       await packaged(await appDefinition(written), out);
       const install = await installIn(out, ["--frozen-lockfile", "--offline"]);
@@ -1590,14 +1604,17 @@ export const Count = ({ children }: { children: ReactNode }) => (
       // What each lint says of the App as it was saved, by file.
       const saved = {
         grasp: graspRulesOf(written),
-        project: rulesOf(run(out, "lint", "--format=json").output),
+        project: rulesOf(run(out, "lint", "--format=json").stdout),
       };
 
       // What Grasp's lint finds, the project's finds, no more: an error
       // (a debugger); a sonarjs hint, a warning; and what Grasp leaves out
       // reports nothing (a forEach, a spread in an accumulator, a
       // comparison that is always false, a function declaration, and in a
-      // test what a preset's override turns on: vitest's rules).
+      // test what a preset's override turns on: vitest's rules). A disable
+      // comment holds whatever plugin it names a rule by
+      // (`@typescript-eslint/…`), and an inline config comment, which
+      // oxlint doesn't read, turns nothing on.
       const findings = `export const stop = (): void => {
   debugger;
 };
@@ -1624,6 +1641,12 @@ export function zero(a: number): number {
 `;
       const found = {
         "components/findings.ts": findings,
+        "components/comments.ts": `/* eslint no-ternary: "error" */
+export const label = (on: boolean): string => (on ? "On" : "Off");
+
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any
+export const anything = (value: any): unknown => value;
+`,
         "tests/count.test.ts": `import { expect, test } from "vitest";
 
 test("counts", () => {
@@ -1642,12 +1665,11 @@ test("counts", () => {
       for (const file of Object.keys(found)) {
         rmSync(path.join(out, "app", file));
       }
-      // And the design system's lint, on screens: a raw colour and a kit
-      // component restyled (@shadcn/lint), and a remote image (the
-      // compiler's own rules).
-      write(
-        "app/screens/off.tsx",
-        `import { Button } from "@grasp-os/ui/components/button";
+      // And the design system's lint, as Grasp's screen build runs it
+      // (apps/core/test/screen-checks.test.ts, on the same files): a raw
+      // colour and a kit component restyled (@shadcn/lint), a remote image
+      // (the compiler's own rules), and its cases (design-cases.ts).
+      const off = `import { Button } from "@grasp-os/ui/components/button";
 
 export const Off = () => (
   <p className="bg-red-500">
@@ -1655,10 +1677,28 @@ export const Off = () => (
     <img alt="" src="https://example.com/logo.png" />
   </p>
 );
-`
-      );
+`;
+      write("app/screens/off.tsx", off);
       const design = run(out, "lint", "--format=json");
       rmSync(path.join(out, "app/screens/off.tsx"));
+      for (const [file, source] of Object.entries(designCases)) {
+        write(`app/${file}`, source);
+      }
+      const casesFound = rulesOf(run(out, "lint", "--format=json").stdout);
+      const cases = {
+        design: casesFound
+          .filter((finding) => designFinding.test(finding))
+          .map((finding) => {
+            const [file, , rule] = finding.split(" ");
+            return `${file?.slice("app/".length)} ${rule}`;
+          }),
+        // And Ultracite's lint of them, in both.
+        grasp: graspRulesOf(designCases),
+        project: casesFound.filter((finding) => !designFinding.test(finding)),
+      };
+      for (const file of Object.keys(designCases)) {
+        rmSync(path.join(out, "app", file));
+      }
       // And the format: what isn't formatted fails its check.
       write("app/components/spaced.ts", "export const  spaced = 1\n");
       const unformatted = run(out, "format:check");
@@ -1680,10 +1720,11 @@ export const Off = () => (
           grasp: graspRulesOf(found),
           project: {
             status: projectFound.status,
-            rules: rulesOf(projectFound.output),
+            rules: rulesOf(projectFound.stdout),
           },
         },
-        design: { status: design.status, rules: rulesOf(design.output) },
+        design: { status: design.status, rules: rulesOf(design.stdout) },
+        cases,
         unformatted: unformatted.status,
       }).toStrictEqual({
         install: 0,
@@ -1702,6 +1743,7 @@ export const Off = () => (
             "app/screens/off.tsx error shadcn/no-restyle",
           ],
         },
+        cases: { design: designFindings, grasp: [], project: [] },
         unformatted: 1,
       });
     });

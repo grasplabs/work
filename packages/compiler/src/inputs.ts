@@ -13,7 +13,24 @@ import { workflowModulesError } from "@grasp-os/shared/workflow-modules";
 import type { Diagnostic } from "./diagnostic.ts";
 import { screenReferences } from "./kit.ts";
 
+/** Where an App's screens are: one `.tsx` file each (`screenFile`). */
+export const screensFolder = "screens/";
+
 export const screenFile = /^screens\/[\w-]+\.tsx$/u;
+
+/** The extensions of the TypeScript an App's code is in. */
+export const codeExtensions = ["ts", "tsx"] as const;
+
+/** A declaration file's extension: types, not code. */
+export const declarationExtension = ".d.ts";
+
+/**
+ * What Ultracite lints and Prettier formats of an App's files (ultracite.ts):
+ * its TypeScript, but its declarations.
+ */
+export const isLintedCode = (path: string): boolean =>
+  codeExtensions.some((extension) => path.endsWith(`.${extension}`)) &&
+  !path.endsWith(declarationExtension);
 /**
  * Types the App's code can use but that aren't code, e.g. its server's:
  * at its root, or among its components, in folders named as any App

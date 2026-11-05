@@ -24,6 +24,7 @@ import path from "node:path";
 import { rolldown } from "rolldown";
 import type { Plugin as RolldownPlugin } from "rolldown";
 import { dts } from "rolldown-plugin-dts";
+import { __unstable__loadDesignSystem } from "tailwindcss";
 import ts from "typescript";
 import shadcnPreset from "ultracite/oxlint/shadcn";
 import { build } from "vite-plus";
@@ -1178,15 +1179,55 @@ const componentsJsonSchema = z.looseObject({
   tailwind: z.looseObject({ css: z.string() }),
 });
 
+/** A class name as a stylesheet's `@utility` names one. */
+const utilityName = /^-?[\w-]+$/u;
+
+/**
+ * Every class the kit's theme gives Tailwind by name, from Tailwind's own
+ * design system of it, as `@utility` rules: what the design-system lint
+ * reads as a class the theme declares. @shadcn/lint asks Tailwind which
+ * classes it knows in a worker thread (`node:worker_threads`), which an
+ * isolate has none of; without, it reads the theme's own declarations
+ * and a grammar of its own, which know neither the theme's values
+ * (`ease-house`) nor what its imports add (`animate-in`, tw-animate-css's).
+ * With these it knows what Tailwind knows, as an exported App's lint,
+ * whose worker runs, does.
+ */
+const kitClassRules = async (
+  stylesheets: Record<string, string>
+): Promise<string> => {
+  const design = await __unstable__loadDesignSystem(
+    stylesheets[kitStylesheet] ?? "",
+    {
+      // oxlint-disable-next-line require-await -- Tailwind expects a promise
+      loadStylesheet: async (id: string) => {
+        const content = stylesheets[id];
+        if (content === undefined) {
+          throw new Error(`The stylesheet "${id}" is not in the kit`);
+        }
+        return { path: id, base: "/", content };
+      },
+    }
+  );
+  return design
+    .getClassList()
+    .map(([name]) => name)
+    .filter((name) => utilityName.test(name))
+    .map((name) => `@utility ${name} {}`)
+    .join("\n");
+};
+
 /**
  * The kit as the design-system lint reads it from disk (see src/lint.ts),
  * by path relative to the App. The kit's sources go in `ui/`: in
  * `node_modules`, the lint doesn't read components' sources, so it couldn't
  * name their variants. A tsconfig maps the kit's exports there; the
  * stylesheets the theme imports go in `node_modules`, where the lint looks.
+ * The theme ends with every class Tailwind makes of it (`kitClassRules`).
  */
 const collectLintProject = (
-  stylesheets: Record<string, string>
+  stylesheets: Record<string, string>,
+  classRules: string
 ): Record<string, string> => {
   const files: Record<string, string> = {
     "package.json": JSON.stringify({ name: "app", private: true }),
@@ -1204,6 +1245,9 @@ const collectLintProject = (
   const components = componentsJsonSchema.parse(
     JSON.parse(readText(path.join(ui, "components.json")))
   );
+  const theme = `ui/${components.tailwind.css}`;
+  files[theme] =
+    `${files[theme] ?? ""}\n/* Every class Tailwind makes of this theme, for the lint (build.ts). */\n${classRules}\n`;
   files["components.json"] = JSON.stringify({
     ...components,
     tailwind: { ...components.tailwind, css: `ui/${components.tailwind.css}` },
@@ -1729,7 +1773,10 @@ const buildAppCompiler = async (
     moduleCandidates: candidatesByModule(sources),
     moduleImports,
     previewModuleImports,
-    lintProject: collectLintProject(stylesheets),
+    lintProject: collectLintProject(
+      stylesheets,
+      await kitClassRules(stylesheets)
+    ),
     // The repo's lint config extends the same preset.
     lintRules: rulesSchema.parse(shadcnPreset.rules),
   };

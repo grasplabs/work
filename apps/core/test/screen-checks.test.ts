@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { callStub } from "../src/sandboxed.ts";
 import { buildScreens } from "../src/screens.ts";
+import { designCases, designFindings } from "./design-cases.ts";
 
 /** A typical screen: a list with a filter, on the kit, with its own component. */
 const typicalApp: Record<string, string> = {
@@ -261,6 +262,25 @@ export default function Server() {
         'screens/tickets.tsx:44:41 shadcn/no-restyle error: "px-8" is not allowed on <Button>: <Button> owns its spacing. Use a size (default, xs, sm, lg, xl, icon, icon-xs, icon-sm, icon-lg, inline)'
       ),
     ]);
+  });
+
+  it("knows the kit's own classes and reads disable comments as oxlint does, as an exported App's lint does", async () => {
+    const built = await buildScreens(env, app(designCases), "app-test");
+
+    expect({
+      ok: built.ok,
+      found: built.diagnostics.map(({ file, rule }) => `${file} ${rule}`),
+      // Only the class Tailwind doesn't know: the theme's `ease-house`,
+      // tw-animate-css's `animate-in` and `fade-in` and the kit's own
+      // `type-display` are classes the kit has.
+      unknown: built.diagnostics.map(({ message }) =>
+        message.slice(0, message.indexOf(" is not"))
+      ),
+    }).toStrictEqual({
+      ok: false,
+      found: designFindings,
+      unknown: ['"foo-bar"'],
+    });
   });
 
   it("fails a raw colour, naming the theme token to use", async () => {

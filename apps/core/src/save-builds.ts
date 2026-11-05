@@ -2,6 +2,7 @@ import {
   appCodeFiles,
   buildFiles,
   isGeneratedPath,
+  isLintedCode,
   workflowFiles,
   workflowsFolder,
 } from "@grasp-os/compiler";
@@ -386,8 +387,7 @@ const lintedFiles = (files: Record<string, string>): Record<string, string> =>
   Object.fromEntries(
     Object.entries(files).filter(
       ([path]) =>
-        (path.endsWith(".ts") || path.endsWith(".tsx")) &&
-        !path.endsWith(".d.ts") &&
+        isLintedCode(path) &&
         !isGeneratedPath(path) &&
         !path.startsWith(workflowsFolder.folder)
     )
