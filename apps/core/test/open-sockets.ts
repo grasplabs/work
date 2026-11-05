@@ -56,12 +56,18 @@ export const waitingOnNow = (now = Date.now()): string[] => [
     ),
 ];
 
-/** Closes every socket the test opened and left open. */
-export const closeOpenSockets = (): void => {
+/**
+ * Ends the running test's share: closes every socket it opened and left
+ * open, and forgets its requests still unanswered, so what the next test
+ * is said to wait on is its own. A request a timed-out test left going
+ * may never settle.
+ */
+export const endTest = (): void => {
   for (const socket of open.keys()) {
     if (socket.readyState === WebSocket.OPEN) {
       socket.close();
     }
   }
   open.clear();
+  unanswered.clear();
 };

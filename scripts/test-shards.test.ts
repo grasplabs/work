@@ -124,9 +124,20 @@ describe("splitting the test files between shards", () => {
       shardSeconds([...others, ...builds]),
       shardSeconds([...builds, ...others]),
     ]).toStrictEqual([
-      2 * projectStartSeconds + 40 / concurrentFiles + 180,
-      2 * projectStartSeconds + 40 / concurrentFiles + 180,
+      2 * projectStartSeconds + Math.max(40 / concurrentFiles, 20) + 180,
+      2 * projectStartSeconds + Math.max(40 / concurrentFiles, 20) + 180,
     ]);
+  });
+
+  it("counts the serial files after the group's longest file when that file outlasts the rest run at once", () => {
+    const builds = [
+      file("compiler build-a", 90, { serial: true }),
+      file("compiler build-b", 90, { serial: true }),
+    ];
+
+    expect(shardSeconds([file("core long", 300), ...builds])).toBe(
+      2 * projectStartSeconds + 300 + 180
+    );
   });
 
   it("adds a shard's groups up, as it runs them one after another", () => {

@@ -23,7 +23,7 @@ import {
 import { installBuiltinsFirst } from "./builtins-first.ts";
 import { configuredEnv } from "./configured-env.ts";
 import { stopModelProviders } from "./model-provider.ts";
-import { closeOpenSockets, waitingOnNow } from "./open-sockets.ts";
+import { endTest, waitingOnNow } from "./open-sockets.ts";
 import { resetStorage } from "./reset-storage.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
@@ -154,7 +154,7 @@ afterEach(({ task }) => {
       `"${task.name}" timed out. Still going:\n- ${lines.join("\n- ")}`
     );
   }
-  closeOpenSockets();
+  endTest();
 });
 
 // The model providers a file's tests answer for stop looking for requests
