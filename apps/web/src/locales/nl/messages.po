@@ -5093,6 +5093,10 @@ msgid "Dropped a kept build of approved packages"
 msgstr "Een bewaarde build van goedgekeurde pakketten verwijderd"
 
 #: src/activity/audit-words.ts
+msgid "Dropped a reply to a run's email"
+msgstr "Een antwoord op de e-mail van een run laten vallen"
+
+#: src/activity/audit-words.ts
 msgid "Dropped an event no workflow could take"
 msgstr "Een gebeurtenis laten vallen die geen workflow kon aannemen"
 
@@ -14472,6 +14476,10 @@ msgstr "Te veel wijzigingen om regel voor regel te tonen"
 #: src/screens/screen-files.ts
 msgid "Too many files are moving at once. Try again shortly."
 msgstr "Er worden te veel bestanden tegelijk overgedragen. Probeer het zo opnieuw."
+
+#: src/activity/audit-words.ts
+msgid "Took a reply to a run's email"
+msgstr "Een antwoord op de e-mail van een run aangenomen"
 
 #: src/activity/audit-words.ts
 msgid "Took back a guest's link"

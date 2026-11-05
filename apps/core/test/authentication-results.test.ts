@@ -1,0 +1,345 @@
+import { describe, expect, it } from "vite-plus/test";
+
+import {
+  authenticationOf,
+  parseArcAuthenticationResults,
+  parseAuthenticationResults,
+  trustedAuthservId,
+} from "../src/workflows/authentication-results.ts";
+
+// What a reply's `authentication` reports (authentication-results.ts):
+// the RFC 8601 grammar read strictly, and only the topmost results header,
+// Email Routing's, believed. The ways it can fail, each closed:
+//
+// - a sender's own header read as Email Routing's: only the topmost is
+//   read, only under Email Routing's authserv-id, and an ARC header only
+//   at the message's highest instance;
+// - a verdict guessed from a header read loosely: one that isn't the
+//   grammar's reports nothing;
+// - a DKIM signature of the sender's own domain reported for a message
+//   whose From is another's: of several, the one aligned with the From
+//   domain is reported;
+// - SPF's check of the HELO name reported as the envelope sender's.
+
+/** Each result of `value` as `method=result`, with its properties. */
+const resultsOf = (value: string) =>
+  parseAuthenticationResults(value)?.results.map(
+    ({ method, result, reason, properties }) => ({
+      method,
+      result,
+      reason,
+      properties: Object.fromEntries(properties),
+    })
+  );
+
+/**
+ * An ARC set at `instance` (its seal, message signature and results), as
+ * postal-mime gives headers (names lower case, topmost first): the seal
+ * saying `cv`.
+ */
+const arcSet = (instance: number, results: string, cv = "none") => [
+  {
+    key: "arc-seal",
+    value: `i=${String(instance)}; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; cv=${cv}; b=abc/def==`,
+  },
+  {
+    key: "arc-message-signature",
+    value: `i=${String(instance)}; a=rsa-sha256; c=relaxed/relaxed; d=cloudflare-email.net; s=cf2024-1; h=from:to:subject; bh=x/y=; b=z+w==`,
+  },
+  {
+    key: "arc-authentication-results",
+    value: `i=${String(instance)}; ${results}`,
+  },
+];
+
+describe("Authentication-Results", () => {
+  it("parses the RFC's examples, comments, quoted strings and versions included", () => {
+    expect({
+      none: parseAuthenticationResults("example.org 1; none"),
+      spf: resultsOf("example.com; spf=pass smtp.mailfrom=example.net"),
+      commented: resultsOf(
+        "example.com; (a comment (nested)) auth=pass (cram-md5) smtp.auth=sender@example.net; spf=pass smtp.mailfrom=example.net"
+      ),
+      reason: resultsOf(
+        'example.com; dkim=pass reason="good signature" header.i=@mail-router.example.net; dkim=fail reason="bad signature" header.i=@newyork.example.com'
+      ),
+      versioned: resultsOf(
+        "mail-router.example.net 1; dkim/1 = pass (good signature) header.d = newyork.example.com"
+      ),
+      quotedLocal: resultsOf(
+        'example.com; spf=pass smtp.mailfrom="first last"@example.net'
+      ),
+    }).toStrictEqual({
+      none: { authservId: "example.org", results: [] },
+      spf: [
+        {
+          method: "spf",
+          result: "pass",
+          reason: undefined,
+          properties: { "smtp.mailfrom": "example.net" },
+        },
+      ],
+      commented: [
+        {
+          method: "auth",
+          result: "pass",
+          reason: undefined,
+          properties: { "smtp.auth": "sender@example.net" },
+        },
+        {
+          method: "spf",
+          result: "pass",
+          reason: undefined,
+          properties: { "smtp.mailfrom": "example.net" },
+        },
+      ],
+      reason: [
+        {
+          method: "dkim",
+          result: "pass",
+          reason: "good signature",
+          properties: { "header.i": "@mail-router.example.net" },
+        },
+        {
+          method: "dkim",
+          result: "fail",
+          reason: "bad signature",
+          properties: { "header.i": "@newyork.example.com" },
+        },
+      ],
+      versioned: [
+        {
+          method: "dkim",
+          result: "pass",
+          reason: undefined,
+          properties: { "header.d": "newyork.example.com" },
+        },
+      ],
+      quotedLocal: [
+        {
+          method: "spf",
+          result: "pass",
+          reason: undefined,
+          properties: { "smtp.mailfrom": "first last@example.net" },
+        },
+      ],
+    });
+  });
+
+  it("reads a property's value as receiving servers write it, outside the grammar's tokens too", () => {
+    const valuesOf = (value: string) =>
+      resultsOf(`${trustedAuthservId}; ${value}`)?.map(
+        ({ properties }) => properties
+      );
+
+    expect({
+      ipv6: valuesOf("arc=none smtp.remote-ip=2a00:1440:4824:20::32e"),
+      signature: valuesOf("dkim=pass header.d=acme.test header.b=Gj4cVp/R"),
+      padded: valuesOf("dkim=pass header.b=ab+cd=ef(comment) header.s=s1"),
+      nullSender: valuesOf("spf=none smtp.mailfrom=<>"),
+      literal: valuesOf("spf=pass smtp.helo=[192.0.2.1]"),
+    }).toStrictEqual({
+      ipv6: [{ "smtp.remote-ip": "2a00:1440:4824:20::32e" }],
+      signature: [{ "header.d": "acme.test", "header.b": "Gj4cVp/R" }],
+      padded: [{ "header.b": "ab+cd=ef", "header.s": "s1" }],
+      nullSender: [{ "smtp.mailfrom": "<>" }],
+      literal: [{ "smtp.helo": "[192.0.2.1]" }],
+    });
+  });
+
+  it("refuses anything that isn't the grammar's", () => {
+    const refused = [
+      "",
+      "example.com",
+      "example.com;",
+      "example.com; spf",
+      "example.com; spf=",
+      "example.com; spf=pass smtp.mailfrom",
+      "example.com; spf=pass smtp=example.net",
+      "example.com; spf=pass smtp.mailfrom=",
+      "example.com; spf=pass smtp.mailfrom=a\\b",
+      "example.com; spf=pass smtp.mailfrom=a.test extra",
+      "example.com; sp_f=pass",
+      "example.com; spf=pass (never closed",
+      'example.com; dkim=pass reason="never closed',
+      "example.com 2; spf=pass",
+      "example.com; spf=pass; none",
+      `example.com; spf=pass (${"(".repeat(20)}deep${")".repeat(20)})`,
+      `example.com; spf=pass smtp.mailfrom=${"a".repeat(17_000)}`,
+    ];
+
+    // Each one parsed, by its value: none.
+    expect(
+      refused.filter((value) => parseAuthenticationResults(value) !== undefined)
+    ).toStrictEqual([]);
+  });
+
+  it("reads an ARC header's instance, from 1 to 50", () => {
+    expect({
+      read: parseArcAuthenticationResults("i=3; example.com; spf=pass"),
+      zero: parseArcAuthenticationResults("i=0; example.com; spf=pass"),
+      past: parseArcAuthenticationResults("i=51; example.com; spf=pass"),
+      none: parseArcAuthenticationResults("example.com; spf=pass"),
+    }).toMatchObject({
+      read: { instance: 3, authservId: "example.com" },
+      zero: undefined,
+      past: undefined,
+      none: undefined,
+    });
+  });
+});
+
+/** What a reply from the boss of bank.test with `lines` reports. */
+const bossReport = (...lines: { key: string; value: string }[]) =>
+  authenticationOf(lines, "boss@bank.test");
+
+describe("a reply's authentication", () => {
+  it("reports what Email Routing found: SPF of the envelope sender, DKIM, DMARC", () => {
+    expect(
+      authenticationOf(
+        [
+          ...arcSet(
+            2,
+            `${trustedAuthservId}; dkim=pass header.d=acme.test header.s=s1 header.b=Gj4cVp/R; dmarc=pass header.from=acme.test policy.dmarc=reject; spf=none (${trustedAuthservId}: no SPF records found for postmaster@mail.acme.test) smtp.helo=mail.acme.test; spf=pass (${trustedAuthservId}: domain of ben@acme.test designates 2a00:1440::32e as permitted sender) smtp.mailfrom=ben@acme.test; arc=pass smtp.remote-ip=2a00:1440::32e`,
+            "pass"
+          ),
+          // Microsoft 365's own, which isn't the grammar's (`action=none`).
+          ...arcSet(
+            1,
+            "mx.microsoft.com 1; spf=pass smtp.mailfrom=acme.test; dmarc=pass action=none header.from=acme.test; dkim=pass header.d=acme.test; arc=none"
+          ),
+          { key: "from", value: "Ben <ben@acme.test>" },
+        ],
+        "ben@acme.test"
+      )
+    ).toStrictEqual({
+      spf: { result: "pass", domain: "acme.test" },
+      dkim: { result: "pass", domain: "acme.test" },
+      dmarc: { result: "pass", domain: "acme.test" },
+    });
+  });
+
+  it("reports a domain only when it is one", () => {
+    expect(
+      authenticationOf(
+        arcSet(
+          1,
+          `${trustedAuthservId}; spf=pass smtp.mailfrom=a@-acme.test; dkim=pass header.d=acme.test; dmarc=none header.from=<>`
+        ),
+        "ben@acme.test"
+      )
+    ).toStrictEqual({
+      spf: { result: "pass", domain: null },
+      dkim: { result: "pass", domain: "acme.test" },
+      dmarc: { result: "none", domain: null },
+    });
+  });
+
+  it("reports the DKIM signature aligned with the From domain, a pass first", () => {
+    const of = (value: string) =>
+      authenticationOf(
+        arcSet(1, `${trustedAuthservId}; ${value}`),
+        "ben@mail.acme.test"
+      ).dkim;
+
+    expect({
+      aligned: of(
+        "dkim=pass header.d=sender.test; dkim=fail header.d=acme.test; dkim=pass header.i=@acme.test"
+      ),
+      alignedFailing: of(
+        "dkim=pass header.d=sender.test; dkim=fail header.d=ACME.test"
+      ),
+      unaligned: of(
+        "dkim=pass header.d=sender.test; dkim=fail header.d=x.test"
+      ),
+      lookalike: of("dkim=pass header.d=notacme.test"),
+    }).toStrictEqual({
+      aligned: { result: "pass", domain: "acme.test" },
+      alignedFailing: { result: "fail", domain: "acme.test" },
+      unaligned: { result: "pass", domain: "sender.test" },
+      lookalike: { result: "pass", domain: "notacme.test" },
+    });
+  });
+
+  it("believes only Email Routing's own ARC set, on top, at the highest instance, of a chain it could extend", () => {
+    const forged = `${trustedAuthservId}; dmarc=pass header.from=bank.test`;
+    const nothing = { spf: null, dkim: null, dmarc: null };
+
+    expect({
+      belowRouting: bossReport(
+        ...arcSet(2, `${trustedAuthservId}; dmarc=fail header.from=bank.test`),
+        { key: "authentication-results", value: forged },
+        ...arcSet(1, forged)
+      ).dmarc,
+      // A plain results header is never Email Routing's.
+      plain: bossReport({ key: "authentication-results", value: forged }),
+      plainAboveRouting: bossReport(
+        { key: "authentication-results", value: forged },
+        ...arcSet(1, `${trustedAuthservId}; dmarc=fail header.from=bank.test`)
+      ).dmarc,
+      otherServer: bossReport(...arcSet(1, "mx.evil.test; dmarc=pass")),
+      lookalikeAuthserv: bossReport(
+        ...arcSet(1, `${trustedAuthservId}.evil.test; dmarc=pass`)
+      ),
+      // A chain that failed, or is full, takes no set of Email Routing's.
+      failedChain: bossReport(...arcSet(1, forged, "fail")),
+      fullChain: bossReport(...arcSet(50, forged, "pass")),
+      notHighest: bossReport(
+        ...arcSet(1, forged),
+        ...arcSet(2, "mx.acme.test; dmarc=fail", "pass")
+      ),
+      sealedHigher: bossReport(
+        { key: "arc-seal", value: "i=3; a=rsa-sha256; cv=pass; b=x" },
+        ...arcSet(2, forged, "pass")
+      ),
+      noSeal: bossReport(
+        ...arcSet(1, forged).filter(({ key }) => key !== "arc-seal")
+      ),
+      noSignature: bossReport(
+        ...arcSet(1, forged).filter(
+          ({ key }) => key !== "arc-message-signature"
+        )
+      ),
+      signedHigher: bossReport(
+        { key: "arc-message-signature", value: "i=2; a=rsa-sha256; b=x" },
+        ...arcSet(1, forged)
+      ),
+      sameInstanceTwice: bossReport(...arcSet(2, forged), ...arcSet(2, forged)),
+      unreadableSeal: bossReport(
+        { key: "arc-seal", value: "i=1; cv=maybe" },
+        ...arcSet(1, forged).filter(({ key }) => key !== "arc-seal")
+      ),
+      unparsable: bossReport(
+        ...arcSet(
+          1,
+          `${trustedAuthservId}; dmarc=pass header.from=bank.test action=none`
+        )
+      ),
+      unknownResult: bossReport(
+        ...arcSet(
+          1,
+          `${trustedAuthservId}; dmarc=bestguesspass header.from=bank.test`
+        )
+      ).dmarc,
+      none: bossReport({ key: "from", value: "boss@bank.test" }),
+    }).toStrictEqual({
+      belowRouting: { result: "fail", domain: "bank.test" },
+      plain: nothing,
+      plainAboveRouting: { result: "fail", domain: "bank.test" },
+      otherServer: nothing,
+      lookalikeAuthserv: nothing,
+      failedChain: nothing,
+      fullChain: nothing,
+      notHighest: nothing,
+      sealedHigher: nothing,
+      noSeal: nothing,
+      noSignature: nothing,
+      signedHigher: nothing,
+      sameInstanceTwice: nothing,
+      unreadableSeal: nothing,
+      unparsable: nothing,
+      unknownResult: null,
+      none: nothing,
+    });
+  });
+});

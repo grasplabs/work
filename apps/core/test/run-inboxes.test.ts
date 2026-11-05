@@ -63,8 +63,8 @@ import { unique } from "./sign-in.ts";
 //   the run, only for its frozen bindings whose contract takes replies;
 // - a replay reading another address: every activation derives the same;
 // - a test run's mail reaching anyone: it gets placeholders on `.invalid`;
-// - a token outliving its run: it says its run ended, and goes with the
-//   run's details, after which nothing has it;
+// - a token outliving its run: it goes with the run's details, after
+//   which nothing has it;
 // - a builder taking a run's replies by naming an email trigger after a
 //   reply address: that shape is refused;
 // - a contract claiming replies in a shape core doesn't deliver, or for a
@@ -369,7 +369,6 @@ describe("a run's inboxes", { timeout: 120_000 }, () => {
         runId,
         workflowId: sealed.workflow.id,
         binding: "replies",
-        ended: false,
       },
     });
   });
@@ -440,7 +439,7 @@ describe("a run's inboxes", { timeout: 120_000 }, () => {
     });
   });
 
-  it("says its run ended, and is gone with the run's details", async () => {
+  it("is gone with the run's details", async () => {
     const runId = await waitingRun(sealed);
     const token = tokenIn(
       z.record(z.string(), z.string()).parse(await inboxRead(runId)).replies
@@ -448,19 +447,20 @@ describe("a run's inboxes", { timeout: 120_000 }, () => {
     await runObject(runId).terminate({ rollback: false });
     await vi.waitFor(
       async () => {
-        await expect(inboxAt(env, token)).resolves.toMatchObject({
-          ended: true,
-        });
+        const run = await runOf(env, runId);
+        expect(run?.endedAt ?? null).not.toBeNull();
       },
       { timeout: 30_000, interval: 100 }
     );
+    const ended = await inboxAt(env, token);
     const later = new Date(Date.now() + 400 * 86_400_000);
     await sweepWorkflowStartDetails(env, later, later);
 
     expect({
+      ended: ended?.runId,
       rows: await rowsOf(runId),
       found: await inboxAt(env, token),
-    }).toStrictEqual({ rows: [], found: undefined });
+    }).toStrictEqual({ ended: runId, rows: [], found: undefined });
   });
 
   it("tells the admin approving a reply binding who can send it", () => {

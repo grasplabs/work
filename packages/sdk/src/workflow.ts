@@ -777,8 +777,11 @@ export interface WorkflowContext<P extends Params, Input> {
    * life, and takes nothing once it ended. Anyone the mail reaches can
    * reply through it: a reply is checked against the contract, but who
    * sent it isn't vouched for. Its `authentication` says what SPF, DKIM
-   * and DMARC found, each of which domain: only `dmarc.result === "pass"`
-   * ties its `from` to who sent it. A test run gets placeholders that
+   * and DMARC found as the deployment's mail service received it, each of
+   * which domain (`null` where it recorded nothing): only
+   * `dmarc.result === "pass"` ties its `from` to who sent it. A reply
+   * delivered again is the same event; a reply after the run ended, or
+   * one sent automatically (an out-of-office), is dropped and audited. A test run gets placeholders that
    * reach nobody; any run not on a sealed build's run host, none.
    */
   inbox: Readonly<Record<string, string>>;

@@ -84,13 +84,15 @@ export const emailReplyType = "grasp.email.reply";
 const mailbox = v.object({ name: v.string(), address: v.string() });
 
 /**
- * What one authentication method said of a message, as the receiving
- * server's `Authentication-Results` header records it (RFC 8601 2.7), and
+ * What one authentication method said of a message, as Email Routing's
+ * own ARC set records it (`ARC-Authentication-Results`, RFC 8617, its
+ * results RFC 8601 2.7's), and
  * of which domain: SPF's of the envelope sender (`smtp.mailfrom`), DKIM's
  * of the signature (`header.d`), DMARC's of the From header
  * (`header.from`). A pass vouches only for that domain: SPF and DKIM may
  * pass for any domain the sender owns, so only DMARC's pass ties the From
- * header to its sender. Null when the header records no result.
+ * header to its sender. Null when Email Routing's own ARC set
+ * (authentication-results.ts) records none, or none core can trust.
  */
 const methodResult = v
   .object({

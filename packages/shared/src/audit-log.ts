@@ -234,6 +234,10 @@ const typeRules: readonly {
   // An attachment of a message an independent workflow's email trigger
   // received, copied into the run it started as a file of the run.
   { action: "workflow.email.attachment", type: "action" },
+  // A reply to a run's mail reaching its inbox (core's
+  // src/workflows/inbound-email.ts): one the run took, and one dropped
+  // (the run ended, its approval went, its inbox is full, or it may loop).
+  { action: "workflow.email.reply", type: "action" },
   // A run's step refused a call of a binding its version's review doesn't
   // show it calling.
   { action: "workflow.call.refused", type: "permission" },

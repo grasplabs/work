@@ -7,7 +7,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 
 import { signInConfig } from "../auth/config.ts";
-import { runInboxes, workflowResourceRuns } from "../db/core/schema.ts";
+import { runInboxes } from "../db/core/schema.ts";
 import { derivedHmacKey } from "../derived-keys.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import type { CallingRun } from "./resource-authority.ts";
@@ -38,12 +38,22 @@ import type { CallingRun } from "./resource-authority.ts";
 //   hop's logs, the run's viewers) sending events. Accepted, as for any
 //   reply, and bounded: they reach one run, through one binding, as its
 //   contract's one outside type, with data checked against it and nothing
-//   evaluated, only while the run hasn't ended (`inboxAt` says when it
-//   has: the token is revoked then, whatever arrives later). Who may send
+//   evaluated, and only while the run hasn't ended: its address still
+//   takes mail after that, until the run's details go, but the run takes
+//   no new event (below). Who may send
 //   is the contract's to say (`ingress`), and the admin approving the
-//   binding is told (workflow-binding-requests.ts). The From header is a
-//   claim: a reply carries what SPF, DKIM and DMARC found
-//   (`emailReplyData`), for the workflow to check.
+//   binding is told (workflow-binding-requests.ts). Each reply is
+//   audited with its run and binding, and fills only its binding's share
+//   of the run's inbox (`inbox:<alias>`), never an App screen's. The From
+//   header is a claim: a reply carries what Email Routing found of SPF,
+//   DKIM and DMARC (`emailReplyData`, authentication-results.ts), for the
+//   workflow to check; core refuses none on it.
+// - A reply after its run ended, or once its binding's approval went:
+//   dropped and audited, never bounced (inbound-email.ts,
+//   `receiveReply`), the authority read again on every reply; one the run
+//   took before it ended, delivered again, is still the event it took.
+// - A token guessed, or one whose run's details are gone: no inbox has
+//   it, and mail to it is rejected at SMTP time, so nothing bounces.
 // - A builder taking a run's replies by naming an email trigger
 //   `reply-<token>` after seeing an address in a trace: that shape is
 //   reserved (`replyLocalPattern`, email-addresses.ts) and no trigger may
@@ -74,6 +84,9 @@ const tokenBytes = 16;
 /** A run inbox's token, as its address carries it: 128 bits, in hex. */
 export const runInboxTokenPattern = /^[0-9a-f]{32}$/u;
 
+/** What a run's reply address's local part starts with, before its token. */
+export const replyPrefix = "reply-";
+
 /**
  * A run's reply address's local part: `reply-` and its token. Reserved:
  * no email trigger takes a name of this shape (email-addresses.ts).
@@ -100,7 +113,7 @@ const tokenOf = async (
 
 /** The reply address with `token`, on `host`. */
 const replyAddressOf = (token: string, host: string): string =>
-  `reply-${token}@${host}`;
+  `${replyPrefix}${token}@${host}`;
 
 /** A test run's placeholder for a reply address. */
 const placeholder = replyAddressOf("0".repeat(tokenBytes * 2), placeholderHost);
@@ -124,12 +137,13 @@ interface EventBinding {
 
 /**
  * The event bindings of `bindings` whose pinned contract, by its
- * fingerprint, takes a type from outside, each with where from.
+ * fingerprint, takes a type from outside, each with that type and where
+ * from.
  */
 const ingressBindings = async (
   env: Env,
   bindings: Iterable<EventBinding>
-): Promise<{ alias: string; ingress: EventIngressKind }[]> => {
+): Promise<{ alias: string; type: string; ingress: EventIngressKind }[]> => {
   const events = [...bindings].filter(({ kind }) => kind === "event");
   if (events.length === 0) {
     return [];
@@ -143,11 +157,30 @@ const ingressBindings = async (
     if (contract?.fingerprint !== fingerprint) {
       return [];
     }
-    const ingress = Object.values(contract.contract.events ?? {}).find(
-      (type) => type.ingress !== undefined
-    )?.ingress;
-    return ingress === undefined ? [] : [{ alias, ingress }];
+    const outside = Object.entries(contract.contract.events ?? {}).find(
+      ([, type]) => type.ingress !== undefined
+    );
+    const ingress = outside?.[1].ingress;
+    return outside === undefined || ingress === undefined
+      ? []
+      : [{ alias, type: outside[0], ingress }];
   });
+};
+
+/**
+ * The type contract `contractId`, by its fingerprint, takes from outside,
+ * and where from, if it takes one: a contract takes at most one.
+ */
+export const ingressTypeOf = async (
+  env: Env,
+  binding: { contractId: string; fingerprint: string }
+): Promise<{ type: string; ingress: EventIngressKind } | undefined> => {
+  const [found] = await ingressBindings(env, [
+    { ...binding, alias: "", kind: "event" },
+  ]);
+  return found === undefined
+    ? undefined
+    : { type: found.type, ingress: found.ingress };
 };
 
 /**
@@ -158,9 +191,7 @@ export const ingressOf = async (
   env: Env,
   binding: { contractId: string; fingerprint: string }
 ): Promise<EventIngressKind | undefined> => {
-  const [found] = await ingressBindings(env, [
-    { ...binding, alias: "", kind: "event" },
-  ]);
+  const found = await ingressTypeOf(env, binding);
   return found?.ingress;
 };
 
@@ -264,8 +295,6 @@ export interface RunInbox {
   readonly runId: string;
   readonly workflowId: string;
   readonly binding: string;
-  /** Whether its run ended: its token takes nothing from then on. */
-  readonly ended: boolean;
 }
 
 /**
@@ -286,21 +315,12 @@ export const inboxAt = async (
       runId: runInboxes.runId,
       workflowId: runInboxes.workflowId,
       binding: runInboxes.binding,
-      endedAt: workflowResourceRuns.endedAt,
     })
     .from(runInboxes)
-    .innerJoin(
-      workflowResourceRuns,
-      eq(workflowResourceRuns.id, runInboxes.runId)
-    )
     .where(eq(runInboxes.tokenHash, await sha256Hex(token)))
     .get();
-  if (
-    row === undefined ||
+  return row === undefined ||
     !sameToken(token, await tokenOf(env, row.runId, row.binding))
-  ) {
-    return undefined;
-  }
-  const { endedAt, ...inbox } = row;
-  return { ...inbox, ended: endedAt !== null };
+    ? undefined
+    : row;
 };
