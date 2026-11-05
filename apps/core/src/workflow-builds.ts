@@ -49,6 +49,7 @@ import { releaseReservations } from "./release-retention.ts";
 import { buildOpenWorkflow, withinBuildWait } from "./screens.ts";
 import { sealedUse } from "./workflow-modules.ts";
 import type { ComputeContract, CompiledModules } from "./workflow-modules.ts";
+import { eventTypeSchema } from "./workflows/event-envelopes.ts";
 import { manifestPackagesSchema } from "./workflows/package-seal.ts";
 
 // What a JSON workflow's version runs (platform specification 13.1, 19.1):
@@ -301,7 +302,7 @@ const sealedCallSchema = z.discriminatedUnion("name", [
   z.strictObject({
     name: z.literal("grasp.emit"),
     binding: aliasSchema,
-    type: z.string().min(1).max(sealedBuildLimits.eventTypeLength),
+    type: eventTypeSchema,
     subject: templateSchema.optional(),
     dataschema: z
       .string()
@@ -346,7 +347,7 @@ const sealedListenSchema = z.strictObject({
   filters: z
     .array(
       z.strictObject({
-        type: z.string().min(1).max(sealedBuildLimits.eventTypeLength),
+        type: eventTypeSchema,
         attributes: z
           .array(
             z.tuple([z.string().regex(/^[a-z0-9]{1,20}$/u), templateSchema])

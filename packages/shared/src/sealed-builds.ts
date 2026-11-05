@@ -51,3 +51,10 @@ export const sealedBuildLimits = {
  */
 export const eventTypePattern =
   "^(?!\\s)[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?<!\\s)$";
+
+const eventTypeRegExp = new RegExp(eventTypePattern, "u");
+
+/** Whether `type` is an event's type: the pattern, within the length. */
+export const isEventType = (type: string): boolean =>
+  type.length <= sealedBuildLimits.eventTypeLength &&
+  eventTypeRegExp.test(type);

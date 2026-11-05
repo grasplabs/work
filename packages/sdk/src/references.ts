@@ -1,3 +1,5 @@
+import { isEventType } from "@grasp-os/shared/sealed-builds";
+
 import type { PaginationResult } from "./database.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
@@ -575,8 +577,8 @@ export type WorkflowWaitOf<Reference> =
 
 /**
  * The most a generated workflow reference declares: events, listen tasks
- * and decisions, the longest listen task's path and the longest event
- * type. The generator refuses
+ * and decisions, and the longest listen task's path; an event's type is
+ * `isEventType`'s, as a run's inbox takes one. The generator refuses
  * more, and the client reads no more, so what one makes the other reads.
  */
 export const workflowReferenceLimits = {
@@ -584,7 +586,6 @@ export const workflowReferenceLimits = {
   listens: 256,
   decisions: 64,
   taskPathLength: 1024,
-  eventTypeLength: 256,
 } as const;
 
 /** The event references of `Reference`, by alias. */
@@ -728,8 +729,7 @@ export const eventReferenceData = (
     typeof alias !== "string" ||
     !eventAliasPattern.test(alias) ||
     typeof type !== "string" ||
-    type.length === 0 ||
-    type.length > workflowReferenceLimits.eventTypeLength ||
+    !isEventType(type) ||
     typeof fingerprint !== "string" ||
     !eventFingerprintPattern.test(fingerprint)
   ) {

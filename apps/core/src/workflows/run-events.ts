@@ -1,10 +1,6 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import {
-  eventTypePattern,
-  sealedBuildLimits,
-} from "@grasp-os/shared/sealed-builds";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { decode } from "@grasp-os/workerflow/codec";
 import { z } from "zod";
@@ -15,6 +11,7 @@ import {
   attributesOf,
   contentType,
   eventTypeKey,
+  eventTypeSchema,
   storedEventSchema,
 } from "./event-envelopes.ts";
 import type { StoredEvent } from "./event-envelopes.ts";
@@ -80,14 +77,12 @@ import { runOf } from "./resource-runs.ts";
 /** Text on one line: no control characters. */
 // oxlint-disable-next-line no-control-regex -- control characters are what it refuses
 const oneLine = /^[^\u0000-\u001F\u007F]*$/u;
-/** An event's type, by the rule a workflow's waits are checked by. */
-const eventType = new RegExp(eventTypePattern, "u");
 
 const deliverySchema = z.strictObject({
   workflowId: workflowResourceIdSchema,
   runId: runIdSchema,
   binding: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
-  type: z.string().max(sealedBuildLimits.eventTypeLength).regex(eventType),
+  type: eventTypeSchema,
   data: z.json(),
   subject: z.string().max(1024).regex(oneLine).optional(),
   key: z.string().min(1).max(200).regex(oneLine),
