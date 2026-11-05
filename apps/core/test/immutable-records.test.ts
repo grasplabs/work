@@ -66,7 +66,6 @@ const tables: readonly ImmutableTable[] = [
       definition: "{}",
       definition_json_hash: "definition",
       profile_version: "1",
-      evaluator_hash: "evaluator",
       contract: "{}",
       contract_hash: "contract",
       manifest: "{}",

@@ -28,8 +28,6 @@ interface SeededRun {
   principal: string;
   /** Its decision: whom it asks, and whether it is still open. */
   asks?: { deciders: string; open: boolean };
-  /** The run that started it. */
-  from?: string;
 }
 
 /** A start and its run of `workflow`, as core keeps them. */
@@ -38,8 +36,8 @@ const runStatements = (workflow: string, id: string, run: SeededRun) => [
     "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, ?, ?, ?, ?, 1, 'm', ?, 1, 'h', ?)"
   ).bind(
     id,
-    run.from === undefined ? "person" : "workflow",
-    run.from ?? run.principal,
+    "person",
+    run.principal,
     `key-${id}`,
     workflow,
     run.principal,
@@ -132,7 +130,6 @@ describe("today's runs", () => {
       at: minutesIn(20),
       principal,
       asks: { deciders: `person:${owner.userId}`, open: true },
-      from: alone.id,
     });
     const askedAdmins = await seedRun(workflow.id, {
       status: "running",
@@ -145,8 +142,6 @@ describe("today's runs", () => {
       at: minutesIn(40),
       principal,
       asks: { deciders: "role:admin", open: false },
-      // From a run the owner may not see.
-      from: crypto.randomUUID(),
     });
     // Yesterday's run is no run of today.
     await seedRun(workflow.id, {
@@ -192,7 +187,7 @@ describe("today's runs", () => {
                 asks: "Approve the invoice?",
               },
               waitsOnOthers: false,
-              from: alone.id,
+              from: null,
             },
             {
               id: askedAdmins.id,
