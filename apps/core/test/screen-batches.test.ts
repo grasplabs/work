@@ -19,7 +19,11 @@ import { unique } from "./sign-in.ts";
 // - A build its own paths refuse (a name clash) spends its batches first.
 // - The isolate is named by the App's code: a Dynamic Worker billed per
 //   unique name a day, and one kept for every version ever built.
-// - Apps share one isolate: one App's heavy builds stop another's.
+// - Apps share one isolate on Cloudflare: one App's heavy builds stop
+//   another's.
+// - Each App keeps an isolate of its own on plain workerd, which unloads
+//   no named isolate while the process runs: every App ever built holds a
+//   compiler, until the process runs out of heap.
 // Plain workerd enforces no CPU time: what bounds a call's is the source
 // it is handed, held to a batch's characters (`batchCharacters` in
 // screens.ts: 4 s at 45 µs a character); the runtime's message stands in
@@ -531,5 +535,28 @@ describe("a first screens build of a large App", () => {
         )
       ),
     }).toStrictEqual({ names: [true], code: [] });
+  }, 120_000);
+
+  it("builds every App in one compiler isolate on plain workerd", async () => {
+    const { loader, names } = recordingLoader();
+    const onWorkerd = { ...env, LOADER: loader, RUNTIME_PROFILE: "workerd" };
+
+    const first = await buildScreens(
+      onWorkerd,
+      syntheticApp(2, 1),
+      `app-${unique()}`
+    );
+    const second = await buildScreens(
+      onWorkerd,
+      syntheticApp(2, 1),
+      `app-${unique()}`
+    );
+
+    // Core's Loader suffixes each name with the entrypoint it silences.
+    const isolates = new Set(names.map((name) => name.split("\u0000")[0]));
+    expect({
+      built: [first.ok, second.ok],
+      isolates: [...isolates],
+    }).toStrictEqual({ built: [true, true], isolates: [appCompilerName()] });
   }, 120_000);
 });

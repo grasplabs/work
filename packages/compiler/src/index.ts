@@ -343,31 +343,38 @@ const compilerWorker = async (
 /**
  * The name of `whose` warm compiler isolate: the App's (or independent
  * workflow's) ID and the release's compiler version, never anything of its
- * code. Each unique name is a Dynamic Worker billed per day, and workerd
+ * code; with no `whose`, the release's one isolate every App's builds
+ * share. Each unique name is a Dynamic Worker billed per day, and workerd
  * keeps a named isolate for as long as the process runs: a name per build,
  * or per version of an App's code, would start and keep one compiler for
  * every build ever made.
  */
-export const appCompilerName = (whose: string): string =>
-  `compiler:${version}:${whose}`;
+export const appCompilerName = (whose?: string): string =>
+  whose === undefined ? `compiler:${version}` : `compiler:${version}:${whose}`;
 
 /**
- * The compiler, in one isolate per App and release that the App's builds
- * share, with its code read from core's static assets. Kept warm, a build
- * doesn't load the compiler and the kit again, so a change to an App shows
- * at once. One per App keeps Apps apart: the isolate's limits, and a
- * recycle or a kill at them, are that App's builds' alone, never another
- * App's. The compiler parses and transforms App code but never runs it,
- * and the isolate has no bindings, no network and no subrequests
- * (`isolateSettings`). Shared by the App's builds, its limits are theirs
- * together: a stop at them may be another of its builds' doing
+ * The compiler, warm in a named isolate with its code read from core's
+ * static assets: a build doesn't load the compiler and the kit again, so a
+ * change to an App shows at once. With `whose` (on Cloudflare), there is
+ * one isolate per App and release, which keeps Apps apart: the isolate's
+ * limits, and a recycle or a kill at them, are that App's builds' alone,
+ * never another App's. Without it (off Cloudflare), every App's builds
+ * share one: workerd never unloads a named isolate while the process
+ * runs, so one per App would keep a compiler for every App ever built.
+ * The compiler parses and transforms App code but never runs it, and the
+ * isolate has no bindings, no network and no subrequests
+ * (`isolateSettings`). Shared by several builds, its limits are theirs
+ * together: a stop at them may be another build's doing
  * (`loadAppCompiler`).
  */
 export const startAppCompiler = (
   loader: WorkerLoader,
   assets: Fetcher,
-  /** Whose builds it runs: the App's, or an independent workflow's, ID. */
-  whose: string
+  /**
+   * Whose builds it runs alone: the App's, or an independent workflow's,
+   * ID. Omitted, every App's builds share it.
+   */
+  whose?: string
 ): Service<AppCompiler> =>
   loader
     .get(appCompilerName(whose), async () => await compilerWorker(assets))
