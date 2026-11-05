@@ -61,6 +61,7 @@ export {
   buildFiles,
   computeModuleErrors,
   isGeneratedPath,
+  isLintedCode,
   limitErrors,
   openWorkflowEntry,
   openWorkflowErrors,

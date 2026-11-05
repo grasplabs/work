@@ -12,7 +12,8 @@
       "types": "./src/types-module.d.ts"
     },
     "#ultracite-rules": {
-      "types": "./src/ultracite-rules.d.ts"
+      "types": "./src/ultracite-rules.d.ts",
+      "node": "./ultracite-rules-node.ts"
     },
     "#version": {
       "types": "./src/version.d.ts",
