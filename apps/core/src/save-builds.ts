@@ -363,8 +363,7 @@ export const draftServerBuild = async (
 const lintedFiles = (files: Record<string, string>): Record<string, string> =>
   Object.fromEntries(
     Object.entries(files).filter(
-      ([path]) =>
-        isLintedCode(path) && !isGeneratedPath(path)
+      ([path]) => isLintedCode(path) && !isGeneratedPath(path)
     )
   );
 

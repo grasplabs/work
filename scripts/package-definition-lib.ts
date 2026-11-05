@@ -100,7 +100,6 @@ import {
   generatedServerFolder,
   hostGeneratedFolder,
   screensFolder,
-  workflowsFolder,
 } from "../packages/compiler/src/inputs.ts";
 import { screenReferences } from "../packages/compiler/src/kit.ts";
 import { designNote } from "../packages/compiler/src/lint.ts";
@@ -871,14 +870,13 @@ const planTypeCheck = (project: Plan): void => {
 /**
  * What the project's lint and format leave alone in `app/`, the only
  * folder they read: all but the App's TypeScript as Grasp lints and
- * formats it (core's `lintedFiles`), so not its declarations, the modules
- * the host generates, nor what is under `workflows/`, which the App never
- * changes. The workflow versions, the vendored packages and the
- * compiler's check are outside `app/`.
+ * formats it (core's `lintedFiles`), so not its declarations, nor the
+ * modules the host generates. The workflow versions, the vendored
+ * packages and the compiler's check are outside `app/`.
  */
 const ignoredGlobs = [
   `**/*${declarationExtension}`,
-  ...[generatedServerFolder, hostGeneratedFolder, workflowsFolder.folder].map(
+  ...[generatedServerFolder, hostGeneratedFolder].map(
     (folder) => `app/${folder}**`
   ),
 ];

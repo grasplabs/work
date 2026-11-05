@@ -8,7 +8,6 @@ import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { findApp } from "../src/apps.ts";
 import type { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 
