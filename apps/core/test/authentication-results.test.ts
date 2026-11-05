@@ -33,13 +33,18 @@ const resultsOf = (value: string) =>
   );
 
 /**
- * An ARC set's seal and results at `instance`, as postal-mime gives
- * headers (names lower case, topmost first): the seal saying `cv`.
+ * An ARC set at `instance` (its seal, message signature and results), as
+ * postal-mime gives headers (names lower case, topmost first): the seal
+ * saying `cv`.
  */
 const arcSet = (instance: number, results: string, cv = "none") => [
   {
     key: "arc-seal",
     value: `i=${String(instance)}; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; cv=${cv}; b=abc/def==`,
+  },
+  {
+    key: "arc-message-signature",
+    value: `i=${String(instance)}; a=rsa-sha256; c=relaxed/relaxed; d=cloudflare-email.net; s=cf2024-1; h=from:to:subject; bh=x/y=; b=z+w==`,
   },
   {
     key: "arc-authentication-results",
@@ -283,14 +288,22 @@ describe("a reply's authentication", () => {
         { key: "arc-seal", value: "i=3; a=rsa-sha256; cv=pass; b=x" },
         ...arcSet(2, forged, "pass")
       ),
-      noSeal: bossReport({
-        key: "arc-authentication-results",
-        value: `i=1; ${forged}`,
-      }),
+      noSeal: bossReport(
+        ...arcSet(1, forged).filter(({ key }) => key !== "arc-seal")
+      ),
+      noSignature: bossReport(
+        ...arcSet(1, forged).filter(
+          ({ key }) => key !== "arc-message-signature"
+        )
+      ),
+      signedHigher: bossReport(
+        { key: "arc-message-signature", value: "i=2; a=rsa-sha256; b=x" },
+        ...arcSet(1, forged)
+      ),
       sameInstanceTwice: bossReport(...arcSet(2, forged), ...arcSet(2, forged)),
       unreadableSeal: bossReport(
         { key: "arc-seal", value: "i=1; cv=maybe" },
-        { key: "arc-authentication-results", value: `i=1; ${forged}` }
+        ...arcSet(1, forged).filter(({ key }) => key !== "arc-seal")
       ),
       unparsable: bossReport(
         ...arcSet(
@@ -316,6 +329,8 @@ describe("a reply's authentication", () => {
       notHighest: nothing,
       sealedHigher: nothing,
       noSeal: nothing,
+      noSignature: nothing,
+      signedHigher: nothing,
       sameInstanceTwice: nothing,
       unreadableSeal: nothing,
       unparsable: nothing,

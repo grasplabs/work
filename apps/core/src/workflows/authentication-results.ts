@@ -11,7 +11,8 @@
 // carries, on top of it, its results under its authserv-id
 // (`trustedAuthservId`). So only the topmost ARC results header is read,
 // and only when it is the message's one set at the highest instance (one
-// results header and one seal there, none higher), its seal doesn't say
+// results header, one message signature and one seal there, none
+// higher: RFC 8617 4.1's complete set), its seal doesn't say
 // the chain failed, its instance isn't the last there may be (50), and
 // its authserv-id is Email Routing's. A sealer adds no set to a chain
 // that failed or is full (RFC 8617 5.1.1), so those are what a sender
@@ -20,7 +21,9 @@
 // Routing records its results in its ARC set, so one claiming its
 // authserv-id is a sender's. Anything else (no such set, a header that
 // doesn't parse) reports nothing, each method `null`: a verdict is never
-// guessed, and nothing a sender writes can turn one into a pass.
+// guessed. What this rests on is Email Routing sealing every message it
+// hands over: one it didn't seal would show a sender's own complete set
+// on top, under its authserv-id, as its own.
 //
 // The parser follows the RFC's grammar strictly where it decides what is
 // reported (RFC 8601 2.2, RFC 8617 4.1.1, with RFC 5322's CFWS and quoted
@@ -452,12 +455,16 @@ interface Header {
 
 const arcResultsKey = "arc-authentication-results";
 const arcSealKey = "arc-seal";
+const arcSignatureKey = "arc-message-signature";
 
 /** The highest instance an ARC set may have (RFC 8617 4.2.1). */
 const maxInstance = 50;
 
-/** An ARC-Seal's tags (RFC 8617 4.1.3, RFC 6376 3.2's tag-list), by name. */
-const sealTags = (value: string): Map<string, string> | undefined => {
+/**
+ * An ARC-Seal's or ARC-Message-Signature's tags (RFC 8617 4.1.2, 4.1.3,
+ * RFC 6376 3.2's tag-list), by name.
+ */
+const arcTags = (value: string): Map<string, string> | undefined => {
   const tags = new Map<string, string>();
   for (const spec of value.split(";")) {
     const trimmed = spec.trim();
@@ -474,19 +481,34 @@ const sealTags = (value: string): Map<string, string> | undefined => {
   return tags;
 };
 
+/** The instance tags `tags` give (`i=`, 1 to 50); none if they give none. */
+const instanceTagged = (
+  tags: Map<string, string> | undefined
+): number | undefined => {
+  const tag = tags?.get("i") ?? "";
+  const instance = Number(tag);
+  return /^\d{1,2}$/u.test(tag) && instance >= 1 && instance <= maxInstance
+    ? instance
+    : undefined;
+};
+
 /** An ARC-Seal's instance and chain validation status; none if it isn't one. */
 const parseArcSeal = (
   value: string
 ): { instance: number; cv: string } | undefined => {
-  const tags = sealTags(value);
-  const instance = Number(tags?.get("i") ?? Number.NaN);
+  const tags = arcTags(value);
+  const instance = instanceTagged(tags);
   const cv = tags?.get("cv")?.toLowerCase();
-  return /^\d{1,2}$/u.test(tags?.get("i") ?? "") &&
-    instance >= 1 &&
-    instance <= maxInstance &&
+  return instance !== undefined &&
     (cv === "none" || cv === "pass" || cv === "fail")
     ? { instance, cv }
     : undefined;
+};
+
+/** An ARC-Message-Signature's instance; none if it isn't one. */
+const parseArcSignature = (value: string): { instance: number } | undefined => {
+  const instance = instanceTagged(arcTags(value));
+  return instance === undefined ? undefined : { instance };
 };
 
 /**
@@ -502,15 +524,21 @@ const trustedResults = (
   const seals = headers
     .filter(({ key }) => key === arcSealKey)
     .map(({ value }) => parseArcSeal(value));
+  const signatures = headers
+    .filter(({ key }) => key === arcSignatureKey)
+    .map(({ value }) => parseArcSignature(value));
   const [top] = results;
   if (
     top === undefined ||
     results.includes(undefined) ||
-    seals.includes(undefined)
+    seals.includes(undefined) ||
+    signatures.includes(undefined)
   ) {
     return undefined;
   }
-  const instances = [...results, ...seals].map((each) => each?.instance ?? 0);
+  const instances = [...results, ...seals, ...signatures].map(
+    (each) => each?.instance ?? 0
+  );
   const highest = Math.max(...instances);
   const atTop = (each: { instance: number } | undefined) =>
     each?.instance === highest;
@@ -519,6 +547,7 @@ const trustedResults = (
     highest < maxInstance &&
     results.filter(atTop).length === 1 &&
     seals.filter(atTop).length === 1 &&
+    signatures.filter(atTop).length === 1 &&
     seal?.cv !== "fail" &&
     top.authservId === trustedAuthservId
     ? top

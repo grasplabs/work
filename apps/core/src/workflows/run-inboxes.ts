@@ -7,7 +7,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 
 import { signInConfig } from "../auth/config.ts";
-import { runInboxes, workflowResourceRuns } from "../db/core/schema.ts";
+import { runInboxes } from "../db/core/schema.ts";
 import { derivedHmacKey } from "../derived-keys.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import type { CallingRun } from "./resource-authority.ts";
@@ -38,8 +38,9 @@ import type { CallingRun } from "./resource-authority.ts";
 //   hop's logs, the run's viewers) sending events. Accepted, as for any
 //   reply, and bounded: they reach one run, through one binding, as its
 //   contract's one outside type, with data checked against it and nothing
-//   evaluated, only while the run hasn't ended (`inboxAt` says when it
-//   has: the token is revoked then, whatever arrives later). Who may send
+//   evaluated, and only while the run hasn't ended: its address still
+//   takes mail after that, until the run's details go, but the run takes
+//   no new event (below). Who may send
 //   is the contract's to say (`ingress`), and the admin approving the
 //   binding is told (workflow-binding-requests.ts). Each reply is
 //   audited with its run and binding, and fills only its binding's share
@@ -49,7 +50,8 @@ import type { CallingRun } from "./resource-authority.ts";
 //   workflow to check; core refuses none on it.
 // - A reply after its run ended, or once its binding's approval went:
 //   dropped and audited, never bounced (inbound-email.ts,
-//   `receiveReply`), the authority read again on every reply.
+//   `receiveReply`), the authority read again on every reply; one the run
+//   took before it ended, delivered again, is still the event it took.
 // - A token guessed, or one whose run's details are gone: no inbox has
 //   it, and mail to it is rejected at SMTP time, so nothing bounces.
 // - A builder taking a run's replies by naming an email trigger
@@ -293,8 +295,6 @@ export interface RunInbox {
   readonly runId: string;
   readonly workflowId: string;
   readonly binding: string;
-  /** Whether its run ended: its token takes nothing from then on. */
-  readonly ended: boolean;
 }
 
 /**
@@ -315,21 +315,12 @@ export const inboxAt = async (
       runId: runInboxes.runId,
       workflowId: runInboxes.workflowId,
       binding: runInboxes.binding,
-      endedAt: workflowResourceRuns.endedAt,
     })
     .from(runInboxes)
-    .innerJoin(
-      workflowResourceRuns,
-      eq(workflowResourceRuns.id, runInboxes.runId)
-    )
     .where(eq(runInboxes.tokenHash, await sha256Hex(token)))
     .get();
-  if (
-    row === undefined ||
+  return row === undefined ||
     !sameToken(token, await tokenOf(env, row.runId, row.binding))
-  ) {
-    return undefined;
-  }
-  const { endedAt, ...inbox } = row;
-  return { ...inbox, ended: endedAt !== null };
+    ? undefined
+    : row;
 };

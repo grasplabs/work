@@ -260,9 +260,13 @@ const dropReasons = async (runId: string) => {
 const today = (): string => new Date().toISOString().slice(0, 10);
 
 /** Email Routing's results of a message from Ben, all passing. */
-/** An ARC set's seal and results at `instance`, its seal saying `cv`. */
+/**
+ * An ARC set at `instance` (its seal, message signature and results), its
+ * seal saying `cv`.
+ */
 const arcSet = (instance: number, results: string, cv = "none"): string[] => [
   `ARC-Seal: i=${String(instance)}; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; cv=${cv}; b=Lx35lY6/t4g==`,
+  `ARC-Message-Signature: i=${String(instance)}; a=rsa-sha256; c=relaxed/relaxed; d=cloudflare-email.net; s=cf2024-1; h=from:to:subject; bh=x/y=; b=z+w==`,
   `ARC-Authentication-Results: i=${String(instance)}; ${results}`,
 ];
 
