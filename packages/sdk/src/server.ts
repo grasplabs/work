@@ -171,11 +171,8 @@ export interface RunHandle {
    * action called again under the same idempotency key).
    */
   readonly startId: string;
-  /**
-   * The run executing it, or null for a version that has no executable
-   * build, which is admitted and never runs.
-   */
-  readonly runId: string | null;
+  /** The run executing it. */
+  readonly runId: string;
   /** The version of the workflow it started: the one its alias binds. */
   readonly version: number;
 }

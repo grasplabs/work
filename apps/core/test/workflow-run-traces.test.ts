@@ -1,8 +1,8 @@
-/* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
+/* oxlint-disable unicorn/no-thenable -- an if step's list is its then */
 import { v } from "@grasp-os/sdk";
 import type { Role } from "@grasp-os/shared/roles";
 import type { WorkflowRunTrace } from "@grasp-os/shared/workflow-diagrams";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -52,52 +52,56 @@ const person = async (role: Role = "builder"): Promise<Acting> => {
 };
 
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
+/** A definition of `steps`, input `{ who }`, ending `{ status: "done" }`. */
 const definitionOf = (
-  name: string,
-  version: string,
-  tasks: unknown[],
+  steps: unknown[],
   bindings: Record<string, unknown> = {}
 ) =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: "done" },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: tasks,
+    bindings,
+    steps,
   });
 
-/** Spec 13.9's routing, by who: branches that join explicitly. */
+/**
+ * A step `id` that runs and ends at once: a raise its `if` skips for
+ * anyone with a name.
+ */
+const passing = (id: string) => ({
+  id,
+  type: "raise",
+  if: { $expr: 'input.who === ""' },
+  error: { type: "urn:grasp:error:nameless", status: 422 },
+});
+
+/** A step `id` that always fails: a raise. */
+const failing = (id: string) => ({
+  id,
+  type: "raise",
+  error: { type: "urn:grasp:error:refused", status: 409, title: "Refused." },
+});
+
+/** Routing by who: one branch or the other, then on. */
 const routing = [
   {
-    route: {
-      switch: [
-        {
-          ada: { when: '${ $workflow.input.who == "Ada" }', then: "greet-ada" },
-        },
-        { anyone: { then: "greet-other" } },
-      ],
-    },
+    id: "route",
+    type: "if",
+    condition: { $expr: 'input.who === "Ada"' },
+    then: [passing("greet-ada")],
+    else: [passing("greet-other")],
   },
-  { "greet-ada": { set: { status: "ada" }, then: "finished" } },
-  { "greet-other": { set: { status: "other" }, then: "finished" } },
-  { finished: { set: "${ . }" } },
+  passing("finished"),
 ];
 
 /** Starts version `version` of workflow `id` for `who`, and waits for its end. */
@@ -130,10 +134,17 @@ const ranFor = async (
 const shown = (trace: WorkflowRunTrace) =>
   trace.steps.map(({ task, state, errorCode }) => ({ task, state, errorCode }));
 
+/** The IDs of `tasks`, each followed by those of the lists it holds. */
+const declaredIn = (tasks: WorkflowRunTrace["diagram"]["tasks"]): string[] =>
+  tasks.flatMap(({ id, scopes }) => [
+    id,
+    ...scopes.flatMap((scope) => declaredIn(scope.tasks)),
+  ]);
+
 /** A trace as lines: what the diagram declares, and what the run reached. */
 const pathOf = (trace: WorkflowRunTrace) => ({
   status: trace.status,
-  declared: trace.diagram.tasks.map(({ id }) => id),
+  declared: declaredIn(trace.diagram.tasks),
   reached: trace.tasks.map(({ task, state }) => `${task} ${state}`).toSorted(),
 });
 
@@ -146,7 +157,7 @@ describe("a run's trace", () => {
       `traced-${unique()}`
     );
     await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(workflow.name, "1.0.0", routing),
+      definition: definitionOf(routing),
       basedOn: null,
     });
     const ada = await ranFor(by, workflow.id, 1, "Ada");
@@ -177,22 +188,12 @@ describe("a run's trace", () => {
       `traced-${unique()}`
     );
     await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(workflow.name, "1.0.0", [
-        {
-          mark: {
-            set: { status: "marked" },
-            export: {
-              as: '${ {count: "not a number"} }',
-              schema: objectSchema({ count: { type: "integer" } }),
-            },
-          },
-        },
-      ]),
+      definition: definitionOf([failing("mark")]),
       basedOn: null,
     });
     const failed = await ranFor(by, workflow.id, 1, "Ada");
     await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(workflow.name, "2.0.0", routing),
+      definition: definitionOf(routing),
       basedOn: 1,
     });
     expect(
@@ -212,22 +213,15 @@ describe("a run's trace", () => {
       `traced-${unique()}`
     );
     await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(workflow.name, "1.0.0", [
-        { init: { set: "${ . }", export: { as: "${ {seen: []} }" } } },
+      definition: definitionOf([
+        passing("init"),
         {
-          "each-name": {
-            for: { each: "name", in: '${ ["Ada", "Grace"] }', at: "i" },
-            do: [
-              {
-                note: {
-                  set: "${ . }",
-                  export: { as: "${ {seen: ($context.seen + [$name])} }" },
-                },
-              },
-            ],
-          },
+          id: "each-name",
+          type: "forEach",
+          items: { $expr: '["Ada", "Grace"]' },
+          do: [passing("note")],
         },
-        { finished: { set: '${ {status: ($context.seen | join(","))} }' } },
+        passing("finished"),
       ]),
       basedOn: null,
     });
@@ -268,34 +262,18 @@ describe("a run's trace", () => {
       `traced-${unique()}`
     );
     await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(workflow.name, "1.0.0", [
+      definition: definitionOf([
         {
-          mark: {
-            set: { status: "marked" },
-            export: {
-              as: '${ {count: "not a number"} }',
-              schema: objectSchema({ count: { type: "integer" } }),
-            },
-          },
+          ...passing("mark"),
+          // Fails as it runs: the input has no ten-thousandth letter.
+          if: { $expr: 'input.who.split("")[9999].toUpperCase() === ""' },
         },
       ]),
       basedOn: null,
     });
     const raising = await createWorkflowResource(env, by, `traced-${unique()}`);
     await publishWorkflowVersion(env, by, raising.id, {
-      definition: definitionOf(raising.name, "1.0.0", [
-        {
-          refuse: {
-            raise: {
-              error: {
-                type: "urn:grasp:error:refused",
-                status: 409,
-                title: "Refused.",
-              },
-            },
-          },
-        },
-      ]),
+      definition: definitionOf([failing("refuse")]),
       basedOn: null,
     });
     const failed = await ranFor(by, workflow.id, 1, "Ada");
@@ -308,7 +286,7 @@ describe("a run's trace", () => {
         {
           task: "mark",
           state: "failed",
-          errorCode: "workflow.task_data_invalid",
+          errorCode: "expression.failed",
         },
       ],
       raised: [
@@ -325,7 +303,7 @@ describe("a run's trace", () => {
       `traced-${unique()}`
     );
     await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(workflow.name, "1.0.0", routing),
+      definition: definitionOf(routing),
       basedOn: null,
     });
     const run = await ranFor(by, workflow.id, 1, "Ada");
@@ -342,7 +320,7 @@ describe("a run's trace", () => {
       removed: trace.detailsRemoved,
       reached: trace.tasks,
       steps: trace.steps,
-      declared: trace.diagram.tasks.length,
+      declared: declaredIn(trace.diagram.tasks).length,
     }).toStrictEqual({ removed: true, reached: [], steps: [], declared: 4 });
   });
 
@@ -356,7 +334,7 @@ describe("a run's trace", () => {
     );
     const other = await createWorkflowResource(env, by, `traced-${unique()}`);
     await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(workflow.name, "1.0.0", routing),
+      definition: definitionOf(routing),
       basedOn: null,
     });
     await shareWorkflowResource(env, by, workflow.id, {
@@ -427,27 +405,21 @@ describe("a run's trace, read over the session API", () => {
     );
     await publishWorkflowVersion(env, builder.acting, workflow.id, {
       definition: definitionOf(
-        workflow.name,
-        "1.0.0",
         [
           {
-            guard: {
-              try: [
-                {
-                  "fetch-rates": {
-                    call: "grasp.compute",
-                    with: { binding: "rates", arguments: "${ .who }" },
-                  },
-                },
-              ],
-              catch: {
-                retry: {
-                  delay: { milliseconds: 50 },
-                  backoff: { constant: {} },
-                  limit: { attempt: { count: 3 } },
-                },
-                do: [{ "fell-back": { set: { status: "fallback" } } }],
+            id: "guard",
+            type: "try",
+            try: [
+              {
+                id: "fetch-rates",
+                type: "do",
+                binding: "rates",
+                arguments: { $expr: "input.who" },
               },
+            ],
+            catch: {
+              retry: { attempts: 3, delay: "1 second", backoff: "constant" },
+              do: [passing("fell-back")],
             },
           },
         ],
@@ -460,8 +432,7 @@ describe("a run's trace, read over the session API", () => {
 
     const whole = await builder.api.workflowResources.runTrace(
       workflow.id,
-      runId,
-      { doors: false }
+      runId
     );
 
     expect({
@@ -471,9 +442,8 @@ describe("a run's trace, read over the session API", () => {
     }).toStrictEqual({
       status: "completed",
       // One step of three attempts in all, failed at the last, which the
-      // catch took: the try's enter and catch steps around it.
+      // catch took: the try's catch step after it.
       steps: [
-        "guard reached 1 -",
         "fetch-rates failed 3 workflow.compute_failed",
         "guard reached 1 -",
         "fell-back reached 1 -",
@@ -500,21 +470,16 @@ describe("a run's trace, read over the session API", () => {
     );
     await publishWorkflowVersion(env, builder.acting, workflow.id, {
       definition: definitionOf(
-        workflow.name,
-        "1.0.0",
         [
           {
-            ask: {
-              call: "grasp.decision",
-              with: {
-                binding: "approval",
-                recipients: [`person:${reviewer.userId}`],
-                prompt: "Greet them?",
-                input: { who: "${ $workflow.input.who }" },
-              },
-            },
+            id: "ask",
+            type: "decision",
+            binding: "approval",
+            recipients: [`person:${reviewer.userId}`],
+            prompt: "Greet them?",
+            input: { who: { $expr: "input.who" } },
           },
-          { finish: { set: { status: "done" } } },
+          passing("finish"),
         ],
         { approval: { kind: "decision", contract } }
       ),
@@ -535,9 +500,7 @@ describe("a run's trace, read over the session API", () => {
       throw new Error("The start made a run");
     }
     const traceNow = async () =>
-      await builder.api.workflowResources.runTrace(workflow.id, runId, {
-        doors: false,
-      });
+      await builder.api.workflowResources.runTrace(workflow.id, runId);
     const waiting = await vi.waitFor(
       async () => {
         const trace = await traceNow();
@@ -601,7 +564,7 @@ describe("a run's trace, read over the session API", () => {
       ),
     }).toStrictEqual({
       // Its enter step opened the decision; its call step waits on it.
-      waiting: ["ask reached 1 -", "ask waiting 0 -"],
+      waiting: ["ask reached 1 -", "ask waiting 1 -"],
       waitingTask: "waiting",
       waitingEnd: null,
       answered: ["ask reached 1 -", "ask reached 1 -", "finish reached 1 -"],
@@ -622,14 +585,14 @@ describe("a run's trace, read over the session API", () => {
       // More records than a trace reads: some four an item's step.
       const items = 600;
       await publishWorkflowVersion(env, builder.acting, long.id, {
-        definition: definitionOf(long.name, "1.0.0", [
+        definition: definitionOf([
           {
-            "each-name": {
-              for: { in: `\${ [range(0; ${items})] }` },
-              do: [{ note: { set: "${ . }" } }],
-            },
+            id: "each-name",
+            type: "forEach",
+            items: { $expr: `${JSON.stringify("x".repeat(items))}.split("")` },
+            do: [passing("note")],
           },
-          { finished: { set: { status: "done" } } },
+          passing("finished"),
         ]),
         basedOn: null,
       });
@@ -639,13 +602,11 @@ describe("a run's trace, read over the session API", () => {
         `traced-${unique()}`
       );
       await publishWorkflowVersion(env, builder.acting, short.id, {
-        definition: definitionOf(short.name, "1.0.0", routing),
+        definition: definitionOf(routing),
         basedOn: null,
       });
       const traceOf = async (id: string, runId: string) =>
-        await builder.api.workflowResources.runTrace(id, runId, {
-          doors: false,
-        });
+        await builder.api.workflowResources.runTrace(id, runId);
       // Room for the loop's steps, past the tests' lowered step limit,
       // while the long run journals more than a trace reads: its engine
       // holds a record past the 2,000th. Read then, ended or not.

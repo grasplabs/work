@@ -1,7 +1,8 @@
-import { openWorkflowEntry } from "@grasp-os/compiler";
+import { generatedWorkflowEntry } from "@grasp-os/compiler";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
 import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
+import { sealedTableSchema } from "@grasp-os/workflow-schema/sealed";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -17,15 +18,14 @@ import {
   withEventWaits,
   withLoops,
 } from "../../../packages/workflow-schema/test/fixtures.ts";
-import { buildOpenWorkflow } from "../src/screens.ts";
-import { tasksFileSchema } from "../src/workflow-builds.ts";
+import { buildGeneratedWorkflow } from "../src/screens.ts";
 
 // grasp-workflow/1's generated code, held to the compiler's own type
 // check against the SDK's real declarations, as the host's generated
-// workflow module is built (`buildOpenWorkflow`): the generator's output
-// is the host's own, so a type error in it is the generator's, and
-// nothing it generates may fail the check a build holds it to. Its sealed
-// table, likewise, is one the host reads back (`tasksFileSchema`).
+// workflow module is built (`buildGeneratedWorkflow`): the generator's
+// output is the host's own, so a type error in it is the generator's, and
+// nothing it generates may fail the check a build holds it to. Its sealed table, likewise, is one the
+// host reads back (`sealedTableSchema`).
 
 /** Every fixture the generator is tested on, by name. */
 const fixtures = {
@@ -61,6 +61,22 @@ const fixtures = {
     }),
     bindings: withDecisions().bindings,
   }),
+  // A loop's item read bare, as arithmetic takes it, in nested loops.
+  bareItems: () =>
+    withLoops({
+      id: "scores",
+      type: "forEach",
+      items: { $expr: "input.pages" },
+      do: [
+        {
+          id: "marks",
+          type: "forEach",
+          items: { $expr: "item.marks" },
+          while: { $expr: "100 * item < 5000" },
+          do: [{ id: "tick", type: "wait", for: "1 second" }],
+        },
+      ],
+    }),
   // Event waits, one in a loop's items, and steps reading how they ended.
   eventWaits: () =>
     withEventWaits(
@@ -104,9 +120,9 @@ describe("grasp-workflow/1's generated code", () => {
               checked(fixture()),
               "generated"
             );
-            const build = await buildOpenWorkflow(
+            const build = await buildGeneratedWorkflow(
               env,
-              { [openWorkflowEntry]: source },
+              { [generatedWorkflowEntry]: source },
               "workflow-schema-builds"
             );
             return [
@@ -129,13 +145,12 @@ describe("grasp-workflow/1's generated code", () => {
   it("seals a table the host reads back, for every fixture", () => {
     const refused = Object.entries(fixtures).flatMap(([name, fixture]) => {
       const generation = generateWorkflow(checked(fixture()), "generated");
-      const read = tasksFileSchema.safeParse(
+      const read = sealedTableSchema.safeParse(
         structuredClone({
           tasks: generation.tasks,
           expressions: generation.expressions,
           workflow: generation.workflow,
           params: generation.params,
-          limits: generation.limits,
         })
       );
       return read.success ? [] : [[name, read.error.issues]];
@@ -155,14 +170,13 @@ describe("grasp-workflow/1's generated code", () => {
       expressions: generation.expressions,
       workflow: generation.workflow,
       params: generation.params,
-      limits: generation.limits,
     });
     expect({
-      longest: tasksFileSchema.safeParse(JSON.parse(sealed)).success,
+      longest: sealedTableSchema.safeParse(JSON.parse(sealed)).success,
       tooLongChecked: checkWorkflow(waitingFor(tooLong)).ok,
       // That table with one more emoji in its type: what a checker counting
       // length otherwise than the host would have let through.
-      tooLongSealed: tasksFileSchema.safeParse(
+      tooLongSealed: sealedTableSchema.safeParse(
         JSON.parse(sealed.replaceAll(longest, tooLong))
       ).success,
     }).toStrictEqual({

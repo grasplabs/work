@@ -41,11 +41,9 @@ import { contractOf, requireShape } from "./resource-calls.ts";
 // The decisions a run of an independent workflow waits for: its
 // `grasp.decision` calls (platform specification 13.6), each on the
 // existing decision service (src/decisions/), through the decision binding
-// its start froze (GRA-941). A sealed run on the run host takes them the
-// same way (sealed-run.ts). The JSON host (resource-host.ts) opens one in
-// its task's enter step, waits for it durably, holding no isolate, and
-// takes its outcome in the task's call step. Threat model, and how each is
-// closed:
+// its start froze (GRA-941), as the run host (sealed-run.ts) opens one in
+// its task's step, waits for it durably, holding no isolate, and takes
+// its outcome. Threat model, and how each is closed:
 //
 // - A forged answer. Only the decision service records one: a signed-in
 //   member it asks, never the run's person, with their one-use
@@ -86,7 +84,7 @@ const maxInputBytes = 16 * 1024;
 /** The furthest a decision's deadline may be: a year, as a sleep's. */
 const maxDecisionMs = sealedBuildLimits.deadlineMs;
 
-/** A decision call, its parts built by the host (resource-host.ts). */
+/** A decision call, its parts built by the run host (sealed-run.ts). */
 export interface BuiltDecision {
   readonly binding: string;
   readonly recipients: Json;
@@ -122,8 +120,8 @@ export const decisionRunOf = (run: CallingRun): ResourceDecisionRun => ({
 const personId = /^[\w-]{1,128}$/u;
 
 /**
- * The most recipients one decision asks: as many as a generator lets a
- * literal list have, and a decision binding names deciders.
+ * The most recipients one decision asks: as many as the format lets a
+ * decision step name.
  */
 const maxRecipients = decisionLimits.recipients;
 

@@ -1,27 +1,22 @@
 import type { EndedRuns } from "@grasp-os/shared/connect";
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
-import {
-  maxLiveRunsPerPrincipal,
-  workflowNamespace,
-} from "@grasp-os/shared/workflow-resources";
+import { maxLiveRunsPerPrincipal } from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowResourceRun,
   WorkflowStart,
 } from "@grasp-os/shared/workflow-resources";
-import type { AttemptLease } from "@grasp-os/workerflow/run";
-import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { loadWorkflowBuild } from "../src/workflow-builds.ts";
+import { generatedModule } from "../src/workflow-builds.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
@@ -31,10 +26,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runEngine, runRetentionDays } from "../src/workflows/engine.ts";
-import { cpuLimitKill } from "../src/workflows/host.ts";
-import type { RunStep } from "../src/workflows/host.ts";
 import { admitAttempt } from "../src/workflows/quotas.ts";
-import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import {
   listResourceRuns,
   repairResourceStarts,
@@ -50,28 +42,26 @@ import {
   sweptPerBatch,
   sweepWorkflowStartDetails,
 } from "../src/workflows/retention.ts";
-import type { Settled } from "../src/workflows/sealed-isolate.ts";
 import { allEvents } from "./audit-events.ts";
 import { withCpuKills } from "./cpu-kills.ts";
-import { endLiveResourceRuns } from "./json-workflow-apps.ts";
+import {
+  endLiveResourceRuns,
+  objectSchema,
+  passing,
+} from "./json-workflow-apps.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { configuredLimits } from "./quota-limits.ts";
-import {
-  admittedFreely,
-  aroundEngine,
-  runObject,
-  whileEngineRefuses,
-} from "./runs.ts";
+import { aroundEngine, runObject, whileEngineRefuses } from "./runs.ts";
 import { artifactKey } from "./sealed-apps.ts";
+import { moduleOf } from "./sealed-run-harness.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
 // Runs of independent workflows (workflows/resource-runs.ts and
-// resource-host.ts), from their threat model: a start's receipt admits a
+// sealed-run.ts), from their threat model: a start's receipt admits a
 // run of exactly the version's sealed build, which runs with the
-// parameters the start froze, replays what it recorded, carries the
-// definition's text only as data, refuses a build that isn't the one it
-// was admitted for, and keeps its workflow from being deleted until it
-// ends.
+// parameters the start froze, carries the definition's text only as
+// data, refuses a build that isn't the one it was admitted for, and
+// keeps its workflow from being deleted until it ends.
 
 /** A builder of the organization, as their session has them. */
 const builder = async (role: Role = "builder"): Promise<Acting> => {
@@ -90,57 +80,56 @@ const builder = async (role: Role = "builder"): Promise<Acting> => {
   return { userId, role, teams: [], staff: false };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
 /** The output most definitions here return: a status. */
 const statusOutput = { status: { type: "string" } };
 
-/** A definition of `name` running `tasks`, its output `output`'s properties. */
+/**
+ * A grasp-workflow/1 definition running `steps` on input `{ who }`, its
+ * output `value` of `output`'s properties: `{ status: "done" }` unless said.
+ */
 const definitionOf = (
-  name: string,
-  tasks: unknown[],
-  output: Record<string, unknown> = statusOutput
+  steps: unknown[],
+  {
+    output = statusOutput,
+    value = { status: "done" },
+  }: { output?: Record<string, unknown>; value?: unknown } = {}
 ): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {
-            greeting: {
-              schema: { type: "string", maxLength: 200 },
-              label: "Greeting",
-              default: "Hello",
-              sensitive: false,
-            },
-          },
-          bindings: {},
-        },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: { schema: objectSchema(output), value },
+    params: {
+      greeting: {
+        kind: "text",
+        label: "Greeting",
+        default: "Hello",
+        sensitive: false,
       },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema(output) },
-    do: tasks,
+    steps,
   });
 
+/** The greeting `params.greeting + ", " + input.who`, as an expression. */
+const greeting = { $expr: 'params.greeting + ", " + input.who' };
+
+/** A run that waits an hour, then ends with `{ status: "done" }`. */
+const waitingDefinition = definitionOf([
+  { id: "pause", type: "wait", for: "1 hour" },
+]);
+
+/**
+ * A run whose output's expression fails: it reads a letter its input's
+ * `who` hasn't.
+ */
+const failingDefinition = definitionOf([], {
+  value: { status: { $expr: 'input.who.split("")[9999].toUpperCase()' } },
+});
+
 /** A workflow of `by`'s, published once from `definition`. */
-const published = async (by: Acting, definition: (name: string) => string) => {
+const published = async (by: Acting, definition: string) => {
   const workflow = await createWorkflowResource(env, by, `run-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definition(workflow.name),
+    definition,
     basedOn: null,
   });
   return workflow;
@@ -179,7 +168,7 @@ const forgedModule = async (id: string, code: string): Promise<void> => {
   await env.FILES.put(artifactKey(sha256), bytes);
   const { build } = manifest;
   build.artifacts = build.artifacts.map((artifact) =>
-    artifact.path === "modules/app~.grasp~workflow.js"
+    artifact.path === `modules/${generatedModule}`
       ? { ...artifact, sha256, bytes: bytes.byteLength }
       : artifact
   );
@@ -240,8 +229,6 @@ const ended = async (
     { timeout: 30_000, interval: 100 }
   );
 
-const statusSchema = z.object({ status: z.string() });
-
 /** Run `id`'s row's `column`, as the repair and the trigger see it. */
 const runColumn = async (
   id: string | null,
@@ -285,33 +272,16 @@ const settledInEngine = async (id: string | null) =>
 describe("runs of JSON workflows", () => {
   afterEach(endLiveResourceRuns);
 
-  it("fails a run of a version published for another expression evaluator, evaluating nothing", async () => {
-    const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: '${ "done" }' } } }])
-    );
-    // A deploy that ships another evaluator than the version was sealed for.
-    const deployed = jqProvenance.sha256;
-    Reflect.set(jqProvenance, "sha256", "0".repeat(64));
-    try {
-      const { runId } = await start(by, workflow.id);
-      const run = await ended(by, workflow.id, runId);
-      expect({ status: run.status, code: run.error?.code }).toStrictEqual({
-        status: "failed",
-        code: "workflow.evaluator_changed",
-      });
-    } finally {
-      Reflect.set(jqProvenance, "sha256", deployed);
-    }
-  });
-
   it("ends with its output as the output schema takes it, defaults filled in", async () => {
     const by = await builder();
-    const workflow = await published(by, (name) =>
+    const workflow = await published(
+      by,
       // `note` is optional, with a default.
-      definitionOf(name, [{ finish: { set: { status: "done" } } }], {
-        status: { type: "string" },
-        note: { type: "string", default: "none" },
+      definitionOf([], {
+        output: {
+          status: { type: "string" },
+          note: { type: "string", default: "none" },
+        },
       }).replace('"required":["status","note"]', '"required":["status"]')
     );
     const { runId } = await start(by, workflow.id);
@@ -322,55 +292,13 @@ describe("runs of JSON workflows", () => {
     });
   });
 
-  it("gives expressions when the run and its task started as the profile's date-time descriptors", async () => {
-    const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(
-        name,
-        [
-          {
-            finish: {
-              set: {
-                status:
-                  "${ $workflow.startedAt.epoch.milliseconds | tostring }",
-                note: '${ [$workflow.startedAt.epoch.seconds, ($task.startedAt.iso8601 | type), (($task.startedAt.iso8601 | .[0:19] + "Z" | fromdateiso8601) == $task.startedAt.epoch.seconds)] | tostring }',
-              },
-            },
-          },
-        ],
-        { status: { type: "string" }, note: { type: "string" } }
-      )
-    );
-    const { runId } = await start(by, workflow.id);
-    const run = await ended(by, workflow.id, runId);
-    const output = z
-      .object({ status: z.string(), note: z.string() })
-      .parse(run.output);
-    const admitted = Number(output.status);
-    expect({
-      status: run.status,
-      admitted: admitted === Number(await runColumn(runId, "created_at")),
-      note: output.note,
-    }).toStrictEqual({
-      status: "completed",
-      admitted: true,
-      note: JSON.stringify([Math.floor(admitted / 1000), "string", true]),
-    });
-  });
-
   it("runs a start's sealed build with the parameters the start froze, once per key", async () => {
     const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [
-        { pause: { wait: "PT2S" } },
-        {
-          greet: {
-            set: {
-              status: '${ $params.greeting + ", " + $workflow.input.who }',
-            },
-          },
-        },
-      ])
+    const workflow = await published(
+      by,
+      definitionOf([{ id: "pause", type: "wait", for: "2 seconds" }], {
+        value: { status: greeting },
+      })
     );
     const key = unique();
     const first = await start(by, workflow.id, key);
@@ -394,36 +322,23 @@ describe("runs of JSON workflows", () => {
     });
   });
 
-  it("replays a task's recorded output after a wait, never running it again", async () => {
-    const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [
-        { stamp: { set: { at: "${ $task.startedAt.epoch.milliseconds }" } } },
-        // Suspends the run: the next activation replays from the start.
-        { pause: { wait: "PT1S" } },
-        { finish: { set: { status: "${ .at | tostring }" } } },
-      ])
-    );
-    const { runId } = await start(by, workflow.id);
-    const run = await ended(by, workflow.id, runId);
-    const stamped = Number(statusSchema.parse(run.output).status);
-    // Run again after the wait, the stamp would be at least a second later.
-    expect(Date.parse(run.endedAt ?? "") - stamped).toBeGreaterThanOrEqual(
-      1000
-    );
-  });
-
   it("carries the definition's text into the run's output only as data", async () => {
     const by = await builder();
     const texts = [
       '"); globalThis.escaped = true; ("',
+      // oxlint-disable-next-line no-template-curly-in-string -- code-like text, carried as data
       "`${globalThis}` */ // \\ </script>",
+      // oxlint-disable-next-line no-template-curly-in-string -- code-like text, carried as data
       "${ looks like an expression, but isn't one }x",
     ];
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done", texts } } }], {
-        status: { type: "string" },
-        texts: { type: "array", items: { type: "string" } },
+    const workflow = await published(
+      by,
+      definitionOf([], {
+        output: {
+          status: { type: "string" },
+          texts: { type: "array", items: { type: "string" } },
+        },
+        value: { status: "done", texts },
       })
     );
     const { runId } = await start(by, workflow.id);
@@ -433,21 +348,13 @@ describe("runs of JSON workflows", () => {
 
   it("fails a run on an expression's failure, without the values it read", async () => {
     const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [
-        {
-          finish: {
-            set: { status: "${ $params.greeting | tonumber | tostring }" },
-          },
-        },
-      ])
-    );
+    const workflow = await published(by, failingDefinition);
     const { runId } = await start(by, workflow.id);
     const run = await ended(by, workflow.id, runId);
     expect({
       status: run.status,
       code: run.error?.code,
-      quotes: JSON.stringify(run.error).includes("Hello"),
+      quotes: JSON.stringify(run.error).includes("Ada"),
     }).toStrictEqual({
       status: "failed",
       code: "expression.failed",
@@ -455,31 +362,9 @@ describe("runs of JSON workflows", () => {
     });
   });
 
-  it("admits a start of a version without an executable build, and runs nothing", async () => {
-    const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [
-        {
-          // A nested list's timeout isn't lowered: no build.
-          check: {
-            do: [{ inner: { set: { status: "checking" } } }],
-            timeout: { after: { seconds: 5 } },
-          },
-        },
-      ])
-    );
-    const started = await start(by, workflow.id);
-    expect(started.runId).toBeNull();
-    await expect(
-      outcome(resourceRunFor(env, by, workflow.id, started.id))
-    ).resolves.toBe("workflow.run_unavailable");
-  });
-
   it("fails a run whose sealed build changed in storage, running none of it", async () => {
     const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
+    const workflow = await published(by, definitionOf([]));
     const row = await env.DB.prepare(
       "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ?"
     )
@@ -495,11 +380,11 @@ describe("runs of JSON workflows", () => {
       })
       .parse(JSON.parse(row?.manifest ?? "{}"));
     const compiled = build.artifacts.find(
-      ({ path }) => path === "modules/app~.grasp~workflow.js"
+      ({ path }) => path === `modules/${generatedModule}`
     );
     await env.FILES.put(
       artifactKey(compiled?.sha256 ?? ""),
-      'export default { metadata: { profile: "grasp-open-workflow/1" }, run: async () => ({ status: "forged" }) };'
+      moduleOf('return { status: "forged" };')
     );
     const { runId } = await start(by, workflow.id);
     const run = await ended(by, workflow.id, runId);
@@ -511,34 +396,27 @@ describe("runs of JSON workflows", () => {
 
   it("fails a run whose module answers more than a step's result may take, reading none of it", async () => {
     const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
+    const workflow = await published(by, definitionOf([]));
     // A module that misbehaves, sealed as if it were the generated one.
     await forgedModule(
       workflow.id,
-      `export default { metadata: { profile: "grasp-open-workflow/1" }, run: async () => ({ status: "x".repeat(${2 * platformLimits.stepPayloadBytes}) }) };`
+      moduleOf(
+        `return (await step.do("workflow", { key: "output", description: "workflow" }, async () => ({ output: { status: "x".repeat(${2 * platformLimits.stepPayloadBytes}) } }))).output;`
+      )
     );
     const { runId } = await start(by, workflow.id);
     const run = await ended(by, workflow.id, runId);
-    expect({ status: run.status, code: run.error?.code }).toStrictEqual({
+    expect({ status: run.status, output: run.output }).toStrictEqual({
       status: "failed",
-      code: "workflow.output_invalid",
+      output: undefined,
     });
   });
 
   it("keeps a workflow with a run that hasn't ended from being deleted, and lets it go after", async () => {
     const by = await builder();
-    const waiting = await published(by, (name) =>
-      definitionOf(name, [
-        { pause: { wait: "PT1H" } },
-        { finish: { set: { status: "done" } } },
-      ])
-    );
+    const waiting = await published(by, waitingDefinition);
     await start(by, waiting.id);
-    const done = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
+    const done = await published(by, definitionOf([]));
     const { runId } = await start(by, done.id);
     await ended(by, done.id, runId);
     expect({
@@ -549,12 +427,7 @@ describe("runs of JSON workflows", () => {
 
   it("keeps what a run reads on its receipt until it ended a retention ago", async () => {
     const by = await builder();
-    const waiting = await published(by, (name) =>
-      definitionOf(name, [
-        { pause: { wait: "PT1H" } },
-        { finish: { set: { status: "done" } } },
-      ])
-    );
+    const waiting = await published(by, waitingDefinition);
     const started = await start(by, waiting.id);
     // Past the run retention (30 days) since it started.
     await sweepRunDetails(env, new Date(Date.now() + 31 * 86_400_000));
@@ -575,12 +448,7 @@ describe("runs of JSON workflows", () => {
 
 /** A workflow of `by`'s whose run waits an hour before it finishes. */
 const waitingWorkflow = async (by: Acting) =>
-  await published(by, (name) =>
-    definitionOf(name, [
-      { pause: { wait: "PT1H" } },
-      { finish: { set: { status: "done" } } },
-    ])
-  );
+  await published(by, waitingDefinition);
 
 /** Runs the start repair at `when` while every engine lookup fails. */
 const repairWhileLookupsFail = async (when: number): Promise<void> => {
@@ -757,30 +625,6 @@ describe("the retention of what starts of JSON workflows kept", () => {
 describe("the bounds on runs of JSON workflows", () => {
   afterEach(endLiveResourceRuns);
 
-  it("fails an attempt whose expressions spend more than its budget together, each one within its own", async () => {
-    const by = await builder();
-    // Each runs well within one evaluation's fuel; together they are over
-    // the attempt's.
-    const burns = Object.fromEntries(
-      Array.from({ length: 24 }, (_, index) => [
-        `n${index}`,
-        `\${ reduce range(0; ${150_000 + index}) as $i (0; . + 1) }`,
-      ])
-    );
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [
-        { burn: { set: burns } },
-        { finish: { set: { status: "done" } } },
-      ])
-    );
-    const { runId } = await start(by, workflow.id);
-    const run = await ended(by, workflow.id, runId);
-    expect({ status: run.status, code: run.error?.code }).toStrictEqual({
-      status: "failed",
-      code: "expression.budget_exhausted",
-    });
-  });
-
   it("refuses a person's start past their live runs of the workflow, audited as refused", async () => {
     const ada = await builder();
     const reader = await builder("user");
@@ -936,11 +780,9 @@ describe("the bounds on runs of JSON workflows", () => {
   it("stops a run the engine refuses to terminate from the stop on: it runs nothing more, and ends cancelled with no repair", async () => {
     const ada = await builder();
     // Its wait is over well before a minute's repair would come.
-    const workflow = await published(ada, (name) =>
-      definitionOf(name, [
-        { pause: { wait: "PT2S" } },
-        { finish: { set: { status: "done" } } },
-      ])
+    const workflow = await published(
+      ada,
+      definitionOf([{ id: "pause", type: "wait", for: "2 seconds" }])
     );
     const { runId } = await start(ada, workflow.id);
     await settledInEngine(runId);
@@ -1021,9 +863,7 @@ describe("the bounds on runs of JSON workflows", () => {
     const reader = await builder("user");
     const other = await builder("user");
     const outsider = await builder("user");
-    const workflow = await published(ada, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
+    const workflow = await published(ada, definitionOf([]));
     for (const person of [reader, other]) {
       // oxlint-disable-next-line no-await-in-loop -- one share after another
       await shareWorkflowResource(env, ada, workflow.id, {
@@ -1122,9 +962,7 @@ describe("the bounds on runs of JSON workflows", () => {
 
   it("keeps an ended run as it ended", async () => {
     const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
+    const workflow = await published(by, definitionOf([]));
     const { runId } = await start(by, workflow.id);
     await ended(by, workflow.id, runId);
     const reopened = await outcome(
@@ -1161,407 +999,6 @@ const holdNotifications = async (
     });
   });
 };
-
-/** The code `settled` failed with, or "ok" with its value. */
-const settledCode = (settled: Settled<unknown>): unknown =>
-  settled.ok ? { ok: settled.value } : settled.error.code;
-
-/** What a step of task `greet` captures, as generated code asks. */
-const adaCaptured = { input: { input: { who: "Ada" }, context: {} } };
-
-/**
- * Evaluates the first expression of the first task of workflow `id`'s
- * version 1, as its run's host does for an attempt, with the attempt's
- * lease as `lease` has it at each of the host's reads of it, by count.
- */
-const evaluatedWith = async (
-  by: Acting,
-  id: string,
-  lease: (read: number) => AttemptLease | undefined,
-  slot = 0,
-  captured: unknown = adaCaptured,
-  ran?: { module: boolean }
-): Promise<unknown> => {
-  const manifest = await env.DB.prepare(
-    "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
-  )
-    .bind(id)
-    .first<{ hash: string }>();
-  const build = await loadWorkflowBuild(env, id, 1, manifest?.hash ?? "");
-  const step: RunStep = {
-    do: async (name, _config, fn) =>
-      await fn({ attempt: 1, idempotencyKey: `key:${name}` }),
-    sleep: async () => {
-      await Promise.resolve();
-    },
-    sleepUntil: async () => {
-      await Promise.resolve();
-    },
-    waitForEvent: async () => await Promise.reject(new Error("No waits here")),
-    waitForMatch: async () => await Promise.reject(new Error("No waits here")),
-  };
-  let reads = 0;
-  const runId = crypto.randomUUID();
-  const host = new ResourceRunHost(
-    env,
-    step,
-    {
-      runId,
-      workflowId: id,
-      version: 1,
-      principal: by.userId,
-      input: { who: "Ada" },
-      params: { greeting: "Hello" },
-      createdAt: Date.now(),
-      build,
-      calling: {
-        runId,
-        rootRunId: runId,
-        accountRunId: runId,
-        workflowId: id,
-        version: 1,
-        principal: by.userId,
-        invoker: { type: "person", id: by.userId, appVersion: null },
-        bindings: new Map(),
-        restricted: false,
-      },
-      maxModelCalls: 1,
-    },
-    {
-      leaseOf: () => {
-        reads += 1;
-        return lease(reads);
-      },
-      tampered: () => {},
-      admitAttempt: admittedFreely,
-    }
-  );
-  let evaluated: unknown;
-  const settled = await host.do("task:greet", captured, async (attempt) => {
-    if (ran !== undefined) {
-      ran.module = true;
-    }
-    evaluated = settledCode(
-      await attempt.evaluate(slot, { input: { who: "Ada" }, output: null })
-    );
-    return null;
-  });
-  // What it evaluated, or, refused before it could, why.
-  return evaluated === undefined && !settled.ok
-    ? settledCode(settled)
-    : evaluated;
-};
-
-/** Whether an attempt of task `greet` on `host` got to run its module's code. */
-const attempted = async (
-  host: ResourceRunHost,
-  task: "greet" | "again",
-  slot: number
-): Promise<boolean> => {
-  const ran = { module: false };
-  await host.do(
-    `task:${task}`,
-    { input: { input: { who: "Ada" }, context: {} } },
-    async (attempt) => {
-      ran.module = true;
-      const value = await attempt.evaluate(slot, {
-        input: { who: "Ada" },
-        output: null,
-      });
-      return value.ok ? { ok: true, value: { output: value.value } } : value;
-    }
-  );
-  return ran.module;
-};
-
-describe("an activation's share of core's CPU", () => {
-  it("admits nothing of an attempt it cuts off: the step's retry, under its key, is admitted with the engine's next number", async () => {
-    const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [
-        { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
-        { again: { set: { status: '${ "Hi, " + $workflow.input.who }' } } },
-      ])
-    );
-    const manifest = await env.DB.prepare(
-      "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
-    )
-      .bind(workflow.id)
-      .first<{ hash: string }>();
-    const build = await loadWorkflowBuild(
-      env,
-      workflow.id,
-      1,
-      manifest?.hash ?? ""
-    );
-    const runId = crypto.randomUUID();
-    // What the lineage's admission was asked to admit, as it would record
-    // each attempt it admits (quotas.ts, `admitAttempt`).
-    const admitted: { key: string; number: number }[] = [];
-    // An activation of the run, its engine claiming each step's attempt
-    // `attempt` under the step's one key, its fuel `fuel`.
-    const activation = (attempt: number, fuel: number) =>
-      new ResourceRunHost(
-        env,
-        {
-          do: async (name, _config, fn) =>
-            await fn({ attempt, idempotencyKey: `key:${name}` }),
-          sleep: async () => {
-            await Promise.resolve();
-          },
-          sleepUntil: async () => {
-            await Promise.resolve();
-          },
-          waitForEvent: async () =>
-            await Promise.reject(new Error("No waits here")),
-          waitForMatch: async () =>
-            await Promise.reject(new Error("No waits here")),
-        },
-        {
-          runId,
-          workflowId: workflow.id,
-          version: 1,
-          principal: by.userId,
-          input: { who: "Ada" },
-          params: {},
-          createdAt: Date.now(),
-          build,
-          calling: {
-            runId,
-            rootRunId: runId,
-            accountRunId: runId,
-            workflowId: workflow.id,
-            version: 1,
-            principal: by.userId,
-            invoker: { type: "person", id: by.userId, appVersion: null },
-            bindings: new Map(),
-            restricted: false,
-          },
-          maxModelCalls: 1,
-        },
-        {
-          leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
-          tampered: () => {},
-          activationFuel: fuel,
-          admitAttempt: async (asked) => {
-            admitted.push({ key: asked.key, number: asked.number });
-            return await admittedFreely();
-          },
-        }
-      );
-    // Room for one attempt's worth: `greet` runs, `again` is cut off.
-    const first = activation(1, 2 ** 27);
-    const ranFirst = [
-      await attempted(first, "greet", 0),
-      await attempted(first, "again", 1),
-    ];
-    // The next activation: the engine's second attempt at `again`, which
-    // runs its expression to the end.
-    let retried: unknown;
-    await activation(2, 2 ** 28).do(
-      "task:again",
-      adaCaptured,
-      async (attempt) => {
-        retried = settledCode(
-          await attempt.evaluate(1, { input: { who: "Ada" }, output: null })
-        );
-        return null;
-      }
-    );
-
-    expect({ ranFirst, retried, admitted }).toStrictEqual({
-      ranFirst: [true, false],
-      retried: { ok: "Hi, Ada" },
-      // The cut-off attempt holds nothing of the lineage and records no
-      // receipt: the receipts skip its number, as CI saw attempt 3 follow
-      // 1 after a CPU kill (GRA-1096). It did spend one of the engine's
-      // attempts at the step (`stepConfig.retries`), as a kill does.
-      admitted: [
-        { key: "key:task:greet", number: 1 },
-        { key: "key:task:again", number: 2 },
-      ],
-    });
-  });
-
-  it("cuts off an attempt the activation's expression fuel can't fund, as a CPU stop the next activation retries", async () => {
-    const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [
-        {
-          greet: {
-            set: {
-              status: '${ $params.greeting + ", " + $workflow.input.who }',
-            },
-          },
-        },
-        {
-          again: {
-            set: {
-              status: '${ $params.greeting + ", " + $workflow.input.who }',
-            },
-          },
-        },
-      ])
-    );
-    const manifest = await env.DB.prepare(
-      "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
-    )
-      .bind(workflow.id)
-      .first<{ hash: string }>();
-    const build = await loadWorkflowBuild(
-      env,
-      workflow.id,
-      1,
-      manifest?.hash ?? ""
-    );
-    // What each step's attempt failed with, as the engine would hear it.
-    const failures: string[] = [];
-    const step: RunStep = {
-      do: async (name, _config, fn) => {
-        try {
-          return await fn({
-            attempt: 1,
-            idempotencyKey: `key:${name}:${unique()}`,
-          });
-        } catch (error) {
-          failures.push(error instanceof Error ? error.name : "unknown");
-          throw error;
-        }
-      },
-      sleep: async () => {
-        await Promise.resolve();
-      },
-      sleepUntil: async () => {
-        await Promise.resolve();
-      },
-      waitForEvent: async () =>
-        await Promise.reject(new Error("No waits here")),
-      waitForMatch: async () =>
-        await Promise.reject(new Error("No waits here")),
-    };
-    // Room for one attempt's worth: the first runs and spends some of it.
-    const hostWithOneShare = () => {
-      const runId = crypto.randomUUID();
-      return new ResourceRunHost(
-        env,
-        step,
-        {
-          runId,
-          workflowId: workflow.id,
-          version: 1,
-          principal: by.userId,
-          input: { who: "Ada" },
-          params: { greeting: "Hello" },
-          createdAt: Date.now(),
-          build,
-          calling: {
-            runId,
-            rootRunId: runId,
-            accountRunId: runId,
-            workflowId: workflow.id,
-            version: 1,
-            principal: by.userId,
-            invoker: { type: "person", id: by.userId, appVersion: null },
-            bindings: new Map(),
-            restricted: false,
-          },
-          maxModelCalls: 1,
-        },
-        {
-          leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
-          tampered: () => {},
-          activationFuel: 2 ** 27,
-          admitAttempt: admittedFreely,
-        }
-      );
-    };
-    // A module that leaves an evaluation running as its attempt returns:
-    // the attempt's fuel goes back only once it settled, and it never runs.
-    const leftRunning: Promise<unknown>[] = [];
-    const settledFirst: string[] = [];
-    await hostWithOneShare().do(
-      "task:greet",
-      { input: { input: { who: "Ada" }, context: {} } },
-      async (attempt) => {
-        leftRunning.push(
-          attempt
-            .evaluate(0, { input: { who: "Ada" }, output: null })
-            .then((settled) => {
-              settledFirst.push("evaluation");
-              return settledCode(settled);
-            })
-        );
-        return await Promise.resolve({ ok: true, value: { output: null } });
-      }
-    );
-    settledFirst.push("attempt");
-    const [late] = await Promise.all(leftRunning);
-    const host = hostWithOneShare();
-    const first = await attempted(host, "greet", 0);
-    const second = await attempted(host, "again", 1);
-    // A step asked for again in the activation: refused before any read.
-    const askedAgain = await attempted(host, "greet", 0);
-    // Two at once on a fresh activation: one holds the share from its start.
-    const fresh = hostWithOneShare();
-    const atOnce = await Promise.all([
-      attempted(fresh, "greet", 0),
-      attempted(fresh, "again", 1),
-    ]);
-    expect({
-      late,
-      settledFirst,
-      first,
-      second,
-      askedAgain,
-      atOnce: atOnce.filter(Boolean).length,
-      // A retryable timeout, as for an isolate stopped past its CPU time.
-      failures,
-    }).toStrictEqual({
-      late: "execution.stale_attempt",
-      settledFirst: ["evaluation", "attempt"],
-      first: true,
-      second: false,
-      askedAgain: false,
-      atOnce: 1,
-      failures: ["TimeoutError", "TimeoutError"],
-    });
-  });
-});
-
-describe("a run's host, against a forged module", () => {
-  it("refuses a capture past what a step records before its step runs", async () => {
-    const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [
-        {
-          greet: {
-            set: {
-              status: '${ $params.greeting + ", " + $workflow.input.who }',
-            },
-          },
-        },
-      ])
-    );
-    const ran = { module: false };
-    const refused = await evaluatedWith(
-      by,
-      workflow.id,
-      () => ({ generation: 1, deadline: Date.now() + 60_000 }),
-      0,
-      {
-        input: {
-          input: { who: "x".repeat(3 * platformLimits.stepPayloadBytes) },
-          context: {},
-        },
-      },
-      ran
-    );
-    expect({ refused, ran: ran.module }).toStrictEqual({
-      refused: "workflow.invalid",
-      ran: false,
-    });
-  });
-});
 
 describe("whose word a run's row takes, and whose clock", () => {
   afterEach(endLiveResourceRuns);
@@ -1638,18 +1075,8 @@ describe("whose word a run's row takes, and whose clock", () => {
 
   it("shows what a run returned only within its retention", async () => {
     const by = await builder();
-    const done = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
-    const failing = await published(by, (name) =>
-      definitionOf(name, [
-        {
-          finish: {
-            set: { status: "${ $params.greeting | tonumber | tostring }" },
-          },
-        },
-      ])
-    );
+    const done = await published(by, definitionOf([]));
+    const failing = await published(by, failingDefinition);
     const completed = await start(by, done.id);
     const failed = await start(by, failing.id);
     await ended(by, done.id, completed.runId);
@@ -1885,9 +1312,7 @@ describe("whose word a run's row takes, and whose clock", () => {
 
   it("leaves a run that ended in the engine before its terminate to its end's notification, at the engine's time", async () => {
     const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
+    const workflow = await published(by, definitionOf([]));
     const { runId } = await whileEngineRefuses(
       () => true,
       async () => await start(by, workflow.id)
@@ -1919,9 +1344,7 @@ describe("whose word a run's row takes, and whose clock", () => {
 
   it("ends a run the repair finds ended in the engine at the engine's time, not the repair's", async () => {
     const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
+    const workflow = await published(by, definitionOf([]));
     const { runId } = await whileEngineRefuses(
       () => true,
       async () => await start(by, workflow.id)
@@ -1947,49 +1370,6 @@ describe("whose word a run's row takes, and whose clock", () => {
       meanwhile: "running",
       status: "completed",
       atEngineTime: true,
-    });
-  });
-
-  it("gives an attempt nothing once its lease's deadline has passed, or it lost its lease while evaluating", async () => {
-    const by = await builder();
-    const workflow = await published(by, (name) =>
-      definitionOf(name, [
-        {
-          greet: {
-            set: {
-              status: '${ $params.greeting + ", " + $workflow.input.who }',
-            },
-          },
-        },
-      ])
-    );
-    const holding = { generation: 1, deadline: Date.now() + 60_000 };
-    expect({
-      holding: await evaluatedWith(by, workflow.id, () => holding),
-      // The engine hasn't noted the timeout yet: it still hands out the
-      // lease, past its deadline.
-      pastDeadline: await evaluatedWith(by, workflow.id, () => ({
-        generation: 1,
-        deadline: Date.now() - 1,
-      })),
-      // Held as it was claimed and as evaluating began, taken over by a
-      // newer activation as it returned.
-      takenOver: await evaluatedWith(by, workflow.id, (read) =>
-        read < 3 ? holding : { ...holding, generation: 2 }
-      ),
-      // Let go of, still running, it asks for an expression it has none
-      // of: stale, never a forged module that fails the run.
-      lostThenForged: await evaluatedWith(
-        by,
-        workflow.id,
-        (read) => (read < 2 ? holding : undefined),
-        999
-      ),
-    }).toStrictEqual({
-      holding: { ok: "Hello, Ada" },
-      pastDeadline: "execution.stale_attempt",
-      takenOver: "execution.stale_attempt",
-      lostThenForged: "execution.stale_attempt",
     });
   });
 });
@@ -2060,6 +1440,12 @@ const receiptsOf = async (id: string | null) => {
   return z.array(receiptSchema).parse(results);
 };
 
+/** An attempt key's step: `<engine run>:do:<count>:<step>`. */
+const keyStep = /^.*?:do:\d+:/u;
+
+/** The step of attempt key `key`. */
+const stepOfKey = (key: string): string => key.replace(keyStep, "");
+
 /** How many times run `id` waited for load, as its journal has it. */
 const loadWaitsOf = async (id: string | null): Promise<number> =>
   await runInDurableObject(
@@ -2072,37 +1458,37 @@ const loadWaitsOf = async (id: string | null): Promise<number> =>
         .one().waits
   );
 
-/** Step `task:greet`'s module on `host`, stopped past its CPU time as the Loader stops it. */
-const stoppedIn = async (host: ResourceRunHost): Promise<void> => {
-  await host.do(
-    "task:greet",
-    { input: { input: { who: "Ada" }, context: {} } },
-    async () => await Promise.reject(cpuLimitKill())
-  );
-};
+/** An `if` step `id` deciding on its input: one step, and no call. */
+const deciding = (id: string) => ({
+  id,
+  type: "if",
+  condition: { $expr: 'input.who !== ""' },
+  // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
+  then: [],
+});
 
-/** A greeting, then the greeting called out: one expression in each task. */
-const greetThenCall = (name: string): string =>
-  definitionOf(name, [
-    {
-      greet: {
-        set: {
-          status: '${ $params.greeting + ", " + $workflow.input.who }',
-        },
-      },
-    },
-    { call: { set: { status: '${ .status + "!" }' } } },
-  ]);
+/**
+ * Two steps, `greet` and `call`, each deciding its `if`, then the
+ * greeting called out.
+ */
+const greetThenCall = definitionOf([deciding("greet"), deciding("call")], {
+  value: { status: { $expr: 'params.greeting + ", " + input.who + "!"' } },
+});
 
 /**
  * A module, sealed as the generated one, whose step of task `finish`
  * never returns: its attempt holds what it was admitted with until the
  * engine fences it.
  */
-const hangingModule = `export default { metadata: { profile: "grasp-open-workflow/1" }, run: async (engine) => {
-  await engine.do("task:finish", { input: {}, context: {} }, async () => await new Promise(() => {}));
-  return { status: "never" };
-} };`;
+const hangingModule = moduleOf(`
+await step.do("finish", { key: "task", description: "finish" }, async () => await new Promise(() => {}));
+return { status: "never" };`);
+
+/** The receipt of run `id`'s attempt at `hangingModule`'s step. */
+const heldBy = async (id: string | null) => {
+  const receipts = await receiptsOf(id);
+  return receipts.find(({ key }) => stepOfKey(key) === "finish:task");
+};
 
 /**
  * An attempt of run `run` of workflow `workflowId`'s, of activation
@@ -2136,11 +1522,12 @@ describe(
   () => {
     afterEach(endLiveResourceRuns);
 
-    it("admits each attempt against the run's own lineage and its workflow's slots, settling it with what it used and the expressions it evaluated", async () => {
+    it("admits each attempt against the run's own lineage and its workflow's slots, settling it with what it used", async () => {
       const by = await builder();
       const workflow = await published(by, greetThenCall);
-      // One attempt at once for the workflow: the call's attempt is admitted
-      // only once the greeting's has settled and given its share back.
+      // One attempt at once for the workflow: each step's attempt is
+      // admitted only once the one before it settled and gave its share
+      // back.
       const { runId, run } = await withQuotas(
         { workflowAppAttempts: 1 },
         async () => {
@@ -2165,7 +1552,7 @@ describe(
           receipts.reduce((sum, { used }) => sum + (used ?? 0), 0),
         receipts: receipts.map(
           ({ key, attempt, root, settled, hostCalls, resource }) => ({
-            key: key.length > 0,
+            step: stepOfKey(key),
             attempt,
             root,
             settled,
@@ -2177,188 +1564,27 @@ describe(
         status: "completed",
         output: { status: "Hello, Ada!" },
         waitedForLoad: 0,
+        // Its expressions run in its isolate: none is a host call.
         lineage: {
           createdAt: lineage?.createdAt,
           used: undefined,
           held: 0,
-          hostCalls: 2,
+          hostCalls: 0,
           descendants: 0,
         },
         startedWithRun: true,
         usedAsSettled: true,
-        receipts: Array.from({ length: 2 }, () => ({
-          key: true,
-          attempt: 1,
-          root: runId,
-          settled: 1,
-          hostCalls: 1,
-          resource: `workflow-resource:${workflow.id}`,
-        })),
-      });
-    });
-
-    it("retries a step as often as its attempts that ran allow, however many the engine numbered that core cut off", async () => {
-      const by = await builder();
-      const workflow = await published(by, (name) =>
-        definitionOf(name, [
-          {
-            greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } },
-          },
-        ])
-      );
-      const manifest = await env.DB.prepare(
-        "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
-      )
-        .bind(workflow.id)
-        .first<{ hash: string }>();
-      const build = await loadWorkflowBuild(
-        env,
-        workflow.id,
-        1,
-        manifest?.hash ?? ""
-      );
-      const runId = crypto.randomUUID();
-      // The run's row, its lineage's root: none of the engine's own runs it.
-      await env.DB.batch([
-        env.DB.prepare(
-          "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'person', ?, ?, ?, 1, ?, ?, 1, 'h', ?)"
-        ).bind(
-          runId,
-          by.userId,
-          `key-${runId}`,
-          workflow.id,
-          manifest?.hash ?? "",
-          by.userId,
-          Date.now()
+        // Its parameters' step, each of its own, and its output's.
+        receipts: ["$params", "greet:task", "call:task", "workflow:output"].map(
+          (step) => ({
+            step,
+            attempt: 1,
+            root: runId,
+            settled: 1,
+            hostCalls: 0,
+            resource: `workflow-resource:${workflow.id}`,
+          })
         ),
-        env.DB.prepare(
-          "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, ?, 'b', ?, 'running', ?)"
-        ).bind(runId, workflow.id, manifest?.hash ?? "", by.userId, Date.now()),
-      ]);
-      // The lineage's own admission, as a run's activations admit attempts.
-      const owner = {
-        run: runId,
-        root: runId,
-        resource: `workflow-resource:${workflow.id}`,
-      };
-      // What the engine was told each time, and what each attempt ended as.
-      const retries: number[] = [];
-      const ends: string[] = [];
-      // An activation of the run, its engine claiming the step's attempt
-      // `attempt` under its one key; with `fuel`, that much to spend.
-      const activation = (attempt: number, fuel?: number) =>
-        new ResourceRunHost(
-          env,
-          {
-            do: async (name, config, fn) => {
-              retries.push(config.retries?.limit ?? 0);
-              try {
-                return await fn({ attempt, idempotencyKey: `key:${name}` });
-              } catch (error) {
-                ends.push(error instanceof Error ? error.name : "unknown");
-                return null;
-              }
-            },
-            sleep: async () => {
-              await Promise.resolve();
-            },
-            sleepUntil: async () => {
-              await Promise.resolve();
-            },
-            waitForEvent: async () =>
-              await Promise.reject(new Error("No waits here")),
-            waitForMatch: async () =>
-              await Promise.reject(new Error("No waits here")),
-          },
-          {
-            runId,
-            workflowId: workflow.id,
-            version: 1,
-            principal: by.userId,
-            input: { who: "Ada" },
-            params: {},
-            createdAt: Date.now(),
-            build,
-            calling: {
-              runId,
-              rootRunId: runId,
-              accountRunId: runId,
-              workflowId: workflow.id,
-              version: 1,
-              principal: by.userId,
-              invoker: { type: "person", id: by.userId, appVersion: null },
-              bindings: new Map(),
-              restricted: false,
-            },
-            maxModelCalls: 1,
-          },
-          {
-            // Each activation took the run over from the last.
-            leaseOf: () => ({
-              generation: attempt,
-              deadline: Date.now() + 60_000,
-            }),
-            tampered: () => {},
-            ...(fuel === undefined ? {} : { activationFuel: fuel }),
-            admitAttempt: async (asked) => {
-              const admitted = await admitAttempt(env, owner, asked);
-              // The engine's try past the step's last: a while passes
-              // between its admission and the host's refusal of it.
-              if (asked.number === 5) {
-                await scheduler.wait(50);
-              }
-              return admitted;
-            },
-          }
-        );
-      await stoppedIn(activation(1));
-      // An activation with no fuel left: cut off, it runs and admits nothing.
-      await stoppedIn(activation(2, 0));
-      await stoppedIn(activation(3));
-      await stoppedIn(activation(4));
-      // The engine tries once more, as its own count allows (the last
-      // that ran timed out, or its activation stopped): refused before it
-      // runs, it holds and charges nothing of the lineage's time.
-      await stoppedIn(activation(5));
-      const receipts = await receiptsOf(runId);
-      const lineage = await env.DB.prepare(
-        "SELECT active_used_ms AS used, active_held_ms AS held FROM run_lineages WHERE root_run_id = ?"
-      )
-        .bind(runId)
-        .first<{ used: number; held: number }>();
-
-      expect({
-        ends,
-        engineRetries: [...new Set(retries)],
-        ran: receipts.map(({ attempt }) => attempt),
-        refused: receipts
-          .filter(({ attempt }) => attempt === 5)
-          .map(({ settled, used }) => ({ settled, used })),
-        lineage: {
-          used: lineage?.used,
-          held: lineage?.held,
-        },
-      }).toStrictEqual({
-        // Retried after each that ran, and after the one cut off; the third
-        // that ran is the step's last, whatever the engine has left.
-        ends: [
-          "TimeoutError",
-          "TimeoutError",
-          "TimeoutError",
-          "NonRetryableError",
-          "NonRetryableError",
-        ],
-        // The step's two retries, and room for four cut off besides.
-        engineRetries: [6],
-        ran: [1, 3, 4, 5],
-        refused: [{ settled: 1, used: 0 }],
-        // Only what the attempts that ran used: none of the refused one's.
-        lineage: {
-          used: receipts
-            .filter(({ attempt }) => attempt !== 5)
-            .reduce((sum, { used }) => sum + (used ?? 0), 0),
-          held: 0,
-        },
       });
     });
 
@@ -2366,7 +1592,7 @@ describe(
       const by = await builder();
       const workflow = await published(by, greetThenCall);
       const result = await withCpuKills(
-        "task:greet",
+        "greet:task",
         () => true,
         async () => {
           const { runId } = await start(by, workflow.id);
@@ -2385,53 +1611,6 @@ describe(
         status: "failed",
         ran: 3,
         settled: true,
-      });
-    });
-
-    it("fails a run whose expressions would take its lineage past its host calls, counting on across a CPU kill and the retry under the same key", async () => {
-      const by = await builder();
-      const workflow = await published(by, greetThenCall);
-      // Two host calls in all: the greeting's first attempt evaluates, and
-      // is cut off as it returns; its retry, under the same key, evaluates
-      // again. Nothing is left for the call.
-      const result = await withQuotas(
-        { lineageHostCalls: 2 },
-        async () =>
-          await withCpuKills(
-            "task:greet",
-            (attempt) => attempt === 1,
-            async () => {
-              const { runId } = await start(by, workflow.id);
-              const run = await ended(by, workflow.id, runId);
-              return { run, runId };
-            },
-            "end"
-          )
-      );
-      const receipts = await receiptsOf(result.runId);
-      const lineage = await lineageOf(result.runId);
-      const [first, second] = receipts;
-      expect({
-        status: result.run.status,
-        code: result.run.error?.code,
-        hostCalls: lineage?.hostCalls,
-        attempts: receipts.map(({ hostCalls }) => ({ hostCalls })),
-        // The killed attempt's retry, under the same key. The engine's
-        // attempt numbers needn't run on by one: under load CI saw the
-        // retry recorded as attempt 3 with no receipt for a second. What
-        // the quota counts is the two receipts' host calls, so the test
-        // asserts their order, not the retry's number.
-        firstAttempt: first?.attempt,
-        retryLater: (second?.attempt ?? 0) > (first?.attempt ?? 0),
-        sameKey: first?.key === second?.key,
-      }).toStrictEqual({
-        status: "failed",
-        code: "workflow.lineage_limit",
-        hostCalls: 2,
-        attempts: [{ hostCalls: 1 }, { hostCalls: 1 }],
-        firstAttempt: 1,
-        retryLater: true,
-        sameKey: true,
       });
     });
 
@@ -2482,7 +1661,7 @@ describe(
           lineage: await lineageOf(runId),
         },
       }).toStrictEqual({
-        before: { status: "completed", receipts: 2 },
+        before: { status: "completed", receipts: 4 },
         after: { input: null, receipts: [], lineage: kept.lineage },
       });
     });
@@ -2499,7 +1678,7 @@ describe(
       const admittedAt = Date.now();
       await env.DB.batch([
         env.DB.prepare(
-          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at) VALUES (?, 'task:call', 9, 1, ?, ?, ?, ?)"
+          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at) VALUES (?, 'call:task', 9, 1, ?, ?, ?, ?)"
         ).bind(runId, runId, reserved, admittedAt + reserved, admittedAt),
         env.DB.prepare(
           "UPDATE run_lineages SET active_held_ms = active_held_ms + ? WHERE root_run_id = ?"
@@ -2521,9 +1700,7 @@ describe(
 
     it("holds an attempt while every slot is taken, and runs it once a stopped run's attempt gives its slot back, charged up to its deadline", async () => {
       const by = await builder();
-      const hanging = await published(by, (name) =>
-        definitionOf(name, [{ finish: { set: { status: "done" } } }])
-      );
+      const hanging = await published(by, definitionOf([passing("finish")]));
       await forgedModule(hanging.id, hangingModule);
       const workflow = await published(by, greetThenCall);
       const result = await withQuotas(
@@ -2533,7 +1710,7 @@ describe(
           // Its attempt holds the deployment's only slot.
           await vi.waitFor(
             async () => {
-              await expect(receiptsOf(holder.runId)).resolves.toHaveLength(1);
+              await expect(heldBy(holder.runId)).resolves.toBeDefined();
             },
             { timeout: 30_000, interval: 100 }
           );
@@ -2550,11 +1727,11 @@ describe(
           await terminateResourceRun(env, by, workflow.id, stopped);
           await terminateResourceRun(env, by, hanging.id, holder.runId);
           const run = await ended(by, workflow.id, runId);
-          const [held] = await vi.waitFor(
+          const held = await vi.waitFor(
             async () => {
-              const receipts = await receiptsOf(holder.runId);
-              expect(receipts[0]?.settled).toBe(1);
-              return receipts;
+              const receipt = await heldBy(holder.runId);
+              expect(receipt?.settled).toBe(1);
+              return receipt;
             },
             { timeout: 30_000, interval: 100 }
           );
@@ -2614,12 +1791,12 @@ describe(
 
     it("fails a task that answers a value shaped as core's wait for load, rather than wait on it", async () => {
       const by = await builder();
-      const workflow = await published(by, (name) =>
-        definitionOf(name, [{ finish: { set: { status: "done" } } }])
-      );
+      const workflow = await published(by, definitionOf([passing("finish")]));
       await forgedModule(
         workflow.id,
-        `export default { metadata: { profile: "grasp-open-workflow/1" }, run: async (engine) => await engine.do("task:finish", { input: {}, context: {} }, async () => ({ "$grasp:busy": 1, "$grasp:busyMaxMs": 86400000 })) };`
+        moduleOf(
+          'return await step.do("finish", { key: "task", description: "finish" }, async () => ({ "$grasp:busy": 1, "$grasp:busyMaxMs": 86400000 }));'
+        )
       );
       const { runId } = await start(by, workflow.id);
       const run = await ended(by, workflow.id, runId);
@@ -2680,90 +1857,6 @@ describe(
         receiptOfNobody: true,
         moved: true,
         rooted: true,
-      });
-    });
-
-    it("checks what an attempt records while it still holds its admission, and settles it after", async () => {
-      const by = await builder();
-      const workflow = await published(by, greetThenCall);
-      const manifest = await env.DB.prepare(
-        "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
-      )
-        .bind(workflow.id)
-        .first<{ hash: string }>();
-      const build = await loadWorkflowBuild(
-        env,
-        workflow.id,
-        1,
-        manifest?.hash ?? ""
-      );
-      // What the host did, in order: its record's check refuses a record
-      // its SDK never makes (`tampered`), and the attempt settles.
-      const happened: string[] = [];
-      const runId = crypto.randomUUID();
-      const host = new ResourceRunHost(
-        env,
-        {
-          do: async (name, _config, fn) =>
-            await fn({ attempt: 1, idempotencyKey: `key:${name}` }),
-          sleep: async () => {
-            await Promise.resolve();
-          },
-          waitForEvent: async () =>
-            await Promise.reject(new Error("No waits here")),
-          waitForMatch: async () =>
-            await Promise.reject(new Error("No waits here")),
-          sleepUntil: async () => {
-            await Promise.resolve();
-          },
-        },
-        {
-          runId,
-          workflowId: workflow.id,
-          version: 1,
-          principal: by.userId,
-          input: { who: "Ada" },
-          params: { greeting: "Hello" },
-          createdAt: Date.now(),
-          build,
-          calling: {
-            runId,
-            rootRunId: runId,
-            accountRunId: runId,
-            workflowId: workflow.id,
-            version: 1,
-            principal: by.userId,
-            invoker: { type: "person", id: by.userId, appVersion: null },
-            bindings: new Map(),
-            restricted: false,
-          },
-          maxModelCalls: 1,
-        },
-        {
-          leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
-          tampered: () => {
-            happened.push("record checked");
-          },
-          admitAttempt: async () => {
-            const admission = await admittedFreely();
-            return {
-              ...admission,
-              settle: async () => {
-                happened.push("settled");
-                await admission.settle();
-              },
-            };
-          },
-        }
-      );
-      const settled = await host.do("task:greet", adaCaptured, async () => {
-        await Promise.resolve();
-        // As the isolate answers: settled, a record its SDK never makes.
-        return { ok: true, value: { notARecord: true } };
-      });
-      expect({ ok: settled.ok, happened }).toStrictEqual({
-        ok: false,
-        happened: ["record checked", "settled"],
       });
     });
   }

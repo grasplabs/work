@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import {
   AppError,
   app as registerApp,
@@ -30,11 +29,9 @@ import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  maxLiveRunsPerPrincipal,
-  workflowNamespace,
-} from "@grasp-os/shared/workflow-resources";
+import { maxLiveRunsPerPrincipal } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -83,6 +80,7 @@ import {
 } from "../src/workflows/resource-runs.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
 import { sleeping, woken } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 
@@ -343,52 +341,24 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
 /** A greeting workflow's definition, which waits an hour first if asked. */
-const definitionOf = (name: string, waits: boolean): string =>
+const definitionOf = (waits: boolean): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {
-            greeting: {
-              schema: { type: "string", maxLength: 200 },
-              label: "Greeting",
-              default: "Hello",
-              sensitive: false,
-            },
-          },
-          bindings: {},
-        },
+    $schema: workflowSchemaUrl,
+    params: {
+      greeting: {
+        kind: "text",
+        label: "Greeting",
+        default: "Hello",
+        sensitive: false,
       },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      ...(waits ? [{ pause: { wait: "PT1H" } }] : []),
-      {
-        greet: {
-          set: {
-            status: '${ $params.greeting + ", " + $workflow.input.who }',
-          },
-        },
-      },
-    ],
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: { $expr: 'params.greeting + ", " + input.who' } },
+    },
+    steps: waits ? [{ id: "pause", type: "wait", for: "1 hour" }] : [],
   });
 
 /** Version 1 of a workflow of `owner`'s. */
@@ -399,7 +369,7 @@ const workflowOf = async (owner: Identity, waits = false) => {
     `follow-up-${unique()}`
   );
   await publishWorkflowVersion(env, owner, workflow.id, {
-    definition: definitionOf(workflow.name, waits),
+    definition: definitionOf(waits),
     basedOn: null,
   });
   return workflow;
@@ -696,7 +666,7 @@ const ended = async (
 const hour = 3_600_000;
 
 /** The sleep step a waiting fixture's run sleeps in. */
-const sleepStep = "task:pause";
+const sleepStep = "pause:task";
 
 /** The outbox's entries as settled: whether they are, and as what. */
 const settledOf = async (store: OpenStore) => {

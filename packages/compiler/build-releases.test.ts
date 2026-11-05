@@ -47,7 +47,6 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
         compilerAssets.oxcWasm,
         compilerAssets.esbuildWasm,
         compilerAssets.reference,
-        compilerAssets.jqWasm,
         compilerAssets.checker,
         compilerAssets.types,
         compilerAssets.tsrsWasm,

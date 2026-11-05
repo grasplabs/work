@@ -1,6 +1,6 @@
-// What a workflow's sealed build may hold (core's workflow-builds.ts,
-// `tasksFileSchema`) and what its run host takes: one home for the bounds
-// the host reads a sealed table back with, so each generator bounds what
+// What a workflow's sealed build may hold (@grasp-os/workflow-schema's
+// sealed.ts, `sealedTableSchema`) and what its run host takes: the bounds
+// the host reads a sealed table back with, so the generator bounds what
 // it seals by the same numbers and nothing it publishes fails to load.
 
 import { valueDepth } from "./value-depth.ts";

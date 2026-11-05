@@ -1,10 +1,59 @@
 import type { ValueSchema } from "@grasp-os/sdk";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 
-import { pointerJoin } from "./diagnostics.ts";
-import type { DiagnosticCode } from "./diagnostics.ts";
-import { isObject } from "./json-text.ts";
-import type { JsonObject, JsonValue } from "./json-text.ts";
+/** JSON, as a schema document is parsed. */
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | JsonObject;
+export interface JsonObject {
+  [key: string]: JsonValue;
+}
+
+const isObject = (value: JsonValue | undefined): value is JsonObject =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const pointerEscape = /[~/]/gu;
+
+/** `pointer` with `token` appended, escaped (RFC 6901). */
+export const pointerJoin = (pointer: string, token: string | number): string =>
+  `${pointer}/${String(token).replaceAll(pointerEscape, (char) =>
+    char === "~" ? "~0" : "~1"
+  )}`;
+
+/** Why a schema was refused. */
+export type SchemaProblemCode =
+  | "schema.ambiguous_any_of"
+  | "schema.default_not_allowed"
+  | "schema.external"
+  | "schema.invalid"
+  | "schema.invalid_default"
+  | "schema.keyword_not_applicable"
+  | "schema.open_object"
+  | "schema.too_large"
+  | "schema.unsupported_keyword";
+
+/** The message every problem of each code carries. */
+export const schemaProblemMessages: Readonly<
+  Record<SchemaProblemCode, string>
+> = {
+  "schema.unsupported_keyword":
+    "The data schema uses a keyword outside the profile's value algebra.",
+  "schema.external": "Data schemas are inline; external schemas aren't loaded.",
+  "schema.invalid": "The data schema isn't valid.",
+  "schema.keyword_not_applicable":
+    "The keyword doesn't apply to the schema's type.",
+  "schema.open_object":
+    "An object schema must set additionalProperties to false.",
+  "schema.default_not_allowed": "A default isn't allowed here.",
+  "schema.invalid_default": "The default isn't a value its schema accepts.",
+  "schema.ambiguous_any_of":
+    "Two members of anyOf can accept the same value and normalize it differently.",
+  "schema.too_large": "The data schema nests too deep or declares too much.",
+};
 
 /**
  * Inline data schemas (`{ format: "json", document }`) are not a second
@@ -14,7 +63,7 @@ import type { JsonObject, JsonValue } from "./json-text.ts";
  * `~standard.validate`, with its exact normalization (defaults inserted
  * where a field has one, nothing coerced).
  *
- * The translation accepts only the finite algebra the profile names: type,
+ * The translation accepts only the finite algebra the format takes: type,
  * properties, required, additionalProperties (always false), items, enum,
  * const, anyOf, minimum, maximum, minLength, maxLength, minItems, maxItems,
  * default, title, description, format (email) and x-grasp-value. Anything
@@ -41,7 +90,7 @@ const schemaLimits = {
 } as const;
 
 export interface SchemaProblem {
-  code: Extract<DiagnosticCode, `schema.${string}`>;
+  code: SchemaProblemCode;
   pointer: string;
   expected?: string;
   remedy: string;
@@ -787,7 +836,7 @@ const checkKeywords = (node: JsonObject, pointer: string): void => {
     refuse(
       "schema.unsupported_keyword",
       pointerJoin(pointer, key),
-      "Use only the profile's keywords, or a shared contract or compute module for anything else."
+      "Use only the keywords listed here, or a compute module for anything else."
     );
   }
   for (const [key, limit] of [
@@ -990,54 +1039,4 @@ export const compileDataSchema = (
           remedy: "Give a default the parameter's schema accepts.",
         }
   );
-};
-
-/**
- * The `{ format: "json", document }` envelope of upstream input, output and
- * export schemas. Only inline JSON documents: `resource` is never loaded.
- */
-export const compileSchemaEnvelope = (
-  envelope: JsonValue | undefined,
-  pointer: string
-): SchemaCompilation => {
-  if (!isObject(envelope)) {
-    return refused({
-      code: "schema.invalid",
-      pointer,
-      remedy: 'Write the schema as { "format": "json", "document": { … } }.',
-    });
-  }
-  for (const key of Object.keys(envelope)) {
-    if (key === "resource") {
-      return refused({
-        code: "schema.external",
-        pointer: pointerJoin(pointer, key),
-        remedy:
-          "Write the schema inline as document: external schemas aren't loaded.",
-      });
-    }
-    if (key !== "format" && key !== "document") {
-      return refused({
-        code: "schema.unsupported_keyword",
-        pointer: pointerJoin(pointer, key),
-        remedy: "A schema envelope has only format and document.",
-      });
-    }
-  }
-  if (Object.hasOwn(envelope, "format") && envelope.format !== "json") {
-    return refused({
-      code: "schema.invalid",
-      pointer: pointerJoin(pointer, "format"),
-      remedy: 'Set format to "json".',
-      expected: "json",
-    });
-  }
-  if (!Object.hasOwn(envelope, "document")) {
-    return refused({
-      code: "schema.invalid",
-      pointer: pointerJoin(pointer, "document"),
-      remedy: "Give the schema an inline document.",
-    });
-  }
-  return compileDataSchema(envelope.document, pointerJoin(pointer, "document"));
 };

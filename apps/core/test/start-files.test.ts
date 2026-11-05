@@ -14,7 +14,7 @@ import {
   screenLeaseHeader,
   screenPersonHeader,
 } from "@grasp-os/shared/screens";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -110,45 +110,25 @@ export default app({
 });
 
 /** A workflow taking a file, whose run says which file it was handed. */
-const definitionOf = (name: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
+const definition = JSON.stringify({
+  $schema: workflowSchemaUrl,
+  input: {
+    type: "object",
+    properties: { doc: { type: "object", "x-grasp-value": { kind: "file" } } },
+    required: ["doc"],
+    additionalProperties: false,
+  },
+  output: {
+    schema: {
+      type: "object",
+      properties: { status: { type: "string" } },
+      required: ["status"],
+      additionalProperties: false,
     },
-    input: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: {
-            doc: { type: "object", "x-grasp-value": { kind: "file" } },
-          },
-          required: ["doc"],
-          additionalProperties: false,
-        },
-      },
-    },
-    output: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: { status: { type: "string" } },
-          required: ["status"],
-          additionalProperties: false,
-        },
-      },
-    },
-    // oxlint-disable-next-line no-template-curly-in-string -- a workflow expression
-    do: [{ say: { set: { status: "${ $workflow.input.doc.id }" } } }],
-  });
+    value: { status: { $expr: "input.doc.id" } },
+  },
+  steps: [],
+});
 
 /** Someone signed in, and as core's own calls take them. */
 const signedIn = async (role: Role) => {
@@ -180,7 +160,7 @@ const reviewsApp = async () => {
     `review-${unique()}`
   );
   await publishWorkflowVersion(env, builder.acting, workflow.id, {
-    definition: definitionOf(workflow.name),
+    definition,
     basedOn: null,
   });
   const fixture = await appWith(files(), "Reviews", builder.acting);
@@ -608,7 +588,7 @@ describe(
             fields: { doc: { ...field, kind: "file" } },
           },
           JSON.stringify({ doc: { id: file.id } }),
-          { runId, workflowId, runs: true },
+          { runId, workflowId },
           {
             // Readable as it is copied, hidden by the time it is read again.
             read: async () => {
@@ -660,7 +640,6 @@ describe(
           {
             runId: crypto.randomUUID(),
             workflowId: crypto.randomUUID(),
-            runs: true,
           },
           {
             // Nothing is a file to read: a text is handed as it is, and an

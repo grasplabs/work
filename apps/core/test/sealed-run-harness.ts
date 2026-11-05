@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { kitModuleName } from "@grasp-os/compiler";
 import { v } from "@grasp-os/sdk";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
@@ -7,9 +6,9 @@ import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowDuration } from "@grasp-os/workerflow/contracts";
 import { namedError } from "@grasp-os/workerflow/errors";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -93,19 +92,17 @@ export const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-export const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+/** A JSON Schema of an object of `properties`, every one required. */
+export const objectOf = (properties: Record<string, unknown>) => ({
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
 /** Where the standard error types are, as a catch's filter names them. */
 export const standardErrors =
-  "https://open-workflow-specification.org/spec/1.0.0/errors/";
+  "https://grasp.work/schemas/grasp-workflow/1/errors/";
 
 /** What mail.send takes, `{ to, subject }`, and answers, `{ messageId }`. */
 export const mailInput = v.object({ to: v.string(), subject: v.string() });
@@ -165,14 +162,7 @@ export const granted = async (
  * wait, task `send` mails its input's `who` through connector binding
  * `mail`, the subject its sensitive `token` parameter as a binding
  * argument (`secret`), and task `greet` asks model binding `summary`.
- * Loop `rows` runs its items one after another, each mailing its row
- * (`notify`), raising what its own try's catch takes (`check` in
- * `guard`), mailing again under a retry policy (`poke` in `steady`) and
- * sleeping until a deadline (`nap`); loop `pages` runs loop
- * `lines` in each item, its items stopped by a `while`; loop `cells`,
- * in try `shielded`, raises in each item (`bad`); fork `both` and
- * loop `wide`, of items at once, don't run on the run host yet. `extra`
- * tasks come last.
+ * `extra` steps come last.
  */
 export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
   const admin = await person("admin");
@@ -193,314 +183,162 @@ export const sealedWorkflow = async (extra: readonly unknown[] = []) => {
   const workflow = await createWorkflowResource(env, by, `sealed-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {
-              token: {
-                schema: { type: "string", maxLength: 64 },
-                label: "Token",
-                default: "none",
-                sensitive: true,
-              },
-            },
-            bindings: {
-              mail: { kind: "connector", contract: mailKey },
-              summary: { kind: "model", contract: modelKey },
-            },
+      $schema: workflowSchemaUrl,
+      input: objectOf({ who: { type: "string" } }),
+      output: {
+        schema: objectOf({ status: { type: "string" } }),
+        value: { status: "done" },
+      },
+      params: { token: { kind: "text", label: "Token" } },
+      bindings: {
+        mail: { kind: "connector", contract: mailKey },
+        summary: { kind: "model", contract: modelKey },
+      },
+      steps: [
+        { id: "linger", type: "wait", for: "1 hour" },
+        {
+          id: "send",
+          type: "do",
+          binding: "mail",
+          operation: "mail.send",
+          arguments: {
+            to: { $expr: "input.who" },
+            subject: { $expr: "params.token" },
           },
         },
-      },
-      input: { schema: objectSchema({ who: { type: "string" } }) },
-      output: { schema: objectSchema({ status: { type: "string" } }) },
-      do: [
-        { linger: { wait: "PT1H" } },
+        ...["greet", "again"].map((id) => ({
+          id,
+          type: "agent",
+          binding: "summary",
+          instructions: "Greet them.",
+          input: {
+            who: { $expr: "input.who" },
+            tags: ["vip", { $expr: "input.who" }],
+          },
+          output: objectOf({ line: { type: "string" } }),
+        })),
+        { id: "pause", type: "wait", until: { $expr: "0" } },
         {
-          send: {
-            call: "grasp.connector",
-            with: {
+          id: "guarded",
+          type: "try",
+          try: [
+            {
+              id: "fetch",
+              type: "do",
               binding: "mail",
               operation: "mail.send",
-              arguments: {
-                to: "${ $workflow.input.who }",
-                subject: "${ $params.token }",
-              },
+              timeout: "20 seconds",
+              arguments: { to: { $expr: "input.who" }, subject: "x" },
             },
+          ],
+          catch: {
+            errors: { type: `${standardErrors}runtime` },
+            retry: { attempts: 3, delay: "1 second", backoff: "constant" },
           },
         },
         {
-          greet: {
-            call: "grasp.model",
-            with: {
-              binding: "summary",
-              instructions: "Greet them.",
-              input: {
-                who: "${ $workflow.input.who }",
-                tags: ["vip", "${ $workflow.input.who }"],
-              },
-              outputSchema: objectSchema({ line: { type: "string" } }),
-            },
-          },
-        },
-        {
-          again: {
-            call: "grasp.model",
-            with: {
-              binding: "summary",
-              instructions: "Greet them.",
-              input: {
-                who: "${ $workflow.input.who }",
-                tags: ["vip", "${ $workflow.input.who }"],
-              },
-              outputSchema: objectSchema({ line: { type: "string" } }),
-            },
-          },
-        },
-        { finish: { set: { status: "done" } } },
-        {
-          pause: {
-            call: "grasp.sleepUntil",
-            with: {
-              timestamp: "${ $workflow.startedAt.epoch.milliseconds + 3000 }",
-            },
-          },
-        },
-        {
-          guarded: {
-            try: [
-              {
-                fetch: {
-                  call: "grasp.connector",
-                  timeout: { after: { seconds: 20 } },
-                  with: {
-                    binding: "mail",
-                    operation: "mail.send",
-                    arguments: { to: "${ $workflow.input.who }", subject: "x" },
+          id: "outer",
+          type: "try",
+          try: [
+            {
+              id: "inner",
+              type: "try",
+              try: [
+                {
+                  id: "stop",
+                  type: "raise",
+                  error: {
+                    type: "urn:grasp:error:stop",
+                    status: 422,
+                    title: "Stopped.",
                   },
                 },
-              },
-            ],
-            catch: {
-              errors: { with: { type: `${standardErrors}runtime` } },
-              retry: {
-                delay: { seconds: 1 },
-                limit: { attempt: { count: 3, duration: { seconds: 10 } } },
-              },
-            },
-          },
-        },
-        {
-          outer: {
-            try: [
-              {
-                inner: {
-                  try: [
-                    {
-                      stop: {
-                        raise: {
-                          error: {
-                            type: "urn:grasp:error:stop",
-                            status: 422,
-                            title: "Stopped.",
-                          },
-                        },
-                      },
-                    },
-                  ],
-                  catch: { errors: { with: { status: 409 } } },
-                },
-              },
-            ],
-            catch: { errors: { with: { status: 422 } } },
-          },
-        },
-        {
-          wrapped: {
-            try: [
-              {
-                shield: {
-                  try: [
-                    {
-                      boom: {
-                        raise: {
-                          error: { type: "urn:grasp:error:boom", status: 418 },
-                        },
-                      },
-                    },
-                  ],
-                  catch: { errors: { with: { status: 418 } } },
-                },
-              },
-            ],
-            catch: { errors: { with: { status: 418 } } },
-          },
-        },
-        {
-          layered: {
-            try: [
-              {
-                probe: {
-                  try: [
-                    {
-                      ping: {
-                        call: "grasp.connector",
-                        with: {
-                          binding: "mail",
-                          operation: "mail.send",
-                          arguments: {
-                            to: "${ $workflow.input.who }",
-                            subject: "y",
-                          },
-                        },
-                      },
-                    },
-                  ],
-                  catch: {
-                    errors: { with: { status: 500 } },
-                    when: '${ $workflow.input.who == "Ada" }',
-                  },
-                },
-              },
-            ],
-            catch: {
-              errors: { with: { status: 500 } },
-              retry: {
-                delay: { seconds: 1 },
-                limit: { attempt: { count: 3 } },
-              },
-            },
-          },
-        },
-        {
-          rows: {
-            for: { each: "row", in: '${ ["a", "b", "c"] }' },
-            do: [
-              {
-                notify: {
-                  call: "grasp.connector",
-                  with: {
-                    binding: "mail",
-                    operation: "mail.send",
-                    arguments: { to: "${ $row }", subject: "loop" },
-                  },
-                },
-              },
-              {
-                guard: {
-                  try: [
-                    {
-                      check: {
-                        raise: {
-                          error: {
-                            type: "urn:grasp:error:bad",
-                            status: 409,
-                            title: "Bad row.",
-                          },
-                        },
-                      },
-                    },
-                  ],
-                  catch: { errors: { with: { status: 409 } } },
-                },
-              },
-              {
-                steady: {
-                  try: [
-                    {
-                      poke: {
-                        call: "grasp.connector",
-                        with: {
-                          binding: "mail",
-                          operation: "mail.send",
-                          arguments: { to: "${ $row }", subject: "again" },
-                        },
-                      },
-                    },
-                  ],
-                  catch: {
-                    errors: { with: { type: `${standardErrors}runtime` } },
-                    retry: {
-                      delay: { seconds: 1 },
-                      limit: { attempt: { count: 3 } },
-                    },
-                  },
-                },
-              },
-              {
-                nap: {
-                  call: "grasp.sleepUntil",
-                  with: {
-                    timestamp:
-                      "${ $workflow.startedAt.epoch.milliseconds + 3000 }",
-                  },
-                },
-              },
-            ],
-          },
-        },
-        {
-          pages: {
-            for: {
-              each: "page",
-              at: "pageAt",
-              in: '${ [["x", "stop"], ["y"]] }',
-            },
-            do: [
-              {
-                lines: {
-                  for: { each: "line", at: "lineAt", in: "${ $page }" },
-                  while: '${ $line != "stop" }',
-                  do: [{ mark: { set: { seen: "${ $line }" } } }],
-                },
-              },
-            ],
-          },
-        },
-        {
-          shielded: {
-            try: [
-              {
-                cells: {
-                  for: { each: "cell", at: "cellAt", in: "${ [1, 2] }" },
-                  output: { as: "${ . }" },
-                  do: [
-                    {
-                      bad: {
-                        raise: {
-                          error: { type: "urn:grasp:error:cell", status: 451 },
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            ],
-            catch: { errors: { with: { status: 451 } } },
-          },
-        },
-        {
-          both: {
-            fork: {
-              branches: [
-                { left: { set: { side: "left" } } },
-                { right: { set: { side: "right" } } },
               ],
+              catch: { errors: { status: 409 } },
             },
-          },
+          ],
+          catch: { errors: { status: 422 } },
         },
         {
-          wide: {
-            for: { each: "w", in: "${ [1, 2] }" },
-            metadata: { grasp: { concurrency: 2 } },
-            do: [{ spread: { set: { w: "${ $w }" } } }],
+          id: "wrapped",
+          type: "try",
+          try: [
+            {
+              id: "shield",
+              type: "try",
+              try: [
+                {
+                  id: "boom",
+                  type: "raise",
+                  error: { type: "urn:grasp:error:boom", status: 418 },
+                },
+              ],
+              catch: { errors: { status: 418 } },
+            },
+          ],
+          catch: { errors: { status: 418 } },
+        },
+        {
+          id: "layered",
+          type: "try",
+          try: [
+            {
+              id: "probe",
+              type: "try",
+              try: [
+                {
+                  id: "ping",
+                  type: "do",
+                  binding: "mail",
+                  operation: "mail.send",
+                  arguments: { to: { $expr: "input.who" }, subject: "y" },
+                },
+              ],
+              catch: {
+                errors: { status: 500 },
+                when: { $expr: 'input.who === "Ada"' },
+              },
+            },
+          ],
+          catch: {
+            errors: { status: 500 },
+            retry: { attempts: 3, delay: "1 second", backoff: "constant" },
           },
         },
+        // A loop of a mail and a raise its own catch takes in each item
+        // (`rows`, enter; `notify` and `check`, task@<item>; `guard`,
+        // catch@<item>), then a step after it.
+        {
+          id: "rows",
+          type: "forEach",
+          items: { $expr: '["a", "b"]' },
+          do: [
+            {
+              id: "notify",
+              type: "do",
+              binding: "mail",
+              operation: "mail.send",
+              arguments: { to: { $expr: "item" }, subject: "loop" },
+            },
+            {
+              id: "guard",
+              type: "try",
+              try: [
+                {
+                  id: "check",
+                  type: "raise",
+                  error: {
+                    type: "urn:grasp:error:bad",
+                    status: 422,
+                    title: "Bad row.",
+                  },
+                },
+              ],
+              catch: { errors: { status: 422 } },
+            },
+          ],
+        },
+        { id: "finish", type: "wait", for: "1 second" },
         ...extra,
       ],
     }),
@@ -1019,76 +857,48 @@ export const decisionWorkflow = async () => {
   const workflow = await createWorkflowResource(env, by, `review-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: { approval: { kind: "decision", contract } },
-          },
-        },
-      },
-      input: {
-        schema: objectSchema({
-          reviewer: { type: "string" },
-          invoice: { type: "string" },
-        }),
-      },
+      $schema: workflowSchemaUrl,
+      input: objectOf({
+        reviewer: { type: "string" },
+        invoice: { type: "string" },
+      }),
       output: {
-        schema: objectSchema({
-          answered: { type: "boolean" },
+        schema: objectOf({
           approved: { type: "boolean" },
           by: { type: "string" },
-          value: {
-            anyOf: [
-              { type: "null" },
-              {
-                type: "object",
-                properties: { comment: { type: "string" } },
-                required: ["comment"],
-                additionalProperties: false,
-              },
-            ],
-          },
         }),
+        value: {
+          approved: { $expr: "steps.review.output.approved" },
+          by: { $expr: "steps.review.output.by" },
+        },
       },
-      do: [
-        { linger: { wait: "PT1H" } },
+      bindings: { approval: { kind: "decision", contract } },
+      steps: [
+        { id: "linger", type: "wait", for: "1 hour" },
         {
-          review: {
-            call: "grasp.decision",
-            with: {
-              binding: "approval",
-              recipients: ["${ $workflow.input.reviewer }"],
-              prompt: "Approve the invoice",
-              input: { invoice: "${ $workflow.input.invoice }" },
-            },
-            timeout: { after: { days: 7 } },
-          },
+          id: "review",
+          type: "decision",
+          binding: "approval",
+          recipients: [{ $expr: "input.reviewer" }],
+          prompt: "Approve the invoice",
+          input: { invoice: { $expr: "input.invoice" } },
+          timeout: "7 days",
         },
         {
-          batch: {
-            for: { each: "inv", at: "invAt", in: '${ ["INV-1", "INV-2"] }' },
-            do: [
-              {
-                sign: {
-                  call: "grasp.decision",
-                  with: {
-                    binding: "approval",
-                    recipients: ["${ $workflow.input.reviewer }"],
-                    prompt: "Approve this one",
-                    input: { invoice: "${ $inv }" },
-                  },
-                  timeout: { after: { days: 7 } },
-                },
-              },
-            ],
-          },
+          id: "batch",
+          type: "forEach",
+          items: { $expr: '["INV-1", "INV-2"]' },
+          do: [
+            {
+              id: "sign",
+              type: "decision",
+              binding: "approval",
+              recipients: [{ $expr: "input.reviewer" }],
+              prompt: "Approve this one",
+              input: { invoice: { $expr: "item" } },
+              timeout: "7 days",
+            },
+          ],
         },
       ],
     }),

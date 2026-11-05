@@ -13,51 +13,19 @@ export type DiagramNext =
   | { kind: "end" }
   | { kind: "task"; task: string };
 
-/**
- * A named part of a workflow (`metadata.grasp.section` on the task that
- * begins it): the part runs from that task to the next one that begins a
- * part, in the same list. Display text only, as a label is.
- */
-export interface DiagramSection {
-  name: string;
-  /** What the part is for, in one sentence. */
-  purpose: string | null;
-  /** The part in a few sentences, as Grasp writes it when it drafts. */
-  summary: string | null;
-}
-
-/**
- * How a workflow goes on through a door: it `waits` for the other
- * workflow to finish (a child workflow), `hands` its item over to it and
- * ends there (an event the other workflow is started by, as its last
- * task), or `starts` it and goes on (such an event, with more after it).
- */
-export type DoorFlow = "waits" | "hands" | "starts";
-
-/**
- * Another workflow a task leads to: a child workflow it runs, or one an
- * event it emits starts. Its ID and name only for a reader who may see
- * that workflow; for anyone else both are null, and only the flow shows.
- */
-export interface DiagramDoor {
-  flow: DoorFlow;
-  workflowId: string | null;
-  name: string | null;
-}
-
 /** One task, as declared, with the scopes it holds. */
 export interface DiagramTask {
-  /** Its stable ID: the key of its single-key object. */
+  /** Its stable ID. */
   id: string;
   /** JSON Pointer to it in the definition. */
   pointer: string;
-  /** Its task kind (`call`, `set`, `switch`, `for`, `fork`, `try`, …). */
+  /** Its step type (`do`, `agent`, `wait`, `if`, `try`, `raise`). */
   kind: string;
-  /** Its `metadata.grasp.label`, if any: display text only. */
+  /** Its `title`, if any: display text only. */
   label: string | null;
   /**
    * What it does, as literal source says it: the named call and binding,
-   * the child workflow, the error raised, the event binding. Null when the
+   * the error raised, the event binding. Null when the
    * source says it through an expression or doesn't say.
    */
   detail: string | null;
@@ -65,22 +33,14 @@ export interface DiagramTask {
   guarded: boolean;
   next: DiagramNext;
   scopes: DiagramScope[];
-  /**
-   * The named part it begins, if it begins one. Missing from a diagram
-   * drawn before parts were: such a workflow is drawn in no parts.
-   */
-  section?: DiagramSection | null;
-  /**
-   * The other workflows it leads to, as core resolved them for the
-   * reader: a child workflow's one, each one an emitted event starts.
-   * Missing where core drew no doors.
-   */
-  doors?: DiagramDoor[];
 }
 
-/** A list of tasks a task holds, or a case of a switch. */
+/**
+ * A list of steps a step holds: an `if`'s `then` and `else`, a `try`'s
+ * `try` and its catch's steps, a `forEach`'s steps for each item (`each`).
+ */
 export interface DiagramScope {
-  kind: "do" | "each" | "branch" | "try" | "catch" | "case";
+  kind: "then" | "else" | "try" | "catch" | "each";
   /** A case's or branch's name, a loop's item variable. */
   name: string | null;
   /** Whether a case's `when`, or a loop's `while`, decides at run time. */

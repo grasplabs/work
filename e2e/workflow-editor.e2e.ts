@@ -1,4 +1,4 @@
-/* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -8,8 +8,8 @@ import { modelScripts } from "./model-scripts.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
 // A builder writes an independent workflow's definition in the editor:
-// core checks each save against the profile and says what to fix at its
-// task and JSON Pointer, only a revision that passes publishes, and of two
+// core checks each save against grasp-workflow/1 and says what to fix at
+// its JSON Pointer, only a revision that passes publishes, and of two
 // people saving the same revision, the second is told and keeps their text.
 // The page opens on its Flow, the revision that passed drawn, where a step
 // is changed too; the JSON is behind it, on Definition. A new workflow
@@ -19,51 +19,28 @@ import { apiOf, peopleIn } from "./people.ts";
 /** How long a read from core may take to show. */
 const pageRead = { timeout: 15_000 };
 
-/** A definition of workflow `name`, its one task given `extra` keys. */
+/** A JSON Schema of an object with exactly `properties`, each required. */
+const objectOf = (properties: Record<string, unknown>) => ({
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
+});
+
+/** A definition answering `status`, its one step given `extra` keys. */
 const definition = (
-  name: string,
   status: string,
-  extra: Record<string, unknown> = {},
-  version = "1.0.0"
+  extra: Record<string, unknown> = {}
 ): string =>
   JSON.stringify(
     {
-      document: {
-        dsl: "1.0.3",
-        namespace: "workspace",
-        name,
-        version,
-        title: name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: {},
-          },
-        },
-      },
-      input: {
-        schema: {
-          format: "json",
-          document: {
-            type: "object",
-            properties: {},
-            additionalProperties: false,
-          },
-        },
-      },
+      $schema: workflowSchemaUrl,
+      input: objectOf({}),
       output: {
-        schema: {
-          format: "json",
-          document: {
-            type: "object",
-            properties: { status: { type: "string" } },
-            required: ["status"],
-            additionalProperties: false,
-          },
-        },
+        schema: objectOf({ status: { type: "string" } }),
+        value: { status },
       },
-      do: [{ finish: { set: { status }, ...extra } }],
+      steps: [{ id: "finish", type: "wait", for: "1 second", ...extra }],
     },
     null,
     2
@@ -106,11 +83,10 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
   await expect(page.getByRole("heading", { name })).toBeVisible();
   await expect(page.getByText("Not published")).toBeVisible();
 
-  // A key the profile doesn't know: refused at its task and pointer.
-  await save(page, definition(name, "done", { unknown: true }));
+  // A key the format doesn't know: refused at its pointer.
+  await save(page, definition("done", { unknown: true }));
   const problems = page.getByRole("region", { name: "What to fix" });
-  await expect(problems.getByText("/do/0/finish/unknown")).toBeVisible();
-  await expect(problems.getByText("finish", { exact: true })).toBeVisible();
+  await expect(problems.getByText("/steps/0/unknown")).toBeVisible();
   await expect(
     page.getByText("Revision 1 doesn't pass yet, and no revision has.")
   ).toBeVisible();
@@ -118,14 +94,14 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
     page.getByRole("button", { name: "Publish revision 1" })
   ).toBeDisabled();
 
-  await save(page, definition(name, "done"));
+  await save(page, definition("done"));
   await expect(
     page.getByText("Revision 2 passes the profile and can be published.")
   ).toBeVisible();
   await expect(problems).toHaveCount(0);
   await page.getByRole("button", { name: "Publish revision 2" }).click();
   // Typed while it publishes: still there once the page shows version 1.
-  const typed = definition(name, "typed while publishing");
+  const typed = definition("typed while publishing");
   await page.getByLabel("workflow.json").fill(typed);
   await expect(page.getByText("Version 1", { exact: true })).toBeVisible();
   await expect(page.getByText("Published as version 1.")).toBeVisible();
@@ -138,11 +114,11 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
   // and can take the other instead.
   const other = await pageOf(builder);
   await other.goto(page.url());
-  await save(other, definition(name, "theirs"));
+  await save(other, definition("theirs"));
   await expect(
     other.getByText("Revision 3 passes the profile and can be published.")
   ).toBeVisible();
-  const mine = definition(name, "mine");
+  const mine = definition("mine");
   await save(page, mine);
   await expect(
     page.getByText("Someone changed this draft since you read it.", {
@@ -158,12 +134,12 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
   await expect(page.getByLabel("workflow.json")).not.toBeEditable();
   reads.release();
   await expect(page.getByLabel("workflow.json")).toHaveValue(
-    definition(name, "theirs")
+    definition("theirs")
   );
   await expect(page.getByLabel("workflow.json")).toBeEditable();
 
   // A newer revision saved before this tab publishes is the same conflict.
-  await save(other, definition(name, "again"));
+  await save(other, definition("again"));
   await expect(
     other.getByText("Revision 4 passes the profile and can be published.")
   ).toBeVisible();
@@ -197,7 +173,7 @@ test("a builder whose workflow someone else published meanwhile is told, and pub
   await other.getByRole("button", { name: "Publish revision 1" }).click();
   await expect(other.getByText("Version 1", { exact: true })).toBeVisible();
 
-  const next = definition(name, "next", {}, "1.1.0");
+  const next = definition("next");
   await page.getByLabel("workflow.json").fill(next);
   await page.getByRole("button", { name: "Check and save" }).click();
   await page.getByRole("button", { name: "Publish revision 2" }).click();
@@ -212,39 +188,31 @@ test("a builder whose workflow someone else published meanwhile is told, and pub
   await expect(page.getByText("Version 2", { exact: true })).toBeVisible();
 });
 
-/** Spec 13.9's routing, by who, as workflow `name`: branches that join. */
-const routing = (name: string): string =>
+/** A step that waits a second, as `id`. */
+const pause = (id: string) => ({ id, type: "wait", for: "1 second" });
+
+/** Routing by who: an `if` whose branches join at `finished`. */
+const routing = (): string =>
   JSON.stringify(
     {
-      ...JSON.parse(definition(name, "unused")),
-      input: {
-        schema: {
-          format: "json",
-          document: {
-            type: "object",
-            properties: { who: { type: "string" } },
-            required: ["who"],
-            additionalProperties: false,
-          },
+      $schema: workflowSchemaUrl,
+      input: objectOf({ who: { type: "string" } }),
+      output: {
+        schema: objectOf({ status: { type: "string" } }),
+        value: {
+          status: { $expr: 'input.who === "Ada" ? "ada" : "other"' },
         },
       },
-      do: [
+      steps: [
         {
-          route: {
-            switch: [
-              {
-                ada: {
-                  when: '${ $workflow.input.who == "Ada" }',
-                  then: "greet-ada",
-                },
-              },
-              { anyone: { then: "greet-other" } },
-            ],
-          },
+          id: "route",
+          type: "if",
+          condition: { $expr: 'input.who === "Ada"' },
+          // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
+          then: [pause("greet-ada")],
+          else: [pause("greet-other")],
         },
-        { "greet-ada": { set: { status: "ada" }, then: "finished" } },
-        { "greet-other": { set: { status: "other" }, then: "finished" } },
-        { finished: { set: "${ . }" } },
+        pause("finished"),
       ],
     },
     null,
@@ -260,17 +228,15 @@ test("a builder sees every declared branch of the checked definition, and a test
   const name = await create(page);
   await expect(page.getByRole("heading", { name })).toBeVisible();
 
-  await save(page, routing(name));
+  await save(page, routing());
   await expect(
     page.getByText("Revision 1 passes the profile and can be published.")
   ).toBeVisible();
   await page.getByRole("tab", { name: "Flow" }).click();
   const diagram = page.getByRole("region", { name: "Diagram", exact: true });
   const route = diagram.getByRole("listitem", { name: "route" });
-  await expect(route.getByText("Case ada, when it holds")).toBeVisible();
-  await expect(route.getByText("Then greet-ada")).toBeVisible();
-  await expect(route.getByText("Otherwise: anyone")).toBeVisible();
-  await expect(route.getByText("Then greet-other")).toBeVisible();
+  await expect(route.getByText("When it holds")).toBeVisible();
+  await expect(route.getByText("Otherwise")).toBeVisible();
   for (const task of ["greet-ada", "greet-other", "finished"]) {
     // oxlint-disable-next-line no-await-in-loop -- one task at a time
     await expect(diagram.getByRole("listitem", { name: task })).toBeVisible();
@@ -284,7 +250,7 @@ test("a builder sees every declared branch of the checked definition, and a test
   await expect(
     diagram.getByRole("button", { name: "Change step route" })
   ).toHaveCount(0);
-  await save(page, routing(name));
+  await save(page, routing());
   await page.getByRole("button", { name: "Publish revision 3" }).click();
   await expect(page.getByText("Version 1", { exact: true })).toBeVisible();
 
@@ -309,27 +275,10 @@ test("a builder sees every declared branch of the checked definition, and a test
     ran.getByRole("listitem", { name: "greet-other" })
   ).toHaveAttribute("data-state", "none");
 
-  // A version with no build that runs is admitted and never runs: the
-  // panel says so instead of waiting on a run that doesn't exist.
-  await save(
-    page,
-    definition(
-      name,
-      "unused",
-      { set: { status: "done", ["k".repeat(2100)]: "${ . }" } },
-      "1.1.0"
-    )
-  );
+  // A second version, which goes live below.
+  await save(page, definition("done"));
   await page.getByRole("button", { name: "Publish revision 4" }).click();
   await expect(page.getByText("Version 2", { exact: true })).toBeVisible();
-  await page.getByRole("tab", { name: "Flow" }).click();
-  await page.getByLabel("Input").fill("{}");
-  await page.getByRole("button", { name: "Start a run", exact: true }).click();
-  await expect(
-    page.getByText("Version 2 has no build that runs, so nothing ran", {
-      exact: false,
-    })
-  ).toBeVisible();
 
   // Traces: the run of version 1, opened beside the page, with what it
   // returned to whoever started it, and each step its journal recorded
@@ -391,7 +340,7 @@ test("a builder changes one step on the Flow, saved as the draft's next revision
     "aria-selected",
     "true"
   );
-  await save(page, routing(name));
+  await save(page, routing());
   await expect(
     page.getByText("Revision 1 passes the profile and can be published.")
   ).toBeVisible();
@@ -400,11 +349,11 @@ test("a builder changes one step on the Flow, saved as the draft's next revision
   await page.getByRole("button", { name: "Change step greet-ada" }).click();
   const step = page.getByRole("dialog");
   await expect(step.getByLabel("The step, as JSON")).toHaveValue(
-    JSON.stringify({ set: { status: "ada" }, then: "finished" }, null, 2)
+    JSON.stringify({ type: "wait", for: "1 second" }, null, 2)
   );
   await step
     .getByLabel("The step, as JSON")
-    .fill(JSON.stringify({ set: { status: "hi ada" }, then: "finished" }));
+    .fill(JSON.stringify({ type: "wait", for: "1 second", title: "hi ada" }));
   await step.getByRole("button", { name: "Check and save" }).click();
   await expect(step).toBeHidden();
   await expect(page.getByText("Diagram of revision 2")).toBeVisible();
@@ -426,46 +375,21 @@ export const total = compute({
 });
 `;
 
-/** A definition of `name` whose one task calls `local:code/total.ts#total`. */
-const totalling = (name: string): string =>
+/** A definition whose one step calls `local:code/total.ts#total`. */
+const totalling = (): string =>
   JSON.stringify(
     {
-      ...JSON.parse(definition(name, "unused")),
-      document: {
-        dsl: "1.0.3",
-        namespace: "workspace",
-        name,
-        version: "1.0.0",
-        title: name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: {
-              total: { kind: "compute", contract: "local:code/total.ts#total" },
-            },
-          },
-        },
-      },
+      $schema: workflowSchemaUrl,
+      input: objectOf({}),
       output: {
-        schema: {
-          format: "json",
-          document: {
-            type: "object",
-            properties: { sum: { type: "number" } },
-            required: ["sum"],
-            additionalProperties: false,
-          },
-        },
+        schema: objectOf({ sum: { type: "number" } }),
+        value: { sum: { $expr: "steps.add.output" } },
       },
-      do: [
-        {
-          add: {
-            call: "grasp.compute",
-            with: { binding: "total", arguments: "${ [1, 2, 3] }" },
-          },
-        },
-        { answer: { set: { sum: "${ . }" } } },
+      bindings: {
+        total: { kind: "compute", contract: "local:code/total.ts#total" },
+      },
+      steps: [
+        { id: "add", type: "do", binding: "total", arguments: [1, 2, 3] },
       ],
     },
     null,
@@ -482,7 +406,7 @@ test("a builder writes a module beside the definition, calls it through a local 
   await expect(page.getByRole("heading", { name })).toBeVisible();
 
   // Without its module, the binding names nothing the workflow has.
-  await save(page, totalling(name));
+  await save(page, totalling());
   await expect(
     page.getByText("Revision 1 doesn't pass yet, and no revision has.")
   ).toBeVisible();
@@ -513,7 +437,7 @@ test("a builder starts a new workflow on an empty Flow with Grasp's chat beside 
   const page = await pageOf(builder);
   const [reply] = modelScripts.drawsWorkflow.replies;
   await page.goto("/workflows");
-  const name = await create(page);
+  await create(page);
   const workflow = new URL(page.url()).pathname.split("/").at(-1) ?? "";
 
   // It opens on its Flow, with nothing drawn yet, and Grasp's chat docked
@@ -551,7 +475,7 @@ test("a builder starts a new workflow on an empty Flow with Grasp's chat beside 
   try {
     await api.workflowResources.editDraft(workflow, {
       expectedRevision: 0,
-      source: definition(name, "received"),
+      source: definition("received"),
       modules: {},
     });
 

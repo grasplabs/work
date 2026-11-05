@@ -1,9 +1,4 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import {
-  jsonSchemaOf,
-  schemaFromDescriptor,
-  workflowReferenceLimits,
-} from "@grasp-os/sdk/host";
+import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import {
   releaseFormatVersion,
   releaseManifestSchema,
@@ -20,7 +15,7 @@ import type {
 } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
@@ -32,13 +27,8 @@ import {
 import { appFor } from "../src/apps.ts";
 import { boundEventsOf } from "../src/bound-workflow-events.ts";
 import { policyOf } from "../src/data-policy.ts";
-import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
-import {
-  grantPermission,
-  requestPermission,
-  revokePermission,
-} from "../src/permissions.ts";
+import { grantPermission, requestPermission } from "../src/permissions.ts";
 import {
   listWorkflowBindings,
   pendingWorkflowBindings,
@@ -75,6 +65,7 @@ import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
 import { connectModels } from "./model-provider.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
@@ -120,16 +111,6 @@ const person = async (role: Role, staff = false): Promise<Person> => {
     expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
   };
 };
-
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
 
 /** The descriptor of an object with no fields. */
 const emptyObject = {
@@ -201,153 +182,128 @@ const sealed = async (app: string, version: number, revoked = false) => {
 /** A model capability contract key of this test's own. */
 const modelKey = () => `summary-${unique()}`;
 
+/**
+ * A grasp-workflow/1 document running `steps` through `bindings`, with
+ * `params`, on input `{ who }`, ending with `{ status }`.
+ */
+const documentOf = ({
+  steps = [],
+  bindings = {},
+  params = {},
+  status = "done",
+}: {
+  steps?: unknown[];
+  bindings?: Record<string, unknown>;
+  params?: Record<string, unknown>;
+  status?: string;
+}): string =>
+  JSON.stringify({
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status },
+    },
+    params,
+    bindings,
+    steps,
+  });
+
 interface Draft {
-  name: string;
-  version?: string;
+  /** What it ends with, so one version's document differs from another's. */
+  status?: string;
   model?: string;
-  /** Whether `token` is sensitive: it is, unless a version says not. */
-  tokenSensitive?: boolean;
-  /** Another workflow's name, run at its 1.0.0 through binding `child`. */
-  child?: string;
+  /**
+   * A `token` parameter, sensitive or not. A sensitive one has no
+   * default, so a run starts only once its value is set.
+   */
+  token?: "sensitive" | "plain";
   /** Whether it waits an hour before it finishes. */
   waits?: boolean;
   /**
-   * An event contract it listens through, as binding `jobEvents`, for
+   * An event contract it waits on, as binding `jobEvents`, for
    * `listensFor` (by default its `grasp.job.completed`).
    */
   events?: string;
   listensFor?: string;
-  /** How many listen tasks it has, one after the other (1 by default). */
+  /** How many event waits it has, one after the other (1 by default). */
   listenTasks?: number;
 }
 
 /**
- * A workflow's definition: a greeting with a sensitive `token` parameter
- * and a `limit` one; with `model`, a model step through binding `summary`
- * of that catalog contract; with `child`, a step running that workflow.
+ * A workflow's definition: a greeting with a `limit` parameter, and a
+ * `token` one if asked; with `model`, a model step through binding
+ * `summary` of that catalog contract.
  */
 const definitionOf = ({
-  name,
-  version = "1.0.0",
+  status,
   model,
-  tokenSensitive = true,
-  child,
+  token,
   waits = false,
   events,
   listensFor = "grasp.job.completed",
   listenTasks = 1,
-}: Draft): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {
-            limit: {
-              schema: { type: "integer", minimum: 1, maximum: 10 },
-              label: "Limit",
-              default: 3,
-              sensitive: false,
-            },
-            token: {
-              schema: { type: "string", maxLength: 64 },
-              label: "Token",
-              default: "none",
-              sensitive: tokenSensitive,
-            },
-          },
-          bindings: {
-            ...(model === undefined
-              ? {}
-              : { summary: { kind: "model", contract: model } }),
-            ...(child === undefined
-              ? {}
-              : {
-                  child: {
-                    kind: "workflow",
-                    contract: `${workflowNamespace}/${child}/1.0.0`,
+}: Draft = {}): string =>
+  documentOf({
+    ...(status === undefined ? {} : { status }),
+    params: {
+      limit: { kind: "number", label: "Limit", default: 3, sensitive: false },
+      ...(token === undefined
+        ? {}
+        : {
+            token:
+              token === "sensitive"
+                ? { kind: "text", label: "Token" }
+                : {
+                    kind: "text",
+                    label: "Token",
+                    default: "none",
+                    sensitive: false,
                   },
-                }),
-            ...(events === undefined
-              ? {}
-              : { jobEvents: { kind: "event", contract: events } }),
-          },
-        },
-      },
+          }),
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
+    bindings: {
+      ...(model === undefined
+        ? {}
+        : { summary: { kind: "model", contract: model } }),
+      ...(events === undefined
+        ? {}
+        : { jobEvents: { kind: "event", contract: events } }),
+    },
+    steps: [
       ...(model === undefined
         ? []
         : [
             {
-              summarize: {
-                call: "grasp.model",
-                with: {
-                  binding: "summary",
-                  instructions: "Greet them.",
-                  input: { who: "${ $workflow.input.who }" },
-                  outputSchema: objectSchema({ line: { type: "string" } }),
-                },
-              },
+              id: "summarize",
+              type: "agent",
+              binding: "summary",
+              instructions: "Greet them.",
+              input: { who: { $expr: "input.who" } },
+              output: objectSchema({ line: { type: "string" } }),
             },
           ]),
-      ...(child === undefined
-        ? []
-        : [
-            {
-              child: {
-                run: {
-                  workflow: {
-                    namespace: workflowNamespace,
-                    name: child,
-                    version: "1.0.0",
-                    input: { who: "${ $workflow.input.who }" },
-                  },
-                },
-                metadata: { grasp: { binding: "child" } },
-              },
-            },
-          ]),
-      ...(waits ? [{ pause: { wait: "PT1H" } }] : []),
+      ...(waits ? [{ id: "pause", type: "wait", for: "1 hour" }] : []),
       ...(events === undefined
         ? []
         : Array.from({ length: listenTasks }, (_, index) => ({
-            [index === 0 ? "await-job" : `await-job-${index}`]: {
-              listen: {
-                to: { one: { with: { type: listensFor } } },
-                read: "data",
-              },
-              timeout: { after: { hours: 24 } },
-              metadata: { grasp: { binding: "jobEvents" } },
-            },
+            id: index === 0 ? "await-job" : `await-job-${index}`,
+            type: "wait",
+            event: { from: "jobEvents", type: listensFor },
+            timeout: "24 hours",
           }))),
-      { finish: { set: { status: "done" } } },
     ],
   });
 
-/** An action of a workflow's that reads Knowledge through `docs`. */
-const lookModule = `import { action, resource, v } from "@grasp-os/sdk/action";
-
-export const look = action({
-  args: {},
-  returns: v.object({ status: v.string() }),
-  uses: [resource.knowledge("docs", { operations: ["search"] })],
-  handler: async (ctx) => {
-    const hits = await ctx.resources.docs.search({ text: "leave" });
-    return { status: String(hits.length) };
-  },
-});
-`;
-
-/** A workflow `owner` created and published as `draft` at version 1. */
-const workflowOf = async (owner: Person, model?: string) => {
+/**
+ * A workflow `owner` created and published at version 1: through `model`,
+ * if given, and with a sensitive `token` if `token` says so.
+ */
+const workflowOf = async (
+  owner: Person,
+  model?: string,
+  token?: "sensitive"
+) => {
   const workflow = await createWorkflowResource(
     env,
     owner,
@@ -355,8 +311,8 @@ const workflowOf = async (owner: Person, model?: string) => {
   );
   await publishWorkflowVersion(env, owner, workflow.id, {
     definition: definitionOf({
-      name: workflow.name,
       ...(model === undefined ? {} : { model }),
+      ...(token === undefined ? {} : { token }),
     }),
     basedOn: null,
   });
@@ -512,8 +468,7 @@ describe("the host catalog", () => {
     const missing = await outcome(
       publishWorkflowVersion(env, ada, workflow.id, {
         definition: definitionOf({
-          name: workflow.name,
-          version: "2.0.0",
+          status: "2.0.0",
           model: `missing-${unique()}`,
         }),
         basedOn: 1,
@@ -613,7 +568,7 @@ describe("event contracts", () => {
     });
   });
 
-  it("record a version's listen tasks and the event binding each listens through, for a type the contract admits", async () => {
+  it("record a version's event waits and the event binding each waits through, for a type the contract admits", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const events = await eventContract(admin);
@@ -623,7 +578,7 @@ describe("event contracts", () => {
       `listen-${unique()}`
     );
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({ name: workflow.name, events }),
+      definition: definitionOf({ events }),
       basedOn: null,
     });
     const [version] = await workflowVersions(env, ada, workflow.id);
@@ -631,8 +586,7 @@ describe("event contracts", () => {
     const unadmitted = await outcome(
       publishWorkflowVersion(env, ada, workflow.id, {
         definition: definitionOf({
-          name: workflow.name,
-          version: "2.0.0",
+          status: "2.0.0",
           events,
           listensFor: "grasp.job.started",
         }),
@@ -656,7 +610,7 @@ describe("event contracts", () => {
     });
   });
 
-  it("make a listen task an App's event wait only when it waits on the type a screen sends", async () => {
+  it("make an event wait one an App sends to only when it waits on the type a screen sends", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const events = await eventContract(admin);
@@ -666,15 +620,14 @@ describe("event contracts", () => {
       `listen-${unique()}`
     );
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({ name: workflow.name, events }),
+      definition: definitionOf({ events }),
       basedOn: null,
     });
     // The same binding, waiting on the contract's other type, which no
     // screen sends.
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: definitionOf({
-        name: workflow.name,
-        version: "2.0.0",
+        status: "2.0.0",
         events,
         listensFor: "grasp.job.timeout",
       }),
@@ -702,40 +655,6 @@ describe("event contracts", () => {
     });
   });
 
-  it("refuse a version with more listen tasks waiting on a screen's events than a reference holds", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const events = await eventContract(admin);
-    const workflow = await createWorkflowResource(
-      env,
-      ada,
-      `listen-${unique()}`
-    );
-    const publish = async (listenTasks: number, listensFor?: string) =>
-      await outcome(
-        publishWorkflowVersion(env, ada, workflow.id, {
-          definition: definitionOf({
-            name: workflow.name,
-            events,
-            listenTasks,
-            ...(listensFor === undefined ? {} : { listensFor }),
-          }),
-          basedOn: null,
-        })
-      );
-    expect({
-      tooMany: await publish(workflowReferenceLimits.listens + 1),
-      // Waits no screen's event: no reference carries them.
-      internal: await publish(
-        workflowReferenceLimits.listens + 1,
-        "grasp.job.timeout"
-      ),
-    }).toStrictEqual({
-      tooMany: "workflow.definition_invalid",
-      internal: "ok",
-    });
-  });
-
   it("are approved for the version an admin reviewed, by an event target only", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -746,7 +665,7 @@ describe("event contracts", () => {
       `listen-${unique()}`
     );
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({ name: workflow.name, events }),
+      definition: definitionOf({ events }),
       basedOn: null,
     });
     const approve = async (by: Person, target: unknown) =>
@@ -785,7 +704,7 @@ describe("event contracts", () => {
     const swapped = await workflowOf(ada, first);
     const kinds = await createWorkflowResource(env, ada, `greet-${unique()}`);
     await publishWorkflowVersion(env, ada, kinds.id, {
-      definition: definitionOf({ name: kinds.name, events }),
+      definition: definitionOf({ events }),
       basedOn: null,
     });
     const asStaff = async (id: string, definition: string) =>
@@ -796,20 +715,19 @@ describe("event contracts", () => {
     expect({
       contract: await asStaff(
         swapped.id,
-        definitionOf({ name: swapped.name, version: "2.0.0", model: second })
+        definitionOf({ status: "2.0.0", model: second })
       ),
       // The same alias, now a model's.
       kind: await asStaff(
         kinds.id,
         definitionOf({
-          name: kinds.name,
-          version: "2.0.0",
+          status: "2.0.0",
           model: first,
         }).replaceAll('"summary"', '"jobEvents"')
       ),
       same: await asStaff(
         swapped.id,
-        definitionOf({ name: swapped.name, version: "2.0.0", model: first })
+        definitionOf({ status: "2.0.0", model: first })
       ),
     }).toStrictEqual({
       contract: "role.forbidden",
@@ -879,31 +797,16 @@ describe("approving a workflow's binding", () => {
     });
     const workflow = await createWorkflowResource(env, ada, `mail-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: JSON.stringify({
-        document: {
-          dsl: "1.0.3",
-          namespace: workflowNamespace,
-          name: workflow.name,
-          version: "1.0.0",
-          title: workflow.name,
-          metadata: {
-            grasp: {
-              profile: "grasp-open-workflow/1",
-              params: {},
-              bindings: { mail: { kind: "connector", contract: key } },
-            },
-          },
-        },
-        input: { schema: objectSchema({ who: { type: "string" } }) },
-        output: { schema: objectSchema({ status: { type: "string" } }) },
-        do: [
+      definition: documentOf({
+        bindings: { mail: { kind: "connector", contract: key } },
+        steps: [
           {
-            send: {
-              call: "grasp.connector",
-              with: { binding: "mail", operation: "mail.send", arguments: {} },
-            },
+            id: "send",
+            type: "do",
+            binding: "mail",
+            operation: "mail.send",
+            arguments: {},
           },
-          { finish: { set: { status: "done" } } },
         ],
       }),
       basedOn: null,
@@ -1027,8 +930,7 @@ describe("bindings waiting on an admin", () => {
     const workflow = await workflowOf(ada, key);
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: definitionOf({
-        name: workflow.name,
-        version: "1.1.0",
+        status: "1.1.0",
         model: key,
       }),
       basedOn: 1,
@@ -1098,142 +1000,6 @@ describe("bindings waiting on an admin", () => {
     });
   });
 
-  it("offer a knowledge binding the workflow's own collection grants only, and approve no target that wouldn't serve as the Approve lands", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const key = `docs-${unique()}`;
-    await publishCatalogContract(env, admin, { key, kind: "knowledge" });
-    const handbook = await createCollection(env, admin, {
-      name: "Handbook",
-      access: "everyone",
-    });
-    const reading = async () => {
-      const workflow = await createWorkflowResource(
-        env,
-        ada,
-        `read-${unique()}`
-      );
-      await publishWorkflowVersion(env, ada, workflow.id, {
-        definition: JSON.stringify({
-          document: {
-            dsl: "1.0.3",
-            namespace: workflowNamespace,
-            name: workflow.name,
-            version: "1.0.0",
-            title: workflow.name,
-            metadata: {
-              grasp: {
-                profile: "grasp-open-workflow/1",
-                params: {},
-                bindings: {
-                  look: {
-                    kind: "operation",
-                    contract: "local:code/look.ts#look",
-                  },
-                  docs: { kind: "knowledge", contract: key },
-                },
-              },
-            },
-          },
-          input: { schema: objectSchema({ who: { type: "string" } }) },
-          output: { schema: objectSchema({ status: { type: "string" } }) },
-          do: [
-            {
-              look: {
-                call: "grasp.operation",
-                with: { binding: "look", arguments: {} },
-              },
-            },
-          ],
-        }),
-        basedOn: null,
-        modules: { "code/look.ts": lookModule },
-      });
-      const permissionId = await granted(ada, admin, {
-        subject: { type: "workflow", workflowId: workflow.id },
-        object: { type: "collection", collectionId: handbook.id },
-        actions: ["read"],
-        binding: `DOCS_${unique().toUpperCase().replaceAll("-", "_")}`,
-      });
-      return { workflow, permissionId };
-    };
-    const { workflow, permissionId } = await reading();
-    // Another workflow's grant on the same collection: never this one's.
-    const other = await reading();
-    const asked = await requestGoLive(env, ada, workflow.id, {
-      version: 1,
-      revision: 0,
-    });
-    await decideGoLive(env, admin, workflow.id, {
-      version: 1,
-      verdict: "approve",
-      revision: asked.revision,
-    });
-    const offeredOf = async () => {
-      const pending = await pendingWorkflowBindings(env, admin);
-      return pending
-        .filter((each) => each.workflow.id === workflow.id)
-        .flatMap((each) =>
-          each.bindings
-            .filter(({ alias }) => alias === "docs")
-            .map(({ offered }) => offered)
-        );
-    };
-    const approve = async (target: unknown) =>
-      await outcome(
-        approveWorkflowBinding(env, admin, workflow.id, {
-          alias: "docs",
-          target,
-          reviewed: { version: 1 },
-        })
-      );
-
-    const before = await offeredOf();
-    const othersGrant = await approve({
-      kind: "knowledge",
-      permissionId: other.permissionId,
-    });
-    // Revoked after it was offered, before the Approve lands.
-    await revokePermission(env, admin, permissionId);
-    const revokedSinceOffered = await approve({
-      kind: "knowledge",
-      permissionId,
-    });
-    const approvals = await env.DB.prepare(
-      "SELECT COUNT(*) AS count FROM workflow_binding_approvals WHERE workflow_resource_id = ?"
-    )
-      .bind(workflow.id)
-      .first<{ count: number }>();
-    const after = await offeredOf();
-    // Granted again and approved: listed by the collection's name, as offered.
-    const regranted = await granted(ada, admin, {
-      subject: { type: "workflow", workflowId: workflow.id },
-      object: { type: "collection", collectionId: handbook.id },
-      actions: ["read"],
-      binding: `DOCS_${unique().toUpperCase().replaceAll("-", "_")}`,
-    });
-    await approve({ kind: "knowledge", permissionId: regranted });
-    const listed = await listWorkflowBindings(env, admin, workflow.id);
-
-    expect({
-      before,
-      othersGrant,
-      revokedSinceOffered,
-      approvals: approvals?.count,
-      after,
-      listed: listed.map(({ alias, label }) => ({ alias, label })),
-    }).toStrictEqual({
-      before: [
-        [{ target: { kind: "knowledge", permissionId }, label: "Handbook" }],
-      ],
-      othersGrant: "workflow.binding_invalid",
-      revokedSinceOffered: "workflow.binding_invalid",
-      approvals: 0,
-      after: [[]],
-      listed: [{ alias: "docs", label: "Handbook" }],
-    });
-  });
-
   it("offer, on the workflow's own page before it goes live, a connector each contract its own connection grant serves, which approves its start", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1250,33 +1016,16 @@ describe("bindings waiting on an admin", () => {
     });
     const workflow = await createWorkflowResource(env, ada, `mail-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: JSON.stringify({
-        document: {
-          dsl: "1.0.3",
-          namespace: workflowNamespace,
-          name: workflow.name,
-          version: "1.0.0",
-          title: workflow.name,
-          metadata: {
-            grasp: {
-              profile: "grasp-open-workflow/1",
-              params: {},
-              bindings: {
-                mail: { kind: "connector", contract: mailKey },
-              },
-            },
-          },
-        },
-        input: { schema: objectSchema({ who: { type: "string" } }) },
-        output: { schema: objectSchema({ status: { type: "string" } }) },
-        do: [
+      definition: documentOf({
+        bindings: { mail: { kind: "connector", contract: mailKey } },
+        steps: [
           {
-            send: {
-              call: "grasp.connector",
-              with: { binding: "mail", operation: "mail.send", arguments: {} },
-            },
+            id: "send",
+            type: "do",
+            binding: "mail",
+            operation: "mail.send",
+            arguments: {},
           },
-          { finish: { set: { status: "done" } } },
         ],
       }),
       basedOn: null,
@@ -1413,8 +1162,7 @@ describe("bindings waiting on an admin", () => {
     });
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: definitionOf({
-        name: workflow.name,
-        version: "1.1.0",
+        status: "1.1.0",
         model: key,
       }),
       basedOn: 1,
@@ -1554,32 +1302,9 @@ describe("approving an operation", () => {
     await sealed(app, 1);
     const workflow = await createWorkflowResource(env, ada, `op-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: JSON.stringify({
-        document: {
-          dsl: "1.0.3",
-          namespace: workflowNamespace,
-          name: workflow.name,
-          version: "1.0.0",
-          title: workflow.name,
-          metadata: {
-            grasp: {
-              profile: "grasp-open-workflow/1",
-              params: {},
-              bindings: { lookup: { kind: "operation", contract: key } },
-            },
-          },
-        },
-        input: { schema: objectSchema({ who: { type: "string" } }) },
-        output: { schema: objectSchema({ status: { type: "string" } }) },
-        do: [
-          {
-            look: {
-              call: "grasp.operation",
-              with: { binding: "lookup", arguments: {} },
-            },
-          },
-          { finish: { set: { status: "done" } } },
-        ],
+      definition: documentOf({
+        bindings: { lookup: { kind: "operation", contract: key } },
+        steps: [{ id: "look", type: "do", binding: "lookup", arguments: {} }],
       }),
       basedOn: null,
     });
@@ -1625,7 +1350,7 @@ describe("what a start freezes", () => {
     const workflow = await workflowOf(ada, key);
     const publish = async (version: string, basedOn: number) =>
       await publishWorkflowVersion(env, ada, workflow.id, {
-        definition: definitionOf({ name: workflow.name, version, model: key }),
+        definition: definitionOf({ status: version, model: key }),
         basedOn,
       });
     const approve = async (version: number) =>
@@ -1660,42 +1385,6 @@ describe("what a start freezes", () => {
       newlyReviewed: "ok",
       // The approval moved the policy generation: decided again.
       decidedBefore: "workflow.start_denied",
-    });
-  });
-
-  it("starts another workflow it binds only while that one is live and it holds its own grant to start it", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const child = await workflowOf(ada);
-    const parent = await createWorkflowResource(env, ada, `parent-${unique()}`);
-    await publishWorkflowVersion(env, ada, parent.id, {
-      definition: definitionOf({ name: parent.name, child: child.name }),
-      basedOn: null,
-    });
-    const ungranted = await outcome(start(ada, parent.id));
-    await granted(ada, admin, {
-      subject: { type: "workflow", workflowId: parent.id },
-      object: { type: "workflow", workflowId: child.id },
-      actions: ["start"],
-      binding: "CHILD",
-    });
-    const allowed = await outcome(start(ada, parent.id));
-    // Version 2 binds nothing, so the child can go; version 1 still binds it.
-    await publishWorkflowVersion(env, ada, parent.id, {
-      definition: definitionOf({ name: parent.name, version: "2.0.0" }),
-      basedOn: 1,
-    });
-    const deleted = await outcome(deleteWorkflowResource(env, ada, child.id));
-    expect({
-      ungranted,
-      allowed,
-      deleted,
-      childGone: await outcome(start(ada, parent.id)),
-    }).toStrictEqual({
-      ungranted: "workflow.start_denied",
-      allowed: "ok",
-      deleted: "ok",
-      childGone: "workflow.start_denied",
     });
   });
 
@@ -1758,8 +1447,6 @@ describe("what a start freezes", () => {
         {
           alias: "summary",
           kind: "model",
-          resourceId: null,
-          resourceVersion: null,
           contractId: key,
           fingerprint: approval.fingerprint,
           approval: approval.id,
@@ -1780,42 +1467,18 @@ describe("what a start freezes", () => {
     const aliases = Array.from({ length: 40 }, (_, index) => `model${index}`);
     const workflow = await createWorkflowResource(env, ada, `many-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: JSON.stringify({
-        document: {
-          dsl: "1.0.3",
-          namespace: workflowNamespace,
-          name: workflow.name,
-          version: "1.0.0",
-          title: workflow.name,
-          metadata: {
-            grasp: {
-              profile: "grasp-open-workflow/1",
-              params: {},
-              bindings: Object.fromEntries(
-                aliases.map((alias) => [
-                  alias,
-                  { kind: "model", contract: key },
-                ])
-              ),
-            },
-          },
-        },
-        input: { schema: objectSchema({ who: { type: "string" } }) },
-        output: { schema: objectSchema({ status: { type: "string" } }) },
-        do: [
-          ...aliases.map((alias) => ({
-            [`ask-${alias.toLowerCase()}`]: {
-              call: "grasp.model",
-              with: {
-                binding: alias,
-                instructions: "Greet them.",
-                input: { who: "${ $workflow.input.who }" },
-                outputSchema: objectSchema({ line: { type: "string" } }),
-              },
-            },
-          })),
-          { finish: { set: { status: "done" } } },
-        ],
+      definition: documentOf({
+        bindings: Object.fromEntries(
+          aliases.map((alias) => [alias, { kind: "model", contract: key }])
+        ),
+        steps: aliases.map((alias) => ({
+          id: `ask-${alias.toLowerCase()}`,
+          type: "agent",
+          binding: alias,
+          instructions: "Greet them.",
+          input: { who: { $expr: "input.who" } },
+          output: objectSchema({ line: { type: "string" } }),
+        })),
       }),
       basedOn: null,
     });
@@ -1873,7 +1536,7 @@ describe("what a start freezes", () => {
       mutated: mutated.includes("immutable"),
       rebound: rebound.includes("immutable"),
     }).toStrictEqual({
-      params: { limit: 5, token: "none" },
+      params: { limit: 5 },
       revision: 1,
       raced: "workflow.start_denied",
       mutated: true,
@@ -1889,7 +1552,7 @@ describe("parameter configuration", () => {
     const ada = await person("builder");
     const reader = await person("builder");
     const staff = await person("admin", true);
-    const workflow = await workflowOf(ada);
+    const workflow = await workflowOf(ada, undefined, "sensitive");
     await shareWorkflowResource(env, ada, workflow.id, {
       type: "person",
       id: reader.userId,
@@ -1898,13 +1561,14 @@ describe("parameter configuration", () => {
     const secret = `secret-${unique()}`;
     const set = async (by: Person, input: unknown) =>
       await setWorkflowParams(env, by, workflow.id, input);
-    const tooHighAttempt = set(ada, {
+    // Text, for a number: refused, without the value in the refusal.
+    const wrongKindAttempt = set(ada, {
       expectedRevision: 0,
-      values: { limit: 99 },
+      values: { limit: "ninety-nine" },
     });
-    const [tooHighCode, tooHigh] = await Promise.all([
-      outcome(tooHighAttempt),
-      refusal(tooHighAttempt),
+    const [wrongKindCode, wrongKind] = await Promise.all([
+      outcome(wrongKindAttempt),
+      refusal(wrongKindAttempt),
     ]);
     const first = await set(ada, {
       expectedRevision: 0,
@@ -1920,8 +1584,8 @@ describe("parameter configuration", () => {
       unknown: await outcome(
         set(ada, { expectedRevision: 0, values: { other: 1 } })
       ),
-      tooHigh: tooHighCode,
-      leaks: JSON.stringify(tooHigh).includes("99"),
+      wrongKind: wrongKindCode,
+      leaks: JSON.stringify(wrongKind).includes("ninety-nine"),
       first: first.revision,
       stale: await outcome(
         set(ada, { expectedRevision: 0, values: { limit: 2 } })
@@ -1930,7 +1594,7 @@ describe("parameter configuration", () => {
       reader: "role.forbidden",
       staff: "role.forbidden",
       unknown: "workflow.params_invalid",
-      tooHigh: "workflow.params_invalid",
+      wrongKind: "workflow.params_invalid",
       leaks: false,
       first: 1,
       stale: "workflow.params_conflict",
@@ -1944,7 +1608,7 @@ describe("parameter configuration", () => {
     const db = racingDb(
       async () =>
         await publishWorkflowVersion(env, ada, workflow.id, {
-          definition: definitionOf({ name: workflow.name, version: "2.0.0" }),
+          definition: definitionOf({ status: "2.0.0" }),
           basedOn: 1,
         }),
       /insert into "workflow_resource_params"/iu
@@ -1972,61 +1636,44 @@ describe("parameter configuration", () => {
     });
   });
 
-  it("takes null as a value, and puts a parameter back to its default only when told to reset it", async () => {
+  it("puts a parameter back to its default only when told to reset it", async () => {
     const ada = await person("builder");
-    const workflow = await createWorkflowResource(env, ada, `null-${unique()}`);
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `reset-${unique()}`
+    );
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: JSON.stringify({
-        document: {
-          dsl: "1.0.3",
-          namespace: workflowNamespace,
-          name: workflow.name,
-          version: "1.0.0",
-          title: workflow.name,
-          metadata: {
-            grasp: {
-              profile: "grasp-open-workflow/1",
-              params: {
-                // Required, with null its only value.
-                marker: {
-                  schema: { type: "null" },
-                  label: "Marker",
-                  required: true,
-                  sensitive: false,
-                },
-                limit: {
-                  schema: { type: "integer", minimum: 1, maximum: 10 },
-                  label: "Limit",
-                  default: 3,
-                  sensitive: false,
-                },
-              },
-              bindings: {},
-            },
+      definition: documentOf({
+        params: {
+          // Sensitive, with no default: required.
+          token: { kind: "text", label: "Token" },
+          limit: {
+            kind: "number",
+            label: "Limit",
+            default: 3,
+            sensitive: false,
           },
         },
-        input: { schema: objectSchema({ who: { type: "string" } }) },
-        output: { schema: objectSchema({ status: { type: "string" } }) },
-        do: [{ finish: { set: { status: "done" } } }],
       }),
       basedOn: null,
     });
     const set = async (input: unknown) =>
       await setWorkflowParams(env, ada, workflow.id, input);
     const unset = await outcome(start(ada, workflow.id));
-    await set({ expectedRevision: 0, values: { marker: null, limit: 7 } });
-    const withNull = await outcome(start(ada, workflow.id));
+    await set({ expectedRevision: 0, values: { token: "set", limit: 7 } });
+    const withToken = await outcome(start(ada, workflow.id));
     const both = await outcome(
       set({ expectedRevision: 1, values: { limit: 2 }, reset: ["limit"] })
     );
     const reset = await set({ expectedRevision: 1, reset: ["limit"] });
     // A required parameter has no default to go back to.
     const resetRequired = await outcome(
-      set({ expectedRevision: 2, reset: ["marker"] })
+      set({ expectedRevision: 2, reset: ["token"] })
     );
     expect({
       unset,
-      withNull,
+      withToken,
       both,
       resetRequired,
       after: reset.params.map(({ name, set: isSet, value }) => ({
@@ -2036,12 +1683,12 @@ describe("parameter configuration", () => {
       })),
     }).toStrictEqual({
       unset: "workflow.params_invalid",
-      withNull: "ok",
+      withToken: "ok",
       both: "workflow.params_invalid",
       resetRequired: "workflow.params_invalid",
       after: [
         { name: "limit", set: false, value: null },
-        { name: "marker", set: true, value: null },
+        { name: "token", set: true, value: null },
       ],
     });
   });
@@ -2050,34 +1697,13 @@ describe("parameter configuration", () => {
     const ada = await person("builder");
     const workflow = await createWorkflowResource(env, ada, `big-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: JSON.stringify({
-        document: {
-          dsl: "1.0.3",
-          namespace: workflowNamespace,
-          name: workflow.name,
-          version: "1.0.0",
-          title: workflow.name,
-          metadata: {
-            grasp: {
-              profile: "grasp-open-workflow/1",
-              params: Object.fromEntries(
-                ["first", "second"].map((name) => [
-                  name,
-                  {
-                    schema: { type: "string", maxLength: 400_000 },
-                    label: name,
-                    default: "",
-                    sensitive: false,
-                  },
-                ])
-              ),
-              bindings: {},
-            },
-          },
-        },
-        input: { schema: objectSchema({ who: { type: "string" } }) },
-        output: { schema: objectSchema({ status: { type: "string" } }) },
-        do: [{ finish: { set: { status: "done" } } }],
+      definition: documentOf({
+        params: Object.fromEntries(
+          ["first", "second"].map((name) => [
+            name,
+            { kind: "text", label: name, default: "", sensitive: false },
+          ])
+        ),
       }),
       basedOn: null,
     });
@@ -2105,7 +1731,7 @@ describe("parameter configuration", () => {
 
   it("never lists or audits a sensitive value", async () => {
     const ada = await person("builder");
-    const workflow = await workflowOf(ada);
+    const workflow = await workflowOf(ada, undefined, "sensitive");
     const secret = `secret-${unique()}`;
     await setWorkflowParams(env, ada, workflow.id, {
       expectedRevision: 0,
@@ -2132,7 +1758,7 @@ describe("parameter configuration", () => {
           set: true,
           value: 4,
           // As the version declares it, for the page to take a value as.
-          schema: { type: "integer", minimum: 1, maximum: 10 },
+          schema: { type: "number" },
         },
         {
           name: "token",
@@ -2140,7 +1766,7 @@ describe("parameter configuration", () => {
           sensitive: true,
           set: true,
           value: null,
-          schema: { type: "string", maxLength: 64 },
+          schema: { type: "string" },
         },
       ],
       inEvents: false,
@@ -2157,7 +1783,7 @@ describe("a sensitive parameter", () => {
   it("stays withheld once any version marked it, whatever a later version says", async () => {
     const ada = await person("builder");
     const reader = await person("builder");
-    const workflow = await workflowOf(ada);
+    const workflow = await workflowOf(ada, undefined, "sensitive");
     await shareWorkflowResource(env, ada, workflow.id, {
       type: "person",
       id: reader.userId,
@@ -2171,9 +1797,8 @@ describe("a sensitive parameter", () => {
     // A builder declares it not sensitive in a new version.
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: definitionOf({
-        name: workflow.name,
-        version: "2.0.0",
-        tokenSensitive: false,
+        status: "2.0.0",
+        token: "plain",
       }),
       basedOn: 1,
     });
@@ -2194,7 +1819,7 @@ describe("a sensitive parameter", () => {
         sensitive: true,
         set: true,
         value: null,
-        schema: { type: "string", maxLength: 64 },
+        schema: { type: "string" },
       },
       leaks: false,
       leaksLater: false,
@@ -2405,7 +2030,7 @@ describe("retention", () => {
 
   it("removes a receipt's input and values and a replaced revision's values, and nothing else", async () => {
     const ada = await person("builder");
-    const workflow = await workflowOf(ada);
+    const workflow = await workflowOf(ada, undefined, "sensitive");
     const secret = `secret-${unique()}`;
     await setWorkflowParams(env, ada, workflow.id, {
       expectedRevision: 0,
@@ -2483,7 +2108,7 @@ describe("deleting a workflow", () => {
       `greet-${unique()}`
     );
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf({ name: workflow.name, waits: true }),
+      definition: definitionOf({ waits: true }),
       basedOn: null,
     });
     // Its run waits an hour: it hasn't ended as the deletion is asked.

@@ -53,29 +53,14 @@ import { isUnapprovedStart, ToApprovals } from "./unapproved-start.tsx";
 // after a lost answer starts nothing twice.
 
 /** What a start started, as the dialog says it. */
-type Started = { kind: "unrunnable"; version: number } | { kind: "listed" };
+interface Started {
+  kind: "listed";
+}
 
-/** What the dialog says once a start went through. */
-const StartedText = ({ started }: { started: Started }) => {
-  switch (started.kind) {
-    case "unrunnable": {
-      const { version } = started;
-      return (
-        <Trans>Version {version} has no build that runs, so nothing ran.</Trans>
-      );
-    }
-    case "listed": {
-      return (
-        <Trans>
-          The run started. It is listed with the workflow&apos;s runs.
-        </Trans>
-      );
-    }
-    default: {
-      return started satisfies never;
-    }
-  }
-};
+/** What the dialog says once a start went through: where its run is listed. */
+const StartedText = () => (
+  <Trans>The run started. It is listed with the workflow&apos;s runs.</Trans>
+);
 
 /** What is said under a field whose value can't be sent. */
 const ProblemText = ({ problem }: { problem: StartFieldProblem }) => {
@@ -359,7 +344,7 @@ const StartDialog = ({
           ) : null}
           {started === undefined ? null : (
             <output className="flex flex-col gap-1">
-              <StartedText started={started} />
+              <StartedText />
             </output>
           )}
           <DialogFooter closeLabel={t`Close`} showCloseButton>
@@ -431,7 +416,7 @@ export const StartIndependentRun = ({
       people={form?.people ?? null}
       onFiles={onFiles}
       start={async (input, key) => {
-        const started = await core.withSession(
+        await core.withSession(
           async (session) =>
             await session.workflowResources.start(workflow, {
               version,
@@ -441,9 +426,7 @@ export const StartIndependentRun = ({
         );
         // Its runs, as core lists them now.
         void router.invalidate();
-        return started.runId === null
-          ? { kind: "unrunnable", version }
-          : { kind: "listed" };
+        return { kind: "listed" };
       }}
     />
   );

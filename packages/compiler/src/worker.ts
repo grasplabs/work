@@ -79,7 +79,7 @@ import {
   declarationFile,
   limitErrors,
   computeModuleErrors,
-  openWorkflowErrors,
+  generatedWorkflowErrors,
   screenFile,
 } from "./inputs.ts";
 import {
@@ -825,21 +825,21 @@ const compileCode = (
  * The module the host generated from a JSON workflow, built: as one module
  * by flat name; or why it failed.
  */
-export type OpenWorkflowBuild =
+export type GeneratedWorkflowBuild =
   | { ok: true; modules: Record<string, string> }
   | { ok: false; diagnostics: Diagnostic[] };
 
 /**
  * Builds the module the host generated from a JSON workflow
- * (`openWorkflowEntry`): type-checked against the SDK's own declarations,
- * then compiled, importing only `@grasp-os/sdk/open-workflow`
+ * (`generatedWorkflowEntry`): type-checked against the SDK's own declarations,
+ * then compiled, importing only `@grasp-os/sdk/workflow`
  * (`generatedWorkflowCode`). It is the host's own output, so a type error
  * is the generator's, and nothing is sealed that doesn't check.
  */
-export const buildOpenWorkflow = (
+export const buildGeneratedWorkflow = (
   files: Record<string, string>
-): Unchecked<OpenWorkflowBuild> => {
-  const wrong = openWorkflowErrors(files);
+): Unchecked<GeneratedWorkflowBuild> => {
+  const wrong = generatedWorkflowErrors(files);
   if (wrong.length > 0) {
     return { built: { ok: false, diagnostics: wrong } };
   }
@@ -1247,7 +1247,7 @@ export type CompileTarget =
   | "preview-frame"
   | "app"
   | "app-tests"
-  | "open-workflow"
+  | "generated-workflow"
   | "compute";
 
 /** What a build of each target answers, once its type check is in (`Unchecked`). */
@@ -1257,7 +1257,7 @@ export interface TargetBuilds {
   "preview-frame": ScreenBuild;
   app: AppCodeBuild;
   "app-tests": AppCodeBuild;
-  "open-workflow": OpenWorkflowBuild;
+  "generated-workflow": GeneratedWorkflowBuild;
   compute: ComputeModulesBuild;
 }
 
@@ -1285,7 +1285,7 @@ const targetBuilds: {
     await buildScreens(files, { preview: true, checks: false }),
   app: checkAppCode,
   "app-tests": (files) => ({ built: buildAppTests(files) }),
-  "open-workflow": buildOpenWorkflow,
+  "generated-workflow": buildGeneratedWorkflow,
   compute: buildComputeModules,
 };
 

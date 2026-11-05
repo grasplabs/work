@@ -566,8 +566,11 @@ const historyRunOf = async (
   return row;
 };
 
-/** A step of the generated code's own: its kind, then its task's ID. */
-const taskStep = /^(?:task|enter|leave|catch):(?<id>[a-z0-9][a-z0-9-]{0,63})$/u;
+/**
+ * A step of the generated code's own, as the run host names it: its
+ * task's ID, then its kind (an item's key after `@` names no task here).
+ */
+const taskStep = /^(?<id>[a-z0-9][a-z0-9-]{0,63}):(?:task|enter|leave|catch)$/u;
 
 /** A history entry's error, as a screen reads one: never the workflow's text. */
 const errorRow = (error: { code: string; message: string }): Json => ({
@@ -805,9 +808,12 @@ const historyWindow = async (
   throw operationErrors.create("operation.read_limit");
 };
 
-/** A decision task's call step, as its decision names it: in a loop's scope too. */
+/**
+ * A decision task's step, as the run host names it (`<id>:task`) and its
+ * decision records it: in a loop's scope too (`<id>:task@<item>`).
+ */
 const decisionStep =
-  /^task:(?<id>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?:@[a-z0-9.\-/]+)?$/u;
+  /^(?<id>[a-z][a-z0-9]*(?:-[a-z0-9]+)*):task(?:@[a-z0-9.\-/]+)?$/u;
 
 /** The version the release pins, while the App's binding still names it. */
 const pinnedBound = (

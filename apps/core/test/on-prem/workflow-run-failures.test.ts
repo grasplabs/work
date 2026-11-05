@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { describe, expect, it } from "vite-plus/test";
 
 import { mockIdp } from "../idp.ts";
@@ -45,20 +44,12 @@ describe("an independent JSON workflow's run on-prem", () => {
     );
     await builder.api.workflowResources.publish(workflow.id, {
       definition: definitionOf(
-        workflow.name,
-        [
-          {
-            fill: {
-              call: "grasp.compute",
-              with: { binding: "fill", arguments: "${ [1, 2, 3] }" },
-            },
-          },
-          { answer: { set: { status: "${ tostring }" } } },
-        ],
+        [{ id: "fill", type: "do", binding: "fill", arguments: [1, 2, 3] }],
         {
           bindings: {
             fill: { kind: "compute", contract: "local:code/fill.ts#fill" },
           },
+          status: { $expr: '"" + steps.fill.output' },
         }
       ),
       basedOn: null,

@@ -1,4 +1,3 @@
-import { workflowDiagram } from "@grasp-os/open-workflow/diagram";
 import { isExpectedCode } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type {
@@ -6,24 +5,18 @@ import type {
   TraceStep,
   WorkflowRunTrace,
 } from "@grasp-os/shared/workflow-diagrams";
-import {
-  workflowResourceErrors,
-  workflowRunTraceOptionsSchema,
-} from "@grasp-os/shared/workflow-resources";
-import { decisionPollStepPrefix } from "@grasp-os/shared/workflows";
 import type {
   HistoryRecord,
   ReadableHistoryRecord,
 } from "@grasp-os/workerflow/run";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
 
 import type { Acting } from "../auth/identity.ts";
 import { workflowStartReceipts } from "../db/core/schema.ts";
 import type { LoadedBuild } from "../workflow-builds.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
-import { withDoors } from "../workflow-doors.ts";
+import { workflowDiagram } from "../workflow-diagram.ts";
 import {
   requireWorkflowRole,
   workflowDefinition,
@@ -38,41 +31,27 @@ import type { SealedSteps } from "./sealed-steps.ts";
 // A run of an independent workflow laid over its version's diagram
 // (platform specification 13.10): the tasks its journal reached, read from
 // the engine's own history (workerflow's `history`), never inferred from
-// the diagram, the run's status or its code. The generated code names each
-// durable step of task `<id>` `task:<id>`, `enter:<id>`, `leave:<id>` or
-// `item:<id>` or `catch:<id>`, inside a loop with the item after `@`
-// (@grasp-os/sdk open-workflow), and the host adds steps of its own to a
-// step of a task (resource-host.ts), read here as part of that step:
+// the diagram, the run's status or its code. The run host (sealed-run.ts)
+// names a task's steps `<task>:<kind>`, a loop item's indices after `@`,
+// each placed by its build's table of tasks (sealed-steps.ts), and core
+// adds steps of its own to a step of a task, by the step's key under its
+// prefix (`$grasp:wait:<key>:…`, host.ts), read here as part of that step:
 //
-// - a try's retry of a failed step runs it again under `<step>:retry:<n>`,
-//   after a backoff sleep (`<step>:retry:<n>:wait`) the host decided in a
-//   step of its own (`…:decide`): each round more attempts of the same
-//   step, waiting while it backs off, its state the latest round's; on the
-//   run host, under core's prefix by the step's key
-//   (`$grasp:wait:<key>:retry:<n>:run|wait|decide`, `coreWait`), read
-//   alike;
-// - a decision task's call step first waits for its decision: the host
-//   asks and looks in steps of its own (`<step>:decision:<look>`) and
-//   waits for the decision's wake under core's prefix
-//   (`$grasp:decision:<step>:<wait|woken>:<round>`): the task's step,
-//   waiting until the decision has its outcome, then as its call goes;
+// - a catch's retry of a failed step runs it again
+//   (`…:retry:<n>:run`), after a backoff sleep (`…:retry:<n>:wait`) it
+//   decided in a step of its own (`…:decide`): each round more attempts of
+//   the same step, waiting while it backs off, its state the latest
+//   round's;
 // - a call connect held for its person to confirm ends its round held:
-//   the host checks and waits in steps of the round's
-//   (`<step>:held:<n>:<check>:check`, `<step>:held:<n>:<check>`), then
-//   runs the step again (`<step>:held:<n>:run`), `<step>` its own name or
-//   a retry's: the task's step, waiting until its person decided, then
-//   its run again an attempt more, reached once confirmed, or
-//   failed once declined.
-//
-// A run of a build generated for the run host (sealed-run.ts) names a
-// task's steps `<task>:<kind>`, a loop item's indices after `@`, each
-// placed by its build's table of tasks (sealed-steps.ts): a catch's retry
-// and a held call read as above, under core's prefix by the step's key;
-// a decision task's step opens its decision, then asks and waits in the
-// SDK's steps past it (`<task>:task#ask`, `#asked`, `#answer`) and
-// core's by that wait's key (`$grasp:wait:<key>:reached|woken|again`,
-// host.ts, `waitForDecision`): the task's step, waiting until its outcome
-// (`…:outcome`) is recorded, reached then.
+//   core checks and waits in steps of the round's, then runs the step
+//   again (`…:held:<n>:run`): the task's step, waiting until its person
+//   decided, then its run again an attempt more, reached once confirmed,
+//   or failed once declined;
+// - a decision task's step opens its decision, then asks and waits in the
+//   SDK's steps past it (`<task>:task#ask`, `#asked`, `#answer`) and
+//   core's by that wait's key (`…:reached|woken|again`, host.ts,
+//   `waitForDecision`): the task's step, waiting until its outcome
+//   (`…:outcome`) is recorded, reached then.
 //
 // Any other step adds nothing. A failure a catch took still shows as its
 // task's: it happened. Each step is shown too, in the order the run
@@ -91,37 +70,13 @@ const maxRecords = 2000;
 /** Records per history read, the engine's own most. */
 const pageRecords = 500;
 
-// A step of a task inside a loop names the item it runs in after `@`
-// (`task:<id>@<for>.<index>/…`), and a loop's check of its `while` is an
-// `item:` step: each item's steps count as their task's. What the host
-// adds to a step's name, if anything, follows (`part`).
-const stepName =
-  /^(?<base>(?:task|enter|leave|item|catch):(?<task>[a-z][a-z0-9-]{0,63})(?:@(?<item>[a-z0-9./-]{1,600}))?)(?<part>(?::[a-z0-9]+)*)$/u;
-
 /**
- * A retry's round of a step, or a held call's run again in one (of the
- * step's own round, or of a retry's).
- */
-const retryRound = /^(?::retry:[1-9]\d*)?(?::held:[1-9]\d*:run)?$/u;
-
-/** A held call's check, or its wait for its person, in a round. */
-const heldWait = /^(?::retry:[1-9]\d*)?:held:[1-9]\d*:\d+(?::check)?$/u;
-const retryBackoff = /^:retry:[1-9]\d*:wait$/u;
-
-/** A decision task's look at its decision, or its wait for its wake. */
-const decisionPart =
-  /^:decision:(?:asked|remind|reminded|reached|outcome|(?:wait|woken):\d+)$/u;
-
-/** A decision's wait or look as core names it, past `decisionPollStepPrefix`. */
-const decisionPoll = /^(?<step>.+):(?<part>wait|woken):(?<round>\d+)$/u;
-
-/**
- * One of core's waits of a round of a step (resource-host.ts, `#rounds`;
- * host.ts, `waitStep`), by the round's key: for its turn (`busy`) or its
+ * One of core's waits of a round of a step (host.ts, `waitStep`), by the
+ * round's key: for its turn (`busy`) or its
  * AI provider (`key`), a record of waiting (`:waiting`), the round's run
  * again (`:run`), and a wait for its AI provider that ran out
- * (`:timed_out`), failed with the step's error. On the run host, a
- * catch's retry of the step (`retry`) too: its decision (`:decide`), its
+ * (`:timed_out`), failed with the step's error; a catch's retry of the
+ * step (`retry`) too: its decision (`:decide`), its
  * backoff (`:wait`) and its run again (`:run`), whose own waits go by its
  * name's key; and a call connect held for its person (`held`) or on an
  * unknown outcome (`unknown`, host.ts, `#waitWhileHeld`): when it was
@@ -156,39 +111,10 @@ const answerAfter: Readonly<Record<string, string>> = { "#ask": "#answer" };
 /**
  * What a step is of the task step it is part of: a round of it (its own
  * attempts, a retry's, or a held call's run again), a retry's backoff,
- * its decision's wait, its held call's wait for its person, or, on the
- * run host, its decision's recorded outcome.
+ * its decision's wait, its held call's wait for its person, or its
+ * decision's recorded outcome.
  */
 type Role = "round" | "backoff" | "decision" | "held" | "outcome";
-
-/** The role of a step, by what the host added to its name (`part`). */
-const roleOf = (part: string): Role | undefined => {
-  if (retryRound.test(part)) {
-    return "round";
-  }
-  if (retryBackoff.test(part)) {
-    return "backoff";
-  }
-  if (heldWait.test(part)) {
-    return "held";
-  }
-  return decisionPart.test(part) ? "decision" : undefined;
-};
-
-/**
- * `name` as its task step's: a decision's wait or look under core's prefix
- * read as `<step>:decision:<wait|woken>:<round>`; any other as it is.
- */
-const unprefixed = (name: string): string => {
-  if (!name.startsWith(decisionPollStepPrefix)) {
-    return name;
-  }
-  const { step, part, round } =
-    decisionPoll.exec(name.slice(decisionPollStepPrefix.length))?.groups ?? {};
-  return step === undefined || part === undefined || round === undefined
-    ? name
-    : `${step}:decision:${part}:${round}`;
-};
 
 /** The more telling of two states of one task's steps. */
 const rank: Readonly<Record<TraceState, number>> = {
@@ -296,40 +222,13 @@ const sealedPlaceOf = (name: string, steps: SealedSteps): Place | undefined => {
 };
 
 /**
- * Where engine step `name` of a run of resource-host.ts stands, if it is
- * part of a task's step: one of its task's own name.
+ * Where engine step `name` stands, if it is part of a task's step: as its
+ * run's build's table places it (`steps`), or one of core's waits of it.
  */
-const namedPlaceOf = (name: string): Place | undefined => {
-  const named = stepName.exec(unprefixed(name))?.groups;
-  const part = named?.part ?? "";
-  const role = roleOf(part);
-  if (named?.base === undefined || named.task === undefined || !role) {
-    return undefined;
-  }
-  // A decision's wait comes before its own step, the rest after it.
-  const own = role === "round" && part === "";
-  return {
-    kind: "task",
-    base: named.base,
-    task: named.task,
-    item: named.item ?? null,
-    role,
-    starts: own || role === "decision",
-    // A round's waits for its turn or its AI provider are named by its key.
-    keys: role === "round" && !part.includes(":held:") ? [name] : [],
-  };
-};
-
-/**
- * Where engine step `name` stands, if it is part of a task's step: for a
- * run on the run host, as its build's table places it (`steps`).
- */
-const placeOf = (name: string, steps?: SealedSteps): Place | undefined => {
+const placeOf = (name: string, steps: SealedSteps): Place | undefined => {
   const waited = coreWait.exec(name)?.groups;
   if (waited?.key === undefined) {
-    return steps === undefined
-      ? namedPlaceOf(name)
-      : sealedPlaceOf(name, steps);
+    return sealedPlaceOf(name, steps);
   }
   const { key, retry, held } = waited;
   if (held !== undefined) {
@@ -484,7 +383,7 @@ const placed = async (
 const foldRecord = async (
   reading: Reading,
   record: HistoryRecord,
-  steps: SealedSteps | undefined
+  steps: SealedSteps
 ): Promise<void> => {
   if (record.unreadable || record.step === null) {
     return;
@@ -509,11 +408,11 @@ const foldRecord = async (
 /**
  * A read of a run's journal, record by record in the order it journaled
  * them (`fold`), and the steps of tasks those records tell so far, in the
- * order the run reached them (`steps`): for a run on the run host, as its
- * build's table of tasks places them (`sealed`, `sealedStepsOf`).
+ * order the run reached them (`steps`), as its build's table of tasks
+ * places them (`sealed`, `sealedStepsOf`).
  */
 export const traceReading = (
-  sealed?: SealedSteps
+  sealed: SealedSteps
 ): {
   fold: (record: HistoryRecord) => Promise<void>;
   steps: () => TraceStep[];
@@ -549,16 +448,17 @@ export const tracedSteps = async (
   build: () => Promise<LoadedBuild>
 ): Promise<TracedSteps> => {
   const stub = runObjectOf(env, id);
-  let sealed: SealedSteps | undefined;
+  let sealed: SealedSteps;
   try {
     sealed = sealedStepsOf(await build());
   } catch (error) {
-    // Logged where it loads (workflow-builds.ts): read as a build of
-    // resource-host.ts names its steps, so a run on the run host shows none.
+    // Logged where it loads (workflow-builds.ts): with no table to place
+    // its steps by, it shows none.
     log.error("workflow.trace_build_unreadable", {
       runId: id,
       ...errorFields(error),
     });
+    return { steps: [], truncated: false };
   }
   const reading = traceReading(sealed);
   let after = 0;
@@ -598,14 +498,8 @@ export const resourceRunTrace = async (
   env: Env,
   by: Acting,
   id: unknown,
-  runId: unknown,
-  options?: unknown
+  runId: unknown
 ): Promise<WorkflowRunTrace> => {
-  const { doors } = workflowResourceErrors.parse(
-    "workflow.resource_invalid",
-    workflowRunTraceOptionsSchema,
-    options
-  );
   const workflow = await requireWorkflowRole(env, by, id, "builder");
   const run = await resourceRunFor(env, by, workflow.id, runId);
   const definition = await workflowDefinition(
@@ -614,10 +508,7 @@ export const resourceRunTrace = async (
     workflow.id,
     run.version
   );
-  const parsed = z.json().parse(JSON.parse(definition));
-  // Its doors once per trace view: a trace followed again draws none.
-  const drawn = workflowDiagram(parsed);
-  const diagram = doors ? await withDoors(env, by, drawn, parsed) : drawn;
+  const diagram = workflowDiagram(definition);
   // Past its retention, or once swept, no more of it is shown than of its
   // result (resource-runs.ts): the engine may still hold its journal a
   // moment longer, on its own clock.

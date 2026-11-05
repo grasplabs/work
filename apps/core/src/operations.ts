@@ -306,7 +306,7 @@ export interface Invocation {
    * commit (`resource.unavailable`): a start there would open a lineage of
    * its own, past its run's nesting, descendant, active-time and host-call
    * limits (GRA-669). Letting a run start one needs its root and depth
-   * carried to the start, `admitChild` as it is admitted, and its attempts
+   * carried to the start, `admitInLineage` as it is admitted, and its attempts
    * counted on that root (quotas.ts).
    */
   readonly workflows?: WorkflowStarts;

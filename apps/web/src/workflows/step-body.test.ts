@@ -1,67 +1,45 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { definitionTitle, stepBodyAt } from "./step-body.ts";
+import { stepFieldsAt } from "./step-body.ts";
 
 // Reading the step a diagram's pointer names, from the text it was drawn
-// from: nested tasks and escaped IDs, and nothing for a pointer that names
-// no task, text that isn't JSON or a key reached only through a prototype.
+// from: nested steps, and nothing for a pointer that names no step, text
+// that isn't JSON or a key reached only through a prototype.
 
 const source = JSON.stringify({
-  do: [
-    { first: { set: { status: "one" } } },
+  $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
+  steps: [
+    { id: "first", type: "wait", for: "1 minute" },
     {
-      "check/a~b": {
-        try: [{ inner: { call: "http", with: { method: "get" } } }],
-        catch: { do: [] },
-      },
+      id: "check",
+      type: "try",
+      try: [{ id: "inner", type: "do", binding: "http", operation: "get" }],
+      catch: { do: [] },
     },
   ],
 });
 
-describe("a step's body", () => {
-  it("is read at a task's pointer, nested and with an escaped ID", () => {
+describe("a step's fields", () => {
+  it("are read at a step's pointer, nested, without its ID", () => {
     expect({
-      first: stepBodyAt(source, "/do/0/first"),
-      inner: stepBodyAt(source, "/do/1/check~1a~0b/try/0/inner"),
+      first: stepFieldsAt(source, "/steps/0"),
+      inner: stepFieldsAt(source, "/steps/1/try/0"),
     }).toStrictEqual({
-      first: { set: { status: "one" } },
-      inner: { call: "http", with: { method: "get" } },
+      first: { type: "wait", for: "1 minute" },
+      inner: { type: "do", binding: "http", operation: "get" },
     });
   });
 
-  it("is nothing where the pointer names no task, or the text isn't JSON", () => {
+  it("are nothing where the pointer names no step, or the text isn't JSON", () => {
     expect([
-      stepBodyAt(source, "/do/0/second"),
-      stepBodyAt(source, "/do/7/first"),
-      stepBodyAt(source, "/do/01/check~1a~0b"),
-      stepBodyAt(source, "/do"),
-      stepBodyAt(source, "do/0/first"),
-      stepBodyAt(source, "/do/0/first/set/status"),
-      stepBodyAt("{ not yet", "/do/0/first"),
-      stepBodyAt(source, "/do/0/constructor"),
-      stepBodyAt(source, "/__proto__/0/first"),
-    ]).toStrictEqual(Array.from({ length: 9 }));
-  });
-});
-
-/** Definition text whose document is titled `title`. */
-const titled = (title: unknown): string =>
-  JSON.stringify({ document: { name: "invoice-intake", title }, do: [] });
-
-describe("a definition's title", () => {
-  it("is its document's title, trimmed, and nothing where it sets none or the text isn't JSON", () => {
-    expect([
-      definitionTitle(titled("  Invoice intake ")),
-      definitionTitle(titled("   ")),
-      definitionTitle(titled(7)),
-      definitionTitle(JSON.stringify({ document: { name: "x" } })),
-      definitionTitle("{ not yet"),
-    ]).toStrictEqual([
-      "Invoice intake",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ]);
+      stepFieldsAt(source, "/steps/7"),
+      stepFieldsAt(source, "/steps/01"),
+      stepFieldsAt(source, "/steps"),
+      stepFieldsAt(source, "steps/0"),
+      stepFieldsAt(source, "/steps/1/catch"),
+      stepFieldsAt("{ not yet", "/steps/0"),
+      stepFieldsAt(source, "/steps/0/constructor"),
+      stepFieldsAt(source, "/__proto__/0"),
+    ]).toStrictEqual(Array.from({ length: 8 }));
   });
 });

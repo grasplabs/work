@@ -61,7 +61,7 @@ import {
   manifestPackagesSchema,
 } from "./workflows/package-seal.ts";
 import { triggeredAccountClaimed } from "./workflows/quotas.ts";
-import type { ChildPlace } from "./workflows/quotas.ts";
+import type { LineagePlace } from "./workflows/quotas.ts";
 import { frozenBindingsOf } from "./workflows/resource-authority.ts";
 import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 import { tellQueryFollowers } from "./workflows/run-changes.ts";
@@ -155,9 +155,6 @@ import type { StartFiles } from "./workflows/start-files.ts";
 //   serve it now, workflow-bindings.ts's own answer). A version a
 //   builder published after the review, or one before it, is code nobody
 //   reviewed for that target, and serves nothing until approved itself.
-// - A binding to another workflow it may not start, or that is gone: the
-//   admitting statement requires the bound workflow live and an active
-//   `start` grant of this workflow's own on it.
 // - Restricted data carried into an unrestricted run: a start by an App
 //   that read restricted data, or made by the call of an agent whose chat
 //   did, starts in restricted mode (`restrictedStart`), read after the
@@ -192,19 +189,11 @@ export type StartInvoker =
    * (inbound-email.ts, connector-events.ts), in `cause`, or it would open
    * a lineage of its own past the run's limits (GRA-692).
    */
-  | { type: "trigger"; triggerId: string; cause?: TriggerCause }
-  /**
-   * A run's `run` task starting its child (workflows/run-children.ts):
-   * only with the parent workflow's own `start` grant on the child's
-   * workflow, for the parent run's person, while the parent run is still
-   * going; never with the authority that started the parent. `place` is
-   * where its lineage admitted the child already (quotas.ts, `admitChild`).
-   */
-  | { type: "workflow"; parent: ParentRun; place: ChildPlace };
+  | { type: "trigger"; triggerId: string; cause?: TriggerCause };
 
 /**
  * The run whose event fired a trigger: where its lineage admitted the
- * trigger's run already (quotas.ts, `admitChild`), and whether it ran
+ * trigger's run already (quotas.ts, `admitInLineage`), and whether it ran
  * restricted, which the trigger's run then does too. The trigger's run
  * joins its lineage, never its life: it isn't the run's child, and goes
  * on after the run ends. Its work is charged to its workflow's own
@@ -213,17 +202,7 @@ export type StartInvoker =
 export interface TriggerCause {
   readonly runId: string;
   readonly restricted: boolean;
-  readonly place: ChildPlace;
-}
-
-/** The run whose `run` task starts a child, as its host knows it. */
-export interface ParentRun {
-  readonly runId: string;
-  readonly workflowId: string;
-  /** The person it acts for, whom the child acts for too. */
-  readonly principal: string;
-  /** Whether it runs restricted: its children do then too. */
-  readonly restricted: boolean;
+  readonly place: LineagePlace;
 }
 
 /**
@@ -254,19 +233,16 @@ export interface StartAuthorization {
    * restricted for good.
    */
   restricted: boolean;
-  /**
-   * The executable identity of the version's build, which the start's run
-   * is admitted for; null for a version without one: no run is admitted.
-   */
-  buildHash: string | null;
+  /** The executable identity of the version's build, which the start's run is admitted for. */
+  buildHash: string;
   /** For the audit log: who started it. */
   actor: AuditActor;
   /**
-   * For a child run: its parent and where it sits in its lineage, pinned
-   * with its row (resource-runs.ts, `RunAdmission.lineage`); for a run an
-   * event's trigger starts, where it sits, with no parent.
+   * For a run an event's trigger starts, where it sits in that event's
+   * run's lineage, pinned with its row (resource-runs.ts,
+   * `RunAdmission.lineage`).
    */
-  lineage?: { parentRunId: string | null; rootRunId: string; depth: number };
+  lineage?: { rootRunId: string; depth: number };
   /**
    * That it still holds, as SQL, read as the admitting statement runs: of
    * a fixed size whatever the version binds, as `required` holds the
@@ -499,8 +475,8 @@ export const pinned = async (
   configRevision: number;
   manifestHash: string;
   inputDescriptor: string;
-  /** The executable identity of its build; null when it has none. */
-  buildHash: string | null;
+  /** The executable identity of its build. */
+  buildHash: string;
   /** The approved graph its modules import (GRA-665); null for none. */
   graphHash: string | null;
 }> => {
@@ -544,7 +520,10 @@ export const pinned = async (
     graphHash =
       manifestPackagesSchema.parse(JSON.parse(row.manifest)).packages
         ?.graphHash ?? null;
-  } catch {
+  } catch (error) {
+    if (isExpectedError(error)) {
+      throw error;
+    }
     throw workflowResourceErrors.create("workflow.version_corrupt");
   }
   return {
@@ -552,27 +531,26 @@ export const pinned = async (
     configRevision: row.configRevision,
     manifestHash: row.manifestHash,
     inputDescriptor: JSON.stringify(input),
-    buildHash: build.executable ? build.hash : null,
+    buildHash: build.hash,
     graphHash,
   };
 };
 
 /**
  * What a start's bindings need to still hold as it is admitted: the
- * approvals serving its catalog bindings, the permissions of the workflow
- * they and its workflow bindings use, and the workflows it binds.
+ * approvals serving its catalog bindings, and the permissions of the
+ * workflow they use.
  */
 interface Required {
   approvals: string[];
   permissions: string[];
-  workflows: string[];
 }
 
 /**
  * That everything `required` (JSON text of `Required`) names still holds
  * for version `version` of workflow `id`, as SQL: each approval active,
- * given for this version; each permission active and the workflow's own;
- * each bound workflow live. One bound value, read with `json_each`, so the
+ * given for this version; each permission active and the workflow's own.
+ * One bound value, read with `json_each`, so the
  * statement stays within D1's bound parameters however many bindings a
  * version declares.
  */
@@ -584,16 +562,11 @@ const requiredSql = (id: string, version: number, required: string): SQL =>
     AND NOT EXISTS (SELECT 1 FROM json_each(${required}, '$.permissions') AS needed
       WHERE NOT EXISTS (SELECT 1 FROM permissions AS held
         WHERE held.id = needed.value AND held.status = 'active'
-          AND held.subject_type = 'workflow' AND held.subject_id = ${id}))
-    AND NOT EXISTS (SELECT 1 FROM json_each(${required}, '$.workflows') AS needed
-      WHERE NOT EXISTS (SELECT 1 FROM workflow_resources AS bound
-        WHERE bound.id = needed.value AND bound.deleted_at IS NULL)))`;
+          AND held.subject_type = 'workflow' AND held.subject_id = ${id})))`;
 
 /**
  * The bindings version `version` of workflow `id` declares, as a start
- * freezes them: each other workflow's exact version, with the permission
- * of this workflow's own that lets it start it (`workflow.start_denied`
- * without one); and for each catalog binding the active approval given
+ * freezes them: for each catalog binding the active approval given
  * for this version's exact declaration and its target
  * (`workflow.binding_unapproved` naming the alias when there is none), as
  * canonical JSON; and what of them must still hold as it is admitted.
@@ -606,37 +579,8 @@ const frozenBindings = async (
   const versions = await bindingsOf(env, id);
   const declared = versions.get(version) ?? [];
   const frozen: Record<string, unknown>[] = [];
-  const required: Required = { approvals: [], permissions: [], workflows: [] };
+  const required: Required = { approvals: [], permissions: [] };
   for (const binding of declared) {
-    if (binding.resourceId !== null) {
-      // This workflow's own grant to start it, never its builders'.
-      // oxlint-disable-next-line no-await-in-loop -- one point lookup per binding
-      const grant = await drizzle(env.DB)
-        .select({ id: permissions.id })
-        .from(permissions)
-        .where(
-          allowingPermissionSql(
-            {
-              type: "workflow",
-              workflowId: workflowResourceIdSchema.parse(id),
-            },
-            undefined,
-            {
-              type: "workflow",
-              workflowId: workflowResourceIdSchema.parse(binding.resourceId),
-            },
-            "start"
-          )
-        )
-        .get();
-      if (grant === undefined) {
-        throw denied();
-      }
-      frozen.push({ ...binding });
-      required.permissions.push(grant.id);
-      required.workflows.push(binding.resourceId);
-      continue;
-    }
     // oxlint-disable-next-line no-await-in-loop -- one point lookup per binding
     const approval = await approvalServing(env, id, version, binding);
     if (approval === undefined) {
@@ -806,40 +750,6 @@ const ruleOf = async (
           )})`,
       };
     }
-    case "workflow": {
-      const { parent } = invoker;
-      const parentWorkflow = workflowResourceIdSchema.safeParse(
-        parent.workflowId
-      );
-      if (!parentWorkflow.success) {
-        throw denied();
-      }
-      return {
-        invoker: { type: "workflow", id: parent.runId },
-        originAppVersion: null,
-        triggerVersion: null,
-        principal: parent.principal,
-        actor: { type: "system" },
-        // The parent workflow's own grant to start this one, never its
-        // builders' nor its invoker's; for a person who still has a role
-        // in both; while the parent run is still going.
-        holds: sql`(${workflowRoleSql(parent.principal, id)}
-          AND ${workflowRoleSql(parent.principal, parent.workflowId)}
-          AND EXISTS (SELECT 1 FROM workflow_resource_runs AS parent_run
-            WHERE parent_run.id = ${parent.runId}
-              AND parent_run.workflow_resource_id = ${parent.workflowId}
-              AND parent_run.principal_id = ${parent.principal}
-              AND parent_run.status IN ('starting', 'running', 'paused'))
-          AND ${grantSql(
-            allowingPermissionSql(
-              { type: "workflow", workflowId: parentWorkflow.data },
-              undefined,
-              object,
-              "start"
-            )
-          )})`,
-      };
-    }
     default: {
       return invoker satisfies never;
     }
@@ -896,8 +806,8 @@ const startOf = (
   inputHash: row.inputHash,
   paramsRevision: row.paramsRevision,
   bindingsHash: row.bindingsHash,
-  // Read with the run's own row, by `startWorkflow`.
-  runId: null,
+  // Every start admits its run, under the start's own ID.
+  runId: row.id,
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -1060,10 +970,6 @@ const restrictedStart = async (
       // Restricted spreads to the run an event of a restricted run starts.
       return invoker.cause?.restricted ?? false;
     }
-    case "workflow": {
-      // Restricted only ever spreads down a lineage, never lifts.
-      return invoker.parent.restricted;
-    }
     default: {
       return invoker satisfies never;
     }
@@ -1192,19 +1098,9 @@ const startInboxes = async (
 const lineageOf = (
   invoker: StartInvoker
 ): Pick<StartAuthorization, "lineage"> => {
-  if (invoker.type === "workflow") {
-    return {
-      lineage: {
-        parentRunId: invoker.parent.runId,
-        rootRunId: invoker.place.rootRunId,
-        depth: invoker.place.depth,
-      },
-    };
-  }
   if (invoker.type === "trigger" && invoker.cause !== undefined) {
     return {
       lineage: {
-        parentRunId: null,
         rootRunId: invoker.cause.place.rootRunId,
         depth: invoker.cause.place.depth,
       },
@@ -1423,7 +1319,7 @@ export const decideWorkflowStart = async (
     env,
     descriptorFromText(inputDescriptor),
     text,
-    { runId, workflowId: id, runs: buildHash !== null },
+    { runId, workflowId: id },
     files
   );
   return {
@@ -1469,9 +1365,7 @@ export const decideWorkflowStart = async (
  * starts make core spend at once.
  */
 const underRunLimit = (authorization: StartAuthorization): SQL =>
-  authorization.buildHash === null
-    ? sql`1`
-    : sql`((SELECT COUNT(*) FROM workflow_resource_runs AS live
+  sql`((SELECT COUNT(*) FROM workflow_resource_runs AS live
         WHERE live.workflow_resource_id = ${authorization.workflowId}
           AND live.principal_id = ${authorization.principal}
           AND live.status IN ('starting', 'running', 'paused')) < ${maxLiveRunsPerPrincipal})`;
@@ -1490,14 +1384,10 @@ const underRunLimit = (authorization: StartAuthorization): SQL =>
  */
 const triggeredAccountFor = (
   db: DrizzleD1Database,
-  { lineage, buildHash, workflowId }: StartAuthorization,
+  { lineage, workflowId }: StartAuthorization,
   run: { run: string; createdAt: number; admitted: SQL }
 ) => {
-  if (
-    lineage === undefined ||
-    lineage.parentRunId !== null ||
-    buildHash === null
-  ) {
+  if (lineage === undefined) {
     return { claim: [], aged: [] };
   }
   const { claim, aged } = triggeredAccountClaimed(db, {
@@ -1599,23 +1489,19 @@ export const admitWorkflowStart = async (
       ...account.claim,
       // Its run, pinned to the version's build, with the receipt or not at
       // all (resource-runs.ts): the engine is sent it once this commits.
-      ...(authorization.buildHash === null
-        ? []
-        : [
-            runAdmitted(db, {
-              receipt: id,
-              workflowId: authorization.workflowId,
-              version: authorization.version,
-              manifestHash: authorization.manifestHash,
-              buildHash: authorization.buildHash,
-              principal: authorization.principal,
-              restricted: authorization.restricted,
-              createdAt: createdAt.getTime(),
-              ...(authorization.lineage === undefined
-                ? {}
-                : { lineage: authorization.lineage }),
-            }),
-          ]),
+      runAdmitted(db, {
+        receipt: id,
+        workflowId: authorization.workflowId,
+        version: authorization.version,
+        manifestHash: authorization.manifestHash,
+        buildHash: authorization.buildHash,
+        principal: authorization.principal,
+        restricted: authorization.restricted,
+        createdAt: createdAt.getTime(),
+        ...(authorization.lineage === undefined
+          ? {}
+          : { lineage: authorization.lineage }),
+      }),
       ...account.aged,
       // The files its start handed its run: theirs once it is admitted.
       ...alsoAdmitted,

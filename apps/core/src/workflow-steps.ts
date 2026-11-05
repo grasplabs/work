@@ -1,30 +1,31 @@
 import type { workflowStepEditSchema } from "@grasp-os/shared/workflow-resources";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { stepListPaths } from "@grasp-os/workflow-schema/format";
 import type { z } from "zod";
 
-// One step of a draft edited from the canvas (GRA-514): a change of a
-// task's body, or a task inserted into a list of tasks, applied to the
-// draft's text as JSON. Pure: the draft saves what it answers as its next
-// revision (workflow-drafts.ts, `editWorkflowStep`), checked like any
-// edit, so a step the profile refuses is saved with its problems and never
-// becomes a checkpoint.
+// One step of a draft edited on the canvas or by the agent (GRA-514): a
+// change of a step's fields, or a step inserted into a list of steps,
+// applied to the draft's grasp-workflow/1 text as JSON. Pure: the draft
+// saves what it answers as its next revision (workflow-drafts.ts,
+// `editWorkflowStep`), checked like any edit, so a step the format refuses
+// is saved with its problems and never becomes a checkpoint.
 //
 // Threat model, and how each is closed:
 //
-// - Editing anything but a step. A pointer must name a list of tasks (its
-//   last token `do`, `try` or `branches`, where the profile keeps them, as
-//   the diagram names them) or a task in one: a single-key object in such
-//   a list, by its index and ID. Anything else is `workflow.step_not_found`.
-// - Prototype keys. The definition is walked by own keys and array
-//   indexes only, and a task is written as a new single-key object, so no
-//   pointer token or ID reaches an object's prototype.
+// - Editing anything but a step. A pointer must name the workflow's own
+//   list of steps (`/steps`), a list a step holds under one of its type's
+//   list paths (`stepListPaths`: `then`, `else`, `try`, `catch/do`), or a
+//   step in such a list, by its index. Anything else is
+//   `workflow.step_not_found`.
+// - Changing a step's identity. A change keeps the ID the step has, whatever
+//   the edit says: IDs are stable keys (`steps.<id>`), renamed by `title`.
+// - Prototype keys. The document is walked by own keys and array indexes
+//   only, and a step is written as a new object, so no pointer token or
+//   field reaches an object's prototype.
 // - A step changed under someone. The edit names the draft revision it
 //   read, and the draft saves it only over that revision.
 
 type StepEdit = z.infer<typeof workflowStepEditSchema>["edit"];
-
-/** The keys under which the profile keeps a list of tasks. */
-const taskListKeys: ReadonlySet<string> = new Set(["do", "try", "branches"]);
 
 const notFound = () => workflowResourceErrors.create("workflow.step_not_found");
 
@@ -35,7 +36,9 @@ const tokensOf = (pointer: string): string[] =>
     .split("/")
     .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
+type JsonRecord = Record<string, unknown>;
+
+const isObject = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const indexPattern = /^(?:0|[1-9]\d*)$/u;
@@ -44,65 +47,107 @@ const indexPattern = /^(?:0|[1-9]\d*)$/u;
 const indexOf = (token: string | undefined): number =>
   token !== undefined && indexPattern.test(token) ? Number(token) : -1;
 
-/** What `tokens` name in `root`, by own keys and indexes only. */
-const valueAt = (root: unknown, tokens: readonly string[]): unknown => {
-  let value: unknown = root;
-  for (const token of tokens) {
-    if (Array.isArray(value)) {
-      const index = indexOf(token);
-      value = index >= 0 && index < value.length ? value[index] : undefined;
-    } else if (isObject(value) && Object.hasOwn(value, token)) {
-      value = value[token];
-    } else {
-      return undefined;
-    }
-  }
-  return value;
-};
+/** A step's own value at `key`, by an own key only. */
+const own = (value: JsonRecord, key: string): unknown =>
+  Object.hasOwn(value, key) ? value[key] : undefined;
 
-/** The list of tasks `tokens` name in `root`, or `workflow.step_not_found`. */
-const taskList = (root: unknown, tokens: readonly string[]): unknown[] => {
-  const list = valueAt(root, tokens);
-  if (!taskListKeys.has(tokens.at(-1) ?? "") || !Array.isArray(list)) {
+/** The list paths a step of `type` may hold, none for a type there's no such. */
+const listPathsOf = (type: unknown): readonly string[] =>
+  Object.entries(stepListPaths).find(([each]) => each === type)?.[1] ?? [];
+
+/**
+ * The list of steps at `path` in `step`, created empty when its type may
+ * hold it and it holds none yet (an `if`'s first `else` step, say).
+ */
+const listIn = (step: JsonRecord, path: string): unknown[] => {
+  if (!listPathsOf(own(step, "type")).includes(path)) {
     throw notFound();
   }
+  const [first, second] = path.split("/");
+  let holder: JsonRecord = step;
+  let key = first ?? "";
+  if (second !== undefined) {
+    const inner = own(step, key) ?? {};
+    if (!isObject(inner)) {
+      throw notFound();
+    }
+    step[key] = inner;
+    holder = inner;
+    key = second;
+  }
+  const list = own(holder, key) ?? [];
+  if (!Array.isArray(list)) {
+    throw notFound();
+  }
+  holder[key] = list;
   return list;
 };
 
 /**
+ * The list of steps `tokens` name in `document`: `["steps"]`, or a step's
+ * tokens then one of its list paths' (`then`, or `catch`, `do`).
+ */
+const walk = (document: JsonRecord, tokens: readonly string[]): unknown[] => {
+  if (tokens.length === 1 && tokens[0] === "steps") {
+    const list = own(document, "steps");
+    if (!Array.isArray(list)) {
+      throw notFound();
+    }
+    return list;
+  }
+  // A list path is one token, or two (`catch/do`).
+  for (const size of [1, 2]) {
+    const path = tokens.slice(-size).join("/");
+    const holder = tokens.slice(0, -size);
+    if (holder.length >= 2 && indexOf(holder.at(-1)) >= 0) {
+      const step = walk(document, holder.slice(0, -1))[indexOf(holder.at(-1))];
+      if (isObject(step) && listPathsOf(own(step, "type")).includes(path)) {
+        return listIn(step, path);
+      }
+    }
+  }
+  throw notFound();
+};
+
+/** `fields` as a step with ID `id`: its ID first, any other `id` dropped. */
+const stepOf = (id: string, fields: Record<string, unknown>): JsonRecord =>
+  Object.fromEntries([
+    ["id", id],
+    ...Object.entries(fields).filter(([key]) => key !== "id"),
+  ]);
+
+/**
  * `source`, the draft's text, with `edit` applied, as the text to save:
- * formatted as JSON with two spaces. Text that isn't JSON is
- * `workflow.draft_not_json`; a pointer to no step or list of tasks,
+ * formatted as JSON with two spaces. Text that isn't a JSON object is
+ * `workflow.draft_not_json`; a pointer to no step or list of steps,
  * `workflow.step_not_found`.
  */
 export const applyStepEdit = (source: string, edit: StepEdit): string => {
-  let definition: unknown;
+  let document: unknown;
   try {
-    definition = JSON.parse(source);
+    document = JSON.parse(source);
   } catch {
+    throw workflowResourceErrors.create("workflow.draft_not_json");
+  }
+  if (!isObject(document)) {
     throw workflowResourceErrors.create("workflow.draft_not_json");
   }
   if (edit.kind === "change") {
     const tokens = tokensOf(edit.pointer);
-    const id = tokens.at(-1);
-    const index = indexOf(tokens.at(-2));
-    const list = taskList(definition, tokens.slice(0, -2));
-    const task = list[index];
-    if (
-      id === undefined ||
-      !isObject(task) ||
-      Object.keys(task).length !== 1 ||
-      !Object.hasOwn(task, id)
-    ) {
+    const list = walk(document, tokens.slice(0, -1));
+    const index = indexOf(tokens.at(-1));
+    const step = list[index];
+    const id = isObject(step) ? own(step, "id") : undefined;
+    if (typeof id !== "string") {
       throw notFound();
     }
-    list[index] = Object.fromEntries([[id, edit.body]]);
+    list[index] = stepOf(id, edit.step);
   } else {
-    const list = taskList(definition, tokensOf(edit.list));
+    const list = walk(document, tokensOf(edit.list));
     if (edit.index > list.length) {
       throw notFound();
     }
-    list.splice(edit.index, 0, Object.fromEntries([[edit.id, edit.body]]));
+    list.splice(edit.index, 0, stepOf(edit.id, edit.step));
   }
-  return JSON.stringify(definition, null, 2);
+  return JSON.stringify(document, null, 2);
 };

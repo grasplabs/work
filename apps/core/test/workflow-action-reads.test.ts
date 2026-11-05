@@ -1,7 +1,5 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import { agentIdSchema } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -20,8 +18,6 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
-import { publishTemplate } from "../src/resource-templates.ts";
-import { workflowPendingBindings } from "../src/workflow-binding-requests.ts";
 import { approveWorkflowBinding } from "../src/workflow-bindings.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
@@ -35,11 +31,10 @@ import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { refusal, unique } from "./sign-in.ts";
 
-// A workflow's own actions reading Knowledge and published templates
-// (resource-reads.ts), from GRA-700's threat model: a knowledge binding is
-// one collection, read as the run's person may, with only the operations
-// the action declares; a template binding is one pinned version; each call
-// is decided again and kept as an effect of its own; a sensitive
+// A workflow's own actions reading Knowledge (resource-reads.ts), from
+// GRA-700's threat model: a knowledge binding is one collection, read as
+// the run's person may, with only the operations the action declares;
+// each call is decided again and kept as an effect of its own; a sensitive
 // collection's data never reaches a run that isn't restricted.
 
 const identityOf = (userId: string, role: Role): Identity => ({
@@ -104,7 +99,7 @@ const granted = async (
 /** The module of action `look`, declaring `uses` and running `body`. */
 const lookModule = (
   body: string,
-  uses = '[resource.knowledge("docs", { operations: ["search", "read"] }), resource.template("letter")]'
+  uses = '[resource.knowledge("docs", { operations: ["search", "read"] })]'
 ): string => `import { action, resource, v } from "@grasp-os/sdk/action";
 
 export const look = action({
@@ -118,20 +113,18 @@ export const look = action({
 `;
 
 /**
- * Searches, reads the document the run's input names and the first hit by
- * its ID, and reads the letter.
+ * Searches, and reads the document the run's input names and the first
+ * hit by its ID.
  */
 const looksEverywhere =
   lookModule(`const hits = await ctx.resources.docs.search({ text: "leave" });
     const found = await ctx.resources.docs.read({ id: args.doc });
     const first = await ctx.resources.docs.read({ id: hits[0]?.id ?? "" });
-    const letter = await ctx.resources.letter.read();
     return {
       status: JSON.stringify({
         hits: hits.map(({ title }) => title),
         found: found.title,
         first: first.title,
-        greeting: letter.content,
       }),
     };`);
 
@@ -153,7 +146,7 @@ const searchesOrReads = lookModule(`if (args.doc.startsWith("search:")) {
 const recalls = lookModule(
   `const pack = await ctx.resources.docs.recall({ query: "leave" });
     return { status: JSON.stringify(pack.items.map(({ citationLocator }) => citationLocator[0] ?? "")) };`,
-  '[resource.knowledge("docs", { operations: ["recall"] }), resource.template("letter")]'
+  '[resource.knowledge("docs", { operations: ["recall"] })]'
 );
 
 /** The workflow's `brain` permission, granted by `admin`. */
@@ -172,7 +165,7 @@ const brainOf = async (
 /** A definition of `name` calling action `look`, after `before`. */
 const definitionOf = (
   name: string,
-  keys: { knowledge: string; template: string },
+  keys: { knowledge: string },
   before: unknown[] = []
 ): string =>
   JSON.stringify({
@@ -189,7 +182,6 @@ const definitionOf = (
           bindings: {
             look: { kind: "operation", contract: "local:code/look.ts#look" },
             docs: { kind: "knowledge", contract: keys.knowledge },
-            letter: { kind: "template", contract: keys.template },
           },
         },
       },
@@ -217,8 +209,8 @@ const hold = { hold: { wait: "PT1S" } };
  * A workflow of `by`'s whose action reads `docs`, its one collection: the
  * handbook everyone reads, the payroll team's own (`team`), or its
  * sensitive salaries collection (`sensitive`), each granted to the
- * workflow and approved by `admin`, with `letter` a pinned template
- * version. Also a collection it was never granted.
+ * workflow and approved by `admin`. Also a collection it was never
+ * granted.
  */
 const readingWorkflow = async (
   by: Identity,
@@ -230,17 +222,10 @@ const readingWorkflow = async (
     before = [],
   }: { sensitive?: boolean; team?: boolean; before?: unknown[] } = {}
 ) => {
-  const keys = {
-    knowledge: `docs-${unique()}`,
-    template: `letter-${unique()}`,
-  };
+  const keys = { knowledge: `docs-${unique()}` };
   await publishCatalogContract(env, admin, {
     key: keys.knowledge,
     kind: "knowledge",
-  });
-  await publishCatalogContract(env, admin, {
-    key: keys.template,
-    kind: "template",
   });
   // A team of the admin and the workflow's builder, whose run reads as
   // them: a sensitive collection is a team's.
@@ -302,33 +287,9 @@ const readingWorkflow = async (
     target: { kind: "knowledge", permissionId },
     reviewed: { version: 1 },
   });
-  const content = { greeting: "Dear" };
-  const template = await publishTemplate(env, admin, {
-    contract: "grasp.letter@1",
-    content,
-  });
-  // As an admin approves it on the workflow's page: the version offered.
-  const [pending] = await workflowPendingBindings(env, admin, workflow.id);
-  const offered = pending?.bindings
-    .find(({ alias }) => alias === "letter")
-    ?.offered.find(
-      ({ target }) =>
-        target.kind === "template" &&
-        target.templateId === template.templateId &&
-        target.contentHash === template.contentHash
-    );
-  if (offered === undefined) {
-    throw new Error("The template version isn't offered");
-  }
-  await approveWorkflowBinding(env, admin, workflow.id, {
-    alias: "letter",
-    target: offered.target,
-    reviewed: { version: 1 },
-  });
   return {
     workflow,
     permissionId,
-    templateId: template.templateId,
     documents: { leave: leave.id, elsewhere: elsewhere.id },
   };
 };
@@ -400,8 +361,8 @@ const refusalsOf = async (runId: string) => {
     .map(({ detail }) => ({ call: detail?.call, reason: detail?.reason }));
 };
 
-describe("a workflow action's knowledge and template uses", () => {
-  it("search and read their one collection as the run's person, read the pinned template, each call an effect of its own", async () => {
+describe("a workflow action's knowledge uses", () => {
+  it("search and read their one collection as the run's person, each call an effect of its own", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const { workflow, documents } = await readingWorkflow(
@@ -424,15 +385,12 @@ describe("a workflow action's knowledge and template uses", () => {
             found: "Leave",
             // What a search found, read by the ID it answered.
             first: "Leave",
-            greeting: { greeting: "Dear" },
           }),
         },
       },
       receipts: [
         ["grasp.knowledge", "docs"],
         ["grasp.knowledge", "docs"],
-        ["grasp.knowledge", "docs"],
-        ["grasp.template", "letter"],
       ].flatMap(([call, binding]) =>
         ["started", "done"].map((result) => ({ call, binding, result }))
       ),
@@ -456,7 +414,7 @@ describe("a workflow action's knowledge and template uses", () => {
         `const docs = ctx.resources.docs as unknown as Record<string, (request: unknown) => Promise<unknown>>;
     await docs.read?.({ id: args.doc });
     return { status: "read" };`,
-        '[resource.knowledge("docs", { operations: ["search"] }), resource.template("letter")]'
+        '[resource.knowledge("docs", { operations: ["search"] })]'
       )
     );
     const undeclaredRun = await started(
@@ -483,7 +441,7 @@ describe("a workflow action's knowledge and template uses", () => {
     });
   });
 
-  it("refuse the next read once the workflow's permission is revoked, a template whose content changed since it was approved, and a sensitive collection's data to a run that isn't restricted", async () => {
+  it("refuse the next read once the workflow's permission is revoked, and a sensitive collection's data to a run that isn't restricted", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const revoked = await readingWorkflow(ada, admin, looksEverywhere, {
@@ -496,28 +454,6 @@ describe("a workflow action's knowledge and template uses", () => {
     );
     await revokePermission(env, admin, revoked.permissionId);
     const revokedEnd = await ended(ada, revoked.workflow.id, revokedRun);
-    // Reads the letter alone, once its content changed.
-    const tampered = await readingWorkflow(
-      ada,
-      admin,
-      lookModule(`const letter = await ctx.resources.letter.read();
-    return { status: JSON.stringify(letter.content) };`),
-      { before: [hold] }
-    );
-    const tamperedRun = await started(
-      ada,
-      tampered.workflow.id,
-      tampered.documents.leave
-    );
-    // Its content and the hash stored with it changed together, behind
-    // the platform's back: only the approval's pin still tells.
-    const changed = canonicalJson({ greeting: "Changed" });
-    await env.DB.prepare(
-      "UPDATE resource_templates SET content = ?, content_hash = ? WHERE id = ?"
-    )
-      .bind(changed, await sha256Hex(changed), tampered.templateId)
-      .run();
-    const tamperedEnd = await ended(ada, tampered.workflow.id, tamperedRun);
     const sensitive = await readingWorkflow(ada, admin, looksEverywhere, {
       sensitive: true,
     });
@@ -528,12 +464,9 @@ describe("a workflow action's knowledge and template uses", () => {
     );
     expect({
       revoked: revokedEnd,
-      tampered: tamperedEnd,
       sensitive: sensitiveEnd,
     }).toStrictEqual({
       revoked: { status: "failed", code: "workflow.call_denied" },
-      // Content no longer the pinned hash's serves nothing.
-      tampered: { status: "failed", code: "resource.unavailable" },
       sensitive: { status: "failed", code: "permission.restricted" },
     });
   });
@@ -635,14 +568,11 @@ describe("a workflow action's knowledge and template uses", () => {
   it("refuse approving a collection no run's person may ever read: one only its owner reads, one only admins read, or one deleted", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const keys = {
-      knowledge: `docs-${unique()}`,
-      template: `letter-${unique()}`,
-    };
-    for (const kind of ["knowledge", "template"] as const) {
-      // oxlint-disable-next-line no-await-in-loop -- one at a time
-      await publishCatalogContract(env, admin, { key: keys[kind], kind });
-    }
+    const keys = { knowledge: `docs-${unique()}` };
+    await publishCatalogContract(env, admin, {
+      key: keys.knowledge,
+      kind: "knowledge",
+    });
     const workflow = await createWorkflowResource(env, ada, `read-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: definitionOf(workflow.name, keys),
@@ -717,53 +647,6 @@ describe("a workflow action's knowledge and template uses", () => {
         },
       },
     });
-  });
-
-  it("refuse a definition whose action uses a knowledge or template binding as another kind", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const keys = {
-      knowledge: `docs-${unique()}`,
-      template: `letter-${unique()}`,
-    };
-    await publishCatalogContract(env, admin, {
-      key: keys.knowledge,
-      kind: "knowledge",
-    });
-    await publishCatalogContract(env, admin, {
-      key: keys.template,
-      kind: "template",
-    });
-    for (const uses of [
-      // Uses the template binding as knowledge.
-      '[resource.knowledge("letter", { operations: ["search"] })]',
-      // Uses the knowledge binding as a template.
-      '[resource.template("docs")]',
-    ]) {
-      // oxlint-disable-next-line no-await-in-loop -- one at a time
-      const workflow = await createWorkflowResource(
-        env,
-        ada,
-        `read-${unique()}`
-      );
-      // oxlint-disable-next-line no-await-in-loop -- one at a time
-      const error = await refusal(
-        publishWorkflowVersion(env, ada, workflow.id, {
-          definition: definitionOf(workflow.name, keys),
-          basedOn: null,
-          modules: {
-            "code/look.ts": lookModule('return { status: "x" };', uses),
-          },
-        })
-      );
-      const parsed = z
-        .object({ code: z.string(), details: z.unknown() })
-        .parse(error);
-      expect([parsed.code, JSON.stringify(parsed.details)]).toStrictEqual([
-        "workflow.definition_invalid",
-        expect.stringContaining("binding.unknown_use"),
-      ]);
-    }
   });
 
   it("recall their one collection through the Brain only while the workflow holds the brain permission, and stop once it is revoked", async () => {

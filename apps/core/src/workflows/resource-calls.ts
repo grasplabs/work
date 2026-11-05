@@ -18,9 +18,8 @@ import {
   runFileLimits,
   runFileNameSchema,
 } from "@grasp-os/shared/run-files";
+import { valueDepth } from "@grasp-os/shared/value-depth";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
-import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
 import { waitUntil } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -35,6 +34,7 @@ import {
   callApprovedStoreOperation,
 } from "../workflow-bindings.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
+import { writeJson } from "./bounded-json.ts";
 import { schemaOfDescriptor, takesExactly } from "./exact-values.ts";
 import { runFileTypeShown } from "./office-files.ts";
 import {
@@ -67,7 +67,6 @@ import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 // and `grasp.model` calls, each through the target its start froze for
 // the call's binding, and only through connect, a business store's public
 // operation (store-operations.ts) or the model gateway, as every external call and model call of the platform.
-// Its time and random numbers are the run host's (resource-host.ts).
 //
 // Threat model, and how each is closed:
 //
@@ -89,7 +88,7 @@ import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 //   every attempt and replay), which connect keys a side effect's stored
 //   result by, and a store operation commits under as its receipt's key.
 //   A model call's step isn't retried
-//   (resource-host.ts): a model request is not idempotent.
+//   (sealed-run.ts, `triedOnceCalls`): a model request is not idempotent.
 // - Arguments or answers that aren't the contract's. Arguments are checked
 //   against the binding's catalog contract before anything is sent, and
 //   what comes back against it before the run sees it, by the SDK's
@@ -106,7 +105,7 @@ import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 //   start carried. Its connector calls carry its restricted mode to
 //   connect, which holds every one but a native connector's declared
 //   reads for its person (`connect.held`; the run waits for their
-//   decision, resource-host.ts); and the App owning a store it calls an
+//   decision, host.ts); and the App owning a store it calls an
 //   operation of is restricted before the input reaches it, audited with
 //   the run as provenance (`callApprovedStoreOperation`).
 // - A run's files leaving through a connector write (GRA-887). A write
@@ -155,7 +154,7 @@ export interface Effect {
   readonly sending?: () => void;
 }
 
-/** A task's call, its arguments built by the host (resource-host.ts). */
+/** A task's call, its arguments built by the host (sealed-run.ts, `#sent`). */
 export type BuiltCall =
   | {
       readonly name: "grasp.operation";
@@ -188,8 +187,6 @@ export type BuiltCall =
       readonly input: Json;
       /** The task's own output schema, as a descriptor. */
       readonly outputSchema: Json;
-      readonly model?: Json;
-      readonly maxOutputTokens?: Json;
     }
   | {
       /** A Knowledge collection's search, read or recall, by an action (GRA-700). */
@@ -235,17 +232,15 @@ const callInvalid = (issue: string) =>
  * it exactly as it is (exact-values.ts): a contract checks what crosses
  * it, never fills in or changes it (`workflow.call_invalid`, naming
  * `what`, never the value). Written once by the bounded writer first, so
- * a value past what a step records, or nested past the evaluator's depth,
+ * a value past what a step records, or nested deeper than a value may,
  * is refused before anything walks it.
  */
 /** `value` as JSON, as much as a step records, or `workflow.call_invalid`. */
 const boundedAnswer = (value: unknown, what: string): Json => {
   const written = writeJson(value, {
     maxBytes: platformLimits.stepPayloadBytes,
-    maxDepth: evaluatorLimits.maxJsonDepth,
+    maxDepth: valueDepth,
     maxNodes: platformLimits.stepPayloadBytes,
-    sortKeys: false,
-    safeIntegers: false,
   });
   if (!written.ok) {
     throw callInvalid(
@@ -625,7 +620,7 @@ const callConnector = async (
   if (result.pending !== undefined) {
     // Connect answers a workflow's held side effect (a restricted run's)
     // with `connect.held`, whose decision the run waits for
-    // (resource-host.ts), never with a held answer: never a success.
+    // (host.ts), never with a held answer: never a success.
     throw workflowResourceErrors.create("workflow.call_denied");
   }
   let output: unknown;
@@ -737,23 +732,16 @@ const callOperation = async (
 
 /**
  * What model call `call` asks for, checked as every model call is, a test
- * run's included: its instructions as text, and a whole number above 0 of
- * output tokens if any (`workflow.call_invalid` otherwise).
+ * run's included: its instructions as text (`workflow.call_invalid`
+ * otherwise).
  */
 export const requireModelRequest = (
   call: Extract<BuiltCall, { name: "grasp.model" }>
-): { instructions: string; tokens: number | undefined } => {
+): string => {
   if (typeof call.instructions !== "string") {
     throw callInvalid("instructions: Give text.");
   }
-  const tokens = call.maxOutputTokens;
-  if (
-    tokens !== undefined &&
-    (typeof tokens !== "number" || !Number.isSafeInteger(tokens) || tokens < 1)
-  ) {
-    throw callInvalid("maxOutputTokens: Give a whole number above 0.");
-  }
-  return { instructions: call.instructions, tokens };
+  return call.instructions;
 };
 
 /**
@@ -773,10 +761,7 @@ const callModel = async (
   if (target.kind !== "model") {
     throw workflowResourceErrors.create("workflow.call_denied");
   }
-  const { instructions, tokens } = requireModelRequest(call);
-  if (call.model !== undefined && call.model !== target.model) {
-    throw callInvalid("model: The binding admits only its own model.");
-  }
+  const instructions = requireModelRequest(call);
   const descriptor = JSON.stringify(call.outputSchema);
   const native = schemaOfDescriptor(descriptor);
   // What refused the request, said as it was: the gateway reports any
@@ -793,7 +778,6 @@ const callModel = async (
   try {
     answer = await models(env).call({
       model: target.model,
-      ...(tokens === undefined ? {} : { maxTokens: tokens }),
       system: instructions,
       input: z.json().parse(call.input),
       schema: z.fromJSONSchema(
@@ -822,7 +806,7 @@ const callModel = async (
         effect.sending?.();
       },
       // One request per call, so the run's limit of model calls
-      // (`maxModelCalls`, resource-host.ts) bounds its requests: an answer
+      // (`maxModelCalls`, sealed-run.ts) bounds its requests: an answer
       // that doesn't fit the task's schema fails the call, never asks again,
       // and a request the provider refused for a moment isn't sent again
       // either: the step is tried once (spec 13.7), so a refusal fails it.
@@ -848,7 +832,7 @@ const callModel = async (
  * sealed `uses` doesn't list, a connector operation its use doesn't
  * declare, a request of the wrong shape or past its bounds, one past the
  * attempt's calls, or a model call past the run's `maxModelCalls`
- * (resource-host.ts, GRA-700).
+ * (sealed-run.ts, `#reserveModelCall`, GRA-700).
  */
 export type AdmissionReason =
   | "use_undeclared"

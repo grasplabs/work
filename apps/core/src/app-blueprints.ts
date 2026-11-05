@@ -25,10 +25,7 @@ import { blueprintWorkflowSchema } from "@grasp-os/shared/permissions";
 import type { BlueprintWorkflow } from "@grasp-os/shared/permissions";
 import { canBuild, requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  workflowNamespace,
-  workflowResourceErrors,
-} from "@grasp-os/shared/workflow-resources";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { waitUntil } from "cloudflare:workers";
 import { and, asc, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -219,34 +216,6 @@ const shippedWorkflowName = (blueprint: string, alias: string): string => {
   return `${prefix}-${suffix}`;
 };
 
-/**
- * `definition` as the workflow named `name` publishes it: its document's
- * namespace and name are that workflow's, whatever the release wrote.
- * Text that isn't a definition is left as it is, for publication to
- * refuse.
- */
-const definitionNamed = (definition: string, name: string): string => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(definition);
-  } catch {
-    return definition;
-  }
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !("document" in parsed) ||
-    typeof parsed.document !== "object" ||
-    parsed.document === null
-  ) {
-    return definition;
-  }
-  return JSON.stringify({
-    ...parsed,
-    document: { ...parsed.document, namespace: workflowNamespace, name },
-  });
-};
-
 /** A workflow a copy got, created and published for it. */
 interface ShippedWorkflow {
   alias: string;
@@ -290,22 +259,25 @@ const createShippedWorkflows = async (
   blueprint: string,
   shipped: readonly BlueprintWorkflow[]
 ): Promise<ShippedWorkflow[]> => {
-  const named = shipped.map(({ alias, binding, definition }) => {
-    const name = shippedWorkflowName(blueprint, alias);
-    return {
-      alias,
-      binding,
-      name,
-      definition: definitionNamed(definition, name),
-    };
-  });
+  // A grasp-workflow/1 document names no workflow: each copy's is
+  // published as the release wrote it, under a name of its own.
+  const named = shipped.map(({ alias, binding, definition }) => ({
+    alias,
+    binding,
+    name: shippedWorkflowName(blueprint, alias),
+    definition,
+  }));
   // Every definition checked as its publication will check it, before any
   // workflow is made: a creation counts toward the creator's quota for
   // good, deleted or not, so none is made for a definition that wouldn't
   // publish.
-  for (const { name, definition } of named) {
+  for (const { definition } of named) {
     // oxlint-disable-next-line no-await-in-loop -- a few, one at a time
-    const problems = await definitionProblems(env, by, { name }, definition);
+    const problems = await definitionProblems(
+      env,
+      definition,
+      `blueprint:${blueprint}`
+    );
     if (problems.length > 0) {
       throw workflowResourceErrors.create("workflow.definition_invalid", {
         // Each a code, a pointer and fixed text, as publication refuses it.

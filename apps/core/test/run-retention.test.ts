@@ -1,7 +1,6 @@
-/* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
 import { v } from "@grasp-os/sdk";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -26,6 +25,7 @@ import {
 } from "../src/workflows/retention.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  definitionOf,
   endedRun,
   endLiveResourceRuns,
   greetingTasks,
@@ -88,14 +88,11 @@ const removedWords =
 /** The time `days` from now, for the clock to run at. */
 const daysOn = (days: number): Date => new Date(Date.now() + days * day);
 
-/** Tasks that fail on what the run read: it is no number. */
-const failingTasks = [
-  {
-    greet: {
-      set: { status: "${ $workflow.input.who | tonumber | tostring }" },
-    },
-  },
-];
+/** A definition that fails on what the run read: a text this short has no ten-thousandth letter. */
+const failing = (): string =>
+  definitionOf([], {
+    status: { $expr: 'input.who.split("")[9999].toUpperCase()' },
+  });
 
 /** What run `id`'s start receipt keeps of it. */
 const receiptOf = async (id: string) =>
@@ -121,8 +118,11 @@ const outputOf = async (by: Person, workflow: string, runId: string) => {
   return run.output;
 };
 
-/** A run of a workflow of `by`'s running `tasks`, reading the transcript, once ended. */
-const endedReading = async (by: Person, tasks: unknown[]) => {
+/**
+ * A run of a workflow of `by`'s running `tasks` (or the definition they
+ * make), reading the transcript, once ended.
+ */
+const endedReading = async (by: Person, tasks: unknown[] | (() => string)) => {
   const { id } = await publishedWorkflow(by, tasks);
   const runId = await startedBy(by, id, { who: transcript });
   await endedRun(by, id, runId);
@@ -147,60 +147,36 @@ const response = v.union(v.null(), v.object({ comment: v.string() }));
  * A workflow that asks its reviewer param to approve what it read (the
  * `approval` decision binding of `contract`), its prompt quoting it.
  */
-const approvalDefinition = (name: string, contract: string): string =>
+const approvalDefinition = (contract: string): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {
-            reviewer: {
-              schema: { type: "string", "x-grasp-value": { kind: "person" } },
-              label: "Reviewer",
-              required: true,
-              sensitive: false,
-            },
-          },
-          bindings: { approval: { kind: "decision", contract } },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: {
+        status: {
+          $expr: 'steps.review.output.approved ? "approved" : "rejected"',
         },
       },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      {
-        review: {
-          call: "grasp.decision",
-          with: {
-            binding: "approval",
-            recipients: "${ [$params.reviewer] }",
-            prompt: '${ "Approve: " + $workflow.input.who }',
-            input: "${ $workflow.input }",
-          },
-          export: { as: "${ $context + {review: .} }" },
-        },
+    params: {
+      reviewer: {
+        kind: "person",
+        label: "Reviewer",
+        default: "role:admin",
+        sensitive: false,
       },
+    },
+    bindings: { approval: { kind: "decision", contract } },
+    steps: [
       {
-        route: {
-          switch: [
-            {
-              accepted: {
-                when: "${ $context.review.approved == true }",
-                then: "approved",
-              },
-            },
-            { declined: { then: "rejected" } },
-          ],
-        },
+        id: "review",
+        type: "decision",
+        binding: "approval",
+        recipients: { $expr: "[params.reviewer]" },
+        prompt: { $expr: '"Approve: " + input.who' },
+        input: { $expr: "input" },
       },
-      { approved: { set: { status: "approved" }, then: "finished" } },
-      { rejected: { set: { status: "rejected" }, then: "finished" } },
-      { finished: { set: "${ . }" } },
     ],
   });
 
@@ -282,7 +258,7 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
     const builder = await signedIn("builder");
     const by = builder;
     const done = await endedReading(by, greetingTasks());
-    const failed = await endedReading(by, failingTasks);
+    const failed = await endedReading(by, failing);
     const read = async () => ({
       done: detailsOf(await runFor(by, done.workflow, done.runId)),
       failed: detailsOf(await runFor(by, failed.workflow, failed.runId)),
@@ -345,9 +321,9 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
 
   it("never touches a run that hasn't ended, paused or not, and one a sweep passed goes on to keep all it did", async () => {
     const builder = await signedIn("builder");
-    const { id } = await publishedWorkflow(builder, greetingTasks("PT1H"));
+    const { id } = await publishedWorkflow(builder, greetingTasks("1 hour"));
     const runId = await startedBy(builder, id, { who: transcript });
-    await sleeping(runId, "task:hold");
+    await sleeping(runId, "hold:task");
     const started = await receiptOf(runId);
 
     // While it sleeps, long after it started.
@@ -364,7 +340,7 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
     await runQuarterHourTasks({}, daysOn(400));
     const whilePaused = await receiptOf(runId);
     // Resumed, it finishes as if no sweep had come by.
-    await woken(runId, "task:hold");
+    await woken(runId, "hold:task");
     const ended = await endedRun(builder, id, runId);
 
     expect({
@@ -425,7 +401,7 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
       `approve-${unique()}`
     );
     await publishWorkflowVersion(env, owner.acting, workflow.id, {
-      definition: approvalDefinition(workflow.name, contract),
+      definition: approvalDefinition(contract),
       basedOn: null,
     });
     await approveWorkflowBinding(env, admin.acting, workflow.id, {
@@ -434,7 +410,7 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
       reviewed: { version: 1 },
     });
     await setWorkflowParams(env, owner.acting, workflow.id, {
-      values: { reviewer: reviewer.userId },
+      values: { reviewer: `person:${reviewer.userId}` },
       expectedRevision: 0,
     });
     const runId = await startedBy(owner, workflow.id, {

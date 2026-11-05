@@ -56,8 +56,8 @@ import { runEngine } from "./engine.ts";
 //   run for the App's call, an independent workflow's run for the
 //   workflow's (GRA-688), each by the run its key names, of that App or
 //   workflow, while it hasn't ended. An App's call an independent run's
-//   step made through an export wakes nothing: that step is tried once,
-//   and failed as held (resource-host.ts), so nothing waits on it.
+//   action made wakes nothing: an action's step is tried once
+//   (sealed-run.ts, `triedOnceCalls`), so nothing waits on it.
 
 /** A wake a run is owed. */
 export interface Wake {

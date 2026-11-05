@@ -52,13 +52,12 @@ import { compileModule } from "./src/compile.ts";
 import {
   computeRunnerImports,
   computeSdkImports,
-  openWorkflowSdkImports,
+  generatedWorkflowSdkImports,
   sdkImports,
 } from "./src/imports.ts";
 import {
   compilerAssets,
   kitModule,
-  jqWasmModule,
   typesModule,
   kitModuleName,
   kitStylesheet,
@@ -92,20 +91,12 @@ const shared = realpathSync(path.join(sdk, "node_modules/@grasp-os/shared"));
  * and Knowledge's types come from: carried for the same reason.
  */
 const brain = realpathSync(path.join(sdk, "node_modules/@grasp-os/brain"));
-/**
- * The workflow SDK's jq (its `evaluate`): its types are the SDK's, and its
- * WebAssembly a module of every workflow isolate (`jqWasmModule`).
- */
-const expressions = realpathSync(
-  path.join(sdk, "node_modules/@grasp-os/workflow-expressions")
-);
 /** The platform's own packages the kit's types come from, by name. */
 const ownPackages: Readonly<Record<string, string>> = {
   "@grasp-os/sdk": sdk,
   "@grasp-os/ui": ui,
   "@grasp-os/shared": shared,
   "@grasp-os/brain": brain,
-  "@grasp-os/workflow-expressions": expressions,
 };
 const require = createRequire(path.join(root, "package.json"));
 
@@ -530,34 +521,6 @@ const buildKitModules = async (
   return built;
 };
 
-/** jq's WebAssembly, as workflow-expressions pins it. */
-const jqWasmSource = path.join(expressions, "src/jq.wasm");
-
-/**
- * jq's WebAssembly, which the workflow SDK's `evaluate` imports: not
- * bundled, but a module of the workflow isolate by its flat name
- * (`jqWasmModule`), as core loads it from the release (`jq.wasm`). It is
- * the only WebAssembly the SDK may import.
- */
-const jqWasmExternal: Plugin = {
-  name: "grasp-jq-wasm",
-  // Before Vite's own WebAssembly plugin, which would inline it.
-  enforce: "pre",
-  resolveId: (source, importer) => {
-    if (!source.endsWith(".wasm")) {
-      return null;
-    }
-    const resolved =
-      importer === undefined
-        ? source
-        : path.resolve(path.dirname(importer), source);
-    if (realpathSync(resolved) !== jqWasmSource) {
-      throw new Error(`The SDK may import no WebAssembly but jq's: ${source}`);
-    }
-    return { id: jqWasmModule, external: true };
-  },
-};
-
 /**
  * The SDK's modules for `specifiers`, which code runs with outside
  * screens: what a workflow's or an App test's isolate loads (`sdkImports`
@@ -579,7 +542,6 @@ const buildSdkModules = async (
     mode: "production",
     define: production,
     resolve: { conditions: ["workerd", "worker"] },
-    plugins: [jqWasmExternal],
     build: {
       write: false,
       minify: true,
@@ -1838,7 +1800,7 @@ const buildAppCompiler = async (
   const typed = [
     ...imports,
     "lucide-react",
-    ...openWorkflowSdkImports,
+    ...generatedWorkflowSdkImports,
     ...computeSdkImports,
     // An App's server code is type-checked against what it and its
     // generated modules import (app-code.ts).
@@ -1881,18 +1843,19 @@ const buildAppCompiler = async (
   // oxlint's, oxfmt's and oxc's parser's, which Ultracite's isolate runs,
   // as pinned.
   const oxc = await oxcWasm();
-  // jq's, which every workflow isolate loads beside the SDK's modules.
-  const jqWasm = readFileSync(jqWasmSource);
   const kitModules = modulesOf(kitCode);
   const kitPreviewModules = modulesOf(previewKitCode);
   // The run hosts', App tests' and JSON workflows' isolates share one set:
   // each imports only its own entry of it (imports.ts).
   const workflowSdkModules = modulesOf(
+    // Generated code imports one of the App workflows' entries: each once.
     await buildSdkModules([
-      ...sdkImports,
-      ...openWorkflowSdkImports,
-      ...computeSdkImports,
-      ...computeRunnerImports,
+      ...new Set([
+        ...sdkImports,
+        ...generatedWorkflowSdkImports,
+        ...computeSdkImports,
+        ...computeRunnerImports,
+      ]),
     ])
   );
   const serverSdkModules = modulesOf(await buildSdkModules(serverSdkImports));
@@ -1912,7 +1875,6 @@ const buildAppCompiler = async (
     .update(oxc)
     .update(packageBuilder)
     .update(esbuildWasm)
-    .update(jqWasm)
     .update(checker)
     .update(typesJson)
     .update(tsrsWasm)
@@ -1930,7 +1892,6 @@ const buildAppCompiler = async (
     [compilerAssets.packageBuilder]: packageBuilder,
     [compilerAssets.esbuildWasm]: esbuildWasm,
     [compilerAssets.reference]: referenceJson,
-    [compilerAssets.jqWasm]: jqWasm,
     [compilerAssets.checker]: checker,
     [compilerAssets.types]: typesJson,
     [compilerAssets.tsrsWasm]: tsrsWasm,

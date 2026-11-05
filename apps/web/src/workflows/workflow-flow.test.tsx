@@ -39,11 +39,11 @@ const settled = async (): Promise<void> => {
   }
 };
 
-/** A task as core draws it, with nothing in it. */
+/** A step as core draws it, with nothing in it. */
 const task = (id: string, index: number): DiagramTask => ({
   id,
-  pointer: `/do/${index}/${id}`,
-  kind: "set",
+  pointer: `/steps/${index}`,
+  kind: "wait",
   label: null,
   detail: null,
   guarded: false,
@@ -51,14 +51,15 @@ const task = (id: string, index: number): DiagramTask => ({
   scopes: [],
 });
 
-/** A draft at `revision` whose tasks set `status`, drawn as core would. */
+/** A draft at `revision` whose steps wait a minute, drawn as core would. */
 const draftOf = (
   revision: number,
   ids: readonly string[],
   passes = true
 ): WorkflowDraft => {
   const source = JSON.stringify({
-    do: ids.map((id) => ({ [id]: { set: { status: id } } })),
+    $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
+    steps: ids.map((id) => ({ id, type: "wait", for: "1 minute" })),
   });
   const diagram: WorkflowDiagram = { tasks: ids.map(task) };
   return {
@@ -177,7 +178,7 @@ describe("a workflow's Flow", () => {
         const prototype = Reflect.getPrototypeOf(field) ?? {};
         Reflect.getOwnPropertyDescriptor(prototype, "value")?.set?.call(
           field,
-          '{ "set": { "status": "hello" } }'
+          '{ "type": "wait", "for": "2 minutes" }'
         );
         field.dispatchEvent(new Event("input", { bubbles: true }));
       }
@@ -198,7 +199,7 @@ describe("a workflow's Flow", () => {
       after: drawn(),
     }).toStrictEqual({
       before: { drawn: ["greet", "finished"], starts: true, ends: true },
-      opened: { set: { status: "greet" } },
+      opened: { type: "wait", for: "1 minute" },
       asked: [
         {
           editStep: "workflow-1",
@@ -206,8 +207,8 @@ describe("a workflow's Flow", () => {
             expectedRevision: 2,
             edit: {
               kind: "change",
-              pointer: "/do/0/greet",
-              body: { set: { status: "hello" } },
+              pointer: "/steps/0",
+              step: { type: "wait", for: "2 minutes" },
             },
           },
         },

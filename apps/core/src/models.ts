@@ -1826,7 +1826,8 @@ const troubleCodes = {
  * or the deadline passed with it out: it may have been taken on), not an
  * answer begun, and not a call cut off here or with a request of it
  * already billed. Whether running the call again is safe is this rule's,
- * which an exactly-once caller keeps to (workflows/resource-host.ts).
+ * which an exactly-once caller keeps to (workflows/sealed-run.ts, a
+ * tried-once call).
  */
 const provablyUnbilled = (
   route: Route,

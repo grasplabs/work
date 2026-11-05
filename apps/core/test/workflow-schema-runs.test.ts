@@ -1,21 +1,21 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { appModuleName, openWorkflowEntry } from "@grasp-os/compiler";
+import { appModuleName, generatedWorkflowEntry } from "@grasp-os/compiler";
 import { v } from "@grasp-os/sdk";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import { decode } from "@grasp-os/workerflow/codec";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { generateWorkflow } from "@grasp-os/workflow-schema/generate";
+import { sealedTableSchema } from "@grasp-os/workflow-schema/sealed";
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
-import { buildOpenWorkflow } from "../src/screens.ts";
+import { buildGeneratedWorkflow } from "../src/screens.ts";
 import {
   approveWorkflowBinding,
   revokeWorkflowBinding,
 } from "../src/workflow-bindings.ts";
-import { tasksFileSchema } from "../src/workflow-builds.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   createWorkflowResource,
@@ -43,7 +43,6 @@ import {
   hello,
   journalingEngine,
   newerEngine,
-  objectSchema,
   person,
   ranAs,
   retryingEngine,
@@ -59,7 +58,7 @@ import type {
   Reviewed,
   Sealed,
 } from "./sealed-run-harness.ts";
-import { unique } from "./sign-in.ts";
+import { refusal, unique } from "./sign-in.ts";
 
 /**
  * `engine`, its activation evicted as step `name` was to start: nothing
@@ -133,7 +132,7 @@ const objectOf = (properties: Record<string, unknown>) => ({
 });
 
 /** Where a build of the generated module keeps it: as the host's own. */
-const generatedPath = openWorkflowEntry;
+const generatedPath = generatedWorkflowEntry;
 
 /**
  * `steps` and their `output` (its schema and value), generated: the
@@ -158,16 +157,15 @@ const generated = async (
   }
   const generation = generateWorkflow(result.workflow, "sealed");
   // The table as core seals it (tasks.json): its own schema reads it.
-  const table = tasksFileSchema.parse(
+  const table = sealedTableSchema.parse(
     structuredClone({
       tasks: generation.tasks,
       expressions: generation.expressions,
       workflow: generation.workflow,
       params: generation.params,
-      limits: generation.limits,
     })
   );
-  const build = await buildOpenWorkflow(
+  const build = await buildGeneratedWorkflow(
     env,
     { [generatedPath]: generation.source },
     "workflow-schema-runs"
@@ -761,15 +759,6 @@ const local = {
   note: { kind: "action", contract: "local:code/note.ts#note" },
 };
 
-/** Task `name`, calling the workflow's own `binding` with `args`. */
-const operationTask = (
-  name: string,
-  binding: string,
-  args: unknown
-): Record<string, unknown> => ({
-  [name]: { call: "grasp.operation", with: { binding, arguments: args } },
-});
-
 /**
  * A workflow of a builder's whose bindings reach its own modules, compute
  * `total` and `broken` and action `note`, published with them: after an
@@ -780,43 +769,23 @@ const localWorkflow = async () => {
   const workflow = await createWorkflowResource(env, by, `local-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: {
-              ...local,
-              // The profile has an action as an operation of the
-              // workflow's own module.
-              note: { ...local.note, kind: "operation" },
-            },
-          },
-        },
+      $schema: workflowSchemaUrl,
+      input: objectOf({ who: { type: "string" } }),
+      output: {
+        schema: objectOf({ status: { type: "string" } }),
+        value: { status: "done" },
       },
-      input: { schema: objectSchema({ who: { type: "string" } }) },
-      output: { schema: objectSchema({ status: { type: "string" } }) },
-      do: [
-        { linger: { wait: "PT1H" } },
+      bindings: local,
+      steps: [
+        { id: "linger", type: "wait", for: "1 hour" },
+        { id: "add", type: "do", binding: "total", arguments: [1, 2, 3] },
+        { id: "fail", type: "do", binding: "broken", arguments: 1 },
         {
-          add: {
-            call: "grasp.compute",
-            with: { binding: "total", arguments: [1, 2, 3] },
-          },
+          id: "tell",
+          type: "do",
+          binding: "note",
+          arguments: { to: { $expr: "input.who" } },
         },
-        {
-          fail: {
-            call: "grasp.compute",
-            with: { binding: "broken", arguments: 1 },
-          },
-        },
-        operationTask("tell", "note", { to: "${ $workflow.input.who }" }),
-        { finish: { set: { status: "done" } } },
       ],
     }),
     basedOn: null,
@@ -1352,38 +1321,16 @@ const eventWorkflow = async () => {
   const workflow = await createWorkflowResource(env, by, `replies-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
     definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: { replies: { kind: "event", contract } },
-          },
-        },
-      },
-      input: { schema: objectSchema({ who: { type: "string" } }) },
-      output: { schema: objectSchema({}) },
-      do: [
-        { linger: { wait: "PT1H" } },
+      $schema: workflowSchemaUrl,
+      input: objectOf({ who: { type: "string" } }),
+      bindings: { replies: { kind: "event", contract } },
+      steps: [
+        { id: "linger", type: "wait", for: "1 hour" },
         {
-          reply: {
-            listen: {
-              to: {
-                any: [
-                  { with: { type: received } },
-                  { with: { type: bounced } },
-                ],
-              },
-              read: "envelope",
-            },
-            timeout: { after: { days: 3 } },
-            metadata: { grasp: { binding: "replies" } },
-          },
+          id: "reply",
+          type: "wait",
+          event: { from: "replies", type: [received, bounced] },
+          timeout: "3 days",
         },
       ],
     }),
@@ -1538,6 +1485,17 @@ const nothingSent = async (): Promise<undefined> => {
 // timeout an outcome, `{ timedOut: true }`, never a failure; a wait in
 // each item of a loop under that item's keys; and a binding revoked since
 // the start, `workflow.event_denied`, failing the run, which no catch takes.
+/** A refused publication's problems, each as its code and pointer. */
+const pointers = (error: unknown) =>
+  z
+    .object({
+      details: z.object({
+        problems: z.array(z.object({ code: z.string(), pointer: z.string() })),
+      }),
+    })
+    .parse(error)
+    .details.problems.map(({ code, pointer }) => `${code} ${pointer}`);
+
 describe("a grasp-workflow/1 event wait's generated code on the run host", () => {
   let listening: Listening;
 
@@ -1546,6 +1504,55 @@ describe("a grasp-workflow/1 event wait's generated code on the run host", () =>
   });
 
   afterAll(endLiveResourceRuns);
+
+  it("is published only for types its binding's contract admits, and records what it waits for as the version's listens", async () => {
+    const admin = await person("admin");
+    const by = await person("builder");
+    const contract = `replies-${unique()}`;
+    const data = descriptorOf(v.object({ from: v.string() }));
+    await publishCatalogContract(env, admin, {
+      key: contract,
+      kind: "event",
+      events: { [received]: { data, browser: false } },
+    });
+    const workflow = await createWorkflowResource(env, by, `waits-${unique()}`);
+    const publishing = async (types: string | string[]) =>
+      await publishWorkflowVersion(env, by, workflow.id, {
+        definition: JSON.stringify({
+          $schema: workflowSchemaUrl,
+          bindings: { replies: { kind: "event", contract } },
+          steps: [
+            {
+              id: "reply",
+              type: "wait",
+              event: { from: "replies", type: types },
+              timeout: "3 days",
+            },
+          ],
+        }),
+        basedOn: null,
+      });
+    const refused = await refusal(publishing([received, bounced]));
+    const single = await refusal(publishing(bounced));
+    await publishing(received);
+    const stored = await env.DB.prepare(
+      "SELECT contract FROM workflow_resource_versions WHERE workflow_resource_id = ?"
+    )
+      .bind(workflow.id)
+      .first<{ contract: string }>();
+    expect({
+      refused: pointers(refused),
+      single: pointers(single),
+      listens: z
+        .object({ listens: z.unknown() })
+        .parse(JSON.parse(stored?.contract ?? "{}")).listens,
+    }).toStrictEqual({
+      // A wait for a type it can never be sent would end only by timing out.
+      refused: ["event.unknown_type /steps/0/event/type/1"],
+      single: ["event.unknown_type /steps/0/event/type"],
+      listens: { reply: { alias: "replies", types: [received] } },
+    });
+  });
 
   it("takes an event of its binding and types an App sends the run, as the host minted it", async () => {
     const { source, sealed: withTable } = await generated(

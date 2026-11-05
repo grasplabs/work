@@ -227,7 +227,7 @@ describe("a Grasp staff member added as a member", () => {
       staff.workflowResources.start(workflow, startOf())
     );
     const { runId } = await member.workflowResources.start(workflow, startOf());
-    const { status } = await endedRun(builder, workflow, String(runId));
+    const { status } = await endedRun(builder, workflow, runId);
 
     expect({
       byStaff,

@@ -88,10 +88,6 @@ const sdkApp = /(?<found>@grasp-os\/sdk\/src\/app\.ts:\d+:export const app =)/u;
 /** The workflow open beside a chat, as its first message names it (web's draw-in-chat.ts). */
 const besideWorkflow = /\(ID (?<found>[^)\s]+)\) is open beside this chat/u;
 
-/** That workflow's name, as the same message names it. */
-const besideWorkflowName =
-  /Workflow (?<found>\S+) \(ID [^)\s]+\) is open beside/u;
-
 /** What the agent says once it wrote the contact list (`buildsApp`). */
 export const appReady = "Your contact list is ready to try in the preview.";
 
@@ -222,7 +218,7 @@ export const modelScripts = {
         calls("editswf01", "editWorkflow", {
           workflow: readIn(said, besideWorkflow),
           expectedRevision: 0,
-          source: invoiceApproval(readIn(said, besideWorkflowName)),
+          source: invoiceApproval(),
           modules: {},
         }),
       says(approvalDrawn),

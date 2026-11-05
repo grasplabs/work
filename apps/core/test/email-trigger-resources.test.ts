@@ -18,6 +18,7 @@ import { routerSecretHeader } from "@grasp-os/shared/router";
 import { runFileLimits } from "@grasp-os/shared/run-files";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { inboundEmailMaxBytes } from "@grasp-os/shared/workflows";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -42,6 +43,7 @@ import {
   inputOf,
   invoiceMail,
   mapping,
+  objectOf,
   own,
   runsOf,
   storedObjects,
@@ -827,9 +829,9 @@ describe("independent workflows' email triggers", { timeout: 120_000 }, () => {
   });
 
   it("try a message again, never refuse it for good, when its trigger moves to another version as it starts, then start it at that version", async () => {
-    const { builder, workflow, name, trigger, address } = await emailTrigger();
+    const { builder, workflow, trigger, address } = await emailTrigger();
     await builder.api.workflowResources.publish(workflow, {
-      definition: definitionOf(name, "1.1.0"),
+      definition: definitionOf("input.subject.trim()"),
       basedOn: 1,
     });
     const message = invoiceMail({
@@ -999,49 +1001,20 @@ const readerOf =
     });
 
 /** A workflow taking a message's attachments as each of `fields`. */
-const takingAttachments =
-  (fields: readonly string[]) =>
-  (name: string): string =>
-    JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name,
-        version: "1.0.0",
-        title: name,
-        metadata: {
-          grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-        },
-      },
-      input: {
-        schema: {
-          format: "json",
-          document: {
-            type: "object",
-            properties: Object.fromEntries(
-              fields.map((field) => [
-                field,
-                { type: "array", items: attachment },
-              ])
-            ),
-            required: fields,
-            additionalProperties: false,
-          },
-        },
-      },
-      output: {
-        schema: {
-          format: "json",
-          document: {
-            type: "object",
-            properties: { subject: { type: "string" } },
-            required: ["subject"],
-            additionalProperties: false,
-          },
-        },
-      },
-      do: [{ finish: { set: { subject: "Read" } } }],
-    });
+const takingAttachments = (fields: readonly string[]) => (): string =>
+  JSON.stringify({
+    $schema: workflowSchemaUrl,
+    input: objectOf(
+      Object.fromEntries(
+        fields.map((field) => [field, { type: "array", items: attachment }])
+      )
+    ),
+    output: {
+      schema: objectOf({ subject: { type: "string" } }),
+      value: { subject: "Read" },
+    },
+    steps: [],
+  });
 
 /** A mapping of a message's attachments into each of `fields`. */
 const attachmentsAs = (...fields: string[]) => ({
@@ -1074,11 +1047,11 @@ const filedOf = (input: string | null): boolean[] =>
 
 /** A workflow of `builder`'s, published, to put a trigger on. */
 const publishedWorkflow = async (builder: Person): Promise<string> => {
-  const { id, name } = await builder.api.workflowResources.create(
+  const { id } = await builder.api.workflowResources.create(
     `named-${unique()}`
   );
   await builder.api.workflowResources.publish(id, {
-    definition: definitionOf(name),
+    definition: definitionOf(),
     basedOn: null,
   });
   return id;

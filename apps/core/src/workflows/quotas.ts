@@ -24,8 +24,8 @@ import { busyRetryAfterSeconds, slotFree } from "./admission.ts";
 // against the platform's limits (`quotaLimits`),
 // counted durably in core's database (`run_lineages`,
 // `run_lineage_attempts`), and checked as each piece of work is admitted:
-// a child run as it starts (`admitChild`), a step's attempt before its
-// code runs (`admitAttempt`). A run's own steps are bounded by the
+// a run started in another run's lineage (`admitInLineage`), a step's
+// attempt before its code runs (`admitAttempt`). A run's own steps are bounded by the
 // engine's journal, which every activation replays (host.ts,
 // `countedStep`).
 //
@@ -227,7 +227,7 @@ const appOf = (id: string): SQL =>
  * its account, model-spend.ts) and taking the share of a person who
  * never used it (dispatcher.ts, `admissionSubjectOf`). Its place stays
  * the lineage's: it takes one of the lineage's descendant runs and sits a
- * level deeper (`admitChild`), which bound runs mailing each other back
+ * level deeper (`admitInLineage`), which bound runs mailing each other back
  * and forth, whichever Apps they are of. What a lineage can spend in all
  * grows with the Apps it reaches: up to twice the per-lineage limits for
  * each App, the descendant runs it may start bounding how many Apps.
@@ -293,7 +293,7 @@ export const triggeredAccountOf = (root: string, workflow: string): SQL =>
  * every other workflow triggered there. However often a workflow is
  * triggered in a lineage, its runs there share one account. Its place
  * stays the lineage's: it takes one of the lineage's descendant runs and
- * sits a level deeper (`admitChild`), and the account's age is the
+ * sits a level deeper (`admitInLineage`), and the account's age is the
  * root's, which bound workflows triggering each other back and forth:
  * never a new root, or a loop would go on.
  */
@@ -426,8 +426,8 @@ const fenceRecorded = (db: DrizzleD1Database, run: string, through: number) =>
       ),
   ] as const;
 
-/** Where a child run sits: its lineage's root, and its depth under it. */
-export interface ChildPlace {
+/** Where a run started in another run's lineage sits: its root, and its depth under it. */
+export interface LineagePlace {
   rootRunId: string;
   depth: number;
 }
@@ -437,7 +437,7 @@ const admittedUnkeyed = async (
   db: DrizzleD1Database,
   { root, depth }: { root: string; depth: number },
   fits: SQL | undefined
-): Promise<ChildPlace | undefined> => {
+): Promise<LineagePlace | undefined> => {
   const [, taken] = await db.batch([
     lineageCreated(db, root),
     db
@@ -460,7 +460,7 @@ const admittedKeyed = async (
   db: DrizzleD1Database,
   { root, depth, key }: { root: string; depth: number; key: string },
   fits: SQL | undefined
-): Promise<ChildPlace | undefined> => {
+): Promise<LineagePlace | undefined> => {
   const children = runLineageChildren;
   const admitted = await db.batch([
     lineageCreated(db, root),
@@ -497,11 +497,11 @@ const admittedKeyed = async (
  * slot. Throws `workflow.lineage_limit` past any of them, having taken
  * nothing; a slot taken is never given back.
  */
-export const admitChild = async (
+export const admitInLineage = async (
   env: QuotaEnv,
   parent: { id: string; rootRunId: string | null; depth: number },
   key?: string
-): Promise<ChildPlace> => {
+): Promise<LineagePlace> => {
   const limits = quotaLimits(env);
   const root = parent.rootRunId ?? parent.id;
   const depth = parent.depth + 1;
@@ -559,7 +559,7 @@ export interface QuotaAttempt {
   deadline: number;
   /**
    * Whether it collects the decided outcome of a connector call held for
-   * its person (resource-host.ts, `StepRun.collecting`): the attempt that
+   * its person (host.ts, `StepAttempt.collecting`): the attempt that
    * was held took that call's host calls, so this one takes none, and is
    * admitted though the lineage has none left.
    */
@@ -576,7 +576,7 @@ export interface AttemptAdmission {
   /**
    * The attempts of the step the lineage admitted, this one included: the
    * attempts that ran, by their engine number, however many the engine
-   * numbered in between that core cut off unadmitted (resource-host.ts).
+   * numbered in between that core cut off unadmitted (host.ts).
    * Absent where nothing admits attempts: count the engine's number then.
    */
   ran?: number;

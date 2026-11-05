@@ -2,16 +2,17 @@ import type { ValueSchema } from "@grasp-os/sdk";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { isEventType } from "@grasp-os/shared/sealed-builds";
 
-/**
- * What a binding's contract key resolves to. A definition names contracts;
- * the host's approved catalog (and, for `local:` keys, the module manifest
- * it extracted from the workflow's own code) says what each one is. A
- * source binding is a requirement, never a grant: this only checks that
- * the definition asks for something the host has, of the right kind, and
- * uses it as its contract allows.
- */
+// The host catalog's contracts, as a definition's bindings resolve them:
+// a definition names contracts; the host's approved catalog (and, for
+// `local:` keys, the module manifest it extracted from the workflow's own
+// code) says what each one is. A binding is a requirement, never a grant:
+// this reads what the host has, within its limits, so a check can hold a
+// definition to it. The catalog holds contracts of more kinds than a
+// grasp-workflow/1 step binds (`bindingKinds`, format.ts): Apps and their
+// screens bind the rest.
 
-export const bindingKinds = [
+/** Every kind of contract the host catalog holds. */
+export const contractKinds = [
   "operation",
   "connector",
   "model",
@@ -23,13 +24,13 @@ export const bindingKinds = [
   "template",
   "files",
 ] as const;
-export type BindingKind = (typeof bindingKinds)[number];
+export type ContractKind = (typeof contractKinds)[number];
 
 /** A value contract: the JSON text of an SDK value descriptor. */
 export type DescriptorText = string;
 
 export interface CatalogContract {
-  kind: BindingKind;
+  kind: ContractKind;
   /** operation, compute, decision and workflow: what a call passes. */
   input?: DescriptorText;
   /** operation, compute and workflow: what it returns. */
@@ -76,7 +77,7 @@ export interface CatalogContract {
  */
 export interface ContractUse {
   readonly alias: string;
-  readonly kind: BindingKind;
+  readonly kind: ContractKind;
   readonly operations?: readonly string[];
 }
 
@@ -94,7 +95,7 @@ const catalogLimits = {
 
 /** A contract as validation holds it: copied, checked, schemas compiled. */
 export interface ResolvedContract {
-  kind: BindingKind;
+  kind: ContractKind;
   input?: ValueSchema<unknown, unknown>;
   output?: ValueSchema<unknown, unknown>;
   response?: ValueSchema<unknown, unknown>;
@@ -285,8 +286,8 @@ const readWorkflow = (value: unknown): ResolvedContract["workflow"] => {
   };
 };
 
-const isBindingKind = (value: unknown): value is BindingKind =>
-  bindingKinds.some((kind) => kind === value);
+const isContractKind = (value: unknown): value is ContractKind =>
+  contractKinds.some((kind) => kind === value);
 
 /** The most bindings one action reaches. */
 const maxUses = 32;
@@ -302,7 +303,7 @@ const maxUseOperations = 64;
  */
 const readUseOperations = (
   use: unknown,
-  kind: BindingKind
+  kind: ContractKind
 ): readonly string[] | undefined => {
   const value = ownData(use, "operations");
   if (kind !== "connector") {
@@ -355,7 +356,7 @@ const readUses = (value: unknown): ResolvedContract["uses"] => {
       if (
         typeof alias !== "string" ||
         !aliasPattern.test(alias) ||
-        !isBindingKind(kind) ||
+        !isContractKind(kind) ||
         seen.has(alias)
       ) {
         return refuse("a use that isn't an alias and a kind, each alias once");
@@ -375,7 +376,7 @@ const readUses = (value: unknown): ResolvedContract["uses"] => {
  * type or child): it is refused instead.
  */
 const requiredFields: Readonly<
-  Record<BindingKind, readonly (keyof ResolvedContract)[]>
+  Record<ContractKind, readonly (keyof ResolvedContract)[]>
 > = {
   operation: ["input", "output"],
   compute: ["input", "output"],
@@ -408,7 +409,7 @@ const readContract = (
   budget: CatalogBudget
 ): ResolvedContract => {
   const kind = ownData(contract, "kind");
-  if (!isBindingKind(kind)) {
+  if (!isContractKind(kind)) {
     return refuse("an unknown contract kind");
   }
   const resolved: ResolvedContract = { kind };
@@ -483,50 +484,4 @@ export const resolveContract = (
           : "the catalog's entry couldn't be read",
     };
   }
-};
-
-/** The host's ceilings a definition's limits may only lower. */
-export interface LimitCeilings {
-  maxSteps: number;
-  maxModelCalls: number;
-  maxActiveMs: number;
-}
-
-export interface ValidateOptions {
-  /** The approved host catalog: every contract key but `local:` ones. */
-  catalog: ContractLookup;
-  /** The module manifest of the workflow's own code: `local:` keys only. */
-  modules?: ContractLookup;
-  /** Host ceilings; limits above them are refused. */
-  ceilings?: LimitCeilings;
-}
-
-export interface ReadOptions {
-  catalog: unknown;
-  modules: unknown;
-  ceilings?: LimitCeilings;
-}
-
-const readCeiling = (ceilings: unknown, key: keyof LimitCeilings): number => {
-  const value = ownData(ceilings, key);
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
-    ? value
-    : refuse("a ceiling that isn't a positive whole number");
-};
-
-/** The options, read once through own data properties. */
-export const readOptions = (options: unknown): ReadOptions => {
-  const ceilings = ownData(options, "ceilings");
-  const read: ReadOptions = {
-    catalog: ownData(options, "catalog"),
-    modules: ownData(options, "modules"),
-  };
-  if (ceilings !== undefined) {
-    read.ceilings = {
-      maxSteps: readCeiling(ceilings, "maxSteps"),
-      maxModelCalls: readCeiling(ceilings, "maxModelCalls"),
-      maxActiveMs: readCeiling(ceilings, "maxActiveMs"),
-    };
-  }
-  return read;
 };

@@ -106,10 +106,10 @@ const waited = (
     : [recordOf(started, step)];
 };
 
-/** The steps `records` tell, read against `steps` (none: another's). */
+/** The steps `records` tell, read against `steps` (the test build's). */
 const traced = async (
   records: readonly HistoryRecord[],
-  steps?: SealedSteps
+  steps: SealedSteps = sealed
 ) => {
   const reading = traceReading(steps);
   for (const record of records) {
@@ -212,7 +212,7 @@ describe("a run on the run host's trace", () => {
     ]);
   });
 
-  it("reads each generator's names only for its own runs", async () => {
+  it("reads only the step names its build's table has, in the run host's encoding", async () => {
     const records = [
       ...waited("linger:task", "sleep", false),
       ...waited("task:linger", "sleep", false),
@@ -223,13 +223,9 @@ describe("a run on the run host's trace", () => {
       ...waited("linger:task%400", "sleep", false),
       ...waited("nap:task@0", "sleep", false),
     ];
-    expect({
-      sealed: await traced(records, sealed),
-      other: await traced(records),
-    }).toStrictEqual({
-      sealed: [{ task: "linger", item: null, state: "waiting", attempts: 0 }],
-      other: [{ task: "linger", item: null, state: "waiting", attempts: 0 }],
-    });
+    await expect(traced(records)).resolves.toStrictEqual([
+      { task: "linger", item: null, state: "waiting", attempts: 0 },
+    ]);
   });
 
   it("shows a call held for its person waiting, then an attempt more once it runs again, reached or failed", async () => {

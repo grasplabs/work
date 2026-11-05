@@ -35,6 +35,18 @@ export const executionErrors = defineErrorFamily({
     "This step's attempt has ended (it ran out of time, or the run was paused or cancelled): what its code still does acts no more.",
 });
 
+/** The code of an expression that failed as it ran (`expressionErrors`). */
+export const expressionFailed = "expression.failed";
+
+/**
+ * Why a workflow's expression failed as it ran: the one code the SDK's
+ * expression guards throw (`ExpressionFailedError`). The run host keeps
+ * it, in these words, never the guard's own message.
+ */
+export const expressionErrors = defineErrorFamily({
+  [expressionFailed]: "The expression failed.",
+});
+
 /** Why a workflow call was refused. */
 export const workflowErrors = defineErrorFamily({
   "workflow.invalid": "That isn't a valid request for a workflow.",
@@ -447,14 +459,6 @@ export const placeholderOf = (value: unknown): string | undefined => {
     ? name
     : undefined;
 };
-
-/**
- * What a decision task's waits for its answer, and its looks after them,
- * start with (core's workflows/resource-host.ts): core's steps, so they
- * count against none of the run's steps however long it waits, each named
- * `<prefix><its task's step>:wait:<round>` or `…:woken:<round>`.
- */
-export const decisionPollStepPrefix = `${coreStepPrefix}decision:`;
 
 /**
  * The idempotency key of a run's step, as the SDK hands it to the step

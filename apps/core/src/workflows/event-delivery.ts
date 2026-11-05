@@ -17,7 +17,7 @@ import {
   defaultMaxAttempts,
 } from "../outbox-delivery.ts";
 import { startWorkflow } from "../workflow-starts.ts";
-import { admitChild } from "./quotas.ts";
+import { admitInLineage } from "./quotas.ts";
 import { runOf } from "./resource-runs.ts";
 
 // Delivering the events JSON workflows emit (emitted-events.ts) from
@@ -33,16 +33,16 @@ import { runOf } from "./resource-runs.ts";
 //   (`startKeyOf`), and a start's receipt is one per trigger, person and
 //   key (workflow-starts.ts): the same event delivered again gets the
 //   same run. Its place in the emitting run's lineage is claimed under the
-//   event and the trigger too (quotas.ts, `admitChild`): one slot, however
+//   event and the trigger too (quotas.ts, `admitInLineage`): one slot, however
 //   often. A drain holds an event under a lease while it delivers it, and
 //   settles it only while it still holds that lease: one that lost it to
 //   another settles nothing.
 // - An event's run escaping its emitting run's limits. The trigger's run
 //   joins the emitting run's lineage, one level deeper, taking one of its
 //   descendant runs, its age counting from the lineage's root
-//   (`TriggerCause`), as a child run does; past any of them it is
-//   refused (`workflow.lineage_limit`). It is no child of the emitting
-//   run, so goes on after that run ends. A restricted run's event starts
+//   (`TriggerCause`); past any of them it is refused
+//   (`workflow.lineage_limit`). It waits on nothing of the emitting run,
+//   so goes on after that run ends. A restricted run's event starts
 //   it restricted.
 // - One workflow's triggered runs using up the lineage's allowances, and
 //   so the emitting run's and every other triggered workflow's. Its run
@@ -144,7 +144,7 @@ const deliver = async (env: Env, event: EventRow): Promise<Delivered> => {
   for (const consumer of consumers) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one trigger at a time
-      const place = await admitChild(
+      const place = await admitInLineage(
         env,
         { id: run.id, rootRunId: run.rootRunId, depth: run.depth },
         `event:${event.id}:${consumer.id}`

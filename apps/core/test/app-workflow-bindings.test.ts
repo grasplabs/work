@@ -1,7 +1,7 @@
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { describe, expect, it } from "vite-plus/test";
 
 import { mockIdp } from "./idp.ts";
+import { greetingOf } from "./json-workflow-apps.ts";
 import {
   openRpc,
   outcome,
@@ -21,33 +21,6 @@ import {
 
 const idp = mockIdp();
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
-const definitionOf = (name: string, version: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [{ finish: { set: { status: "done" } } }],
-  });
-
 /** An App and a workflow with two published versions, both the builder's. */
 const setUp = async () => {
   const builder = await signedInApi(idp, "builder");
@@ -56,7 +29,7 @@ const setUp = async () => {
   const started = await builder.api.workflowResources.draft(flow.id);
   await builder.api.workflowResources.editDraft(flow.id, {
     expectedRevision: started.revision,
-    source: definitionOf(flow.name, "1.0.0"),
+    source: greetingOf(undefined, "Version 1"),
     modules: {},
   });
   await builder.api.workflowResources.publishDraft(flow.id, {
@@ -65,7 +38,7 @@ const setUp = async () => {
   });
   await builder.api.workflowResources.editDraft(flow.id, {
     expectedRevision: 1,
-    source: definitionOf(flow.name, "1.1.0"),
+    source: greetingOf(undefined, "Version 1.1"),
     modules: {},
   });
   await builder.api.workflowResources.publishDraft(flow.id, {

@@ -195,6 +195,12 @@ export interface StepAttempt {
   final?: Error;
   /** Whether a call of it was refused past its lineage's host calls, and audited so. */
   hostCallsAudited?: boolean;
+  /**
+   * Whether it runs its step again to collect what the person decided of
+   * a call connect held: that call's host call, its first, was taken by
+   * the attempt that was held, so it takes none again.
+   */
+  collecting: boolean;
   keptMessages?: Map<string, Email>;
   /** Whether the step has no retry left after it, as far as core can tell. */
   last: boolean;
@@ -1515,8 +1521,6 @@ export interface RetryDecision {
   retry: boolean;
   /** After how long. */
   delayMs: number;
-  /** When its first round failed, which every later decision reads. */
-  firstFailedAt: number;
 }
 
 /**
@@ -1532,16 +1536,15 @@ export interface RetryOffer {
    * catch and a policy with no conditions): the host takes it without
    * asking, so no code can withhold it.
    */
-  readonly alone?: (firstFailedAt: number) => RetryDecision;
+  readonly alone?: () => RetryDecision;
   /** `choice` is `undefined` when its code failed to choose. */
-  decided: (choice: unknown, firstFailedAt: number) => RetryDecision;
+  decided: (choice: unknown) => RetryDecision;
 }
 
 const retryDecisionSchema = z.strictObject({
   by: z.string().nullable().optional(),
   retry: z.boolean(),
   delayMs: z.int().min(0),
-  firstFailedAt: z.number(),
 });
 
 /**
@@ -1937,6 +1940,7 @@ export class RunHost extends RpcTarget {
         ...(attempt.ordinal === undefined ? {} : { ordinal: attempt.ordinal }),
         generation: attempt.generation,
         deadline: attempt.deadline,
+        ...(attempt.collecting ? { collecting: true as const } : {}),
       });
       // No attempt after it is admitted: it is the step's last.
       if (attempt.number >= admission.attemptsAllowed) {
@@ -2123,6 +2127,8 @@ export class RunHost extends RpcTarget {
       let tries = 0;
       // The step's wait for load since its last admission (`LoadWait`).
       let load = loadWaitStart;
+      // Whether the next attempts collect a held call's decided outcome.
+      let collecting = false;
       const attemptStep = async (context?: unknown): Promise<unknown> => {
         attempted = true;
         tries += 1;
@@ -2134,7 +2140,8 @@ export class RunHost extends RpcTarget {
         const attempt = this.#attemptOf(
           step,
           context,
-          isLastAttempt(context, tries, config.retries.limit)
+          isLastAttempt(context, tries, config.retries.limit),
+          collecting
         );
         // Admitted before its code runs, or failed with the refusal: a
         // limit reached fails the step; a lineage whose time attempts
@@ -2267,6 +2274,7 @@ export class RunHost extends RpcTarget {
         tries = 0;
         load = loadWaitStart;
         failed = undefined;
+        collecting = false;
         let value = await this.#step.do(base, config, attemptStep);
         // When the step was first held on its current unknown outcome.
         const unknown: { since?: number } = {};
@@ -2305,8 +2313,20 @@ export class RunHost extends RpcTarget {
               // oxlint-disable-next-line no-await-in-loop -- once
               await this.#keyWaitEnded(step, keyWait);
               keyWait = keyWaitStart();
-              failed = keyTimedOut(step, marker.trouble);
-              throw toStepError(failed);
+              const waitedOut = keyTimedOut(step, marker.trouble);
+              failed = waitedOut;
+              // Its failure a step of its own (`<round>:timed_out`), failed
+              // as the engine fails any step: journaled with its error, as
+              // a trace reads a step's failure, and failed again on replay.
+              // oxlint-disable-next-line no-await-in-loop -- once
+              await this.#step.do(
+                `${prefix}:timed_out`,
+                { ...config, retries: { ...config.retries, limit: 0 } },
+                () => {
+                  throw toStepError(waitedOut);
+                }
+              );
+              throw toStepError(waitedOut);
             }
             tries = 0;
             // oxlint-disable-next-line no-await-in-loop -- one round at a time
@@ -2322,6 +2342,7 @@ export class RunHost extends RpcTarget {
             unknown
           );
           tries = 0;
+          collecting = marker.kind === "held";
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
           value = await this.#step.do(`${prefix}:run`, config, attemptStep);
         }
@@ -2331,8 +2352,6 @@ export class RunHost extends RpcTarget {
         }
         return value;
       };
-      // When its first round failed, as a catch's retry recorded it.
-      let firstFailedAt: number | undefined;
       let value: unknown;
       for (let round = 1; ; round += 1) {
         const base =
@@ -2353,7 +2372,6 @@ export class RunHost extends RpcTarget {
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
           const retried = await this.#retried(step, roundError, round, {
             retry,
-            firstFailedAt,
             stepDone: stepDone.promise,
           });
           // This round's own decision, none if it had none.
@@ -2365,7 +2383,6 @@ export class RunHost extends RpcTarget {
           // oxlint-disable-next-line no-await-in-loop -- one round at a time
           await this.#keyWaitEndedQuietly(step, keyWait);
           keyWait = keyWaitStart();
-          ({ firstFailedAt } = retried);
         }
       }
       this.#kind.stepEnded?.(step, { ok: true, value });
@@ -2403,7 +2420,12 @@ export class RunHost extends RpcTarget {
    * number, its step's key and its lease, which an activation that is
    * over no longer has, and whether it is the step's `last`.
    */
-  #attemptOf(step: string, context: unknown, last: boolean): StepAttempt {
+  #attemptOf(
+    step: string,
+    context: unknown,
+    last: boolean,
+    collecting: boolean
+  ): StepAttempt {
     const told = attemptContextSchema.parse(context);
     const lease = this.#hooks.leaseOf(told.idempotencyKey, told.attempt);
     if (lease === undefined) {
@@ -2422,6 +2444,7 @@ export class RunHost extends RpcTarget {
       unknown: false,
       heldKeys: [],
       last,
+      collecting,
     };
   }
 
@@ -2433,9 +2456,8 @@ export class RunHost extends RpcTarget {
    * failure may be tried again), and its code's `retry` chooses, the
    * kind holding that choice to the policy. Decided in a step of its own
    * that records it (`#decideRetry`), then a durable sleep of the backoff
-   * it decided, each named after the round it leads to. Answers when the
-   * first round failed, which every later decision reads; `undefined`
-   * when it doesn't run again, and the step fails as its round did,
+   * it decided, each named after the round it leads to. Answers the
+   * decision; `undefined` when it doesn't run again, and the step fails as its round did,
    * whatever a decision itself failed with; a backoff its kind refuses
    * (`RunKind.requireWait`) fails it with that refusal. Fresh or replayed
    * alike.
@@ -2446,11 +2468,9 @@ export class RunHost extends RpcTarget {
     round: number,
     {
       retry,
-      firstFailedAt,
       stepDone,
     }: {
       retry: ((error: Json) => Promise<unknown>) | undefined;
-      firstFailedAt: number | undefined;
       stepDone: Promise<unknown>;
     }
   ): Promise<RetryDecision | undefined> {
@@ -2463,15 +2483,10 @@ export class RunHost extends RpcTarget {
     const { alone } = offer;
     let decide: ((context: unknown) => Promise<RetryDecision>) | undefined;
     if (alone !== undefined) {
-      decide = async () =>
-        await Promise.resolve(alone(firstFailedAt ?? Date.now()));
+      decide = async () => await Promise.resolve(alone());
     } else if (retry !== undefined) {
       decide = async (context) =>
-        await this.#decideRetry(step, context, offer, {
-          retry,
-          firstFailedAt,
-          stepDone,
-        });
+        await this.#decideRetry(step, context, offer, { retry, stepDone });
     }
     if (decide === undefined) {
       // Its policy asks its code, which gave no way to ask: code past the
@@ -2526,16 +2541,13 @@ export class RunHost extends RpcTarget {
     offer: RetryOffer,
     {
       retry,
-      firstFailedAt,
       stepDone,
     }: {
       retry: (error: Json) => Promise<unknown>;
-      firstFailedAt: number | undefined;
       stepDone: Promise<unknown>;
     }
   ): Promise<RetryDecision> {
-    const firstAt = firstFailedAt ?? Date.now();
-    const attempt = this.#attemptOf(step, context, false);
+    const attempt = this.#attemptOf(step, context, false, false);
     if (this.#tampered !== undefined) {
       throw toStepError(forIsolate(this.#tampered));
     }
@@ -2561,7 +2573,7 @@ export class RunHost extends RpcTarget {
       }
       try {
         // A choice its code failed to make is the kind's to judge too.
-        return offer.decided(chosen.ok ? chosen.value : undefined, firstAt);
+        return offer.decided(chosen.ok ? chosen.value : undefined);
       } catch (error) {
         // Tampering: the decision fails for good, and with it the step.
         const refused = await settle(
@@ -2903,6 +2915,11 @@ export class RunHost extends RpcTarget {
     admission: AttemptAdmission,
     call: string
   ): Promise<Settled<never> | undefined> {
+    // A rerun's first call is the held one: its host call is taken.
+    if (attempt.collecting) {
+      attempt.collecting = false;
+      return undefined;
+    }
     try {
       await admission.hostCall();
       return undefined;

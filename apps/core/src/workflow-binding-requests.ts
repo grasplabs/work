@@ -79,8 +79,6 @@ const pendingWorkflowsMax = 50;
  */
 const templatesOffered = 100;
 
-type CatalogBinding = Extract<PinnedBinding, { resourceId: null }>;
-
 /** What an offer needs of a store operation: its kind and shapes. */
 type StoreOperationShape = Parameters<typeof operationServesContract>[0] & {
   kind: string;
@@ -327,7 +325,7 @@ const templateTargets = async (env: Env): Promise<Offered[]> => {
 const candidatesOf = async (
   env: Env,
   id: string,
-  binding: CatalogBinding,
+  binding: PinnedBinding,
   everyKind: boolean
 ): Promise<Offered[]> => {
   if (
@@ -393,7 +391,7 @@ type Offers = Map<string, Promise<Offered[]>>;
 const offeredFor = async (
   env: Env,
   id: string,
-  binding: CatalogBinding,
+  binding: PinnedBinding,
   everyKind: boolean
 ): Promise<Offered[]> => {
   const offered: Offered[] = [];
@@ -424,7 +422,7 @@ const offeredFor = async (
 /** What `offers` holds for `binding`, worked out by `offer` the first time. */
 const offersOf = async (
   offers: Offers,
-  binding: CatalogBinding,
+  binding: PinnedBinding,
   offer: () => Promise<Offered[]>
 ): Promise<Offered[]> => {
   const key =
@@ -447,9 +445,6 @@ const unapprovedOf = async (
   const versions = await bindingsOf(env, id, version);
   const unapproved: PendingWorkflowBindings["bindings"] = [];
   for (const binding of versions.get(version) ?? []) {
-    if (binding.resourceId !== null) {
-      continue;
-    }
     // oxlint-disable-next-line no-await-in-loop -- one point lookup per binding
     if ((await approvalServing(env, id, version, binding)) !== undefined) {
       continue;

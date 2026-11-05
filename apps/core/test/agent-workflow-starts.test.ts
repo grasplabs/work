@@ -3,7 +3,6 @@ import {
   chatIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -20,6 +19,7 @@ import { openTestRun, personalChatsOf } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { greetingOf } from "./json-workflow-apps.ts";
 import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 // A chat's agent asking to start an independent workflow
@@ -36,44 +36,6 @@ const idp = mockIdp();
 /** Signing people in, granting and running can be slow on CI. */
 const setUpTime = { timeout: 120_000 };
 
-/** A definition of `name` that greets whoever its input names. */
-const greeting = (name: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: { who: { type: "string" } },
-          required: ["who"],
-          additionalProperties: false,
-        },
-      },
-    },
-    output: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: { status: { type: "string" } },
-          required: ["status"],
-          additionalProperties: false,
-        },
-      },
-    },
-    do: [{ finish: { set: { status: "done" } } }],
-  });
-
 type Session = Awaited<ReturnType<typeof signedInApi>>;
 
 /**
@@ -88,7 +50,7 @@ const workflowFor = async (userId: string, shared = true) => {
   }
   const workflow = await createWorkflowResource(env, by, `greet-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
-    definition: greeting(workflow.name),
+    definition: greetingOf(),
     basedOn: null,
   });
   if (shared) {

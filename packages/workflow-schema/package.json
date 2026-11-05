@@ -6,16 +6,20 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./catalog": "./src/catalog.ts",
     "./check": "./src/check.ts",
+    "./data-schema": "./src/data-schema.ts",
+    "./expression-scope": "./src/expression-scope.ts",
     "./format": "./src/format.ts",
     "./generate": "./src/generate.ts",
-    "./schema": "./src/schema.ts"
+    "./schema": "./src/schema.ts",
+    "./sealed": "./src/sealed.ts"
   },
   "dependencies": {
     "@cfworker/json-schema": "catalog:",
-    "@grasp-os/open-workflow": "workspace:*",
     "@grasp-os/sdk": "workspace:*",
-    "@grasp-os/shared": "workspace:*"
+    "@grasp-os/shared": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@babel/parser": "catalog:",

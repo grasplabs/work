@@ -188,8 +188,7 @@ export interface BindingCaller {
   /**
    * Whether this invocation is a workflow run's, or was called, through
    * other Apps, from one (resource-apps.ts): the Apps it calls start no
-   * workflows, as a run's own call starts none (a run starting another
-   * is a child run of its own, within its lineage's limits).
+   * workflows, as a run's own call starts none.
    */
   readonly fromRun?: boolean;
   /**

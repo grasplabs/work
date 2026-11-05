@@ -1,6 +1,5 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page } from "@playwright/test";
 
@@ -29,13 +28,10 @@ test.use({ trace: "retain-on-failure" });
 const live = { timeout: 30_000 };
 
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
 /** A native value descriptor of an object of string fields named `names`. */
@@ -45,44 +41,29 @@ const stringsDescriptor = (names: readonly string[]) =>
 
 /**
  * A workflow asking the person its input names (`reviewer`, a user ID) for
- * decision `contract`, as `approval`, in its task `ask`, then greeting.
+ * decision `contract`, as `approval`, in its step `ask`, then greeting.
  */
-const definitionOf = (name: string, contract: string) =>
+const definitionOf = (contract: string) =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: { approval: { kind: "decision", contract } },
-        },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({
+      who: { type: "string" },
+      reviewer: { type: "string" },
+    }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: { $expr: '"Hello, " + input.who' } },
     },
-    input: {
-      schema: objectSchema({
-        who: { type: "string" },
-        reviewer: { type: "string" },
-      }),
-    },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
+    bindings: { approval: { kind: "decision", contract } },
+    steps: [
       {
-        ask: {
-          call: "grasp.decision",
-          with: {
-            binding: "approval",
-            recipients: '${ ["person:" + $workflow.input.reviewer] }',
-            prompt: "Greet them?",
-            input: { who: "${ $workflow.input.who }" },
-          },
-        },
+        id: "ask",
+        type: "decision",
+        binding: "approval",
+        recipients: { $expr: '["person:" + input.reviewer]' },
+        prompt: "Greet them?",
+        input: { who: { $expr: "input.who" } },
       },
-      { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
     ],
   });
 
@@ -273,7 +254,7 @@ const boundApp = async (
       `greet-${crypto.randomUUID().slice(0, 8)}`
     );
     await builds.api.workflowResources.publish(workflow.id, {
-      definition: definitionOf(workflow.name, key),
+      definition: definitionOf(key),
       basedOn: null,
     });
     await decides.api.workflowResources.approveBinding(workflow.id, {

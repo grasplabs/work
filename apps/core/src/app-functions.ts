@@ -369,7 +369,7 @@ export const invocationFor = async (
     // calling: each start admitted on the App's own grant and the
     // person's role in the App, read again as it is admitted. None for a
     // call from a workflow run's chain, as for the run's own call: a run
-    // starting another is a child run, within its lineage's limits.
+    // starts no workflow.
     ...(fromRun
       ? {}
       : {

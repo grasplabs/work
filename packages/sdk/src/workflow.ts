@@ -51,20 +51,6 @@ import {
 // Workflow code imports only this module, so it gets Zod from here too.
 export { z } from "zod";
 export { brain } from "./brain.ts";
-// jq, as JSON workflows' expressions are: what code generated from one
-// evaluates its data flow with, in the run's own isolate.
-export {
-  evaluate,
-  evaluationFuel,
-  expressionBudget,
-  stepExpressionFuel,
-  type EvaluateOptions,
-  type Expression,
-  type ExpressionBudget,
-  type ExpressionResult,
-  type ExpressionScope,
-  type ExpressionStage,
-} from "./expressions.ts";
 // The guards a workflow's JavaScript expressions run through, as the
 // code generated from them imports them (expression-check.ts,
 // `runtimeNames`).

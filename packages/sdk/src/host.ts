@@ -167,6 +167,7 @@ export {
   dataModelSource,
   serverModuleSource,
   symbolicModules,
+  valueTypeOf,
   workflowFingerprint,
   workflowReferenceOf,
 } from "./generate.ts";

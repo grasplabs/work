@@ -112,8 +112,8 @@ import type { ReviewContext } from "./confirmations.ts";
 //   screen never holds one, and agents never reach this service: it is
 //   answered through a person's session only. A context that changed
 //   since it was reviewed is a `decision.conflict`, never an approval.
-// - An independent workflow's run (a JSON workflow's `grasp.decision`
-//   call, workflows/resource-host.ts) waits on the same decisions, by the
+// - An independent workflow's run (a JSON workflow's decision step,
+//   workflows/sealed-run.ts) waits on the same decisions, by the
 //   same rules: its run is `resource_run_id` instead of `run_id`, its
 //   starter the person it acts for (`principal_id`), and it goes on while
 //   it hasn't ended and no cancel or termination of it was admitted. What

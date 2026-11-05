@@ -30,7 +30,7 @@ import { allowingPermissionSql } from "../permissions.ts";
 import { isStaleRefusal, startWorkflow } from "../workflow-starts.ts";
 import type { TriggerCause } from "../workflow-starts.ts";
 import type { StampedRun } from "./mail-stamps.ts";
-import { admitChild } from "./quotas.ts";
+import { admitInLineage } from "./quotas.ts";
 import { runOf } from "./resource-runs.ts";
 import { triggeredRunsPerHour } from "./runs.ts";
 import type { StartFiles } from "./start-files.ts";
@@ -73,7 +73,7 @@ import type { StartFiles } from "./start-files.ts";
 //   other. An independent workflow's mail is stamped as an App run's is
 //   (mail-stamps.ts, `resource_run_mail_calls`), and a stamped event's
 //   run joins the stamping run's lineage, one level deeper, admitted
-//   against its nesting and descendant limits (quotas.ts, `admitChild`),
+//   against its nesting and descendant limits (quotas.ts, `admitInLineage`),
 //   so the lineage's limits end the loop (`workflow.lineage_limit`,
 //   refused for good). Its work is charged to its workflow's own account
 //   in that lineage (quotas.ts, `triggeredAccountClaimed`), so a busy
@@ -487,7 +487,7 @@ const refusalOf = async (
 /**
  * The lineage a trigger's run of a stamped event or message joins: the
  * stamping independent run's, one level deeper, admitted once per `admission`
- * (the event or message and the trigger; quotas.ts, `admitChild`, which
+ * (the event or message and the trigger; quotas.ts, `admitInLineage`, which
  * throws `workflow.lineage_limit` past its limits); none for one no run
  * stamped; `unjoinable` for an App run's mail, which can't join an
  * independent lineage (their runs are kept apart), or a run no longer kept.
@@ -505,7 +505,7 @@ const causeOf = async (
   if (run === undefined) {
     return "unjoinable";
   }
-  const place = await admitChild(
+  const place = await admitInLineage(
     env,
     { id: run.id, rootRunId: run.rootRunId, depth: run.depth },
     admission

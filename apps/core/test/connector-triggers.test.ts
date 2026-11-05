@@ -1,5 +1,5 @@
 import { createAuditEvent } from "@grasp-os/shared/audit";
-/* oxlint-disable no-template-curly-in-string -- workflow expressions, and text that looks like one, are written as ${ … } strings */
+/* oxlint-disable no-template-curly-in-string -- text that looks like an expression is written as ${ … } strings */
 import {
   connectionIdSchema,
   triggerIdSchema,
@@ -8,7 +8,7 @@ import {
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -89,13 +89,10 @@ const person = async (role: Role): Promise<Identity> => {
 };
 
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
 /** A workflow of `admin`'s taking `{ subject, folder }` and handing it back. */
@@ -104,32 +101,16 @@ const filing = async (admin: Identity) => {
   const fields = { subject: { type: "string" }, folder: { type: "string" } };
   await publishWorkflowVersion(env, admin, workflow.id, {
     definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: {},
-          },
+      $schema: workflowSchemaUrl,
+      input: objectSchema(fields),
+      output: {
+        schema: objectSchema(fields),
+        value: {
+          subject: { $expr: "input.subject" },
+          folder: { $expr: "input.folder" },
         },
       },
-      input: { schema: objectSchema(fields) },
-      output: { schema: objectSchema(fields) },
-      do: [
-        {
-          finish: {
-            set: {
-              subject: "${ $workflow.input.subject }",
-              folder: "${ $workflow.input.folder }",
-            },
-          },
-        },
-      ],
+      steps: [],
     }),
     basedOn: null,
   });
