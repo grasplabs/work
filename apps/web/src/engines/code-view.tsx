@@ -11,6 +11,7 @@ import {
   FileTypeIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { createElement } from "react";
 import type { ReactNode } from "react";
 
 // How the Code view (app-code.tsx) shows code: @pierre/diffs draws a file,
@@ -41,7 +42,11 @@ const fileOptions: FileOptions<undefined, undefined> = {
 /** How a diff shows its two versions: one column, or side by side. */
 export type DiffLayout = "unified" | "split";
 
-/** A file's change, read-only, under a header that stays while it scrolls. */
+/**
+ * A file's change, read-only, under a header that stays while it scrolls.
+ * Each hunk opens with its `@@ -a,b +c,d @@` line, as git prints it: the
+ * library's other separators say "N unmodified lines" in English only.
+ */
 const diffOptions = (
   layout: DiffLayout
 ): FileDiffOptions<undefined, undefined> => ({
@@ -49,7 +54,7 @@ const diffOptions = (
   preferredHighlighter: "highlights",
   diffStyle: layout,
   diffIndicators: "classic",
-  hunkSeparators: "line-info",
+  hunkSeparators: "metadata",
   lineDiffType: "word-alt",
   stickyHeader: true,
   overflow: "scroll",
@@ -85,6 +90,28 @@ export const CodeFile = ({ path, text }: { path: string; text: string }) => (
   />
 );
 
+/**
+ * `text` ending in a newline. A diff of texts that all do never has the
+ * library's "No newline at end of file" marker, which it draws in English
+ * only; a change of the final newline alone is the page's to say
+ * (`onlyFinalNewline`).
+ */
+const ended = (text: string): string =>
+  text.endsWith("\n") ? text : `${text}\n`;
+
+/** The lines of `text`; its last newline ends a line, not starts one. */
+const lineCount = (text: string): number =>
+  text === "" ? 0 : ended(text).split("\n").length - 1;
+
+/** The lines a diff of `diff` compares: its old and new lines together. */
+export const comparedLines = (diff: FileDiff): number =>
+  (diff.change === "added" ? 0 : lineCount(diff.before)) +
+  (diff.change === "deleted" ? 0 : lineCount(diff.after));
+
+/** Whether `diff` changes nothing but whether its file ends in a newline. */
+export const onlyFinalNewline = (diff: FileDiff): boolean =>
+  diff.change === "modified" && ended(diff.before) === ended(diff.after);
+
 /** How a file changed: an added one all added, a deleted one all removed. */
 export const CodeDiff = ({
   diff,
@@ -98,7 +125,7 @@ export const CodeDiff = ({
   if (diff.change === "added") {
     return (
       <MultiFileDiff
-        newFile={{ name: path, contents: diff.after }}
+        newFile={{ name: path, contents: ended(diff.after) }}
         oldFile={null}
         options={options}
       />
@@ -108,15 +135,15 @@ export const CodeDiff = ({
     return (
       <MultiFileDiff
         newFile={null}
-        oldFile={{ name: path, contents: diff.before }}
+        oldFile={{ name: path, contents: ended(diff.before) }}
         options={options}
       />
     );
   }
   return (
     <MultiFileDiff
-      newFile={{ name: path, contents: diff.after }}
-      oldFile={{ name: path, contents: diff.before }}
+      newFile={{ name: path, contents: ended(diff.after) }}
+      oldFile={{ name: path, contents: ended(diff.before) }}
       options={options}
     />
   );
@@ -139,13 +166,21 @@ const iconsByExtension: Readonly<Record<string, LucideIcon>> = {
   txt: FileTextIcon,
   css: FileTypeIcon,
   svg: FileImageIcon,
-  png: FileImageIcon,
 };
 
 /** The icon of the file at `path`, a plain file's for a type it doesn't know. */
-export const fileIconOf = (path: string): LucideIcon => {
+const fileIconOf = (path: string): LucideIcon => {
   const dot = path.lastIndexOf(".");
   return (
     (dot === -1 ? undefined : iconsByExtension[path.slice(dot + 1)]) ?? FileIcon
   );
 };
+
+/** The icon of the file at `path`'s type, for the eye alone. */
+export const PathIcon = ({
+  path,
+  className,
+}: {
+  path: string;
+  className?: string;
+}) => createElement(fileIconOf(path), { "aria-hidden": true, className });

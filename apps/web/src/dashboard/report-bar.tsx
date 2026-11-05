@@ -13,7 +13,7 @@ import { FileTextIcon } from "lucide-react";
 /**
  * The shade's width for each of the week's days passed, 0 to 7: whole
  * classes, so Tailwind finds them, and no inline style, which the
- * Content Security Policy refuses.
+ * `no-inline-styles` lint rule refuses.
  */
 const shadeWidths = [
   "w-0",

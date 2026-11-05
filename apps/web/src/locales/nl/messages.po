@@ -8902,6 +8902,10 @@ msgstr "Een moment"
 msgid "One real case"
 msgstr "Eén echt geval"
 
+#: src/engines/app-code.tsx
+msgid "Only a newline at the end of the file was added."
+msgstr "Alleen een regeleinde aan het eind van het bestand is toegevoegd."
+
 #: src/settings/sign-in-settings.tsx
 msgid "Only accounts of the Google Workspace {hostedDomain}."
 msgstr "Alleen accounts van de Google Workspace {hostedDomain}."
@@ -8953,6 +8957,10 @@ msgstr "Alleen wie in de workspace is ingelogd, opent hem."
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Alleen de eerste manier"
+
+#: src/engines/app-code.tsx
+msgid "Only the newline at the end of the file was removed."
+msgstr "Alleen het regeleinde aan het eind van het bestand is verwijderd."
 
 #: src/knowledge/collection-markers.tsx
 msgid "Only the owner"
@@ -9078,6 +9086,10 @@ msgstr "Openen in Chat"
 #: src/engines/app-chat.tsx
 msgid "Open in Chat"
 msgstr "Openen in Chat"
+
+#: src/engines/app-code.tsx
+msgid "Open in Files"
+msgstr "Openen in Bestanden"
 
 #: src/dashboard/widget-block.tsx
 msgid "Open in full"
@@ -13380,6 +13392,10 @@ msgstr "Dit kan niet ongedaan worden gemaakt. Bevestig vóór {until}, of bereid
 #: src/engines/store-change-errors.ts
 msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
 msgstr "Deze wijziging wordt opnieuw toegepast, dus die kan nu niet worden opgegeven. De pagina toont nu hoe het ervoor staat."
+
+#: src/engines/app-code.tsx
+msgid "This change is too large to show line by line."
+msgstr "Deze wijziging is te groot om regel voor regel te tonen."
 
 #: src/engines/store-change-errors.ts
 msgid "This change was already abandoned."

@@ -212,7 +212,7 @@ catalog:
   # The kit's charts.
   recharts: 3.10.1
   # The agent's answers: code blocks highlighted by class, so the theme's
-  # tokens colour them and the CSP needs no inline style.
+  # tokens colour them with no inline style (the no-inline-styles lint rule).
   rehype-highlight: 7.0.2
   # An App's Code tab: its files and a draft's changes, virtualised and
   # highlighted by the library's own highlighter (Highlights).

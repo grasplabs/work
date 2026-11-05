@@ -204,17 +204,31 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
       .getByRole("link", { name: "Code" })
       .click();
     await page.getByRole("button", { name: "Changes" }).click();
+    // One file changed, one line out and one in.
     const changes = page.getByRole("region", { name: "Changes" });
-    await expect(changes.locator("[data-diffs-header]")).toHaveCount(1);
-    await expect(changes.locator("[data-title]")).toHaveText("server/tally.ts");
-    await expect(
-      changes.locator('[data-line][data-line-type="change-deletion"]')
-    ).toContainText("in the App");
-    await expect(
-      changes.locator('[data-line][data-line-type="change-addition"]')
-    ).toContainText("in the next version");
+    const changed = changes.getByRole("region", { name: "server/tally.ts" });
+    await expect(changes.getByRole("region")).toHaveCount(1);
+    await expect(changed).toContainText("-1+1");
+    const removed = changed.getByText(/in the App`;$/u);
+    const added = changed.getByText(/in the next version`;$/u);
+    await expect(removed).toBeVisible();
+    await expect(added).toBeVisible();
+    // Unified, the new line stands under the old; split, beside it.
+    const unified = [await removed.boundingBox(), await added.boundingBox()];
+    expect((unified[1]?.y ?? 0) > (unified[0]?.y ?? 0)).toBeTruthy();
     await page.getByRole("button", { name: "Split" }).click();
-    await expect(changes.locator('pre[data-diff-type="split"]')).toBeVisible();
+    await expect
+      .poll(async () => {
+        const [old, now] = [
+          await removed.boundingBox(),
+          await added.boundingBox(),
+        ];
+        return {
+          sameRow: old?.y === now?.y,
+          beside: (now?.x ?? 0) > (old?.x ?? 0) + (old?.width ?? 0) / 2,
+        };
+      })
+      .toStrictEqual({ sameRow: true, beside: true });
   } finally {
     core[Symbol.dispose]();
   }

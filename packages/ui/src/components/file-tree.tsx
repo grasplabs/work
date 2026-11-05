@@ -18,7 +18,7 @@ import type * as React from "react";
  */
 
 const fileTreeRowVariants = cva(
-  "focus-visible:ring-ring/50 flex w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-left text-[0.8125rem] leading-5 transition-colors duration-100 outline-none focus-visible:ring-[3px] [&_svg]:size-4 [&_svg]:shrink-0",
+  "focus-visible:ring-ring/50 flex w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-start text-[0.8125rem] leading-5 transition-colors duration-100 outline-none focus-visible:ring-[3px] [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       active: {
@@ -92,7 +92,7 @@ function FileTreeFile({
         aria-current={active ? "true" : undefined}
         data-active={active ? "" : undefined}
         // In line with a folder's name: past where its chevron stands.
-        className={cn(fileTreeRowVariants({ active }), "ps-7", className)}
+        className={cn(fileTreeRowVariants({ active }), "ps-7.5", className)}
         {...props}
       >
         {icon}

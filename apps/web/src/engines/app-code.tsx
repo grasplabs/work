@@ -28,7 +28,14 @@ import { LoadingLines } from "../frame/page-states.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { CodeDiff, CodeFile, CodeScroller, fileIconOf } from "./code-view.tsx";
+import {
+  CodeDiff,
+  CodeFile,
+  CodeScroller,
+  comparedLines,
+  PathIcon,
+  onlyFinalNewline,
+} from "./code-view.tsx";
 import type { DiffLayout } from "./code-view.tsx";
 
 // An App's code in its workspace, for its builders (app-workspace.tsx's
@@ -105,22 +112,19 @@ const FolderEntries = ({
       ))}
     {folder.files
       .toSorted((a, b) => byName(a.name, b.name))
-      .map((file) => {
-        const Icon = fileIconOf(file.path);
-        return (
-          <FileTreeFile
-            active={file.path === open}
-            icon={<Icon aria-hidden="true" />}
-            key={file.path}
-            onClick={() => {
-              onOpen(file.path);
-            }}
-            title={file.path}
-          >
-            {file.name}
-          </FileTreeFile>
-        );
-      })}
+      .map((file) => (
+        <FileTreeFile
+          active={file.path === open}
+          icon={<PathIcon path={file.path} />}
+          key={file.path}
+          onClick={() => {
+            onOpen(file.path);
+          }}
+          title={file.path}
+        >
+          {file.name}
+        </FileTreeFile>
+      ))}
   </>
 );
 
@@ -185,17 +189,36 @@ const EditorFrame = ({ children }: { children: ReactNode }) => (
   </div>
 );
 
+/** The first file of `folder`, as its tree lists them. */
+const firstIn = (folder: Folder): string | undefined => {
+  for (const [, inner] of [...folder.folders.entries()].toSorted(([a], [b]) =>
+    byName(a, b)
+  )) {
+    const first = firstIn(inner);
+    if (first !== undefined) {
+      return first;
+    }
+  }
+  return folder.files.toSorted((a, b) => byName(a.name, b.name))[0]?.path;
+};
+
+/** The file asked to be open, and how to ask for another. */
+interface OpenFile {
+  asked: string | undefined;
+  onAsk: (path: string) => void;
+}
+
 /** The files of one version: their tree, and the open one's text. */
-const FilesView = ({ files }: { files: AppFiles }) => {
+const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
   const { t } = useLingui();
   const paths = Object.keys(files);
-  const [asked, setAsked] = useState<string>();
+  const tree = treeOf(paths);
   // The one asked for while this version has it, else its app.ts, else
-  // its first.
+  // the tree's first.
   const file =
     asked !== undefined && Object.hasOwn(files, asked)
       ? asked
-      : (paths.find((path) => path === "app.ts") ?? paths.toSorted()[0]);
+      : (paths.find((path) => path === "app.ts") ?? firstIn(tree));
   if (file === undefined) {
     return (
       <EditorFrame>
@@ -213,7 +236,7 @@ const FilesView = ({ files }: { files: AppFiles }) => {
         className="max-h-48 flex-none overflow-y-auto border-b p-2 md:max-h-none md:w-60 md:border-e md:border-b-0"
       >
         <FileTree>
-          <FolderEntries folder={treeOf(paths)} onOpen={setAsked} open={file} />
+          <FolderEntries folder={tree} onOpen={onAsk} open={file} />
         </FileTree>
       </nav>
       <section
@@ -230,13 +253,79 @@ const FilesView = ({ files }: { files: AppFiles }) => {
   );
 };
 
+/**
+ * The most lines, old and new together, a file's change is diffed line by
+ * line in. The diff runs on the page's own thread (the CSP starts no
+ * worker), and it grows faster than the lines: about 4,000 take a few
+ * hundred milliseconds, 10,000 several seconds. Past it, as GitHub does
+ * with a large diff, the change says so and opens in Files instead.
+ */
+const maxComparedLines = 4000;
+
+/** Whether the view draws `diff` line by line, rather than a note. */
+const drawnLineByLine = (diff: FileDiff): boolean =>
+  comparedLines(diff) <= maxComparedLines && !onlyFinalNewline(diff);
+
+/** Why a file's change isn't drawn line by line. */
+const NoteText = ({ diff }: { diff: FileDiff }) => {
+  if (comparedLines(diff) > maxComparedLines) {
+    return <Trans>This change is too large to show line by line.</Trans>;
+  }
+  return diff.change !== "deleted" && diff.after.endsWith("\n") ? (
+    <Trans>Only a newline at the end of the file was added.</Trans>
+  ) : (
+    <Trans>Only the newline at the end of the file was removed.</Trans>
+  );
+};
+
+/** A file's change the view doesn't draw line by line, and why. */
+const ChangeNote = ({
+  diff,
+  onOpen,
+}: {
+  diff: FileDiff;
+  onOpen: (path: string) => void;
+}) => {
+  const { path, change } = diff;
+  return (
+    <section
+      aria-label={path}
+      className="flex flex-col gap-2 border-b px-4 py-3 text-sm"
+    >
+      <h3 className="flex min-w-0 items-center gap-2 text-xs">
+        <PathIcon className="text-muted-foreground size-4" path={path} />
+        <span className="truncate">{path}</span>
+      </h3>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <p className="text-muted-foreground">
+          <NoteText diff={diff} />
+        </p>
+        {change === "deleted" ? null : (
+          <Button
+            onClick={() => {
+              onOpen(path);
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <Trans>Open in Files</Trans>
+          </Button>
+        )}
+      </div>
+    </section>
+  );
+};
+
 /** The draft's changes against the current version, file by file. */
 const ChangesView = ({
   diffs,
   layout,
+  onOpen,
 }: {
   diffs: readonly FileDiff[];
   layout: DiffLayout;
+  /** Opens a file of the draft in Files. */
+  onOpen: (path: string) => void;
 }) => {
   const { t } = useLingui();
   return (
@@ -254,9 +343,15 @@ const ChangesView = ({
           className="flex min-h-0 min-w-0 flex-1 flex-col"
         >
           <CodeScroller className="min-h-0 flex-1 overflow-auto">
-            {diffs.map((diff) => (
-              <CodeDiff diff={diff} key={diff.path} layout={layout} />
-            ))}
+            {diffs.map((diff) =>
+              drawnLineByLine(diff) ? (
+                <section aria-label={diff.path} key={diff.path}>
+                  <CodeDiff diff={diff} layout={layout} />
+                </section>
+              ) : (
+                <ChangeNote diff={diff} key={diff.path} onOpen={onOpen} />
+              )
+            )}
           </CodeScroller>
         </section>
       )}
@@ -322,14 +417,19 @@ const allAdded = (files: AppFiles): FileDiff[] =>
     .map(([path, after]) => ({ path, change: "added", after }));
 
 /** One version's files, read. */
-const VersionFiles = ({ app, version }: { app: string; version: number }) => {
+const VersionFiles = ({
+  app,
+  version,
+  asked,
+  onAsk,
+}: OpenFile & { app: string; version: number }) => {
   const files = useCoreRead(
     `${app}/${version}`,
     async (session) => await session.apps.files.read(app, version)
   );
   return files?.state === "ready" ? (
-    // A version's own tree: what was open in another may not be in it.
-    <FilesView files={files.data} key={version} />
+    // A version's own tree, the file asked for open while it has it.
+    <FilesView asked={asked} files={files.data} key={version} onAsk={onAsk} />
   ) : (
     <ReadState loaded={files} />
   );
@@ -348,13 +448,14 @@ const ChatDraftFiles = ({
   chatId: string;
   revision: number;
 }) => {
+  const [asked, setAsked] = useState<string>();
   const files = useCoreRead(
     `${chatId}/${app}/${revision}`,
     async (session) => await session.chats.draftFiles(chatId, app),
     `${chatId}/${app}`
   );
   return files?.state === "ready" ? (
-    <FilesView files={files.data} />
+    <FilesView asked={asked} files={files.data} onAsk={setAsked} />
   ) : (
     <ReadState loaded={files} />
   );
@@ -366,11 +467,13 @@ const DraftChanges = ({
   current,
   draft,
   layout,
+  onOpen,
 }: {
   app: string;
   current: number | null;
   draft: number;
   layout: DiffLayout;
+  onOpen: (path: string) => void;
 }) => {
   const changes = useCoreRead(
     `${app}/${current ?? ""}/${draft}`,
@@ -380,7 +483,7 @@ const DraftChanges = ({
         : await session.apps.versions.diff(app, current, draft)
   );
   return changes?.state === "ready" ? (
-    <ChangesView diffs={changes.data} layout={layout} />
+    <ChangesView diffs={changes.data} layout={layout} onOpen={onOpen} />
   ) : (
     <ReadState loaded={changes} />
   );
@@ -451,6 +554,13 @@ const CodeBody = ({
   const [asked, setAsked] = useState<Source>();
   const [part, setPart] = useState<Part>("files");
   const [layout, setLayout] = useState<DiffLayout>("unified");
+  const [file, setFile] = useState<string>();
+  // A change opened in Files: the draft's file.
+  const openInFiles = (path: string): void => {
+    setFile(path);
+    setAsked("draft");
+    setPart("files");
+  };
   // The draft's, as the preview shows it, unless the current version's
   // were asked for, or there is no draft.
   const source: Source =
@@ -526,10 +636,16 @@ const CodeBody = ({
           current={current}
           draft={changes}
           layout={layout}
+          onOpen={openInFiles}
         />
       )}
       {changes === null && version !== null && (
-        <VersionFiles app={app} version={version} />
+        <VersionFiles
+          app={app}
+          asked={file}
+          onAsk={setFile}
+          version={version}
+        />
       )}
     </div>
   );

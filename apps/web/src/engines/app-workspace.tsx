@@ -65,6 +65,7 @@ import type { ShownVersion } from "../chat/draft-versions.tsx";
 import { DraftPreview } from "../chat/studio.tsx";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { LoadingLines } from "../frame/page-states.tsx";
 import { useWide } from "../frame/wide.ts";
 import { useVersionPushes } from "../screens/use-version-pushes.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -926,7 +927,13 @@ const MainArea = ({
     </div>
     {view === "code" ? (
       <div className="flex min-h-0 flex-1 flex-col">
-        <Suspense fallback={null}>
+        <Suspense
+          fallback={
+            <div className="p-4">
+              <LoadingLines lines={6} />
+            </div>
+          }
+        >
           <AppCode app={app} building={building} />
         </Suspense>
       </div>

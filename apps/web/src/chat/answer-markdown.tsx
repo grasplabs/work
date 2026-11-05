@@ -48,8 +48,8 @@ import { CitedNote, citedNoteLink, CitedSpan } from "./cited-note.tsx";
 // whose components these extend: no raw HTML, safe links only, no images.
 //
 // Highlighting is by class (rehype-highlight), coloured from the theme's
-// tokens in styles.css, so the page's Content Security Policy needs no
-// inline style, and dark mode comes with the theme. Only a block that
+// tokens in styles.css, so it needs no inline style (the `no-inline-styles`
+// lint rule), and dark mode comes with the theme. Only a block that
 // names its language is highlighted: guessing one would cost each render
 // and often guess wrong.
 

@@ -8902,6 +8902,10 @@ msgstr "Un instant"
 msgid "One real case"
 msgstr "Un cas réel"
 
+#: src/engines/app-code.tsx
+msgid "Only a newline at the end of the file was added."
+msgstr "Seul un saut de ligne a été ajouté à la fin du fichier."
+
 #: src/settings/sign-in-settings.tsx
 msgid "Only accounts of the Google Workspace {hostedDomain}."
 msgstr "Uniquement les comptes du Google Workspace {hostedDomain}."
@@ -8953,6 +8957,10 @@ msgstr "Seule une personne connectée à l'espace de travail l'ouvre."
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Seulement la première façon"
+
+#: src/engines/app-code.tsx
+msgid "Only the newline at the end of the file was removed."
+msgstr "Seul le saut de ligne à la fin du fichier a été supprimé."
 
 #: src/knowledge/collection-markers.tsx
 msgid "Only the owner"
@@ -9078,6 +9086,10 @@ msgstr "Ouvrir dans le chat"
 #: src/engines/app-chat.tsx
 msgid "Open in Chat"
 msgstr "Ouvrir dans Chat"
+
+#: src/engines/app-code.tsx
+msgid "Open in Files"
+msgstr "Ouvrir dans Fichiers"
 
 #: src/dashboard/widget-block.tsx
 msgid "Open in full"
@@ -13380,6 +13392,10 @@ msgstr "C’est irréversible. Confirmez avant {until}, ou préparez-la à nouve
 #: src/engines/store-change-errors.ts
 msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
 msgstr "Cette modification est de nouveau en cours d’application : elle ne peut donc pas être abandonnée maintenant. La page montre maintenant où elle en est."
+
+#: src/engines/app-code.tsx
+msgid "This change is too large to show line by line."
+msgstr "Cette modification est trop importante pour être affichée ligne par ligne."
 
 #: src/engines/store-change-errors.ts
 msgid "This change was already abandoned."

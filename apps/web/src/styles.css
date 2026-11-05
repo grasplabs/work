@@ -1205,7 +1205,8 @@
 /*
  * Code in the agent's answers (chat/answer-markdown.tsx), highlighted by
  * class (rehype-highlight): coloured from the theme's tokens, so it follows
- * light and dark, and set without any inline style the CSP would refuse.
+ * light and dark, and set without any inline style (the `no-inline-styles`
+ * lint rule).
  */
 @layer components {
   .hljs-comment,
@@ -1264,7 +1265,9 @@
  * every colour a variable, each set to the theme's token, so the view
  * follows light and dark with the rest of the page. Added and removed
  * lines are the status colours; the code is set in the theme's mono at
- * the line height the view's virtualizer counts on (code-view.tsx).
+ * the line height the library's virtualizer counts on: 20px, fixed in its
+ * own code (`DEFAULT_VIRTUAL_FILE_METRICS`), so in pixels here too, not rem,
+ * that a larger root font size can't move one from the other.
  */
 @layer components {
   diffs-container {
@@ -1272,7 +1275,7 @@
     --diffs-font-family: var(--font-mono);
     --diffs-header-font-family: var(--font-sans);
     --diffs-font-size: 0.8125rem;
-    --diffs-line-height: 1.25rem;
+    --diffs-line-height: 20px;
     --diffs-tab-size: 2;
     --diffs-foreground: var(--foreground);
     --diffs-background: var(--card);

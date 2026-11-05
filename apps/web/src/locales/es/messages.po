@@ -8902,6 +8902,10 @@ msgstr "Un momento"
 msgid "One real case"
 msgstr "Un caso real"
 
+#: src/engines/app-code.tsx
+msgid "Only a newline at the end of the file was added."
+msgstr "Solo se añadió un salto de línea al final del archivo."
+
 #: src/settings/sign-in-settings.tsx
 msgid "Only accounts of the Google Workspace {hostedDomain}."
 msgstr "Solo cuentas del Google Workspace {hostedDomain}."
@@ -8953,6 +8957,10 @@ msgstr "Solo lo abre quien ha iniciado sesión en el espacio de trabajo."
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Solo la primera manera"
+
+#: src/engines/app-code.tsx
+msgid "Only the newline at the end of the file was removed."
+msgstr "Solo se quitó el salto de línea al final del archivo."
 
 #: src/knowledge/collection-markers.tsx
 msgid "Only the owner"
@@ -9078,6 +9086,10 @@ msgstr "Abrir en el chat"
 #: src/engines/app-chat.tsx
 msgid "Open in Chat"
 msgstr "Abrir en Chat"
+
+#: src/engines/app-code.tsx
+msgid "Open in Files"
+msgstr "Abrir en Archivos"
 
 #: src/dashboard/widget-block.tsx
 msgid "Open in full"
@@ -13380,6 +13392,10 @@ msgstr "No se puede deshacer. Confirma antes de {until}, o prepáralo de nuevo."
 #: src/engines/store-change-errors.ts
 msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
 msgstr "Este cambio se está aplicando de nuevo, así que ahora no se puede abandonar. La página muestra ahora en qué punto está."
+
+#: src/engines/app-code.tsx
+msgid "This change is too large to show line by line."
+msgstr "Este cambio es demasiado grande para mostrarlo línea por línea."
 
 #: src/engines/store-change-errors.ts
 msgid "This change was already abandoned."
