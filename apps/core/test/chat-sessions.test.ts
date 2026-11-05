@@ -107,6 +107,7 @@ const sessionOf = (
     shared: false,
     readsBrain: false,
     context: { skills: [] },
+    capture: { model: asked, audience: null },
   }),
 });
 

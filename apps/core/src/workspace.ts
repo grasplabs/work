@@ -136,6 +136,7 @@ import {
 import type { HeldWriteRefusal, TurnCheck } from "./channels/stephen-rules.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import type {
+  TurnCapture,
   TurnEnd,
   TurnMessage,
   TurnRequest,
@@ -187,7 +188,7 @@ import {
   previewStores,
 } from "./db/workspace/schema.ts";
 import { DraftVersions } from "./draft-versions.ts";
-import { brokeOnTheWay, callObject, chatSession } from "./durable-objects.ts";
+import { callObject, chatSession } from "./durable-objects.ts";
 import { dropHeldStarts } from "./held-starts.ts";
 import { readableSources, withheldSourceDetail } from "./history-access.ts";
 import {
@@ -626,32 +627,25 @@ const stopReason = (chatId: ChatId, error: unknown): string => {
 const traceKeyPrefix = "trace:";
 
 /**
- * A chat's turn under way, as `turn:<chat>` (`TurnMark`): from when its
- * question is handed to its `ChatSession` until the turn ends there
- * (`#endTurn`). Kept in storage, so a restart of this object mid-turn
- * still shows the chat running, takes the turn's build jobs and stops
- * them, and captures how the turn ended, while it goes on there.
+ * A chat whose turn runs, as `running:<chat>`: a copy of what its
+ * `ChatSession` holds (`turnRunning`), for the chat's lists and watchers,
+ * kept through a restart of this object. Never what decides a turn: that
+ * object does.
  */
-const turnKeyPrefix = "turn:";
-
-/** What `turn:<chat>` keeps of a turn under way: what its end needs. */
-const turnMarkSchema = z.object({
-  turnId: z.string(),
-  /** The chat's last message as the turn began: its answer comes after. */
-  after: z.number(),
-  /** The admitted model, as the turn's capture records it. */
-  model: z.string(),
-  /** A shared chat's members as the turn read for them; null for one's own. */
-  audience: z.array(z.string()).nullable(),
-});
-type TurnMark = z.infer<typeof turnMarkSchema>;
+const runningKeyPrefix = "running:";
 
 /**
- * The last entry of a chat's `ChatSession` its messages were kept of, as
- * `copied:<chat>`: that object copies at least once, so a copy it sends
- * again after a restart is passed over (`keepTurnMessages`).
+ * What of a chat's `ChatSession` its messages were kept of, as
+ * `copied:<chat>`: the last entry, and the last answer kept with it. That
+ * object copies at least once, so a copy it sends again after a restart
+ * is passed over, and answered as the first was (`keepTurnMessages`).
  */
 const copiedKeyPrefix = "copied:";
+
+const copiedSchema = z.object({
+  through: z.number(),
+  answer: z.number().optional(),
+});
 
 /** Most characters of what a chat read that its writes are traced to. */
 const traceCharsMax = 200_000;
@@ -754,10 +748,10 @@ export class Workspace extends DurableObject<Env> {
   readonly #db = drizzle(this.ctx.storage);
 
   /**
-   * The turns running now, by chat, to cancel them. Only in memory: a turn
-   * ends with the object, and the chat goes on from what it stored. Each
-   * is also marked in storage while it runs (`turnKeyPrefix`), so the wake
-   * after a restart tells the chat its turn was cut short.
+   * The questions this object is taking now, by chat: what each gathers
+   * for its asker as its turn runs (`LiveTurn`). Only in memory: the turn
+   * itself is its ChatSession's, and goes on there through a restart of
+   * this object.
    */
   readonly #turns = new Map<ChatId, LiveTurn>();
 
@@ -1513,119 +1507,48 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Ends turn `turnId` of the chat once its messages are all kept, once:
-   * its mark goes (`turnKeyPrefix`) and, for a turn that settled (`end`,
-   * one its guard didn't stop), its capture intent (none in a chat in
-   * restricted mode), in one transaction. The intent is delivered soon,
-   * the alarm set first so a delivery cut short is tried again
-   * (brain-capture.ts). Called as the turn's asker gets its end, and as
-   * its ChatSession says it ended (`turnEnded`), so a turn that outlives
-   * this object's restart is settled all the same: whichever comes second
-   * finds no mark and does nothing.
+   * Keeps the capture intent of a turn of the chat its ChatSession settled
+   * (chat-harness.ts), as its outcome for the Brain: once, by the turn's
+   * event ID, however often it is delivered; none in a chat in restricted
+   * mode, or one gone or being deleted. Whose turn it was is the chat's,
+   * never the caller's. Delivered soon, the alarm set first so a delivery
+   * cut short is tried again (brain-capture.ts).
    */
-  #endTurn(chatId: ChatId, turnId: string, end?: TurnEnd): void {
-    const key = `${turnKeyPrefix}${chatId}`;
-    const mark = turnMarkSchema.safeParse(this.ctx.storage.kv.get(key));
-    if (!mark.success || mark.data.turnId !== turnId) {
-      return;
-    }
+  captureTurn(chatId: ChatId, capture: TurnCapture): void {
     const chat = this.#db
       .select({ personId: chats.personId, agentId: chats.agentId })
       .from(chats)
       .where(eq(chats.id, chatId))
       .get();
-    const facts: TurnFacts | undefined =
-      chat === undefined || end === undefined || end.stopped !== undefined
-        ? undefined
-        : {
-            chatId,
-            turnId,
-            personId: chat.personId,
-            agentId: chat.agentId,
-            audience: mark.data.audience,
-            outcome: end.outcome,
-            answerId: this.#answerAfter(chatId, mark.data.after) ?? null,
-            model: mark.data.model,
-            occurredAt: new Date().toISOString(),
-          };
-    const eligible =
-      facts !== undefined && this.isChatRestricted(chatId) === false;
-    this.ctx.storage.transactionSync(() => {
-      this.ctx.storage.kv.delete(key);
-      if (eligible) {
-        this.#db
-          .insert(brainCaptureIntents)
-          .values({
-            eventId: turnEventId(facts),
-            evidenceId: chatId,
-            facts: JSON.stringify(facts),
-            createdAt: new Date(),
-          })
-          .onConflictDoNothing({ target: brainCaptureIntents.eventId })
-          .run();
-      }
-    });
-    if (eligible) {
-      this.ctx.waitUntil(this.#captureSoon());
-    }
-    this.#changed(chatId);
-  }
-
-  /**
-   * The chat's ChatSession says turn `turnId` ended there, with `end`
-   * (chat-harness.ts): settled once, if nothing settled it yet
-   * (`#endTurn`).
-   */
-  turnEnded(chatId: ChatId, turnId: string, end: TurnEnd): void {
-    if (this.#deleting.has(chatId)) {
+    if (
+      chat === undefined ||
+      this.#deleting.has(chatId) ||
+      this.isChatRestricted(chatId) !== false
+    ) {
       return;
     }
-    this.#endTurn(chatId, turnId, end);
-  }
-
-  /**
-   * Settles turn `turnId`, which the chat's mark holds while this object
-   * waits on none: a restart may have cut it off before its ChatSession
-   * took it, or the hand-over broke on its way every time, so nothing
-   * would end it. Asked of the ChatSession (`turnState`): ended there, or
-   * never taken, it is settled now; still running, it stays.
-   */
-  /** The chat's marked turn, when this object waits on none. */
-  #leftTurnOf(chatId: ChatId): string | undefined {
-    return this.#turns.has(chatId) ? undefined : this.#turnIdOf(chatId);
-  }
-
-  async #settleLeftTurn(chatId: ChatId, turnId: string): Promise<void> {
-    const { running, end } = await this.#toSession(
+    const facts: TurnFacts = {
       chatId,
-      async (session) => await session.turnState(turnId)
-    );
-    if (!running) {
-      this.#endTurn(chatId, turnId, end);
-    }
-  }
-
-  /** The chat's last answer kept after message `after`, if any. */
-  #answerAfter(chatId: ChatId, after: number): number | undefined {
-    const [row] = this.ctx.storage.sql
-      .exec<{ id: number }>(
-        "SELECT id FROM chat_messages WHERE chat_id = ? AND id > ? AND json_extract(message, '$.role') = 'assistant' ORDER BY id DESC LIMIT 1",
-        chatId,
-        after
-      )
-      .toArray();
-    return row?.id;
-  }
-
-  /** The ID of the chat's last stored message; 0 while it has none. */
-  #lastMessageId(chatId: ChatId): number {
-    const [row] = this.ctx.storage.sql
-      .exec<{ last: number }>(
-        "SELECT coalesce(max(id), 0) AS last FROM chat_messages WHERE chat_id = ?",
-        chatId
-      )
-      .toArray();
-    return row?.last ?? 0;
+      turnId: capture.turnId,
+      personId: chat.personId,
+      agentId: chat.agentId,
+      audience: capture.audience,
+      outcome: capture.outcome,
+      answerId: capture.answerId,
+      model: capture.model,
+      occurredAt: new Date().toISOString(),
+    };
+    this.#db
+      .insert(brainCaptureIntents)
+      .values({
+        eventId: turnEventId(facts),
+        evidenceId: chatId,
+        facts: JSON.stringify(facts),
+        createdAt: new Date(),
+      })
+      .onConflictDoNothing({ target: brainCaptureIntents.eventId })
+      .run();
+    this.ctx.waitUntil(this.#captureSoon());
   }
 
   async #captureSoon(): Promise<void> {
@@ -1874,20 +1797,14 @@ export class Workspace extends DurableObject<Env> {
     // The agent acts for the chat's own person, as this object stored it,
     // never for whoever asks, and only while they are still a member.
     const { personId, via } = chat;
-    // A turn this object's restart left marked is settled first if its
-    // ChatSession no longer runs it. Only then awaited: otherwise the
-    // checks below take the question with nothing awaited before them.
-    const left = this.#leftTurnOf(chat.id);
-    if (left !== undefined) {
-      await this.#settleLeftTurn(chat.id, left);
-    }
     // Being deleted: its writes are being rejected, and it takes no more.
     if (this.#deleting.has(chat.id)) {
       throw agentErrors.create("agent.chat_not_found");
     }
-    // Its ChatSession's run too, before anything is touched: one this
-    // object's restart left there, or one that answers a notice.
-    if (this.#isRunning(chat.id)) {
+    // One asker here at a time, whose question this object prepares and
+    // whose turn's messages it gathers (`LiveTurn`). Whether the chat may
+    // take a turn at all is its ChatSession's to say (`ChatHarness.run`).
+    if (this.#turns.has(chat.id)) {
       throw agentErrors.create("agent.busy");
     }
     // Taken before the first await, so a second question waits its turn
@@ -1943,27 +1860,23 @@ export class Workspace extends DurableObject<Env> {
         live.onText = throttled(onText);
       }
       const { text, model: asked, effort } = parsed.data;
-      const end = await this.#runTurn(
-        {
-          turnId: live.id,
-          scope,
-          question: {
-            text,
-            model: asked,
-            ...(effort === undefined ? {} : { effort }),
-            files,
-          },
-          shared,
-          readsBrain: await hasBrainGrant(this.env, authority),
-          context,
+      const end = await this.#runTurn({
+        turnId: live.id,
+        scope,
+        question: {
+          text,
+          model: asked,
+          ...(effort === undefined ? {} : { effort }),
+          files,
         },
-        {
-          turnId: live.id,
-          after: this.#lastMessageId(chat.id),
+        shared,
+        readsBrain: await hasBrainGrant(this.env, authority),
+        context,
+        capture: {
           model: model.id,
           audience: audience === undefined ? null : [...audience.members],
-        }
-      );
+        },
+      });
       if (end.stopped !== undefined) {
         throw turnStopError(end.stopped);
       }
@@ -2018,28 +1931,14 @@ export class Workspace extends DurableObject<Env> {
    * Runs the turn `request` in the chat's own object (chat-session.ts),
    * to its end. A call that broke on its way is made again: the turn goes
    * on there, and the same turn ID joins or finds it rather than asking
-   * again (`ChatHarness.run`). Marked (`mark`) before it is handed over,
-   * as from then the turn may go on there whatever becomes of this call,
-   * and settled once it ends (`#endTurn`): here, or by its ChatSession
-   * (`turnEnded`) when this call broke on its way.
+   * again (`ChatHarness.run`). That object owns the turn from here: it
+   * refuses one while another runs, settles it, and delivers its capture.
    */
-  async #runTurn(request: TurnRequest, mark: TurnMark): Promise<TurnEnd> {
-    const { chatId } = request.scope;
-    this.ctx.storage.kv.put(`${turnKeyPrefix}${chatId}`, mark);
-    let end: TurnEnd;
-    try {
-      end = await this.#toSession(
-        chatId,
-        async (session) => await session.run(request)
-      );
-    } catch (error) {
-      if (!brokeOnTheWay(error)) {
-        this.#endTurn(chatId, mark.turnId);
-      }
-      throw error;
-    }
-    this.#endTurn(chatId, mark.turnId, end);
-    return end;
+  async #runTurn(request: TurnRequest): Promise<TurnEnd> {
+    return await this.#toSession(
+      request.scope.chatId,
+      async (session) => await session.run(request)
+    );
   }
 
   /**
@@ -2389,21 +2288,47 @@ export class Workspace extends DurableObject<Env> {
     };
   }
 
-  /** Whether the chat's turn runs: its question taken, and not yet ended. */
+  /**
+   * Whether the chat shows its turn running: a question this object is
+   * taking (`#turns`), or a turn its ChatSession says runs (`turnRunning`).
+   */
   #isRunning(chatId: ChatId): boolean {
-    return this.#turnIdOf(chatId) !== undefined;
+    return (
+      this.#turns.has(chatId) ||
+      this.ctx.storage.kv.get(`${runningKeyPrefix}${chatId}`) !== undefined
+    );
   }
 
   /**
-   * The chat's turn under way: the one this object waits on (`#turns`), or
-   * the one it handed to its ChatSession (`turnKeyPrefix`), which goes on
-   * there through a restart of this object.
+   * The chat's `ChatSession` says whether a turn of the chat runs there,
+   * as its record of the turn is claimed and settled (chat-harness.ts):
+   * what the chat's lists and watchers show.
    */
-  #turnIdOf(chatId: ChatId): string | undefined {
-    const mark = turnMarkSchema.safeParse(
-      this.ctx.storage.kv.get(`${turnKeyPrefix}${chatId}`)
+  turnRunning(chatId: ChatId, running: boolean): void {
+    if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
+      return;
+    }
+    const key = `${runningKeyPrefix}${chatId}`;
+    if (running) {
+      this.ctx.storage.kv.put(key, true);
+    } else {
+      this.ctx.storage.kv.delete(key);
+    }
+    this.#changed(chatId);
+  }
+
+  /**
+   * The chat's turn under way, as its ChatSession holds it, or the one
+   * this object is taking: what its build jobs belong to and a stop ends.
+   */
+  async #activeTurn(chatId: ChatId): Promise<string | undefined> {
+    return (
+      this.#turns.get(chatId)?.id ??
+      (await this.#toSession(
+        chatId,
+        async (session) => await session.activeTurn()
+      ))
     );
-    return this.#turns.get(chatId)?.id ?? mark.data?.turnId;
   }
 
   /**
@@ -2411,21 +2336,29 @@ export class Workspace extends DurableObject<Env> {
    * a question with the files it carries; in a chat platform's chat, the
    * agent's words without links (`withoutLinks`). Each entry once
    * (`copiedKeyPrefix`): a copy its object sends again is passed over.
+   * Answers the last answer kept of them, a response or a stopped turn's
+   * end, for the turn's capture: as the first copy did, for one sent again.
    */
-  keepTurnMessages(chatId: ChatId, messages: readonly TurnMessage[]): void {
+  keepTurnMessages(
+    chatId: ChatId,
+    messages: readonly TurnMessage[]
+  ): number | undefined {
     if (this.chatState(chatId) === undefined || this.#deleting.has(chatId)) {
-      return;
+      return undefined;
     }
     const { via } = this.#chat(chatId);
     const live = this.#turns.get(chatId);
     const copiedKey = `${copiedKeyPrefix}${chatId}`;
-    const copied = this.ctx.storage.kv.get<number>(copiedKey) ?? 0;
-    let through = copied;
+    const copied = copiedSchema.safeParse(this.ctx.storage.kv.get(copiedKey));
+    const before = copied.success ? copied.data : { through: 0 };
+    let { through, answer } = before;
+    let answered = false;
     for (const { entryId, message, files = [], thinkingMs } of messages) {
-      if (entryId !== undefined && entryId <= copied) {
+      answered ||= message.role === "assistant";
+      if (entryId <= before.through) {
         continue;
       }
-      through = Math.max(through, entryId ?? 0);
+      through = Math.max(through, entryId);
       if (message.role === "assistant") {
         this.#partials.delete(chatId);
         // Only a response the provider counted a prompt for: not a request
@@ -2442,14 +2375,18 @@ export class Workspace extends DurableObject<Env> {
         via === "web" ? message : inOwnWords(message),
         { files, ...(thinkingMs === undefined ? {} : { thinkingMs }) }
       );
-      if (live !== undefined && message.role === "assistant") {
-        live.answer = id;
+      if (message.role === "assistant") {
+        answer = id;
+        if (live !== undefined) {
+          live.answer = id;
+        }
       }
     }
     // With the messages: no await between, so they are stored together.
-    if (through > copied) {
-      this.ctx.storage.kv.put(copiedKey, through);
+    if (through > before.through) {
+      this.ctx.storage.kv.put(copiedKey, { through, answer });
     }
+    return answered ? answer : undefined;
   }
 
   /** Shows the chat's watchers the answer streaming in, or none. */
@@ -2801,9 +2738,7 @@ export class Workspace extends DurableObject<Env> {
    */
   async cancel(chatId: unknown, personId: string): Promise<boolean> {
     const { id } = this.#ownChat(chatId, personId);
-    // The one this object waits on, or one its restart left to its
-    // ChatSession.
-    const turnId = this.#turnIdOf(id);
+    const turnId = await this.#activeTurn(id);
     if (turnId === undefined) {
       return false;
     }
@@ -2821,16 +2756,17 @@ export class Workspace extends DurableObject<Env> {
    * the run's turn, the draft of App `appId` as it is now (its revision),
    * and the authority the run acts on (granted when it opened). Its ID is
    * random. Refused, opening nothing, once the chat has as many jobs
-   * running as it may.
+   * running as it may. The run's turn is its ChatSession's, through a
+   * restart of this object too.
    */
-  openBuildJob(
+  async openBuildJob(
     chatId: ChatId,
     runId: string,
     job: Pick<BuildJobOpening, "appId" | "kind" | "message">
-  ): { id: string; revision: number } | { refused: "jobs" } {
+  ): Promise<{ id: string; revision: number } | { refused: "jobs" }> {
+    const turnId = await this.#activeTurn(chatId);
+    // After the await: the run is checked open in the step that opens.
     const lease = this.admitFromCodeRun(chatId, runId);
-    // The chat's turn under way, through a restart of this object too.
-    const turnId = this.#turnIdOf(chatId);
     if (lease.call !== "open" || turnId === undefined) {
       throw runRefusal(lease.call === "revoked" ? "revoked" : "ended");
     }
@@ -3886,7 +3822,7 @@ export class Workspace extends DurableObject<Env> {
         this.#versions.deleteChat(id);
         this.#db.delete(chats).where(eq(chats.id, id)).run();
         this.ctx.storage.kv.delete(`${traceKeyPrefix}${id}`);
-        this.ctx.storage.kv.delete(`${turnKeyPrefix}${id}`);
+        this.ctx.storage.kv.delete(`${runningKeyPrefix}${id}`);
         this.ctx.storage.kv.delete(`${copiedKeyPrefix}${id}`);
         this.#outboxed(by, "chat.deleted", id, { declined });
       });

@@ -51,7 +51,7 @@ const callAttempts = 3;
  * `overloaded` object, as Cloudflare advises for Durable Object calls. Never
  * an error the object threw itself.
  */
-export const brokeOnTheWay = (error: unknown): boolean =>
+const brokeOnTheWay = (error: unknown): boolean =>
   error instanceof Error &&
   !isExpectedError(error) &&
   (Reflect.get(error, "durableObjectReset") === true ||
