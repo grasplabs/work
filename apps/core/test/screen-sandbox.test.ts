@@ -294,12 +294,22 @@ describe(
         anew,
         anewRead: read.slice(before).toSorted(),
       }).toStrictEqual({
-        together: ["compiler.js", "esbuild.wasm", "kit.json"],
+        together: [
+          "compiler.js",
+          "esbuild.wasm",
+          "kit.json",
+          "oxc-parser.wasm",
+        ],
         checks: ["checked", "checked", "checked"],
         warm: "checked",
         warmRead: [],
         anew: "checked",
-        anewRead: ["compiler.js", "esbuild.wasm", "kit.json"],
+        anewRead: [
+          "compiler.js",
+          "esbuild.wasm",
+          "kit.json",
+          "oxc-parser.wasm",
+        ],
       });
     });
 
@@ -350,6 +360,7 @@ describe(
           "compiler.js",
           "esbuild.wasm",
           "kit.json",
+          "oxc-parser.wasm",
           "oxc.wasm",
           "ultracite.js",
         ],

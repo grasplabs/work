@@ -7,15 +7,15 @@
  * what it would have the first time. Convex has the same rule, and
  * baseflare's codegen warns of it too. A warning, never an error: the
  * code may mean it, and the host makes nothing of it either way. Through
- * ESLint's `Linter` and the typescript-eslint parser, as screens are
+ * ESLint's `Linter` and oxc-parser (eslint-parser.ts), as screens are
  * linted (lint.ts).
  */
-import * as parser from "@typescript-eslint/parser";
 import type { Rule } from "eslint";
 import { Linter } from "eslint/universal";
 
 import { appCodeKind } from "./app-code.ts";
 import type { Diagnostic } from "./diagnostic.ts";
+import { parser } from "./eslint-parser.ts";
 
 /** The builders whose handlers are mutations. */
 const mutationBuilders: ReadonlySet<string> = new Set([

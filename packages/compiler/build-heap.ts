@@ -171,6 +171,7 @@ const hookRelease = (release: string): void => {
     "cloudflare:workers":
       "export class WorkerEntrypoint { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }",
     "./esbuild.wasm": wasmStub(release, compilerAssets.esbuildWasm),
+    "./oxc-parser.wasm": wasmStub(release, compilerAssets.oxcParserWasm),
     "./tsrs.wasm": wasmStub(release, compilerAssets.tsrsWasm),
   };
   registerHooks({

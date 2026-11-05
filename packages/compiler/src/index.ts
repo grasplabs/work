@@ -346,10 +346,11 @@ const compilerWorker = async (
   assets: Fetcher
 ): Promise<WorkerLoaderWorkerCode> =>
   await workerCodeRead(assets, `compiler:${version}`, async () => {
-    const [source, kitJson, wasm] = await Promise.all([
+    const [source, kitJson, wasm, parserWasm] = await Promise.all([
       readCompilerFile(assets, compilerAssets.source, "javascript"),
       readCompilerFile(assets, compilerAssets.kit, "json"),
       esbuildWasmOf(assets),
+      readCompilerBytes(assets, compilerAssets.oxcParserWasm, "wasm"),
     ]);
     const kit: unknown = JSON.parse(kitJson);
     return {
@@ -359,8 +360,10 @@ const compilerWorker = async (
         "compiler.js": source,
         [kitModule]: { json: kit },
         // Compiled as the isolate loads; the isolate itself can't. What
-        // bundles a preview's entries (preview-entry.ts).
+        // bundles a preview's entries (preview-entry.ts), and what the
+        // design lint parses with (eslint-parser.ts).
         "esbuild.wasm": { wasm },
+        [compilerAssets.oxcParserWasm]: { wasm: parserWasm },
       },
     };
   });
@@ -445,10 +448,11 @@ const platformCodeRead = reader<PlatformCode>(true, platformCodeTurns);
  */
 export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
   await platformCodeRead(assets, `compiler:${version}`, async () => {
-    const [source, kit, wasm] = await Promise.all([
+    const [source, kit, wasm, parserWasm] = await Promise.all([
       readCompilerBytes(assets, compilerAssets.source, "javascript"),
       readCompilerBytes(assets, compilerAssets.kit, "json"),
       esbuildWasmOf(assets),
+      readCompilerBytes(assets, compilerAssets.oxcParserWasm, "wasm"),
     ]);
     return {
       mainModule: "compiler.js",
@@ -456,6 +460,10 @@ export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
         "compiler.js": { type: "js", bytes: new Uint8Array(source) },
         [kitModule]: { type: "json", bytes: new Uint8Array(kit) },
         "esbuild.wasm": { type: "wasm", bytes: new Uint8Array(wasm) },
+        [compilerAssets.oxcParserWasm]: {
+          type: "wasm",
+          bytes: new Uint8Array(parserWasm),
+        },
       },
       nodejsCompat: true,
       cpuMs: isolateSettings.limits.cpuMs,

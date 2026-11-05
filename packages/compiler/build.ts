@@ -21,11 +21,25 @@ import {
 import { builtinModules, createRequire } from "node:module";
 import path from "node:path";
 
+import {
+  EXIT_CRASHED,
+  NotFoundError,
+  makeRequest,
+  memoryFileSystem,
+  parseReply,
+  runTsc,
+} from "@tsrs/wasm/core";
+import type {
+  FileStat,
+  HostFileSystem,
+  Diagnostic as TscDiagnostic,
+} from "@tsrs/wasm/core";
+import { parseSync } from "oxc-parser";
 import { rolldown } from "rolldown";
 import type { Plugin as RolldownPlugin } from "rolldown";
 import { dts } from "rolldown-plugin-dts";
+import { ResolverFactory } from "rolldown/experimental";
 import { __unstable__loadDesignSystem } from "tailwindcss";
-import ts from "typescript";
 import shadcnPreset from "ultracite/oxlint/shadcn";
 import { build } from "vite-plus";
 import type { InlineConfig, Plugin, Rolldown } from "vite-plus";
@@ -620,30 +634,16 @@ const collectStylesheets = (): Record<string, string> => {
 };
 
 /**
- * Drops JSDoc comments: most of TypeScript's and lucide-react's
- * declarations, and nothing a type check reads.
+ * Drops JSDoc comments: most of lucide-react's declarations, and nothing
+ * a type check reads. oxc-parser finds them.
  */
 const withoutDocComments = (source: string): string => {
-  const scanner = ts.createScanner(
-    ts.ScriptTarget.Latest,
-    false,
-    ts.LanguageVariant.Standard,
-    source
-  );
   let result = "";
   let kept = 0;
-  for (
-    let token = scanner.scan();
-    token !== ts.SyntaxKind.EndOfFileToken;
-    token = scanner.scan()
-  ) {
-    const start = scanner.getTokenStart();
-    if (
-      token === ts.SyntaxKind.MultiLineCommentTrivia &&
-      source.startsWith("/**", start)
-    ) {
+  for (const { type, start, end } of parseSync("types.d.ts", source).comments) {
+    if (type === "Block" && source.startsWith("/**", start)) {
       result += source.slice(kept, start);
-      kept = scanner.getTokenEnd();
+      kept = end;
     }
   }
   return result + source.slice(kept);
@@ -662,73 +662,205 @@ const importing = (specifiers: readonly string[]): string =>
  * declarations can have errors that don't matter here.
  */
 const { paths: _appPaths, ...checkOptions } = compilerOptions;
-const kitOptions: ts.CompilerOptions = ts.convertCompilerOptionsFromJson(
-  {
-    ...checkOptions,
-    skipLibCheck: true,
-    lib: [...compilerOptions.lib, ...serverLibs],
-  },
-  "/"
-).options;
+const kitOptions = {
+  ...checkOptions,
+  skipLibCheck: true,
+  lib: [...compilerOptions.lib, ...serverLibs],
+};
 
 /**
- * Where TypeScript's own declarations are as the build's checks of the
- * kit read them (`readByKit`). The check of App code has its own: tsrs
- * carries TypeScript's libs, so none of these ship with the kit's types.
+ * tsrs, the checker App code is checked with (type-check.ts), which every
+ * build-time check and emit of the kit runs on too: its WebAssembly, as
+ * the package ships it, compiled once.
  */
-const libLocation = "/node_modules/typescript/lib";
+const tsrsBytes = readFileSync(require.resolve("@tsrs/wasm/tsrs.wasm"));
+const tsrsModule: unknown = Reflect.construct(WebAssembly.Module, [tsrsBytes]);
+if (!(tsrsModule instanceof WebAssembly.Module)) {
+  throw new TypeError("tsrs's WebAssembly didn't compile");
+}
+
+/** The errors of tsrs's `tsc -p <config>` over `host`. */
+const tsrs = (host: HostFileSystem, config: string): TscDiagnostic[] => {
+  const stderr: string[] = [];
+  const decoder = new TextDecoder();
+  const { exitCode, reply } = runTsc(
+    tsrsModule,
+    makeRequest(["-p", config], { cwd: path.dirname(config), json: true }),
+    host,
+    {
+      env: {},
+      stderr: (chunk) => {
+        stderr.push(decoder.decode(chunk, { stream: true }));
+      },
+    }
+  );
+  if (exitCode === EXIT_CRASHED) {
+    throw new Error(`tsrs stopped: ${stderr.join("")}`);
+  }
+  return parseReply(reply).filter(({ category }) => category === 1);
+};
+
+const messageOf = ({ fileName, text }: TscDiagnostic): string =>
+  `${fileName ?? ""} ${text}`.trim();
+
+/** A failed read of `file`, as tsrs's host says a path is missing. */
+const missing = (file: string, error: unknown): never => {
+  if (
+    error instanceof Error &&
+    "code" in error &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR")
+  ) {
+    throw new NotFoundError(file);
+  }
+  throw error;
+};
+
+/** A directory entry's kind, as tsrs's host names it. */
+const kindOf = (entry: {
+  isDirectory: () => boolean;
+  isFile: () => boolean;
+  isSymbolicLink?: () => boolean;
+}): "f" | "d" | "l" | "o" => {
+  if (entry.isDirectory()) {
+    return "d";
+  }
+  if (entry.isFile()) {
+    return "f";
+  }
+  return entry.isSymbolicLink?.() === true ? "l" : "o";
+};
+
+/**
+ * The real file system as tsrs reads it (as its own Node host does), with
+ * `overlay`'s files on top: every file it reads goes in `read`, every file
+ * it writes in `written`, and nothing is written to disk.
+ */
+const diskHost = (
+  overlay: Readonly<Record<string, string>>,
+  read: Map<string, string>,
+  written = new Map<string, string>()
+): HostFileSystem => {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  return {
+    readFile: (file) => {
+      if (Object.hasOwn(overlay, file)) {
+        return encoder.encode(overlay[file]);
+      }
+      try {
+        const bytes = readFileSync(file);
+        read.set(file, decoder.decode(bytes));
+        return bytes;
+      } catch (error) {
+        return missing(file, error);
+      }
+    },
+    stat: (file): FileStat => {
+      if (Object.hasOwn(overlay, file)) {
+        return { kind: "f", size: overlay[file]?.length ?? 0, mtimeNs: 0n };
+      }
+      try {
+        const found = statSync(file, { bigint: true });
+        // A stat follows links: what it finds is never one.
+        const kind = kindOf({
+          isDirectory: () => found.isDirectory(),
+          isFile: () => found.isFile(),
+        });
+        return {
+          kind: kind === "l" ? "o" : kind,
+          size: found.size,
+          mtimeNs: found.mtimeNs,
+        };
+      } catch (error) {
+        return missing(file, error);
+      }
+    },
+    readDir: (directory) => {
+      try {
+        return readdirSync(directory, { withFileTypes: true }).map(
+          (entry): ["f" | "d" | "l" | "o", string] => [
+            kindOf(entry),
+            entry.name,
+          ]
+        );
+      } catch (error) {
+        return missing(directory, error);
+      }
+    },
+    realpath: (file) => {
+      if (Object.hasOwn(overlay, file)) {
+        return file;
+      }
+      try {
+        return realpathSync(file);
+      } catch (error) {
+        return missing(file, error);
+      }
+    },
+    writeFile: (file, data) => {
+      written.set(file, decoder.decode(data));
+    },
+    remove: () => {
+      throw new Error("The kit's build removes nothing.");
+    },
+    chtimes: () => {
+      // Nothing is written to disk.
+    },
+  };
+};
+
+/**
+ * Where a file of a package (by its real path) is in the kit's types:
+ * `/node_modules/<name>/…`, the platform's own packages by their sources;
+ * undefined for a file of no package (the compiler's own package.json).
+ */
+const kitPathOf = (real: string): string | undefined => {
+  const own = Object.entries(ownPackages).find(([, dir]) =>
+    real.startsWith(`${dir}/`)
+  );
+  if (own !== undefined) {
+    const [packageName, dir] = own;
+    return `/node_modules/${packageName}${real.slice(dir.length)}`;
+  }
+  const inPackage = real.split("/node_modules/").at(-1) ?? real;
+  return inPackage === real ? undefined : `/node_modules/${inPackage}`;
+};
 
 /**
  * The files a type check of the kit's sources reads, by the path the
- * isolate knows them by (see src/type-check.ts): TypeScript loads
- * everything App code may import, with the options the isolate checks
- * with, and every file it reads is kept. Packages are flattened into
+ * isolate knows them by (see src/type-check.ts): tsrs loads everything
+ * App code may import, with the options the isolate checks with, and
+ * every file it reads is kept. Packages are flattened into
  * `/node_modules/<name>`, the platform's own as their sources: what the
  * agent's reference holds, and what the type chunks are made of
  * (`typeChunks`). Two versions of one package would clash, and fail the
- * build.
+ * build. TypeScript's own libs are tsrs's, never read from disk.
  */
 const collectTypes = (specifiers: string[]): Record<string, string> => {
   const entry = path.join(root, "kit-types.ts");
-  const options = kitOptions;
-  const host = ts.createCompilerHost(options);
+  const config = path.join(root, "kit-types.tsconfig.json");
   const read = new Map<string, string>();
-  const readFile = host.readFile.bind(host);
-  host.readFile = (file) => {
-    const content = readFile(file);
-    if (content !== undefined) {
-      read.set(file, content);
-    }
-    return content;
-  };
-  const getSourceFile = host.getSourceFile.bind(host);
-  host.getSourceFile = (file, ...rest) =>
-    file === entry
-      ? ts.createSourceFile(file, importing(specifiers), ts.ScriptTarget.Latest)
-      : getSourceFile(file, ...rest);
-  const program = ts.createProgram([entry], options, host);
-  const [error] = ts.getPreEmitDiagnostics(program);
+  const [error] = tsrs(
+    diskHost(
+      {
+        [entry]: importing(specifiers),
+        [config]: JSON.stringify({
+          compilerOptions: kitOptions,
+          files: [entry],
+        }),
+      },
+      read
+    ),
+    config
+  );
   if (error !== undefined) {
-    throw new Error(
-      `The kit doesn't type-check: ${ts.flattenDiagnosticMessageText(error.messageText, "\n")}`
-    );
+    throw new Error(`The kit doesn't type-check: ${messageOf(error)}`);
   }
   const types: Record<string, string> = {};
   for (const [file, content] of read) {
-    const real = realpathSync(file);
-    const inPackage = real.split("/node_modules/").at(-1) ?? real;
-    const own = Object.entries(ownPackages).find(([, dir]) =>
-      real.startsWith(`${dir}/`)
-    );
-    let name: string;
-    if (own !== undefined) {
-      const [packageName, dir] = own;
-      name = `/node_modules/${packageName}${real.slice(dir.length)}`;
-    } else if (inPackage === real) {
-      // The compiler's own package.json, read for the entry.
+    const name = kitPathOf(realpathSync(file));
+    if (name === undefined) {
       continue;
-    } else {
-      name = `/node_modules/${inPackage}`;
     }
     const kept = declaration.test(name) ? withoutDocComments(content) : content;
     if (types[name] !== undefined && types[name] !== kept) {
@@ -828,74 +960,55 @@ const declarationOf = (source: string): string =>
 
 /**
  * The declarations of the platform's own sources that `specifiers` reach,
- * by `declarationOf` their source, as TypeScript emits them with the
- * options the kit is loaded with, without checking them again:
- * `collectTypes` did. Declaration files among the sources are as they are.
+ * by `declarationOf` their source, as tsrs emits them with the options the
+ * kit is loaded with, without checking them again: `collectTypes` did.
+ * Declaration files among the sources are as they are. Every own source
+ * is a root of the program: one only reached through the workspace's
+ * links in node_modules would be a library's, which emits nothing.
  */
 const emitOwnDeclarations = (
   specifiers: readonly string[]
 ): Map<string, string> => {
-  const options: ts.CompilerOptions = {
-    ...kitOptions,
-    noEmit: false,
-    declaration: true,
-    emitDeclarationOnly: true,
-    noCheck: true,
-  };
   const entry = path.join(root, "kit-declarations.ts");
-  const host = ts.createCompilerHost(options);
-  const getSourceFile = host.getSourceFile.bind(host);
-  host.getSourceFile = (file, ...rest) =>
-    file === entry
-      ? ts.createSourceFile(file, importing(specifiers), ts.ScriptTarget.Latest)
-      : getSourceFile(file, ...rest);
-  // TypeScript emits nothing for a file it reaches through node_modules,
-  // a library's. The platform's own packages are reached that way too,
-  // through the workspace's links, but are sources.
-  host.resolveModuleNameLiterals = (
-    literals,
-    containingFile,
-    redirectedReference,
-    resolveOptions
-  ) =>
-    literals.map(({ text }) => {
-      const resolved = ts.resolveModuleName(
-        text,
-        containingFile,
-        resolveOptions,
-        host,
-        undefined,
-        redirectedReference
-      );
-      const { resolvedModule } = resolved;
-      return resolvedModule !== undefined &&
-        isOwnSource(resolvedModule.resolvedFileName)
-        ? {
-            ...resolved,
-            resolvedModule: {
-              ...resolvedModule,
-              isExternalLibraryImport: false,
-            },
-          }
-        : resolved;
-    });
-  const program = ts.createProgram([entry], options, host);
+  const config = path.join(root, "kit-declarations.tsconfig.json");
+  const read = new Map<string, string>();
+  const written = new Map<string, string>();
+  // Unchecked, so its only errors are the declarations' own: a type it
+  // can't name, which would leave its file out.
+  const [error] = tsrs(
+    diskHost(
+      {
+        [entry]: importing(specifiers),
+        [config]: JSON.stringify({
+          compilerOptions: {
+            ...kitOptions,
+            noEmit: false,
+            declaration: true,
+            emitDeclarationOnly: true,
+            noCheck: true,
+          },
+          files: [
+            entry,
+            ...Object.values(ownPackages).flatMap((dir) =>
+              sourcesIn(path.join(dir, "src"))
+            ),
+          ],
+        }),
+      },
+      read,
+      written
+    ),
+    config
+  );
+  if (error !== undefined) {
+    throw new Error(`The kit's declarations don't emit: ${messageOf(error)}`);
+  }
   const declarations = new Map<string, string>();
-  for (const file of program.getSourceFiles()) {
-    if (!isOwnSource(file.fileName)) {
-      continue;
-    }
-    if (file.isDeclarationFile) {
-      declarations.set(file.fileName, file.text);
-    } else {
-      program.emit(
-        file,
-        (name, text) => {
-          declarations.set(name, text);
-        },
-        undefined,
-        true
-      );
+  for (const [file, text] of [...read, ...written]) {
+    const real = realpathSync(path.dirname(file));
+    const source = path.join(real, path.basename(file));
+    if (isOwnSource(source) && declaration.test(source)) {
+      declarations.set(source, text);
     }
   }
   return declarations;
@@ -995,7 +1108,9 @@ const rollUpTypes = async (
       ownModuleOf(id) === undefined,
     plugins: [
       ownDeclarations(declarations),
-      dts({ dtsInput: true, tsconfig: false }),
+      // Its input is declarations already (`emitOwnDeclarations`): no
+      // generator runs, and oxc's is the one that needs no tsconfig.
+      dts({ dtsInput: true, tsconfig: false, generator: "oxc" }),
     ],
   });
   const chunks: Record<string, string> = {};
@@ -1050,74 +1165,105 @@ const rollUpTypes = async (
 
 /**
  * What of `files` a program that imports each of `specifiers` reads, as
- * the isolate's check reads them (src/type-check.ts), and its first
- * error, if any: in the program, its entry or a type chunk.
+ * the isolate's check reads them (src/type-check.ts, on the same tsrs),
+ * and its first error, if any: in the program, its entry or a type chunk.
  */
 const readByKit = (
   files: Readonly<Record<string, string>>,
   specifiers: readonly string[]
-): { read: Set<string>; error: ts.Diagnostic | undefined } => {
+): { read: Set<string>; error: TscDiagnostic | undefined } => {
   const entry = "/kit-types.ts";
-  // Type chunks are checked too; the third-party declarations aren't.
-  const options = { ...kitOptions, skipLibCheck: false };
+  const memory = memoryFileSystem({
+    ...files,
+    [entry]: importing(specifiers),
+    // Type chunks are checked too; the third-party declarations aren't.
+    "/tsconfig.json": JSON.stringify({
+      compilerOptions: { ...kitOptions, skipLibCheck: false },
+      files: [entry],
+    }),
+  });
   const read = new Set<string>();
-  const directories = new Set(
-    Object.keys(files).flatMap((file) =>
-      file
-        .split("/")
-        .slice(1, -1)
-        .map((_, index, parts) => `/${parts.slice(0, index + 1).join("/")}`)
-    )
+  const host: HostFileSystem = {
+    readFile: (file) => {
+      const bytes = memory.readFile(file);
+      read.add(file);
+      return bytes;
+    },
+    stat: (file) => memory.stat(file),
+    readDir: (directory) => memory.readDir(directory),
+    realpath: (file) => memory.realpath(file),
+    writeFile: (file, data, append) => {
+      memory.writeFile(file, data, append);
+    },
+    remove: (file) => {
+      memory.remove(file);
+    },
+    chtimes: (file, atime, mtime) => {
+      memory.chtimes(file, atime, mtime);
+    },
+  };
+  const error = tsrs(host, "/tsconfig.json").find(
+    ({ fileName }) =>
+      fileName === undefined ||
+      fileName === entry ||
+      Object.keys(ownPackages).some((name) =>
+        fileName.startsWith(`/node_modules/${name}/`)
+      )
   );
-  const readFile = (file: string): string | undefined => {
-    if (!Object.hasOwn(files, file)) {
-      return undefined;
-    }
-    read.add(file);
-    return files[file];
-  };
-  const host: ts.CompilerHost = {
-    getSourceFile: (file, languageVersion) => {
-      const text = file === entry ? importing(specifiers) : readFile(file);
-      return text === undefined
-        ? undefined
-        : ts.createSourceFile(file, text, languageVersion);
-    },
-    getDefaultLibFileName: (libOptions) =>
-      `${libLocation}/${ts.getDefaultLibFileName(libOptions)}`,
-    getDefaultLibLocation: () => libLocation,
-    writeFile: () => {
-      // Nothing is emitted.
-    },
-    getCurrentDirectory: () => "/",
-    getCanonicalFileName: (file) => file,
-    useCaseSensitiveFileNames: () => true,
-    getNewLine: () => "\n",
-    fileExists: (file) => file === entry || Object.hasOwn(files, file),
-    readFile,
-    directoryExists: (directory) =>
-      directory === "/" || directories.has(directory.replace(/\/+$/u, "")),
-    getDirectories: () => [],
-  };
-  const program = ts.createProgram([entry], options, host);
-  const checked = program
-    .getSourceFiles()
-    .filter(
-      (file) =>
-        file.fileName === entry ||
-        Object.keys(ownPackages).some((name) =>
-          file.fileName.startsWith(`/node_modules/${name}/`)
-        )
-    );
-  const [error] = [
-    ...program.getOptionsDiagnostics(),
-    ...program.getGlobalDiagnostics(),
-    ...checked.flatMap((file) => [
-      ...program.getSyntacticDiagnostics(file),
-      ...program.getSemanticDiagnostics(file),
-    ]),
-  ];
   return { read, error };
+};
+
+/**
+ * What a declaration's `specifier` resolves to among the packages on
+ * disk, by its file's place in the kit's types: as TypeScript resolves it
+ * with `moduleResolution: "bundler"` (the `types` condition, then the
+ * `types` or `typings` field), and for a package with no types of its own,
+ * by its DefinitelyTyped package (`react` is `@types/react`).
+ */
+const resolver = new ResolverFactory({
+  conditionNames: ["types", "import"],
+  mainFields: ["types", "typings"],
+  extensions: [".d.ts", ".d.mts", ".d.cts"],
+});
+
+const resolveType = (specifier: string): string | undefined => {
+  const typed = (name: string): string | undefined => {
+    const found = resolver.sync(root, name).path;
+    return found !== undefined && declaration.test(found)
+      ? kitPathOf(realpathSync(found))
+      : undefined;
+  };
+  const scoped = specifier.startsWith("@") ? 2 : 1;
+  const [scope = "", ...rest] = specifier.split("/");
+  const packageName = specifier.split("/").slice(0, scoped).join("/");
+  const definitelyTyped = `@types/${scoped === 2 ? `${scope.slice(1)}__${rest[0] ?? ""}` : packageName}${specifier.slice(packageName.length)}`;
+  return typed(specifier) ?? typed(definitelyTyped);
+};
+
+/**
+ * Where `specifier` resolves among the kit's types `kept`: an own module
+ * is its chunk, by the manifest `rollUpTypes` wrote; anything else is a
+ * library's on disk (`resolveType`).
+ */
+const resolveKitType = (
+  kept: Readonly<Record<string, string>>,
+  specifier: string
+): string | undefined => {
+  const own = ownModuleOf(specifier);
+  if (own === undefined) {
+    return resolveType(specifier);
+  }
+  const manifest = kept[`/node_modules/${own.name}/package.json`];
+  const target =
+    manifest === undefined
+      ? undefined
+      : exportTarget(
+          manifestSchema.parse(JSON.parse(manifest)).exports ?? {},
+          own.subpath === "" ? "." : `./${own.subpath}`
+        );
+  return target === undefined
+    ? undefined
+    : path.posix.join(`/node_modules/${own.name}`, target);
 };
 
 /**
@@ -1144,30 +1290,18 @@ const typeChunks = async (
   const { read, error } = readByKit(files, specifiers);
   if (error !== undefined) {
     throw new Error(
-      `The kit's type chunks don't type-check: ${error.file?.fileName ?? ""} ${ts.flattenDiagnosticMessageText(error.messageText, "\n")}`
+      `The kit's type chunks don't type-check: ${messageOf(error)}`
     );
   }
-  // TypeScript's own libs aren't the kit's: tsrs carries its own.
   const kept = Object.fromEntries(
-    Object.entries(files).filter(
-      ([file]) => read.has(file) && !file.startsWith(`${libLocation}/`)
-    )
+    Object.entries(files).filter(([file]) => read.has(file))
   );
-  // Where each module App code may import resolves, as TypeScript resolves
-  // it from an App file: the check maps exactly these names to these files
-  // (type-check.ts `paths`), and nothing else of the kit.
-  const host: ts.ModuleResolutionHost = {
-    fileExists: (file) => Object.hasOwn(kept, file),
-    readFile: (file) => (Object.hasOwn(kept, file) ? kept[file] : undefined),
-    directoryExists: (directory) =>
-      Object.keys(kept).some((file) =>
-        file.startsWith(`${directory.replace(/\/+$/u, "")}/`)
-      ),
-  };
+  // Where each module App code may import resolves from an App file: the
+  // check maps exactly these names to these files (type-check.ts `paths`),
+  // and nothing else of the kit.
   const resolved: Record<string, string> = {};
   for (const specifier of specifiers) {
-    const found = ts.resolveModuleName(specifier, "/app.ts", kitOptions, host)
-      .resolvedModule?.resolvedFileName;
+    const found = resolveKitType(kept, specifier);
     if (found === undefined || !Object.hasOwn(kept, found)) {
       throw new Error(`The kit's types don't resolve ${specifier}`);
     }
@@ -1289,8 +1423,8 @@ const nodeBuiltins = [
 ];
 
 /**
- * The React Compiler and TypeScript are CommonJS written for Node and
- * `require` Node's built-ins. An ES module has no `require`; the bundle's
+ * The React Compiler is CommonJS written for Node and `require`s Node's
+ * built-ins. An ES module has no `require`; the bundle's
  * `require` shim uses one if it is in scope, and `createRequire` makes one.
  * It takes the module's URL, and a Dynamic Worker's modules have no
  * `import.meta.url`, so this passes the URL the module would have. It goes
@@ -1300,23 +1434,19 @@ const requireShim = (moduleUrl: string): string =>
   `import { createRequire } from "node:module"; const require = createRequire("${moduleUrl}");`;
 
 /**
- * Where the module would be, for the libraries that ask: TypeScript
- * (`__filename`, `__dirname`) and @shadcn/lint (`import.meta.url`). They
- * only look next to themselves for files that aren't there, and carry on
- * without them. Babel's generated code mentions them only as text.
+ * Where the module would be, for @shadcn/lint, which asks
+ * (`import.meta.url`): it only looks next to itself for files that aren't
+ * there, and carries on without them.
  */
 const moduleLocation = (moduleUrl: string) => ({
   "import.meta.url": JSON.stringify(moduleUrl),
-  __filename: JSON.stringify(new URL(moduleUrl).pathname),
-  __dirname: JSON.stringify("/"),
 });
 
 /**
- * The design-system lint (@shadcn/lint) loads its parser with a `require`
- * at runtime, which in the isolate only finds Node's built-ins: this hands
- * it the bundled typescript-eslint parser instead. oxc-parser, which it
- * tries first, has no build that runs in a Worker (its WASM one needs
- * threads); that `require` fails and it falls back to typescript-eslint.
+ * The design-system lint (@shadcn/lint) loads oxc-parser, which it reads
+ * the kit's components with, by a `require` at runtime, which in the
+ * isolate only finds Node's built-ins: this hands it the compiler's own,
+ * oxc-parser's WebAssembly (src/eslint-parser.ts), started before a lint.
  */
 const shadcnParser: Plugin = {
   name: "shadcn-lint-parser",
@@ -1324,14 +1454,14 @@ const shadcnParser: Plugin = {
     if (!id.endsWith("/@shadcn/lint/dist/index.js")) {
       return null;
     }
-    const required = 'require("@typescript-eslint/parser")';
+    const required = 'require("oxc-parser")';
     if (!code.includes(required)) {
       throw new Error(
         "@shadcn/lint no longer requires its parser the way the build expects"
       );
     }
-    return `import * as typescriptEslintParser from "@typescript-eslint/parser";
-${code.replace(required, "typescriptEslintParser")}`;
+    return `import * as oxcParser from ${JSON.stringify(path.join(root, "src/eslint-parser.ts"))};
+${code.replace(required, "oxcParser")}`;
   },
 };
 
@@ -1426,12 +1556,13 @@ const isolateBuild = (
       rolldownOptions: {
         // esbuild's WebAssembly is a module of the isolate, as the
         // package builder's is: what bundles a preview's entries; and
-        // oxc's, Ultracite's.
+        // oxc's, Ultracite's, and oxc-parser's, the design lint's.
         external: [
           "cloudflare:workers",
           "#kit",
           "./esbuild.wasm",
           "./oxc.wasm",
+          "./oxc-parser.wasm",
           ...nodeBuiltins,
         ],
         output: {
@@ -1736,13 +1867,17 @@ const buildAppCompiler = async (
   const packageBuilder = await buildPackageBuilder();
   const checker = await buildChecker();
   // The WebAssembly the type checker runs, as the package ships it.
-  const tsrsWasm = readFileSync(require.resolve("@tsrs/wasm/tsrs.wasm"));
+  const tsrsWasm = tsrsBytes;
   // The WebAssembly the builder's esbuild runs, as the package ships it.
   const esbuildWasm = readFileSync(
     require.resolve("esbuild-wasm/esbuild.wasm")
   );
   // oxlint's and oxfmt's, which Ultracite's isolate runs, as pinned.
   const oxc = await oxcWasm();
+  // oxc-parser's, the compiler's design lint's, as the package ships it.
+  const oxcParserWasm = readFileSync(
+    require.resolve("@oxc-parser/binding-wasm32-wasip1/wasm")
+  );
   // jq's, which every workflow isolate loads beside the SDK's modules.
   const jqWasm = readFileSync(jqWasmSource);
   const kitModules = modulesOf(kitCode);
@@ -1772,6 +1907,7 @@ const buildAppCompiler = async (
     .update(serverSdkModules.version)
     .update(ultracite)
     .update(oxc)
+    .update(oxcParserWasm)
     .update(packageBuilder)
     .update(esbuildWasm)
     .update(jqWasm)
@@ -1784,6 +1920,7 @@ const buildAppCompiler = async (
     [compilerAssets.source]: compiler,
     [compilerAssets.ultracite]: ultracite,
     [compilerAssets.oxcWasm]: oxc,
+    [compilerAssets.oxcParserWasm]: oxcParserWasm,
     [compilerAssets.kit]: kitJson,
     [compilerAssets.kitModules]: JSON.stringify(kitModules),
     [compilerAssets.kitPreviewModules]: JSON.stringify(kitPreviewModules),

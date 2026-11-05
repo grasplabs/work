@@ -7,8 +7,9 @@
  * oxlint, which a comment names in full, as ESLint does. Ultracite's lint
  * is oxlint's own, which reads its comments itself (ultracite.ts).
  */
-import { parse } from "@typescript-eslint/parser";
 import type { Linter } from "eslint/universal";
+
+import { parseSync, stopsParse } from "./eslint-parser.ts";
 
 /**
  * Whether `source` may hold a disable comment or an inline config one: most
@@ -72,14 +73,14 @@ const commentsOf = (
   path: string,
   source: string
 ): { range: [number, number]; type: "Line" | "Block"; value: string }[] => {
-  try {
-    return (
-      parse(source, { comment: true, range: true, filePath: path }).comments ??
-      []
-    );
-  } catch {
-    return [];
-  }
+  const { comments, errors } = parseSync(path, source);
+  return errors.some(stopsParse)
+    ? []
+    : comments.map(({ type, value, start, end }) => ({
+        range: [start, end],
+        type,
+        value,
+      }));
 };
 
 /**

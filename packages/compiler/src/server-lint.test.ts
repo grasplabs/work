@@ -1,6 +1,23 @@
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+
 import { describe, expect, test } from "vite-plus/test";
 
+import { startOxcParser } from "./eslint-parser.ts";
 import { lintServerCode } from "./server-lint.ts";
+
+// oxc-parser's WebAssembly, started as the compiler's isolate starts it.
+const parserWasm: unknown = Reflect.construct(WebAssembly.Module, [
+  readFileSync(
+    createRequire(import.meta.url).resolve(
+      "@oxc-parser/binding-wasm32-wasip1/wasm"
+    )
+  ),
+]);
+if (!(parserWasm instanceof WebAssembly.Module)) {
+  throw new TypeError("oxc-parser's WebAssembly didn't compile");
+}
+await startOxcParser(parserWasm);
 
 // The server code lint (server-lint.ts): a mutation that reads the clock
 // or randomness is warned of, where it reads it; nothing else is.

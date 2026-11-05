@@ -165,8 +165,14 @@ catalog:
   seroval: 1.7.5
   "@types/react": 19.3.0
   "@types/react-dom": 19.3.0
-  # The screen compiler lints screens with ESLint's Linter (see catalogs).
-  "@typescript-eslint/parser": 8.70.1
+  # The design-system lint's parser in the screen compiler's isolate:
+  # oxc-parser's threadless WebAssembly (its workerd loader), with
+  # typescript-eslint's scope analysis and visitor keys, which need no
+  # TypeScript (packages/compiler/src/eslint-parser.ts).
+  "@oxc-parser/binding-wasm32-wasip1": 0.156.0
+  oxc-parser: 0.156.0
+  "@typescript-eslint/scope-manager": 8.72.1
+  "@typescript-eslint/visitor-keys": 8.72.1
   "@vitejs/plugin-react": 6.1.1
   babel-plugin-react-compiler: 1.0.0
   class-variance-authority: 0.7.1
@@ -214,12 +220,6 @@ catalog:
   tailwindcss: 4.3.3
   tw-animate-css: 1.4.0
 
-# TypeScript 6 is the compiler's for two things only, next to the repo's
-# TypeScript 7 toolchain: the design-system lint's parser (typescript-eslint,
-# which supports it up to 6.0) in the compiler's isolate, and the release
-# build's roll-up of the type chunks (packages/compiler/build.ts), which
-# emits and reads declarations through its JavaScript API. App code is
-# type-checked by tsrs (@tsrs/wasm), TypeScript 7's checker.
 catalogs:
   # oxlint and oxfmt, the releases App code is linted and formatted with:
   # Grasp's isolate runs them compiled to WebAssembly from the same oxc tag
@@ -230,8 +230,6 @@ catalogs:
   oxc:
     oxfmt: 0.75.0
     oxlint: 1.90.0
-  typescript6:
-    typescript: 6.0.3
   # The admin deploys with Cloudflare's cf CLI, whose Vite builds need the
   # Cloudflare Vite plugin's v2, still in beta (apps/admin/cloudflare.config.ts).
   # Core, connect and the web stay on the catalog's v1 until v2 is stable.
@@ -255,14 +253,20 @@ overrides:
   "@cloudflare/vitest-pool-workers>zod": "catalog:"
   "miniflare@5.20260815.0-alpha>undici": 7.30.1
   "miniflare@5.20260815.0-alpha>sharp": 0.35.5
+  # oxc-parser's WebAssembly binding pins emnapi 2.0.0-alpha.6 beside a
+  # @napi-rs/wasm-runtime (~1.2.6) built for 2.0.0-beta.2, its peer: on
+  # alpha.6 the binding fails to start ("setting 'initWorker'"). Lifted to
+  # the runtime's peer; drop once the binding pins it itself.
+  "@oxc-parser/binding-wasm32-wasip1>@emnapi/core": 2.0.0-beta.2
+  "@oxc-parser/binding-wasm32-wasip1>@emnapi/runtime": 2.0.0-beta.2
 
 peerDependencyRules:
   allowedVersions:
     vite: "*"
-    # The root's @shadcn/lint runs in oxlint, which parses with oxc-parser.
-    # Only the screen compiler's parses with typescript-eslint, on
-    # TypeScript 6; the root's resolves it on the repo's TypeScript 7 only
-    # because it is installed.
+    # @shadcn/lint's optional parser, which pnpm installs beside it: it
+    # reads components with oxc-parser, which it prefers, so this one never
+    # runs (packages/compiler/src/eslint-parser.ts); it resolves on the
+    # repo's TypeScript 7 only because it is installed.
     "@typescript-eslint/parser>typescript": "7"
     "@typescript-eslint/project-service>typescript": "7"
     "@typescript-eslint/tsconfig-utils>typescript": "7"
