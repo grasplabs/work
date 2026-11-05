@@ -1647,6 +1647,15 @@ export const label = (on: boolean): string => (on ? "On" : "Off");
 // oxlint-disable-next-line @typescript-eslint/no-explicit-any
 export const anything = (value: any): unknown => value;
 `,
+        // An inline config comment over several lines keeps them: the
+        // disable comment above it covers its first line, not the code.
+        "components/spanning.ts": `export const stop = (): void => {
+  // oxlint-disable-next-line no-debugger
+  /* eslint
+    no-console: "off"
+  */ debugger;
+};
+`,
         "tests/count.test.ts": `import { expect, test } from "vitest";
 
 test("counts", () => {
@@ -1706,6 +1715,8 @@ export const Off = () => (
       const foundRules = [
         "app/components/findings.ts error no-debugger",
         "app/components/findings.ts warning sonarjs/no-identical-expressions",
+        "app/components/spanning.ts error no-debugger",
+        "app/components/spanning.ts error no-inline-comments",
       ];
       expect({
         install: install.status,

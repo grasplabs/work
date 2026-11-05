@@ -17,9 +17,20 @@ const mayDirect = /(?:es|ox)lint-(?:disable|enable)|\/\*\s*eslint\s/u;
 
 /**
  * An inline config comment (`/* eslint no-console: "error" *\/`), which
- * ESLint reads in a block comment and oxlint doesn't read at all.
+ * ESLint reads in a block comment and oxlint doesn't read at all: its
+ * leading space, then the word ESLint reads it by.
  */
-const inlineConfig = /^\s*eslint\s/u;
+const inlineConfig = /^(?<space>\s*)eslint(?=\s)/u;
+
+/**
+ * An inline config comment's value as neither lint reads it: its word as
+ * spaces, so every line and place in it stays where it is.
+ */
+const inactive = (value: string): string =>
+  value.replace(
+    inlineConfig,
+    (word, space: string) => `${space}${" ".repeat(word.length - space.length)}`
+  );
 
 /** A disable comment's text (its value): its directive, then the rules it names. */
 const directive =
@@ -157,7 +168,7 @@ export const asEslint = (
   for (const { range, type, value } of commentsOf(path, source).toReversed()) {
     const read =
       type === "Block" && inlineConfig.test(value)
-        ? " "
+        ? inactive(value)
         : eslintDirective(value, rules);
     const as = source.slice(...range);
     const comment = read === undefined ? as : commentOf(type, read);
