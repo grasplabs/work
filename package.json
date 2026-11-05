@@ -49,6 +49,7 @@
     "aws4fetch": "catalog:",
     "capnweb": "catalog:",
     "eslint": "catalog:",
+    "eslint-plugin-sonarjs": "catalog:",
     "lightningcss": "catalog:",
     "secretlint": "catalog:",
     "semver": "catalog:",

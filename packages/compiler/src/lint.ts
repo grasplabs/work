@@ -21,8 +21,11 @@ import type { Kit } from "./kit.ts";
 
 const root = "/tmp/app";
 
-/** Added to every message: an App uses the kit as it is. */
-const note =
+/**
+ * Added to every message: an App uses the kit as it is. An exported App's
+ * oxlint adds it too (scripts/package-definition-lib.ts).
+ */
+export const designNote =
   "Screens can't change the kit (@grasp-os/ui): use what it has, or build the look from plain elements.";
 
 const writeFiles = (files: Record<string, string>): void => {
@@ -67,7 +70,7 @@ export const lint = (
         parserOptions: { ecmaFeatures: { jsx: true } },
       },
       plugins: { shadcn, grasp: designRules },
-      settings: { shadcn: { note } },
+      settings: { shadcn: { note: designNote } },
       rules: { ...kit.lintRules, ...designRuleLevels },
     },
   ];

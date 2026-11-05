@@ -1,10 +1,10 @@
 /**
  * The rules of Ultracite's oxlint presets that App code is never held to,
- * wherever it is linted: in Grasp (ultracite-rules.ts), and in an
- * exported App's own oxlint. Each was run over the repo's own
- * TypeScript, the 3,347 files its oxlint lints and passes, and reported
- * the findings below (November 2026). Code that passes in Grasp then
- * passes once exported.
+ * beyond those with no equivalent the isolate runs: Grasp leaves them out
+ * (ultracite-rules.ts `unmapped`), and so does an exported App's own
+ * oxlint. Each was run over the repo's own TypeScript, the 3,347 files
+ * its oxlint lints and passes, and reported the findings below (November
+ * 2026).
  */
 
 /**
@@ -109,9 +109,3 @@ export const noisy: Readonly<Record<string, number>> = {
   "sonarjs/use-type-alias": 12,
   "sonarjs/variable-name": 19,
 };
-
-/** Every rule left out, by oxlint's name, sorted. */
-export const leftOutRules: readonly string[] = [
-  ...Object.keys(disagreeing),
-  ...Object.keys(noisy),
-].toSorted();

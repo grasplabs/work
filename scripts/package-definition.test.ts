@@ -8,13 +8,19 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-import { inspectApp, registerFunctions } from "@grasp-os/sdk/host";
+import {
+  inspectApp,
+  registerFunctions,
+  symbolicModules,
+} from "@grasp-os/sdk/host";
 import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
 import {
   definitionPackageFormatVersion,
@@ -27,7 +33,13 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { parse } from "yaml";
 import { z } from "zod";
 
+import { hostModules } from "../apps/core/src/host-modules.ts";
 import { steeringCases } from "../apps/core/test/steering-cases.ts";
+import {
+  serverEntryPath,
+  serverEntrySource,
+} from "../packages/compiler/src/app-code.ts";
+import { lintCode, tidy } from "../packages/compiler/src/ultracite.ts";
 import { notesWorkflows } from "../packages/sdk/test/notes-workflows.ts";
 import notes from "../packages/sdk/test/notes/app.ts";
 import * as notesFunctions from "../packages/sdk/test/notes/server/notes.ts";
@@ -387,8 +399,11 @@ const installedVersion = (dir: string, name: string): string =>
 /** The checker the platform type-checks App code with: the compiler's tsrs. */
 const platformChecker = installedVersion("packages/compiler", "@tsrs/wasm");
 
-/** The repo's TypeScript, 7: the project's, never 6. */
-const repoTypescript = installedVersion(".", "typescript");
+/**
+ * The compiler's TypeScript, 6: the project's, for sonarjs, which needs
+ * its JavaScript API. Nothing type-checks on it: the check is tsrs's.
+ */
+const compilerTypescript = installedVersion("packages/compiler", "typescript");
 
 /** The Babel the platform parses App files with, its parser bundled. */
 const platformParser = installedVersion(
@@ -421,6 +436,149 @@ const projectCheck = (
   return { status: checked.status, problems };
 };
 
+/**
+ * The project's own script `name` with `args`, as `pnpm run` runs it: in
+ * a shell, with the project's installed bins first on its path.
+ */
+const run = (
+  out: string,
+  name: string,
+  ...args: string[]
+): { status: number | null; output: string } => {
+  const { scripts } = z
+    .object({ scripts: z.record(z.string(), z.string()) })
+    .parse(JSON.parse(readFileSync(path.join(out, "package.json"), "utf-8")));
+  const script = scripts[name];
+  if (script === undefined) {
+    return { status: null, output: `no script ${name}` };
+  }
+  const ran = spawnSync([script, ...args].join(" "), {
+    cwd: out,
+    encoding: "utf-8",
+    shell: true,
+    // Outside this test run, as a developer's shell has it: under Vite+
+    // (`VP_VERSION`), oxlint reads Vite+'s config in place of its own.
+    env: {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([variable]) => !/^(?:vp|npm)_/iu.test(variable)
+        )
+      ),
+      PATH: `${path.join(out, "node_modules/.bin")}${path.delimiter}${process.env.PATH ?? ""}`,
+    },
+  });
+  return { status: ran.status, output: `${ran.stdout}${ran.stderr}` };
+};
+
+/** A rule as oxlint's report codes it: `plugin(rule)`, `eslint(rule)`. */
+const reportCode = /^(?<plugin>[^(]+)\((?<rule>[^)]+)\)$/u;
+
+/**
+ * What oxlint's JSON report found: each finding's file, severity and
+ * rule, by the name Grasp's lint reports it by (`unicorn/no-array-reduce`).
+ */
+const rulesOf = (report: string): string[] =>
+  z
+    .object({
+      diagnostics: z.array(
+        z.object({
+          severity: z.string(),
+          code: z.string(),
+          filename: z.string(),
+        })
+      ),
+    })
+    // The report, without what @shadcn/lint says after it.
+    .parse(JSON.parse(report.slice(0, report.lastIndexOf("}") + 1)))
+    .diagnostics.map(({ severity, code, filename }) => {
+      const { plugin = "", rule = code } = reportCode.exec(code)?.groups ?? {};
+      const name = plugin === "eslint" ? rule : `${plugin}/${rule}`;
+      return `${filename} ${severity === "warning" ? "warning" : "error"} ${name}`;
+    })
+    .toSorted();
+
+/**
+ * What Grasp's lint of App code (ultracite.ts `lintCode`) finds in
+ * `files`, by path in the App, as `rulesOf` reads a project's under `app/`.
+ */
+const graspRulesOf = (files: Record<string, string>): string[] =>
+  Object.entries(lintCode(files))
+    .flatMap(([file, found]) =>
+      found.map(({ severity, rule }) => `app/${file} ${severity} ${rule}`)
+    )
+    .toSorted();
+
+/** A built-in blueprint's App files, by path. */
+const blueprintFiles = (name: string): Record<string, string> => {
+  const dir = path.join(ROOT, "apps/core/blueprints", name, "files");
+  return Object.fromEntries(
+    readdirSync(dir, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => {
+        const file = path.join(entry.parentPath, entry.name);
+        return [
+          path.relative(dir, file).split(path.sep).join("/"),
+          readFileSync(file, "utf-8"),
+        ];
+      })
+  );
+};
+
+/**
+ * A definition package of an App of `files` that binds no workflow but
+ * packages the greeting's version, as core exports one: its files, and
+ * the manifest its seal reads first, inspected as core inspects it
+ * (app-inspection.ts): its server entry (`serverEntrySource`) over its
+ * code, the host's modules and the stand-in references it lends
+ * (`symbolicModules`).
+ */
+const appDefinition = async (
+  files: Record<string, string>
+): Promise<DefinitionPackage> => {
+  const dir = mkdtempSync(path.join(tmpdir(), "grasp-blueprint-"));
+  made.push(dir);
+  const code = {
+    ...files,
+    ...symbolicModules(),
+    ...hostModules,
+    [serverEntryPath]: serverEntrySource(Object.keys(files)),
+    // `@server/_generated/<module>` resolves, as the compiler aliases it,
+    // through a package of that name linked to the folder.
+    "server/_generated/package.json": JSON.stringify({
+      type: "module",
+      exports: { "./*": "./*.ts" },
+    }),
+  };
+  for (const [file, source] of Object.entries(code)) {
+    mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+    writeFileSync(path.join(dir, file), source);
+  }
+  writeFileSync(path.join(dir, "package.json"), '{ "type": "module" }');
+  mkdirSync(path.join(dir, "node_modules/@grasp-os"), { recursive: true });
+  mkdirSync(path.join(dir, "node_modules/@server"), { recursive: true });
+  symlinkSync(
+    path.join(ROOT, "packages/sdk"),
+    path.join(dir, "node_modules/@grasp-os/sdk")
+  );
+  symlinkSync(
+    path.join(dir, "server/_generated"),
+    path.join(dir, "node_modules/@server/_generated")
+  );
+  const loaded: unknown = await import(
+    pathToFileURL(path.join(dir, serverEntryPath)).href
+  );
+  const registered = z.object({ default: z.unknown() }).parse(loaded).default;
+  return {
+    ...definitionOf(files),
+    app: {
+      ...definitionOf(files).app,
+      manifest: canonicalText(inspectApp(registered).manifest),
+      workflows: {},
+      workflowContracts: {},
+    },
+  };
+};
+
 describe(
   "packaging a definition as a standalone project",
   { timeout: 60_000 },
@@ -430,7 +588,7 @@ describe(
         rmSync(dir, { recursive: true, force: true });
       }
       vi.unstubAllGlobals();
-    });
+    }, 60_000);
 
     it("writes the App with its references generated anew, the workflow, the vendored kit and notices, pinned exactly and offline", async () => {
       const fetches = vi.fn<typeof fetch>();
@@ -521,7 +679,6 @@ describe(
           "workflows/greet/1.0.0/code/double.ts",
           "workflows/greet/1.0.0/tsconfig.generated.json",
           "workflows/greet/1.0.0/tsconfig.json",
-          "workflows/greet/1.0.0/workflow.json",
         ],
         vendorTests: [],
         sameSource: true,
@@ -581,6 +738,10 @@ describe(
       for (const file of Object.keys(valid)) {
         rmSync(path.join(out, file));
       }
+      const held = {
+        lint: run(out, "lint").status,
+        format: run(out, "format:check").status,
+      };
 
       // What the platform's check refuses, each in a file of its own: a
       // type error in a screen and in a compute module; a workflow and
@@ -642,6 +803,11 @@ describe(
       for (const file of Object.keys(mistyped)) {
         rmSync(path.join(out, file));
       }
+      // The App's own declarations are checked, as the platform checks
+      // them: only the packages' are another's to check.
+      write({ "app/declared.d.ts": "export type Count = Missing;\n" });
+      const declared = projectCheck(out);
+      rmSync(path.join(out, "app/declared.d.ts"));
       write(steering);
       const failedBuild = projectCheck(out);
       const codesOf = (file: string): string[] =>
@@ -655,6 +821,8 @@ describe(
           // The parser it reads files with, as the platform's Babel does.
           parser: project.devDependencies["@babel/parser"],
         },
+        held,
+        declared,
         accepted,
         failedCheck,
         failedBuild: {
@@ -673,9 +841,11 @@ describe(
         install: 0,
         checker: {
           tsrs: platformChecker,
-          typescript: repoTypescript,
+          typescript: compilerTypescript,
           parser: platformParser,
         },
+        held: { lint: 0, format: 0 },
+        declared: { status: 1, problems: { "app/declared.d.ts": ["TS2304"] } },
         accepted: { status: 0, problems: {} },
         failedCheck: {
           status: 1,
@@ -1390,6 +1560,152 @@ describe(
       });
     });
 
+    it("holds the App's code to what Grasp holds it to: what Grasp's tidy wrote passes its typecheck, lint, format and build, and its lint finds what Grasp's finds", async () => {
+      const { out } = scratch();
+      // A blueprint's App as Grasp saves an agent's writes (`tidy`), and a
+      // component Grasp keeps as it is though oxfmt wouldn't: imports out
+      // of oxfmt's order, and classes Tailwind's sorter would reorder.
+      const written = await tidy({
+        ...blueprintFiles("workflow-map"),
+        "components/count.tsx": `import type { ReactNode } from "react";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { api } from "@server/_generated/api";
+
+export const Count = ({ children }: { children: ReactNode }) => (
+  <p className="p-2 flex text-sm bg-primary">
+    <Badge>{children}</Badge>
+    {Object.keys(api).length}
+  </p>
+);
+`,
+      });
+      await packaged(await appDefinition(written), out);
+      const install = await installIn(out, ["--frozen-lockfile", "--offline"]);
+      const fresh = {
+        typecheck: run(out, "typecheck"),
+        lint: run(out, "lint"),
+        format: run(out, "format:check"),
+        build: run(out, "build"),
+      };
+      // What each lint says of the App as it was saved, by file.
+      const saved = {
+        grasp: graspRulesOf(written),
+        project: rulesOf(run(out, "lint", "--format=json").output),
+      };
+
+      // What Grasp's lint finds, the project's finds, no more: an error
+      // (a debugger); a sonarjs hint, a warning; and what Grasp leaves out
+      // reports nothing (a forEach, a spread in an accumulator, a
+      // comparison that is always false, a function declaration, and in a
+      // test what a preset's override turns on: vitest's rules).
+      const findings = `export const stop = (): void => {
+  debugger;
+};
+
+export const byKey = (pairs: [string, number][]): Record<string, number> => {
+  let all: Record<string, number> = {};
+  for (const [key, value] of pairs) {
+    all = { ...all, [key]: value };
+  }
+  return all;
+};
+
+export const each = (items: number[], seen: number[]): void => {
+  items.forEach((item) => {
+    seen.push(item);
+  });
+};
+
+export const never = (n: number): boolean => n < 1 && n > 2;
+
+export function zero(a: number): number {
+  return a - a;
+}
+`;
+      const found = {
+        "components/findings.ts": findings,
+        "tests/count.test.ts": `import { expect, test } from "vitest";
+
+test("counts", () => {
+  expect([1].length).toEqual(1);
+});
+`,
+      };
+      const write = (file: string, source: string): void => {
+        mkdirSync(path.dirname(path.join(out, file)), { recursive: true });
+        writeFileSync(path.join(out, file), source);
+      };
+      for (const [file, source] of Object.entries(found)) {
+        write(`app/${file}`, source);
+      }
+      const projectFound = run(out, "lint", "--format=json");
+      for (const file of Object.keys(found)) {
+        rmSync(path.join(out, "app", file));
+      }
+      // And the design system's lint, on screens: a raw colour and a kit
+      // component restyled (@shadcn/lint), and a remote image (the
+      // compiler's own rules).
+      write(
+        "app/screens/off.tsx",
+        `import { Button } from "@grasp-os/ui/components/button";
+
+export const Off = () => (
+  <p className="bg-red-500">
+    <Button className="rounded-none">Go</Button>
+    <img alt="" src="https://example.com/logo.png" />
+  </p>
+);
+`
+      );
+      const design = run(out, "lint", "--format=json");
+      rmSync(path.join(out, "app/screens/off.tsx"));
+      // And the format: what isn't formatted fails its check.
+      write("app/components/spaced.ts", "export const  spaced = 1\n");
+      const unformatted = run(out, "format:check");
+
+      const foundRules = [
+        "app/components/findings.ts error no-debugger",
+        "app/components/findings.ts warning sonarjs/no-identical-expressions",
+      ];
+      expect({
+        install: install.status,
+        fresh: Object.fromEntries(
+          Object.entries(fresh).map(([script, { status, output }]) => [
+            script,
+            status === 0 ? "ok" : output,
+          ])
+        ),
+        saved,
+        found: {
+          grasp: graspRulesOf(found),
+          project: {
+            status: projectFound.status,
+            rules: rulesOf(projectFound.output),
+          },
+        },
+        design: { status: design.status, rules: rulesOf(design.output) },
+        unformatted: unformatted.status,
+      }).toStrictEqual({
+        install: 0,
+        fresh: { typecheck: "ok", lint: "ok", format: "ok", build: "ok" },
+        // Clean in both, as the blueprint passes Grasp's lint.
+        saved: { grasp: [], project: [] },
+        found: {
+          grasp: foundRules,
+          project: { status: 1, rules: foundRules },
+        },
+        design: {
+          status: 1,
+          rules: [
+            "app/screens/off.tsx error grasp/no-remote-resources",
+            "app/screens/off.tsx error shadcn/no-raw-colors",
+            "app/screens/off.tsx error shadcn/no-restyle",
+          ],
+        },
+        unformatted: 1,
+      });
+    });
+
     it("renames the finished project onto an empty --out and leaves nothing beside it", async () => {
       const { dir, out } = scratch();
       mkdirSync(out);
@@ -1400,14 +1716,18 @@ describe(
       }).toStrictEqual({
         beside: ["project"],
         written: [
+          ".prettierignore",
           "LICENSES",
           "THIRD-PARTY-NOTICES.md",
           "app",
+          "components.json",
           "grasp",
           "grasp-project.json",
+          "oxlint.config.ts",
           "package.json",
           "pnpm-lock.yaml",
           "pnpm-workspace.yaml",
+          "prettier.config.mjs",
           "tsconfig.json",
           "vendor",
           "workflows",

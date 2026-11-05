@@ -16,13 +16,13 @@
  * libraries the isolate can't run; nor github's, its own repositories'
  * conventions.
  *
- * Code that passes in Grasp passes the export's oxlint, but for what has
- * no equivalent the isolate can run (`unmapped`, printed by the build):
- * oxc's own rules, which only oxlint has; the rules that need type
- * information, which TypeScript's check stands in for; the few the ESLint
- * plugins no longer have; and those whose ESLint version disagrees with
- * oxlint's (`disagreeing`, src/ultracite-calibration.ts, which an export's
- * oxlint leaves out too).
+ * Left out (`unmapped`, printed by the build) is what has no equivalent
+ * the isolate can run: oxc's own rules, which only oxlint has; the rules
+ * that need type information, which TypeScript's check stands in for;
+ * the few the ESLint plugins no longer have; and those calibrated out
+ * (src/ultracite-calibration.ts). An exported App's oxlint leaves out
+ * the same (scripts/package-definition-lib.ts), so code passes there as
+ * it passes here.
  */
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -69,6 +69,15 @@ export interface UltraciteRules {
   /** The presets' rules left out: no equivalent the isolate runs. */
   unmapped: string[];
 }
+
+/**
+ * Ultracite's oxlint presets App code is held to, by name, in the order
+ * the repo's config extends them: a later preset's level wins (`tanstack`
+ * turns `sort-keys` off: TanStack's option objects, as App pages' routes,
+ * are in the order their types are inferred in). An exported App's
+ * oxlint extends the same.
+ */
+export const ultracitePresets = { core, react, tanstack, vitest } as const;
 
 /** What needs type information: `requiresTypeChecking`, as typescript-eslint marks it. */
 const needsTypes = (rule: Rule.RuleModule): boolean => {
@@ -290,10 +299,7 @@ export const ultraciteRules = (): UltraciteRules => {
       })
     );
 
-  // As the repo's config extends them: a later preset's level wins
-  // (`tanstack` turns `sort-keys` off: TanStack's option objects, as App
-  // pages' routes, are in the order their types are inferred in).
-  const presets = [core, react, tanstack, vitest];
+  const presets = Object.values(ultracitePresets);
   const rules = mapped(
     Object.fromEntries(
       presets.flatMap((preset) => Object.entries(preset.rules ?? {}))
