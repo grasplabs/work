@@ -1,0 +1,146 @@
+--- a/crates/oxc_react_compiler/src/react_compiler_lowering/hir_builder.rs
++++ b/crates/oxc_react_compiler/src/react_compiler_lowering/hir_builder.rs
+@@ -932,15 +932,25 @@
+     let mut used_fallthroughs: FxHashSet<BlockId> = FxHashSet::default();
+     let mut postorder: Vec<BlockId> = Vec::new();
+ 
+-    fn visit(
+-        hir: &HIR<'_>,
++    // A depth-first walk with a stack of its own rather than recursion, so
++    // a long chain of blocks (a screen of many JSX elements) can't run
++    // out of the native stack. Each entry is a block whose successors are
++    // being walked: `next` of them visited so far.
++    struct Frame {
+         block_id: BlockId,
+-        is_used: bool,
+-        visited: &mut FxHashSet<BlockId>,
+-        used: &mut FxHashSet<BlockId>,
+-        used_fallthroughs: &mut FxHashSet<BlockId>,
+-        postorder: &mut Vec<BlockId>,
+-    ) {
++        was_visited: bool,
++        children: Vec<(BlockId, bool)>,
++        next: usize,
++    }
++
++    // What entering `block_id` does before its successors: `None` when it
++    // was walked already.
++    let enter = |block_id: BlockId,
++                     is_used: bool,
++                     visited: &mut FxHashSet<BlockId>,
++                     used: &mut FxHashSet<BlockId>,
++                     used_fallthroughs: &mut FxHashSet<BlockId>|
++     -> Option<Frame> {
+         let was_used = used.contains(&block_id);
+         let was_visited = visited.contains(&block_id);
+         visited.insert(block_id);
+@@ -948,7 +958,7 @@
+             used.insert(block_id);
+         }
+         if was_visited && (was_used || !is_used) {
+-            return;
++            return None;
+         }
+ 
+         let block = hir
+@@ -961,27 +971,39 @@
+         let mut successors = each_terminal_successor(&block.terminal);
+         successors.reverse();
+ 
+-        let fallthrough = terminal_fallthrough(&block.terminal);
+-
+         // Visit fallthrough first (marking as not-yet-used) to ensure its
+         // block ID is emitted in the correct position.
+-        if let Some(ft) = fallthrough {
++        let mut children = Vec::with_capacity(successors.len() + 1);
++        if let Some(ft) = terminal_fallthrough(&block.terminal) {
+             if is_used {
+                 used_fallthroughs.insert(ft);
+             }
+-            visit(hir, ft, false, visited, used, used_fallthroughs, postorder);
++            children.push((ft, false));
+         }
+-        for successor in successors {
+-            visit(hir, successor, is_used, visited, used, used_fallthroughs, postorder);
+-        }
++        children.extend(successors.into_iter().map(|successor| (successor, is_used)));
++        Some(Frame { block_id, was_visited, children, next: 0 })
++    };
+ 
+-        if !was_visited {
+-            postorder.push(block_id);
++    let mut stack: Vec<Frame> = Vec::new();
++    if let Some(frame) = enter(hir.entry, true, &mut visited, &mut used, &mut used_fallthroughs) {
++        stack.push(frame);
++    }
++    while let Some(frame) = stack.last_mut() {
++        if let Some(&(child, is_used)) = frame.children.get(frame.next) {
++            frame.next += 1;
++            if let Some(entered) =
++                enter(child, is_used, &mut visited, &mut used, &mut used_fallthroughs)
++            {
++                stack.push(entered);
++            }
++        } else {
++            if !frame.was_visited {
++                postorder.push(frame.block_id);
++            }
++            stack.pop();
+         }
+     }
+ 
+-    visit(hir, hir.entry, true, &mut visited, &mut used, &mut used_fallthroughs, &mut postorder);
+-
+     let mut blocks = OrderedMap::default();
+     for block_id in postorder.into_iter().rev() {
+         let block = hir.blocks.get(&block_id).unwrap();
+@@ -1119,23 +1141,23 @@
+ 
+     let mut visited: FxHashSet<BlockId> = FxHashSet::default();
+ 
+-    fn visit(
+-        hir: &mut HIR,
+-        block_id: BlockId,
+-        prev_block_id: Option<BlockId>,
+-        visited: &mut FxHashSet<BlockId>,
+-    ) {
++    // A depth-first walk with a stack of its own rather than recursion, so
++    // a long chain of blocks can't run out of the native stack: each entry
++    // is a block to visit and the block it was reached from, popped in the
++    // order the recursive walk visited them.
++    let mut stack: Vec<(BlockId, Option<BlockId>)> = vec![(hir.entry, None)];
++    while let Some((block_id, prev_block_id)) = stack.pop() {
+         // Add predecessor
+         if let Some(prev_id) = prev_block_id {
+             if let Some(block) = hir.blocks.get_mut(&block_id) {
+                 block.preds.insert(prev_id);
+             } else {
+-                return;
++                continue;
+             }
+         }
+ 
+         if visited.contains(&block_id) {
+-            return;
++            continue;
+         }
+         visited.insert(block_id);
+ 
+@@ -1143,15 +1165,11 @@
+         let successors = if let Some(block) = hir.blocks.get(&block_id) {
+             each_terminal_successor(&block.terminal)
+         } else {
+-            return;
++            continue;
+         };
+ 
+-        for successor in successors {
+-            visit(hir, successor, Some(block_id), visited);
+-        }
++        stack.extend(successors.into_iter().rev().map(|successor| (successor, Some(block_id))));
+     }
+-
+-    visit(hir, hir.entry, None, &mut visited);
+ }
+ 
+ // ---------------------------------------------------------------------------

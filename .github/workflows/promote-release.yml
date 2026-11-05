@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Node.js, node_modules and oxc.wasm, with this job's read-only token.
+      # Node.js, node_modules and oxc.wasm (.github/actions/setup).
       - uses: ./.github/actions/setup
       - uses: ./.github/actions/load-1password
         with:

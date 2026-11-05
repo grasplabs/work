@@ -2,21 +2,27 @@
 # that lints and formats App code (packages/compiler/oxc-wasm), and
 # publishes it as an asset of the pre-release pin.json names: by oxc's
 # commit and the hash of the glue (glue.ts), so a change to either is a
-# release of another name, and no release ever holds a build of other
-# glue. Installs, CI and release builds download it by that name and check
-# the SHA-256 pin.json pins (wasm.ts), and never build it.
+# release of another name. Installs, CI and release builds download it by
+# that name and check the SHA-256 pin.json pins (wasm.ts), and never build
+# it.
 #
-# Who can publish: a push to main, or someone with write access running it
-# by hand on a branch (`gh workflow run build-oxc-wasm.yml --ref <branch>`),
-# as the pull request that changes the glue needs its release to test;
-# never any other push. The build runs with a read-only token and no
-# credentials on disk, as it runs the build scripts and proc-macros of
-# oxc's whole dependency tree; only the publish job, which runs nothing of
-# the repo's or oxc's, can write, and it publishes the build's artifact.
+# Run by hand on the branch that changes the glue (`gh workflow run
+# build-oxc-wasm.yml --ref <branch>`), as its pull request needs the
+# release to test, and on a push to main. A release, once there, is built
+# again and compared byte for byte (.github/actions/oxc-wasm-build), and a
+# mismatch fails the run.
 #
-# A release, once there, is built again and compared, byte for byte: the
-# build is reproducible (build.sh says what fixes it), so anyone can check
-# a release against the commit that names it. A mismatch fails the run.
+# What a run proves is no more than its branch's copy of this file says:
+# anyone with write access can run their own, or make a release by hand.
+# What binds a pin to the glue is CI's `oxc-wasm` job, part of the
+# required check: on a pull request that changes the glue, this workflow
+# or pin.json, it builds the glue read-only, publishes nothing, and fails
+# unless the release's digest, the pin and its build are one.
+#
+# The build runs with a read-only token and no credentials on disk, as it
+# runs the build scripts and proc-macros of oxc's whole dependency tree;
+# only the publish job, which runs nothing of the repo's or oxc's, can
+# write, and it publishes the build's artifact.
 name: Build oxc WASM
 
 on:
@@ -24,6 +30,7 @@ on:
     branches: [main]
     paths:
       - packages/compiler/oxc-wasm/**
+      - .github/actions/oxc-wasm-build/**
       - .github/workflows/build-oxc-wasm.yml
   workflow_dispatch:
 
@@ -42,56 +49,18 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
-      release: ${{ steps.pin.outputs.release }}
-      published: ${{ steps.published.outputs.sha256 != '' }}
-      sha256: ${{ steps.built.outputs.sha256 }}
-      oxc: ${{ steps.pin.outputs.oxc }}
-      glue: ${{ steps.pin.outputs.glue }}
+      release: ${{ steps.build.outputs.release }}
+      published: ${{ steps.build.outputs.published }}
+      sha256: ${{ steps.build.outputs.sha256 }}
+      oxc: ${{ steps.build.outputs.oxc }}
+      glue: ${{ steps.build.outputs.glue }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Node.js alone, for glue.ts: nothing is installed.
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
-        with:
-          node-version-file: .node-version
-          cache: false
-          run-install: false
-      # The release pin.json names, once its glue is this tree's.
-      - id: pin
-        run: |
-          set -euo pipefail
-          release=$(node packages/compiler/oxc-wasm/glue.ts --release)
-          {
-            echo "release=$release"
-            echo "oxc=$(jq -r .oxc packages/compiler/oxc-wasm/pin.json)"
-            echo "glue=$(jq -r .glue packages/compiler/oxc-wasm/pin.json)"
-          } >> "$GITHUB_OUTPUT"
-      - id: published
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE: ${{ steps.pin.outputs.release }}
-        run: |
-          set -euo pipefail
-          if gh release view "$RELEASE" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            digest=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE" --jq '.assets[] | select(.name == "oxc.wasm") | .digest')
-            echo "sha256=${digest#sha256:}" >> "$GITHUB_OUTPUT"
-          fi
-      - run: packages/compiler/oxc-wasm/build.sh "$RUNNER_TEMP/oxc.wasm"
-      - id: built
-        run: echo "sha256=$(sha256sum "$RUNNER_TEMP/oxc.wasm" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - if: steps.published.outputs.sha256 != ''
-        env:
-          RELEASE: ${{ steps.pin.outputs.release }}
-          PUBLISHED: ${{ steps.published.outputs.sha256 }}
-          BUILT: ${{ steps.built.outputs.sha256 }}
-        run: |
-          if [ "$BUILT" != "$PUBLISHED" ]; then
-            echo "::error::$RELEASE's oxc.wasm has SHA-256 $PUBLISHED, but this build of the same commit and glue has $BUILT"
-            exit 1
-          fi
-          echo "$RELEASE is published already, and this build of it is byte for byte the same: SHA-256 \`$BUILT\`." >> "$GITHUB_STEP_SUMMARY"
-      - if: steps.published.outputs.sha256 == ''
+      - id: build
+        uses: ./.github/actions/oxc-wasm-build
+      - if: steps.build.outputs.published != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: oxc-wasm

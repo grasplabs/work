@@ -15,7 +15,7 @@
 # for one to win.
 #
 # Then oxc.wasm, which the compiler builds in (.github/actions/oxc-wasm),
-# with the job's own token: every workflow that sets up can build.
+# with no token: every workflow that sets up can build.
 name: Set up
 description: Install Vite+ and Node.js, restore or install node_modules, and download oxc.wasm
 
@@ -23,6 +23,9 @@ inputs:
   save:
     description: "Save node_modules when the cache missed: true or false"
     default: "false"
+  oxc-wasm:
+    description: "Download oxc.wasm, for a job that builds or tests the compiler: true or false"
+    default: "true"
 
 runs:
   using: composite
@@ -62,4 +65,5 @@ runs:
           packages/*/node_modules
           packages/connectors/*/node_modules
         key: ${{ steps.modules.outputs.cache-primary-key }}
-    - uses: ./.github/actions/oxc-wasm
+    - if: inputs.oxc-wasm == 'true'
+      uses: ./.github/actions/oxc-wasm

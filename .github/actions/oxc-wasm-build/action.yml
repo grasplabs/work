@@ -1,0 +1,97 @@
+# Builds oxc.wasm from the checkout (packages/compiler/oxc-wasm/build.sh)
+# into $RUNNER_TEMP/oxc.wasm, and compares it with the release pin.json
+# names when that exists: the build is reproducible, so a release that
+# isn't this build's bytes fails it. With `check`, as CI's check of a pull
+# request that changes the glue: the release must exist, and its digest,
+# pin.json's sha256 and this build must be one, so a pin is proven before
+# it merges, whoever published it. Needs no token beyond the job's
+# read-only one, and runs nothing with write access: the build runs the
+# build scripts and proc-macros of oxc's whole dependency tree.
+name: Build oxc.wasm
+description: Build oxc.wasm and compare it with the release pin.json names
+
+inputs:
+  check:
+    description: "Fail unless the release exists and its digest, the pin and this build match: true or false"
+    default: "false"
+
+outputs:
+  release:
+    description: The release pin.json names
+    value: ${{ steps.pin.outputs.release }}
+  oxc:
+    description: oxc's commit it was built from
+    value: ${{ steps.pin.outputs.oxc }}
+  glue:
+    description: The glue's hash (glue.ts)
+    value: ${{ steps.pin.outputs.glue }}
+  published:
+    description: Whether the release exists already
+    value: ${{ steps.published.outputs.sha256 != '' }}
+  sha256:
+    description: This build's SHA-256
+    value: ${{ steps.built.outputs.sha256 }}
+
+runs:
+  using: composite
+  steps:
+    # Node.js alone, for glue.ts: nothing is installed.
+    - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+      with:
+        node-version-file: .node-version
+        cache: false
+        run-install: false
+    # The release pin.json names, once its glue is this tree's.
+    - id: pin
+      shell: bash
+      run: |
+        set -euo pipefail
+        release=$(node packages/compiler/oxc-wasm/glue.ts --release)
+        {
+          echo "release=$release"
+          echo "oxc=$(jq -r .oxc packages/compiler/oxc-wasm/pin.json)"
+          echo "glue=$(jq -r .glue packages/compiler/oxc-wasm/pin.json)"
+          echo "pinned=$(jq -r .sha256 packages/compiler/oxc-wasm/pin.json)"
+        } >> "$GITHUB_OUTPUT"
+    - id: published
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RELEASE: ${{ steps.pin.outputs.release }}
+      run: |
+        set -euo pipefail
+        if gh release view "$RELEASE" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          digest=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE" --jq '.assets[] | select(.name == "oxc.wasm") | .digest')
+          echo "sha256=${digest#sha256:}" >> "$GITHUB_OUTPUT"
+        fi
+    - shell: bash
+      run: packages/compiler/oxc-wasm/build.sh "$RUNNER_TEMP/oxc.wasm"
+    - id: built
+      shell: bash
+      run: echo "sha256=$(sha256sum "$RUNNER_TEMP/oxc.wasm" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+    - shell: bash
+      env:
+        CHECK: ${{ inputs.check }}
+        RELEASE: ${{ steps.pin.outputs.release }}
+        PUBLISHED: ${{ steps.published.outputs.sha256 }}
+        PINNED: ${{ steps.pin.outputs.pinned }}
+        BUILT: ${{ steps.built.outputs.sha256 }}
+      run: |
+        set -euo pipefail
+        if [ "$CHECK" = true ]; then
+          if [ -z "$PUBLISHED" ]; then
+            echo "::error::$RELEASE isn't published: run the Build oxc WASM workflow on this branch (gh workflow run build-oxc-wasm.yml --ref <branch>), and pin the SHA-256 it prints"
+            exit 1
+          fi
+          if [ "$PINNED" != "$PUBLISHED" ]; then
+            echo "::error::pin.json pins $PINNED, but $RELEASE's oxc.wasm is $PUBLISHED"
+            exit 1
+          fi
+        fi
+        if [ -n "$PUBLISHED" ] && [ "$BUILT" != "$PUBLISHED" ]; then
+          echo "::error::$RELEASE's oxc.wasm has SHA-256 $PUBLISHED, but this build of the same commit and glue has $BUILT"
+          exit 1
+        fi
+        if [ -n "$PUBLISHED" ]; then
+          echo "$RELEASE's oxc.wasm is this build, byte for byte: SHA-256 \`$BUILT\`." >> "$GITHUB_STEP_SUMMARY"
+        fi

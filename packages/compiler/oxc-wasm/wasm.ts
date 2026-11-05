@@ -9,9 +9,9 @@
  * A release build bundles it into the compiler's assets, so a deployment
  * never downloads it.
  *
- * It comes through GitHub's API with a token, never a public URL, so it
- * works as well while the repo is private: `GITHUB_TOKEN` (CI's), or the
- * GitHub CLI's sign-in (`gh auth login`).
+ * A fresh clone needs nothing to download it: the asset's public address
+ * takes no token. With `GITHUB_TOKEN` set, it comes through GitHub's API
+ * instead, which keeps working if the repo is made private.
  *
  * `node packages/compiler/oxc-wasm/wasm.ts` downloads it if it is missing.
  * Working on the glue: set pin.json's `glue` to what `node glue.ts`
@@ -20,7 +20,6 @@
  * (`gh workflow run build-oxc-wasm.yml --ref <branch>`), which publishes
  * the release, and pin the SHA-256 it prints.
  */
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -67,38 +66,46 @@ export const oxcWasmPath = path.join(
 
 const releaseApi = `https://api.github.com/repos/grasplabs/work/releases/tags/${release}`;
 
-/** A token that reads this repo's releases: CI's, or the GitHub CLI's. */
-const githubToken = (): string => {
-  const set = process.env.GITHUB_TOKEN;
-  if (set !== undefined && set !== "") {
-    return set;
-  }
-  try {
-    return execFileSync("gh", ["auth", "token"], { encoding: "utf-8" }).trim();
-  } catch {
-    throw new Error(
-      "Downloading oxc.wasm needs a GitHub token that reads grasplabs/work: sign in with `gh auth login`, or set GITHUB_TOKEN"
-    );
-  }
-};
-
 const releaseSchema = z.object({
   assets: z.array(z.object({ name: z.string(), url: z.string() })),
 });
 
-/** The pinned release's oxc.wasm, through GitHub's API. */
+const unavailable = (status: number): Error =>
+  new Error(
+    `Could not download oxc.wasm of the release ${release} of grasplabs/work (${status}). Was the Build oxc WASM workflow run for this glue? If the repo is private, set GITHUB_TOKEN to a token that reads it (GITHUB_TOKEN=$(gh auth token)).`
+  );
+
+const bytesOf = async (response: Response): Promise<Uint8Array> => {
+  if (!response.ok) {
+    throw unavailable(response.status);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+};
+
+/**
+ * The pinned release's oxc.wasm: from its public address, with no token,
+ * while the repo is public; through GitHub's API with `GITHUB_TOKEN` when
+ * it is set, which reads a private repo too. Either way its SHA-256 is
+ * checked (`pinned`): the token is for reading, not for trust.
+ */
 const download = async (): Promise<Uint8Array> => {
+  const token = process.env.GITHUB_TOKEN ?? "";
+  if (token === "") {
+    return await bytesOf(
+      await fetch(
+        `https://github.com/grasplabs/work/releases/download/${release}/oxc.wasm`
+      )
+    );
+  }
   const headers = {
-    authorization: `Bearer ${githubToken()}`,
+    authorization: `Bearer ${token}`,
     "x-github-api-version": "2022-11-28",
   };
   const found = await fetch(releaseApi, {
     headers: { ...headers, accept: "application/vnd.github+json" },
   });
   if (!found.ok) {
-    throw new Error(
-      `Could not read the release ${release} of grasplabs/work (${found.status}): is the token signed in to it, and was the Build oxc WASM workflow run for this glue?`
-    );
+    throw unavailable(found.status);
   }
   const asset = releaseSchema
     .parse(await found.json())
@@ -106,15 +113,11 @@ const download = async (): Promise<Uint8Array> => {
   if (asset === undefined) {
     throw new Error(`The release ${release} has no oxc.wasm`);
   }
-  const response = await fetch(asset.url, {
-    headers: { ...headers, accept: "application/octet-stream" },
-  });
-  if (!response.ok) {
-    throw new Error(
-      `Could not download oxc.wasm of ${release} (${response.status})`
-    );
-  }
-  return new Uint8Array(await response.arrayBuffer());
+  return await bytesOf(
+    await fetch(asset.url, {
+      headers: { ...headers, accept: "application/octet-stream" },
+    })
+  );
 };
 
 const sha256 = (bytes: Uint8Array): string =>

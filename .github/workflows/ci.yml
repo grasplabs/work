@@ -117,6 +117,7 @@ jobs:
       shards: ${{ steps.plan.outputs.shards }}
       e2e: ${{ steps.plan.outputs.e2e }}
       admin-e2e: ${{ steps.plan.outputs['admin-e2e'] }}
+      oxc-wasm: ${{ steps.oxc-wasm.outputs.changed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -131,6 +132,18 @@ jobs:
         run: node scripts/test-plan.ts
         env:
           GRASP_TEST_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+      # Whether oxc.wasm's glue, its build or its pin changed against the
+      # base, as the merge commit's first parent: then the oxc-wasm job
+      # proves the pin (below). A full run (by hand, nightly) proves it too.
+      - id: oxc-wasm
+        run: |
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != merge_group ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif ! git diff --quiet HEAD^1 HEAD -- packages/compiler/oxc-wasm .github/actions/oxc-wasm-build .github/workflows/build-oxc-wasm.yml; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          EVENT: ${{ github.event_name }}
 
   # `vp test` in shards, a runner each: unsharded, one passing run reached
   # 16 minutes at about 5,300 tests (October 2026). Each shard gets its part
@@ -276,15 +289,36 @@ jobs:
   # ready runs it all, and this check again). In the merge queue the
   # journeys (e2e, admin-e2e) skip too, and pass (why: e2e, below), and so
   # does a journey suite whose stack the plan finds unchanged.
+  # Proves the pin of oxc.wasm before it merges, when the plan finds its
+  # glue, its build or pin.json changed: builds it read-only from this
+  # checkout, publishes nothing, and fails unless the release pin.json
+  # names exists and its digest, the pin and this build are one
+  # (.github/actions/oxc-wasm-build). Whoever published the release, the
+  # bytes CI and every deployment run are then the glue's. About five
+  # minutes of Rust, on a rare pull request. Part of the required `check`.
+  oxc-wasm:
+    name: oxc-wasm
+    needs: plan
+    if: needs.plan.outputs.oxc-wasm == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/oxc-wasm-build
+        with:
+          check: true
+
   check:
     name: check
-    needs: [static, plan, test, release, workerd, e2e, admin-e2e]
+    needs: [static, plan, test, release, workerd, e2e, admin-e2e, oxc-wasm]
     if: always() && github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - run: |
-          echo "static: $STATIC, plan: $PLAN ($SHARDS), test shards: $TEST, release: $RELEASE, workerd: $WORKERD, e2e parts: $E2E, admin-e2e: $ADMIN_E2E, draft: $DRAFT, event: $EVENT"
+          echo "static: $STATIC, plan: $PLAN ($SHARDS), test shards: $TEST, release: $RELEASE, workerd: $WORKERD, e2e parts: $E2E, admin-e2e: $ADMIN_E2E, oxc-wasm: $OXC_WASM, draft: $DRAFT, event: $EVENT"
           if [ "$STATIC" != success ]; then
             echo "::error title=check::static ended as $STATIC; check passes only when it succeeds."
             exit 1
@@ -309,8 +343,11 @@ jobs:
             echo "The change doesn't reach the admin's stack: no admin journey to run."
             ADMIN_E2E="success (stack unchanged)"
           fi
+          if [ "$OXC_WASM" = skipped ] && [ "$PLAN" = success ] && [ "$OXC_WASM_RUNS" != true ]; then
+            OXC_WASM="success (glue unchanged)"
+          fi
           failed=""
-          for job in "plan=$PLAN" "test shards=${TEST%% *}" "release=$RELEASE" "workerd=$WORKERD" "e2e parts=${E2E%% *}" "admin-e2e=${ADMIN_E2E%% *}"; do
+          for job in "plan=$PLAN" "test shards=${TEST%% *}" "release=$RELEASE" "workerd=$WORKERD" "e2e parts=${E2E%% *}" "admin-e2e=${ADMIN_E2E%% *}" "oxc-wasm=${OXC_WASM%% *}"; do
             [ "${job#*=}" = success ] || failed="$failed ${job%%=*} (${job#*=}),"
           done
           if [ -n "$failed" ]; then
@@ -329,6 +366,8 @@ jobs:
           ADMIN_E2E: ${{ needs.admin-e2e.result }}
           E2E_RUNS: ${{ needs.plan.outputs.e2e }}
           ADMIN_E2E_RUNS: ${{ needs.plan.outputs['admin-e2e'] }}
+          OXC_WASM: ${{ needs.oxc-wasm.result }}
+          OXC_WASM_RUNS: ${{ needs.plan.outputs.oxc-wasm }}
           DRAFT: ${{ github.event.pull_request.draft == true }}
           EVENT: ${{ github.event_name }}
 

@@ -323,6 +323,18 @@ export const isNumber = (value: unknown, extra: unknown): extra is number =>
     });
   });
 
+  it("lints and tidies a flat screen of a thousand rows, as native oxlint and oxfmt do", async () => {
+    const table = `export const Table = () => (\n  <table>\n    <tbody>\n${"      <tr>\n        <td>Name</td>\n        <td>Value</td>\n      </tr>\n".repeat(1000)}    </tbody>\n  </table>\n);\n`;
+
+    const linted = await ultracite().lint({ "screens/table.tsx": table });
+    const tidied = await ultracite().tidy({ "screens/table.tsx": table });
+
+    expect({
+      linted: linted["screens/table.tsx"]?.map(({ rule }) => rule),
+      tidied: typeof tidied["screens/table.tsx"],
+    }).toStrictEqual({ linted: [], tidied: "string" });
+  });
+
   it("keeps as written a file oxfmt would make larger than an App's file may be", async () => {
     // Formatted, each array nested 300 deep is a line a level, indented:
     // 180,000 characters, from 600 written.

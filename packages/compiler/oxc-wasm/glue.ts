@@ -1,6 +1,6 @@
 /**
  * What ties oxc.wasm to this repo: the hash of its glue (every file
- * build.sh builds it from: Cargo.toml, build.sh and src/), which pin.json
+ * build.sh builds it from: Cargo.toml, build.sh, patches/ and src/), which pin.json
  * pins beside oxc's commit, and the release both name. A change to the
  * glue or the commit is a release of another name, so a pin can never
  * name a build of other glue; and while pin.json's `glue` isn't this
@@ -26,10 +26,13 @@ const glueFiles = (): string[] =>
   [
     "Cargo.toml",
     "build.sh",
-    ...readdirSync(path.join(here, "src"), {
-      recursive: true,
-      withFileTypes: true,
-    })
+    ...["patches", "src"]
+      .flatMap((folder) =>
+        readdirSync(path.join(here, folder), {
+          recursive: true,
+          withFileTypes: true,
+        })
+      )
       .filter((entry) => entry.isFile())
       .map((entry) =>
         path
