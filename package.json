@@ -5,7 +5,7 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "prepare": "vp config --no-agent && node packages/compiler/oxc-wasm/wasm.ts",
+    "prepare": "vp config --no-agent",
     "dev": "node scripts/dev.ts",
     "seed": "node scripts/seed.ts",
     "seed:admin": "node scripts/seed-admin.ts",
@@ -19,6 +19,7 @@
     "check:migrations": "node scripts/check-migrations.ts",
     "check:wrangler-configs": "node scripts/check-wrangler-configs.ts",
     "check:playwright-image": "node scripts/check-playwright-image.ts",
+    "check:vite-plus-oxc": "node scripts/check-vite-plus-oxc.ts",
     "github:setup": "node scripts/github-setup.ts",
     "check:attribution": "node scripts/check-attribution.ts",
     "check:branch": "node scripts/check-branch-name.ts",

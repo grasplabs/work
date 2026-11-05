@@ -1,0 +1,17 @@
+# oxc.wasm, oxlint and oxfmt as the compiler builds them in, from this
+# repo's pre-release that packages/compiler/oxc-wasm/pin.json names,
+# checked against its SHA-256 (packages/compiler/oxc-wasm/wasm.ts). Read
+# through GitHub's API with the job's own token, which needs only
+# `contents: read`, and only in this step: nothing after it downloads, as
+# the file is kept in the compiler's node_modules. Once installed (Set up
+# runs it): restored node_modules may lack a newer pin's file.
+name: oxc.wasm
+description: Download the pinned oxc.wasm into the compiler's node_modules
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: node packages/compiler/oxc-wasm/wasm.ts

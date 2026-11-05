@@ -37,12 +37,6 @@ on:
 permissions:
   contents: read
 
-# What downloads oxc.wasm, oxlint and oxfmt as the compiler builds them in,
-# reads it from this repo's pre-release through GitHub's API
-# (packages/compiler/oxc-wasm/wasm.ts): the run's own token, read-only.
-env:
-  GITHUB_TOKEN: ${{ github.token }}
-
 # The nightly and by-hand runs on main in a group of their own: in main's,
 # a push would wait for the full suite to end before it could publish.
 concurrency:
@@ -77,6 +71,7 @@ jobs:
       - run: vp run check:migrations
       - run: vp run check:wrangler-configs
       - run: vp run check:playwright-image
+      - run: vp run check:vite-plus-oxc
       # Generated files (Worker types, migrations, the
       # frontend's translation catalogs) must be committed.
       - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
@@ -433,6 +428,7 @@ jobs:
           cache: false
           run-install: |
             - args: ["--frozen-lockfile"]
+      - uses: ./.github/actions/oxc-wasm
       # Beside the journeys, the runner's memory once a minute, as in the
       # test shards (scripts/memory-log.ts).
       - run: |
@@ -498,6 +494,7 @@ jobs:
           cache: false
           run-install: |
             - args: ["--frozen-lockfile"]
+      - uses: ./.github/actions/oxc-wasm
       - run: vp run e2e:admin
       # A failing journey keeps its trace (playwright.admin.config.ts).
       - if: failure()
