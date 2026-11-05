@@ -8,6 +8,7 @@ import {
   runIdSchema,
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
+import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   runFileLimits,
@@ -871,6 +872,43 @@ const receiveForTrigger = async (
   }
 };
 
+/**
+ * Audits `action` about a reply to `inbox`'s run, with `detail`, once a
+ * day: the event's ID is derived from all it holds and the day, and its
+ * time is that day, so the same event however often that day, which the
+ * outbox and the log each keep once (as `auditDownload` in
+ * app-file-route.ts).
+ */
+const auditReplyOnce = async (
+  env: Env,
+  inbox: RunInbox,
+  action: string,
+  detail: Readonly<Record<string, string>>
+): Promise<void> => {
+  const day = new Date().toISOString().slice(0, 10);
+  const held = {
+    workflow: inbox.workflowId,
+    binding: inbox.binding,
+    ...detail,
+    day,
+  };
+  const event = auditEventSchema.parse({
+    id: uuidFromHash(
+      await sha256Hex(`${action}:${inbox.runId}:${canonicalJson(held)}`)
+    ),
+    at: `${day}T00:00:00.000Z`,
+    source: "core",
+    actor: { type: "system" },
+    action,
+    target: { type: "workflow_run", id: inbox.runId },
+    detail: held,
+  });
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxedEventWhere(db, event, not(storedEvent(event.id))),
+  ]);
+};
+
 /** Why a reply to a run's inbox is dropped (`receiveReply`). */
 type ReplyDrop =
   | LoopReason
@@ -913,30 +951,9 @@ const replyDropped = async (
     reason,
     message,
   });
-  const day = new Date().toISOString().slice(0, 10);
-  const action = "workflow.email.reply.dropped";
-  const event = auditEventSchema.parse({
-    id: uuidFromHash(
-      await sha256Hex(
-        `${action}:${inbox.runId}:${inbox.binding}:${reason}:${day}`
-      )
-    ),
-    at: `${day}T00:00:00.000Z`,
-    source: "core",
-    actor: { type: "system" },
-    action,
-    target: { type: "workflow_run", id: inbox.runId },
-    detail: {
-      workflow: inbox.workflowId,
-      binding: inbox.binding,
-      reason,
-      day,
-    },
+  await auditReplyOnce(env, inbox, "workflow.email.reply.dropped", {
+    reason,
   });
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    outboxedEventWhere(db, event, not(storedEvent(event.id))),
-  ]);
 };
 
 /**
@@ -951,28 +968,9 @@ const replyReceived = async (
   inbox: RunInbox,
   eventId: string
 ): Promise<void> => {
-  const day = new Date().toISOString().slice(0, 10);
-  const action = "workflow.email.reply.received";
-  const event = auditEventSchema.parse({
-    id: uuidFromHash(
-      await sha256Hex(`${action}:${inbox.runId}:${eventId}:${day}`)
-    ),
-    at: `${day}T00:00:00.000Z`,
-    source: "core",
-    actor: { type: "system" },
-    action,
-    target: { type: "workflow_run", id: inbox.runId },
-    detail: {
-      workflow: inbox.workflowId,
-      binding: inbox.binding,
-      event: eventId,
-      day,
-    },
+  await auditReplyOnce(env, inbox, "workflow.email.reply.received", {
+    event: eventId,
   });
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    outboxedEventWhere(db, event, not(storedEvent(event.id))),
-  ]);
 };
 
 /**
