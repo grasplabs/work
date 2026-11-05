@@ -610,13 +610,14 @@ const tasksFileSchema = z.strictObject({
   tasks: z
     .array(sealedTaskSchema)
     .max(10_000)
-    // State only where a step records it.
+    // State only where a step records it, once a run: never in a loop's
+    // items or a fork's branches, whose writes would race each other.
     .refine((tasks) =>
       tasks.every(
         ({ state, ...task }) =>
           state === undefined ||
           Object.keys(state).length === 0 ||
-          stateStepOf(task) !== undefined
+          (stateStepOf(task) !== undefined && task.scope.length === 0)
       )
     ),
   expressions: z.array(sealedExpressionSchema).max(10_000),

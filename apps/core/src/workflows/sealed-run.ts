@@ -315,6 +315,12 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   an App's test started, writes nothing, and nor does a restricted run,
 //   whose state would carry what it read to the workflow's other runs
 //   (restricted.ts): its skip is audited (`workflow.state.withheld`).
+//   What a value holds is the build's to decide: its builder seals each
+//   key's expression, as they seal what a run writes to an App's data,
+//   so state is the company's record of what the workflow's runs
+//   computed, which every later run of it reads, whoever it acts for.
+//   A task keeps state once a run: never inside a loop's items or a
+//   fork's branches, whose writes would race (the table refuses it).
 // - State changing under a run. A run reads its workflow's state once,
 //   as its start is decided (a write or reset landing between that and
 //   its admission is the next start's to read), frozen as a snapshot its

@@ -3553,6 +3553,15 @@ describe("a sealed run's state between runs on the run host", () => {
         { ...finishTask, kind: "do", steps: ["task", "leave"] },
         true
       ),
+      // Inside a loop's items, each item would write.
+      inLoopKeeping: tableOf(
+        { ...finishTask, scope: ["rows"], branches: [null] },
+        true
+      ),
+      inLoop: tableOf(
+        { ...finishTask, scope: ["rows"], branches: [null] },
+        false
+      ),
       // A sensitive parameter anywhere in a template, and keys past 64.
       nestedParam: tableOf(finishTask, {
         secret: {
@@ -3609,6 +3618,8 @@ describe("a sealed run's state between runs on the run host", () => {
         doing: "sealed",
         doKeeping: "refused",
         doLeavingKeeping: "sealed",
+        inLoopKeeping: "refused",
+        inLoop: "sealed",
         nestedParam: "refused",
         tooManyKeys: "refused",
         sixtyFourKeys: "sealed",

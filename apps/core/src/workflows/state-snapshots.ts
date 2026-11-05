@@ -22,7 +22,11 @@ import {
 // same batch as the row that names it, so one named is always there, and
 // retention removes those nothing names any more (`orphanedSnapshotsRemoved`)
 // in a statement of its own, which a batch naming one again either runs
-// before (it stays) or after (it is written again).
+// before (it stays) or after (it is written again). A state that changes
+// every run is stored once per start, at most `workflowStateMaxBytes`
+// each, until retention reaches the start (`runRetentionDays` after its
+// run ended): a workflow started every 5 minutes with its state at the cap
+// holds about 540 MB at worst.
 
 /** A snapshot, as its run freezes it: its hash, and its canonical JSON. */
 export interface StateSnapshot {
