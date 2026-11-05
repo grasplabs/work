@@ -44,7 +44,6 @@ export const recipients = query({
 `;
 
 const registration = `import { app } from "@grasp-os/sdk";
-import { recipients, remember } from "./server/asks.ts";
 import schema from "./schema.ts";
 
 export default app({

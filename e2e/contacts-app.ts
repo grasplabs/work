@@ -17,8 +17,10 @@ import { mutation, query } from "@server/_generated/server";
 export const list = query({
   args: {},
   returns: v.array(v.string().max(200)),
-  handler: async (ctx) =>
-    (await ctx.db.query("contacts").take(100)).map(({ name }) => name),
+  handler: async (ctx) => {
+    const contacts = await ctx.db.query("contacts").take(100);
+    return contacts.map(({ name }) => name);
+  },
 });
 
 export const add = mutation({

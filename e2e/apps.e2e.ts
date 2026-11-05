@@ -37,7 +37,6 @@ export const addOne = mutation({
 const registration = (
   screen: string
 ): string => `import { app } from "@grasp-os/sdk";
-import { addOne, count } from "./server/counter.ts";
 import schema from "./schema.ts";
 
 export default app({
