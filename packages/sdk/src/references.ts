@@ -288,9 +288,10 @@ export type ScreenOutputOf<Screen> =
  * Changes wait for the person's own click.
  *
  * ```tsx
- * export default function Note({ input }: ScreenProps<typeof screens.note>) {
+ * const Note = ({ input }: ScreenProps<typeof screens.note>) => {
  *   const note = useQuery(api.notes.get, { id: input.id });
- * }
+ *   …
+ * };
  * ```
  */
 export interface ScreenProps<Screen> {
