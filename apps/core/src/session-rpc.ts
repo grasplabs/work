@@ -146,7 +146,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
       connections: this.#connections,
       decisions: this.#decisions,
       heldStarts: this.#heldStarts,
-      chats: this.#chats,
       lifecycles: this.#workflowResources.lifecycle,
       bindings: this.#workflowResources,
     });

@@ -80,17 +80,16 @@ export default function Wandering() {
 /**
  * Renders, then sends more in one message than the page takes over the
  * frame's port. The SDK's client bounds a function's request before it
- * sends it, so this starts a run through the legacy workflow hook, whose
- * input crosses the port before anything reads it; no workflow is
+ * sends it, so this answers a decision through the page's bridge itself,
+ * whose answer crosses the port before anything reads it; no decision is
  * involved.
  */
-const oversizedScreen = `import { useWorkflow } from "@grasp-os/sdk/screen";
+const oversizedScreen = `import { bridge } from "@grasp-os/sdk/screen-runtime";
 import { useEffect } from "react";
 
 export default function Oversized() {
-  const { start } = useWorkflow("secret");
   useEffect(() => {
-    void start("x".repeat(300_000)).catch(() => undefined);
+    void bridge().decide("run", "secret", "x".repeat(300_000)).catch(() => undefined);
   }, []);
   return <main><h1>Oversized</h1></main>;
 }

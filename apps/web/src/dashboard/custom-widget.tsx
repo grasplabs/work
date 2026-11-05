@@ -66,7 +66,6 @@ const stateNames: Record<WidgetState, MessageDescriptor> = {
 
 /** Each column of a widget's table, as its header names it. */
 const columnNames: Record<WidgetColumn, MessageDescriptor> = {
-  engine: msg({ message: "App", context: "a table column: an engine" }),
   workflow: msg({ message: "Workflow", context: "a table column" }),
   state: msg({ message: "State", context: "a table column: a workflow's" }),
   started: measureNames.started,

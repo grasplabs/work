@@ -42,11 +42,6 @@ export const workflowErrors = defineErrorFamily({
   "workflow.run_not_found": "There's no such workflow run.",
   "workflow.run_details_removed":
     "This run's details were removed when its retention ended, so there is nothing left to work out a fix from.",
-  "workflow.build_failed": "The App's workflows don't build.",
-  "workflow.model_undeclared":
-    "A workflow's AI step goes through an `ai` permission this version doesn't declare, so it can't be made current.",
-  "workflow.tests_failed":
-    "A workflow's tests fail, or it has none, so this version can't be made current.",
   "workflow.outside_step":
     "A workflow calls its connections only inside a step: code between steps runs again on every replay.",
   "workflow.control_conflict":
@@ -71,30 +66,8 @@ export const workflowErrors = defineErrorFamily({
     "This workflow step waited to run for as long as a step may wait, so it was stopped. Steps already running kept the organization or this App busy throughout: try again later.",
   "workflow.idempotency_key_invalid":
     "A workflow's connection calls take their step's own idempotency key (the `idempotencyKey` a side-effect step gets), or none: the platform keeps side effects to once per step and run.",
-  "workflow.param_not_found":
-    "The workflow has no such parameter in the App's current version.",
-  "workflow.param_invalid": "That isn't a valid value for this parameter.",
-  "workflow.param_conflict":
-    "The App's current version changed while the value was set. Try again.",
-  "workflow.trigger_gone":
-    "The trigger belongs to a version of the App that is no longer current.",
-  "workflow.owner_invalid":
-    "Only a current member of the organization who can open the App can own its workflow.",
-  "workflow.owner_conflict":
-    "Someone changed the workflow's owner meanwhile. Try again.",
-  "workflow.team_invalid": "That isn't one of the organization's teams.",
   "workflow.email_taken":
     "Another workflow already receives mail at this address.",
-  "workflow.attachment_not_found":
-    "This App has no such attachment: the message isn't kept for it, or its 30 days have passed.",
-  "workflow.attachment_unreadable":
-    "The kept message can't be read any more, so none of its attachments can.",
-  "workflow.call_not_reviewed":
-    "A step called a binding its version's review doesn't show it calling: call each binding only in the step's own function.",
-  "workflow.step_not_reviewed":
-    "A step ran that its version's review doesn't show: run steps only as the workflow's function writes them.",
-  "workflow.calls_not_kept":
-    "This version keeps no reading of what the workflow calls, so it doesn't run: commit the workflow again.",
   // What a step or run failed with when its error named no code of its
   // own: the audit log and failure reports carry these instead.
   "workflow.step_failed": "A step of the workflow failed.",
@@ -267,12 +240,6 @@ export const inboundEmailMaxBytes = 10 * 1024 * 1024;
  * lists; so the most attachments a run reads by index.
  */
 export const inboundEmailMaxListed = 100;
-
-/** An attachment's index in a message's run input. */
-export const inboundEmailIndexSchema = z
-  .int()
-  .min(0)
-  .max(inboundEmailMaxListed - 1);
 
 /** A name and address, as a message's headers give them. */
 const mailboxSchema = z.object({ name: z.string(), address: z.string() });
@@ -459,8 +426,7 @@ export const coreStepPrefix = "$grasp:";
  * The key of a sensitive parameter's placeholder, `{"$grasp:param": name}`
  * (the SDK's `sensitiveParam`): where a sealed build seals that parameter
  * as a connector call's argument, its run host puts in the value the run's
- * start froze (core's workflows/sealed-run.ts). An App's run may send
- * none (core's workflows/app-run.ts).
+ * start froze (core's workflows/sealed-run.ts).
  */
 export const sensitiveParamKey = "$grasp:param";
 
@@ -640,74 +606,6 @@ export type RunStatus =
   | "cancelled";
 
 /**
- * A run as an App's screens observe it, all of one revision of the run
- * (core's workflows/summary.ts): its status, who it is, its times (Unix
- * milliseconds), the decisions it waits for, a compensation's cause and
- * activity, and what the person asking may do with it now. `revision`
- * orders snapshots: a greater one is newer.
- */
-export interface RunSummary {
-  revision: number;
-  runId: string;
-  workflowId: string;
-  workflowVersion: number;
-  status:
-    | "queued"
-    | "running"
-    | "waiting"
-    | "paused"
-    | "compensating"
-    | "completed"
-    | "failed"
-    | "cancelled";
-  createdAt: number;
-  /** When the engine first ran it; null until it has. */
-  startedAt: number | null;
-  /** Once it has ended; null before. */
-  finishedAt: number | null;
-  /** While it compensates: why, and what its cleanup is doing. */
-  compensation?: {
-    cause: "failure" | "cancellation";
-    activity: "running" | "waiting" | "paused";
-    /**
-     * After a failure, what the run failed with, to those who see why a
-     * run failed (its person and admins): as `error` once it ends.
-     */
-    originalError?: { code: string; message: string };
-  };
-  /** Why it failed, once failed: a code and message, no values. */
-  error?: { code: string; message: string };
-  /** The decisions it waits for now: none once it has ended. */
-  waits: { kind: "decision"; name: string; expiresAt: number }[];
-  /**
-   * While it is `queued` for a share of the attempts that run at once (its
-   * App's, its person's or the organization's): which, and when it asks
-   * again at the latest. Throttling, not a fault of the workflow.
-   */
-  queued?: { waitingFor: "client" | "person" | "app"; retryAt: number };
-  /**
-   * While it is `queued` because a model call of it failed on the
-   * organization's own AI provider key: the provider, what it showed (it
-   * refuses the key, isn't answering, or is limiting requests), and since
-   * when. It goes on by itself once calls work.
-   */
-  aiProvider?: { since: number; provider: string; trouble: ProviderTrouble };
-  /**
-   * What the person asking may do now, as the host would admit it, and a
-   * control the host admitted that the engine is still applying.
-   */
-  control: {
-    canPause: boolean;
-    canResume: boolean;
-    canCancel: boolean;
-    pendingControl: {
-      kind: "pause" | "resume" | "cancel";
-      stage: "applying";
-    } | null;
-  };
-}
-
-/**
  * A step's or a compensation's failure as a run's history shows it. To
  * those who see the run's details (admins, and the person it acts for):
  * its code and message. To anyone else: the code only when it is one the
@@ -744,7 +642,14 @@ export type RunHistoryEntry = {
 } & (
   | {
       kind: "lifecycle";
-      status: Exclude<RunSummary["status"], "compensating">;
+      status:
+        | "queued"
+        | "running"
+        | "waiting"
+        | "paused"
+        | "completed"
+        | "failed"
+        | "cancelled";
     }
   | {
       kind: "lifecycle";
@@ -801,33 +706,6 @@ export type RunHistoryEntry = {
       kind: "unreadable";
     }
 );
-
-/** Most entries one page of a run's history holds. */
-export const runHistoryMaxPageSize = 100;
-
-/** What `WorkflowsApi.history` reads: a page size, and where to go on from. */
-export const runHistoryPageSchema = z
-  .strictObject({
-    pageSize: z.int().min(1).max(runHistoryMaxPageSize).default(50),
-    /** The `nextCursor` of the page before; null for the first. */
-    cursor: z
-      .string()
-      .regex(/^[1-9]\d{0,15}$/u)
-      .nullable()
-      .default(null),
-  })
-  .default({ pageSize: 50, cursor: null });
-
-/** What `WorkflowsApi.history` reads. */
-export type RunHistoryPageQuery = z.input<typeof runHistoryPageSchema>;
-
-/**
- * One page of a run's history, oldest first; the last page has no cursor.
- * Empty once the run's details are removed.
- */
-export type RunHistoryPage =
-  | { items: RunHistoryEntry[]; nextCursor: null; hasMore: false }
-  | { items: RunHistoryEntry[]; nextCursor: string; hasMore: true };
 
 /**
  * The receipt of a pause, resume or cancel of a run the host admitted:
@@ -933,35 +811,9 @@ export type StepUse =
   | "decision"
   | "recipients";
 
-/** Which runs `WorkflowsApi.runs` lists; each field narrows it. */
+/** Which runs `WorkflowsApi.runs` lists. */
 export interface RunFilter {
-  app?: string;
-  workflow?: string;
   status?: RunFilterStatus;
-}
-
-/**
- * The workflow a run, a summary or a count is of: an App's, by its App and
- * ID, or an independent one (platform specification 13), by its ID and
- * name. The run lists, the overview and the activity read both alike.
- */
-export type RunWorkflowRef =
-  | { type: "app"; app: AppId; appName: string; workflow: WorkflowId }
-  | { type: "resource"; workflowId: WorkflowResourceId; name: string };
-
-/**
- * A run of an App's workflow as the Runs list has it, with its App's
- * name. While it waits for a decision its `status` is `waiting`.
- */
-export interface AppListedRun extends WorkflowRun {
-  type: "app";
-  appName: string;
-  /**
-   * An open decision it waits for that the person may answer now (the
-   * latest such), answered on its own page (`/decisions/<id>`); none when
-   * they may answer none of them.
-   */
-  decision?: string;
 }
 
 /**
@@ -970,8 +822,7 @@ export interface AppListedRun extends WorkflowRun {
  * workflow's builders, their own for its users). What it returned or why
  * it failed stays on the run itself.
  */
-export interface ResourceListedRun {
-  type: "resource";
+export interface ListedRun {
   id: RunId;
   workflowId: WorkflowResourceId;
   name: string;
@@ -993,9 +844,6 @@ export interface ResourceListedRun {
   createdAt: string;
   endedAt: string | null;
 }
-
-/** A run as the Runs list has it, of an App's workflow or an independent one. */
-export type ListedRun = AppListedRun | ResourceListedRun;
 
 /** Most runs one `runs` call returns. */
 export const runsPageSize = 100;
@@ -1026,15 +874,17 @@ export interface LatestRun {
   createdAt: string;
 }
 
-/** What the Workflows page shows of any workflow, an App's or independent. */
-interface WorkflowRunCounts {
-  /**
-   * Who owns it: the person who answers for it. For an App's workflow, and
-   * told when a run a trigger started fails, its App's owner unless
-   * someone set another; for an independent one, who created it. Not whom
-   * its runs act for: a run of an App no person started acts for the
-   * App's owner.
-   */
+/**
+ * An independent workflow the person has a role in, as the Workflows page
+ * lists it. Its counts are of the runs its page lists them: every run for
+ * its builders, their own for its users.
+ */
+export interface WorkflowSummary {
+  workflowId: WorkflowResourceId;
+  name: string;
+  /** The version published last, which new runs run; null before the first. */
+  version: number | null;
+  /** Who owns it: the person who created it. */
   owner: { userId: string; name: string | null };
   /**
    * Its latest run, of any version, `waiting` while it waits for a
@@ -1051,39 +901,6 @@ interface WorkflowRunCounts {
    */
   handled: number;
 }
-
-/** A workflow of an App's current version, as the Workflows page lists it. */
-export interface AppWorkflowSummary extends WorkflowRunCounts {
-  type: "app";
-  app: AppId;
-  appName: string;
-  workflow: WorkflowId;
-  /** The App's current version, which new runs run. */
-  version: number;
-  /**
-   * Whether the person may change its owner (`setOwner`) and its team
-   * (`setTeam`): an admin, or a builder of the App; never Grasp staff.
-   */
-  changesOwner: boolean;
-  /** The organization's team that owns it (`setTeam`); null for none. */
-  team: { id: string; name: string } | null;
-}
-
-/**
- * An independent workflow the person has a role in, as the Workflows page
- * lists it. Its counts are of the runs its page lists them: every run for
- * its builders, their own for its users.
- */
-export interface ResourceWorkflowSummary extends WorkflowRunCounts {
-  type: "resource";
-  workflowId: WorkflowResourceId;
-  name: string;
-  /** The version published last, which new runs run; null before the first. */
-  version: number | null;
-}
-
-/** A workflow as the Workflows page lists it. */
-export type WorkflowSummary = AppWorkflowSummary | ResourceWorkflowSummary;
 
 /** Most UTC days one `activity` read looks back over, today included. */
 export const runActivityMaxDays = 90;
@@ -1128,21 +945,9 @@ export interface RunActivityDay {
 }
 
 /** A workflow's runs started in the window, and how many of them ended how. */
-export type RunActivityWorkflow = (
-  | {
-      type: "app";
-      app: AppId;
-      appName: string;
-      workflow: WorkflowId;
-      /**
-       * It is a workflow of its App's current version, so its page opens; a
-       * workflow a later version removed or renamed has runs here but no
-       * page.
-       */
-      current: boolean;
-    }
-  | { type: "resource"; workflowId: WorkflowResourceId; name: string }
-) & {
+export interface RunActivityWorkflow {
+  workflowId: WorkflowResourceId;
+  name: string;
   started: number;
   completed: number;
   failed: number;
@@ -1151,7 +956,7 @@ export type RunActivityWorkflow = (
    * it handled without a person.
    */
   completedAlone: number;
-};
+}
 
 /**
  * The runs a person can list (`WorkflowsApi.runs`), started over the last
@@ -1182,7 +987,7 @@ export interface RunActivity {
     timedOut: number;
     open: number;
   };
-  /** Each workflow that ran, by App name, then workflow. */
+  /** Each workflow that ran, by name. */
   workflows: RunActivityWorkflow[];
 }
 
@@ -1238,18 +1043,18 @@ export interface TodayRun {
   /** It waits on someone other than the reader. */
   waitsOnOthers: boolean;
   /**
-   * The run it came from, by its lineage: an App run's root, an
-   * independent run's parent; only a run of today the reader sees, null
-   * otherwise.
+   * The run it came from, its parent; only a run of today the reader
+   * sees, null otherwise.
    */
   from: string | null;
 }
 
 /** A workflow that worked today, with its runs of the day, oldest first. */
-export type TodayLane = (
-  | { kind: "app"; app: AppId; appName: string; workflow: WorkflowId }
-  | { kind: "independent"; id: string; name: string }
-) & { runs: TodayRun[] };
+export interface TodayLane {
+  id: string;
+  name: string;
+  runs: TodayRun[];
+}
 
 /**
  * The runs of the company's day across the workflows the reader may see,
@@ -1273,39 +1078,14 @@ export interface WorkflowsToday {
 }
 
 /**
- * A signed-in person's workflows. Anyone with a role in the App
- * (`AppsApi`) starts and follows its runs, and its builders cancel them;
- * every call checks the session and the person's role again.
+ * A signed-in person's view of the independent workflows they have a role
+ * in, and their runs; every call checks the session and the person's role
+ * again.
  */
 export interface WorkflowsApi {
   /**
-   * Starts a run of an App's workflow on the App's current version, acting
-   * for the person who starts it.
-   */
-  start: (
-    app: string,
-    workflow: string,
-    input?: unknown
-  ) => Promise<WorkflowRun>;
-  /** A run as it is now. */
-  status: (run: string) => Promise<WorkflowRun>;
-  /**
-   * A page of a run's history, oldest first, for anyone `status` shows the
-   * run to: what its engine journaled, step by step and attempt by attempt.
-   */
-  history: (run: string, page?: RunHistoryPageQuery) => Promise<RunHistoryPage>;
-  /**
-   * An App's runs, newest first; a failed one with its report for those
-   * `status` shows it to.
-   */
-  list: (app: string) => Promise<WorkflowRun[]>;
-  /** Stops a run for good; a run that ended stays as it ended. */
-  cancel: (run: string) => Promise<WorkflowRun>;
-  /**
-   * Every workflow of the current version of every App the person can
-   * open, by App name and workflow, then every independent workflow they
-   * have a role in, by name: each with its latest run and its waiting and
-   * failed runs.
+   * Every independent workflow the person has a role in, by name: each with
+   * its latest run and its waiting and failed runs.
    */
   overview: () => Promise<WorkflowSummary[]>;
   /**
@@ -1315,10 +1095,8 @@ export interface WorkflowsApi {
    */
   byConnection: () => Promise<ConnectionWorkflows[]>;
   /**
-   * Runs of the Apps the person can open, and of the independent workflows
-   * they have a role in (every run for a builder, their own for a user),
-   * as `filter` narrows them (an App or its workflow: that App's runs
-   * alone):
+   * Runs of the independent workflows the person has a role in (every run
+   * for a builder, their own for a user), as `filter` narrows them:
    * waiting first (latest to wait first), then failed (latest ended
    * first), then the rest, newest first; at most {@link runsPageSize},
    * with `more` when more matched.
@@ -1332,33 +1110,13 @@ export interface WorkflowsApi {
   activity: (query?: RunActivityQuery) => Promise<RunActivity>;
   /**
    * The runs of the company's day across the workflows the person may
-   * see, App and independent alike, a lane per workflow that worked; runs
-   * they may not see only counted.
+   * see, a lane per workflow that worked; runs they may not see only
+   * counted.
    */
   today: () => Promise<WorkflowsToday>;
   /**
-   * Makes `owner`, a member of the organization who can open the App,
-   * the owner of an App's workflow; for admins and the App's builders,
-   * audited. Returns the workflow's summary as it is now.
-   */
-  setOwner: (
-    app: string,
-    workflow: string,
-    owner: string
-  ) => Promise<AppWorkflowSummary>;
-  /**
-   * Makes one of the organization's teams (by ID) the team that owns an
-   * App's workflow, or none with `null`; for admins and the App's
-   * builders, audited. Returns the workflow's summary as it is now.
-   */
-  setTeam: (
-    app: string,
-    workflow: string,
-    team: string | null
-  ) => Promise<AppWorkflowSummary>;
-  /**
-   * The organization's teams, by name, that a workflow's team may be set
-   * to (`setTeam`); for admins and builders, never Grasp staff.
+   * The organization's teams, by name, for choosing one (a collection's,
+   * a person's); for admins and builders, never Grasp staff.
    */
   teams: () => Promise<{ id: string; name: string }[]>;
 }

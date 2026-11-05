@@ -26,7 +26,6 @@ import type {
 import type { z } from "zod";
 
 import type { AppsRpc } from "./apps-rpc.ts";
-import type { ChatsRpc } from "./chats-rpc.ts";
 import type { ConnectionsRpc } from "./connections.ts";
 import type { DecisionsRpc } from "./decisions/rpc.ts";
 import type { DependenciesRpc } from "./dependencies/rpc.ts";
@@ -66,7 +65,6 @@ export interface WaitingSources {
   connections: ConnectionsRpc;
   decisions: DecisionsRpc;
   heldStarts: HeldStartsRpc;
-  chats: ChatsRpc;
   /** Independent workflows' lifecycles (`workflowResources.lifecycle`). */
   lifecycles: WorkflowLifecycleRpc;
   /** Independent workflows' bindings that wait on an admin (`workflowResources.pendingBindings`). */
@@ -87,7 +85,7 @@ interface PartRead {
   items: WaitingItem[];
   notifications?: Pick<
     WaitingFeed,
-    "moreNotifications" | "unreadNotifications" | "fixModel"
+    "moreNotifications" | "unreadNotifications"
   >;
 }
 
@@ -112,18 +110,6 @@ const everyOutcome = async (
       return all;
     }
     before = last.cursor;
-  }
-};
-
-/**
- * The models chats may ask with: only whether a fix can be asked hangs on
- * them, so failing to read them is no part of its own, just none.
- */
-const modelsOrNone = async (chats: ChatsRpc): Promise<string[]> => {
-  try {
-    return await chats.models();
-  } catch {
-    return [];
   }
 };
 
@@ -160,35 +146,22 @@ const requestItems = async (
   };
 };
 
-/** The latest page of the person's notifications: failed runs, questions they were asked, schedules of theirs that stopped, sources connect stopped hearing for their triggers, packages revoked as malware, and what Apps told them. */
+/** The latest page of the person's notifications: questions they were asked, schedules of theirs that stopped, sources connect stopped hearing for their triggers, packages revoked as malware, and what Apps told them. */
 const notificationItems = async (
-  { notifications, chats, connections }: WaitingSources,
+  { notifications, connections }: WaitingSources,
   { forMe }: Reader
 ): Promise<PartRead> => {
-  const [page, models] = await Promise.all([
-    notifications.list(),
-    modelsOrNone(chats),
-  ]);
+  const page = await notifications.list();
   // Named by their accounts as the person may see them: read only when a
   // source connect stopped hearing is among them.
   const named = page.notifications.some(({ type }) => type === "events_stopped")
     ? await connections.list()
     : [];
   const connectionsById = new Map(named.map((listed) => [listed.id, listed]));
-  const fixModel = models[0] ?? null;
   return {
     items: page.notifications.map((notification): WaitingItem => {
       const base = { at: notification.at, urgent: false, waitsOn: forMe };
       switch (notification.type) {
-        case "run_failed": {
-          return {
-            ...base,
-            kind: "failedRun",
-            id: `failedRun:${notification.id}`,
-            verdicts: fixModel === null ? [] : ["askToFix"],
-            notification,
-          };
-        }
         case "gap_asked": {
           return {
             ...base,
@@ -252,7 +225,6 @@ const notificationItems = async (
     notifications: {
       moreNotifications: page.more,
       unreadNotifications: page.unread,
-      fixModel,
     },
   };
 };
@@ -514,7 +486,6 @@ const feedOf = async (
     unread,
     moreNotifications: notifications?.moreNotifications ?? false,
     unreadNotifications: notifications?.unreadNotifications ?? 0,
-    fixModel: notifications?.fixModel ?? null,
   };
 };
 
@@ -591,12 +562,6 @@ export class WaitingRpc extends CoreRpcTarget implements WaitingApi {
           revision: verdict.revision,
         });
         return { kind: verdict.kind };
-      }
-      case "failedRun": {
-        return {
-          kind: verdict.kind,
-          fix: await sources.chats.fixRun(verdict.run, verdict.model),
-        };
       }
       default: {
         return verdict satisfies never;

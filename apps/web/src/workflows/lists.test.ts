@@ -1,14 +1,5 @@
-import {
-  appIdSchema,
-  runIdSchema,
-  workflowIdSchema,
-  workflowResourceIdSchema,
-} from "@grasp-os/shared/ids";
-import type {
-  AppWorkflowSummary,
-  ResourceWorkflowSummary,
-  WorkflowSummary,
-} from "@grasp-os/shared/workflows";
+import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -17,22 +8,17 @@ import {
   needsAttention,
   processesIn,
   showsUnder,
-  workflowName,
 } from "./lists.ts";
 
 /** A workflow that ran and needs nobody, changed by `change`. */
 const workflow = (
   name: string,
-  change: Partial<AppWorkflowSummary> = {}
-): AppWorkflowSummary => ({
-  type: "app",
-  app: appIdSchema.parse("invoices"),
-  appName: "Invoices",
-  workflow: workflowIdSchema.parse(name),
+  change: Partial<WorkflowSummary> = {}
+): WorkflowSummary => ({
+  workflowId: workflowResourceIdSchema.parse(`id-${name}`),
+  name,
   version: 1,
   owner: { userId: "owner", name: null },
-  changesOwner: false,
-  team: null,
   lastRun: {
     id: runIdSchema.parse(`run-${name}`),
     status: "completed",
@@ -49,29 +35,8 @@ const waiting = workflow("waiting", { waiting: 1 });
 const failed = workflow("failed", { failed: 2 });
 const never = workflow("never", { lastRun: null });
 
-/** An independent workflow that ran and needs nobody, changed by `change`. */
-const independent = (
-  name: string,
-  change: Partial<ResourceWorkflowSummary> = {}
-): ResourceWorkflowSummary => ({
-  type: "resource",
-  workflowId: workflowResourceIdSchema.parse(`id-${name}`),
-  name,
-  version: 1,
-  owner: { userId: "owner", name: null },
-  lastRun: {
-    id: runIdSchema.parse(`run-${name}`),
-    status: "completed",
-    createdAt: "2026-10-08T09:00:00.000Z",
-  },
-  waiting: 0,
-  failed: 0,
-  handled: 0,
-  ...change,
-});
-
 const names = (rows: readonly WorkflowSummary[]): string[] =>
-  rows.map((row) => workflowName(row));
+  rows.map(({ name }) => name);
 
 describe("the Workflows page's lists", () => {
   it("needs a person for a run waiting or a recent failure, and not otherwise", () => {
@@ -80,15 +45,15 @@ describe("the Workflows page's lists", () => {
     );
   });
 
-  it("has those that ran at work, the ones that need a person first, and the rest on the way, independent ones among them", () => {
+  it("has those that ran at work, the ones that need a person first, and the rest on the way", () => {
     const { atWork, onTheWay } = listsOf([
       healthy,
       never,
-      independent("alone"),
+      workflow("alone"),
       waiting,
       failed,
-      independent("alone-failed", { failed: 1 }),
-      independent("alone-new", { version: null, lastRun: null }),
+      workflow("alone-failed", { failed: 1 }),
+      workflow("alone-new", { version: null, lastRun: null }),
     ]);
     expect({
       atWork: names(atWork),

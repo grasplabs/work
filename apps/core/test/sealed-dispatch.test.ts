@@ -25,8 +25,6 @@ import {
   candidateRunFor,
   startCandidateRun,
 } from "../src/workflows/candidate-runs.ts";
-import { runModules } from "../src/workflows/code.ts";
-import type { StepError } from "../src/workflows/code.ts";
 import { fixtureDecisionLookMs } from "../src/workflows/fixture-decisions.ts";
 import { fixtureActivation } from "../src/workflows/fixture-runs.ts";
 import type { HostHooks, RunStep } from "../src/workflows/host.ts";
@@ -35,6 +33,8 @@ import {
   sealedActivationOf,
 } from "../src/workflows/resource-runs.ts";
 import type { HostedActivation } from "../src/workflows/resource-runs.ts";
+import { sealedMainModules } from "../src/workflows/sealed-isolate.ts";
+import type { StepError } from "../src/workflows/sealed-isolate.ts";
 import type { SealedRunMemory } from "../src/workflows/sealed-run.ts";
 import { allEvents } from "./audit-events.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -374,7 +374,10 @@ const ranOnRunHost = async (
       () => ({
         ...sealed.run.build.sdk,
         [generatedModule]: source,
-        ...runModules({ module: generatedModule, refusal: "No workflow." }),
+        ...sealedMainModules({
+          module: generatedModule,
+          refusal: "No workflow.",
+        }),
       })
     );
   } catch (error) {

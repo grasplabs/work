@@ -14,16 +14,11 @@ import type {
   ChatsApi,
   ChatSummary,
   ChatUpdate,
-  FixRunResult,
   PreviewBundle,
   PreviewRefresh,
   PreviewUpdate,
 } from "@grasp-os/shared/chat";
-import {
-  authErrors,
-  internalErrors,
-  isExpectedError,
-} from "@grasp-os/shared/errors";
+import { authErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -71,7 +66,6 @@ import { QuerySubscriptions } from "./query-subscriptions.ts";
 import type { LiveReads } from "./query-subscriptions.ts";
 import { isRestricted } from "./restricted.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
-import { fixQuestion, runToFix } from "./run-fixes.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import type { LeasedBuild } from "./screen-delivery.ts";
 import {
@@ -105,9 +99,8 @@ import { questionSchema } from "./workspace.ts";
 // object checks every call against the chat's stored person too: nobody
 // else lists, renames, deletes, asks in, stops or follows a chat, and a
 // chat of someone else's is refused as if there were none. Making,
-// renaming and deleting one is audited, and so is starting one to fix a
-// failed run (`fixRun`), and deciding a connection its agent asked for
-// (chat-connections.ts).
+// renaming and deleting one is audited, and so is deciding a connection
+// its agent asked for (chat-connections.ts).
 
 /**
  * The agent every chat's agent is: the organization workspace's, so
@@ -132,18 +125,6 @@ const chatIdOf = (chatId: unknown): ChatId => {
     throw agentErrors.create("agent.chat_not_found");
   }
   return parsed.data;
-};
-
-/**
- * Why a question wasn't taken, as its person reads it: an unplanned error
- * is logged, and shown as one.
- */
-const refusedBecause = (chatId: ChatId, error: unknown): string => {
-  if (isExpectedError(error)) {
-    return error.message;
-  }
-  log.error("chat.fix_not_asked", { chatId, ...errorFields(error) });
-  return internalErrors.create("internal.unexpected").message;
 };
 
 /** How a push to a chat page is refused. */
@@ -439,7 +420,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       person.userId,
       chatAgentId,
       actorOf(person),
-      undefined,
       "web",
       undefined,
       id
@@ -529,51 +509,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         throw agentErrors.create("agent.invalid_question");
       }
       await this.#chatsOf(userId).send(id, userId, parsed.data);
-    });
-  }
-
-  /**
-   * Starts a chat to fix a failed run (run-fixes.ts), and asks its agent
-   * with `model`. A model the deployment doesn't allow is refused before any chat is
-   * made. A question refused past that (the client's model rules, say)
-   * leaves the chat, with its report, in the person's list, to ask again:
-   * it resolves with the chat and why, so the page opens that chat rather
-   * than make another.
-   */
-  async fixRun(run: string, model: string): Promise<FixRunResult> {
-    return await withPerson(this.#check, async (person) => {
-      const { userId } = person;
-      const fix = await runToFix(this.#env, person, run);
-      const chats = this.#chatsOf(userId);
-      const chat = await chats.createFixChat(
-        `Fix ${fix.report.workflow}`,
-        userId,
-        chatAgentId,
-        actorOf(person),
-        fix,
-        model
-      );
-      const summary = {
-        id: chat.id,
-        title: chat.title,
-        createdAt: chat.createdAt.toISOString(),
-        lastAt: chat.lastAt.toISOString(),
-        appId: chat.appId,
-        via: chat.via,
-      };
-      try {
-        await chats.send(chat.id, userId, {
-          text: fixQuestion(fix.report),
-          model,
-        });
-      } catch (error) {
-        return {
-          chat: { ...summary, running: false },
-          sent: false,
-          reason: refusedBecause(chat.id, error),
-        };
-      }
-      return { chat: { ...summary, running: true }, sent: true };
     });
   }
 

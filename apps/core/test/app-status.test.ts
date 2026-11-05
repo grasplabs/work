@@ -31,12 +31,7 @@ import {
 import type { Person as Signed } from "./json-workflow-apps.ts";
 import { runMinuteTasks } from "./maintenance.ts";
 import { notesFiles } from "./notes-client-app.ts";
-import {
-  endLiveRuns,
-  runObject,
-  sleeping,
-  whileEngineRefuses,
-} from "./runs.ts";
+import { runObject, sleeping, whileEngineRefuses } from "./runs.ts";
 import { person as acting } from "./sealed-apps.ts";
 import { firstVersion, outcome, signedInApi } from "./sign-in.ts";
 
@@ -712,6 +707,3 @@ describe("an App's status", () => {
 
 // Kept until a JSON run's start repair re-checks its person: an App's own
 // workflow's runs, as before.
-describe("an App's status, for its own workflows' runs", () => {
-  afterEach(endLiveRuns);
-});

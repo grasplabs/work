@@ -1,30 +1,24 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import type { AppStatus } from "@grasp-os/shared/apps";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
-import { actorOf, createAuditEvent, runActorOf } from "@grasp-os/shared/audit";
+import { createAuditEvent, runActorOf } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import {
   appIdSchema,
   runIdSchema,
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
-import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
+import type { AppId, RunId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { roleSchema } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import type {
-  RunFailure,
-  RunStatus,
-  WorkflowRun,
-} from "@grasp-os/shared/workflows";
+import type { RunFailure, WorkflowRun } from "@grasp-os/shared/workflows";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import {
   and,
   asc,
-  desc,
   eq,
   gte,
   inArray,
@@ -37,18 +31,14 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { SQLiteUpdateSetSource } from "drizzle-orm/sqlite-core";
-import { z } from "zod";
 
 import { requireStillOpen } from "../app-access.ts";
-import type { Person } from "../app-access.ts";
-import { appFor, findVersion, usableApp } from "../apps.ts";
 import {
   auditedBatch,
   outboxed,
   outboxedEventWhere,
   outboxedIfChanged,
   outboxedWhere,
-  storedEvent,
 } from "../audit-outbox.ts";
 import { currentMembership } from "../auth/auth.ts";
 import type { Member } from "../auth/identity.ts";
@@ -59,15 +49,9 @@ import {
   workflowRunControls,
   workflowRuns,
 } from "../db/core/schema.ts";
-import { failureNoticed } from "../notifications.ts";
-import { queuedRuns } from "./admission.ts";
 import type { RunWait } from "./admission.ts";
 import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
-import { ownerOf } from "./owners.ts";
-import { lineageCreated } from "./quotas.ts";
-import { detailsRemoved, removedText } from "./retention.ts";
-import { tellScreens } from "./run-changes.ts";
 
 // Runs of Apps' workflows, as core keeps them: one row each (the App
 // version it is pinned to, who started it, where the engine last said it
@@ -112,9 +96,6 @@ export const shownStatus = (
 ): Exclude<RunRow["status"], "starting"> =>
   status === "starting" ? "running" : status;
 
-/** Most runs one `list` call returns. */
-export const runsPerPage = 100;
-
 /**
  * The most input a run starts with, in bytes of its UTF-8 JSON: the public
  * operation input limit (spec 18.1), whoever starts the run.
@@ -124,27 +105,6 @@ export const maxInputBytes = platformLimits.operationInputBytes;
 /** The bytes of `value` as UTF-8 JSON. */
 export const jsonBytes = (value: unknown): number =>
   new TextEncoder().encode(JSON.stringify(value)).byteLength;
-
-const invalid = () => workflowErrors.create("workflow.invalid");
-
-const parse = <Schema extends z.ZodType>(
-  schema: Schema,
-  input: unknown
-): z.output<Schema> => {
-  const parsed = schema.safeParse(input);
-  if (!parsed.success) {
-    throw invalid();
-  }
-  return parsed.data;
-};
-
-/** A workflow's ID as its file names it (`workflows/<id>.ts`). */
-export const workflowInputSchema = z
-  .string()
-  .regex(/^[A-Za-z][\w-]{0,63}$/u)
-  .pipe(workflowIdSchema);
-
-const iso = (date: Date | null): string | null => date?.toISOString() ?? null;
 
 /**
  * Whether `by` sees what a run read, returned and failed with: an admin,
@@ -157,39 +117,6 @@ export const seesDetails = (
   row: RunRow,
   ownerId: string
 ): boolean => by.role === "admin" || by.userId === (row.startedBy ?? ownerId);
-
-/** What a run's row holds that its callers see. */
-type RunFields = Pick<
-  RunRow,
-  | "id"
-  | "appId"
-  | "workflowId"
-  | "version"
-  | "startedBy"
-  | "status"
-  | "createdAt"
-  | "endedAt"
-  | "detailsRemovedAt"
->;
-
-/**
- * A run as its row has it; `status` names what the row last saw. It says
- * so once its details are removed (`detailsRemoved`, retention.ts).
- */
-export const toRun = (env: Env, row: RunFields): WorkflowRun => ({
-  id: runIdSchema.parse(row.id),
-  app: appIdSchema.parse(row.appId),
-  workflow: workflowIdSchema.parse(row.workflowId),
-  version: row.version,
-  startedBy:
-    row.startedBy === null
-      ? { type: "trigger" }
-      : { type: "person", userId: row.startedBy },
-  status: shownStatus(row.status),
-  createdAt: row.createdAt.toISOString(),
-  endedAt: iso(row.endedAt),
-  ...(detailsRemoved(row) ? { detailsRemoved: true } : {}),
-});
 
 /** What runs need of their App: its current version and its owner. */
 export const appRecord = async (
@@ -257,64 +184,27 @@ export const runActor = (
   });
 
 /**
- * The statements that record a run's failure, after the one that marks it
+ * The statement that records a run's failure, after the one that marks it
  * failed in the same batch: its `workflow.run.failed` event, stored only
  * if that statement changed the row, so a run that ended otherwise records
- * nothing; and the notice to the person who answers for it
- * (notifications.ts), only if the event was stored. That person is who
- * started it, or for a triggered run the workflow's owner (owners.ts),
- * read now: its App's owner unless someone set another.
+ * nothing.
  */
-const failureRecorded = async (
-  env: Env,
+const failureRecorded = (
   db: DrizzleD1Database,
   row: Pick<RunRow, "id" | "appId" | "workflowId" | "version" | "startedBy">,
   detail: Record<string, string | number | boolean | null>,
   also: SQL = sql`1`
-) => {
-  const failed = createAuditEvent(
-    runEntry(runActor(row), "workflow.run.failed", row, detail),
-    "core"
-  );
-  const stored = outboxedEventWhere(db, failed, sql`changes() > 0 AND ${also}`);
-  const personId =
-    row.startedBy ??
-    (await ownerOf(env, appIdSchema.parse(row.appId), row.workflowId));
-  return [
-    stored,
-    ...failureNoticed(db, {
-      run: row,
-      personId,
-      entry: runEntry(runActor(row), "workflow.run.notified", row, {
-        person: personId,
-      }),
-      recorded: storedEvent(failed.id),
-    }),
+) =>
+  [
+    outboxedEventWhere(
+      db,
+      createAuditEvent(
+        runEntry(runActor(row), "workflow.run.failed", row, detail),
+        "core"
+      ),
+      sql`changes() > 0 AND ${also}`
+    ),
   ] as const;
-};
-
-/** What starts a run: which workflow, with what input, for whom. */
-export interface RunRequest {
-  app: AppId;
-  workflow: WorkflowId;
-  input: Json | undefined;
-  /** The person who started it, whom it acts for. */
-  startedBy: string;
-  /** Who started it, for the audit log. */
-  actor: AuditActor;
-  /**
-   * Where the person started it, when not directly: from one of the App's
-   * screens (`screen`). The audit log says so (`via`).
-   */
-  via?: "screen";
-  /**
-   * The person who starts it, as their session has them, for a run a
-   * person starts: checked again once its row is written
-   * (`requireStillStartable`), so someone who may no longer use the App
-   * (its status changed, their role went) starts nothing.
-   */
-  starter?: Person;
-}
 
 /** What core sends the engine to start `row`'s run (engine.ts). */
 const sendStart = async (
@@ -368,7 +258,7 @@ const unstarted = {
 
 /**
  * Marks a run whose start the engine never confirmed as failed, for
- * `reason`, audited and notified as a failed run (`failureRecorded`),
+ * `reason`, audited as a failed run (`failureRecorded`),
  * once: core's own decision that the run didn't start, and its tombstone.
  * Only a starting run: one the engine has told of meanwhile stays as the
  * engine says. Should the engine have it after all (the answer to its
@@ -415,13 +305,12 @@ const failStart = async (
         and(eq(workflowRuns.id, row.id), eq(workflowRuns.status, "starting"))
       )
       .returning({ id: workflowRuns.id }),
-    ...(await failureRecorded(
-      env,
+    ...failureRecorded(
       db,
       row,
       { reason, error: "workflow.run_failed" },
       sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.status} = 'failed')`
-    )),
+    ),
     // A pause or resume admitted while it was starting has nothing left
     // to apply to: superseded, so the repair doesn't send it for ever. A
     // cancel admitted meanwhile is what ended it.
@@ -463,7 +352,6 @@ const failStart = async (
       ...errorFields(error),
     });
   }
-  await tellScreens(env, row);
   return true;
 };
 
@@ -533,189 +421,6 @@ const engineHas = async (env: Env, run: string): Promise<boolean | null> => {
 };
 
 /**
- * What a start whose call to the engine failed with `error` leaves
- * (`startRun`): returns when the engine has the run after all, and throws
- * `error` otherwise.
- */
-const startFailed = async (
-  env: Env,
-  row: Pick<RunRow, "id" | "appId" | "workflowId" | "version" | "startedBy">,
-  error: unknown
-): Promise<void> => {
-  log.error("workflow.start_failed", {
-    runId: row.id,
-    ...errorFields(error),
-  });
-  // An error is no proof the engine didn't take the start: its answer
-  // may have been lost. Releasing the trigger key on such a start could
-  // start a second run beside it, so the engine is asked first.
-  const has = await engineHas(env, row.id);
-  if (has === null) {
-    // It can't say: the start stays pending, its key held, and the
-    // repair sends it again under the same key, which the engine takes
-    // once (`repairStarts`). A trigger delivered again finds this run.
-    throw error;
-  }
-  if (!has) {
-    // Not taken. Its report says only that it didn't start: the
-    // platform's error stays in the log. It gives up its trigger key,
-    // so the delivery tried again (a schedule stays due, mail and
-    // events are retried) starts the run as a new one. Should the start
-    // still reach the engine after all, the run's ended row is its
-    // tombstone: the dispatcher runs none of it.
-    await failStart(env, row, "start_failed");
-    throw error;
-  }
-};
-
-/**
- * The version of `app` a run would start on: its current one. Refused for
- * an archived App (`app.archived`), and while no version is current.
- */
-const versionToStart = async (env: Env, app: AppId): Promise<number> => {
-  const { currentVersion, status } = await appRecord(env, app);
-  if (status === "archived") {
-    throw appErrors.create("app.archived");
-  }
-  if (currentVersion === null) {
-    throw appErrors.create("app.not_running");
-  }
-  return currentVersion;
-};
-
-/**
- * Refuses `row`'s start, its row written, if its App's status refuses it
- * now, as `versionToStart` would: an archive that committed since that
- * read is caught here, and ends the run as one that never started; an
- * archive committing after this read finds the row and cancels it
- * (app-status.ts).
- */
-const requireStillStartable = async (
-  env: Env,
-  row: Pick<RunRow, "id" | "appId" | "workflowId" | "version" | "startedBy">,
-  { starter }: Pick<RunRequest, "starter">
-): Promise<void> => {
-  const app = appIdSchema.parse(row.appId);
-  if (starter !== undefined) {
-    // Their role in the App as it stands now, with its status: someone
-    // with only the user role has none once it is no longer published.
-    try {
-      await requireStillOpen(env, starter, app);
-    } catch (error) {
-      await failStart(env, row, "starter_refused");
-      throw error;
-    }
-  }
-  const { status } = await appRecord(env, app);
-  if (status === "archived") {
-    await failStart(env, row, "app_archived");
-    throw appErrors.create("app.archived");
-  }
-};
-
-/**
- * Starts a run on the App's current version, which it keeps until it ends.
- * The row, the start it is to send and its audit event are written before
- * the start is sent, so the dispatcher always finds the row, and a start
- * core stops in the middle of is sent again (`repairStarts`). The row says
- * `starting` until the engine's first notification; a start that failed,
- * and that the engine then says it has no record of, is marked failed,
- * audited as a failed run (one it can't say of stays pending, for the
- * repair). The run is pinned to the version checked. Input over
- * {@link maxInputBytes} is refused (`workflow.invalid`).
- */
-export const startRun = async (
-  env: Env,
-  { app, workflow, input, startedBy, actor, via, starter }: RunRequest
-): Promise<WorkflowRun> => {
-  if (input !== undefined && jsonBytes(input) > maxInputBytes) {
-    throw invalid();
-  }
-  const db = drizzle(env.DB);
-  const version = await versionToStart(env, app);
-  // As the version's row keeps its workflows: none since Apps hold no
-  // workflows of their own (app-no-workflows.ts).
-  const { workflows } = await findVersion(env, app, version);
-  if (!workflows.includes(workflow)) {
-    throw workflowErrors.create("workflow.not_found", { workflow, version });
-  }
-  const row = {
-    id: crypto.randomUUID(),
-    appId: app,
-    workflowId: workflow,
-    version,
-    startedBy,
-    status: "starting",
-    createdAt: new Date(),
-    endedAt: null,
-    failure: null,
-    triggerKey: null,
-    detailsRemovedAt: null,
-    rootRunId: null,
-    depth: 0,
-    pendingStart: input === undefined ? {} : { input },
-  } satisfies RunFields & typeof workflowRuns.$inferInsert;
-  await auditedBatch(env, db, [
-    db.insert(workflowRuns).values(row),
-    outboxedIfChanged(
-      db,
-      runEntry(actor, "workflow.run.started", row, {
-        startedBy: "person",
-        ...(via === undefined ? {} : { via }),
-      })
-    ),
-    lineageCreated(db, row.id),
-  ]);
-  await requireStillStartable(env, row, { starter });
-  try {
-    await sendStart(env, row, input);
-  } catch (error) {
-    await startFailed(env, row, error);
-  }
-  await confirmStart(env, row.id);
-  // Only now: a screen told of the run reads it from the engine too.
-  await tellScreens(env, row);
-  return toRun(env, row);
-};
-
-/**
- * Starts a run of an App's workflow for the person `by`; `via` says where,
- * when not directly (`RunRequest`).
- */
-export const startWorkflow = async (
-  env: Env,
-  by: Identity,
-  app: unknown,
-  workflow: unknown,
-  input?: unknown,
-  via?: "screen"
-): Promise<WorkflowRun> => {
-  await usableApp(env, by, app);
-  return await startRun(env, {
-    starter: by,
-    app: parse(appIdSchema, app),
-    workflow: parse(workflowInputSchema, workflow),
-    input: parse(z.json().optional(), input),
-    startedBy: by.userId,
-    actor: actorOf(by),
-    ...(via === undefined ? {} : { via }),
-  });
-};
-
-/** Where the engine says a run is, as a run's status. */
-const liveStatuses: Record<InstanceStatus["status"], RunStatus> = {
-  queued: "running",
-  running: "running",
-  waitingForPause: "running",
-  rollingBack: "running",
-  waiting: "waiting",
-  paused: "paused",
-  errored: "failed",
-  terminated: "cancelled",
-  complete: "completed",
-};
-
-/**
  * A run as it reads with its place in the queue (admission.ts,
  * `queuedRuns`): `queued`, with the share it waits for and when it asks
  * again, or since when it waits for its AI provider, while it would otherwise read as running, or as waiting the way
@@ -731,131 +436,6 @@ export const queuedRun = <
   wait !== undefined && (run.status === "running" || run.status === "waiting")
     ? { ...run, status: "queued", ...wait }
     : run;
-
-const foundRun = async (env: Env, run: unknown): Promise<RunRow> => {
-  const row = await findRun(env, parse(runIdSchema, run));
-  if (!row) {
-    throw workflowErrors.create("workflow.run_not_found");
-  }
-  return row;
-};
-
-/**
- * A run, with its failure report when `by` sees its details. Once its
- * details are removed (retention.ts) the report's message says so, and
- * how long the deployment keeps them now, and its step is named without
- * its key: as the sweep leaves the row, whether it has reached it or not.
- */
-export const runFor = (
-  env: Env,
-  by: Member,
-  row: RunRow,
-  ownerId: string
-): WorkflowRun => {
-  const run = toRun(env, row);
-  if (row.failure === null || !seesDetails(by, row, ownerId)) {
-    return run;
-  }
-  if (!run.detailsRemoved) {
-    return { ...run, failure: row.failure };
-  }
-  const { step, error } = row.failure;
-  return {
-    ...run,
-    failure: {
-      ...row.failure,
-      step: step === null ? null : (step.split(":", 1)[0] ?? step),
-      error: { ...error, message: removedText },
-    },
-  };
-};
-
-/**
- * Where the engine has a run; nothing for one still starting, or that
- * has ended without an instance to ask (its start failed, or the engine
- * removed its record, its retention over), whose row says all there is.
- */
-const liveOf = async (
-  env: Env,
-  row: RunRow
-): Promise<InstanceStatus | undefined> => {
-  const live = await runEngine(env).status(row.id);
-  if (
-    live === undefined &&
-    (row.status === "running" || row.status === "paused")
-  ) {
-    throw new Error(`The engine has no instance of run ${row.id}`);
-  }
-  return live;
-};
-
-/**
- * A run as it is now: where the engine has it while core last saw it
- * running. What it returned or why it failed can hold what the run read
- * for its person, so only they and admins see it (`seesDetails`).
- */
-export const runStatus = async (
-  env: Env,
-  by: Member,
-  run: unknown
-): Promise<WorkflowRun> => {
-  const row = await foundRun(env, run);
-  const { owner: ownerId } = await appFor(env, by, row.appId, "user");
-  const live = await liveOf(env, row);
-  const status =
-    (row.status === "starting" || row.status === "running") && live
-      ? liveStatuses[live.status]
-      : shownStatus(row.status);
-  // Only a run that goes on may wait for a share: no read for another.
-  const queues = await queuedRuns(
-    drizzle(env.DB),
-    status === "running" || status === "waiting" ? [row.id] : [],
-    Date.now()
-  );
-  const found = queuedRun(
-    { ...runFor(env, by, row, ownerId), status },
-    queues.get(row.id)
-  );
-  // Once its details are removed, nothing the engine may still have of it
-  // is shown: the list, the overview and screens show none either.
-  if (found.detailsRemoved || !(live && seesDetails(by, row, ownerId))) {
-    return found;
-  }
-  if (live.status === "complete") {
-    const output = z.json().safeParse(live.output);
-    return output.success ? { ...found, output: output.data } : found;
-  }
-  if (live.status === "errored") {
-    const { name, message } = live.error;
-    return { ...found, error: { name, message } };
-  }
-  return found;
-};
-
-/** An App's runs, newest first; `app.not_found` for an App there isn't. */
-export const listRuns = async (
-  env: Env,
-  by: Identity,
-  app: unknown
-): Promise<WorkflowRun[]> => {
-  const appId = parse(appIdSchema, app);
-  const { owner: ownerId } = await appFor(env, by, appId, "user");
-  const db = drizzle(env.DB);
-  const rows = await db
-    .select()
-    .from(workflowRuns)
-    .where(eq(workflowRuns.appId, appId))
-    .orderBy(desc(workflowRuns.createdAt), desc(workflowRuns.id))
-    .limit(runsPerPage);
-  const queues = await queuedRuns(
-    db,
-    rows.flatMap(({ id, status }) => (goesOn(status) ? [id] : [])),
-    Date.now()
-  );
-  return rows.map((row) =>
-    queuedRun(runFor(env, by, row, ownerId), queues.get(row.id))
-  );
-};
 
 /** What a run that stopped reports: where it stopped, and why. */
 export type Stopped = Pick<RunFailure, "step" | "input" | "error">;
@@ -1040,26 +620,6 @@ const engineFields = (engine: EngineStatus) => ({
 });
 
 /**
- * What follows a projection that changed `row`: its screens are told of a
- * new status or a compensation begun (`compensating`), and the Brain gets
- * an ended run's outcome soon.
- */
-const afterProjection = async (
-  env: Env,
-  row: RunRow,
-  status: RunRow["status"],
-  ended: boolean,
-  compensating = false
-): Promise<void> => {
-  if (ended) {
-    deliverRunCapturesSoon(env);
-  }
-  if (shownStatus(row.status) !== status || compensating) {
-    await tellScreens(env, row);
-  }
-};
-
-/**
  * What run `row` ends with, or is, as the engine says it is (`engine`), at
  * `at`: its status, its failure report (none unless it failed), and what
  * the projection writes of them. A cancelled run the engine ended
@@ -1166,13 +726,7 @@ export const projectStatus = async (
     // Audited and noticed only when the write made it failed.
     ...(report === null
       ? []
-      : await failureRecorded(
-          env,
-          db,
-          row,
-          { error: report.error.code },
-          endedFailed
-        )),
+      : failureRecorded(db, row, { error: report.error.code }, endedFailed)),
     // Audited by the system only when no cancel was asked for, as the
     // batch finds the row: a cancel written since `row` was read audited
     // it already, and its run is audited as cancelled once.
@@ -1190,11 +744,9 @@ export const projectStatus = async (
     // ends without it (brain-capture.ts).
     ...(ended ? [runCaptured(db, row.id, at)] : []),
   ]);
-  if (changed) {
-    // Its compensation's start changes its summary too.
-    const compensating =
-      row.compensation === null && engine.compensation !== undefined;
-    await afterProjection(env, row, changed.status, ended, compensating);
+  if (changed && ended) {
+    // The Brain gets an ended run's outcome soon.
+    deliverRunCapturesSoon(env);
   }
 };
 

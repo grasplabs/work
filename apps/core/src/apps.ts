@@ -852,8 +852,6 @@ export const commitFiles = async (
     message: text,
     createdAt: new Date(),
     approved: null,
-    // An App holds no workflows (app-no-workflows.ts).
-    workflows: [],
     screens: screensIn(files),
     proposedBy: null,
   };
@@ -1041,8 +1039,6 @@ export const proposeDraft = async (
     message: text,
     createdAt: new Date(),
     approved: null,
-    // An App holds no workflows (app-no-workflows.ts).
-    workflows: [],
     screens: screensIn(files),
     proposedBy: by.via ?? null,
   };
@@ -1594,9 +1590,8 @@ export const makeCurrent = async (
     owing = bound.map(({ storeId }) => storeId);
   }
   // Only over the current version read above, so the event's `previous`
-  // is the version this replaced, and only while what its triggers were
-  // worked out from still holds (trigger-registry.ts). The event is stored
-  // only if this batch made it current, and what follows it only then.
+  // is the version this replaced. The event is stored only if this batch
+  // made it current, and what follows it only then.
   const batch = async () =>
     await retriedBatch(
       async () =>

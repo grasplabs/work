@@ -9,7 +9,6 @@ import type {
   AbandonedBackfill,
   AppStoreBackfill,
 } from "@grasp-os/shared/stores";
-import { workflowErrors } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import type { ReactElement } from "react";
@@ -576,27 +575,6 @@ describe("why a version wasn't made current", () => {
         text: "This version changes the App's data, and the change can't be applied: filling in its new fields stopped making progress.",
         link: "No record is to blame, so an admin can only abandon the change, in the App's settings.",
       },
-    });
-  });
-
-  it("names each AI step that goes through an ai permission the version doesn't declare, at its file and line", () => {
-    const message =
-      'AI step "extract" of workflow "reader" goes through "missing", which this version declares no permission as.';
-    expect(
-      makeCurrentFailure(
-        workflowErrors.create("workflow.model_undeclared", {
-          version: 2,
-          diagnostics: [
-            { file: "workflows/reader.ts", line: 4, message },
-            { file: "workflows/reader.ts", line: null, message },
-          ],
-        })
-      )
-    ).toStrictEqual({
-      text: "A workflow's AI step goes through an `ai` permission this version doesn't declare, so it can't be made current.",
-      link: undefined,
-      // Core's own words, by step; one without a line isn't one core sends.
-      issues: [`workflows/reader.ts:4: ${message}`],
     });
   });
 

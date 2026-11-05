@@ -1,13 +1,9 @@
 import type {
-  AppWorkflowSummary,
   ConnectionWorkflows,
   RunActivity,
   RunActivityQuery,
-  RunHistoryPage,
-  RunHistoryPageQuery,
   RunsPage,
   RunFilter,
-  WorkflowRun,
   WorkflowsApi,
   WorkflowSummary,
   WorkflowsToday,
@@ -18,15 +14,7 @@ import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { runActivity } from "./activity.ts";
 import { connectionWorkflows } from "./connection-workflows.ts";
-import { cancelRun } from "./controls.ts";
-import { runHistory } from "./history.ts";
-import {
-  listAllRuns,
-  setOwner,
-  setTeam,
-  workflowOverview,
-} from "./overview.ts";
-import { listRuns, runStatus, startWorkflow } from "./runs.ts";
+import { listAllRuns, workflowOverview } from "./overview.ts";
 import { teamChoices } from "./teams.ts";
 import { workflowsToday } from "./today.ts";
 
@@ -44,48 +32,6 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     super();
     this.#env = env;
     this.#check = check;
-  }
-
-  async start(
-    app: string,
-    workflow: string,
-    input?: unknown
-  ): Promise<WorkflowRun> {
-    return await withPerson(
-      this.#check,
-      async (by) => await startWorkflow(this.#env, by, app, workflow, input)
-    );
-  }
-
-  async status(run: string): Promise<WorkflowRun> {
-    return await withPerson(
-      this.#check,
-      async (by) => await runStatus(this.#env, by, run)
-    );
-  }
-
-  async history(
-    run: string,
-    page?: RunHistoryPageQuery
-  ): Promise<RunHistoryPage> {
-    return await withPerson(
-      this.#check,
-      async (by) => await runHistory(this.#env, by, run, page)
-    );
-  }
-
-  async list(app: string): Promise<WorkflowRun[]> {
-    return await withPerson(
-      this.#check,
-      async (by) => await listRuns(this.#env, by, app)
-    );
-  }
-
-  async cancel(run: string): Promise<WorkflowRun> {
-    return await withPerson(
-      this.#check,
-      async (by) => await cancelRun(this.#env, by, run)
-    );
   }
 
   async overview(): Promise<WorkflowSummary[]> {
@@ -120,28 +66,6 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     return await withPerson(
       this.#check,
       async (by) => await workflowsToday(this.#env, by)
-    );
-  }
-
-  async setOwner(
-    app: string,
-    workflow: string,
-    owner: string
-  ): Promise<AppWorkflowSummary> {
-    return await withPerson(
-      this.#check,
-      async (by) => await setOwner(this.#env, by, app, workflow, owner)
-    );
-  }
-
-  async setTeam(
-    app: string,
-    workflow: string,
-    team: string | null
-  ): Promise<AppWorkflowSummary> {
-    return await withPerson(
-      this.#check,
-      async (by) => await setTeam(this.#env, by, app, workflow, team)
     );
   }
 

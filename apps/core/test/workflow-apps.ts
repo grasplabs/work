@@ -9,11 +9,8 @@ import { expect, vi } from "vite-plus/test";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { findApp } from "../src/apps.ts";
-import { approveResourceBinding } from "../src/resource-bindings.ts";
-import { release, requestGranted } from "./apps.ts";
+import type { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import type { Idp } from "./idp.ts";
-import { person } from "./sealed-apps.ts";
 
 /** Someone signed in, with their API. */
 type Builder = Parameters<typeof release>[0];
@@ -175,14 +172,6 @@ export default app({
 });
 
 /**
- * The sample App (`sampleApp`), declaring the `ai` permission with
- * `maxOutputTokens` as its bound.
- */
-export const modelRegistration = (
-  maxOutputTokens: number
-): Record<string, string> => sampleApp({ ai: maxOutputTokens });
-
-/**
  * Workflow code calling the sample App's function `path`, of `kind`, with
  * the input `input` (code), as a step calls it: its value, read as `type`,
  * or the function's refusal thrown, with its code. What a binding answers
@@ -206,10 +195,6 @@ export const hitCall = (name: string): string =>
     `{ name: ${name}, execution: crypto.randomUUID() }`,
     "number"
   );
-
-/** Workflow code reading the counter `name` (code). */
-export const hitsCall = (name: string): string =>
-  appCall("counter.hits", "query", `{ name: ${name} }`, "number");
 
 /**
  * What `by` gets calling the sample App's function `path` of `app`'s
@@ -266,144 +251,6 @@ export const openGate = async (
 };
 
 /**
- * An admin's binding of the sample App's resource `alias` to `target`, for
- * the version current now.
- */
-const bindSample = async (
-  app: string,
-  alias: string,
-  target: { kind: "connector"; permissionId: string }
-) => {
-  const { currentVersion } = await findApp(env, appIdSchema.parse(app));
-  return await approveResourceBinding(env, await person("admin"), {
-    app,
-    alias,
-    target,
-    reviewed: { version: currentVersion ?? 0 },
-  });
-};
-
-/**
- * Gives the sample App's mail connection `send` the connection
- * `connectionId` (allowing `mailForApps`): a permission on its tool
- * (`MAIL_SEND`) `requester` asks for and an admin grants, and the admin's
- * binding to it.
- */
-export const bindMail = async (
-  idp: Idp,
-  requester: Builder,
-  app: string,
-  connectionId: string
-) => {
-  const permissionId = await requestGranted(idp, requester, {
-    subject: { type: "app", appId: app },
-    object: { type: "connection", connectionId },
-    actions: ["MAIL_SEND"],
-    binding: "SEND",
-  });
-  return await bindSample(app, "send", { kind: "connector", permissionId });
-};
-
-/**
- * An admin's binding of App `app`'s `ai` permission to `model`, for the
- * version current now: the model must be one the deployment allows as it
- * is approved.
- */
-export const bindModel = async (app: string, model: string) => {
-  const { currentVersion } = await findApp(env, appIdSchema.parse(app));
-  return await approveResourceBinding(env, await person("admin"), {
-    app,
-    alias: "ai",
-    target: { kind: "model", model },
-    reviewed: { version: currentVersion ?? 0 },
-  });
-};
-
-/**
- * A workflow of the given steps' code, run as `id`, with a test that
- * mocks every step it names, so any workflow passes activation.
- */
-export const workflowFiles = (
-  id: string,
-  body: string,
-  mocks: Record<string, unknown> = {}
-): Record<string, string> => ({
-  [`workflows/${id}.ts`]: `import { type Json, type Person, workflow, z } from "@grasp-os/sdk/workflow";
-
-export default workflow("${id}", { params: {}, input: z.unknown() }, async (step, { env, input }) => {
-${body}
-});
-`,
-  [`workflows/${id}.workflow-tests.ts`]: `import { workflowTests } from "@grasp-os/sdk/testing";
-
-import definition from "./${id}.ts";
-
-export default workflowTests(definition, [
-  { name: "runs", mocks: ${JSON.stringify(mocks)}, expect: {} },
-]);
-`,
-});
-
-/**
- * A workflow, `priced`, whose one step evaluates jq `source` on the run's
- * input with the workflow SDK's `evaluate`, as its result. Its test runs
- * the step on no input, evaluating it there too, unless `mocks` mock it.
- */
-export const evaluating = (
-  source: string,
-  mocks: Record<string, unknown> = {}
-): Record<string, string> => {
-  const files = workflowFiles(
-    "priced",
-    `  const order = z.json().parse(input ?? null);
-  return await step.do("price", { description: "Price the order" }, async () =>
-    await evaluate(
-      { source: ${JSON.stringify(source)}, stage: "taskDefinition", pointer: "/do/0/price/set", scope: ["price"] },
-      { input: order, variables: { context: {}, input: order, task: { name: "price" }, workflow: { input: order }, params: {} } },
-      { budget: expressionBudget() }
-    ));`,
-    mocks
-  );
-  return Object.fromEntries(
-    Object.entries(files).map(([path, text]) => [
-      path,
-      text.replace(
-        "import { type Json,",
-        "import { evaluate, expressionBudget, type Json,"
-      ),
-    ])
-  );
-};
-
-/**
- * A new App of `builder`'s: the sample App (`sampleApp`), and `files`,
- * current.
- */
-export const appWith = async (
-  builder: Builder,
-  files: Record<string, string>
-): Promise<string> => {
-  const { id } = await builder.api.apps.create({ name: "Invoices" });
-  await release(builder, id, { ...sampleApp(), ...files });
-  return id;
-};
-
-/**
- * A new App of `builder`'s with only `files`, its workflows, and no App
- * code to seal: for the tests of what making a version current does with
- * its workflows alone, whose database races would otherwise land in the
- * seal's writes.
- */
-export const workflowsApp = async (
-  builder: Builder,
-  files: Record<string, string>
-): Promise<string> => {
-  const { id } = await builder.api.apps.create({ name: "Invoices" });
-  await release(builder, id, files);
-  return id;
-};
-
-/**
  * A run's audit events, once the log has `last` of them, each as its
  * action and what it says of the step, the reason and the error, sorted.
  */
@@ -424,42 +271,5 @@ export const runEvents = async (run: string, last: string): Promise<string[]> =>
     { timeout: 10_000, interval: 100 }
   );
 
-/**
- * Gives the App `MAIL`, for sending on the connection; an admin grants it.
- * Answers the permission's ID.
- */
-export const grantMail = async (
-  idp: Idp,
-  requester: Builder,
-  app: string,
-  connectionId: string
-): Promise<string> =>
-  await requestGranted(idp, requester, {
-    subject: { type: "app", appId: app },
-    object: { type: "connection", connectionId },
-    actions: ["mail.send"],
-    binding: "MAIL",
-  });
-
 /** The mail each test's workflow sends. */
 export const invoiceMail = { to: "ben@acme.test", subject: "Invoice INV-7" };
-
-/**
- * A workflow `mailer` that sends the invoice mail in its side-effect step
- * `send`, with the step's idempotency key, with the step's `options`; then
- * runs `after` in the step, with the connector's answer as `sent`.
- */
-export const mailer = (options: string, after = "") =>
-  workflowFiles(
-    "mailer",
-    `  return await step.do(
-    "send",
-    { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, ${options} },
-    async ({ idempotencyKey, input: mail }) => {
-      const sent = JSON.parse(((await env.MAIL.call("mail.send", mail, { idempotencyKey })) as { output: string }).output);
-${after}
-      return sent;
-    }
-  );`,
-    { send: { messageId: "mocked" } }
-  );

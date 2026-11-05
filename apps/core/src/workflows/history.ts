@@ -1,13 +1,8 @@
 import { isExpectedCode } from "@grasp-os/shared/errors";
-import { runIdSchema } from "@grasp-os/shared/ids";
-import {
-  runHistoryPageSchema,
-  workflowErrors,
-} from "@grasp-os/shared/workflows";
+import { workflowErrors } from "@grasp-os/shared/workflows";
 import type {
   RunHistoryEntry,
   RunHistoryError,
-  RunHistoryPage,
 } from "@grasp-os/shared/workflows";
 import type { WorkflowError } from "@grasp-os/workerflow/contracts";
 import type {
@@ -17,13 +12,9 @@ import type {
   StepIdentity,
 } from "@grasp-os/workerflow/run";
 
-import { appFor } from "../apps.ts";
-import type { Member } from "../auth/identity.ts";
 import { decisionOfEventType } from "../decisions/decisions.ts";
 import { runObjectOf } from "./engine.ts";
 import { waitKeyOf, waitStepPrefix } from "./host.ts";
-import { detailsRemoved } from "./retention.ts";
-import { findRun, seesDetails } from "./runs.ts";
 
 // A run's history, as Grasp's run pages show it: projected, page by page,
 // from what the run's engine journaled (workerflow's `history`), never
@@ -706,44 +697,4 @@ export const historyEntries = async (
   return more
     ? { items, nextCursor: String(after), hasMore: true }
     : { items, nextCursor: null, hasMore: false };
-};
-
-/**
- * A page of run `run`'s history for `by`, from `input`'s cursor (the
- * engine event ID the page before ended at): at most its page size of
- * entries, oldest first.
- */
-export const runHistory = async (
-  env: Env,
-  by: Member,
-  run: unknown,
-  input?: unknown
-): Promise<RunHistoryPage> => {
-  const id = runIdSchema.safeParse(run);
-  const query = runHistoryPageSchema.safeParse(input);
-  if (!(id.success && query.success)) {
-    throw workflowErrors.create("workflow.invalid");
-  }
-  const row = await findRun(env, id.data);
-  if (row === undefined) {
-    throw workflowErrors.create("workflow.run_not_found");
-  }
-  const { owner } = await appFor(env, by, row.appId, "user");
-  if (detailsRemoved(row)) {
-    return { items: [], nextCursor: null, hasMore: false };
-  }
-  const { pageSize, cursor } = query.data;
-  const page = await historyEntries(
-    env,
-    row.id,
-    { after: cursor === null ? 0 : Number(cursor), pageSize },
-    {
-      sees: seesDetails(by, row, owner),
-      // An App's run keeps no review of its steps: none is named.
-      taskOf: () => null,
-    }
-  );
-  return page.hasMore && page.nextCursor !== null
-    ? { items: [...page.items], nextCursor: page.nextCursor, hasMore: true }
-    : { items: [...page.items], nextCursor: null, hasMore: false };
 };

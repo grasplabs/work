@@ -76,7 +76,7 @@ import { onboardingStore } from "./onboarding/store.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
-import { visibleApps } from "./workflows/run-view.ts";
+import { listWorkflowResources } from "./workflow-resources.ts";
 
 // The company brain's workspace (`brain.read`), assembled from what core
 // already holds, each part as the person may read it, so the brain shows
@@ -119,8 +119,7 @@ import { visibleApps } from "./workflows/run-view.ts";
 // |                    | week, never who or which day (the onboarding's store),   |
 // |                    | for everyone signed in                                   |
 // | goals              | the brain's records, for everyone signed in; each goal's |
-// |                    | linked workflows only as far as the person may see their |
-// |                    | App, while it still has them                             |
+// |                    | linked workflows only those the person has a role in     |
 //
 // The onboarding (who works where, the kickoff, the interviews' progress,
 // the documents shared) is the admin's: its own RPC shows the roster, the
@@ -900,9 +899,9 @@ const onboardingHeld = async (env: Env): Promise<OnboardingHeld> => {
 
 /**
  * The board's goals (`goals`), each with the workflows linked to it that
- * `person` may see: whose App they may see, and that App's current
- * version still has. The rest are left out, so a goal never names an App
- * or a workflow its reader couldn't open.
+ * `person` may see: the independent workflows they have a role in
+ * (`listWorkflowResources`), none of them deleted. The rest are left out,
+ * so a goal never names a workflow its reader couldn't open.
  */
 export const goalsFor = async (
   env: Env,
@@ -912,17 +911,11 @@ export const goalsFor = async (
   if (goals.every(({ workflows }) => workflows.length === 0)) {
     return [...goals];
   }
-  const visible = await visibleApps(env, person);
-  const seen = new Set(
-    visible.flatMap(({ id, workflows }) =>
-      workflows.map((workflow) => `${id}/${workflow}`)
-    )
-  );
+  const workflows = await listWorkflowResources(env, person);
+  const seen = new Set(workflows.map(({ id }) => id));
   return goals.map((goal) => ({
     ...goal,
-    workflows: goal.workflows.filter(({ app, workflow }) =>
-      seen.has(`${app}/${workflow}`)
-    ),
+    workflows: goal.workflows.filter((workflow) => seen.has(workflow)),
   }));
 };
 

@@ -1599,9 +1599,9 @@ const suiteAskMs = 2 * sandboxWaitMs;
 
 /**
  * Whose an App's test suites are in the sandbox: an owner of their own,
- * apart from the App's interactive calls and its runs (`runOwnerOf`). Not
- * its runs', whose loads hold their places for as long as their steps
- * take, so its open runs never hold up its activation. Not its
+ * apart from the App's interactive calls. Not the runs of the workflows it
+ * binds, whose loads hold their places for as long as their steps take,
+ * so open runs never hold up its activation. Not its
  * interactive calls' either: the functions its tests call run as the App's
  * own calls do, in sessions of the App's that are children of the suite's
  * (`parentSession`), and the sandbox counts a child against its owner's

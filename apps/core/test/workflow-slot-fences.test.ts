@@ -27,7 +27,7 @@ describe("a fenced workflow attempt's slot", { timeout: 120_000 }, () => {
     const result = await withShares(
       { workflowClientAttempts: 2, workflowAppAttempts: 1 },
       async () => {
-        // The activation that dies mid-attempt holds the App's share.
+        // The activation that dies mid-attempt holds the workflow's share.
         const dies = attemptOf("dies");
         const first = await admitExactly(owner, dies);
         // The engine took the run over: its next activation runs another

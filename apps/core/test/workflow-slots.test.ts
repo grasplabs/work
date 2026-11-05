@@ -18,7 +18,7 @@ import {
 } from "./workflow-slots.ts";
 
 // The limit on workflow attempts running at once (admission.ts): in the
-// whole deployment, and of one App, each a quota limit a test lowers
+// whole deployment, and of one workflow, each a quota limit a test lowers
 // (`TEST_QUOTA_LIMITS`) to reach it. Runs, the engine, the dispatcher and
 // core's database are real; attempts are admitted as a run's host admits
 // them (quotas.ts, `admitAttempt`).
@@ -26,7 +26,7 @@ import {
 const idp = mockIdp();
 
 describe("workflow attempts running at once", { timeout: 120_000 }, () => {
-  it("admit no more at once than the deployment's or an App's limit, however many race, the same attempt once, and the next once one settles", async () => {
+  it("admit no more at once than the deployment's or a workflow's limit, however many race, the same attempt once, and the next once one settles", async () => {
     const [first, second, third] = await Promise.all([
       signedInApi(idp, "builder"),
       signedInApi(idp, "builder"),
@@ -39,7 +39,7 @@ describe("workflow attempts running at once", { timeout: 120_000 }, () => {
     const result = await withShares(
       { workflowClientAttempts: 3, workflowAppAttempts: 2 },
       async () => {
-        // Six of one App's attempts at once: two fit its limit.
+        // Six of one workflow's attempts at once: two fit its limit.
         const racing = await Promise.all(
           Array.from(
             { length: 6 },
@@ -49,11 +49,11 @@ describe("workflow attempts running at once", { timeout: 120_000 }, () => {
         // The first admitted, admitted again: it holds one slot.
         const again = racing.findIndex((answer) => "admitted" in answer);
         const twice = await admit(hot, `hot-${again}`);
-        // Another App still has room; the deployment's last slot goes to
-        // it, and a third App's attempt finds none.
-        const otherApp = await admit(other, "other");
-        const lastApp = await admit(late, "late");
-        // One of the hot App's attempts settles: its slot comes back.
+        // Another workflow still has room; the deployment's last slot goes to
+        // it, and a third workflow's attempt finds none.
+        const otherWorkflow = await admit(other, "other");
+        const lastWorkflow = await admit(late, "late");
+        // One of the hot workflow's attempts settles: its slot comes back.
         const held = racing[again];
         if (held !== undefined && "admitted" in held) {
           await held.admitted.settle();
@@ -62,8 +62,8 @@ describe("workflow attempts running at once", { timeout: 120_000 }, () => {
         return {
           racing: racing.map(shown).toSorted(),
           twice: shown(twice),
-          otherApp: shown(otherApp),
-          lastApp: shown(lastApp),
+          otherWorkflow: shown(otherWorkflow),
+          lastWorkflow: shown(lastWorkflow),
           afterSettle: shown(afterSettle),
         };
       }
@@ -79,8 +79,8 @@ describe("workflow attempts running at once", { timeout: 120_000 }, () => {
         "workflow.queued",
       ],
       twice: "ok",
-      otherApp: "ok",
-      lastApp: "workflow.queued",
+      otherWorkflow: "ok",
+      lastWorkflow: "workflow.queued",
       afterSettle: "ok",
     });
   });

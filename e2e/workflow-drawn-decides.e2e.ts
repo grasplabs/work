@@ -15,7 +15,9 @@ import { origin } from "./stack.ts";
 // model saves an invoice approval, a person's decision, as its draft,
 // e2e/model-scripts.ts) and publishes it; an admin names who answers its
 // decision on its Files and apps tab; the builder starts a run naming the
-// approver, who decides from their inbox; and the run ends with their
+// approver, whose nav counts the workflow that needs them, and who decides
+// from their inbox, on the decision's own page: its link, which anyone
+// else who opens it only sees isn't for them; and the run ends with their
 // answer. Then a webhook: the builder adds one, an admin grants its
 // request to start the workflow from the inbox, and a delivery signed
 // with its secret starts a run.
@@ -158,15 +160,31 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   );
   await start.getByRole("button", { name: "Close" }).first().click();
 
-  // The approver decides from their inbox.
+  // The approver decides from their inbox. Beside Workflows, their nav
+  // counts the workflow that needs them.
   const asDecider = await pageOf(decider);
   await decisionIn(asDecider, name);
+  const workflows = asDecider
+    .getByRole("navigation", { name: "Main" })
+    .getByRole("link", { name: /^Workflows/u });
+  await expect(workflows).toHaveAccessibleName(
+    /1 workflow needs you$/u,
+    pageRead
+  );
   const item = asDecider.getByRole("article", {
     name: "Approve invoice INV-42",
   });
   await item.getByRole("button", { name: "Review and answer" }).first().click();
   await expect(
     asDecider.getByRole("heading", { name: "Approve invoice INV-42" })
+  ).toBeVisible(pageRead);
+  // Its page is the decision's link: opened by anyone else, it only says
+  // it isn't theirs.
+  const link = new URL(asDecider.url()).pathname;
+  expect(link).toMatch(/^\/decisions\/[^/]+$/u);
+  await page.goto(link);
+  await expect(
+    page.getByText("This decision is for someone else to answer.")
   ).toBeVisible(pageRead);
   await asDecider.getByLabel("Comment (optional)").fill("Matches the order");
   await asDecider.getByRole("button", { name: "Approve" }).click();
@@ -178,6 +196,9 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     /^Approved by Person on /u,
     pageRead
   );
+  // Answered, it needs them no more.
+  await asDecider.reload();
+  await expect(workflows).toHaveAccessibleName("Workflows", pageRead);
 
   // The run ends with their answer: its list is read once, so read again
   // until the engine has finished it.

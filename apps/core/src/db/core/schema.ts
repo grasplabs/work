@@ -1013,16 +1013,6 @@ export const appVersions = sqliteTable(
      */
     approved: integer(),
     /**
-     * The IDs of the version's workflows (JSON), written when it is
-     * committed, as a version never changes: so listing an App's
-     * workflows reads no files (workflows/overview.ts). A row the
-     * previous release writes gets none (the default).
-     */
-    workflows: text({ mode: "json" })
-      .$type<string[]>()
-      .notNull()
-      .default(sql`'[]'`),
-    /**
      * The names of the version's screens (JSON, `screensIn`), written when
      * it is committed: so listing every App someone can open, with its
      * pages, is one query and reads no files (`listAppOverviews`). A row
@@ -2906,52 +2896,6 @@ export const dependencyAdmissionRefusals = sqliteTable(
 );
 
 /**
- * Who owns each workflow (workflows/owners.ts): the person who answers
- * for it, shown on its line and told about its failures; one row per App
- * and workflow, kept across the App's versions. A workflow without one is
- * owned by its App's owner. Who owns it never changes whom its runs act
- * for. `set_by` set it last.
- */
-export const workflowOwners = sqliteTable(
-  "workflow_owners",
-  {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
-    workflowId: text("workflow_id").notNull(),
-    ownerId: text("owner_id").notNull(),
-    setBy: text("set_by").notNull(),
-    setAt: timestamp("set_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.appId, table.workflowId] })]
-);
-
-/**
- * The team that owns a workflow (workflows/teams.ts): one of the
- * organization's teams, set by an admin or a builder of its App, by App
- * and workflow ID, so it holds across versions. A workflow without a row
- * has no team; a team that goes takes its rows with it.
- */
-export const workflowTeams = sqliteTable(
-  "workflow_teams",
-  {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
-    workflowId: text("workflow_id").notNull(),
-    teamId: text("team_id")
-      .notNull()
-      .references(() => teams.id, { onDelete: "cascade" }),
-    setBy: text("set_by").notNull(),
-    setAt: timestamp("set_at").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.appId, table.workflowId] }),
-    index("workflow_teams_team").on(table.teamId),
-  ]
-);
-
-/**
  * The catalog entries an admin stopped offering (connections.ts): one row
  * each, by its source (`native` or `composio`) and its ID there. Nobody
  * starts connecting a hidden entry, admins included, until an admin offers
@@ -3226,20 +3170,16 @@ export const platformVersions = sqliteTable("platform_versions", {
 });
 
 /**
- * What core tells a person in the product (src/notifications.ts): that a
- * workflow failed while acting for them (`run_failed`), or that an admin
- * asked them one of the brain's open questions (`gap_asked`,
- * src/brain-gaps.ts), that connect stopped hearing a source their
- * triggers listen to (`events_stopped`), or that packages of an App or
+ * What core tells a person in the product (src/notifications.ts): that an
+ * admin asked them one of the brain's open questions (`gap_asked`,
+ * src/brain-gaps.ts), that a schedule trigger of theirs stopped
+ * (`trigger_stopped`), that connect stopped hearing a source their
+ * triggers listen to (`events_stopped`), that packages of an App or
  * workflow they build or approved were revoked as malware
- * (`package_revoked`). A `run_failed` row has its App, workflow, run and
- * failures, and no gap; a `gap_asked` row its gap alone, once per person
- * and gap. One unread `run_failed` row per person, App and workflow:
- * another failure while it is unread counts on it (`failures`) and names
- * the latest run (`run_id`), so a workflow that fails every minute makes
- * one row, not thousands. Once read (`read_at`), the next failure makes a
- * new one. The person's rows read over 30 days ago go when they next
- * read, and all of them when they are removed from the organization.
+ * (`package_revoked`), or what an App told them (`app_message`). A
+ * `gap_asked` row has its gap alone, once per person and gap. The
+ * person's rows read over 30 days ago go when they next read, and all of
+ * them when they are removed from the organization.
  */
 export const notifications = sqliteTable(
   "notifications",
@@ -3248,7 +3188,6 @@ export const notifications = sqliteTable(
     personId: text("person_id").notNull(),
     type: text({
       enum: [
-        "run_failed",
         "gap_asked",
         "trigger_stopped",
         "package_revoked",
@@ -3258,12 +3197,10 @@ export const notifications = sqliteTable(
     }).notNull(),
     appId: text("app_id"),
     workflowId: text("workflow_id"),
-    runId: text("run_id"),
-    failures: integer(),
     /** The gap a `gap_asked` row asks about: its brain record id. */
     gapId: text("gap_id"),
     createdAt: timestamp("created_at").notNull(),
-    /** When it last changed: the latest failure it counts. */
+    /** When it last changed. */
     updatedAt: timestamp("updated_at").notNull(),
     readAt: timestamp("read_at"),
     /**
@@ -3309,7 +3246,7 @@ export const notifications = sqliteTable(
       table.updatedAt,
       table.id
     ),
-    // The one unread row a failure counts on, and the unread count.
+    // One unread row per person, kind, App and workflow, and the unread count.
     uniqueIndex("notifications_unread_idx")
       .on(table.personId, table.type, table.appId, table.workflowId)
       .where(sql`read_at IS NULL`),

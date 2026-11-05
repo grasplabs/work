@@ -56,7 +56,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
-import { appVersions, apps, brainRecords } from "./db/core/schema.ts";
+import { brainRecords, workflowResources } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 
 // The brain's records, as core keeps them (`brain_records`), and adding
@@ -509,9 +509,9 @@ const keepRecords = async (
 
 /**
  * Refuses a goal link (`goalLink`, `linked`) to a workflow the company
- * doesn't have: one its App's current version doesn't hold, or an App
- * that is gone or has no version. Taking one off needs none: a workflow
- * that went keeps its link until it is taken off.
+ * doesn't have: an independent workflow that never was, or was deleted.
+ * Taking one off needs none: a workflow that went keeps its link until it
+ * is taken off.
  */
 const requireLinkedWorkflows = async (
   env: Env,
@@ -524,27 +524,21 @@ const requireLinkedWorkflows = async (
     return;
   }
   const rows = await drizzle(env.DB)
-    .select({ id: apps.id, workflows: appVersions.workflows })
-    .from(apps)
-    .innerJoin(
-      appVersions,
-      and(
-        eq(appVersions.appId, apps.id),
-        eq(appVersions.version, apps.currentVersion)
-      )
-    )
+    .select({ id: workflowResources.id })
+    .from(workflowResources)
     .where(
-      sql`${apps.id} IN (SELECT value FROM json_each(${JSON.stringify([
-        ...new Set(links.map(({ app }) => app)),
-      ])}))`
+      and(
+        inList(workflowResources.id, [
+          ...new Set(links.map(({ workflow }) => workflow)),
+        ]),
+        isNull(workflowResources.deletedAt)
+      )
     );
-  const held = new Map(rows.map(({ id, workflows }) => [id, workflows]));
+  const held = new Set(rows.map(({ id }) => id));
   for (const link of links) {
-    if (held.get(link.app)?.includes(link.workflow) !== true) {
+    if (!held.has(link.workflow)) {
       throw brainRecordErrors.create("brain.record_missing", {
-        issues: [
-          `${keyOf(link)}: no workflow ${link.workflow} in App ${link.app}`,
-        ],
+        issues: [`${keyOf(link)}: no workflow ${link.workflow}`],
       });
     }
   }
@@ -1026,13 +1020,13 @@ const withDrawings = (held: HeldRecords): void => {
 /**
  * Gives each goal its later wordings after its first, in date order (the
  * newest counts),
- * and the workflows linked to it now: the newest link for each App's
- * workflow counts, in the order they were last linked. A change for a
+ * and the workflows linked to it now: the newest link for each workflow
+ * counts, in the order they were last linked. A change for a
  * goal that isn't held is left out.
  */
 const withGoalChanges = (held: HeldRecords): void => {
   const goals = new Map(held.goals.map((goal) => [goal.id, goal]));
-  const linked = new Map<string, Map<string, Goal["workflows"][number]>>();
+  const linked = new Map<string, Set<string>>();
   for (const change of held.goalChanges) {
     const goal = goals.get(change.goalId);
     if (goal === undefined) {
@@ -1043,13 +1037,11 @@ const withGoalChanges = (held: HeldRecords): void => {
       goal.versions.push({ title, howWeNotice, sourceId, date });
       continue;
     }
-    const links =
-      linked.get(goal.id) ?? new Map<string, Goal["workflows"][number]>();
+    const links = linked.get(goal.id) ?? new Set<string>();
     linked.set(goal.id, links);
-    const key = `${change.app}/${change.workflow}`;
-    links.delete(key);
+    links.delete(change.workflow);
     if (change.linked) {
-      links.set(key, { app: change.app, workflow: change.workflow });
+      links.add(change.workflow);
     }
   }
   for (const goal of held.goals) {

@@ -3,6 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
+import { openTo } from "../src/app-settings.ts";
 import { activeMember, organizationId } from "../src/auth/auth.ts";
 import {
   appMembers,
@@ -11,12 +12,11 @@ import {
   teamMembers,
   teams,
 } from "../src/db/core/schema.ts";
-import { openTo } from "../src/workflows/owners.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // The membership conditions every role check builds on (auth.ts
-// `activeMember`, workflows/owners.ts `openTo`), given a column of the very
+// `activeMember`, app-settings.ts `openTo`), given a column of the very
 // table they read: a query on `members` asking which of its own rows are
 // active admins, or one on `apps`, `app_members` or `team_members` asking
 // whose person may open an App.

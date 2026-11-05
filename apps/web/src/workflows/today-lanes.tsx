@@ -210,25 +210,11 @@ const Dot = ({
   );
 };
 
-/** The business processes the lanes' workflows serve, for their marks. */
-export interface LaneProcesses {
-  /** By App: the process each App serves. */
-  apps: ReadonlyMap<string, BusinessProcess | null>;
-  /** By independent workflow: the process each serves. */
-  independent: ReadonlyMap<string, BusinessProcess | null>;
-}
+/** The business process each lane's workflow serves, by its ID, for their marks. */
+export type LaneProcesses = ReadonlyMap<string, BusinessProcess | null>;
 
 /** None known: lanes without their marks. */
-const noProcesses: LaneProcesses = { apps: new Map(), independent: new Map() };
-
-/** The process `of`'s workflow serves, by `processes`. */
-const processOfLane = (
-  processes: LaneProcesses,
-  of: Lane["of"]
-): BusinessProcess | undefined =>
-  (of.kind === "app"
-    ? processes.apps.get(of.app)
-    : processes.independent.get(of.id)) ?? undefined;
+const noProcesses: LaneProcesses = new Map();
 
 /** A lane's process, by its mark, before its name, as the prototype has it. */
 const LaneMark = ({
@@ -238,23 +224,22 @@ const LaneMark = ({
   lane: Lane;
   processes: LaneProcesses;
 }) => {
-  const process = processOfLane(processes, lane.of);
-  return process === undefined ? null : <ProcessGlyph process={process} />;
+  const process = processes.get(lane.of.id);
+  return process === undefined || process === null ? null : (
+    <ProcessGlyph process={process} />
+  );
 };
 
 /** A lane's name, opening its workflow. */
-const LaneLink = ({ lane, className }: { lane: Lane; className: string }) =>
-  lane.of.kind === "app" ? (
-    <span className={className}>{lane.name}</span>
-  ) : (
-    <Link
-      className={className}
-      params={{ workflow: lane.of.id }}
-      to="/workflows/$workflow"
-    >
-      {lane.name}
-    </Link>
-  );
+const LaneLink = ({ lane, className }: { lane: Lane; className: string }) => (
+  <Link
+    className={className}
+    params={{ workflow: lane.of.id }}
+    to="/workflows/$workflow"
+  >
+    {lane.name}
+  </Link>
+);
 
 /** The width of `element`, as it changes. */
 const useWidth = () => {

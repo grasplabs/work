@@ -18,7 +18,7 @@ import { readPlatformStatistics } from "../src/statistics.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
-import { endLiveRuns, seedResourceRun } from "./runs.ts";
+import { seedResourceRun } from "./runs.ts";
 import { failure, person } from "./sealed-apps.ts";
 import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
@@ -266,13 +266,39 @@ const limited = (limit: "call" | "minute" | "day", at?: number) => ({
   },
 });
 
-/** A run of `app`'s workflow `workflow`, started `ago` milliseconds back. */
-const seedRun = async (app: string, workflow: string, ago = 0) => {
-  await env.DB.prepare(
-    "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, ?, 1, NULL, 'completed', ?, ?)"
+/**
+ * A run of the independent workflow `app` binds as `alias`, started `ago`
+ * milliseconds back: bound to a new workflow of the App's owner the first
+ * time.
+ */
+const seedRun = async (app: string, alias: string, ago = 0) => {
+  const bound = await env.DB.prepare(
+    "SELECT workflow_resource_id AS workflow FROM app_workflow_bindings WHERE app_id = ? AND alias = ? AND status = 'active'"
   )
-    .bind(crypto.randomUUID(), app, workflow, Date.now() - ago, Date.now())
-    .run();
+    .bind(app, alias)
+    .first<{ workflow: string }>();
+  const owner = await env.DB.prepare("SELECT owner_id FROM apps WHERE id = ?")
+    .bind(app)
+    .first<string>("owner_id");
+  const principal = owner ?? "";
+  let workflow = bound?.workflow;
+  if (workflow === undefined) {
+    workflow = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO workflow_resources (id, name, owner_id, created_at) VALUES (?, ?, ?, ?)"
+      ).bind(workflow, `${alias}-${unique()}`, principal, Date.now()),
+      env.DB.prepare(
+        "INSERT INTO app_workflow_bindings (id, app_id, alias, workflow_resource_id, workflow_resource_version, status, bound_by, bound_at) VALUES (?, ?, ?, ?, 1, 'active', ?, ?)"
+      ).bind(crypto.randomUUID(), app, alias, workflow, principal, Date.now()),
+    ]);
+  }
+  await seedResourceRun({
+    workflow,
+    principal,
+    status: "completed",
+    createdAt: Date.now() - ago,
+  });
 };
 
 /**
@@ -839,7 +865,9 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
     const plans = await Promise.all(
       recorded
         .filter(({ query: sql }) =>
-          /from "(?:apps|improvement_signals|workflow_runs)"/u.test(sql)
+          /from "(?:apps|improvement_signals|workflow_resource_runs|app_workflow_bindings)"/u.test(
+            sql
+          )
         )
         .map(planOf)
     );
@@ -874,11 +902,10 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
     const watched = await countedApp(admin);
     holdClock();
     // 101 workflows ran a minute ago: two pages of groups.
-    await env.DB.prepare(
-      "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 101) INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) SELECT ?1 || i, ?2, 'w' || i, 1, NULL, 'completed', ?3, ?3 FROM n"
-    )
-      .bind(`bulk-${unique()}-`, watched, Date.now() - 60_000)
-      .run();
+    for (let i = 1; i <= 101; i += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one workflow after another
+      await seedRun(watched, `w${i}`, 60_000);
+    }
     const until = new Date(Date.now() - 1000).toISOString();
     const page = async (offset: number, held = true) =>
       answerSchema.parse(
@@ -1205,11 +1232,5 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
         },
       ],
     });
-  });
-});
-
-describe("a run's statistics", { timeout: 90_000 }, () => {
-  afterEach(async () => {
-    await endLiveRuns();
   });
 });

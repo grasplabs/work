@@ -345,7 +345,6 @@ describe("chat agent", () => {
       userId,
       id,
       undefined,
-      undefined,
       "teams"
     );
     await fakeProvider(says("Hello."));
@@ -592,7 +591,7 @@ describe("chat agent sandbox", () => {
   it("lets no ctx.waitUntil work act through env after its run returned", async () => {
     const { stub, chat, ask } = await newChat(
       codeStep(
-        "export default async (self, env, ctx) => { ctx.waitUntil((async () => { await scheduler.wait(500); await env.chat.attachments(); })()); return 'returned'; };"
+        "export default async (self, env, ctx) => { ctx.waitUntil((async () => { await scheduler.wait(500); await env.chat.files(); })()); return 'returned'; };"
       ),
       says("Done.")
     );
@@ -612,7 +611,7 @@ describe("chat agent sandbox", () => {
           ({ action, detail }) =>
             action === "agent.call" &&
             detail.chat === chat.id &&
-            detail.method === "chat.attachments"
+            detail.method === "chat.files"
         )
         .map(({ detail }) => detail.outcome)
         .filter((outcome) => outcome !== "refused")
@@ -1535,7 +1534,7 @@ describe("chat agent code run leases", () => {
     });
     const { stub, chat, agent, ask } = await newChat(
       codeStep(
-        "export default async (self, env) => { const reports = await env.chat.attachments(); await scheduler.wait(3_000); console.log('leaked', reports.length); return 'read before the revoke'; };"
+        "export default async (self, env) => { const files = await env.chat.files(); await scheduler.wait(3_000); console.log('leaked', files.length); return 'read before the revoke'; };"
       ),
       says("Done.")
     );
@@ -1556,7 +1555,7 @@ describe("chat agent code run leases", () => {
             ({ action, detail }) =>
               action === "agent.call" &&
               detail.chat === chat.id &&
-              detail.method === "chat.attachments" &&
+              detail.method === "chat.files" &&
               detail.outcome === "ok"
           )
         ).toBeTruthy();
@@ -1684,7 +1683,7 @@ describe("chat agent code run leases", () => {
     // calls during the slow read of revocations that follows.
     const { stub, chat, ask } = await newChat(
       codeStep(
-        "export default async (self, env) => { await scheduler.wait(1_300); await env.chat.attachments(); };"
+        "export default async (self, env) => { await scheduler.wait(1_300); await env.chat.files(); };"
       ),
       says("Done.")
     );
@@ -1709,7 +1708,7 @@ describe("chat agent code run leases", () => {
           refusalsIn(chat.id, "agent.run_ended")
         ).resolves.toStrictEqual([
           {
-            method: "chat.attachments",
+            method: "chat.files",
             outcome: "refused",
             reason: "agent.run_ended",
           },
@@ -2054,7 +2053,6 @@ describe("chat agent code output", () => {
       "Questions",
       userId,
       id,
-      undefined,
       undefined,
       "teams"
     );

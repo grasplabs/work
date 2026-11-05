@@ -5,7 +5,6 @@ import type { HeldStart } from "@grasp-os/shared/held-starts";
 import type {
   AppMessageNotification,
   GapAskedNotification,
-  RunFailedNotification,
   TriggerStoppedNotification,
 } from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
@@ -21,7 +20,7 @@ import { objectOf, subjectOf } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
 import { targetNames } from "../dashboard/dependency-requests.tsx";
-import type { NotificationsPage } from "../dashboard/failed-workflows.tsx";
+import type { NotificationsPage } from "../dashboard/notifications-page.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
 import type { Viewer, Waiting } from "../dashboard/waiting.ts";
 import { formatDateTime, formatList } from "../format.ts";
@@ -36,7 +35,7 @@ import type { Loaded } from "../load-from-core.tsx";
 // the person whose answer was lost, a permission an App
 // or agent asked for, packages proposed for an engine, a version of an
 // App the person answers for
-// up for review, a workflow that failed while acting for the person. Core keeps nothing the inbox adds (put away until a date, given
+// up for review. Core keeps nothing the inbox adds (put away until a date, given
 // to someone, dismissed with why), so none of that is here. Pure.
 
 export type InboxKind =
@@ -55,7 +54,6 @@ export type InboxKind =
   | "unknownOutcome"
   | "permissionRequest"
   | "packages"
-  | "failedRun"
   | "stoppedSchedule"
   | "revokedPackage"
   | "stoppedEvents"
@@ -92,11 +90,6 @@ export type InboxSource =
   | { type: "version"; item: GoLiveItem }
   | { type: "workflowGoLive"; item: WorkflowGoLiveItem }
   | { type: "bindings"; item: BindingApprovalItem }
-  | {
-      type: "failed";
-      notification: RunFailedNotification;
-      model: string | undefined;
-    }
   | { type: "reconnect"; integration: string }
   | { type: "asked"; notification: GapAskedNotification }
   | { type: "stopped"; notification: TriggerStoppedNotification }
@@ -148,7 +141,6 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   unknownOutcome: "apps",
   permissionRequest: "apps",
   packages: "apps",
-  failedRun: "workflows",
   stoppedSchedule: "workflows",
   revokedPackage: "apps",
   stoppedEvents: "workflows",
@@ -479,41 +471,12 @@ const bindingItems = (
     };
   });
 
-/** A workflow that failed while acting for the person, with a way to ask the agent to fix it. */
-const failedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
-  failed.page.notifications.flatMap((notification): InboxItem[] => {
-    if (notification.type !== "run_failed") {
-      return [];
-    }
-    const { app, appName, workflow, failures, at } = notification;
-    const item: InboxItem = {
-      id: `failed:${notification.id}`,
-      kind: "failedRun",
-      title: t`${workflow} in ${appName} failed`,
-      context: workflow,
-      body: [
-        t`It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached.`,
-      ],
-      facts: [
-        { label: t`App`, value: appName },
-        {
-          label: t`Failed`,
-          value: plural(failures, { one: "Once", other: "# times" }),
-        },
-        { label: t`Last`, value: formatDateTime(at) },
-      ],
-      about: { kind: "engine", engine: app },
-      forWhom: { person: me },
-      date: at,
-      urgent: false,
-      source: { type: "failed", notification, model: failed.model },
-    };
-    return [item];
-  });
-
 /** A question of the brain an admin asked the person, as the role that can answer it, while it is open. */
-const askedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
-  failed.page.notifications.flatMap((notification): InboxItem[] => {
+const askedItems = (
+  notifications: NotificationsPage,
+  me: string
+): InboxItem[] =>
+  notifications.page.notifications.flatMap((notification): InboxItem[] => {
     if (notification.type !== "gap_asked") {
       return [];
     }
@@ -558,8 +521,11 @@ const revokedSubject = (
       };
 
 /** Packages of an App or workflow the person builds or approved, revoked because one was reported as malware. */
-const revokedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
-  failed.page.notifications.flatMap((notification): InboxItem[] => {
+const revokedItems = (
+  notifications: NotificationsPage,
+  me: string
+): InboxItem[] =>
+  notifications.page.notifications.flatMap((notification): InboxItem[] => {
     if (notification.type !== "package_revoked") {
       return [];
     }
@@ -609,16 +575,16 @@ const stoppedTitle = (mail: boolean, name: string | undefined): string => {
 
 /** A mailbox or drive the person's triggers listen to, which connect stopped hearing. */
 const stoppedEventsItems = (
-  failed: NotificationsPage,
+  notifications: NotificationsPage,
   me: string
 ): InboxItem[] =>
-  failed.page.notifications.flatMap((notification): InboxItem[] => {
+  notifications.page.notifications.flatMap((notification): InboxItem[] => {
     if (notification.type !== "events_stopped") {
       return [];
     }
     const { at, reason, resource } = notification;
     const mail = notification.event.endsWith(".mail.received");
-    const account = failed.accounts?.get(notification.connection);
+    const account = notifications.accounts?.get(notification.connection);
     const name = account?.name ?? undefined;
     return [
       {
@@ -654,8 +620,11 @@ const stoppedEventsItems = (
   });
 
 /** A schedule trigger of the person's that stopped after its starts kept failing, until they enable it again. */
-const stoppedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
-  failed.page.notifications.flatMap((notification): InboxItem[] => {
+const stoppedItems = (
+  notifications: NotificationsPage,
+  me: string
+): InboxItem[] =>
+  notifications.page.notifications.flatMap((notification): InboxItem[] => {
     if (notification.type !== "trigger_stopped") {
       return [];
     }
@@ -685,8 +654,11 @@ const stoppedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
   });
 
 /** What an App the person can open told them, opened on the App's page (the screen it named, if any). */
-const appMessageItems = (failed: NotificationsPage, me: string): InboxItem[] =>
-  failed.page.notifications.flatMap((notification): InboxItem[] => {
+const appMessageItems = (
+  notifications: NotificationsPage,
+  me: string
+): InboxItem[] =>
+  notifications.page.notifications.flatMap((notification): InboxItem[] => {
     if (notification.type !== "app_message") {
       return [];
     }
@@ -769,7 +741,7 @@ export const inboxItems = (
     ? readyOf(waiting.requests)
     : undefined;
   const dependencies = readyOf(waiting.dependencies);
-  const failed = readyOf(waiting.failed);
+  const notifications = readyOf(waiting.notifications);
   const decisions = readyOf(waiting.decisions) ?? [];
   const heldStarts = readyOf(waiting.heldStarts) ?? [];
   const versions = readyOf(waiting.versions) ?? [];
@@ -819,12 +791,13 @@ export const inboxItems = (
     ...versionItems(versions, me, readAt),
     ...workflowGoLiveItems(workflowGoLives, me),
     ...bindingItems(bindings, readAt),
-    ...(failed === undefined ? [] : failedItems(failed, me)),
-    ...(failed === undefined ? [] : askedItems(failed, me)),
-    ...(failed === undefined ? [] : stoppedItems(failed, me)),
-    ...(failed === undefined ? [] : revokedItems(failed, me)),
-    ...(failed === undefined ? [] : stoppedEventsItems(failed, me)),
-    ...(failed === undefined ? [] : appMessageItems(failed, me)),
+    ...(notifications === undefined ? [] : askedItems(notifications, me)),
+    ...(notifications === undefined ? [] : stoppedItems(notifications, me)),
+    ...(notifications === undefined ? [] : revokedItems(notifications, me)),
+    ...(notifications === undefined
+      ? []
+      : stoppedEventsItems(notifications, me)),
+    ...(notifications === undefined ? [] : appMessageItems(notifications, me)),
     ...reconnect,
   ].toSorted(order);
 };
@@ -836,7 +809,7 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.outcomes,
     waiting.requests,
     waiting.dependencies,
-    waiting.failed,
+    waiting.notifications,
     waiting.reconnect,
     waiting.versions,
     waiting.decisions,

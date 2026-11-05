@@ -10,23 +10,6 @@ import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 export const needsAttention = (workflow: WorkflowSummary): boolean =>
   workflow.waiting > 0 || workflow.failed > 0;
 
-/** A workflow's name, as the lists show it: an App's ID, or an independent one's name. */
-export const workflowName = (
-  workflow:
-    | { type: "app"; workflow: string }
-    | { type: "resource"; name: string }
-): string => (workflow.type === "app" ? workflow.workflow : workflow.name);
-
-/** A key for a workflow among others of either kind. */
-export const workflowKey = (
-  workflow:
-    | { type: "app"; app: string; workflow: string }
-    | { type: "resource"; workflowId: string }
-): string =>
-  workflow.type === "app"
-    ? `app/${workflow.app}/${workflow.workflow}`
-    : `resource/${workflow.workflowId}`;
-
 /**
  * At work: those that have run, the ones that need a person first, each
  * group in the order given. On the way: those that haven't run yet.

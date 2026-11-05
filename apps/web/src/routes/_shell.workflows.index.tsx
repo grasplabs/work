@@ -1,4 +1,3 @@
-import type { App } from "@grasp-os/shared/apps";
 import { businessProcesses } from "@grasp-os/shared/business-processes";
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import { canBuild } from "@grasp-os/shared/roles";
@@ -47,7 +46,6 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import type { Session } from "../core.ts";
 import { readPeople } from "../directory.ts";
 import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import { EmptyCard } from "../frame/page.tsx";
@@ -64,29 +62,23 @@ import { RunFiguresView } from "../workflows/figures.tsx";
 import { GoLivesWaiting } from "../workflows/go-lives-waiting.tsx";
 import { NewWorkflow } from "../workflows/independent-workflows.tsx";
 import { needsAttention, processesIn, showsUnder } from "../workflows/lists.ts";
-import {
-  listRuns,
-  listWorkflows,
-  openableApps,
-  readActivity,
-} from "../workflows/reads.ts";
+import { listRuns, listWorkflows, readActivity } from "../workflows/reads.ts";
 import { runFiguresOf } from "../workflows/run-figures.ts";
 import { RunsLog } from "../workflows/runs.tsx";
 import { TodayLanes } from "../workflows/today-lanes.tsx";
-import type { LaneProcesses } from "../workflows/today-lanes.tsx";
 import {
   WorkflowsOverview,
   WorkflowLists,
   processOf,
 } from "../workflows/workflows-table.tsx";
-import type { AppProcesses } from "../workflows/workflows-table.tsx";
+import type { WorkflowProcesses } from "../workflows/workflows-table.tsx";
 
 // Everything that runs on its own, in one place: every workflow of every
 // App the person can open, at work and on the way; those that need a
 // person now, with the independent workflows waiting for the reader to
 // let them go live; and, on the Runs tab, today's runs in time, the
 // figures core counted over the last days and their runs, waiting ones
-// first, filtered by App and status. The lists filter by the
+// first, filtered by status. The lists filter by the
 // business process their workflows serve, once they serve more than one.
 // The tab and the filters are in the address, so a link can open the runs
 // it means. A new workflow is the page's action, in the bar above it.
@@ -95,7 +87,6 @@ interface WorkflowsSearch {
   tab?: "needs" | "runs";
   /** On the lists: the business process whose workflows show. */
   process?: BusinessProcess;
-  app?: string;
   status?: RunFilterStatus;
 }
 
@@ -115,14 +106,6 @@ const filterLabels: Readonly<Record<RunFilterStatus, MessageDescriptor>> = {
 
 /** The value of a filter that filters nothing. */
 const all = "all";
-
-/**
- * The Apps the person can open, as the Runs tab's App filter offers them.
- */
-const appOptions = async (session: Session): Promise<Option[]> => {
-  const apps = await openableApps(session);
-  return apps.map(({ id, name }) => ({ value: id, label: name }));
-};
 
 interface Option {
   value: string;
@@ -176,8 +159,8 @@ const Filter = ({
   );
 };
 
-/** The Runs tab's filters: an App, and a status. */
-const RunFilters = ({ apps }: { apps: Option[] }) => {
+/** The Runs tab's filter: a status. */
+const RunFilters = () => {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/workflows/" });
   const filterBy = (change: Partial<WorkflowsSearch>): void => {
@@ -186,14 +169,6 @@ const RunFilters = ({ apps }: { apps: Option[] }) => {
   const { t } = useLingui();
   return (
     <div className="flex flex-wrap gap-2">
-      <Filter
-        label={t`App`}
-        onChange={(app) => {
-          filterBy({ app });
-        }}
-        options={apps}
-        value={search.app}
-      />
       <Filter
         label={t`Status`}
         onChange={(status) => {
@@ -209,13 +184,10 @@ const RunFilters = ({ apps }: { apps: Option[] }) => {
   );
 };
 
-/**
- * The processes the lists' workflows serve: an App workflow its App's, an
- * independent one its own.
- */
+/** The processes the lists' workflows serve. */
 const offeredOf = (
   workflows: Loaded<WorkflowSummary[]>,
-  processes: AppProcesses
+  processes: WorkflowProcesses
 ): BusinessProcess[] =>
   processesIn(
     workflows.state === "ready"
@@ -223,27 +195,19 @@ const offeredOf = (
       : []
   );
 
-/**
- * The workflows serving `process`, the Apps' and the independent ones
- * together, at work and on the way.
- */
+/** The workflows serving `process`, at work and on the way. */
 const ListedWorkflows = ({
   rows,
-  apps,
   independent,
   processes,
   process,
 }: {
   rows: WorkflowSummary[];
-  apps: Loaded<App[]>;
   independent: Loaded<WorkflowResource[]>;
-  processes: AppProcesses;
+  processes: WorkflowProcesses;
   process: BusinessProcess | undefined;
 }) => {
   // Which serve the chosen process can't be told: said, not shown fewer.
-  if (domainsUnchecked(apps, process)) {
-    return <NotLoadedState page={apps} />;
-  }
   if (domainsUnchecked(independent, process)) {
     return <NotLoadedState page={independent} />;
   }
@@ -269,7 +233,6 @@ const ListedWorkflows = ({
 const NeedsAttention = ({
   workflows,
   independent,
-  apps,
   goLives,
   processes,
   process,
@@ -278,9 +241,8 @@ const NeedsAttention = ({
 }: {
   workflows: Loaded<WorkflowSummary[]>;
   independent: Loaded<WorkflowResource[]>;
-  apps: Loaded<App[]>;
   goLives: Loaded<WorkflowGoLiveWaiting[]>;
-  processes: AppProcesses;
+  processes: WorkflowProcesses;
   process: BusinessProcess | undefined;
   me: string;
   people: ReadonlyMap<string, string>;
@@ -306,12 +268,10 @@ const NeedsAttention = ({
       : [];
   // Under a process, a list whose processes couldn't be read says so
   // rather than showing fewer.
-  const domainsGone = domainsUnchecked(apps, process);
   const independentGone = domainsUnchecked(independent, process);
   const nothing =
     workflows.state === "ready" &&
     goLives.state === "ready" &&
-    !domainsGone &&
     !independentGone &&
     rows.length === 0 &&
     waiting.length === 0;
@@ -326,15 +286,12 @@ const NeedsAttention = ({
         </EmptyCard>
       ) : null}
       {workflows.state === "ready" ? null : <NotLoadedState page={workflows} />}
-      {workflows.state === "ready" && domainsGone ? (
-        <NotLoadedState page={apps} />
-      ) : null}
       <IndependentUnread
         gone={independentGone}
         independent={independent}
         listed={workflows.state === "ready" || goLives.state === "ready"}
       />
-      {domainsGone || independentGone || rows.length === 0 ? null : (
+      {independentGone || rows.length === 0 ? null : (
         <WorkflowLists processes={processes} rows={rows} />
       )}
       {goLives.state === "ready" ? null : <NotLoadedState page={goLives} />}
@@ -488,8 +445,7 @@ const countAll = (
   process: BusinessProcess | undefined
 ): number | undefined =>
   lists.workflows.state === "ready" &&
-  !domainsUnchecked(lists.independent, process) &&
-  !domainsUnchecked(lists.apps, process)
+  !domainsUnchecked(lists.independent, process)
     ? lists.workflows.data.filter((row) =>
         showsUnder(process, processOf(lists.processes, row))
       ).length
@@ -510,10 +466,7 @@ const countNeeds = (
   // workflows, and which App workflow serves it off the Apps:
   // without either it can't be told, so no count rather than one that
   // leaves some out.
-  if (
-    domainsUnchecked(lists.independent, process) ||
-    domainsUnchecked(lists.apps, process)
-  ) {
+  if (domainsUnchecked(lists.independent, process)) {
     return undefined;
   }
   const served = new Map(
@@ -536,60 +489,27 @@ const countNeeds = (
   );
 };
 
-/** What the Runs tab's log shows: its runs, its filters' options, and the model a fix asks with. */
+/** What the Runs tab's log shows: its runs. */
 interface RunsRead {
   runs: Loaded<RunsPage>;
-  apps: Loaded<Option[]>;
-  model: string | undefined;
 }
 
-/** Reads the runs `filter` lets through, with what the filters offer. */
+/** Reads the runs `filter` lets through. */
 const readRuns = async (
   core: CoreConnection,
   filter: RunFilter,
   left?: AbortSignal
-): Promise<RunsRead> => {
-  const [runs, apps, models] = await Promise.all([
-    loadFromCore(
-      core,
-      async (session) => await listRuns(session, filter),
-      left
-    ),
-    loadFromCore(core, appOptions, left),
-    // The model a fix in chat asks with; without one, none is offered.
-    loadFromCore(core, async (session) => await session.chats.models(), left),
-  ]);
-  return {
-    runs,
-    apps,
-    model: models.state === "ready" ? models.data[0] : undefined,
-  };
-};
-
-/** The run filters `search` sets: what the log reads. */
-const filterOf = ({
-  app,
-  status,
-}: Pick<WorkflowsSearch, "app" | "status">): RunFilter => ({
-  ...(app === undefined ? {} : { app }),
-  ...(status === undefined ? {} : { status }),
+): Promise<RunsRead> => ({
+  runs: await loadFromCore(
+    core,
+    async (session) => await listRuns(session, filter),
+    left
+  ),
 });
 
-/**
- * What of the address's run filters isn't on offer once the App filter's
- * options are read, to drop, or null: an App it doesn't offer (one the
- * reader can't open, or that is gone), as it would filter the log by an
- * App the filter can't show.
- */
-const strayOf = (
-  app: string | undefined,
-  read: { data: RunsRead } | undefined
-): { app: undefined } | null =>
-  app !== undefined &&
-  read?.data.apps.state === "ready" &&
-  !read.data.apps.data.some(({ value }) => value === app)
-    ? { app: undefined }
-    : null;
+/** The run filters `search` sets: what the log reads. */
+const filterOf = ({ status }: Pick<WorkflowsSearch, "status">): RunFilter =>
+  status === undefined ? {} : { status };
 
 /** One read of the log: the filters it was read for, and what it answers. */
 interface LogRead {
@@ -609,17 +529,16 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
   const core = useCore();
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
-  const { app, status } = Route.useSearch();
-  const key = JSON.stringify(filterOf({ app, status }));
+  const { status } = Route.useSearch();
+  const key = JSON.stringify(filterOf({ status }));
   // The loader's read is taken once, on the first read after that loader
   // run: a later change of filters, back to these too, reads again, as
   // the runs may have moved on since.
   const taken = useRef<LogRead | null>(null);
-  const navigate = useNavigate({ from: "/workflows/" });
   const [read, setRead] = useState<{ key: string; data: RunsRead }>();
   useEffect(() => {
     const left = new AbortController();
-    const filter = filterOf({ app, status });
+    const filter = filterOf({ status });
     const fresh = taken.current !== log;
     taken.current = log;
     const load = async (): Promise<void> => {
@@ -636,34 +555,22 @@ const RunsLogRead = ({ log }: { log: LogRead }) => {
     return () => {
       left.abort();
     };
-  }, [core, log, app, status]);
-  const stray = strayOf(app, read);
-  useEffect(() => {
-    if (stray !== null) {
-      void navigate({
-        replace: true,
-        search: (previous) => ({ ...previous, ...stray }),
-      });
-    }
-  }, [stray, navigate]);
+  }, [core, log, status]);
   if (read === undefined) {
     return <LoadingLines lines={4} />;
   }
   // Read for other filters than those now chosen: the filters stay, and
   // the log is loading rather than showing runs the filters don't say.
   const current = read.key === key;
-  const filtered = app !== undefined || status !== undefined;
+  const filtered = status !== undefined;
   return (
     <div className="flex flex-col gap-4">
-      <RunFilters
-        apps={read.data.apps.state === "ready" ? read.data.apps.data : []}
-      />
+      <RunFilters />
       {current ? null : <LoadingLines lines={4} />}
       {current && read.data.runs.state === "ready" ? (
         <RunsLog
           empty={filtered ? t`No runs match these filters.` : undefined}
           me={identity.userId}
-          model={read.data.model}
           more={read.data.runs.data.more}
           runs={read.data.runs.data.runs}
         />
@@ -731,7 +638,6 @@ const Workflows = () => {
               <div className="mt-4 flex flex-col gap-8">
                 {lists.workflows.state === "ready" ? (
                   <ListedWorkflows
-                    apps={lists.apps}
                     independent={lists.independent}
                     process={process}
                     processes={lists.processes}
@@ -746,7 +652,6 @@ const Workflows = () => {
           <TabsContent value="needs">
             {page.tab === "needs" ? (
               <NeedsAttention
-                apps={lists.apps}
                 goLives={lists.goLives}
                 independent={lists.independent}
                 me={identity.userId}
@@ -765,7 +670,7 @@ const Workflows = () => {
               <div className="mt-4 flex flex-col gap-8">
                 {page.today.state === "ready" ? (
                   <TodayLanes
-                    processes={laneProcessesOf(lists)}
+                    processes={lists.processes}
                     today={page.today.data}
                   />
                 ) : (
@@ -782,37 +687,15 @@ const Workflows = () => {
   );
 };
 
-/**
- * The processes Today's lanes serve, from what the lists read: an App
- * workflow its App's, an independent one its own.
- */
-const laneProcessesOf = (lists: Lists): LaneProcesses => ({
-  apps: lists.processes,
-  independent: new Map(
-    lists.independent.state === "ready"
-      ? lists.independent.data.map((workflow) => [
-          workflow.id,
-          workflow.process,
-        ])
-      : []
-  ),
-});
-
-/** The business process each App, and each independent workflow, serves, by its ID. */
+/** The business process each workflow serves, by its ID. */
 const processesOf = (
-  apps: Loaded<App[]>,
   independent: Loaded<WorkflowResource[]>
-): AppProcesses =>
-  new Map([
-    ...(apps.state === "ready"
-      ? apps.data.map((app) => [app.id, app.process ?? null] as const)
-      : []),
-    ...(independent.state === "ready"
-      ? independent.data.map(
-          (workflow) => [workflow.id, workflow.process] as const
-        )
-      : []),
-  ]);
+): WorkflowProcesses =>
+  new Map(
+    independent.state === "ready"
+      ? independent.data.map((workflow) => [workflow.id, workflow.process])
+      : []
+  );
 
 /**
  * What the lists show, read on every tab, as the tabs count them: the
@@ -822,22 +705,17 @@ const processesOf = (
 interface Lists {
   workflows: Loaded<WorkflowSummary[]>;
   independent: Loaded<WorkflowResource[]>;
-  /** The Apps, read for the processes they serve (`processes`). */
-  apps: Loaded<App[]>;
-  processes: AppProcesses;
+  processes: WorkflowProcesses;
   goLives: Loaded<WorkflowGoLiveWaiting[]>;
 }
 
 const readLists = async (core: CoreConnection): Promise<Lists> => {
-  const [workflows, independent, apps, goLives] = await Promise.all([
+  const [workflows, independent, goLives] = await Promise.all([
     loadFromCore(core, listWorkflows),
     loadFromCore(
       core,
       async (session) => await session.workflowResources.list()
     ),
-    // For the processes the Apps serve: read like the rest, so a list
-    // filtered by a process can tell when it couldn't check them.
-    loadFromCore(core, async (session) => await session.apps.list()),
     loadFromCore(
       core,
       async (session) => await session.workflowResources.lifecycle.waiting()
@@ -846,8 +724,7 @@ const readLists = async (core: CoreConnection): Promise<Lists> => {
   return {
     workflows,
     independent,
-    apps,
-    processes: processesOf(apps, independent),
+    processes: processesOf(independent),
     goLives,
   };
 };
@@ -860,7 +737,6 @@ const searchOf = (search: Record<string, unknown>): WorkflowsSearch => ({
   ...(search.tab !== "runs" && isProcess(search.process)
     ? { process: search.process }
     : {}),
-  ...(typeof search.app === "string" ? { app: search.app } : {}),
   ...(isStatus(search.status) ? { status: search.status } : {}),
 });
 

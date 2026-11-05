@@ -122,11 +122,10 @@ type Columns = Readonly<Record<string, SQLiteColumn>>;
 
 /**
  * The runs of the Apps `apps` started from `start` to `now`, as `query`
- * asks: their own workflows' runs, by workflow ID, and the runs of the
- * independent workflows each binds now (`app_workflow_bindings`), by the
- * alias the App binds it under, whoever started them: the App's workflows,
- * whichever kind. Read through the run view (workflows/run-view.ts), each
- * arm by the index of its App's or workflow's runs.
+ * asks: the runs of the independent workflows each binds now
+ * (`app_workflow_bindings`), by the alias the App binds it under, whoever
+ * started them. Read through the run view (workflows/run-view.ts), by the
+ * index of each workflow's runs.
  */
 const workflowRunsMeasure = async (
   env: Env,
@@ -148,35 +147,26 @@ const workflowRunsMeasure = async (
   const run = runView(
     db,
     {
-      apps,
       workflows: [...new Set(bindings.map(({ workflow }) => workflow))],
       ownWorkflows: [],
       principal: "",
     },
     now,
-    (arm) =>
-      and(
-        // An App's workflow by its own index; a bound one by its alias, below.
-        arm.kind === "app" && where.workflow !== undefined
-          ? sql`${arm.workflow} = ${where.workflow}`
-          : undefined,
-        sql`${arm.createdAt} >= ${start.getTime()}`,
-        sql`${arm.createdAt} <= ${now.getTime()}`
-      )
+    (columns) =>
+      sql`${columns.createdAt} >= ${start.getTime()} AND ${columns.createdAt} <= ${now.getTime()}`
   );
   if (run === undefined) {
     return [];
   }
   // A bound workflow's run counts for each App binding it, under its alias.
   const bound = and(
-    sql`${run.app} IS NULL`,
     eq(appWorkflowBindings.workflowResourceId, sql`${run.workflow}`),
     eq(appWorkflowBindings.status, "active"),
     inList(appWorkflowBindings.appId, apps)
   );
   const columns: Readonly<Record<string, SQL>> = {
-    app: sql`coalesce(${run.app}, ${appWorkflowBindings.appId})`,
-    workflow: sql`coalesce(${appWorkflowBindings.alias}, ${run.workflow})`,
+    app: sql`${appWorkflowBindings.appId}`,
+    workflow: sql`${appWorkflowBindings.alias}`,
   };
   const grouped = groupBy.flatMap((name) => columns[name] ?? []);
   const rows = await db
@@ -185,14 +175,11 @@ const workflowRunsMeasure = async (
       count: count(),
     })
     .from(run)
-    .leftJoin(appWorkflowBindings, bound)
+    .innerJoin(appWorkflowBindings, bound)
     .where(
-      and(
-        sql`(${run.app} IS NOT NULL OR ${appWorkflowBindings.appId} IS NOT NULL)`,
-        where.workflow === undefined
-          ? undefined
-          : sql`${columns.workflow} = ${where.workflow}`
-      )
+      where.workflow === undefined
+        ? undefined
+        : sql`${columns.workflow} = ${where.workflow}`
     )
     .groupBy(...grouped)
     // Without a group, no points still makes one row: none, then.

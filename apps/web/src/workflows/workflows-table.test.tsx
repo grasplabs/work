@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
-import type { ResourceWorkflowSummary } from "@grasp-os/shared/workflows";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -22,8 +22,7 @@ import { WorkflowsTable } from "./workflows-table.tsx";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
-const independent: ResourceWorkflowSummary = {
-  type: "resource",
+const independent: WorkflowSummary = {
   workflowId: workflowResourceIdSchema.parse("wf-1"),
   name: "Intake",
   version: 1,
@@ -37,7 +36,7 @@ const independent: ResourceWorkflowSummary = {
 let root: Root | undefined;
 
 /** The table of `rows`, as the Workflows page shows it. */
-const shown = async (rows: ResourceWorkflowSummary[]): Promise<void> => {
+const shown = async (rows: WorkflowSummary[]): Promise<void> => {
   const rootRoute = createRootRoute();
   const index = createRoute({
     getParentRoute: () => rootRoute,

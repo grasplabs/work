@@ -95,12 +95,9 @@ const shown = async () => {
   const waiting = {
     held: { state: "ready", data: [] },
     outcomes: { state: "ready", data: [] },
-    failed: {
+    notifications: {
       state: "ready",
-      data: {
-        page: { notifications: [], unread: 0, more: false },
-        model: undefined,
-      },
+      data: { page: { notifications: [], unread: 0, more: false } },
     },
     reconnect: { state: "ready", data: [] },
     versions: { state: "ready", data: [] },

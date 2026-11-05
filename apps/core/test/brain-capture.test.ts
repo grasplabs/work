@@ -58,8 +58,6 @@ const executionsOf = async (id: string): Promise<string[]> => {
   return events.map(({ execution }) => execution);
 };
 
-describe("a workflow run's outcome", () => {});
-
 /** A member with their own chats, answered by `replies`. */
 const chatter = async (...replies: ProviderReply[]) => {
   const person = await signedInApi(idp, "user");

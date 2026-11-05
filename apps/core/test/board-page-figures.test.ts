@@ -15,6 +15,7 @@ import {
   saveWorkflow,
   seedMap,
   seedRuns,
+  payOf,
   seedSignals,
   take,
   valueOf,
@@ -211,22 +212,17 @@ describe("the board page", { timeout: 90_000 }, () => {
     const { admin, app, map } = await setUp();
     const { payables } = await seedMap(admin, map);
     // 501 workflows of a linked App ran: more groups than a snapshot reads.
-    const bulk = `bulk-${unique()}-`;
+    const { workflow, principal } = await payOf(payables);
     await env.DB.prepare(
-      "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 501) INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) SELECT ?1 || i, ?2, 'w' || i, 1, NULL, 'completed', ?3, ?3 FROM n"
+      "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 501) INSERT INTO app_workflow_bindings (id, app_id, alias, workflow_resource_id, workflow_resource_version, status, bound_by, bound_at) SELECT ?1 || i, ?2, 'w' || i, ?3, 1, 'active', ?4, ?5 FROM n"
     )
-      .bind(bulk, payables, Date.now())
+      .bind(`bulk-${unique()}-`, payables, workflow, principal, Date.now())
       .run();
-    try {
-      expect({
-        taken: codeOf(await take(admin, app)),
-        listed: await listed(admin, app),
-      }).toStrictEqual({ taken: "board.figures_incomplete", listed: [] });
-    } finally {
-      await env.DB.prepare("DELETE FROM workflow_runs WHERE id LIKE ?")
-        .bind(`${bulk}%`)
-        .run();
-    }
+    await seedRuns(payables, 1, 0);
+    expect({
+      taken: codeOf(await take(admin, app)),
+      listed: await listed(admin, app),
+    }).toStrictEqual({ taken: "board.figures_incomplete", listed: [] });
   });
 
   it("keeps what a snapshot froze when the workflows, runs and signals change later, and when its narrative is written", async () => {

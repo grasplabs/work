@@ -1,10 +1,17 @@
 import { appErrors } from "@grasp-os/shared/apps";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { installBuiltinBlueprint } from "../src/app-blueprints.ts";
+import {
+  builtins,
+  fingerprintOf,
+  loadBuiltinRelease,
+} from "../src/builtins.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { outcome, refusal, signedInApi } from "./sign-in.ts";
+import { refusal, signedInApi } from "./sign-in.ts";
 
 // An App holds no workflows of its own (GRA-1367). What it reaches is what
 // its version declares: each resource in its manifest, bound and approved
@@ -17,9 +24,9 @@ import { outcome, refusal, signedInApi } from "./sign-in.ts";
 // - code under `workflows/` committed into an App, which would run as the
 //   App's own workflow with the App's permissions, its calls read from its
 //   code rather than listed and approved: every commit refuses it, naming
-//   it, and commits nothing (the chat's agent: agent-builds.test.ts; a
-//   blueprint: app-no-workflows.ts holds every write that makes a version);
-// - a run of such a workflow started by name: an App has none to start.
+//   it, and commits nothing (the chat's agent: agent-builds.test.ts);
+// - such code in a blueprint, reaching an App created from it, or one
+//   updated to its newer code: neither is made, and nothing of it kept.
 
 const idp = mockIdp();
 
@@ -73,13 +80,56 @@ describe("an App's own workflows", () => {
     });
   });
 
-  it("can't be started by name: an App has none", async () => {
+  it("are refused in a blueprint an App is created from, or updated to, with nothing made", async () => {
     const builder = await signedInApi(idp, "builder");
-    const { id: app } = await builder.api.apps.create({ name: "Ledger" });
-    await release(builder, app, { "AGENTS.md": "# Ledger\n" });
-
-    await expect(
-      outcome(builder.api.workflows.start(app, "steal"))
-    ).resolves.toBe("workflow.not_found");
+    const builtinRelease = await loadBuiltinRelease();
+    await builtins(env).ensureInstalled(await fingerprintOf(builtinRelease));
+    const hello = builtinRelease.blueprints.find(({ id }) => id === "hello");
+    if (hello === undefined) {
+      throw new Error("The global setup didn't embed the tests' built-in");
+    }
+    // Made from the release's `hello`, before any workflow code is in it.
+    const { app: copy } = await builder.api.apps.blueprints.create("hello", {
+      name: "Copy",
+    });
+    const before = await builder.api.apps.list();
+    await installBuiltinBlueprint(env, {
+      ...hello,
+      files: { ...hello.files, ...stealing },
+    });
+    try {
+      const created = await refusal(
+        builder.api.apps.blueprints.create("hello", { name: "Stolen" })
+      );
+      const offered = await builder.api.apps.blueprints.update(copy.id);
+      if (offered === null) {
+        throw new Error("No update was offered");
+      }
+      const updated = await refusal(
+        builder.api.apps.blueprints.acceptUpdate(copy.id, {
+          to: offered.to,
+          over: offered.over,
+        })
+      );
+      const after = await builder.api.apps.list();
+      const versions = await builder.api.apps.versions.list(copy.id);
+      expect({
+        refused: [created, updated].map((error) => ({
+          code: appErrors.codeOf(error),
+          issues: refusedSchema.parse(error).details.issues,
+        })),
+        apps: after.length - before.length,
+        versions: versions.map(({ version }) => version),
+      }).toStrictEqual({
+        refused: [
+          { code: "app.no_workflows", issues: ["workflows/steal.ts"] },
+          { code: "app.no_workflows", issues: ["workflows/steal.ts"] },
+        ],
+        apps: 0,
+        versions: [1],
+      });
+    } finally {
+      await installBuiltinBlueprint(env, hello);
+    }
   });
 });

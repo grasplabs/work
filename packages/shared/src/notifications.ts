@@ -8,33 +8,14 @@ export const notificationErrors = defineErrorFamily({
 });
 
 // What core tells a signed-in person in the product (core's
-// notifications.ts): that a workflow failed while acting for them, that
-// an admin asked them one of the brain's open questions, that a
+// notifications.ts): that an admin asked them one of the brain's open
+// questions, that a
 // schedule trigger of theirs stopped, that connect stopped hearing a
 // mailbox or drive their triggers listen to, or that packages of an App
 // or workflow they build or approved were revoked as malware, or what an
 // App's server code told them (`ctx.notifyPeople`, core's
 // app-notifications.ts).
 // Only they see their own; nobody else is told.
-
-/**
- * A workflow of an App failed while acting for the person: one per App
- * and workflow while unread, counting each failure until it is read.
- */
-export interface RunFailedNotification {
-  id: string;
-  type: "run_failed";
-  app: string;
-  appName: string;
-  workflow: string;
-  /** The latest run that failed: the one to ask the agent to fix. */
-  run: string;
-  /** How many runs failed since it was made. */
-  failures: number;
-  /** When the latest failed (ISO 8601). */
-  at: string;
-  read: boolean;
-}
 
 /**
  * An admin asked the person one of the brain's open questions, as the
@@ -139,7 +120,6 @@ export interface AppMessageNotification {
 
 export type Notification =
   | AppMessageNotification
-  | RunFailedNotification
   | GapAskedNotification
   | TriggerStoppedNotification
   | PackageRevokedNotification

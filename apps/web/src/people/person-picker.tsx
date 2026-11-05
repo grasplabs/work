@@ -53,7 +53,7 @@ export const matchTyped = (
     : 0;
 
 /** Someone's portrait: their initials. */
-const PersonAvatar = ({ name }: { name: string }) => (
+export const PersonAvatar = ({ name }: { name: string }) => (
   <Avatar size="sm">
     <AvatarFallback>{initials(name)}</AvatarFallback>
   </Avatar>

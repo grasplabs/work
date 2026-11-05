@@ -324,18 +324,6 @@ export const deliveryAt = async (
 };
 
 /**
- * Whether `build` of `app` gets the App's data now, for a push: a
- * refusal is recorded, and answers false.
- */
-export const deliveryOpen = async (
-  env: Env,
-  by: Pick<Identity, "userId" | "staff">,
-  app: AppId,
-  build: LeasedBuild | undefined,
-  at: Refused
-): Promise<boolean> => (await deliveryAt(env, by, app, build, at)) === "open";
-
-/**
  * Refuses, with `screen.revoked` or `screen.unreviewed`, unless `build`
  * of `app` gets the App's data now. The refusal is recorded first.
  */

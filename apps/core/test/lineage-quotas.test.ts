@@ -439,4 +439,3 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
 });
 
 // Kept until a JSON run shows it: an App run's lineage, as before.
-describe("an App run's lineage quotas", { timeout: 90_000 }, () => {});

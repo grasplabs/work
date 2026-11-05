@@ -1,8 +1,4 @@
-import {
-  appIdSchema,
-  workflowIdSchema,
-  workflowResourceIdSchema,
-} from "@grasp-os/shared/ids";
+import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import {
   runActivityQuerySchema,
@@ -22,7 +18,6 @@ import type { Member } from "../auth/identity.ts";
 import { workflowDecisions } from "../db/core/schema.ts";
 import { stillOpen } from "../decisions/decisions.ts";
 import { runView, visibleToMember } from "./run-view.ts";
-import type { ListedApp } from "./run-view.ts";
 
 // The runs a person can list, started over the last days, and the people
 // they needed: the dashboard's Runs widget. The same runs as the Workflows
@@ -32,12 +27,11 @@ import type { ListedApp } from "./run-view.ts";
 // Everything is counted from the runs started in the window, by the UTC
 // day they started, as they stand now: a run started on Monday that fails
 // on Tuesday is one of Monday's failed runs, and the decisions counted are
-// those runs' decisions. Runs are read by the start of their App's runs
-// (`workflow_runs_app_idx`, as the platform's `workflow_runs` statistic
-// reads them) or their workflow's (`workflow_resource_runs_newest_idx`),
-// their decisions by run (`workflow_decisions_run_status_idx`), so a read
-// takes the runs of the window and no more, in three grouped statements:
-// one batch, so their counts agree.
+// those runs' decisions. Runs are read by the start of their workflow's
+// runs (`workflow_resource_runs_newest_idx`), their decisions by run
+// (`workflow_decisions_resource_run_step_idx`), so a read takes the runs
+// of the window and no more, in three grouped statements: one batch, so
+// their counts agree.
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -71,9 +65,8 @@ const dayNumber = (run: Runs): SQL<number> =>
 
 /**
  * How a decision of a run stands at `now`: answered, timed out, open (one
- * someone can still answer, of a run that hasn't ended and nobody asked to
- * cancel), or none of these: past its deadline or of a run that ended,
- * which nobody answers.
+ * someone can still answer, of a run that hasn't ended), or none of these:
+ * past its deadline or of a run that ended, which nobody answers.
  */
 const decisionBucketOf = (run: Runs, now: Date): SQL<string> => sql<string>`CASE
   WHEN ${workflowDecisions.status} <> 'open' THEN ${workflowDecisions.status}
@@ -89,8 +82,6 @@ const dayRowSchema = z.object({
 });
 
 const workflowRowSchema = z.object({
-  kind: z.enum(["app", "resource"]),
-  app: z.string().nullable(),
   workflow: z.string(),
   bucket: z.enum(runBuckets),
   asked: z.number(),
@@ -127,53 +118,30 @@ const noActivity = (first: number, last: number): RunActivity => ({
   workflows: [],
 });
 
-/** A workflow's entry, with no runs yet, and where the lists put it. */
-const entryOf = (
-  row: z.infer<typeof workflowRowSchema>,
-  apps: ReadonlyMap<string, { app: ListedApp; index: number }>,
-  named: ReadonlyMap<string, { workflow: WorkflowResource; index: number }>
-): (RunActivityWorkflow & { order: number }) | undefined => {
-  const counts = { started: 0, completed: 0, failed: 0, completedAlone: 0 };
-  if (row.kind === "resource") {
-    const found = named.get(row.workflow);
-    return found === undefined
-      ? undefined
-      : {
-          type: "resource",
-          workflowId: workflowResourceIdSchema.parse(found.workflow.id),
-          name: found.workflow.name,
-          ...counts,
-          order: found.index,
-        };
-  }
-  const found = row.app === null ? undefined : apps.get(row.app);
-  return found === undefined
-    ? undefined
-    : {
-        type: "app",
-        app: appIdSchema.parse(found.app.id),
-        appName: found.app.name,
-        workflow: workflowIdSchema.parse(row.workflow),
-        current: found.app.workflows.includes(row.workflow),
-        ...counts,
-        order: found.index,
-      };
-};
-
 /**
  * Each workflow's runs, from `rows` (by workflow, how each stands, and
- * whether it asked a person), with where the lists put it: those of an
- * App or independent workflow the lists don't hold are left out.
+ * whether it asked a person), in the order of `named`: those of a workflow
+ * it doesn't hold are left out.
  */
 const workflowsOf = (
   rows: readonly z.infer<typeof workflowRowSchema>[],
-  apps: ReadonlyMap<string, { app: ListedApp; index: number }>,
-  named: ReadonlyMap<string, { workflow: WorkflowResource; index: number }>
-): (RunActivityWorkflow & { order: number })[] => {
-  const workflows = new Map<string, RunActivityWorkflow & { order: number }>();
+  named: readonly WorkflowResource[]
+): RunActivityWorkflow[] => {
+  const ran = new Map<string, RunActivityWorkflow>(
+    named.map((workflow) => [
+      workflow.id,
+      {
+        workflowId: workflowResourceIdSchema.parse(workflow.id),
+        name: workflow.name,
+        started: 0,
+        completed: 0,
+        failed: 0,
+        completedAlone: 0,
+      },
+    ])
+  );
   for (const row of rows) {
-    const key = JSON.stringify([row.app, row.workflow]);
-    const entry = workflows.get(key) ?? entryOf(row, apps, named);
+    const entry = ran.get(row.workflow);
     if (entry !== undefined) {
       entry.started += row.count;
       if (row.bucket === "completed" || row.bucket === "failed") {
@@ -182,18 +150,16 @@ const workflowsOf = (
       if (row.bucket === "completed" && row.asked !== 1) {
         entry.completedAlone += row.count;
       }
-      workflows.set(key, entry);
     }
   }
-  return [...workflows.values()];
+  return [...ran.values()].filter(({ started }) => started > 0);
 };
 
 /**
  * The runs `by` can list started over `days` UTC days up to `to` (today
  * unless given), both included (`runActivityQuerySchema`, as `input`), by
  * day and how they stand at `now`, the decisions they asked for, and each
- * workflow's: an App's by App name, then workflow, then the independent
- * ones by name. A `to` after today is refused.
+ * workflow's, by name. A `to` after today is refused.
  */
 export const runActivity = async (
   env: Env,
@@ -220,8 +186,8 @@ export const runActivity = async (
     db,
     visible.scope,
     now,
-    (arm) =>
-      sql`${arm.createdAt} >= ${first * dayMs} AND ${arm.createdAt} <= ${until.getTime()}`
+    (columns) =>
+      sql`${columns.createdAt} >= ${first * dayMs} AND ${columns.createdAt} <= ${until.getTime()}`
   );
   if (run === undefined) {
     return noActivity(first, last);
@@ -240,25 +206,17 @@ export const runActivity = async (
       .groupBy(dayNumber(run), bucket, sql`${run.asked}`),
     db
       .select({
-        kind: run.kind,
-        app: run.app,
         workflow: run.workflow,
         bucket,
         asked: run.asked,
         count: count(),
       })
       .from(run)
-      .groupBy(
-        sql`${run.kind}`,
-        sql`${run.app}`,
-        sql`${run.workflow}`,
-        bucket,
-        sql`${run.asked}`
-      ),
+      .groupBy(sql`${run.workflow}`, bucket, sql`${run.asked}`),
     db
       .select({ bucket: decisionBucket, count: count() })
       .from(run)
-      .innerJoin(workflowDecisions, eq(workflowDecisions.runId, run.id))
+      .innerJoin(workflowDecisions, eq(workflowDecisions.resourceRunId, run.id))
       .groupBy(decisionBucket),
   ]);
 
@@ -279,29 +237,9 @@ export const runActivity = async (
         row.count;
     }
   }
-  // Each workflow under its place in the lists: its App's, then its own.
-  const apps = new Map(
-    visible.apps.map((app, index) => [app.id, { app, index }])
-  );
-  const named = new Map(
-    visible.workflows.map((workflow, index) => [
-      workflow.id,
-      { workflow, index: apps.size + index },
-    ])
-  );
-  const workflows = workflowsOf(
+  activity.workflows = workflowsOf(
     z.array(workflowRowSchema).parse(workflowRows),
-    apps,
-    named
+    visible.workflows
   );
-  activity.workflows = workflows
-    .toSorted(
-      (a, b) =>
-        a.order - b.order ||
-        (a.type === "app" && b.type === "app"
-          ? a.workflow.localeCompare(b.workflow)
-          : 0)
-    )
-    .map(({ order: _order, ...entry }) => entry);
   return activity;
 };

@@ -59,18 +59,10 @@ export default app({
 const screenSaying = (text: string): string =>
   `export default () => <p>${text}</p>;\n`;
 
-/** The run each App `newApp` makes has: one that has ended. */
-const runOf = (app: string): string => `run-${app}`;
-
-/** A released App of `owner`'s, sealed, with an ended run. */
+/** A released App of `owner`'s, sealed. */
 const newApp = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `Desk ${unique()}` });
-  const version = await release(owner, id, files);
-  await env.DB.prepare(
-    "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'report', ?, ?, 'completed', ?, ?)"
-  )
-    .bind(runOf(id), id, version, owner.userId, Date.now(), Date.now())
-    .run();
+  await release(owner, id, files);
   return id;
 };
 
@@ -105,10 +97,6 @@ const callsOn = async ({ api }: Person, app: string) => ({
   ),
   open: await outcome(api.screens.open(app, "desk")),
   call: await functionOutcome({ api }, app),
-  runs: await outcome(api.workflows.list(app)),
-  status: await outcome(api.workflows.status(runOf(app))),
-  start: await outcome(api.workflows.start(app, "report")),
-  allRuns: await outcome(api.workflows.runs({ app })),
   members: await outcome(api.apps.members.list(app)),
   // Its code and settings.
   read: await outcome(api.apps.files.read(app)),
@@ -121,7 +109,6 @@ const callsOn = async ({ api }: Person, app: string) => ({
   propose: await outcome(api.apps.versions.propose(app, 1)),
   setCurrent: await outcome(api.apps.versions.setCurrent(app, 1)),
   errors: await outcome(api.screens.errors(app)),
-  cancel: await outcome(api.workflows.cancel(runOf(app))),
   permission: await outcome(
     api.permissions.request({
       ...outlook(app),
@@ -141,11 +128,6 @@ const asUser = {
   open: "ok",
   // Past the role check: the App's release has no such function.
   call: "operation.not_found",
-  runs: "ok",
-  status: "ok",
-  // Past the role check: the App has no such workflow.
-  start: "workflow.not_found",
-  allRuns: "ok",
   members: "ok",
   read: "role.forbidden",
   commit: "role.forbidden",
@@ -155,7 +137,6 @@ const asUser = {
   propose: "role.forbidden",
   setCurrent: "role.forbidden",
   errors: "role.forbidden",
-  cancel: "role.forbidden",
   permission: "role.forbidden",
   share: "role.forbidden",
 };
@@ -252,7 +233,6 @@ describe("App roles", { timeout: 60_000 }, () => {
       propose: "ok",
       setCurrent: "ok",
       errors: "ok",
-      cancel: "ok",
       permission: "ok",
       // Refused for the team there isn't, past the role check.
       share: "app.member_invalid",

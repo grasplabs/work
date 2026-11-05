@@ -13,7 +13,7 @@ import type {
 
 import type { PendingRequests } from "../activity/pending.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import type { NotificationsPage } from "./failed-workflows.tsx";
+import type { NotificationsPage } from "./notifications-page.ts";
 
 // What waits on the person, as the dashboard and the inbox read it
 // (`read-dashboard.ts`), apart from how either shows it.
@@ -27,7 +27,8 @@ export interface Waiting {
   held: Loaded<PendingAction[]>;
   /** Calls of the person's whose answer was lost, for them to say what became of each. */
   outcomes: Loaded<UnknownOutcome[]>;
-  failed: Loaded<NotificationsPage>;
+  /** The latest page of the person's notifications. */
+  notifications: Loaded<NotificationsPage>;
   /** Connections whose access ran out, among those the person may sign in to again. */
   reconnect: Loaded<SignInAgainItem[]>;
   /** Versions of Apps the person answers for, up for review. */

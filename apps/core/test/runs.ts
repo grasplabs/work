@@ -95,43 +95,6 @@ export const sleeping = async (run: string, step: string): Promise<void> => {
   );
 };
 
-/**
- * Once the run, `stopped` and `resumed`, began a sleep in a step whose
- * name starts with `step` in the resumed activation: as `sleeping`, but
- * only a sleep the engine reports after it resumed the run counts. The
- * resumed activation has then replayed every step before that sleep.
- */
-export const sleepingOnceResumed = async (
-  run: string,
-  step: string
-): Promise<void> => {
-  using events = await runInstance(run).subscribe({
-    filter: ["workflow_paused", "workflow_running", "sleep_started"],
-  });
-  let paused = false;
-  let resumedRun = false;
-  await vi.waitFor(
-    async () => {
-      const { done, value } = await events.next();
-      if (done === true) {
-        throw new Error(`Run ${run} ended before it slept in ${step}`);
-      }
-      if (value.type === "workflow_paused") {
-        paused = true;
-        resumedRun = false;
-      } else if (value.type === "workflow_running" && paused) {
-        resumedRun = true;
-      }
-      expect(
-        resumedRun &&
-          value.type === "sleep_started" &&
-          value.stepName.startsWith(step)
-      ).toBeTruthy();
-    },
-    { timeout: 10_000, interval: 100 }
-  );
-};
-
 /** Where a run stands with its sleep `step`, as its journal has it. */
 type SleepState = "ended" | "passed" | "asleep" | "not_yet";
 
@@ -487,17 +450,6 @@ export const admittedFreely = async (): Promise<AttemptAdmission> =>
       await Promise.resolve();
     },
   });
-
-/**
- * The rows of an App's workflows or runs among `rows`, which list
- * independent workflows' too.
- */
-export const ofApps = <Row extends { type: "app" | "resource" }>(
-  rows: readonly Row[]
-): Extract<Row, { type: "app" }>[] =>
-  rows.filter(
-    (row): row is Extract<Row, { type: "app" }> => row.type === "app"
-  );
 
 /** A run of an independent workflow, as core keeps it. */
 export interface SeededResourceRun {

@@ -107,7 +107,6 @@ const setUp = async (via: "teams" | "web", ...replies: ProviderReply[]) => {
     person.userId,
     id,
     undefined,
-    undefined,
     via
   );
   const provider = await fakeProvider(...replies);

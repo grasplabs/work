@@ -23,7 +23,6 @@ import {
 import type { Person } from "./json-workflow-apps.ts";
 import { runMinuteTasks, runQuarterHourTasks } from "./maintenance.ts";
 import { configuredLimits } from "./quota-limits.ts";
-import { endLiveRuns } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, unique } from "./sign-in.ts";
 import { connectDb, testBinding } from "./test-env.ts";
@@ -816,15 +815,5 @@ describe(
         }
       );
     });
-  }
-);
-
-// Kept until a JSON run's mail can wait for its person: an App's
-// restricted run, as before.
-describe(
-  "runs an App run's mail to a watched mailbox starts",
-  { timeout: 180_000 },
-  () => {
-    afterEach(endLiveRuns);
   }
 );

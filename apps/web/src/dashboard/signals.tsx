@@ -29,7 +29,6 @@ import { LoadingLines } from "../frame/page-states.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { AskToFix } from "../workflows/fix-in-chat.tsx";
 import { signalKinds } from "./board.ts";
 import type { SignalKind } from "./board.ts";
 import { ItemMark } from "./dashboard-card.tsx";
@@ -52,8 +51,6 @@ export interface Signals {
   knowledge: KnowledgeSignals | undefined;
   /** Engine names by ID. */
   engines: ReadonlyMap<string, string>;
-  /** The model a fix is asked with, if any. */
-  model: string | undefined;
 }
 
 /** Each kind of signal's mark and name, as its rows and the block's counts show them. */
@@ -138,11 +135,9 @@ const About = ({
 const ImprovementRow = ({
   signal,
   engines,
-  model,
 }: {
   signal: ImprovementSignal;
   engines: ReadonlyMap<string, string>;
-  model: string | undefined;
 }) => {
   const { t, i18n } = useLingui();
   const about = <About engines={engines} signal={signal} />;
@@ -163,16 +158,8 @@ const ImprovementRow = ({
   }
   if (signal.kind === "failing_step") {
     const { failures, runs } = signal.evidence;
-    const [latest] = signal.evidence.recent ?? [];
     return (
-      <SignalRow
-        action={
-          latest === undefined || model === undefined ? undefined : (
-            <AskToFix model={model} run={latest} />
-          )
-        }
-        kind="failing_step"
-      >
+      <SignalRow kind="failing_step">
         <Trans>
           Step {step} of {about} failed in {failures} of{" "}
           <Plural one="# run" other="# runs" value={runs} /> in{" "}
@@ -333,7 +320,6 @@ const SignalList = ({ signals }: { signals: Signals }) => {
           <ImprovementRow
             engines={signals.engines}
             key={`${signal.kind}:${signal.app ?? ""}:${signal.workflow ?? ""}:${signal.subject ?? ""}`}
-            model={signals.model}
             signal={signal}
           />
         ))}

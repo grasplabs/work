@@ -15,7 +15,6 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { approvalApp } from "./approval-app.ts";
 import { pastAccessRecheck, published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
@@ -97,22 +96,6 @@ const revoked = async (app: string, version: number): Promise<void> => {
     { app: appIdSchema.parse(app), version },
     "Leaks data"
   );
-};
-
-/** A page's callback that is never pushed to, and whether core let go of it. */
-const releasable = () => {
-  const state = { released: false };
-  const callback = Object.assign(
-    (): void => {
-      // Nothing is pushed to it.
-    },
-    {
-      [Symbol.dispose]: (): void => {
-        state.released = true;
-      },
-    }
-  );
-  return { state, callback };
 };
 
 /** The refusals among `events` for `app`, as what was refused where. */
@@ -261,7 +244,9 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
         notes: await outcome(
           notesFrame.watchQuery(request, follower().callback)
         ),
-        notesRuns: await outcome(notesFrame.runs("invoices")),
+        notesDecision: await outcome(
+          notesFrame.reviewDecision("run-1", "review", { approved: true })
+        ),
         notesDelivery: await notesFrame.delivery(),
         other: await outcome(
           otherFrame.watchQuery(otherRequest, follower().callback)
@@ -270,7 +255,9 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
         unleased: await outcome(
           unleased.watchQuery(otherRequest, follower().callback)
         ),
-        unleasedRuns: await outcome(unleased.runs("invoices")),
+        unleasedDecision: await outcome(
+          unleased.reviewDecision("run-1", "review", { approved: true })
+        ),
       };
     });
 
@@ -285,17 +272,17 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
       beforePushed: [[]],
       after: {
         notes: "screen.revoked",
-        notesRuns: "screen.revoked",
+        notesDecision: "screen.revoked",
         notesDelivery: "revoked",
         other: "ok",
         otherDelivery: "open",
         unleased: "screen.unreviewed",
-        unleasedRuns: "screen.unreviewed",
+        unleasedDecision: "screen.unreviewed",
       },
       // Each refused by the gate, as its own frame's build.
       refused: [
-        "runs/admission: revoked",
-        "runs/admission: unreviewed",
+        "reviewDecision/admission: revoked",
+        "reviewDecision/admission: unreviewed",
         "watchQuery/admission: revoked",
         "watchQuery/admission: unreviewed",
       ],
@@ -395,17 +382,15 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
       closedFollow: await outcome(
         closing.watchQuery(request, follower().callback)
       ),
-      closedRuns: await outcome(
-        closing.watchRuns("invoices", () => {
-          // Never followed.
-        })
+      closedDecision: await outcome(
+        closing.reviewDecision("run-1", "review", { approved: true })
       ),
     }).toStrictEqual({
       toClosing: [[]],
       closingReleased: true,
       stayingReleased: false,
       closedFollow: "screen.invalid",
-      closedRuns: "screen.invalid",
+      closedDecision: "screen.invalid",
     });
   });
 
@@ -443,29 +428,6 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
       answered,
       pushedAfter: toClosed.titles.flat().includes("After the close"),
     }).toStrictEqual({ answered: "ok", pushedAfter: false });
-  });
-
-  it("lets go at once of what a frame that closed while core opened it follows", async () => {
-    const builder = await personApi("builder");
-    const app = await approvalApp(builder);
-    // No lease of core's: the App's data allows any build here.
-    const frame = await builder.api.screens.frame(app, "");
-    const toClosed = releasable();
-
-    // Sent one after the other: the close arrives while core still
-    // admits the follow, or waits for the App's host to take it.
-    const following = outcome(frame.watchRuns("approval", toClosed.callback));
-    await frame.close();
-    const answered = await following;
-
-    // Nothing is pushed: only the frame having closed lets go of it.
-    await vi.waitFor(
-      () => {
-        expect(toClosed.state.released).toBeTruthy();
-      },
-      { timeout: 5000, interval: 50 }
-    );
-    expect(answered).toBe("ok");
   });
 
   it("answers a frame's delivery only to someone who still has a role in the App", async () => {

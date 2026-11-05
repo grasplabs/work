@@ -3,14 +3,12 @@ import { runIdSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import type { RunControl, WorkflowRun } from "@grasp-os/shared/workflows";
+import type { RunControl } from "@grasp-os/shared/workflows";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { and, asc, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { z } from "zod";
 
-import { appFor } from "../apps.ts";
 import { auditedBatch, outboxedEventWhere } from "../audit-outbox.ts";
 import { apps, workflowRunControls, workflowRuns } from "../db/core/schema.ts";
 import { markRunCancelled, runEngine, settleRunCancel } from "./engine.ts";
@@ -21,7 +19,6 @@ import {
   nextRevision,
   projectEnded,
   runEntry,
-  toRun,
   unended,
 } from "./runs.ts";
 import type { RunRow } from "./runs.ts";
@@ -64,8 +61,6 @@ import type { RunRow } from "./runs.ts";
 type ControlRow = typeof workflowRunControls.$inferSelect;
 
 export type ControlKind = RunControl["kind"];
-
-const controlKindSchema = z.enum(["pause", "resume", "cancel"]);
 
 /** Who asks for a control, as its receipt and audit event name them. */
 type Requester = Pick<Identity, "userId" | "staff">;
@@ -511,59 +506,6 @@ const control = async (
     row = again;
   }
   throw workflowErrors.create("workflow.control_conflict");
-};
-
-/** The run `run` names, or `workflow.run_not_found`. */
-const foundRun = async (env: Env, run: unknown): Promise<RunRow> => {
-  const id = runIdSchema.safeParse(run);
-  const row = id.success ? await findRun(env, id.data) : undefined;
-  if (row === undefined) {
-    throw workflowErrors.create("workflow.run_not_found");
-  }
-  return row;
-};
-
-/**
- * Cancels a run for a builder of its App (the Workflows API), and answers
- * the run as its row says once the engine has heard: `cancelled` once the
- * engine confirmed the end, as it does for a run it terminates.
- */
-export const cancelRun = async (
-  env: Env,
-  by: Identity,
-  run: unknown
-): Promise<WorkflowRun> => {
-  const row = await foundRun(env, run);
-  await appFor(env, by, row.appId, "builder");
-  if (unended.includes(row.status)) {
-    await control(env, by, row, "cancel");
-  }
-  return toRun(env, await foundRun(env, row.id));
-};
-
-/**
- * Pauses, resumes or cancels a run of `app` from one of its screens, for a
- * builder of the App: the role the Workflows API asks of whoever cancels a
- * run, and nobody else. A run of another App is `workflow.run_not_found`.
- * Audited as asked on a screen (`via: "screen"`).
- */
-export const controlScreenRun = async (
-  env: Env,
-  by: Identity,
-  app: unknown,
-  run: unknown,
-  kind: unknown
-): Promise<RunControl> => {
-  const asked = controlKindSchema.safeParse(kind);
-  if (!asked.success) {
-    throw workflowErrors.create("workflow.invalid");
-  }
-  const { id } = await appFor(env, by, app, "builder");
-  const row = await foundRun(env, run);
-  if (row.appId !== id) {
-    throw workflowErrors.create("workflow.run_not_found");
-  }
-  return await control(env, by, row, asked.data, "screen");
 };
 
 /**

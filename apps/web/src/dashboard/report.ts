@@ -11,13 +11,12 @@ import type {
 } from "@grasp-os/shared/onboarding";
 import type { RunActivity } from "@grasp-os/shared/workflows";
 import type { I18n, MessageDescriptor } from "@lingui/core";
-import { msg, ph, plural } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 
 import { plainText } from "../chat/chat-markdown.ts";
 import type { ExportFigure } from "../export/figure-tiles.tsx";
 import { formatDate } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
-import { workflowName } from "../workflows/lists.ts";
 import { byKindOrder } from "./board.ts";
 import { signalKindLooks } from "./signals.tsx";
 
@@ -240,19 +239,11 @@ const workflowsSection = (
     return [heading, unread(i18n)];
   }
   const ran = runs.data.workflows.map((workflow) => {
-    const name = plainText(workflowName(workflow));
+    const name = plainText(workflow.name);
     const { started, completed, failed } = workflow;
-    if (workflow.type === "resource") {
-      return item(
-        i18n._(
-          msg`${name}: ${started} started, ${completed} completed, ${failed} failed`
-        )
-      );
-    }
-    const engine = plainText(workflow.appName);
     return item(
       i18n._(
-        msg`${name} in ${ph({ app: engine })}: ${started} started, ${completed} completed, ${failed} failed`
+        msg`${name}: ${started} started, ${completed} completed, ${failed} failed`
       )
     );
   });

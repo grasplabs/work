@@ -13,19 +13,12 @@ import { mockIdp } from "./idp.ts";
 import { seedResourceRun } from "./runs.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
-// The Workflows page: every workflow of every App a person can open, and
-// the runs across them; and the workflows that use a connection. What
-// could go wrong: a workflow or run of an App someone can't open showing
-// up, counts that count the wrong runs, a waiting run lost below the
-// others, or a workflow listed to someone it isn't shared with, or still
-// listed once its approval goes. An independent workflow's use of a
-// connection runs as a JSON workflow. Kept as App runs until independent
-// workflows have a Workflows page: the page's list, the Runs tab (its
-// order, filters, paging, queued runs and index reads), each read from
-// App versions and runs only. Gone with App workflows, which read them
-// from an App's code: a workflow's view of its steps and parameters, its
-// Test, and the App workflows calling their App's permission on a
-// connection.
+// The Workflows page: every independent workflow a person has a role in,
+// the runs across them, and the workflows that use a connection. What
+// could go wrong: a workflow or run someone has no role in showing up,
+// counts that count the wrong runs, or a workflow listed to someone it
+// isn't shared with, or still listed once its approval goes. A workflow's
+// use of a connection runs as a JSON workflow.
 
 const idp = mockIdp();
 
@@ -50,22 +43,19 @@ const workflowsUsing = async (
  */
 const independent = async (person: Person) => {
   const all = await person.api.workflows.overview();
-  return all.flatMap((row) =>
-    row.type === "resource" ? [{ ...row, owner: row.owner.userId }] : []
-  );
+  return all.map((row) => ({ ...row, owner: row.owner.userId }));
 };
 
 const minute = 60_000;
 const day = 24 * 60 * minute;
 
-// Releasing a version compiles its workflows and runs their tests, and a
-// Test runs them again in an isolate: on a loaded runner that takes
-// longer than the default five seconds. Sixty is room for a slow runner,
-// not for a hang.
+// Signing people in and connecting accounts takes longer than the
+// default five seconds on a loaded runner. Sixty is room for a slow
+// runner, not for a hang.
 const buildTime = { timeout: 60_000 };
 
 describe("the Workflows page", buildTime, () => {
-  it("lists the independent workflows a person has a role in after the Apps', each summed up from the runs its page lists them", async () => {
+  it("lists the independent workflows a person has a role in, each summed up from the runs its page lists them", async () => {
     const [owner, user, stranger] = await Promise.all([
       personApi("builder"),
       personApi("user"),
@@ -109,7 +99,6 @@ describe("the Workflows page", buildTime, () => {
     ]);
     const [usersLatest, ownersLatest] = runs.slice(2);
     const summary = (change: object) => ({
-      type: "resource",
       workflowId: workflow.id,
       name: workflow.name,
       version: null,

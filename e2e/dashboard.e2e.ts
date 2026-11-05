@@ -1,3 +1,4 @@
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -8,8 +9,8 @@ import { pileOf, toCard } from "./pile.ts";
 
 // The dashboard, from the nav: what waits on the person; the widget
 // board under it, with the prototype's return, goals, teams and
-// workflows, then where their engines stand, the runs this week and what
-// could be better, each block opening in full; and,
+// workflows, then the Apps, the runs this week and what could be better,
+// each block opening in full; and,
 // for admins, the latest of the audit trail. Each person lays out their
 // own board: widgets taken off, added back and moved stay so over a
 // reload, until they put it back as it began. Without a plan for the
@@ -17,11 +18,121 @@ import { pileOf, toCard } from "./pile.ts";
 // a plan, are in e2e/onboarding.e2e.ts, which runs after this file, as a
 // plan can't be taken back. What waits is a pile of
 // cards gone through one at a time, and what is settled on its own page
-// under it; what fills them is the failed-run, held-write and approval
-// journeys' (notifications, chat, activity, screen approval).
+// under it; what fills them is the held-write and approval journeys'
+// (chat, activity, screen approval).
 
 /** How long a page may take to show what core said. */
 const pageRead = { timeout: 20_000 };
+
+const objectSchema = (properties: Record<string, unknown>) => ({
+  format: "json",
+  document: {
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+  },
+});
+
+/** An independent workflow `name` that counts in one step, and is done. */
+const countingDefinition = (name: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: [{ count: { set: { status: "counted" } } }],
+  });
+
+test("a builder sees their workflows on the board, and opens them in full", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("dashboardBoard");
+  const tag = crypto.randomUUID().slice(0, 8);
+  const { core, api } = apiOf(builder);
+  let made: { id: string; name: string }[] = [];
+  try {
+    made = await Promise.all(
+      [`tally-${tag}`, `later-${tag}`].map(async (name) => {
+        const workflow = await api.workflowResources.create(name);
+        await api.workflowResources.publish(workflow.id, {
+          definition: countingDefinition(workflow.name),
+          basedOn: null,
+        });
+        return { id: workflow.id, name: workflow.name };
+      })
+    );
+    const [counted] = made;
+    if (counted === undefined) {
+      throw new Error("No workflow was made");
+    }
+    const { runId } = await api.workflowResources.start(counted.id, {
+      version: 1,
+      input: { who: "Ada" },
+      key: `count-${tag}`,
+    });
+    await expect(async () => {
+      // Awaited first: `expect` would probe the RPC promise's stub itself.
+      const run = await api.workflowResources.run(counted.id, runId ?? "");
+      expect(run.status).toBe("completed");
+    }).toPass({ timeout: 30_000 });
+  } finally {
+    core[Symbol.dispose]();
+  }
+  const [tally, later] = made;
+  if (tally === undefined || later === undefined) {
+    throw new Error("Expected two workflows");
+  }
+
+  const page = await pageOf(builder);
+  await page.goto("/dashboard");
+
+  // Where the workflows stand: a dot for each, in its state's column.
+  const workflows = page.getByRole("region", { name: "Workflows" });
+  await expect(
+    workflows
+      .getByRole("list", { name: "Ran" })
+      .getByRole("link", { name: tally.name })
+  ).toBeVisible(pageRead);
+  await expect(
+    workflows
+      .getByRole("list", { name: "Not run yet" })
+      .getByRole("link", { name: later.name })
+  ).toBeVisible();
+
+  // The run, completed today, which needed nobody.
+  const runs = page.getByRole("region", { name: "Runs this week" });
+  await expect(runs).toContainText("100% without a person", pageRead);
+
+  // In full, the month, with each workflow's runs.
+  await runs.getByRole("button", { name: "Open in full" }).click();
+  let dialog = page.getByRole("dialog", { name: "Runs this week" });
+  await expect(
+    dialog
+      .getByRole("region", { name: "By workflow" })
+      .getByRole("row")
+      .filter({ hasText: tally.name })
+  ).toContainText("1");
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  // In full, each state with its workflows, each opening its own page.
+  await workflows.getByRole("button", { name: "Open in full" }).click();
+  dialog = page.getByRole("dialog", { name: "Workflows" });
+  await dialog
+    .getByRole("list", { name: "Ran" })
+    .getByRole("link", { name: tally.name })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`/workflows/${tally.id}$`, "u"));
+});
 
 test("someone with nothing waiting sees no pile or activity, and a board with nothing on it yet", async ({
   pageOf,

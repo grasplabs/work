@@ -30,6 +30,7 @@ import m0027 from './0027_drop_email_preferences.sql';
 import m0028 from './0028_chat_files.sql';
 import m0029 from './0029_drop_chat_projects.sql';
 import m0030 from './0030_build_job_notice_owed.sql';
+import m0031 from './0031_drop_chat_attachments.sql';
 
   export default {
     journal,
@@ -64,7 +65,8 @@ m0026,
 m0027,
 m0028,
 m0029,
-m0030
+m0030,
+m0031
     }
   }
   

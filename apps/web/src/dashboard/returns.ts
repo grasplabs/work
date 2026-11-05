@@ -1,8 +1,5 @@
 import type { Goal } from "@grasp-os/shared/brain";
-import type {
-  AppWorkflowSummary as WorkflowSummary,
-  RunActivity,
-} from "@grasp-os/shared/workflows";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 
@@ -11,13 +8,11 @@ import { msg } from "@lingui/core/macro";
 // board's goals are, and how far each team is with AI, read from the work
 // itself. The return, goals and teams widgets draw it
 // (`standard-widgets.tsx`). Core keeps the board's goals and the
-// workflows linked to each (`brain.goals`), the team that owns each
-// workflow (`WorkflowSummary.team`) and how many items its runs handled
-// without a person (`RunActivityWorkflow.completedAlone`), but no hours by
-// hand and no stage on the way to live yet. So the goals and teams
-// widgets show how far the workflows are, without a return; the return
-// widget gets nothing, and says so as the prototype does; once core has
-// the rest, it fills these shapes. Euros are the
+// workflows linked to each (`brain.goals`), but no team that owns a
+// workflow, no hours by hand and no stage on the way to live yet. So the
+// goals widget shows how far the workflows are, without a return; the
+// return and teams widgets get nothing, and say so as the prototype does;
+// once core has the rest, it fills these shapes. Euros are the
 // value of the hours by hand at the client's own rate, never money saved.
 
 /**
@@ -60,8 +55,8 @@ export type ReturnBasis =
 
 /** The workflow a return is of: where it opens, and whose work it is. */
 export interface ReturnWorkflow {
-  /** The engine it is in, and its name there: where it opens. */
-  app: string;
+  /** The workflow's ID, where it opens, and its name. */
+  id: string;
   name: string;
   /** The team whose work it is, and the board goal it serves, if any. */
   teamId: string | null;
@@ -86,9 +81,8 @@ export interface WorkflowReturn {
   basis: ReturnBasis;
 }
 
-/** A workflow's key among the others: its engine and its name. */
-export const returnKey = ({ workflow }: WorkflowReturn): string =>
-  `${workflow.app}/${workflow.name}`;
+/** A workflow's key among the others: its ID. */
+export const returnKey = ({ workflow }: WorkflowReturn): string => workflow.id;
 
 /** What all the work adds up to, a month. */
 export interface ReturnTotals {
@@ -182,24 +176,22 @@ export interface TeamProgress {
 /**
  * The board's goals as core keeps them (`brain.goals`), each by its newest
  * wording, with the workflows linked to it that `workflows` lists: live
- * once it handled items this week, else in its test (it is built, in an
- * App, and handles nothing yet). Core keeps no hours, so no return: a
- * workflow's is unknown.
+ * once it handled items this week, else in its test (it is built, and
+ * handles nothing yet). Core keeps no hours, so no return: a workflow's
+ * is unknown.
  */
 export const goalProgressOf = (
   goals: readonly Goal[],
   workflows: readonly WorkflowSummary[]
 ): GoalProgress[] =>
   goals.map((goal) => {
-    const rows = goal.workflows.flatMap(({ app, workflow }) => {
-      const summary = workflows.find(
-        (each) => each.app === app && each.workflow === workflow
-      );
+    const rows = goal.workflows.flatMap((id) => {
+      const summary = workflows.find((each) => each.workflowId === id);
       if (summary === undefined) {
         return [];
       }
       const row: WorkflowReturn = {
-        workflow: { app, name: workflow, teamId: null, goalId: goal.id },
+        workflow: { id, name: summary.name, teamId: null, goalId: goal.id },
         stage: summary.handled > 0 ? "live" : "testing",
         hoursBefore: null,
         hoursAfter: null,
@@ -220,88 +212,6 @@ export const goalProgressOf = (
       coming: 0,
     };
   });
-
-/** How the teams widget is drawn: each team, and the workflows each owns. */
-export interface TeamsRead {
-  teams: TeamProgress[];
-  rows: WorkflowReturn[];
-}
-
-/**
- * Each of the organization's teams that owns a workflow `workflows` lists,
- * the furthest first, with what its workflows handled over `activity`'s
- * days and how many of those items without a person. A workflow is live
- * once it handled items this week, else in its test (it is built, in an
- * App, and handles nothing yet); so is its team. Core keeps no hours or
- * drawn work, so no share, cost or return, and no team is behind.
- */
-export const teamProgressOf = (
-  workflows: readonly WorkflowSummary[],
-  activity: RunActivity
-): TeamsRead => {
-  const ran = new Map(
-    activity.workflows.flatMap((each) =>
-      each.type === "app"
-        ? [[`${each.app}/${each.workflow}`, each] as const]
-        : []
-    )
-  );
-  const rows: WorkflowReturn[] = [];
-  const teams = new Map<string, TeamProgress>();
-  for (const summary of workflows) {
-    const { team } = summary;
-    if (team === null) {
-      continue;
-    }
-    const stage: Stage = summary.handled > 0 ? "live" : "testing";
-    rows.push({
-      workflow: {
-        app: summary.app,
-        name: summary.workflow,
-        teamId: team.id,
-        goalId: null,
-      },
-      stage,
-      hoursBefore: null,
-      hoursAfter: null,
-      before: null,
-      after: null,
-      back: null,
-      cut: null,
-      basis: "unknown",
-    });
-    const progress = teams.get(team.id) ?? {
-      id: team.id,
-      name: team.name,
-      level: "testing",
-      workflows: 0,
-      mapped: 0,
-      redesign: 0,
-      testing: 0,
-      live: 0,
-      share: null,
-      cost: 0,
-      measured: 0,
-      expected: 0,
-      handled: 0,
-      alone: 0,
-      needsHelp: false,
-    };
-    const counted = ran.get(`${summary.app}/${summary.workflow}`);
-    progress.workflows += 1;
-    progress[stage] += 1;
-    progress.handled += counted?.completed ?? 0;
-    progress.alone += counted?.completedAlone ?? 0;
-    progress.level = progress.live > 0 ? "live" : "testing";
-    teams.set(team.id, progress);
-  }
-  return {
-    rows,
-    teams: [...teams.values()].toSorted(
-      (a, b) => b.live - a.live || a.name.localeCompare(b.name)
-    ),
-  };
-};
 
 /** What the board's return, goals and teams widgets are drawn from. */
 export interface WorkReturns {

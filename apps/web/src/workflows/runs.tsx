@@ -21,14 +21,12 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 
 import { formatDateTime, formatSince } from "../format.ts";
-import { AskToFix } from "./fix-in-chat.tsx";
 
 // Runs as the Workflows page and a workflow's page list them, in the
 // prototype's runs log (grasplabs/prototype `components/runs-log.tsx`):
 // when, the workflow, who started it, and what happened, with a dot in
 // the status colours. A run waiting for a decision links to where it is
-// answered; a failed one says why and offers a fix in chat. An independent
-// workflow's run says what its workflow's page lists of it: what it
+// answered. A run says what its workflow's page lists of it: what it
 // returned or why it failed stays on the run.
 
 const statusLabels: Readonly<Record<RunStatus, MessageDescriptor>> = {
@@ -46,12 +44,8 @@ export const runStatusLabel = (status: RunStatus): string =>
   i18n._(statusLabels[status]);
 
 /** Who started a run, in words, for the person `me`. */
-const startedByOf = ({ startedBy }: ListedRun, me: string): string => {
-  if (startedBy.type === "trigger") {
-    return i18n._(msg`Automatically`);
-  }
-  return startedBy.userId === me ? i18n._(msg`You`) : i18n._(msg`Someone else`);
-};
+const startedByOf = ({ startedBy }: ListedRun, me: string): string =>
+  startedBy.userId === me ? i18n._(msg`You`) : i18n._(msg`Someone else`);
 
 /**
  * Why a queued run waits, and when it asks again at the latest: throttling,
@@ -165,21 +159,16 @@ export const RunResult = ({
 
 /**
  * What happened: the status, with the link to the decision it waits for
- * when the person may answer it (core sends it only then), or, for those
- * who see it, why it failed and a fix in chat. That reason is the
- * workflow's own text, shown as text. A run whose details were removed,
- * its retention over, says so in place of the reason, which went with them.
+ * when the person may answer it (core sends it only then).
  */
-const RunOutcome = ({
-  run,
-  model,
-}: {
-  run: ListedRun;
-  model: string | undefined;
-}) => {
-  const { t } = useLingui();
-  const decide =
-    run.decision === undefined ? null : (
+const RunOutcome = ({ run }: { run: ListedRun }) => (
+  <div className="flex flex-col items-start gap-1">
+    <RunResult
+      aiProvider={run.aiProvider}
+      queued={run.queued}
+      status={run.status}
+    />
+    {run.decision === undefined ? null : (
       <Link
         className="underline-offset-4 hover:underline"
         params={{ decision: run.decision }}
@@ -187,50 +176,9 @@ const RunOutcome = ({
       >
         <Trans>Decide</Trans>
       </Link>
-    );
-  if (run.type === "resource") {
-    return (
-      <div className="flex flex-col items-start gap-1">
-        <RunResult
-          aiProvider={run.aiProvider}
-          queued={run.queued}
-          status={run.status}
-        />
-        {decide}
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col items-start gap-1">
-      <RunResult
-        aiProvider={run.aiProvider}
-        queued={run.queued}
-        status={run.status}
-      />
-      {decide}
-      {run.failure === undefined || run.detailsRemoved ? null : (
-        <span className="text-muted-foreground text-xs">
-          {run.failure.step === null
-            ? run.failure.error.message
-            : t`At ${ph({ step: run.failure.step })}: ${ph({ error: run.failure.error.message })}`}
-        </span>
-      )}
-      {run.detailsRemoved ? (
-        <span className="text-muted-foreground text-xs">
-          <Trans>Details removed</Trans>
-        </span>
-      ) : null}
-      {/* Only where the person sees why it failed: core fixes nothing
-          else, nor a run whose details are gone. */}
-      {run.status === "failed" &&
-      run.failure !== undefined &&
-      !run.detailsRemoved &&
-      model !== undefined ? (
-        <AskToFix inLog model={model} run={run.id} />
-      ) : null}
-    </div>
-  );
-};
+    )}
+  </div>
+);
 
 /** When a run started. */
 const RunTime = ({ run }: { run: ListedRun }) => (
@@ -239,47 +187,33 @@ const RunTime = ({ run }: { run: ListedRun }) => (
   </span>
 );
 
-/** A run's workflow, opening it, over its engine or that it is independent. */
-const RunWorkflow = ({ run }: { run: ListedRun }) =>
-  run.type === "app" ? (
-    <div className="flex flex-col">
-      <span>{run.workflow}</span>
-      <span className="text-muted-foreground">{run.appName}</span>
-    </div>
-  ) : (
-    <div className="flex flex-col">
-      <Link
-        className="underline-offset-4 hover:underline"
-        params={{ workflow: run.workflowId }}
-        to="/workflows/$workflow"
-      >
-        {run.name}
-      </Link>
-      <span className="text-muted-foreground">
-        <Trans>Independent</Trans>
-      </span>
-    </div>
-  );
+/** A run's workflow, opening it. */
+const RunWorkflow = ({ run }: { run: ListedRun }) => (
+  <Link
+    className="underline-offset-4 hover:underline"
+    params={{ workflow: run.workflowId }}
+    to="/workflows/$workflow"
+  >
+    {run.name}
+  </Link>
+);
 
 /**
  * The runs log, in the order core lists them (waiting runs first); with
  * each one's workflow unless `withWorkflow` is false, as on a workflow's
  * own page. `more` says core had more than it sent; `empty` what to say
- * when there are none, such as that none match the filters. `model` is
- * the one a fix in chat asks with, if there is one.
+ * when there are none, such as that none match the filters.
  */
 export const RunsLog = ({
   runs,
   more,
   me,
-  model,
   empty,
   withWorkflow = true,
 }: {
   runs: ListedRun[];
   more: boolean;
   me: string;
-  model: string | undefined;
   empty?: string;
   withWorkflow?: boolean;
 }) => {
@@ -331,7 +265,7 @@ export const RunsLog = ({
                   className="align-top whitespace-normal"
                   variant="card"
                 >
-                  <RunOutcome model={model} run={run} />
+                  <RunOutcome run={run} />
                 </TableCell>
               </TableRow>
             ))}

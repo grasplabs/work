@@ -51,7 +51,6 @@ import {
   previewRefresh,
   previewRuntime,
   referenceOf,
-  screenHooks,
   screenRuntime,
   screenSdk,
   sdkRoot,
@@ -182,16 +181,14 @@ const uiEntries = (): Entry[] =>
  * module, so the provider the runtime mounts is the one the hooks read.
  */
 const sdkEntries = (extra: readonly string[] = []): Entry[] =>
-  [sdkRoot, screenHooks, screenSdk, screenRuntime, ...extra].map(
-    (specifier) => {
-      const target =
-        exportsOf(sdk)[`.${specifier.slice("@grasp-os/sdk".length)}`];
-      if (typeof target !== "string") {
-        throw new TypeError(`@grasp-os/sdk doesn't export ${specifier}`);
-      }
-      return { specifier, id: path.join(sdk, target) };
+  [sdkRoot, screenSdk, screenRuntime, ...extra].map((specifier) => {
+    const target =
+      exportsOf(sdk)[`.${specifier.slice("@grasp-os/sdk".length)}`];
+    if (typeof target !== "string") {
+      throw new TypeError(`@grasp-os/sdk doesn't export ${specifier}`);
     }
-  );
+    return { specifier, id: path.join(sdk, target) };
+  });
 
 /**
  * lucide-react's icons, one module each, and the export names App code
@@ -1737,7 +1734,6 @@ const buildAppCompiler = async (
   const imports = [
     ...reactImports,
     ...components.map(({ specifier }) => specifier),
-    screenHooks,
     screenSdk,
     sdkRoot,
   ];

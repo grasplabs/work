@@ -1,11 +1,4 @@
-import {
-  appIdSchema,
-  runIdSchema,
-  workflowIdSchema,
-  workflowResourceIdSchema,
-} from "@grasp-os/shared/ids";
-import type { WorkflowId } from "@grasp-os/shared/ids";
-import type { Identity } from "@grasp-os/shared/rpc";
+import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import {
   failedRunDays,
@@ -15,84 +8,50 @@ import {
   workflowErrors,
 } from "@grasp-os/shared/workflows";
 import type {
-  AppListedRun,
-  AppWorkflowSummary,
   LatestRun,
   ListedRun,
-  ResourceListedRun,
-  ResourceWorkflowSummary,
   RunFilterStatus,
   RunsPage,
   RunStatus,
   WorkflowSummary,
 } from "@grasp-os/shared/workflows";
-import { and, desc, eq, gt, inArray, notExists, or, sql } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
+import { and, desc, eq, gt, notExists, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
-import { appsBuiltBy } from "../app-access.ts";
-import { appFor } from "../apps.ts";
 import type { Member } from "../auth/identity.ts";
 import {
   users,
   workflowDecisions,
   workflowResourceRuns,
-  workflowRuns,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import { answerableBy, stillOpen } from "../decisions/decisions.ts";
 import { queuedRuns } from "./admission.ts";
-import { ownerKey, ownersSet, setWorkflowOwner } from "./owners.ts";
-import type { RunRow as ResourceRunRow } from "./resource-runs.ts";
+import type { RunRow } from "./resource-runs.ts";
 import {
   hasOpenDecision,
   listOf,
   orderedRuns,
-  runUnended,
   runView,
-  scopeOf,
-  visibleApps,
   visibleToMember,
   waits,
 } from "./run-view.ts";
-import type {
-  ListedApp,
-  RunArm,
-  RunOrder,
-  RunScope,
-  RunWhere,
-} from "./run-view.ts";
-import {
-  goesOn,
-  queuedRun,
-  runFor,
-  shownStatus,
-  unended,
-  workflowInputSchema,
-} from "./runs.ts";
-import type { RunRow } from "./runs.ts";
-import { setWorkflowTeam, teamKey, teamsSet } from "./teams.ts";
+import type { RunOrder, RunScope, RunWhere } from "./run-view.ts";
+import { goesOn, queuedRun, shownStatus, unended } from "./runs.ts";
 
-// Every workflow a person can see, an App's or an independent one, and
-// their runs: the Workflows page, its Runs tab and the workflow view. A
-// person sees the workflows and runs of every App they can open
-// (app-access.ts), and the independent workflows they have a role in, with
-// the runs their pages list them: every run for a builder, their own for a
-// user (run-view.ts). What each App's run shows them is what `list` shows
-// for one App (`runFor`); an independent workflow's run, what its page
-// lists of it.
+// Every independent workflow a person has a role in, and their runs: the
+// Workflows page, its Runs tab and the workflow view, with the runs their
+// pages list them: every run for a builder, their own for a user
+// (run-view.ts).
 //
 // A run waits when it hasn't ended and one of its decisions is still
 // open, as answering decides it (`stillOpen`): open, and not past its
 // deadline. It goes on once someone answers it, on the decision's own
-// page. A run that waits otherwise (a sleep, a feature switched
-// off, a decision past its deadline that it hasn't timed out yet) goes on
-// by itself, and counts as running. Only an App's runs show as waiting
-// yet (run-view.ts); an independent workflow's run leads to an open
-// decision of its that the person may answer.
+// page. A run that waits otherwise (a sleep, a decision past its deadline
+// that it hasn't timed out yet) goes on by itself, and counts as running.
 //
 // A run that goes on without a decision to wait for, while a step of it
 // waits for a share of the model requests in flight (model-waits.ts),
@@ -103,63 +62,20 @@ import { setWorkflowTeam, teamKey, teamsSet } from "./teams.ts";
 // The queries are written for a D1 without statistics (a fresh one never
 // has them), where SQLite picks indexes by the query's shape alone. Each
 // list reads one index in the order it returns rows, and stops at a page:
-// runs newest first by `workflow_runs_created_idx` and
-// `workflow_resource_runs_created_idx`, failed runs by their tables'
-// `status_ended` indexes, waiting runs from the open decisions
-// (`workflow_decisions_status_opened_idx`), one App's runs by its own
-// (`workflow_runs_app_idx`, `workflow_runs_app_workflow_idx`), runs that
-// haven't ended by status. A filter that must not pick an index of its
-// own is written `+column`, which SQLite never looks up by an index: so
-// the list of Apps and workflows someone sees never turns a page into a
-// sort of every run of them. workflow-overview.test.ts checks the plans.
+// runs newest first by `workflow_resource_runs_created_idx`, failed runs
+// by `workflow_resource_runs_status_ended_idx`, waiting runs from the open
+// decisions (`workflow_decisions_status_opened_idx`), runs that haven't
+// ended by status. A filter that must not pick an index of its own is
+// written `+column`, which SQLite never looks up by an index: so the list
+// of workflows someone sees never turns a page into a sort of every run of
+// them. workflow-overview.test.ts checks the plans.
 
 type Db = DrizzleD1Database;
 
 const dayMs = 24 * 60 * 60 * 1000;
 
-const invalid = () => workflowErrors.create("workflow.invalid");
-
-/** That a run is one of the Apps `ids`, never looked up by an index. */
-const ofApps = (ids: readonly string[]): SQL =>
-  sql`+${workflowRuns.appId} IN ${listOf(ids)}`;
-
-interface AppWorkflow {
-  app: ListedApp;
-  workflow: WorkflowId;
-}
-
-/**
- * The workflows of each released App's current version, by App, then ID,
- * as the version's row keeps them: no files are read.
- */
-const workflowsOf = (listed: readonly ListedApp[]): AppWorkflow[] =>
-  listed.flatMap((app) =>
-    app.currentVersion === null
-      ? []
-      : app.workflows
-          .toSorted()
-          .map((id) => ({ app, workflow: workflowIdSchema.parse(id) }))
-  );
-
-/**
- * A key of a workflow, for looking its runs up: an App's by its App and
- * ID, an independent one by its ID alone (as the run view has it, its App
- * null).
- */
-const keyOf = (app: string | null, workflow: string): string =>
-  JSON.stringify([app, workflow]);
-
-/** Counts by workflow, as the grouped queries return them. */
-const countsByKey = (
-  rows: readonly { app: string | null; workflow: string; count: number }[]
-): Map<string, number> =>
-  new Map(
-    rows.map(({ app, workflow, count }) => [keyOf(app, workflow), count])
-  );
-
 const latestRunSchema = z.object({
   id: z.string(),
-  app: z.string().nullable(),
   workflow: z.string(),
   status: z.enum([
     "starting",
@@ -176,53 +92,16 @@ const latestRunSchema = z.object({
 type LatestRow = z.infer<typeof latestRunSchema>;
 
 /**
- * Each of `workflows`' latest run: one query, which looks each workflow's
- * latest run up in `workflow_runs_app_workflow_idx`, read newest first and
- * stopped at one, so it reads one run a workflow however many runs each
- * has. (Ranking every run of the Apps in a window instead reads, and
- * sorts, them all.) Runs started in the same millisecond are told apart
- * by no one: either counts as the latest.
+ * Each of the workflows `workflows`' latest run of those `by` sees: any
+ * run of one they build, their own of one they use. One query, which looks
+ * each up in `workflow_resource_runs_newest_idx` newest first and stops at
+ * one, so it reads one run a workflow however many runs each has.
  */
-const latestAppRuns = async (
-  db: Db,
-  workflows: readonly AppWorkflow[],
-  now: Date
-): Promise<LatestRow[]> => {
-  if (workflows.length === 0) {
-    return [];
-  }
-  const pairs = JSON.stringify(
-    workflows.map(({ app, workflow }) => [app.id, workflow])
-  );
-  const rows = await db.all(sql`
-    SELECT latest.id, latest.app_id AS app, latest.workflow_id AS workflow,
-      latest.status, latest.created_at AS createdAt,
-      (latest.status IN ${listOf(unended)} AND EXISTS (
-        SELECT 1 FROM ${workflowDecisions}
-        WHERE ${workflowDecisions.runId} = latest.id
-          AND ${stillOpen(workflowDecisions, now)}
-      )) AS waits
-    FROM json_each(${pairs}) AS wanted
-    INNER JOIN ${workflowRuns} AS latest ON latest.id = (
-      SELECT id FROM ${workflowRuns}
-      WHERE app_id = wanted.value ->> 0
-        AND workflow_id = wanted.value ->> 1
-      ORDER BY created_at DESC
-      LIMIT 1
-    )`);
-  return z.array(latestRunSchema).parse(rows);
-};
-
-/**
- * Each of the independent workflows `workflows`' latest run of those `by`
- * sees: any run of one they build, their own of one they use. One query,
- * which looks each up in `workflow_resource_runs_newest_idx` newest first
- * and stops at one, as for an App's.
- */
-const latestResourceRuns = async (
+const latestRuns = async (
   db: Db,
   by: Member,
-  workflows: readonly WorkflowResource[]
+  workflows: readonly WorkflowResource[],
+  now: Date
 ): Promise<LatestRow[]> => {
   if (workflows.length === 0) {
     return [];
@@ -232,9 +111,13 @@ const latestResourceRuns = async (
   );
   const runs = workflowResourceRuns;
   const rows = await db.all(sql`
-    SELECT latest.id, NULL AS app,
-      latest.workflow_resource_id AS workflow, latest.status,
-      latest.created_at AS createdAt, 0 AS waits
+    SELECT latest.id, latest.workflow_resource_id AS workflow, latest.status,
+      latest.created_at AS createdAt,
+      (latest.ended_at IS NULL AND EXISTS (
+        SELECT 1 FROM ${workflowDecisions}
+        WHERE ${workflowDecisions.resourceRunId} = latest.id
+          AND ${stillOpen(workflowDecisions, now)}
+      )) AS waits
     FROM json_each(${wanted}) AS wanted
     INNER JOIN ${runs} AS latest ON latest.id = (
       SELECT id FROM ${runs}
@@ -248,11 +131,11 @@ const latestResourceRuns = async (
 };
 
 /**
- * The latest runs `rows` by workflow key: `waiting` while one waits for a
+ * The latest runs `rows` by workflow: `waiting` while one waits for a
  * decision; one that goes on otherwise may wait for a share of the
  * attempts running at once.
  */
-const latestByKey = async (
+const latestByWorkflow = async (
   db: Db,
   rows: readonly LatestRow[],
   now: Date
@@ -270,7 +153,7 @@ const latestByKey = async (
         row.waits === 1 ? "waiting" : shownStatus(row.status);
       const queue = queues.get(row.id);
       return [
-        keyOf(row.app, row.workflow),
+        row.workflow,
         {
           id: runIdSchema.parse(row.id),
           ...(status === "running" && queue !== undefined
@@ -284,89 +167,31 @@ const latestByKey = async (
 };
 
 /**
- * The runs `scope` sees that ended `status` since `since`, counted by
- * workflow key: read from the runs ended since, by their tables'
- * `status_ended` indexes.
+ * How many of the runs `scope` sees match `where`, by workflow, read
+ * through the view in the order `where`'s own index gives them.
  */
-const endedSince = async (
+const countedBy = async (
   db: Db,
   scope: RunScope,
-  status: "completed" | "failed",
-  since: Date,
-  now: Date
+  now: Date,
+  where: RunWhere
 ): Promise<Map<string, number>> => {
-  const run = runView(
-    db,
-    scope,
-    now,
-    (arm) =>
-      sql`${arm.status} = ${status} AND ${arm.endedAt} >= ${since.getTime()}`,
-    true
-  );
+  const run = runView(db, scope, now, where, true);
   if (run === undefined) {
     return new Map();
   }
   const rows = await db
-    .select({
-      app: run.app,
-      workflow: run.workflow,
-      count: sql<number>`count(*)`,
-    })
+    .select({ workflow: run.workflow, count: sql<number>`count(*)` })
     .from(run)
-    .groupBy(sql`${run.app}`, sql`${run.workflow}`);
-  return countsByKey(rows);
+    .groupBy(sql`${run.workflow}`);
+  return new Map(rows.map(({ workflow, count }) => [workflow, count]));
 };
 
-/**
- * The runs of the Apps `appIds` waiting for a decision now, by workflow
- * key: counted from the open decisions.
- */
-const waitingByWorkflow = async (
-  db: Db,
-  appIds: readonly string[],
-  now: Date
-): Promise<Map<string, number>> => {
-  if (appIds.length === 0) {
-    return new Map();
-  }
-  const rows = await db
-    .select({
-      app: workflowRuns.appId,
-      workflow: workflowRuns.workflowId,
-      count: sql<number>`count(DISTINCT ${workflowRuns.id})`,
-    })
-    .from(workflowDecisions)
-    .innerJoin(workflowRuns, eq(workflowRuns.id, workflowDecisions.runId))
-    .where(and(stillOpen(workflowDecisions, now), runUnended(), ofApps(appIds)))
-    .groupBy(workflowRuns.appId, workflowRuns.workflowId);
-  return countsByKey(rows);
-};
-
-/**
- * What an App's workflows show besides their runs: their owners
- * (owners.ts), their teams
- * (teams.ts), and the Apps `by` builds, who may change them.
- */
-const appExtrasOf = async (env: Env, by: Member, appIds: readonly string[]) => {
-  if (appIds.length === 0) {
-    return {
-      owners: new Map<string, { userId: string; name: string | null }>(),
-      built: new Set<string>(),
-      teams: new Map<string, { id: string; name: string }>(),
-    };
-  }
-  const [owners, built, teams] = await Promise.all([
-    ownersSet(env, appIds),
-    // Staff change no owner (owners.ts), so whether they build is moot.
-    by.staff ? new Set<string>() : appsBuiltBy(env, by, appIds),
-    teamsSet(env, appIds),
-  ]);
-  return {
-    teams,
-    owners,
-    built,
-  };
-};
+/** That a run ended `status` since `since`. */
+const endedSince =
+  (status: "completed" | "failed", since: Date): RunWhere =>
+  (run) =>
+    sql`${run.status} = ${status} AND ${run.endedAt} >= ${since.getTime()}`;
 
 /** The names of the people `ids`, by ID. */
 const ownerNames = async (
@@ -383,188 +208,84 @@ const ownerNames = async (
   return new Map(rows.map(({ id, name }) => [id, name]));
 };
 
-/** What each workflow's summary counts, by workflow key. */
-interface SummaryCounts {
-  latest: Map<string, LatestRun>;
-  waiting: Map<string, number>;
-  failed: Map<string, number>;
-  handled: Map<string, number>;
-}
-
 /**
- * The summaries of `workflows` (of Apps) and `resources` (independent),
- * for `by`: each one's owner (owners.ts for an App's), latest run, its
- * runs waiting now (counted from the open decisions), those failed lately
- * and those it handled this week (from the runs ended since), and, for an
- * App's, the team that owns
- * it (teams.ts) and whether `by` may change its owner: a fixed number of queries, whatever the number of
- * workflows.
- */
-const summariesOf = async (
-  env: Env,
-  by: Member,
-  workflows: readonly AppWorkflow[],
-  resources: readonly WorkflowResource[]
-): Promise<{
-  apps: AppWorkflowSummary[];
-  resources: ResourceWorkflowSummary[];
-}> => {
-  if (workflows.length === 0 && resources.length === 0) {
-    return { apps: [], resources: [] };
-  }
-  const db = drizzle(env.DB);
-  const appIds = [...new Set(workflows.map(({ app }) => app.id))];
-  const scope = scopeOf(by, appIds, resources);
-  const now = new Date();
-  const failedSince = new Date(now.getTime() - failedRunDays * dayMs);
-  const handledSince = new Date(now.getTime() - handledRunDays * dayMs);
-  const [
-    latestApps,
-    latestResources,
-    waiting,
-    failed,
-    handled,
-    appExtras,
-    resourceOwners,
-  ] = await Promise.all([
-    latestAppRuns(db, workflows, now),
-    latestResourceRuns(db, by, resources),
-    waitingByWorkflow(db, appIds, now),
-    endedSince(db, scope, "failed", failedSince, now),
-    endedSince(db, scope, "completed", handledSince, now),
-    appExtrasOf(env, by, appIds),
-    ownerNames(
-      db,
-      resources.map(({ owner }) => owner)
-    ),
-  ]);
-  const counts: SummaryCounts = {
-    latest: await latestByKey(db, [...latestApps, ...latestResources], now),
-    waiting,
-    failed,
-    handled,
-  };
-  const countsOf = (key: string) => ({
-    lastRun: counts.latest.get(key) ?? null,
-    waiting: counts.waiting.get(key) ?? 0,
-    failed: counts.failed.get(key) ?? 0,
-    handled: counts.handled.get(key) ?? 0,
-  });
-  return {
-    apps: workflows.map(({ app, workflow }) => ({
-      type: "app",
-      app: app.id,
-      appName: app.name,
-      workflow,
-      version: app.currentVersion ?? 0,
-      owner: appExtras.owners.get(ownerKey(app.id, workflow)) ?? {
-        userId: app.ownerId,
-        name: app.ownerName,
-      },
-      changesOwner: appExtras.built.has(app.id),
-      team: appExtras.teams.get(teamKey(app.id, workflow)) ?? null,
-      ...countsOf(keyOf(app.id, workflow)),
-    })),
-    resources: resources.map((resource) => ({
-      type: "resource",
-      workflowId: workflowResourceIdSchema.parse(resource.id),
-      name: resource.name,
-      version: resource.currentVersion,
-      owner: {
-        userId: resource.owner,
-        name: resourceOwners.get(resource.owner) ?? null,
-      },
-      ...countsOf(keyOf(null, resource.id)),
-    })),
-  };
-};
-
-/**
- * Every workflow of the current version of every App `by` can open, by
- * App name, then workflow, then every independent workflow they have a
- * role in, by name.
+ * Every independent workflow `by` has a role in, by name: each with its
+ * owner, latest run, its runs waiting now, those failed lately and those
+ * it handled this week (from the runs ended since): a fixed number of
+ * queries, whatever the number of workflows.
  */
 export const workflowOverview = async (
   env: Env,
   by: Member
 ): Promise<WorkflowSummary[]> => {
-  const visible = await visibleToMember(env, by);
-  const summaries = await summariesOf(
-    env,
-    by,
-    workflowsOf(visible.apps),
-    visible.workflows
-  );
-  return [...summaries.apps, ...summaries.resources];
-};
-
-/**
- * The workflows of the current version of every App `by` can open that
- * `keep` keeps, left out before they are summed up, by App name, then
- * workflow.
- */
-export const appWorkflowOverview = async (
-  env: Env,
-  by: Member,
-  keep: (app: string, workflow: string) => boolean
-): Promise<AppWorkflowSummary[]> => {
-  const summaries = await summariesOf(
-    env,
-    by,
-    workflowsOf(await visibleApps(env, by)).filter(({ app, workflow }) =>
-      keep(app.id, workflow)
+  const { workflows, scope } = await visibleToMember(env, by);
+  if (workflows.length === 0) {
+    return [];
+  }
+  const db = drizzle(env.DB);
+  const now = new Date();
+  const failedSince = new Date(now.getTime() - failedRunDays * dayMs);
+  const handledSince = new Date(now.getTime() - handledRunDays * dayMs);
+  const [latest, waiting, failed, handled, owners] = await Promise.all([
+    latestRuns(db, by, workflows, now),
+    countedBy(db, scope, now, () => waits(now)),
+    countedBy(db, scope, now, endedSince("failed", failedSince)),
+    countedBy(db, scope, now, endedSince("completed", handledSince)),
+    ownerNames(
+      db,
+      workflows.map(({ owner }) => owner)
     ),
-    []
-  );
-  return summaries.apps;
+  ]);
+  const lastRuns = await latestByWorkflow(db, latest, now);
+  return workflows.map((workflow) => ({
+    workflowId: workflowResourceIdSchema.parse(workflow.id),
+    name: workflow.name,
+    version: workflow.currentVersion,
+    owner: {
+      userId: workflow.owner,
+      name: owners.get(workflow.owner) ?? null,
+    },
+    lastRun: lastRuns.get(workflow.id) ?? null,
+    waiting: waiting.get(workflow.id) ?? 0,
+    failed: failed.get(workflow.id) ?? 0,
+    handled: handled.get(workflow.id) ?? 0,
+  }));
 };
 
 const runFilterSchema = z
-  .strictObject({
-    app: appIdSchema.optional(),
-    workflow: workflowInputSchema.optional(),
-    status: z.enum(runFilterStatuses).optional(),
-  })
+  .strictObject({ status: z.enum(runFilterStatuses).optional() })
   .optional();
-
-/** A run a list found, its row as its table keeps it. */
-type FoundRun =
-  | {
-      kind: "app";
-      row: RunRow;
-      /** The decision it waits for, as read from the open decisions. */
-      decision: { id: string; deciders: string } | null;
-    }
-  | { kind: "resource"; row: ResourceRunRow };
 
 /** One more than a page: whether there are more tells itself. */
 const pageAndOne = runsPageSize + 1;
 
 /**
- * Runs waiting for a decision, matching `where`, latest to wait first:
- * read from the open decisions, each run once, with its latest open
- * decision; a page and one. Only an App's runs wait for one yet.
+ * The runs `scope` sees waiting for a decision, latest to wait first: read
+ * from the open decisions, each run once, by its latest open decision; a
+ * page and one.
  */
 const waitingRuns = async (
   db: Db,
-  where: SQL | undefined,
+  scope: RunScope,
   now: Date
-): Promise<FoundRun[]> => {
+): Promise<RunRow[]> => {
+  const run = runView(db, scope, now);
+  if (run === undefined) {
+    return [];
+  }
   const later = alias(workflowDecisions, "later");
   const rows = await db
-    .select({
-      run: workflowRuns,
-      decision: {
-        id: workflowDecisions.id,
-        deciders: workflowDecisions.deciders,
-      },
-    })
+    .select({ run: workflowResourceRuns })
     .from(workflowDecisions)
-    .innerJoin(workflowRuns, eq(workflowRuns.id, workflowDecisions.runId))
+    .innerJoin(
+      workflowResourceRuns,
+      eq(workflowResourceRuns.id, workflowDecisions.resourceRunId)
+    )
     .where(
       and(
         stillOpen(workflowDecisions, now),
-        runUnended(),
+        sql`${workflowResourceRuns.endedAt} IS NULL`,
+        sql`${workflowResourceRuns.id} IN (SELECT ${run.id} FROM ${run})`,
         // Its latest open decision alone, so each run comes once.
         notExists(
           db
@@ -572,7 +293,7 @@ const waitingRuns = async (
             .from(later)
             .where(
               and(
-                eq(later.runId, workflowDecisions.runId),
+                eq(later.resourceRunId, workflowDecisions.resourceRunId),
                 stillOpen(later, now),
                 or(
                   gt(later.openedAt, workflowDecisions.openedAt),
@@ -583,19 +304,17 @@ const waitingRuns = async (
                 )
               )
             )
-        ),
-        where
+        )
       )
     )
     .orderBy(desc(workflowDecisions.openedAt), desc(workflowDecisions.id))
     .limit(pageAndOne);
-  return rows.map(({ run, decision }) => ({ kind: "app", row: run, decision }));
+  return rows.map(({ run: row }) => row);
 };
 
 /**
  * The first page and one of the runs `scope` sees, as `where` narrows the
- * view's arms, in `order` (run-view.ts, `orderedRuns`), with their rows:
- * the view lists them, and each table then gives its own by ID.
+ * view, in `order` (run-view.ts, `orderedRuns`), with their rows.
  */
 const viewRuns = async (
   db: Db,
@@ -603,34 +322,21 @@ const viewRuns = async (
   now: Date,
   where: RunWhere,
   order: RunOrder
-): Promise<FoundRun[]> => {
+): Promise<RunRow[]> => {
   const listed = await orderedRuns(db, scope, now, where, order, pageAndOne);
-  const idsOf = (kind: "app" | "resource") =>
-    listed.flatMap((row) => (row.kind === kind ? [row.id] : []));
-  const [appRows, resourceRows] = await Promise.all([
-    idsOf("app").length === 0
-      ? []
-      : db
-          .select()
-          .from(workflowRuns)
-          .where(inList(workflowRuns.id, idsOf("app"))),
-    idsOf("resource").length === 0
-      ? []
-      : db
-          .select()
-          .from(workflowResourceRuns)
-          .where(inList(workflowResourceRuns.id, idsOf("resource"))),
-  ]);
-  const found = new Map<string, FoundRun>([
-    ...appRows.map((row): [string, FoundRun] => [
-      row.id,
-      { kind: "app", row, decision: null },
-    ]),
-    ...resourceRows.map((row): [string, FoundRun] => [
-      row.id,
-      { kind: "resource", row },
-    ]),
-  ]);
+  if (listed.length === 0) {
+    return [];
+  }
+  const rows = await db
+    .select()
+    .from(workflowResourceRuns)
+    .where(
+      inList(
+        workflowResourceRuns.id,
+        listed.map(({ id }) => id)
+      )
+    );
+  const found = new Map(rows.map((row) => [row.id, row]));
   return listed.flatMap(({ id }) => {
     const one = found.get(id);
     return one === undefined ? [] : [one];
@@ -638,11 +344,10 @@ const viewRuns = async (
 };
 
 /**
- * For each of the runs `runIds`, an App's or an independent workflow's,
- * the latest of its open decisions `by` may answer now (`answerableBy`),
- * if any: one read of their decisions by run
- * (`workflow_decisions_run_status_idx`, `..._resource_run_step_idx`), its
- * status unary-plussed off the organization-wide status index.
+ * For each of the runs `runIds`, the latest of its open decisions `by` may
+ * answer now (`answerableBy`), if any: one read of their decisions by run
+ * (`workflow_decisions_resource_run_step_idx`), its status unary-plussed
+ * off the organization-wide status index.
  */
 const answerableDecisions = async (
   env: Env,
@@ -657,17 +362,13 @@ const answerableDecisions = async (
   const open = await db
     .select({
       id: workflowDecisions.id,
-      runId: workflowDecisions.runId,
-      resourceRunId: workflowDecisions.resourceRunId,
+      runId: workflowDecisions.resourceRunId,
       deciders: workflowDecisions.deciders,
     })
     .from(workflowDecisions)
     .where(
       and(
-        or(
-          sql`${workflowDecisions.runId} IN ${listOf(runIds)}`,
-          sql`${workflowDecisions.resourceRunId} IN ${listOf(runIds)}`
-        ),
+        sql`${workflowDecisions.resourceRunId} IN ${listOf(runIds)}`,
         sql`+${workflowDecisions.status} = 'open'`,
         gt(workflowDecisions.expiresAt, now)
       )
@@ -675,23 +376,40 @@ const answerableDecisions = async (
     .orderBy(desc(workflowDecisions.openedAt), desc(workflowDecisions.id));
   const answerable = await answerableBy(env, by, open);
   const byRun = new Map<string, string>();
-  for (const { id, runId, resourceRunId } of open) {
-    // An App's run's, or an independent workflow's.
-    const run = runId ?? resourceRunId;
-    if (run !== null && answerable.has(id) && !byRun.has(run)) {
-      byRun.set(run, id);
+  for (const { id, runId } of open) {
+    if (runId !== null && answerable.has(id) && !byRun.has(runId)) {
+      byRun.set(runId, id);
     }
   }
   return byRun;
+};
+
+/** Those of the runs `runIds` that wait at `now` for a decision someone can answer. */
+const waitingIds = async (
+  db: Db,
+  runIds: readonly string[],
+  now: Date
+): Promise<Set<string>> => {
+  if (runIds.length === 0) {
+    return new Set();
+  }
+  const rows = await db
+    .selectDistinct({ id: workflowDecisions.resourceRunId })
+    .from(workflowDecisions)
+    .where(
+      and(
+        sql`${workflowDecisions.resourceRunId} IN ${listOf(runIds)}`,
+        stillOpen(workflowDecisions, now)
+      )
+    );
+  return new Set(rows.flatMap(({ id }) => (id === null ? [] : [id])));
 };
 
 /**
  * Runs `by` can see, as `input` (a `RunFilter`) narrows them: waiting
  * first, then failed (latest ended first), then the rest, newest first;
  * at most a page, and whether more matched. A run waiting for a decision
- * says so (`waiting`), with the decision when `by` may answer it now. An
- * App or a workflow in the filter names an App's runs: no independent
- * workflow's run matches it.
+ * says so (`waiting`), with the decision when `by` may answer it now.
  */
 export const listAllRuns = async (
   env: Env,
@@ -700,79 +418,22 @@ export const listAllRuns = async (
 ): Promise<RunsPage> => {
   const parsed = runFilterSchema.safeParse(input);
   if (!parsed.success) {
-    throw invalid();
+    throw workflowErrors.create("workflow.invalid");
   }
   const filter = parsed.data ?? {};
-  if (filter.app !== undefined) {
-    // As for one App's runs: an App they can't open isn't there.
-    await appFor(env, by, filter.app, "user");
-  }
-  const visible = await visibleToMember(env, by);
-  const owners = new Map<string, string>(
-    visible.apps.flatMap(({ id, ownerId }) =>
-      filter.app === undefined || id === filter.app ? [[id, ownerId]] : []
-    )
-  );
-  if (filter.app !== undefined && !owners.has(filter.app)) {
-    // One they can't open any more, since the check above.
-    return { runs: [], more: false };
-  }
-  const appNames = new Map<string, string>(
-    visible.apps.map(({ id, name }) => [id, name])
-  );
-  const workflowNames = new Map<string, string>(
-    visible.workflows.map(({ id, name }) => [id, name])
-  );
-  const scope: RunScope = { ...visible.scope, apps: [...owners.keys()] };
-  // An App or its workflow names an App's runs alone.
-  const appsOnly = filter.app !== undefined || filter.workflow !== undefined;
-  const workflowIs = (checkedOnly: boolean): SQL | undefined => {
-    if (filter.workflow === undefined) {
-      return undefined;
-    }
-    return checkedOnly
-      ? sql`+${workflowRuns.workflowId} = ${filter.workflow}`
-      : eq(workflowRuns.workflowId, filter.workflow);
-  };
-  // The rest newest first: across Apps and workflows by their
-  // `created_idx`, for one App by its own runs (`workflow_runs_app_idx`,
-  // or with a workflow `workflow_runs_app_workflow_idx`), which hold them
-  // newest first by start alone: runs started in the same millisecond
-  // come in either order.
-  const oneApp = filter.app;
-  /**
-   * `condition` on an arm, as the filter narrows it: an App's runs by
-   * their workflow, and for one App by its own index; an independent
-   * workflow's not at all once the filter names an App or a workflow.
-   * `indexed` an arm reads by `condition`'s own index, which the App and
-   * workflow then only narrow down.
-   */
-  const narrowed = (arm: RunArm, condition: SQL, indexed = false) => {
-    if (arm.kind === "resource") {
-      return appsOnly ? false : condition;
-    }
-    if (indexed || oneApp === undefined) {
-      return sql`${condition} AND ${workflowIs(true) ?? sql`1`}`;
-    }
-    return sql`${condition} AND ${eq(workflowRuns.appId, oneApp)} AND ${workflowIs(false) ?? sql`1`}`;
-  };
-  const newest: RunOrder = oneApp === undefined ? "newest" : "byStart";
+  const { workflows, scope } = await visibleToMember(env, by);
+  const names = new Map(workflows.map(({ id, name }) => [id, name]));
   const db = drizzle(env.DB);
   const now = new Date();
-  const byStatus: Record<RunFilterStatus, () => Promise<FoundRun[]>> = {
-    // Read from the open decisions, which the App and workflow only
-    // narrow down.
-    waiting: async () =>
-      scope.apps.length === 0
-        ? []
-        : await waitingRuns(db, and(ofApps(scope.apps), workflowIs(true)), now),
-    // Read from the failed runs by end, as above.
+  const byStatus: Record<RunFilterStatus, () => Promise<RunRow[]>> = {
+    waiting: async () => await waitingRuns(db, scope, now),
+    // Read from the failed runs by end.
     failed: async () =>
       await viewRuns(
         db,
         scope,
         now,
-        (arm) => narrowed(arm, sql`${arm.status} = 'failed'`, true),
+        (run) => sql`${run.status} = 'failed'`,
         "latestEnded"
       ),
     // By status: runs that haven't ended are few, so sorting them costs
@@ -782,23 +443,17 @@ export const listAllRuns = async (
         db,
         scope,
         now,
-        (arm) =>
-          narrowed(
-            arm,
-            arm.kind === "app"
-              ? sql`${inArray(workflowRuns.status, unended)} AND NOT ${hasOpenDecision(now)}`
-              : sql`${arm.status} IN ${listOf(unended)}`
-          ),
-        newest
+        (run) =>
+          sql`${run.status} IN ${listOf(unended)} AND NOT ${hasOpenDecision(now)}`,
+        "newest"
       ),
     done: async () =>
       await viewRuns(
         db,
         scope,
         now,
-        (arm) =>
-          narrowed(arm, sql`+${arm.status} IN ('completed', 'cancelled')`),
-        newest
+        (run) => sql`+${run.status} IN ('completed', 'cancelled')`,
+        "newest"
       ),
   };
   const rest = async () =>
@@ -806,14 +461,8 @@ export const listAllRuns = async (
       db,
       scope,
       now,
-      (arm) =>
-        narrowed(
-          arm,
-          arm.kind === "app"
-            ? sql`+${workflowRuns.status} <> 'failed' AND NOT ${waits(now)}`
-            : sql`+${arm.status} <> 'failed'`
-        ),
-      newest
+      (run) => sql`+${run.status} <> 'failed' AND NOT ${waits(now)}`,
+      "newest"
     );
   const pages =
     filter.status === undefined
@@ -821,116 +470,39 @@ export const listAllRuns = async (
       : [await byStatus[filter.status]()];
   const matched = pages.flat();
   const found = matched.slice(0, runsPageSize);
-  const [answering, queues] = await Promise.all([
-    answerableDecisions(
-      env,
-      db,
-      by,
-      // An independent workflow's run waits on its decisions without
-      // being read from them: one that hasn't ended may have one open.
-      found.flatMap((run) =>
-        (run.kind === "app" && run.decision !== null) ||
-        (run.kind === "resource" && goesOn(run.row.status))
-          ? [run.row.id]
-          : []
-      ),
-      now
-    ),
+  const unendedIds = found.flatMap((row) =>
+    row.endedAt === null ? [row.id] : []
+  );
+  const [answering, waiting, queues] = await Promise.all([
+    answerableDecisions(env, db, by, unendedIds, now),
+    waitingIds(db, unendedIds, now),
     // A run waiting for a decision says so; one that goes on otherwise
     // may wait for a share of the attempts running at once.
     queuedRuns(
       db,
-      found.flatMap((run) =>
-        (run.kind === "resource" || run.decision === null) &&
-        goesOn(run.row.status)
-          ? [run.row.id]
-          : []
-      ),
+      found.flatMap((row) => (goesOn(row.status) ? [row.id] : [])),
       now.getTime()
     ),
   ]);
   return {
-    runs: found.map((run): ListedRun => {
-      if (run.kind === "resource") {
-        const { row } = run;
-        const listed: ResourceListedRun = {
-          type: "resource",
-          id: runIdSchema.parse(row.id),
-          workflowId: workflowResourceIdSchema.parse(row.workflowResourceId),
-          name: workflowNames.get(row.workflowResourceId) ?? "",
-          version: row.version,
-          startedBy: { type: "person", userId: row.principalId },
-          status: shownStatus(row.status),
-          createdAt: row.createdAt.toISOString(),
-          endedAt: row.endedAt?.toISOString() ?? null,
-        };
-        const answered = answering.get(row.id);
-        return queuedRun(
-          answered === undefined ? listed : { ...listed, decision: answered },
-          queues.get(row.id)
-        );
-      }
-      const { row, decision } = run;
-      const listed: AppListedRun = {
-        ...runFor(env, by, row, owners.get(row.appId) ?? ""),
-        type: "app",
-        appName: appNames.get(row.appId) ?? "",
+    runs: found.map((row): ListedRun => {
+      const listed: ListedRun = {
+        id: runIdSchema.parse(row.id),
+        workflowId: workflowResourceIdSchema.parse(row.workflowResourceId),
+        name: names.get(row.workflowResourceId) ?? "",
+        version: row.version,
+        startedBy: { type: "person", userId: row.principalId },
+        status: waiting.has(row.id) ? "waiting" : shownStatus(row.status),
+        createdAt: row.createdAt.toISOString(),
+        endedAt: row.endedAt?.toISOString() ?? null,
       };
-      if (decision === null) {
-        return queuedRun(listed, queues.get(row.id));
-      }
       const answered = answering.get(row.id);
-      return answered === undefined
-        ? { ...listed, status: "waiting" }
-        : { ...listed, status: "waiting", decision: answered };
+      const withDecision =
+        answered === undefined ? listed : { ...listed, decision: answered };
+      return waiting.has(row.id)
+        ? withDecision
+        : queuedRun(withDecision, queues.get(row.id));
     }),
     more: matched.length > runsPageSize,
   };
-};
-
-/**
- * Makes `team` the team that owns an App's workflow (teams.ts), and
- * returns its summary as it is now.
- */
-export const setTeam = async (
-  env: Env,
-  by: Identity,
-  app: unknown,
-  workflow: unknown,
-  team: unknown
-): Promise<AppWorkflowSummary> => {
-  const set = await setWorkflowTeam(env, by, app, workflow, team);
-  const [summary] = await appWorkflowOverview(
-    env,
-    by,
-    (id, workflowId) => id === set.app && workflowId === set.workflow
-  );
-  if (summary === undefined) {
-    throw workflowErrors.create("workflow.not_found");
-  }
-  return summary;
-};
-
-/**
- * Makes `owner` the owner of an App's workflow (owners.ts), for an admin
- * or a builder of the App, and returns the workflow's summary as it is
- * now.
- */
-export const setOwner = async (
-  env: Env,
-  by: Identity,
-  app: unknown,
-  workflow: unknown,
-  owner: unknown
-): Promise<AppWorkflowSummary> => {
-  const set = await setWorkflowOwner(env, by, app, workflow, owner);
-  const [summary] = await appWorkflowOverview(
-    env,
-    by,
-    (id, workflowId) => id === set.app && workflowId === set.workflow
-  );
-  if (summary === undefined) {
-    throw workflowErrors.create("workflow.not_found");
-  }
-  return summary;
 };

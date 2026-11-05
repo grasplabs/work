@@ -150,13 +150,6 @@ export const kitModule = "kit.json";
 export const typesModule = "types.json";
 
 /**
- * The legacy workflow hooks screens import (string `useWorkflow`, `useRun`),
- * which GRA-418 removes. A screen reaches its App's code through the React
- * SDK only (`screenSdk`).
- */
-export const screenHooks = "@grasp-os/sdk/screen";
-
-/**
  * The React SDK screens use (spec 10.1, 10.7.1): the platform's session
  * client and the App's queries, mutations and actions through `@server/_generated/api`.
  */

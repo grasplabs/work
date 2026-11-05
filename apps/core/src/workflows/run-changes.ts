@@ -21,29 +21,6 @@ import { appHost } from "../durable-objects.ts";
 // an older status than the one it read last.
 
 /**
- * Tells the screens of the run's App that `run` changed. Best effort, after
- * the change is written: it never fails what changed the run, and a push
- * that doesn't arrive is made up for by the next one, or by the screen
- * reading its runs again when it follows again.
- */
-export const tellScreens = async (
-  env: Env,
-  run: { id: string; appId: string; workflowId: string }
-): Promise<void> => {
-  try {
-    await appHost(env, appIdSchema.parse(run.appId)).runChanged(
-      run.workflowId,
-      run.id
-    );
-  } catch (error) {
-    log.warn("workflow.screens_not_told", {
-      runId: run.id,
-      ...errorFields(error),
-    });
-  }
-};
-
-/**
  * Tells the live queries of the App that started independent run `id`, if
  * an App did, that its person's runs of the App's workflow references
  * changed: admitted, a new status, ended. Each connection of that person

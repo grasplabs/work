@@ -727,11 +727,6 @@ const appTarget = (
       const { screens } = await hold.session();
       await screens.report(app, { version, screen }, problem);
     },
-    startRun: async (workflow, input) =>
-      await framed(async (frame) => await frame.startRun(workflow, input)),
-    runs: async (workflow) =>
-      await framed(async (frame) => await frame.runs(workflow)),
-    run: async (run) => await framed(async (frame) => await frame.run(run)),
     decide: async (run, decision, answer) => {
       const review = await framed(
         async (frame) =>
@@ -757,19 +752,6 @@ const appTarget = (
           await frame.decide(run, decision, review.response, confirmation)
       );
     },
-    summary: async (run) =>
-      await framed(async (frame) => await frame.summary(run)),
-    control: async (run, kind) =>
-      await framed(async (frame) => {
-        if (kind !== "pause" && kind !== "resume" && kind !== "cancel") {
-          throw screenErrors.create("screen.invalid");
-        }
-        return await frame.control(run, kind);
-      }),
-    watchRuns: async (workflow, onChange) =>
-      await framed(
-        async (frame) => await frame.watchRuns(workflow, forCore(onChange))
-      ),
     watchQuery: async (request, onSnapshot) =>
       await framed(
         async (frame) =>
@@ -1143,18 +1125,7 @@ export const previewTarget = (
       });
     },
     ...(follow === undefined ? {} : { followUpdates: follow.followUpdates }),
-    startRun: refusedInPreview,
-    runs: async () => await Promise.resolve([]),
-    run: refusedInPreview,
     decide: refusedInPreview,
-    control: refusedInPreview,
-    summary: refusedInPreview,
-    watchRuns: async () =>
-      await Promise.resolve({
-        release: async () => {
-          await Promise.resolve();
-        },
-      }),
     watchQuery: async (request, onSnapshot) => {
       if (!(onSnapshot instanceof RpcStub)) {
         throw screenErrors.create("screen.invalid");

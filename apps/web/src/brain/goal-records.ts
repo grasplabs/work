@@ -1,4 +1,4 @@
-import type { Goal, GoalWorkflow } from "@grasp-os/shared/brain";
+import type { Goal } from "@grasp-os/shared/brain";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 
 // The brain's records an admin's change to the board's goals adds
@@ -65,8 +65,6 @@ export const rewordedRecords = (
   },
 ];
 
-const keyOf = ({ app, workflow }: GoalWorkflow): string => `${app}/${workflow}`;
-
 /**
  * The records that make `chosen` the workflows linked to `goal` on `day`:
  * a link for each newly chosen, a taking off for each no longer chosen.
@@ -74,29 +72,25 @@ const keyOf = ({ app, workflow }: GoalWorkflow): string => `${app}/${workflow}`;
  */
 export const relinkedRecords = (
   goal: Goal,
-  chosen: readonly GoalWorkflow[],
+  chosen: readonly string[],
   day: string
 ): BrainRecordInput[] => {
-  const before = new Set(goal.workflows.map(keyOf));
-  const after = new Set(chosen.map(keyOf));
-  const link = (
-    { app, workflow }: GoalWorkflow,
-    linked: boolean
-  ): BrainRecordInput => ({
+  const before = new Set(goal.workflows);
+  const after = new Set(chosen);
+  const link = (workflow: string, linked: boolean): BrainRecordInput => ({
     type: "goalLink",
     id: `goall-${crypto.randomUUID()}`,
     goalId: goal.id,
-    app,
     workflow,
     linked,
     date: day,
   });
   return [
     ...chosen
-      .filter((each) => !before.has(keyOf(each)))
+      .filter((each) => !before.has(each))
       .map((each) => link(each, true)),
     ...goal.workflows
-      .filter((each) => !after.has(keyOf(each)))
+      .filter((each) => !after.has(each))
       .map((each) => link(each, false)),
   ];
 };

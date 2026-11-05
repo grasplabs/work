@@ -1,31 +1,21 @@
-import type { App } from "@grasp-os/shared/apps";
-import {
-  appIdSchema,
-  runIdSchema,
-  workflowIdSchema,
-} from "@grasp-os/shared/ids";
-import type { AppWorkflowSummary as WorkflowSummary } from "@grasp-os/shared/workflows";
+import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
-import { byState, enginesOf, signalKinds, stateOf } from "./board.ts";
+import { byState, signalKinds, stateOf } from "./board.ts";
 
 // What the dashboard's widget board works out (board.ts): where each
-// workflow stands, each engine's workflows, and the signals by kind.
+// workflow stands, and the signals by kind.
 
-/** A workflow of `app` that ran and needs nobody, changed by `change`. */
+/** A workflow that ran and needs nobody, changed by `change`. */
 const workflow = (
   name: string,
-  change: Partial<WorkflowSummary> = {},
-  app = "invoices"
+  change: Partial<WorkflowSummary> = {}
 ): WorkflowSummary => ({
-  type: "app",
-  app: appIdSchema.parse(app),
-  appName: app,
-  workflow: workflowIdSchema.parse(name),
+  workflowId: workflowResourceIdSchema.parse(`wf-${name}`),
+  name,
   version: 1,
   owner: { userId: "owner", name: null },
-  changesOwner: false,
-  team: null,
   lastRun: {
     id: runIdSchema.parse(`run-${name}`),
     status: "completed",
@@ -37,25 +27,8 @@ const workflow = (
   ...change,
 });
 
-/** An engine named after its ID. */
-const engine = (id: string): App => ({
-  id: appIdSchema.parse(id),
-  name: id,
-  description: "",
-  owner: "owner",
-  responsible: "owner",
-  audience: null,
-  process: null,
-  blueprint: null,
-  currentVersion: 1,
-  pendingVersion: null,
-  status: "published",
-  link: null,
-  createdAt: "2026-10-01T09:00:00.000Z",
-});
-
 const names = (rows: readonly WorkflowSummary[]): string[] =>
-  rows.map(({ workflow: name }) => name);
+  rows.map(({ name }) => name);
 
 describe("where a workflow stands", () => {
   it("needs attention once a run failed lately, even with runs waiting", () => {
@@ -83,37 +56,6 @@ describe("where a workflow stands", () => {
     expect(names(states.ran)).toStrictEqual(["a", "d"]);
     expect(names(states.notRun)).toStrictEqual(["c"]);
     expect(byState([]).ran).toStrictEqual([]);
-  });
-});
-
-describe("each engine's workflows", () => {
-  it("lists each engine in order with its workflows and how many ran, and one without any too", () => {
-    const rows = [
-      workflow("send", {}, "invoices"),
-      workflow("check", { lastRun: null }, "invoices"),
-      workflow("welcome", { failed: 1 }, "people"),
-    ];
-    const { engines, others } = enginesOf(
-      [engine("people"), engine("invoices"), engine("empty")],
-      rows
-    );
-    expect(others).toBe(1);
-    expect(
-      engines.map(({ app, workflows, ran }) => ({
-        app: app.id,
-        workflows: names(workflows),
-        ran,
-      }))
-    ).toStrictEqual([
-      { app: "people", workflows: ["welcome"], ran: 1 },
-      { app: "invoices", workflows: ["send", "check"], ran: 1 },
-    ]);
-  });
-
-  it("leaves out workflows of engines the person can't open", () => {
-    expect(
-      enginesOf([engine("invoices")], [workflow("other", {}, "elsewhere")])
-    ).toStrictEqual({ engines: [], others: 1 });
   });
 });
 

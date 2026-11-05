@@ -36,7 +36,7 @@ const row = (
   name: string,
   fields: Partial<WorkflowReturn> & Pick<WorkflowReturn, "stage" | "basis">
 ): WorkflowReturn => ({
-  workflow: { app: "invoices", name, teamId: "finance", goalId: "close" },
+  workflow: { id: `wf-${name}`, name, teamId: "finance", goalId: "close" },
   hoursBefore: null,
   hoursAfter: null,
   before: null,

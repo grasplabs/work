@@ -29,7 +29,8 @@ const Inbox = () => {
       items={inboxItems(waiting, identity, readAt)}
       notLoaded={unread(waiting)}
       olderFailures={
-        waiting.failed.state === "ready" && waiting.failed.data.page.more
+        waiting.notifications.state === "ready" &&
+        waiting.notifications.data.page.more
       }
     />
   );

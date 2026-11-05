@@ -8,7 +8,6 @@ import {
   stepIdempotencyKey,
   triggerDeclarationsSchema,
 } from "@grasp-os/shared/workflows";
-import type { InboundEmail } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
 import type {
@@ -47,9 +46,6 @@ import {
  *     async ({ idempotencyKey, input }) => ...);
  * });
  * ```
- *
- * The code is the only source of truth: `describeWorkflow` in
- * `@grasp-os/sdk/describe` reads the step list from it.
  */
 
 // Workflow code imports only this module, so it gets Zod from here too.
@@ -682,32 +678,6 @@ export interface WorkflowContext<P extends Params, Input> {
    * (`permission.denied`).
    */
   env: WorkflowEnv;
-  /**
-   * The content of attachment `index` (its place in `message.attachments`)
-   * of a message an email trigger received, as it arrived. Call it inside
-   * a step, and pass the content on there (to a connection, say): a
-   * step's result must be JSON, so return what you made of it, not the
-   * bytes. A message is kept for 30 days from when it arrived; after
-   * that, and for a message its App didn't receive, an attachment it
-   * doesn't have, or a message that isn't kept (`stored: null`: it has
-   * no attachments but inline ones), it
-   * fails with `workflow.attachment_not_found`; a kept message that can't
-   * be read any more fails with `workflow.attachment_unreadable`. Neither
-   * is retried. Every read is audited, a refused one too. The content,
-   * its name and its type are whatever the sender sent: treat them as
-   * untrusted data.
-   *
-   * ```ts
-   * await step.do("file", { description: "File the invoice" }, async () => {
-   *   const pdf = await readAttachment(input, 0);
-   *   ...
-   * });
-   * ```
-   */
-  readAttachment: (
-    message: Pick<InboundEmail, "stored">,
-    index: number
-  ) => Promise<Uint8Array>;
 }
 
 // Definition
@@ -800,9 +770,7 @@ export type Trigger<ScheduleParam extends string = string> =
    * or with one lacking an `@` such as `<>`, the same bytes are), so a
    * message that reuses an earlier one's Message-ID starts none. Mail
    * starts at most 60 runs of a workflow an hour. Past that, mail is
-   * refused for now, and its sender tries again later. The input lists the message's attachments; a
-   * message with any is kept for 30 days, and the run reads their content
-   * with `readAttachment`.
+   * refused for now, and its sender tries again later.
    */
   | { type: "email"; address: string };
 
@@ -822,10 +790,7 @@ export interface ParamMetadata {
   currency?: string;
 }
 
-/**
- * What the UI shows about a workflow besides its steps, as plain JSON. The
- * steps come from the code, through `describeWorkflow`.
- */
+/** What the UI shows about a workflow besides its steps, as plain JSON. */
 export interface WorkflowMetadata {
   id: WorkflowId;
   params: ParamMetadata[];
@@ -946,7 +911,6 @@ const createRunner = (
   engine: WorkflowEngine
 ): {
   steps: UntypedStepRunner;
-  readAttachment: WorkflowContext<Params, unknown>["readAttachment"];
 } => {
   const started = new Set<string>();
   // The step running now, if any. They run one after another: one started
@@ -1229,25 +1193,7 @@ const createRunner = (
       }),
   };
 
-  // Not a step of its own: bytes can't be recorded, so the step it runs in
-  // reads again whenever it runs again. Every call goes to the engine,
-  // which refuses and records each one it must (see `WorkflowEngine`):
-  // only what isn't data is left out, so the call can cross to it.
-  const readAttachment: WorkflowContext<
-    Params,
-    unknown
-  >["readAttachment"] = async (message, index) => {
-    const stored: unknown =
-      typeof message === "object" && message !== null
-        ? message.stored
-        : undefined;
-    return await engine.readAttachment(
-      typeof stored === "string" || stored === null ? stored : undefined,
-      typeof index === "number" ? index : undefined
-    );
-  };
-
-  return { steps, readAttachment };
+  return { steps };
 };
 
 /**
@@ -1323,7 +1269,6 @@ export const workflow = <
         // binding the run doesn't have when it calls fails then
         // (`permission.denied`).
         env: engine.env,
-        readAttachment: runner.readAttachment,
       }
     );
   };

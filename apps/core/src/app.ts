@@ -12,11 +12,7 @@ import {
   screenErrors,
   screenLimits,
 } from "@grasp-os/shared/screens";
-import type {
-  AppErrorLog,
-  RunChange,
-  ServerLog,
-} from "@grasp-os/shared/screens";
+import type { AppErrorLog, ServerLog } from "@grasp-os/shared/screens";
 import {
   statisticErrors,
   statisticReadLimitsOf,
@@ -59,13 +55,6 @@ const serverLinesLimit = { burst: 200, perMinute: 200 } as const;
 /** Where the App keeps its restricted mode (see restricted.ts). */
 const restrictedKey = "restricted";
 /**
- * A screen's callback for its App's run changes, as the host keeps it:
- * screens-rpc.ts wraps it, checking before each push that the person may
- * still use the App.
- */
-export type RunWatcher = Rpc.Stub<(change: RunChange) => Promise<void>>;
-
-/**
  * A connection's callback for the App's revocations (`followAccess`):
  * called with `true` when its person's role in the App may have dropped,
  * so it checks their access again now (query-subscriptions.ts), and with
@@ -102,9 +91,6 @@ const invocationHoldsKey = (userId: string, streaming: boolean): string =>
  * no App code does.
  */
 export class App extends DurableObject<Env> {
-  /** Screens following the App's runs, by workflow and ID (`watchRuns`). */
-  readonly #runWatchers = new Map<string, Map<string, RunWatcher>>();
-
   /** Connections following the App's revocations, by ID (`followAccess`). */
   readonly #accessFollowers = new Map<
     string,
@@ -431,67 +417,10 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * Keeps `onChange`, a screen's callback, and calls it each time a run of
-   * the App's workflow `workflow` changes (`runChanged`), until calling it
-   * fails: the screen is gone, or the person may no longer use the App.
-   * Kept here in memory, outside the App's code, so a restart of that code
-   * keeps them; a restart of this object drops them, which tells each
-   * screen to follow again. Returns the ID `unwatchRuns` drops it by.
-   */
-  watchRuns(workflow: string, onChange: RunWatcher): string {
-    const id = crypto.randomUUID();
-    const watchers =
-      this.#runWatchers.get(workflow) ?? new Map<string, RunWatcher>();
-    watchers.set(id, onChange.dup());
-    this.#runWatchers.set(workflow, watchers);
-    return id;
-  }
-
-  /** Drops the screen's callback `watchRuns` kept as `id`, if it still does. */
-  unwatchRuns(workflow: string, id: string): void {
-    this.#drop(workflow, id);
-  }
-
-  /**
-   * Tells the screens following `workflow` that its run `run` changed, so
-   * they read it again (workflows/run-changes.ts). Returns at once: each
-   * push goes on by itself, and one that fails drops only its screen.
-   */
-  runChanged(workflow: string, run: string): void {
-    for (const [id, watcher] of this.#runWatchers.get(workflow) ?? []) {
-      void this.#tell(workflow, id, watcher, { run });
-    }
-  }
-
-  async #tell(
-    workflow: string,
-    id: string,
-    watcher: RunWatcher,
-    change: RunChange
-  ): Promise<void> {
-    try {
-      await watcher(change);
-    } catch {
-      this.#drop(workflow, id);
-    }
-  }
-
-  #drop(workflow: string, id: string): void {
-    const watchers = this.#runWatchers.get(workflow);
-    const watcher = watchers?.get(id);
-    watchers?.delete(id);
-    if (watchers?.size === 0) {
-      this.#runWatchers.delete(workflow);
-    }
-    watcher?.[Symbol.dispose]();
-  }
-
-  /**
    * Keeps `onRevoked`, the callback of a connection of `userId`'s that
    * follows the App's live queries, and calls it each time their role in
    * the App may have dropped (`accessRevoked`), until calling it fails.
-   * Kept in memory, as `watchRuns` keeps its callbacks: a restart of this
-   * object drops them, which tells each connection to check its access
+   * Kept in memory: a restart of this object drops them, which tells each connection to check its access
    * and follow again, so an event sent meanwhile is never missed. Past
    * `accessFollowersPerPerson`, the person's connections that are gone
    * are let go of first; refused if that frees no place. Returns the ID

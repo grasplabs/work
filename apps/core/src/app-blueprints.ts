@@ -620,8 +620,6 @@ export const createFromBlueprint = async (
     // (`madeCurrent`) only when an admin approved it, unlike a version its
     // builder commits; otherwise approved as any version is.
     approved: blueprint.approved ? 1 : null,
-    // An App holds no workflows (app-no-workflows.ts).
-    workflows: [],
     screens: screensIn(files),
     proposedBy: null,
   };
@@ -969,8 +967,6 @@ export const acceptBlueprintUpdate = async (
     message: `Updated from the blueprint ${blueprint.name}.`,
     createdAt: new Date(),
     approved: null,
-    // An App holds no workflows (app-no-workflows.ts).
-    workflows: [],
     screens: screensIn(files),
     proposedBy: null,
   };

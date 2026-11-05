@@ -109,16 +109,6 @@ const signalCounts = async (
 
 /** The board's weekly report, for `person`, as it stands now. */
 
-/** A workflow's key in a report: an App's by App and name, an independent one by its ID. */
-const reportKeyOf = (
-  workflow:
-    | { type: "app"; app: string; workflow: string }
-    | { type: "resource"; workflowId: string }
-): string =>
-  workflow.type === "app"
-    ? `${workflow.app}/${workflow.workflow}`
-    : workflow.workflowId;
-
 export const boardReportOf = async (
   sources: BoardReportSources,
   person: Identity
@@ -148,9 +138,11 @@ export const boardReportOf = async (
   const idleWorkflows = await partOf("workflows", async () => {
     const listed = (await orNone(workflows.overview())) ?? [];
     const ranNames = new Set(
-      ran.state === "read" ? ran.data.workflows.map(reportKeyOf) : []
+      ran.state === "read"
+        ? ran.data.workflows.map(({ workflowId }) => workflowId)
+        : []
     );
-    return listed.filter((workflow) => !ranNames.has(reportKeyOf(workflow)))
+    return listed.filter((workflow) => !ranNames.has(workflow.workflowId))
       .length;
   });
   return {

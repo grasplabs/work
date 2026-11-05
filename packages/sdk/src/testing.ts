@@ -1,13 +1,7 @@
 import { messageOf } from "@grasp-os/shared/errors";
 import { runIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import {
-  inboundEmailIndexSchema,
-  isRetryable,
-  maxStepRetries,
-  storedEmailSchema,
-  workflowErrors,
-} from "@grasp-os/shared/workflows";
+import { isRetryable, maxStepRetries } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
 import type {
@@ -151,13 +145,6 @@ export interface TestEngineOptions {
    */
   decisions?: Readonly<Record<string, DecisionAnswer>>;
   /**
-   * The content of kept messages' attachments, by the message's `stored`
-   * name, in the order its `attachments` lists them, for `readAttachment`.
-   * Reading any other fails with `workflow.attachment_not_found`, as a
-   * message another App received does.
-   */
-  attachments?: Readonly<Record<string, readonly Uint8Array[]>>;
-  /**
    * `record` (the default) records side-effect steps without running them;
    * `run` runs them, e.g. against a fake of the system they change.
    */
@@ -280,8 +267,6 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
     }
   };
 
-  // How many steps' functions run now: `readAttachment` works only inside one.
-  let stepsRunning = 0;
   const engine: WorkflowEngine = {
     runId: runIdSchema.parse(options.runId ?? "run-1"),
     params: options.params ?? {},
@@ -312,16 +297,11 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
         } else if (sideEffect && !runSideEffects) {
           status = "recorded";
         } else {
-          stepsRunning += 1;
-          try {
-            // As the engine: the platform's attempts when it declares none.
-            output = await attempt(
-              retries?.limit ?? maxStepRetries,
-              async () => await fn()
-            );
-          } finally {
-            stepsRunning -= 1;
-          }
+          // As the engine: the platform's attempts when it declares none.
+          output = await attempt(
+            retries?.limit ?? maxStepRetries,
+            async () => await fn()
+          );
         }
         const stored = toStored(step.name, output);
         results.set(name, stored);
@@ -419,33 +399,6 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
         options.skipTime?.(timeout);
       }
       return await Promise.resolve(outcome);
-    },
-    // Refuses as the platform does, but records nothing.
-    readAttachment: async (stored, index) => {
-      if (stepsRunning === 0) {
-        throw workflowErrors.create("workflow.outside_step");
-      }
-      if (stored === null) {
-        throw workflowErrors.create("workflow.attachment_not_found");
-      }
-      if (
-        !storedEmailSchema.safeParse(stored).success ||
-        !inboundEmailIndexSchema.safeParse(index).success
-      ) {
-        throw workflowErrors.create("workflow.invalid");
-      }
-      const content =
-        stored !== undefined &&
-        index !== undefined &&
-        options.attachments &&
-        Object.hasOwn(options.attachments, stored)
-          ? options.attachments[stored]?.[index]
-          : undefined;
-      if (content === undefined) {
-        throw workflowErrors.create("workflow.attachment_not_found");
-      }
-      // A copy of its own, as each read on the platform is.
-      return await Promise.resolve(new Uint8Array(content));
     },
   };
 

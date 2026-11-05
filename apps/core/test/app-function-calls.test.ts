@@ -2,23 +2,15 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import {
   appIdSchema,
   chatIdSchema,
-  runIdSchema,
-  workflowIdSchema,
   workspaceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
-import { executionErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { actionInvocation, invocationName } from "../src/action-invocation.ts";
-import {
-  callAppFunction,
-  callRunFunction,
-  readFunctionRequest,
-} from "../src/app-functions.ts";
-import type { RunCaller } from "../src/app-functions.ts";
+import { callAppFunction, readFunctionRequest } from "../src/app-functions.ts";
 import { addMember } from "../src/app-members.ts";
 import type { Release } from "../src/app-releases.ts";
 import { loadRelease } from "../src/app-releases.ts";
@@ -1066,69 +1058,5 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
 describe("a run calling another App's functions", { timeout: 90_000 }, () => {
   afterEach(async () => {
     await endLiveRuns();
-  });
-
-  it("commits nothing in the App a run calls once the run's step lets go of its lease", async () => {
-    const admin = await person("admin");
-    const crm = await sealedApp(crmFiles(), "CRM");
-    const desk = await sealedApp(deskFiles(), "Desk");
-    await bind(admin, desk, crm.app);
-    const lease = { holds: true };
-    let reads = 0;
-    // A run of Desk's, as its engine keeps it, still going.
-    const runId = crypto.randomUUID();
-    await env.DB.prepare(
-      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'noter', 1, ?, 'running', ?, NULL)"
-    )
-      .bind(runId, desk.app, admin.userId, Date.now())
-      .run();
-    const caller: RunCaller = {
-      run: {
-        app: appIdSchema.parse(desk.app),
-        workflow: workflowIdSchema.parse("noter"),
-        runId: runIdSchema.parse(runId),
-        version: 1,
-        shareSubject: admin.userId,
-        authority: {
-          subject: { type: "app", appId: appIdSchema.parse(desk.app) },
-          onBehalfOf: admin.userId,
-          mode: "workflow",
-          appVersion: 1,
-        },
-      },
-      requestId: crypto.randomUUID(),
-      deadline: Date.now() + 30_000,
-      // The step's lease is let go of as the CRM's function is admitted,
-      // after Desk's own gate read: only the commit's check sees it.
-      stillCurrent: async () => {
-        reads += 1;
-        if (reads === 3) {
-          lease.holds = false;
-        }
-        await Promise.resolve();
-      },
-      requireHolds: () => {
-        if (!lease.holds) {
-          throw executionErrors.create("execution.stale_attempt");
-        }
-      },
-      held: () => {
-        throw new Error("Nothing is held here");
-      },
-    };
-    const answered = await callRunFunction(
-      env,
-      caller,
-      { name: "desk.add", kind: "action" },
-      { text: "stale" },
-      `step:${crypto.randomUUID()}`
-    );
-    expect({
-      answered: answered.ok ? answered.value : answered.error.code,
-      crmSees: await call(admin, crm, "notes.mine"),
-    }).toStrictEqual({
-      answered: "error:execution.stale_attempt",
-      crmSees: [],
-    });
   });
 });

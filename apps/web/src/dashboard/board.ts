@@ -1,11 +1,10 @@
-import type { App } from "@grasp-os/shared/apps";
 import type { KnowledgeSignal } from "@grasp-os/shared/knowledge-signals";
 import type { ImprovementSignal } from "@grasp-os/shared/signals";
-import type { AppWorkflowSummary as WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 
 // What the dashboard's widget board works out from what core read
-// (`widget-board.tsx`): where each workflow stands, each engine's
-// workflows, and how many signals of each kind there are. Pure, so the
+// (`widget-board.tsx`): where each workflow stands, and how many signals
+// of each kind there are. Pure, so the
 // widgets only draw it.
 
 /**
@@ -50,46 +49,6 @@ export const byState = (
     states[stateOf(row)].push(row);
   }
   return states;
-};
-
-/** An engine (core's App) on the board: its workflows, and how many of them ran. */
-export interface EngineWorkflows {
-  app: App;
-  workflows: WorkflowSummary[];
-  ran: number;
-}
-
-/** The engines on the board, and how many more there are with no workflow to show. */
-export interface Engines {
-  engines: EngineWorkflows[];
-  /**
-   * Engines listed with no workflow the overview shows: none made yet,
-   * or shared ones whose data the person can't read, which the overview
-   * leaves out. Told apart from neither, so counted, never drawn empty.
-   */
-  others: number;
-}
-
-/**
- * Each engine with a workflow the person can see, in the order given,
- * with its workflows as the overview lists them, and how many others
- * there are. A workflow of an engine not given is left out: the board
- * shows the engines the person can open.
- */
-export const enginesOf = (
-  apps: readonly App[],
-  rows: readonly WorkflowSummary[]
-): Engines => {
-  const all = apps.map((app) => {
-    const workflows = rows.filter((row) => row.app === app.id);
-    return {
-      app,
-      workflows,
-      ran: workflows.filter(({ lastRun }) => lastRun !== null).length,
-    };
-  });
-  const engines = all.filter(({ workflows }) => workflows.length > 0);
-  return { engines, others: all.length - engines.length };
 };
 
 /** Every kind of signal the board counts, improvement and Knowledge; an unanswered question is one kind for both. */

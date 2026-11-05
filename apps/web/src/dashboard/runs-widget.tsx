@@ -20,7 +20,6 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { useId } from "react";
 
-import { workflowKey } from "../workflows/lists.ts";
 import {
   columnsOf,
   fullDays,
@@ -284,25 +283,16 @@ const Decisions = ({ activity }: { activity: RunActivity }) => {
   );
 };
 
-/**
- * A workflow that ran, opening it: an independent one, or an engine's one
- * of its engine's current version (one a later version removed has no
- * page).
- */
-const ActivityWorkflow = ({ row }: { row: RunActivityWorkflow }) => {
-  if (row.type === "resource") {
-    return (
-      <Link
-        className="hover:underline"
-        params={{ workflow: row.workflowId }}
-        to="/workflows/$workflow"
-      >
-        {row.name}
-      </Link>
-    );
-  }
-  return row.workflow;
-};
+/** A workflow that ran, opening it. */
+const ActivityWorkflow = ({ row }: { row: RunActivityWorkflow }) => (
+  <Link
+    className="hover:underline"
+    params={{ workflow: row.workflowId }}
+    to="/workflows/$workflow"
+  >
+    {row.name}
+  </Link>
+);
 
 /** Each workflow's runs over the window: how many started, completed and failed. */
 const Workflows = ({ activity }: { activity: RunActivity }) => {
@@ -321,9 +311,6 @@ const Workflows = ({ activity }: { activity: RunActivity }) => {
             <TableHead>
               <Trans>Workflow</Trans>
             </TableHead>
-            <TableHead>
-              <Trans>App</Trans>
-            </TableHead>
             <TableHead className="text-right">
               <Trans>Started</Trans>
             </TableHead>
@@ -337,12 +324,9 @@ const Workflows = ({ activity }: { activity: RunActivity }) => {
         </TableHeader>
         <TableBody>
           {activity.workflows.map((row) => (
-            <TableRow key={workflowKey(row)}>
+            <TableRow key={row.workflowId}>
               <TableCell>
                 <ActivityWorkflow row={row} />
-              </TableCell>
-              <TableCell>
-                {row.type === "app" ? row.appName : <Trans>Independent</Trans>}
               </TableCell>
               <TableCell className="text-right">{row.started}</TableCell>
               <TableCell className="text-right">{row.completed}</TableCell>
