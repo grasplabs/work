@@ -599,12 +599,12 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         instance.draft(chatIdSchema.parse(chat.chat.id), existing)
       )
     ).resolves.toMatchObject({ changes: {}, revision: 2 });
-    // Nor does the chat's page list it.
+    // The chat's page lists it as changing nothing.
     await expect(
       runInDurableObject(chat.stub, (instance) =>
         instance.drafts(chat.chat.id, chat.personId)
       )
-    ).resolves.toStrictEqual([]);
+    ).resolves.toMatchObject([{ app: existing, changed: [], revision: 2 }]);
   });
 
   it("builds for whoever builds, as them, with no permission of its own, and never past what they may do", async () => {

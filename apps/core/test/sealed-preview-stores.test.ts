@@ -149,7 +149,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
 
     expect({ before, dropped, again, gone }).toMatchObject({
       before: { releases: 1, stores: 1 },
-      dropped: "app.no_draft",
+      dropped: "app.preview_outdated",
       again: { releases: 1, stores: 1 },
       gone: "agent.chat_not_found",
     });

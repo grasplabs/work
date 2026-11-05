@@ -67,6 +67,17 @@ export interface Joined {
 }
 
 /**
+ * Has `listener` told each push of App `app`'s version on the tab's
+ * connection `core`, sharing its frames' one subscription
+ * (app-versions.ts), until the returned function is called.
+ */
+export const followAppVersion = (
+  core: CoreConnection,
+  app: string,
+  listener: VersionListener
+): (() => void) => feedOf(core).follow(app, listener);
+
+/**
  * Joins the tab's connection `core`: `onEnded` is called once if the
  * person's session ends while the frame is on it. The frame waits for the
  * connection across reconnects for as long as it takes, as its start has

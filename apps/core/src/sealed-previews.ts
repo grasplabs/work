@@ -583,9 +583,15 @@ const serverOf = ({ base, changes }: Pick<Draft, "base" | "changes">): string =>
     ),
   });
 
-/** Whether `running` runs the server code of `draft`. */
+/**
+ * Whether `running` runs the server code of `draft`. Its revision alone
+ * doesn't say: a draft that changes nothing previews the App's latest
+ * version, which a commit elsewhere moves on at the same revision.
+ */
 const runsServerOf = (running: Running, draft: Draft): boolean =>
-  running.revision === draft.revision || running.server === serverOf(draft);
+  (running.revision === draft.revision &&
+    running.version === sealedAs(draft)) ||
+  running.server === serverOf(draft);
 
 /**
  * The `@server/_generated/api` references the screens of `files`, an App as `version` of

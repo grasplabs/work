@@ -1,5 +1,6 @@
 import { readOnlyRevision } from "@grasp-os/shared/chat";
-import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
+import type { ChatDraft } from "@grasp-os/shared/chat";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
@@ -7,7 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { chatsOf, chatWithDraft, requestFor } from "./previews.ts";
+import { chatsOf, chatWithDraft, outcome, requestFor } from "./previews.ts";
 import { failure } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -72,6 +73,10 @@ export default app({
 `,
   "screens/desk.tsx": desk(marker),
 });
+
+/** What each of the chat's drafts changes, and at which revision. */
+const changesOf = (drafts: readonly ChatDraft[]) =>
+  drafts.map(({ changed, revision }) => ({ changed, revision }));
 
 /** A Desk App of `builder`'s, released, and a chat with two writes of its draft. */
 const twoVersions = async (builder: Person) => {
@@ -214,7 +219,7 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
     });
   });
 
-  it("previews the version a draft was proposed as, read-only, before it is published", async () => {
+  it("previews the version a draft was proposed as, at the draft's revision, its calls running there and nowhere earlier", async () => {
     const builder = await signedInApi(idp, "builder");
     const other = await signedInApi(idp, "builder");
     const { app, chatId, revision } = await twoVersions(builder);
@@ -229,52 +234,36 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       { chatId, app, revision },
       "notes.titles"
     );
-    const drafted = await chats.preview(chatId, app);
 
-    // Proposed, the draft is dropped: only the version is left to preview.
+    // Proposed, the draft changes nothing: its preview shows the version
+    // it became, at the draft's revision, where its calls run.
     const version = await chats.proposeDraft(chatId, app, "Two");
-    const proposed = await chats.preview(
-      chatId,
-      app,
-      undefined,
-      undefined,
-      version
-    );
-    const live = await chats.preview(chatId, app, undefined, undefined, 1);
-    // Previewed from a chat of theirs that never drafted the App, which
-    // reads as at the read-only revision: what its frame reports never
-    // reaches that chat's agent as its draft's.
-    const look = await chats.create("Look");
-    const looking = chatIdSchema.parse(look.id);
-    const elsewhere = await chats.preview(
-      looking,
-      app,
-      undefined,
-      undefined,
-      version
-    );
-    await chats.previewReport(looking, app, elsewhere.revision, "desk", {
-      kind: "rejection",
-      message: "Not a draft's.",
-    });
-    const reports = await chatsOf(builder).previewReports(
-      looking,
-      app,
-      elsewhere.revision,
-      0
+    const latest = await chats.preview(chatId, app);
+    const latestRequest = await requestFor(
+      builder,
+      { chatId, app, revision: latest.revision },
+      "notes.titles"
     );
 
     expect({
       version,
-      drafts: await chats.drafts(chatId),
-      draft: await failure(async () => await chats.preview(chatId, app)),
-      proposed: { revision: proposed.revision, screens: proposed.screens },
-      // Built as its draft's preview was, from the same files.
-      asDrafted: proposed.artifact === drafted.artifact,
-      notLive: proposed.artifact !== live.artifact,
-      // Nothing of it runs: no call, the draft's own revision's neither.
+      drafts: changesOf(await chats.drafts(chatId)),
+      latest: {
+        revision: latest.revision,
+        screens: latest.screens,
+        appVersion: latest.refresh?.appVersion,
+        titles: outcome(
+          await chats.previewFunction(
+            chatId,
+            app,
+            latest.revision,
+            latestRequest
+          )
+        ),
+      },
+      // The draft's own revision, and a read-only one, run nothing.
       calls: await Promise.all(
-        [proposed.revision, revision].map(
+        [readOnlyRevision, revision].map(
           async (named) =>
             await failure(
               async () =>
@@ -282,44 +271,20 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
             )
         )
       ),
-      // The same version, read-only, in a frame of that chat's own: a
-      // preview's frame and modules are its chat's (screen-frame.ts,
-      // `previewFrame`), so its artifact is too.
-      elsewhere: {
-        revision: elsewhere.revision === proposed.revision,
-        screens: elsewhere.screens,
-        ownFrame: elsewhere.artifact !== proposed.artifact,
-      },
-      reports,
-      both: await failure(
-        async () => await chats.preview(chatId, app, undefined, 1, version)
-      ),
-      missing: await failure(
-        async () => await chats.preview(chatId, app, undefined, undefined, 9)
-      ),
       // Another builder of the App, through a chat that isn't theirs.
       othersChat: await failure(
-        async () =>
-          await other.api.chats.preview(
-            chatId,
-            app,
-            undefined,
-            undefined,
-            version
-          )
+        async () => await other.api.chats.preview(chatId, app)
       ),
     }).toStrictEqual({
       version: 2,
-      drafts: [],
-      draft: "app.no_draft",
-      proposed: { revision: readOnlyRevision, screens: ["desk"] },
-      asDrafted: true,
-      notLive: true,
-      calls: ["app.no_draft", "app.no_draft"],
-      elsewhere: { revision: true, screens: ["desk"], ownFrame: true },
-      reports: { problems: [], logs: [], seen: false },
-      both: "screen.invalid",
-      missing: "app.version_not_found",
+      drafts: [{ changed: [], revision: revision + 1 }],
+      latest: {
+        revision: revision + 1,
+        screens: ["desk"],
+        appVersion: 2,
+        titles: [],
+      },
+      calls: ["app.preview_outdated", "app.preview_outdated"],
       othersChat: "agent.chat_not_found",
     });
   });
@@ -343,12 +308,13 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
     const logged = await allEvents();
 
     expect({
-      drafts,
+      // Listed still, changing nothing once discarded, its revision on.
+      drafts: changesOf(drafts),
       versionsKept: after,
       staleLanded: stale === "ok",
-      afterStale,
+      afterStale: changesOf(afterStale),
       restored: restored.restoredFrom,
-      back: back?.app,
+      back: changesOf(back === undefined ? [] : [back]),
       audited: logged
         .filter(
           ({ action, target }) =>
@@ -359,12 +325,12 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
           app: detail.app,
         })),
     }).toStrictEqual({
-      drafts: [],
+      drafts: [{ changed: [], revision: revision + 1 }],
       versionsKept: before,
       staleLanded: false,
-      afterStale: [],
+      afterStale: [{ changed: [], revision: revision + 1 }],
       restored: 2,
-      back: app,
+      back: [{ changed: ["screens/desk.tsx"], revision: revision + 2 }],
       audited: [{ by: builder.userId, app }],
     });
   });

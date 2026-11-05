@@ -176,7 +176,7 @@ const failures: Readonly<Record<string, FailureReason>> = {
   "app.unreadable": "forbidden",
   "permission.person_inactive": "forbidden",
   "app.not_found": "not-found",
-  "app.no_draft": "not-found",
+  "app.not_in_chat": "not-found",
   "screen.not_found": "not-found",
   "screen.invalid": "not-found",
   "screen.input_invalid": "bad-input",
@@ -1697,12 +1697,14 @@ export const runScreen = (
 export interface DraftRevisions {
   latest: number | undefined;
   listener: ((revision: number) => void) | undefined;
+  /** Told the App's version the frame shows (`PreviewRefresh.appVersion`). */
+  onShows?: ((appVersion: number | undefined) => void) | undefined;
 }
 
 /**
  * Runs `screen` (the draft's first when none is named) of the chat's
  * draft of `app` in `frame`, as a preview (`runFrame`): of its draft's
- * `version`, or of the App's `appVersion`, read-only. The draft as it is
+ * `version`, read-only. The draft as it is
  * now takes each newer revision `revisions` names in the frame it has
  * open (preview-updates.ts); one that can't come in that way starts the
  * frame afresh, as a new version of an App does (`updated`).
@@ -1714,13 +1716,11 @@ export const runPreview = (
     app,
     screen,
     version,
-    appVersion,
   }: {
     chatId: string;
     app: string;
     screen?: string;
     version?: number;
-    appVersion?: number;
   },
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void,
@@ -1742,7 +1742,7 @@ export const runPreview = (
     frame,
     {
       open: async (session) =>
-        await session.chats.preview(chatId, app, screen, version, appVersion),
+        await session.chats.preview(chatId, app, screen, version),
       openMs: screenLimits.previewOpenMs,
       // A connection of its own: core keeps a preview's callbacks (its
       // server calls') per connection, with no way of the frame's own to
@@ -1756,30 +1756,48 @@ export const runPreview = (
           return { target: previewTarget(link, chatId, bundle) };
         }
         const moves: { to?: (revision: number) => void } = {};
-        const updates = new PreviewUpdates(bundle.app, opened, {
-          fetch: async (revision) =>
-            await on(
-              link,
-              async ({ chats }) =>
-                await chats.previewUpdate(
-                  chatId,
-                  bundle.app,
-                  bundle.screen,
-                  revision
-                )
-            ),
-          health: (next) => {
-            health = next;
-            if (running) {
-              onState({ status: next === "fixing" ? "fixing" : "running" });
-            }
+        health = bundle.fallback === true ? "fixing" : "working";
+        const updates = new PreviewUpdates(
+          bundle.app,
+          opened,
+          {
+            fetch: async (revision) =>
+              await on(
+                link,
+                async ({ chats }) =>
+                  await chats.previewUpdate(
+                    chatId,
+                    bundle.app,
+                    bundle.screen,
+                    revision
+                  )
+              ),
+            health: (next) => {
+              health = next;
+              if (running) {
+                onState({ status: next === "fixing" ? "fixing" : "running" });
+              }
+            },
+            reset: () => {
+              onState({ status: "updated" });
+            },
+            moved: (next) => {
+              moves.to?.(next);
+            },
+            shows: (appVersion) => {
+              revisions.onShows?.(appVersion);
+            },
           },
-          reset: () => {
-            onState({ status: "updated" });
-          },
-          moved: (next) => {
-            moves.to?.(next);
-          },
+          bundle.fallback === true
+        );
+        // The App's version, as the tab's one subscription of it pushes it
+        // (app-versions.ts): another committed comes into a frame showing
+        // the App's latest. Its first push too, which may tell of one
+        // committed while the frame opened: one it has hands nothing.
+        const stopFollowing = link.followVersion(bundle.app, (push) => {
+          if (push.type === "current") {
+            updates.again();
+          }
         });
         const target = previewTarget(link, chatId, bundle, {
           problem: () => {
@@ -1798,6 +1816,7 @@ export const runPreview = (
         cleanups.push(() => {
           revisions.listener = undefined;
           updates.close();
+          stopFollowing();
         });
         return { target };
       },

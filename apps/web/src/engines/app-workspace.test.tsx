@@ -446,7 +446,7 @@ describe(AppWorkspace, () => {
     expect(seen).toStrictEqual({ builder: true, user: false, staff: false });
   });
 
-  it("never shows the live App: it says where the App stands instead", async () => {
+  it("never shows the live App: with no chat to preview from, it says where the App stands instead", async () => {
     const said: Record<string, boolean> = {};
     const states = {
       ready: [
@@ -458,12 +458,29 @@ describe(AppWorkspace, () => {
     } as const;
     for (const [state, [fake, text]] of Object.entries(states)) {
       // oxlint-disable-next-line no-await-in-loop -- one page at a time
-      await opened(fake.apps);
+      await opened(
+        fake.apps,
+        identityOf(false),
+        undefined,
+        undefined,
+        async () => await Promise.reject(new Error("No chat."))
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one page at a time
+      await settled();
       said[state] = says(text);
       takenDown();
     }
+    // While core finds the App's chat, the preview is on its way.
+    await opened(fakeApps("published").apps);
+    const finding = {
+      loading: document.querySelector('[aria-label="Loading…"]') !== null,
+      unchanged: says("No unpublished changes"),
+    };
 
-    expect(said).toStrictEqual({ ready: true, unchanged: true, empty: true });
+    expect({ said, finding }).toStrictEqual({
+      said: { ready: true, unchanged: true, empty: true },
+      finding: { loading: true, unchanged: false },
+    });
   });
 
   it("switches the main area between Preview, Code, Data and Settings, the one shown marked", async () => {
@@ -675,7 +692,7 @@ describe(AppWorkspace, () => {
       }
     );
     await settled();
-    const before = says("Version 2 is ready to publish");
+    const before = says("Publish version 2");
 
     // The job proposed its draft as version 2: core drops the draft.
     fake.proposed(2);
@@ -694,19 +711,16 @@ describe(AppWorkspace, () => {
 
     expect({
       before,
-      ready: says("Version 2 is ready to publish"),
+      ready: says("Publish version 2"),
       publish: button("Publish version 2").disabled,
     }).toStrictEqual({ before: false, ready: true, publish: false });
   });
 
-  it("previews the version proposed, read-only, with the way to publish it, once the App's chat is known", async () => {
+  it("previews the App as the App's chat has it, with the way to publish the version proposed, once the chat is known", async () => {
     const fake = fakeApps("published", { pendingVersion: 2 });
-    // No chat yet: where the App stands, as before.
+    // No chat yet: no frame.
     await opened(fake.apps);
-    const withoutChat = {
-      ready: says("Grasp finished these changes"),
-      frame: document.querySelector("iframe"),
-    };
+    const withoutChat = { frame: document.querySelector("iframe") };
     takenDown();
 
     const core = new PreviewingCore();
@@ -722,31 +736,33 @@ describe(AppWorkspace, () => {
     });
     const frame = document.querySelector("iframe");
 
-    await press(button("Review and publish"));
+    await press(button("Publish version 2"));
 
     expect({
       withoutChat,
-      label: says("Version 2: read-only preview"),
+      label: says("Preview: changes nothing, reads no real data"),
+      // The bar names the version once the frame says which it shows.
       said: says("Version 2 is ready to publish"),
       frame: {
         title: frame?.getAttribute("title"),
         sandbox: frame?.getAttribute("sandbox"),
       },
       review: document.querySelector('[role="dialog"] h2')?.textContent,
-      // What the frame asked core to build: the App's version 2, not the
-      // chat's draft (proposing dropped it) nor a version of the draft.
-      asked: core.asked,
+      // What the frame asked core to build: the chat's preview, which core
+      // builds from the App's latest version, version 2, while the chat's
+      // draft changes nothing (proposing it emptied it); never read-only,
+      // so the chat's next write comes into it.
+      asked: core.asked.map((args) => args.filter((arg) => arg !== undefined)),
     }).toStrictEqual({
-      withoutChat: { ready: true, frame: null },
+      withoutChat: { frame: null },
       label: true,
-      said: true,
-      // The same sandboxed frame a draft's preview runs in.
+      said: false,
       frame: {
-        title: "Preview of the version's first page",
+        title: "Preview of the draft's first page",
         sandbox: "allow-scripts",
       },
       review: "Publish version 2",
-      asked: [["chat-proposed", "invoice-desk", undefined, undefined, 2]],
+      asked: [["chat-proposed", "invoice-desk"]],
     });
   });
 
@@ -894,7 +910,8 @@ describe(AppWorkspace, () => {
     expect({
       open,
       reopened: document.querySelector('[role="dialog"]') !== null,
-      offered: says("Version 3 is ready to publish"),
+      // Offered on the bar: the preview waits for the App's chat.
+      offered: says("Publish version 3"),
     }).toStrictEqual({ open: true, reopened: false, offered: true });
   });
 

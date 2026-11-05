@@ -1,4 +1,5 @@
 import type { PreviewApplied, PreviewLoad } from "@grasp-os/sdk/screen-runtime";
+import { fallbackRevision } from "@grasp-os/shared/chat";
 import type { PreviewRefresh, PreviewUpdate } from "@grasp-os/shared/chat";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { screenErrors } from "@grasp-os/shared/screens";
@@ -47,6 +48,8 @@ export interface PreviewUpdatesHost {
   reset: () => void;
   /** The frame shows `revision` now: what its calls name. */
   moved: (revision: number) => void;
+  /** The frame shows the App's `appVersion` now, or the draft's own changes. */
+  shows: (appVersion: number | undefined) => void;
 }
 
 /** What the frame's receiver answers each version with. */
@@ -81,7 +84,9 @@ const newBytes = (
 
 /**
  * Follows the draft's revisions for one open frame of a preview of
- * `app`, opened at `opened`.
+ * `app`, opened at `opened`: `fallback` when that is the App's latest
+ * version in place of the draft's screen, which didn't build, so the
+ * problem is being fixed until a write of the draft shows.
  */
 export class PreviewUpdates {
   readonly #app: string;
@@ -89,6 +94,11 @@ export class PreviewUpdates {
   /** The kit modules the frame loaded: all an update may import. */
   readonly #kit: ReadonlySet<string>;
   #toFrame: FrameReceiver | undefined;
+  /**
+   * Whether the frame shows the App's latest version in place of the
+   * draft, which didn't build: until a write of the draft shows.
+   */
+  #fallback: boolean;
   /** The revision the frame shows. */
   #shown: number;
   /** The newest revision the chat named. */
@@ -101,7 +111,9 @@ export class PreviewUpdates {
   #trying: number | undefined;
   /** Whether the frame reported a problem while trying the update it is handed. */
   #troubled = false;
-  #health: PreviewHealth = "working";
+  /** Whether the App's version may have changed under the revision shown (`again`). */
+  #again = false;
+  #health: PreviewHealth;
   /** The update the frame shows: the last that rendered. */
   #applied: PreviewRefresh;
   #evaluated: Evaluated;
@@ -112,8 +124,15 @@ export class PreviewUpdates {
    */
   readonly #taken = { revisions: 0, bytes: 0 };
 
-  constructor(app: string, opened: PreviewRefresh, host: PreviewUpdatesHost) {
+  constructor(
+    app: string,
+    opened: PreviewRefresh,
+    host: PreviewUpdatesHost,
+    fallback = false
+  ) {
     this.#app = app;
+    this.#fallback = fallback;
+    this.#health = fallback ? "fixing" : "working";
     this.#applied = opened;
     this.#host = host;
     this.#kit = new Set(opened.kit);
@@ -135,6 +154,8 @@ export class PreviewUpdates {
       return;
     }
     this.#toFrame = toFrame;
+    // The frame runs what it opened on.
+    this.#host.shows(this.#applied.appVersion);
     void this.#run();
   }
 
@@ -142,6 +163,19 @@ export class PreviewUpdates {
   revise(revision: number): void {
     if (revision > this.#wanted) {
       this.#wanted = revision;
+      void this.#run();
+    }
+  }
+
+  /**
+   * The App has another version now (app-versions.ts): a frame showing
+   * the App's latest version, the draft changing nothing, takes it at the
+   * same revision. One showing the draft's own changes keeps them: its
+   * draft is over the version it began from.
+   */
+  again(): void {
+    if (this.#applied.appVersion !== undefined) {
+      this.#again = true;
       void this.#run();
     }
   }
@@ -167,7 +201,12 @@ export class PreviewUpdates {
    * does.
    */
   runningAt(): number {
-    return this.#trying ?? this.#shown;
+    if (this.#trying !== undefined) {
+      return this.#trying;
+    }
+    // The App's latest version, shown in place of a draft that didn't
+    // build, runs that version's own code (core's `fallbackRevision`).
+    return this.#fallback ? fallbackRevision : this.#shown;
   }
 
   /** Stops following: the frame is gone. */
@@ -192,10 +231,16 @@ export class PreviewUpdates {
     }
     this.#asking = true;
     try {
-      while (!this.#closed && this.#wanted > this.#asked) {
-        this.#asked = this.#wanted;
+      while (!this.#closed && (this.#wanted > this.#asked || this.#again)) {
+        // A newer revision is built from the App as it is now anyway.
+        const again = this.#again && this.#wanted <= this.#shown;
+        this.#again = false;
+        this.#asked = Math.max(this.#wanted, this.#asked);
         // oxlint-disable-next-line no-await-in-loop -- one update at a time
-        const update = await this.#ask(this.#asked);
+        const update = await this.#ask(
+          again ? this.#shown : this.#asked,
+          again
+        );
         if (update === undefined) {
           continue;
         }
@@ -212,9 +257,13 @@ export class PreviewUpdates {
   /**
    * Core's answer for the draft at `revision`, the newest the chat named,
    * or undefined when there is none to hand. Core builds each revision
-   * once, for every preview that asks for it.
+   * once, for every preview that asks for it. `again`: the revision shown,
+   * asked for the App's version it is of now.
    */
-  async #ask(revision: number): Promise<PreviewRefresh | undefined> {
+  async #ask(
+    revision: number,
+    again: boolean
+  ): Promise<PreviewRefresh | undefined> {
     let answered: PreviewUpdate;
     try {
       answered = await this.#host.fetch(revision);
@@ -229,10 +278,23 @@ export class PreviewUpdates {
     }
     // Only the App the frame was opened for, and only a revision past
     // the one it shows.
+    const { refresh } = answered;
+    if (answered.app !== this.#app) {
+      return undefined;
+    }
+    // Asked again, another version of the App at the revision it shows:
+    // a frame takes only a revision past its own (@grasp-os/sdk's
+    // preview-updates.ts), so it starts afresh on that version, as for a
+    // new version of an App.
     if (
-      answered.app !== this.#app ||
-      answered.refresh.revision <= this.#shown
+      again &&
+      refresh.revision === this.#shown &&
+      refresh.appVersion !== this.#applied.appVersion
     ) {
+      this.#reset();
+      return undefined;
+    }
+    if (refresh.revision <= this.#shown) {
       return undefined;
     }
     // What core had when it built: one the chat named since is asked for.
@@ -271,6 +333,8 @@ export class PreviewUpdates {
       return !this.#closed;
     }
     this.#applied = update;
+    this.#fallback = false;
+    this.#host.shows(update.appVersion);
     if (update.revision !== this.#shown) {
       this.#shown = update.revision;
       this.#host.moved(update.revision);

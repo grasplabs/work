@@ -168,8 +168,9 @@ export interface ChatFileInput {
 }
 
 /**
- * An App the chat's agent is changing in the chat's own draft, not yet
- * proposed (`ChatsApi.drafts`).
+ * An App the chat's agent changes in the chat's own draft
+ * (`ChatsApi.drafts`): with no `changed` paths once its changes were
+ * proposed or discarded, when its preview shows the App's latest version.
  */
 export interface ChatDraft {
   app: string;
@@ -193,14 +194,23 @@ export interface ChatDraft {
 }
 
 /**
- * The revision a preview of a version of the draft, or of the App,
- * carries (`ChatsApi.preview` with `version` or `appVersion`): no draft
- * with changes is ever at it (a chat with none reads as at it, and is
- * refused for having none), so every call of that preview (function,
- * query, stream) is refused, the latest version's too, and nothing it
- * reports is kept. Read-only by construction.
+ * The revision a preview of a version of the draft carries
+ * (`ChatsApi.preview` with `version`): no draft
+ * is ever at it (a chat's draft starts at 0, before its first write), so
+ * every call of that preview (function, query, stream) is refused, the
+ * latest version's too, and nothing it reports is kept. Read-only by
+ * construction.
  */
-export const readOnlyRevision = 0;
+export const readOnlyRevision = -1;
+
+/**
+ * The revision a preview's calls name while it shows the App's latest
+ * version in place of the chat's draft, whose screen doesn't build
+ * (`PreviewBundle.fallback`): no draft is ever at it either, so its
+ * calls run on that version's own server code, never the draft's, and
+ * nothing it runs or reports counts toward the draft's check.
+ */
+export const fallbackRevision = -2;
 
 /**
  * One write of the chat's draft of an App, kept as it left the draft
@@ -238,8 +248,9 @@ export interface PreviewBundle extends Omit<
   "version" | "lease" | "route" | "input"
 > {
   /**
-   * Which write of the draft it was built from: its calls name it.
-   * `readOnlyRevision` for a version of the draft opened read-only.
+   * What its calls name: the write of the draft it was built from;
+   * `readOnlyRevision` for a version of the draft opened read-only;
+   * `fallbackRevision` for the App's latest version shown in its place.
    */
   revision: number;
   /** The draft's screens, sorted. */
@@ -250,6 +261,14 @@ export interface PreviewBundle extends Omit<
    * now; a version opened read-only never updates.
    */
   refresh?: PreviewRefresh;
+  /**
+   * The draft's changes left it no screen that builds at
+   * `refresh.revision`: the frame opened on the App's latest version
+   * instead (`refresh.appVersion`), as a draft that changes nothing shows
+   * it, its calls at `fallbackRevision`, and takes the draft's next write
+   * that builds.
+   */
+  fallback?: true;
 }
 
 /**
@@ -274,6 +293,13 @@ export interface PreviewRefresh {
    * import map is fixed once it loaded.
    */
   kit: string[];
+  /**
+   * The App's version it is of, when it shows one rather than the draft's
+   * changes: a draft that changes nothing shows the App's latest. Another
+   * version of the App committed since is the same revision with another
+   * version: the open frame takes it (preview-updates.ts).
+   */
+  appVersion?: number;
 }
 
 /** What `ChatsApi.previewUpdate` answers: one screen of the draft now. */
@@ -899,8 +925,8 @@ export interface ChatsApi {
    */
   send: (chatId: string, question: ChatQuestion) => Promise<void>;
   /**
-   * The Apps the chat's agent is changing in the chat's drafts, not yet
-   * proposed, most recently written first.
+   * The Apps the chat's agent changes in the chat's drafts, those whose
+   * changes are proposed or discarded too, most recently written first.
    */
   drafts: (chatId: string) => Promise<ChatDraft[]>;
   /**
@@ -952,17 +978,19 @@ export interface ChatsApi {
   /**
    * Screen `screen` of the chat's draft of `app` (its first screen when
    * none is named), built, to preview: for the person while they build
-   * the App. With `version`, of that version of the draft, read-only:
-   * at `readOnlyRevision`, so its calls are all refused. With
-   * `appVersion` instead, of that version of the App (the one proposed,
-   * before it is published), read-only the same way.
+   * the App, from a chat that changes it or is its own
+   * (`app.not_in_chat` otherwise). A draft that changes nothing previews
+   * the App's latest version, at the draft's revision, so its next write
+   * comes into the frame; one whose changes leave no screen that builds
+   * opens on that version too (`PreviewBundle.fallback`). With `version`,
+   * of that version of the draft, read-only: at `readOnlyRevision`, so its
+   * calls are all refused.
    */
   preview: (
     chatId: string,
     app: string,
     screen?: string,
-    version?: number,
-    appVersion?: number
+    version?: number
   ) => Promise<PreviewBundle>;
   /**
    * Screen `screen` of the chat's draft of `app` at `revision`, the

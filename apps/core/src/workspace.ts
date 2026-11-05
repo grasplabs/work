@@ -21,6 +21,7 @@ import {
   chatPlatformName,
   chatPlatformSchema,
   chatToolEventsKept,
+  fallbackRevision,
   readOnlyRevision,
 } from "@grasp-os/shared/chat";
 import type {
@@ -108,7 +109,7 @@ import type {
 } from "./agent-scope.ts";
 import { inOwnWords } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
-import { draftFiles } from "./apps.ts";
+import { draftFiles, latestVersion } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
 import {
@@ -832,6 +833,12 @@ export class Workspace extends DurableObject<Env> {
         .where(and(eq(chatDrafts.chatId, chatId), eq(chatDrafts.appId, appId)))
         .get()?.revision
   );
+
+  /**
+   * The App's latest version each chat's preview of it last read, by chat
+   * and App (`#latestFor`): in memory, read again when this object starts.
+   */
+  readonly #latestShown = new Map<string, number | null>();
 
   /** What those previews ran into (preview-reports.ts). */
   readonly #previewReports = new PreviewReports();
@@ -4062,9 +4069,9 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * `personId`'s own chat's drafts with changes, the most recently
-   * written first: which Apps, over which version, and the paths each
-   * changes, and which of those it deletes.
+   * `personId`'s own chat's drafts, the most recently written first:
+   * which Apps, over which version, and the paths each changes (none once
+   * proposed or discarded), and which of those it deletes.
    */
   drafts(chatId: unknown, personId: string): ChatDraft[] {
     const { id } = this.#ownChat(chatId, personId);
@@ -4089,25 +4096,20 @@ export class Workspace extends DurableObject<Env> {
       .where(eq(chatDraftFiles.chatId, id))
       .orderBy(asc(chatDraftFiles.appId), asc(chatDraftFiles.path))
       .all();
-    // A draft whose changes are all gone keeps its row (its revision
-    // goes on), and isn't one to show.
-    return rows.flatMap(({ appId, base, revision, updatedAt, callId }) => {
+    // A draft whose changes are all gone (proposed, or discarded) keeps
+    // its row and its revision, which its preview, of the App's latest
+    // version now (`previewDraft`), goes on following.
+    return rows.map(({ appId, base, revision, updatedAt, callId }) => {
       const files = paths.filter((row) => row.appId === appId);
-      return files.length === 0
-        ? []
-        : [
-            {
-              app: appId,
-              base,
-              changed: files.map(({ path }) => path),
-              deleted: files
-                .filter(({ deleted }) => deleted)
-                .map(({ path }) => path),
-              revision,
-              updatedAt: updatedAt.toISOString(),
-              callId,
-            },
-          ];
+      return {
+        app: appId,
+        base,
+        changed: files.map(({ path }) => path),
+        deleted: files.filter(({ deleted }) => deleted).map(({ path }) => path),
+        revision,
+        updatedAt: updatedAt.toISOString(),
+        callId,
+      };
     });
   }
 
@@ -4411,36 +4413,60 @@ export class Workspace extends DurableObject<Env> {
   // person's role in the App first (chats-rpc.ts, agent-builds.ts).
 
   /**
-   * `personId`'s own chat's draft of App `appId`, to preview, which they
-   * have open in the side panel now: `app.no_draft` while it changes
-   * nothing.
+   * What `personId`'s own chat previews of App `appId` (`#draftToPreview`)
+   * at `revision` (the draft's now, unless `fallbackRevision`), which they
+   * have open in the side panel now. `fresh`: the App's latest version read
+   * anew, as a preview opens or takes an update; its calls read the one
+   * read then.
    */
-  previewDraft(chatId: unknown, personId: string, appId: string): Draft {
-    const { id, draft } = this.#draftToPreview(chatId, personId, appId);
+  async previewDraft(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    { revision, fresh = false }: { revision?: number; fresh?: boolean } = {}
+  ): Promise<Draft> {
+    const latest = await this.#latestFor(
+      chatId,
+      personId,
+      appId,
+      revision,
+      fresh
+    );
+    const { id, draft } = this.#draftToPreview(
+      chatId,
+      personId,
+      appId,
+      revision,
+      latest
+    );
     this.#previewReports.opened(id, appId);
     return draft;
   }
 
   /**
-   * `previewDraft`, for a screen of it at `revision`: the draft's own, or
-   * one since which only its screens changed (`SealedPreviews.serves`);
-   * `app.preview_outdated` otherwise.
+   * What the chat previews of App `appId` (`#draftToPreview`), for a
+   * screen of it at `revision`: the draft's own, or one since which only
+   * its screens changed (`SealedPreviews.serves`), or the App's latest
+   * version at `fallbackRevision`; `app.preview_outdated` otherwise. Read
+   * with no wait, so nothing lands between the check and what the caller
+   * does with it next.
    */
   #servedDraft(
     chatId: unknown,
     personId: string,
     appId: string,
-    revision: unknown
+    revision: unknown,
+    latest: number | null | undefined
   ): Draft {
-    const draft = this.previewDraft(chatId, personId, appId);
-    if (
-      !this.#sealedPreviews.serves(
-        chatIdSchema.parse(chatId),
-        appId,
-        draft,
-        revision
-      )
-    ) {
+    const { id, draft } = this.#draftToPreview(
+      chatId,
+      personId,
+      appId,
+      revision,
+      latest
+    );
+    this.#previewReports.opened(id, appId);
+    if (!this.#sealedPreviews.serves(id, appId, draft, revision)) {
       throw appErrors.create("app.preview_outdated");
     }
     return draft;
@@ -4462,25 +4488,34 @@ export class Workspace extends DurableObject<Env> {
     revision: number | undefined,
     build: () => Promise<PreviewBuilt>
   ): Promise<PreviewBuilt> {
-    // `app.no_draft` for an App the chat builds no draft of.
-    const { id, draft } = this.#draftToPreview(chatId, personId, appId);
+    // Only the draft's revision: what the build shows, the App's latest
+    // version too, the build itself reads (`previewDraft`, fresh).
+    const chat = this.#ownChat(chatId, personId);
+    this.#previewsInChat(chat, appId);
+    const { id } = chat;
+    const now = this.draft(id, appId).revision;
     return await this.#previewBuilds.build(
       `${id}:${appId}:${what}`,
-      revision ?? draft.revision,
-      draft.revision,
+      revision ?? now,
+      now,
       build
     );
   }
 
   /**
-   * Whether a screen of the chat's draft of App `appId` at `revision`
+   * Whether a screen of the chat's preview of App `appId` at `revision`
    * still reaches it (`SealedPreviews.serves`): for what follows it
-   * outside this object, a live query or a stream (chats-rpc.ts).
+   * outside this object, a live query or a stream (chats-rpc.ts). One of
+   * the App's latest version shown in place of the draft
+   * (`fallbackRevision`) always does: it runs that version's own code.
    */
   previewServes(chatId: unknown, appId: string, revision: unknown): boolean {
     const chat = chatIdSchema.safeParse(chatId);
+    if (!chat.success) {
+      return false;
+    }
     return (
-      chat.success &&
+      revision === fallbackRevision ||
       this.#sealedPreviews.serves(
         chat.data,
         appId,
@@ -4490,18 +4525,105 @@ export class Workspace extends DurableObject<Env> {
     );
   }
 
-  /** `personId`'s own chat's draft of App `appId`: `app.no_draft` while it changes nothing. */
+  /**
+   * The App's latest version, which the chat's preview of App `appId`
+   * shows while its draft changes nothing, and at `fallbackRevision`
+   * (`#draftToPreview`): null when it has none; undefined, not looked up,
+   * for the draft's own changes. Read from core's database only when
+   * `fresh` (a preview opening or taking an update) or not read yet since
+   * this object started: every call of the preview reads the one read
+   * then. Only of an App the chat changes, or whose chat it is:
+   * `app.not_in_chat` for any other.
+   */
+  async #latestFor(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    revision: unknown,
+    fresh: boolean
+  ): Promise<number | null | undefined> {
+    const chat = this.#ownChat(chatId, personId);
+    const app = appIdSchema.parse(appId);
+    const drafted = this.#previewsInChat(chat, app);
+    const changes =
+      drafted &&
+      this.#db
+        .select({ path: chatDraftFiles.path })
+        .from(chatDraftFiles)
+        .where(
+          and(eq(chatDraftFiles.chatId, chat.id), eq(chatDraftFiles.appId, app))
+        )
+        .limit(1)
+        .get() !== undefined;
+    if (changes && revision !== fallbackRevision) {
+      return undefined;
+    }
+    const key = `${chat.id}:${app}`;
+    const known = this.#latestShown.get(key);
+    // None read is read again: the App may have its first version since.
+    if (!fresh && known !== undefined && known !== null) {
+      return known;
+    }
+    const latest = await latestVersion(this.env, app);
+    this.#latestShown.set(key, latest);
+    return latest;
+  }
+
+  /**
+   * Whether `chat` has a draft of App `app`, rather than being only its
+   * own chat: `app.not_in_chat` when it is neither, as it has no preview
+   * of that App.
+   */
+  #previewsInChat(chat: Chat, app: string): boolean {
+    const drafted =
+      this.#db
+        .select({ revision: chatDrafts.revision })
+        .from(chatDrafts)
+        .where(and(eq(chatDrafts.chatId, chat.id), eq(chatDrafts.appId, app)))
+        .get() !== undefined;
+    if (!drafted && chat.appId !== app) {
+      throw appErrors.create("app.not_in_chat");
+    }
+    return drafted;
+  }
+
+  /**
+   * What `personId`'s own chat previews of App `appId`: its draft, over
+   * the version it began from; while the draft changes nothing (none
+   * written yet, or proposed, or discarded), the App's `latest` version
+   * (`#latestFor`, looked up first), at the draft's revision. So the
+   * preview always shows the App, and the draft's next write comes into
+   * the frame showing it, as any write does. At `fallbackRevision`, the
+   * App's latest version whatever the draft holds: what a preview shows
+   * while the draft's screen doesn't build, on that version's own server
+   * code. `app.not_running` only for an App with no version and no
+   * changes, with nothing to show; `app.preview_outdated` for a draft
+   * whose changes went after the latest version wasn't looked up, which
+   * the preview asks for again.
+   */
   #draftToPreview(
     chatId: unknown,
     personId: string,
-    appId: string
+    appId: string,
+    revision: unknown,
+    latest: number | null | undefined
   ): { id: ChatId; draft: Draft } {
     const { id } = this.#ownChat(chatId, personId);
     const draft = this.draft(id, appId);
-    if (Object.keys(draft.changes).length === 0) {
-      throw appErrors.create("app.no_draft");
+    const showsDraft =
+      revision !== fallbackRevision && Object.keys(draft.changes).length > 0;
+    if (showsDraft) {
+      return { id, draft };
     }
-    return { id, draft };
+    if (latest === undefined) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    if (latest === null) {
+      throw appErrors.create("app.not_running");
+    }
+    return revision === fallbackRevision
+      ? { id, draft: { base: latest, changes: {}, revision: fallbackRevision } }
+      : { id, draft: { ...draft, base: latest } };
   }
 
   /**
@@ -4600,7 +4722,13 @@ export class Workspace extends DurableObject<Env> {
       chargeWindow?: (pages: number, whole: number) => Promise<void>;
     } = {}
   ): Promise<string> {
-    const draft = this.#servedDraft(chatId, personId, appId, revision);
+    const draft = this.#servedDraft(
+      chatId,
+      personId,
+      appId,
+      revision,
+      await this.#latestFor(chatId, personId, appId, revision, false)
+    );
     const id = chatIdSchema.parse(chatId);
     // A screen of the draft's own revision: only what it ran into decides
     // the draft's check. A frame still on an earlier screen of the same
@@ -4655,7 +4783,13 @@ export class Workspace extends DurableObject<Env> {
     request: unknown,
     attach: boolean
   ): Promise<ReadableStream<Uint8Array>> {
-    const draft = this.#servedDraft(chatId, personId, appId, revision);
+    const draft = this.#servedDraft(
+      chatId,
+      personId,
+      appId,
+      revision,
+      await this.#latestFor(chatId, personId, appId, revision, false)
+    );
     return await this.#sealedPreviews.openStream(
       chatIdSchema.parse(chatId),
       personId,
@@ -4681,7 +4815,13 @@ export class Workspace extends DurableObject<Env> {
     revision: unknown,
     request: unknown
   ): Promise<boolean> {
-    const draft = this.#servedDraft(chatId, personId, appId, revision);
+    const draft = this.#servedDraft(
+      chatId,
+      personId,
+      appId,
+      revision,
+      await this.#latestFor(chatId, personId, appId, revision, false)
+    );
     return await this.#sealedPreviews.cancelStream(
       chatIdSchema.parse(chatId),
       personId,
@@ -4692,19 +4832,33 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * The `@server/_generated/api` references the screens of `personId`'s own chat's draft
-   * of App `appId` at `revision` import: generated from its draft
-   * release, sealed now if it isn't yet; null when it generates none.
-   * Throws as the seal does for a draft that doesn't build or inspect.
+   * The `@server/_generated/api` references the screens of what
+   * `personId`'s own chat previews of App `appId` at `revision` import
+   * (`#draftToPreview`): generated from its draft release, sealed now if
+   * it isn't yet; null when it generates none. Over `base`, when named:
+   * the version the caller read its files over, so files and references
+   * come from one reading of the App's latest version;
+   * `app.preview_outdated` once the preview is over another. Throws as the
+   * seal does for a draft that doesn't build or inspect.
    */
   async previewReferences(
     chatId: unknown,
     personId: string,
     appId: string,
-    revision: unknown
+    revision: unknown,
+    base?: number | null
   ): Promise<string | null> {
-    const { id, draft } = this.#draftToPreview(chatId, personId, appId);
-    if (draft.revision !== revision) {
+    const { id, draft } = this.#draftToPreview(
+      chatId,
+      personId,
+      appId,
+      revision,
+      await this.#latestFor(chatId, personId, appId, revision, false)
+    );
+    if (
+      draft.revision !== revision ||
+      (base !== undefined && draft.base !== base)
+    ) {
       throw appErrors.create("app.preview_outdated");
     }
     const app = appIdSchema.parse(appId);
@@ -4730,7 +4884,13 @@ export class Workspace extends DurableObject<Env> {
     personId: string,
     appId: string
   ): Promise<boolean> {
-    const { draft } = this.#draftToPreview(chatId, personId, appId);
+    const { draft } = this.#draftToPreview(
+      chatId,
+      personId,
+      appId,
+      undefined,
+      await this.#latestFor(chatId, personId, appId, undefined, false)
+    );
     const files = await draftFiles(this.env, appIdSchema.parse(appId), draft);
     return isAppLayout(Object.fromEntries(files));
   }
@@ -4749,7 +4909,13 @@ export class Workspace extends DurableObject<Env> {
     path: string,
     input: unknown
   ): Promise<string> {
-    const { id, draft } = this.#draftToPreview(chatId, personId, appId);
+    const { id, draft } = this.#draftToPreview(
+      chatId,
+      personId,
+      appId,
+      undefined,
+      await this.#latestFor(chatId, personId, appId, undefined, false)
+    );
     const app = appIdSchema.parse(appId);
     const { release } = await this.#sealedPreviews.release(id, app, draft);
     const operation = Object.hasOwn(release.app.operations, path)

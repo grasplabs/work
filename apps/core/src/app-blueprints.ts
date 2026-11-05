@@ -29,11 +29,13 @@ import {
   workflowNamespace,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
+import { waitUntil } from "cloudflare:workers";
 import { and, asc, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import type { BuiltinBlueprint } from "#blueprints";
 
+import { versionMadeCurrent } from "./access-revocations.ts";
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import { refuseV1Server } from "./app-v1-server.ts";
@@ -1003,6 +1005,11 @@ export const acceptBlueprintUpdate = async (
       throw appErrors.create("app.conflict");
     }
     throw error;
+  }
+  if (changed) {
+    // The pages open on the App hear of it, as of any commit: a chat's
+    // preview showing the App's latest version takes it.
+    waitUntil(versionMadeCurrent(env, appId));
   }
   return toVersion(changed ? row : latest);
 };

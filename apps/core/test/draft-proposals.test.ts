@@ -91,7 +91,8 @@ describe("a person proposing a chat's draft", { timeout: 180_000 }, () => {
         proposedBy: null,
         files: [{ path: "screens/desk.tsx", change: "added" }],
       },
-      drafts: [],
+      // Kept, changing nothing: its preview shows the version proposed.
+      drafts: [{ app, changed: [] }],
       recorded: [
         {
           action: "app.committed",

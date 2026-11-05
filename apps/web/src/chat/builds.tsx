@@ -857,18 +857,28 @@ export interface NamedDraft {
   name: string;
 }
 
-/** The chat's drafts, as core lists them in the latest builds read; none until one succeeds. */
+/** Whether `draft` changes its App: it has changes not proposed yet. */
+export const changesApp = (draft: ChatDraft): boolean =>
+  draft.changed.length > 0;
+
+/**
+ * The chat's drafts, as core lists them in the latest builds read; none
+ * until one succeeds. One that changes nothing (proposed, or discarded)
+ * stays: its preview shows the App's latest version, as core reads it, so
+ * the App stays in view; not of an archived App, which has no preview.
+ */
 export const draftsOf = ({ builds }: ChatBuildsRead): NamedDraft[] => {
   if (builds === undefined) {
     return [];
   }
-  const names = new Map<string, string>(
-    builds.apps.map((app) => [app.id, app.name])
-  );
-  return builds.drafts.map((draft) => ({
-    draft,
-    name: names.get(draft.app) ?? draft.app,
-  }));
+  const apps = new Map<string, App>(builds.apps.map((app) => [app.id, app]));
+  return builds.drafts.flatMap((draft) => {
+    const app = apps.get(draft.app);
+    if (!changesApp(draft) && app?.status === "archived") {
+      return [];
+    }
+    return [{ draft, name: app?.name ?? draft.app }];
+  });
 };
 
 /**
