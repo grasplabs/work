@@ -284,7 +284,8 @@ const replyMail = ({
   headers = routingPass,
 }: {
   messageId?: string;
-  from?: string;
+  /** Its From, or none at all for null. */
+  from?: string | null;
   subject?: string;
   text?: string;
   headers?: string[];
@@ -292,7 +293,7 @@ const replyMail = ({
   [
     ...headers,
     `Message-ID: <${messageId}>`,
-    `From: ${from}`,
+    ...(from === null ? [] : [`From: ${from}`]),
     "To: quotes@acme.test",
     `Subject: ${subject}`,
     "Date: Mon, 28 Sep 2026 08:00:00 +0000",
@@ -433,7 +434,7 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
     // domain, keeps it. By subject, each case.
     const cases: Record<
       string,
-      { from: string; headers?: string[]; envelopeFrom?: string }
+      { from: string | null; headers?: string[]; envelopeFrom?: string }
     > = {
       aligned: { from: "Ben <ben@acme.test>" },
       cased: { from: "Ben <ben@ACME.Test>" },
@@ -456,6 +457,11 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
       group: { from: "Team: boss@acme.test;" },
       // No From postal-mime can read: the run gets the envelope sender.
       unreadable: { from: "", envelopeFrom: "boss@acme.test" },
+      spacedOnly: {
+        from: null,
+        headers: [...routingPass, "From : Boss <boss@acme.test>"],
+        envelopeFrom: "boss@acme.test",
+      },
       // An address the run gets cut to 256 characters, its quoted local
       // part ending, once cut, at another domain.
       cut: { from: `"${"x".repeat(245)}@bank.test tail"@acme.test` },
@@ -488,6 +494,7 @@ describe("replies to a run's mail", { timeout: 120_000 }, () => {
       severalMailboxes: ["boss@acme.test", null],
       group: ["boss@acme.test", null],
       unreadable: ["boss@acme.test", null],
+      spacedOnly: ["boss@acme.test", null],
       cut: [`"${"x".repeat(245)}@bank.test`, null],
     });
   });

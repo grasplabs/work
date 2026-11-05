@@ -455,8 +455,9 @@ const asciiLowerCase = (domain: string): string | undefined =>
 /**
  * `authentication`, its DMARC verdict kept only when it is of `from`, the
  * address the run gets (`messageOf`, cut to fit): the message has one
- * From header (any spelling of its name; RFC 5322 3.6 allows only one),
- * holding one mailbox, exactly `from`, at the domain DMARC judged. Which
+ * From header (counting every spelling of its name; RFC 5322 3.6 allows
+ * only one), the one postal-mime reads (`From:`, not `From :`), holding
+ * one mailbox, exactly `from`, at the domain DMARC judged. Which
  * From Email Routing judged, when there are several or a header holds
  * several mailboxes or none postal-mime reads (the run then gets the
  * envelope sender), or what a cut address was, the run can't tell.
@@ -475,6 +476,7 @@ const dmarcOfFrom = (
       ? undefined
       : asciiLowerCase(address.slice(address.lastIndexOf("@") + 1));
   const ofFrom =
+    fromHeaders[0]?.key === "from" &&
     fromMailboxes.length === 1 &&
     address === from &&
     domain !== undefined &&
