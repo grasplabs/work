@@ -590,9 +590,7 @@ export const checkFiles = async (
   signal?.throwIfAborted();
   const builds = await draftBuilds(env, app, base, files, signal);
   signal?.throwIfAborted();
-  const built = [builds.screens, builds.server, builds.lint].every(
-    buildPassed
-  );
+  const built = [builds.screens, builds.server, builds.lint].every(buildPassed);
   // The preview runs the draft's screens and server code: a lint finding
   // doesn't stop it, so the check still waits for what it runs into, and
   // the agent fixes both at once.
