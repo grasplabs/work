@@ -24,7 +24,6 @@ import {
 import type { InboundEmail } from "@grasp-os/shared/workflows";
 import { and, eq, isNull, not } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { addressParser } from "postal-mime";
 import type { Address, Attachment, Email } from "postal-mime";
 import { z } from "zod";
 
@@ -46,7 +45,7 @@ import {
 import type { Authentication } from "./authentication-results.ts";
 import { inputOf as mappedInput, startOnce } from "./connector-triggers.ts";
 import type { Outcome, Taker } from "./connector-triggers.ts";
-import { parsedOf, stagedAttachmentKey } from "./kept-email.ts";
+import { parsedOf, postalMime, stagedAttachmentKey } from "./kept-email.ts";
 import {
   learnMailDomain,
   mailRecipient,
@@ -462,11 +461,12 @@ const textOfHtml = (full: string): string => {
  * can't tell: several From headers or mailboxes, none postal-mime reads
  * (the run then gets the envelope sender), a cut address, another domain.
  */
-const dmarcOfFrom = (
+const dmarcOfFrom = async (
   parsed: Email,
   from: string,
   authentication: Authentication
-): Authentication => {
+): Promise<Authentication> => {
+  const { addressParser } = await postalMime();
   const fromHeaders = parsed.headers.filter(({ key }) => key.trim() === "from");
   const fromMailboxes =
     fromHeaders.length === 1 ? addressParser(fromHeaders[0]?.value ?? "") : [];
@@ -971,7 +971,7 @@ const receiveReply = async (
     type: ingress.type,
     data: fitted({
       ...input,
-      authentication: dmarcOfFrom(
+      authentication: await dmarcOfFrom(
         parsed,
         input.from.address,
         authenticationOf(parsed.headers, parsed.from?.address)
