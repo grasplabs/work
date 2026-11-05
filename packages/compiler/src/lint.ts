@@ -1,7 +1,7 @@
 /**
  * Lints App files with @shadcn/lint's rules, as the repo lints its own
  * code, through ESLint's `Linter` (which needs no file system of its own)
- * and oxc-parser (eslint-parser.ts), started before the lint runs.
+ * and oxc's parser (eslint-parser.ts), started before the lint runs.
  *
  * The rules read the project from disk: `components.json`, the theme and
  * the kit's component sources, for their variants. Each lint writes them

@@ -168,12 +168,9 @@ catalog:
   seroval: 1.7.5
   "@types/react": 19.3.0
   "@types/react-dom": 19.3.0
-  # The design-system lint's parser in the screen compiler's isolate:
-  # oxc-parser's threadless WebAssembly (its workerd loader), with
-  # typescript-eslint's scope analysis and visitor keys, which need no
-  # TypeScript (packages/compiler/src/eslint-parser.ts).
-  "@oxc-parser/binding-wasm32-wasip1": 0.156.0
-  oxc-parser: 0.156.0
+  # The design-system lint's parser in the screen compiler's isolate, with
+  # oxc's (oxc.wasm): typescript-eslint's scope analysis and visitor keys,
+  # which need no TypeScript (packages/compiler/src/eslint-parser.ts).
   "@typescript-eslint/scope-manager": 8.72.1
   "@typescript-eslint/visitor-keys": 8.72.1
   "@vitejs/plugin-react": 6.1.1
@@ -256,12 +253,6 @@ overrides:
   "@cloudflare/vitest-pool-workers>zod": "catalog:"
   "miniflare@5.20260815.0-alpha>undici": 7.30.1
   "miniflare@5.20260815.0-alpha>sharp": 0.35.5
-  # oxc-parser's WebAssembly binding pins emnapi 2.0.0-alpha.6 beside a
-  # @napi-rs/wasm-runtime (~1.2.6) built for 2.0.0-beta.2, its peer: on
-  # alpha.6 the binding fails to start ("setting 'initWorker'"). Lifted to
-  # the runtime's peer; drop once the binding pins it itself.
-  "@oxc-parser/binding-wasm32-wasip1>@emnapi/core": 2.0.0-beta.2
-  "@oxc-parser/binding-wasm32-wasip1>@emnapi/runtime": 2.0.0-beta.2
 
 peerDependencyRules:
   allowedVersions:

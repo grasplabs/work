@@ -342,7 +342,7 @@ const compilerWorker = async (
     const [source, kitJson, parserWasm] = await Promise.all([
       readCompilerFile(assets, compilerAssets.source, "javascript"),
       readCompilerFile(assets, compilerAssets.kit, "json"),
-      readCompilerBytes(assets, compilerAssets.oxcParserWasm, "wasm"),
+      readCompilerBytes(assets, compilerAssets.oxcWasm, "wasm"),
     ]);
     const kit: unknown = JSON.parse(kitJson);
     return {
@@ -353,7 +353,7 @@ const compilerWorker = async (
         [kitModule]: { json: kit },
         // Compiled as the isolate loads; the isolate itself can't. What
         // the design lint parses with (eslint-parser.ts).
-        [compilerAssets.oxcParserWasm]: { wasm: parserWasm },
+        [compilerAssets.oxcWasm]: { wasm: parserWasm },
       },
     };
   });
@@ -441,14 +441,14 @@ export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
     const [source, kit, parserWasm] = await Promise.all([
       readCompilerBytes(assets, compilerAssets.source, "javascript"),
       readCompilerBytes(assets, compilerAssets.kit, "json"),
-      readCompilerBytes(assets, compilerAssets.oxcParserWasm, "wasm"),
+      readCompilerBytes(assets, compilerAssets.oxcWasm, "wasm"),
     ]);
     return {
       mainModule: "compiler.js",
       modules: {
         "compiler.js": { type: "js", bytes: new Uint8Array(source) },
         [kitModule]: { type: "json", bytes: new Uint8Array(kit) },
-        [compilerAssets.oxcParserWasm]: {
+        [compilerAssets.oxcWasm]: {
           type: "wasm",
           bytes: new Uint8Array(parserWasm),
         },

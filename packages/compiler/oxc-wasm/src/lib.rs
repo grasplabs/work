@@ -4,7 +4,10 @@
 //! JS plugins and parallel runtime need native threads), so this is the
 //! thin layer their own playground has over the same crates: it parses
 //! and lints a file as oxlint's runtime does (`service/runtime.rs`),
-//! fixes as `oxlint --fix` does, and formats as `oxfmt` does.
+//! fixes as `oxlint --fix` does, and formats as `oxfmt` does. It also
+//! parses a file for ESLint as oxc-parser does (napi/parser), with the
+//! tokens oxc-parser gives only by raw transfer, which needs 64-bit memory:
+//! the compiler's design lint parses with it (src/eslint-parser.ts).
 //!
 //! Delete this crate once oxc publishes a threadless WebAssembly build of
 //! its linter and formatter, as it does for its parser (`oxc-parser/workerd`).
@@ -22,11 +25,14 @@ use std::{cell::RefCell, path::Path, sync::Arc};
 
 use oxc::{
     allocator::Allocator,
+    ast::CommentKind,
+    ast_visit::utf8_to_utf16::Utf8ToUtf16,
     diagnostics::Severity,
-    parser::{ParseOptions, Parser},
+    parser::{ParseOptions, Parser, ParserReturn, config::RuntimeParserConfig},
     semantic::SemanticBuilder,
     span::SourceType,
 };
+use oxc_estree_tokens::{ESTreeTokenOptions, to_estree_tokens_json};
 use oxc_formatter::{
     ArrowParentheses, BracketSameLine, BracketSpacing, JsFormatOptions, QuoteProperties,
     QuoteStyle, Semicolons, SortImportsOptions, SortOrder, TrailingCommas,
@@ -350,4 +356,82 @@ pub extern "C" fn tidy(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, src
             .map_or_else(|| fixed.to_string(), |printed| printed.into_code())
     });
     answer(tidied)
+}
+
+/// A comment as ESTree has it: its kind, and the text between its markers.
+#[derive(Serialize)]
+struct EstreeComment<'a> {
+    r#type: &'static str,
+    value: &'a str,
+    start: u32,
+    end: u32,
+}
+
+/// Why `source` doesn't parse, and where: oxc's first error.
+#[derive(Serialize)]
+struct ParseError {
+    message: String,
+    start: u32,
+}
+
+/// Parses `source` (`path`, which picks the language) as oxc-parser's
+/// `parseSync` does with `range: true` and `preserveParens: false`: JSON of
+/// `{ program, comments, tokens }`, the program and its comments as
+/// TS-ESTree has them and its tokens as ESLint's, every offset in UTF-16
+/// code units; or `{ error }` if it doesn't parse. Needs no `configure`.
+#[unsafe(no_mangle)]
+pub extern "C" fn parse(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, src_len: usize) -> usize {
+    let path = input(path_ptr, path_len);
+    let source = input(src_ptr, src_len);
+    let source_type = SourceType::from_path(&path).unwrap_or_default();
+    let allocator = Allocator::default();
+    let ParserReturn { mut program, diagnostics, tokens, .. } =
+        Parser::new(&allocator, &source, source_type)
+            .with_options(ParseOptions { preserve_parens: false, ..ParseOptions::default() })
+            .with_config(RuntimeParserConfig::new(true))
+            .parse();
+    let converter = Utf8ToUtf16::new(&source);
+    if let Some(error) = diagnostics.iter().find(|error| error.severity == Severity::Error) {
+        let mut start =
+            error.labels.first().map_or(0, |label| u32::try_from(label.offset()).unwrap_or(0));
+        if let Some(mut offsets) = converter.converter() {
+            offsets.convert_offset(&mut start);
+        }
+        let error = ParseError { message: error.message.to_string(), start };
+        return answer(format!(
+            "{{\"error\":{}}}",
+            serde_json::to_string(&error).unwrap_or_else(|_| "null".to_string())
+        ));
+    }
+    let is_ts = source_type.is_typescript();
+    // Before the program's offsets are converted: the tokens' are read
+    // against it, and converted as they are written.
+    let tokens =
+        to_estree_tokens_json(&tokens, &program, &source, &converter, ESTreeTokenOptions::new(is_ts));
+    converter.convert_program(&mut program);
+    let mut offsets = converter.converter();
+    let comments: Vec<EstreeComment> = program
+        .comments
+        .iter()
+        .map(|comment| {
+            let mut span = comment.span;
+            if let Some(offsets) = offsets.as_mut() {
+                offsets.convert_span(&mut span);
+            }
+            EstreeComment {
+                r#type: match comment.kind {
+                    CommentKind::Line | CommentKind::HtmlOpen | CommentKind::HtmlClose => "Line",
+                    CommentKind::SingleLineBlock | CommentKind::MultiLineBlock => "Block",
+                },
+                value: comment.content_span().source_text(&source),
+                start: span.start,
+                end: span.end,
+            }
+        })
+        .collect();
+    answer(format!(
+        "{{\"program\":{},\"comments\":{},\"tokens\":{tokens}}}",
+        program.to_estree_json(is_ts, true),
+        serde_json::to_string(&comments).unwrap_or_else(|_| "[]".to_string()),
+    ))
 }

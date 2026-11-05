@@ -9,7 +9,7 @@
  */
 import type { Linter } from "eslint/universal";
 
-import { parseSync, stopsParse } from "./eslint-parser.ts";
+import { commentsOf } from "./eslint-parser.ts";
 
 /**
  * Whether `source` may hold a disable comment or an inline config one: most
@@ -66,21 +66,6 @@ const commentOf = (type: "Line" | "Block", read: string): string => {
   return lineScoped.test(read) || read.includes("*/")
     ? `//${read}`
     : `/*${read}*/`;
-};
-
-/** The comments of `source` (`path` in the App), with where each is; none if it doesn't parse. */
-const commentsOf = (
-  path: string,
-  source: string
-): { range: [number, number]; type: "Line" | "Block"; value: string }[] => {
-  const { comments, errors } = parseSync(path, source);
-  return errors.some(stopsParse)
-    ? []
-    : comments.map(({ type, value, start, end }) => ({
-        range: [start, end],
-        type,
-        value,
-      }));
 };
 
 /**

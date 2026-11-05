@@ -1,67 +1,102 @@
 /**
  * The parser of the compiler's ESLint lints (lint.ts, server-lint.ts), and
- * the one @shadcn/lint reads the kit's components with: oxc-parser, as the
- * threadless WebAssembly its workerd loader starts, with typescript-eslint's
- * own scope analysis and visitor keys. That is typescript-eslint's parser
- * less TypeScript: oxc answers TS-ESTree, the tree typescript-eslint's
- * converts TypeScript's to, and TypeScript 7 has no JavaScript API to run
- * typescript-eslint's on.
+ * the one @shadcn/lint reads the kit's components with: oxc's, on oxc.wasm
+ * (oxc-wasm/src/lib.rs `parse`, the WebAssembly Ultracite's lint runs on),
+ * with typescript-eslint's own scope analysis and visitor keys. That is
+ * typescript-eslint's parser less TypeScript: oxc answers TS-ESTree, the
+ * tree typescript-eslint converts TypeScript's to, and ESLint's tokens
+ * (oxc_estree_tokens, which oxc checks against typescript-eslint's), and
+ * TypeScript 7 has no JavaScript API to run typescript-eslint's on.
  *
- * It exists for what ESLint reads that oxc doesn't give, and is no more:
- * - every node's and comment's line and column (`loc`): oxc gives offsets
- *   alone (`range`);
- * - `tokens`, a list ESLint requires: oxc's WebAssembly has none (its
- *   tokens come only by raw transfer, which needs 64-bit memory). ESLint
- *   reads them only for its token API, which no rule of these lints calls
- *   (@shadcn/lint's and design-rules.ts read nodes, text and scopes), so
- *   the list is empty rather than made by a tokenizer of our own.
+ * What it adds is what ESLint reads that oxc's ESTree leaves out: each
+ * node's, comment's and token's line and column (`loc`), from its offsets,
+ * as oxlint's own JavaScript plugins work them out.
  */
-import type {
-  OxcError,
-  ParserOptions,
-} from "@oxc-parser/binding-wasm32-wasip1";
-import { instantiate } from "@oxc-parser/binding-wasm32-wasip1/workerd";
-import type { WasiBinding } from "@oxc-parser/binding-wasm32-wasip1/workerd";
 import { analyze } from "@typescript-eslint/scope-manager";
 import { visitorKeys } from "@typescript-eslint/visitor-keys";
 import type { AST, Linter, Scope, SourceCode } from "eslint";
-import { wrap } from "oxc-parser/src-js/wrap";
+import { z } from "zod";
 
-let binding: WasiBinding | undefined;
+import { oxcParserOf } from "./oxc.ts";
+
+let parse: ((path: string, source: string) => string) | undefined;
 
 /**
- * Starts oxc-parser on its WebAssembly `module`, once per isolate: its
- * loader keeps the one instance. The module declares about 61 MiB of
- * linear memory as its least, which the instance takes whatever it parses.
+ * Starts the parser on oxc.wasm's `module`, once per isolate: an instance
+ * made on the first parse and kept (oxc.ts).
  */
-export const startOxcParser = async (
-  module: WebAssembly.Module
-): Promise<void> => {
-  binding ??= await instantiate(module);
+export const startOxcParser = (module: WebAssembly.Module): void => {
+  parse ??= oxcParserOf(module);
+};
+
+const spanSchema = z.looseObject({ start: z.number(), end: z.number() });
+
+/** What oxc.wasm's `parse` answers. */
+const parsedSchema = z.union([
+  z.strictObject({
+    program: z.custom<object>(
+      (value) =>
+        typeof value === "object" &&
+        value !== null &&
+        Reflect.get(value, "type") === "Program"
+    ),
+    comments: z.array(
+      z.strictObject({
+        type: z.enum(["Line", "Block"]),
+        value: z.string(),
+        start: z.number(),
+        end: z.number(),
+      })
+    ),
+    tokens: z.array(spanSchema),
+  }),
+  z.strictObject({
+    error: z.strictObject({ message: z.string(), start: z.number() }),
+  }),
+]);
+
+type Parsed = z.infer<typeof parsedSchema>;
+
+/** `source` (`path`, which picks the language) parsed by oxc. */
+const parsed = (path: string, source: string): Parsed => {
+  if (parse === undefined) {
+    throw new Error("oxc's parser hasn't started (startOxcParser)");
+  }
+  return parsedSchema.parse(JSON.parse(parse(path, source)));
+};
+
+/** The comments of `source` (`path`), with where each is; none if it doesn't parse. */
+export const commentsOf = (
+  path: string,
+  source: string
+): { range: [number, number]; type: "Line" | "Block"; value: string }[] => {
+  const found = parsed(path, source);
+  return "error" in found
+    ? []
+    : found.comments.map(({ type, value, start, end }) => ({
+        range: [start, end],
+        type,
+        value,
+      }));
 };
 
 /**
- * oxc-parser's `parseSync`, as its own JavaScript entry answers it: what
- * the design lint's @shadcn/lint reads the kit's components with (build.ts
- * `shadcnParser`).
+ * oxc-parser's `parseSync`, as far as @shadcn/lint calls it to read the
+ * kit's components (build.ts `shadcnParser`): the program, and an error
+ * when it doesn't parse.
  */
 export const parseSync = (
   filename: string,
-  source: string,
-  options?: ParserOptions
-): ReturnType<typeof wrap> => {
-  if (binding === undefined) {
-    throw new Error("oxc-parser hasn't started (startOxcParser)");
-  }
-  return wrap(binding.parseSync(filename, source, options));
+  source: string
+): { program: unknown; errors: { severity: "Error"; message: string }[] } => {
+  const found = parsed(filename, source);
+  return "error" in found
+    ? {
+        program: { type: "Program", body: [] },
+        errors: [{ severity: "Error", message: found.error.message }],
+      }
+    : { program: found.program, errors: [] };
 };
-
-/** The severity of an error of oxc's that stops the parse; a warning doesn't. */
-const stopping: ReadonlySet<string> = new Set(["Error"]);
-
-/** Whether an error of oxc's stops the parse. */
-export const stopsParse = ({ severity }: OxcError): boolean =>
-  stopping.has(severity);
 
 /** What ends a line, as ESLint counts lines. */
 const lineBreak = /\r\n|[\n\r\u2028\u2029]/gu;
@@ -116,6 +151,19 @@ const locate = (value: unknown, at: (offset: number) => Position): void => {
   }
 };
 
+/** A comment or a token as ESLint reads it: its offsets as `range`, and its `loc`. */
+const placed = <Span extends { start: number; end: number }>(
+  span: Span,
+  at: (offset: number) => Position
+): Span & {
+  range: [number, number];
+  loc: { start: Position; end: Position };
+} => ({
+  ...span,
+  range: [span.start, span.end],
+  loc: { start: at(span.start), end: at(span.end) },
+});
+
 /** A parse error as ESLint reports one: where it is, 1-based. */
 const syntaxError = (
   message: string,
@@ -138,41 +186,30 @@ const keys: SourceCode.VisitorKeys = Object.fromEntries(
   ])
 );
 
-/** The ESLint parser over oxc-parser: `startOxcParser` first. */
+/** The ESLint parser over oxc's: `startOxcParser` first. */
 export const parser: Linter.Parser = {
-  meta: { name: "oxc-parser" },
+  meta: { name: "oxc" },
   parseForESLint: (
     code: string,
     options: { filePath?: string; sourceType?: string } = {}
   ): Linter.ESLintParseResult => {
     const sourceType = options.sourceType === "module" ? "module" : "script";
-    const result = parseSync(options.filePath ?? "file.ts", code, {
-      sourceType,
-      range: true,
-      // TS-ESTree has no node for parentheses.
-      preserveParens: false,
-    });
+    const found = parsed(options.filePath ?? "file.ts", code);
     const at = positionsIn(code);
-    const error = result.errors.find(stopsParse);
-    if (error !== undefined) {
-      throw syntaxError(error.message, error.labels[0]?.start ?? 0, at);
+    if ("error" in found) {
+      throw syntaxError(found.error.message, found.error.start, at);
     }
-    const { program } = result;
+    const { program, comments, tokens } = found;
     locate(program, at);
-    // SAFETY: oxc-parser answers TS-ESTree (its README: any deviation is a
-    // bug), the tree typescript-eslint's scope analysis reads.
+    Object.assign(program, {
+      sourceType,
+      comments: comments.map((comment) => placed(comment, at)),
+      tokens: tokens.map((token) => placed(token, at)),
+    });
+    // SAFETY: oxc answers TS-ESTree (its README: any deviation is a bug),
+    // the tree typescript-eslint's scope analysis reads.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     const tree = program as Parameters<typeof analyze>[0];
-    Object.assign(tree, {
-      sourceType,
-      tokens: [],
-      comments: result.comments.map(({ type, value, start, end }) => ({
-        type,
-        value,
-        range: [start, end],
-        loc: { start: at(start), end: at(end) },
-      })),
-    });
     return {
       // SAFETY: the same tree, which ESLint reads as ESTree: TS-ESTree is
       // ESTree with TypeScript's nodes added.
