@@ -285,6 +285,7 @@ export const endSession = async (
  * someone, their role say, no other test sees.
  */
 const cast = {
+  platformWarmUp: { builder: "builder" },
   apps: { builder: "builder", user: "user", admin: "admin" },
   appPage: { builder: "builder", user: "user", colleague: "builder" },
   screens: { one: "builder", two: "builder" },
