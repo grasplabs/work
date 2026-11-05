@@ -37,10 +37,15 @@ import { hostModules } from "../apps/core/src/host-modules.ts";
 import { designCases, designFindings } from "../apps/core/test/design-cases.ts";
 import { steeringCases } from "../apps/core/test/steering-cases.ts";
 import {
+  oxcWasmModule,
+  oxcWasmPin,
+} from "../packages/compiler/oxc-wasm/wasm.ts";
+import {
   serverEntryPath,
   serverEntrySource,
 } from "../packages/compiler/src/app-code.ts";
-import { lintCode, tidy } from "../packages/compiler/src/ultracite.ts";
+import { ultraciteOf } from "../packages/compiler/src/ultracite.ts";
+import { ultraciteConfig } from "../packages/compiler/ultracite-config.ts";
 import { notesWorkflows } from "../packages/sdk/test/notes-workflows.ts";
 import notes from "../packages/sdk/test/notes/app.ts";
 import * as notesFunctions from "../packages/sdk/test/notes/server/notes.ts";
@@ -401,10 +406,13 @@ const installedVersion = (dir: string, name: string): string =>
 const platformChecker = installedVersion("packages/compiler", "@tsrs/wasm");
 
 /**
- * The compiler's TypeScript, 6: the project's, for sonarjs, which needs
- * its JavaScript API. Nothing type-checks on it: the check is tsrs's.
+ * Grasp's own lint and format of App code (ultracite.ts), on the oxc.wasm
+ * its isolate runs.
  */
-const compilerTypescript = installedVersion("packages/compiler", "typescript");
+const { lintCode, tidy } = ultraciteOf(
+  await oxcWasmModule(),
+  ultraciteConfig()
+);
 
 /** The Babel the platform parses App files with, its parser bundled. */
 const platformParser = installedVersion(
@@ -824,9 +832,15 @@ describe(
         install: install.status,
         checker: {
           tsrs: project.devDependencies["@tsrs/wasm"],
+          // No TypeScript of its own: the check is tsrs's.
           typescript: project.devDependencies.typescript,
           // The parser it reads files with, as the platform's Babel does.
           parser: project.devDependencies["@babel/parser"],
+        },
+        // Its lint and format: the releases Grasp's isolate runs.
+        tools: {
+          oxlint: project.devDependencies.oxlint,
+          oxfmt: project.devDependencies.oxfmt,
         },
         held,
         declared,
@@ -848,9 +862,10 @@ describe(
         install: 0,
         checker: {
           tsrs: platformChecker,
-          typescript: compilerTypescript,
+          typescript: undefined,
           parser: platformParser,
         },
+        tools: { oxlint: oxcWasmPin.oxlint, oxfmt: oxcWasmPin.oxfmt },
         held: { lint: 0, format: 0 },
         declared: { status: 1, problems: { "app/declared.d.ts": ["TS2304"] } },
         accepted: { status: 0, problems: {} },
@@ -1573,7 +1588,7 @@ describe(
       // component Grasp keeps as it is though oxfmt wouldn't: imports out
       // of oxfmt's order, and classes Tailwind's sorter would reorder; and
       // a GraphQL template, whose query Grasp leaves as written.
-      const written = await tidy({
+      const written = tidy({
         ...blueprintFiles("workflow-map"),
         "components/count.tsx": `import type { ReactNode } from "react";
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -1769,7 +1784,7 @@ export const Off = () => (
       }).toStrictEqual({
         beside: ["project"],
         written: [
-          ".prettierignore",
+          ".oxfmtrc.json",
           "LICENSES",
           "THIRD-PARTY-NOTICES.md",
           "app",
@@ -1780,7 +1795,6 @@ export const Off = () => (
           "package.json",
           "pnpm-lock.yaml",
           "pnpm-workspace.yaml",
-          "prettier.config.mjs",
           "tsconfig.json",
           "vendor",
           "workflows",

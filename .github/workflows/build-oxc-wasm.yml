@@ -1,0 +1,69 @@
+# Builds oxc.wasm, oxlint's linter and oxfmt's formatter for the isolate
+# that lints and formats App code (packages/compiler/oxc-wasm), and
+# publishes it as an asset of the pre-release pin.json names. Only when the
+# pin or the glue changes: installs, CI and release builds download it by
+# that release and check the hash pin.json pins (wasm.ts), and never build
+# it. A release, once there, is never built again: a change to the glue or
+# the oxc tag takes a new release in pin.json (`oxc-wasm-v1.90.0-2`), and
+# the hash this run prints goes into the pin.
+#
+# It runs on a push to any branch, so the pull request that changes the
+# pin can download what it pins; it publishes nothing a merge relies on
+# until review accepts the hash in pin.json.
+name: Build oxc WASM
+
+on:
+  push:
+    paths:
+      - packages/compiler/oxc-wasm/pin.json
+      - packages/compiler/oxc-wasm/Cargo.toml
+      - packages/compiler/oxc-wasm/build.sh
+      - packages/compiler/oxc-wasm/src/**
+      - .github/workflows/build-oxc-wasm.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-oxc-wasm
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      # To publish the release.
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: pin
+        run: echo "release=$(jq -r .release packages/compiler/oxc-wasm/pin.json)" >> "$GITHUB_OUTPUT"
+      - id: published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ steps.pin.outputs.release }}
+        run: |
+          if gh release view "$RELEASE" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "$RELEASE is published already: nothing to build." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - if: steps.published.outputs.exists != 'true'
+        run: packages/compiler/oxc-wasm/build.sh "$RUNNER_TEMP/oxc.wasm"
+      - if: steps.published.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ steps.pin.outputs.release }}
+        # A pre-release, never "latest": it is a build input, not a release
+        # of Grasp.
+        run: |
+          sha=$(sha256sum "$RUNNER_TEMP/oxc.wasm" | cut -d ' ' -f 1)
+          gh release create "$RELEASE" "$RUNNER_TEMP/oxc.wasm" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease --latest=false \
+            --title "$RELEASE" \
+            --notes "oxlint and oxfmt as WebAssembly (packages/compiler/oxc-wasm), built from oxc tag oxlint_v$(jq -r .oxlint packages/compiler/oxc-wasm/pin.json). SHA-256: $sha"
+          echo "Published $RELEASE: oxc.wasm, SHA-256 \`$sha\` (pin it in packages/compiler/oxc-wasm/pin.json)." >> "$GITHUB_STEP_SUMMARY"

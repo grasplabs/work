@@ -81,6 +81,8 @@ export const compilerAssets = {
   packageBuilder: "package-builder.js",
   /** Ultracite's lint and format of App code (src/ultracite-worker.ts). */
   ultracite: "ultracite.js",
+  /** oxlint's and oxfmt's WebAssembly, which Ultracite's isolate runs (oxc-wasm/). */
+  oxcWasm: "oxc.wasm",
   /** esbuild's WebAssembly, which the package builder runs. */
   esbuildWasm: "esbuild.wasm",
   /**

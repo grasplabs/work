@@ -23,12 +23,7 @@ import { designRuleLevels, designRules } from "./design-rules.ts";
 import type { Diagnostic } from "./diagnostic.ts";
 import { declarationExtension } from "./inputs.ts";
 import type { Kit } from "./kit.ts";
-import {
-  asEslint,
-  namesUnknownRule,
-  placeIn,
-  ruleIndex,
-} from "./lint-comments.ts";
+import { asEslint, namesUnknownRule, placeIn } from "./lint-comments.ts";
 import type { Place } from "./lint-comments.ts";
 
 const root = "/tmp/app";
@@ -89,12 +84,10 @@ export const lint = (
       rules: { ...kit.lintRules, ...designRuleLevels },
     },
   ];
-  // Every rule here is a JS plugin's in oxlint.
-  const rules = ruleIndex([], Object.keys(config[0]?.rules ?? {}));
   return Object.entries(appFiles)
     .filter(([path]) => !path.endsWith(declarationExtension))
     .flatMap(([path, source]) => {
-      const { text, changes } = asEslint(path, source, rules);
+      const { text, changes } = asEslint(path, source);
       const place = placeIn(source, text, changes);
       return linter
         .verify(text, config, `${root}/${path}`)

@@ -38,6 +38,12 @@ catalog:
   ultracite: 7.12.0
   vite: npm:@voidzero-dev/vite-plus-core@0.3.3
   vite-plus: 0.3.3
+  # Vite+'s own oxlint and oxfmt, as vite-plus pins them: what the repo
+  # lints and formats itself with, so the root's Ultracite reads its
+  # presets' types against them, not App code's (the `oxc` catalog).
+  # They move with vite-plus.
+  oxfmt: 0.68.0
+  oxlint: 1.83.0
   vitest: 4.1.11
   # Same workerd as Wrangler; runs the on-prem smoke test.
   workerd: 1.20261023.1
@@ -170,19 +176,8 @@ catalog:
   # The kit's carousel.
   embla-carousel-react: 8.6.0
   eslint: 10.11.0
-  # The ESLint equivalents of Ultracite's oxlint presets, which App code is
-  # linted with in an isolate of its own, where oxlint can't run; and
-  # Prettier, which formats what the agent writes.
-  "@typescript-eslint/eslint-plugin": 8.70.1
-  eslint-plugin-import-x: 4.17.1
-  eslint-plugin-jsdoc: 65.4.2
-  eslint-plugin-jsx-a11y: 6.10.2
-  eslint-plugin-promise: 7.3.0
-  eslint-plugin-react: 7.37.5
-  eslint-plugin-react-hooks: 7.1.1
-  eslint-plugin-sonarjs: 4.2.2
-  eslint-plugin-unicorn: 79.0.0
-  prettier: 3.9.10
+  # The WASI oxc.wasm runs on in the isolate, napi-rs's.
+  "@tybys/wasm-util": 0.10.4
   # A DOM for the web app's component tests that click and type.
   happy-dom: 21.0.4
   # The kit's one-time-code input.
@@ -226,6 +221,15 @@ catalog:
 # emits and reads declarations through its JavaScript API. App code is
 # type-checked by tsrs (@tsrs/wasm), TypeScript 7's checker.
 catalogs:
+  # oxlint and oxfmt, the releases App code is linted and formatted with:
+  # Grasp's isolate runs them compiled to WebAssembly from the same oxc tag
+  # (packages/compiler/oxc-wasm/pin.json), an exported App runs them as
+  # they are. They move together with the pin. A catalog of their own, not
+  # the default: the repo lints and formats itself with Vite+'s, which its
+  # Ultracite resolves as its peers, and a default entry would take over.
+  oxc:
+    oxfmt: 0.75.0
+    oxlint: 1.90.0
   typescript6:
     typescript: 6.0.3
   # The admin deploys with Cloudflare's cf CLI, whose Vite builds need the
@@ -263,10 +267,6 @@ peerDependencyRules:
     "@typescript-eslint/project-service>typescript": "7"
     "@typescript-eslint/tsconfig-utils>typescript": "7"
     "@typescript-eslint/typescript-estree>typescript": "7"
-    # Ultracite's ESLint preset runs them on ESLint 10, which their ranges
-    # don't name yet.
-    "eslint-plugin-jsx-a11y>eslint": "10"
-    "eslint-plugin-react>eslint": "10"
 
 # jq-wasm's Workers entry imports its own, unmetered jq.wasm as a default;
 # the patch drops that import, so a bundle carries only the metered module
