@@ -97,8 +97,9 @@ import type { Draft } from "./workspace.ts";
 // lists.
 //
 // Every write answers with what the whole draft builds to (`draftBuilds`),
-// as a save builds it (pages: compile, type errors,
-// @shadcn/lint and the React Compiler) and its server code as its seal
+// as a save builds it (pages: compile, type errors, the design
+// system's class checks and the React Compiler; Ultracite's lint) and its
+// server code as its seal
 // type-checks it, every gate at once and none hiding another: sorted by
 // file, each named once (`writtenDiagnostics`). There is no check of its
 // own to call: proposing checks the draft again and reads what the preview of the draft in the person's side
@@ -1560,7 +1561,7 @@ interface Build {
     file: string | null;
     line: number | null;
     column?: number;
-    /** A TypeScript code (TS2322), a lint rule (shadcn/no-restyle) or a compiler stage. */
+    /** A TypeScript code (TS2322), a lint rule (no-debugger), a class check (design/no-restyle) or a compiler stage. */
     rule?: string;
     severity: "error" | "warning";
     message: string;

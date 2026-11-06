@@ -192,8 +192,8 @@ export const isRefusedToProductPage = (request: Request): boolean =>
  * HTML parser refuses a string, so no markup becomes a nested document,
  * and the bootstrap closes the ways that don't parse markup. A browser
  * that doesn't enforce Trusted Types is told so, and runs no page. The
- * compiler's no-peer-connections rule (@grasp-os/compiler's
- * design-rules.ts) only tells an author early; nothing relies on it. The
+ * pages' lint rules against WebRTC (@grasp-os/compiler's page-rules.ts)
+ * only tell an author early; nothing relies on them. The
  * browser tests try every way, in every engine (e2e/page-attacks.e2e.ts).
  *
  * What a page is handed stays bounded besides: only what its person may

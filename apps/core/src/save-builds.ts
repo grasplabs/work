@@ -2,8 +2,6 @@ import {
   appCodeFiles,
   buildFiles,
   isGeneratedPath,
-  designContextKey,
-  isDesignLinted,
   isDesignRule,
   isLintedCode,
 } from "@grasp-os/compiler";
@@ -420,13 +418,7 @@ export const draftLintBuild = async (
     lintedFiles,
     async () => {
       const files = lintedFiles(source.files);
-      // What the design lint reads beside a page or a component: the
-      // App's others, which go with every call (`lint`'s `app`).
-      const app = Object.fromEntries(
-        Object.entries(files).filter(([path]) => isDesignLinted(path))
-      );
-      const designContext = await designContextKey(app);
-      const kept = await readLints(env, files, designContext, buildRefreshMs);
+      const kept = await readLints(env, files, buildRefreshMs);
       const missing = Object.fromEntries(
         Object.entries(files).filter(([path]) => !Object.hasOwn(kept, path))
       );
@@ -436,12 +428,11 @@ export const draftLintBuild = async (
         // oxlint-disable-next-line no-await-in-loop -- one call at a time, each within its bounds
         const stopped = await callSplitting(batch, async (part) => {
           const found = lintedSchema.parse(
-            await runner.run("ultracite", "lint", [part, app], { once: true })
+            await runner.run("ultracite", "lint", [part], { once: true })
           );
           await keepLints(
             env,
             part,
-            designContext,
             found,
             runner.callMs("ultracite") + leaseSlackMs
           );

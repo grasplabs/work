@@ -65,7 +65,6 @@ export {
   appCodeLimitErrors,
   buildFiles,
   computeModuleErrors,
-  isDesignLinted,
   isGeneratedPath,
   isLintedCode,
   isPageFile,
@@ -83,7 +82,6 @@ export {
   pageRuntime,
 } from "./kit.ts";
 export {
-  designContextKey,
   incrementSchema,
   lintKey,
   lintRecordOf,
@@ -319,8 +317,8 @@ export const referenceFiles = async (
  * How the compiler's isolate runs: no bindings, no importable env, no
  * network (`globalOutbound: null` and no subrequests), and at most one
  * build task's CPU per call (spec 18.1, `compilerTaskCpuMs`: 60 s), many
- * times what a large App takes. `nodejs_compat` is for the React
- * Compiler, which is written for Node.
+ * times what a large App takes. `nodejs_compat` is for TanStack's route
+ * generator, which crawls the pages in `node:fs` (route-tree.ts).
  */
 export const isolateSettings = {
   ...isolateBase,
@@ -335,15 +333,21 @@ const compilerWorker = async (
   assets: Fetcher
 ): Promise<WorkerLoaderWorkerCode> =>
   await workerCodeRead(assets, `compiler:${version}`, async () => {
-    const [source, kitJson] = await Promise.all([
+    const [source, kitJson, wasm] = await Promise.all([
       readCompilerFile(assets, compilerAssets.source, "javascript"),
       readCompilerFile(assets, compilerAssets.kit, "json"),
+      readCompilerBytes(assets, compilerAssets.oxcWasm, "wasm"),
     ]);
     const kit: unknown = JSON.parse(kitJson);
     return {
       ...isolateSettings,
       mainModule: "compiler.js",
-      modules: { "compiler.js": source, [kitModule]: { json: kit } },
+      modules: {
+        "compiler.js": source,
+        [kitModule]: { json: kit },
+        // Compiled as the isolate loads; the isolate itself can't.
+        [compilerAssets.oxcWasm]: { wasm },
+      },
     };
   });
 
@@ -427,15 +431,17 @@ const platformCodeRead = reader<PlatformCode>(true, platformCodeTurns);
  */
 export const appCompilerCode = async (assets: Fetcher): Promise<PlatformCode> =>
   await platformCodeRead(assets, `compiler:${version}`, async () => {
-    const [source, kit] = await Promise.all([
+    const [source, kit, wasm] = await Promise.all([
       readCompilerBytes(assets, compilerAssets.source, "javascript"),
       readCompilerBytes(assets, compilerAssets.kit, "json"),
+      readCompilerBytes(assets, compilerAssets.oxcWasm, "wasm"),
     ]);
     return {
       mainModule: "compiler.js",
       modules: {
         "compiler.js": { type: "js", bytes: new Uint8Array(source) },
         [kitModule]: { type: "json", bytes: new Uint8Array(kit) },
+        [compilerAssets.oxcWasm]: { type: "wasm", bytes: new Uint8Array(wasm) },
       },
       nodejsCompat: true,
       cpuMs: isolateSettings.limits.cpuMs,

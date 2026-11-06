@@ -416,7 +416,8 @@ export interface BuildDiagnostic {
   column?: number;
   /**
    * What found it: a TypeScript error code (`TS2322`), a lint rule
-   * (`shadcn/no-restyle`), or a compiler stage (`imports`, `compile`).
+   * (`no-debugger`), a class check (`design/no-restyle`), or a compiler
+   * stage (`imports`, `compile`).
    */
   rule?: string;
   /** What kind of problem it is, from a closed set (`diagnosticCategory`). */

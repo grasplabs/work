@@ -192,6 +192,7 @@ const hookRelease = (release: string): void => {
       "export class WorkerEntrypoint { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }",
     "./esbuild.wasm": wasmStub(release, compilerAssets.esbuildWasm),
     "./tsrs.wasm": wasmStub(release, compilerAssets.tsrsWasm),
+    "./oxc.wasm": wasmStub(release, compilerAssets.oxcWasm),
   };
   registerHooks({
     resolve: (specifier, context, next) => {

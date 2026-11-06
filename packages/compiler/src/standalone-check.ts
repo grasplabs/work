@@ -16,8 +16,10 @@
  * the platform does besides the options:
  *
  * - every App file parses as the platform's compile parses it, with
- *   Babel, which reads its comments and ambient declarations for the two
- *   rules below through the platform's own steering.ts;
+ *   oxc's parser (oxc-parser, the release of the oxc the platform's
+ *   oxc.wasm is built from), which reads its comments and ambient
+ *   declarations for the two rules below through the platform's own
+ *   steering.ts;
  * - code whose types are checked (server code, compute
  *   modules) steers nothing: no triple-slash directive, no suppression
  *   (`@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`), no `declare
@@ -41,7 +43,6 @@ import {
 import path from "node:path";
 import { isMainThread, parentPort, Worker } from "node:worker_threads";
 
-import { parse } from "@babel/parser";
 import {
   EXIT_CRASHED,
   makeRequest,
@@ -50,14 +51,10 @@ import {
   runTsc,
 } from "@tsrs/wasm/core";
 import type { Diagnostic, FileStat, HostFileSystem } from "@tsrs/wasm/core";
+import { parseSync } from "oxc-parser";
 
-import {
-  ambientOf,
-  directivesIn,
-  parserPlugins,
-  referenceError,
-} from "./steering.ts";
-import type { ModuleDeclaration } from "./steering.ts";
+import { ambientOf, directivesIn, referenceError } from "./steering.ts";
+import type { ModuleDeclaration, ParsedComment } from "./steering.ts";
 
 /** A problem in an App file, or in a check's options. */
 interface Problem {
@@ -399,48 +396,70 @@ interface Where {
   readonly column: number | undefined;
 }
 
-/** Where Babel puts a node or an error (`loc`, 0-based column), 1-based. */
-const whereOf = (position: unknown): Where => {
-  const line = fieldOf(position, "line");
-  const column = fieldOf(position, "column");
-  return {
-    line: typeof line === "number" ? line : undefined,
-    column: typeof column === "number" ? column + 1 : undefined,
+/** What ends a line, as JavaScript counts lines. */
+const lineBreak = /\r\n?|[\n\u2028\u2029]/gu;
+
+/** Where each offset of `text` is, 1-based. */
+const placesIn = (text: string): ((offset: number) => Where) => {
+  const starts = [
+    0,
+    ...Array.from(
+      text.matchAll(lineBreak),
+      ({ index, 0: found }) => index + found.length
+    ),
+  ];
+  return (offset) => {
+    const line = starts.findLastIndex((start) => start <= offset);
+    return { line: line + 1, column: offset - (starts[line] ?? 0) + 1 };
   };
 };
 
-/** An App file as Babel parses it: its comments and syntax tree. */
+/** An App file as oxc parses it: its comments and syntax tree, placed. */
 interface Parsed {
-  readonly comments: Parameters<typeof directivesIn>[0];
+  readonly comments: readonly ParsedComment[];
   readonly program: unknown;
+  readonly at: (offset: number) => Where;
 }
 
 /**
- * `text` parsed as the platform's compile parses `file`, with the same
- * parser options (steering.ts `parserPlugins`), or the parser's refusal
- * of it, which the platform's build reports.
+ * `text` parsed as the platform's compile parses `file` (by its
+ * extension: a `.d.ts` as declarations, JSX in a `.tsx`), or the parser's
+ * first refusal of it, which the platform's build reports.
  */
 const parsedOf = (file: string, text: string): Parsed | Problem => {
-  try {
-    const { comments, program } = parse(text, {
-      sourceType: "module",
-      plugins: parserPlugins(file),
-    });
-    return { comments: comments ?? [], program };
-  } catch (error) {
+  const { program, comments, errors } = parseSync(file, text, {
+    sourceType: "module",
+  });
+  const at = placesIn(text);
+  // A parse's every error stops it: the platform's build fails on each.
+  const [error] = errors;
+  if (error !== undefined) {
+    const [label] = error.labels;
     return {
       file,
-      ...whereOf(fieldOf(error, "loc")),
+      ...(label === undefined
+        ? { line: undefined, column: undefined }
+        : at(label.start)),
       code: "compile",
-      message: error instanceof Error ? error.message : String(error),
+      message: error.message,
     };
   }
+  return {
+    comments: comments.map(({ type, value, start }) => ({
+      lineComment: type === "Line",
+      value,
+      ...at(start),
+    })),
+    program,
+    at,
+  };
 };
 
-/** Every `declare module` or `declare global` in a syntax tree, with its line. */
-const ambientDeclarations = (
-  program: unknown
-): (ModuleDeclaration & Where)[] => {
+/** Every `declare module` or `declare global` in a syntax tree, where it is. */
+const ambientDeclarations = ({
+  program,
+  at,
+}: Parsed): (ModuleDeclaration & Where)[] => {
   const found: (ModuleDeclaration & Where)[] = [];
   const pending: unknown[] = [program];
   while (pending.length > 0) {
@@ -451,16 +470,17 @@ const ambientDeclarations = (
     if (fieldOf(node, "type") === "TSModuleDeclaration") {
       const id = fieldOf(node, "id");
       const type = fieldOf(id, "type");
-      const value = fieldOf(id, "value");
-      const name = fieldOf(id, "name");
+      const kind = fieldOf(node, "kind");
+      const start = fieldOf(node, "start");
       found.push({
         id: {
           type: typeof type === "string" ? type : "",
-          value,
-          name: typeof name === "string" ? name : undefined,
+          value: fieldOf(id, "value"),
         },
-        global: fieldOf(node, "global") === true,
-        ...whereOf(fieldOf(fieldOf(node, "loc"), "start")),
+        ...(typeof kind === "string" ? { kind } : {}),
+        ...(typeof start === "number"
+          ? at(start)
+          : { line: undefined, column: undefined }),
       });
     }
     const children: unknown[] = Object.values(node);
@@ -484,8 +504,8 @@ const directiveProblems = (file: string, { comments }: Parsed): Problem[] =>
  * would declare, or shadow, a module by name, or give every file globals
  * (steering.ts `ambientOf`, as the platform reads them).
  */
-const ambientProblems = (file: string, { program }: Parsed): Problem[] =>
-  ambientDeclarations(program).flatMap(({ line, column, ...declaration }) => {
+const ambientProblems = (file: string, parsed: Parsed): Problem[] =>
+  ambientDeclarations(parsed).flatMap(({ line, column, ...declaration }) => {
     const ambient = ambientOf(declaration);
     if (ambient === undefined) {
       return [];

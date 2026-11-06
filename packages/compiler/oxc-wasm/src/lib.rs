@@ -1,18 +1,17 @@
-//! oxlint's linter and oxfmt's formatter, for App code in an isolate: a
-//! threadless wasm32-wasip1 module with no file system, which src/oxc.ts
-//! loads. oxlint and oxfmt publish no WebAssembly build of either (their
-//! JS plugins and parallel runtime need native threads), so this is the
-//! thin layer their own playground has over the same crates: it parses
-//! and lints a file as oxlint's runtime does (`service/runtime.rs`),
-//! fixes as `oxlint --fix` does, and formats as `oxfmt` does. It also
-//! parses a file for ESLint as oxc-parser does (napi/parser), with the
-//! tokens oxc-parser gives only by raw transfer, which needs 64-bit memory:
-//! the lint isolate's ESLint lints parse with it (src/eslint-parser.ts).
+//! oxc's React transform, oxlint's linter and oxfmt's formatter, for App
+//! code in an isolate: a threadless wasm32-wasip1 module with no file
+//! system, which src/oxc.ts loads. oxc publishes no WebAssembly build of
+//! them that starts small (oxlint's JS plugins and parallel runtime need
+//! native threads), so this is the thin layer their own playground and
+//! napi packages have over the same crates: it transforms a file as
+//! `napi/transform-react` does (transform.rs), parses and lints it as
+//! oxlint's runtime does (`service/runtime.rs`), fixes as `oxlint --fix`
+//! does, and formats as `oxfmt` does. It also parses a file to ESTree as
+//! oxc-parser does (napi/parser), with the tokens ESLint needs on request,
+//! which oxc-parser gives only by raw transfer, which needs 64-bit memory.
 //!
-//! Delete this crate once oxc publishes a threadless WebAssembly build of
-//! its linter and formatter, and its parser's (`oxc-parser/workerd`, today
-//! without tokens and asking for 61 MiB of memory at its start) gives
-//! ESLint's tokens in 32-bit memory and starts small.
+//! Delete this crate once oxc publishes threadless WebAssembly builds of
+//! its linter, formatter and React transform that start small.
 //!
 //! The calls are plain C ABI: text goes in through `alloc` (owned and
 //! freed by the callee), and the answer is read from `out_ptr` for the
@@ -23,6 +22,8 @@
 //! ceiling, build.sh, run out on a file nested too deep or too large)
 //! leaves the instance's stack pointer, allocator and cells where they
 //! were: src/oxc.ts never calls it again, and starts a fresh one.
+mod transform;
+
 use std::{cell::RefCell, path::Path, sync::Arc};
 
 use oxc::{
@@ -275,7 +276,7 @@ struct Finding {
 /// Where each of `offsets` (bytes into `source`) is, in one pass over
 /// `source` whatever the number of findings: 1-based lines, and columns in
 /// UTF-16 code units. An offset inside a character is placed at it.
-fn places(source: &str, offsets: &[usize]) -> Vec<(usize, usize)> {
+pub(crate) fn places(source: &str, offsets: &[usize]) -> Vec<(usize, usize)> {
     let mut order: Vec<usize> = (0..offsets.len()).collect();
     order.sort_unstable_by_key(|&at| offsets[at]);
     let mut places = vec![(1, 1); offsets.len()];
@@ -302,7 +303,12 @@ fn places(source: &str, offsets: &[usize]) -> Vec<(usize, usize)> {
 /// Lints `source` (`path`, which picks the language and the overrides
 /// that apply): JSON of its findings, or `null` if it doesn't parse.
 #[unsafe(no_mangle)]
-pub extern "C" fn lint(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, src_len: usize) -> usize {
+pub extern "C" fn lint(
+    path_ptr: *mut u8,
+    path_len: usize,
+    src_ptr: *mut u8,
+    src_len: usize,
+) -> usize {
     let path = input(path_ptr, path_len);
     let source = input(src_ptr, src_len);
     let found = TOOLS.with(|cell| {
@@ -337,7 +343,12 @@ pub extern "C" fn lint(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, src
 /// `source` (`path`) with the fixes `oxlint --fix` makes made, then
 /// formatted as oxfmt formats it. What doesn't parse is answered as it is.
 #[unsafe(no_mangle)]
-pub extern "C" fn tidy(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, src_len: usize) -> usize {
+pub extern "C" fn tidy(
+    path_ptr: *mut u8,
+    path_len: usize,
+    src_ptr: *mut u8,
+    src_len: usize,
+) -> usize {
     let path = input(path_ptr, path_len);
     let source = input(src_ptr, src_len);
     let tidied = TOOLS.with(|cell| {
@@ -360,6 +371,32 @@ pub extern "C" fn tidy(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, src
     answer(tidied)
 }
 
+/// `source` (`path`, which picks the language) transformed as `config`
+/// (JSON of transform.rs's `Config`) says: JSON of its code, or why it
+/// failed, with the modules it names and its comments (transform.rs
+/// `Transformed`). Needs no `configure`.
+#[unsafe(no_mangle)]
+pub extern "C" fn transform(
+    path_ptr: *mut u8,
+    path_len: usize,
+    src_ptr: *mut u8,
+    src_len: usize,
+    config_ptr: *mut u8,
+    config_len: usize,
+) -> usize {
+    let path = input(path_ptr, path_len);
+    let source = input(src_ptr, src_len);
+    let config = input(config_ptr, config_len);
+    let answered = match serde_json::from_str::<transform::Config>(&config) {
+        Ok(config) => serde_json::to_string(&transform::transform(&path, &source, &config)),
+        Err(error) => Ok(format!(
+            "{{\"config\":{}}}",
+            serde_json::to_string(&error.to_string()).unwrap_or_default()
+        )),
+    };
+    answer(answered.unwrap_or_else(|_| "null".to_string()))
+}
+
 /// A comment as ESTree has it: its kind, and the text between its markers.
 #[derive(Serialize)]
 struct EstreeComment<'a> {
@@ -380,9 +417,9 @@ struct ParseError {
 /// `parseSync` does with `preserveParens: false`: JSON of `{ node, fixes,
 /// comments, tokens }`, the program as TS-ESTree has it (`node`), where
 /// its regular expression and BigInt literals are, whose values JSON
-/// can't hold (`fixes`, as oxc-parser's), its comments, and its tokens as
-/// ESLint's, every offset in UTF-16 code units; or `{ error }` if it
-/// doesn't parse. Needs no `configure`.
+/// can't hold (`fixes`, as oxc-parser's), its comments, and, unless
+/// `tokens` is 0, its tokens as ESLint's, every offset in UTF-16 code
+/// units; or `{ error }` if it doesn't parse. Needs no `configure`.
 ///
 /// Its memory is the AST, the tokens' JSON and the program's: about 125
 /// times the source for a file of data, 85 for most code, so 25 MB for
@@ -390,7 +427,14 @@ struct ParseError {
 /// ceiling. A file denser still that passes it traps, and src/oxc.ts
 /// starts a fresh instance.
 #[unsafe(no_mangle)]
-pub extern "C" fn parse(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, src_len: usize) -> usize {
+pub extern "C" fn parse(
+    path_ptr: *mut u8,
+    path_len: usize,
+    src_ptr: *mut u8,
+    src_len: usize,
+    tokens: u32,
+) -> usize {
+    let with_tokens = tokens != 0;
     let path = input(path_ptr, path_len);
     let source = input(src_ptr, src_len);
     let source_type = SourceType::from_path(&path).unwrap_or_default();
@@ -398,12 +442,11 @@ pub extern "C" fn parse(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, sr
     let ParserReturn { mut program, diagnostics, tokens, .. } =
         Parser::new(&allocator, &source, source_type)
             .with_options(ParseOptions { preserve_parens: false, ..ParseOptions::default() })
-            .with_config(RuntimeParserConfig::new(true))
+            .with_config(RuntimeParserConfig::new(with_tokens))
             .parse();
     let converter = Utf8ToUtf16::new(&source);
     if let Some(error) = diagnostics.iter().find(|error| error.severity == Severity::Error) {
-        let mut start =
-            error.labels.first().map_or(0, |label| u32::try_from(label.offset()).unwrap_or(0));
+        let mut start = error.labels.first().map_or(0, |label| label.offset());
         if let Some(mut offsets) = converter.converter() {
             offsets.convert_offset(&mut start);
         }
@@ -416,8 +459,15 @@ pub extern "C" fn parse(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, sr
     let is_ts = source_type.is_typescript();
     // Before the program's offsets are converted: the tokens' are read
     // against it, and converted as they are written.
-    let tokens =
-        to_estree_tokens_json(&tokens, &program, &source, &converter, ESTreeTokenOptions::new(is_ts));
+    let tokens = with_tokens.then(|| {
+        to_estree_tokens_json(
+            &tokens,
+            &program,
+            &source,
+            &converter,
+            ESTreeTokenOptions::new(is_ts),
+        )
+    });
     converter.convert_program(&mut program);
     let mut offsets = converter.converter();
     let comments: Vec<EstreeComment> = program
@@ -447,11 +497,13 @@ pub extern "C" fn parse(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, sr
     let mut json = program.to_estree_json_with_fixes(is_ts, false);
     drop(allocator);
     json.pop();
-    json.reserve_exact(comments.len() + tokens.len() + 24);
+    json.reserve_exact(comments.len() + tokens.as_ref().map_or(0, String::len) + 24);
     json.push_str(",\"comments\":");
     json.push_str(&comments);
-    json.push_str(",\"tokens\":");
-    json.push_str(&tokens);
+    if let Some(tokens) = tokens {
+        json.push_str(",\"tokens\":");
+        json.push_str(&tokens);
+    }
     json.push('}');
     answer(json)
 }

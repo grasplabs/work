@@ -1,7 +1,7 @@
-import Babel from "@babel/standalone";
 import { symbolicModules } from "@grasp-os/sdk/host";
 
-import { parserPlugins } from "./steering.ts";
+import { child, children, parsed, walk } from "./syntax.ts";
+import type { Node } from "./syntax.ts";
 
 // While an App's server code doesn't register, the modules generated from
 // it are stand-ins typed `any` (the SDK's `symbolicModules`): a page or
@@ -26,29 +26,13 @@ export const readsStandIns = (
     ([path, source]) => Object.hasOwn(files, path) && files[path] === source
   );
 
-/** What the collector reads of Babel's nodes. */
-interface Node {
-  type: string;
-  loc?: { start: { line: number; column: number } } | null;
-  name?: string;
-  params?: Node[];
-  arguments?: Node[];
-  properties?: Node[];
-  elements?: (Node | null)[];
-  value?: Node;
-  left?: Node;
-  argument?: Node;
-}
+const calls = new Set(["CallExpression", "NewExpression"]);
 
-const calls = new Set([
-  "CallExpression",
-  "NewExpression",
-  "OptionalCallExpression",
-]);
+const functions = new Set(["ArrowFunctionExpression", "FunctionExpression"]);
 
 /** The names a parameter binds, however it destructures: each one's identifier. */
-const boundNames = (node: Node | null | undefined): Node[] => {
-  if (node === null || node === undefined) {
+const boundNames = (node: Node | undefined): Node[] => {
+  if (node === undefined) {
     return [];
   }
   switch (node.type) {
@@ -56,20 +40,24 @@ const boundNames = (node: Node | null | undefined): Node[] => {
       return [node];
     }
     case "ObjectPattern": {
-      return (node.properties ?? []).flatMap((property) =>
+      return children(node, "properties").flatMap((property) =>
         boundNames(
-          property.type === "RestElement" ? property.argument : property.value
+          property.type === "RestElement"
+            ? child(property, "argument")
+            : child(property, "value")
         )
       );
     }
     case "ArrayPattern": {
-      return (node.elements ?? []).flatMap((element) => boundNames(element));
+      return children(node, "elements").flatMap((element) =>
+        boundNames(element)
+      );
     }
     case "AssignmentPattern": {
-      return boundNames(node.left);
+      return boundNames(child(node, "left"));
     }
     case "RestElement": {
-      return boundNames(node.argument);
+      return boundNames(child(node, "argument"));
     }
     default: {
       return [];
@@ -82,50 +70,31 @@ const boundNames = (node: Node | null | undefined): Node[] => {
  * straight to a call names its parameters, as TypeScript locates an
  * implicit `any` (`file:line:column`, 1-based): the positions a check
  * that reads stand-ins doesn't report one at (checked-build.ts
- * `lenient`). A file Babel can't parse has none: its compile says why.
+ * `lenient`). A file that doesn't parse has none: its compile says why.
  */
 export const callbackParameters = (
   files: Readonly<Record<string, string>>
 ): string[] => {
   const found: string[] = [];
   for (const [path, source] of Object.entries(files)) {
-    const collect = () => ({
-      visitor: {
-        "ArrowFunctionExpression|FunctionExpression": ({
-          node,
-          parent,
-        }: {
-          node: Node;
-          parent: Node;
-        }) => {
-          if (
-            !calls.has(parent.type) ||
-            parent.arguments?.includes(node) !== true
-          ) {
-            return;
-          }
-          for (const name of (node.params ?? []).flatMap(boundNames)) {
-            const start = name.loc?.start;
-            if (start !== undefined) {
-              found.push(`${path}:${start.line}:${start.column + 1}`);
-            }
-          }
-        },
-      },
-    });
-    try {
-      Babel.transform(source, {
-        filename: path,
-        babelrc: false,
-        configFile: false,
-        sourceType: "module",
-        code: false,
-        parserOpts: { plugins: parserPlugins(path) },
-        plugins: [collect],
-      });
-    } catch {
-      // Unparsed: its compile error says so.
+    const tree = parsed(path, source);
+    if (tree === undefined) {
+      continue;
     }
+    walk(tree.program, (node, parent, key) => {
+      if (
+        !functions.has(node.type) ||
+        parent === undefined ||
+        !calls.has(parent.type) ||
+        key !== "arguments"
+      ) {
+        return;
+      }
+      for (const name of children(node, "params").flatMap(boundNames)) {
+        const { line, column } = tree.at(name.start);
+        found.push(`${path}:${line}:${column}`);
+      }
+    });
   }
   return found;
 };

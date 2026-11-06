@@ -25,6 +25,17 @@ export interface Kit {
   /** What each of the kit's modules imports, by flat name. */
   moduleImports: Record<string, string[]>;
   /**
+   * The kit's components (`@grasp-os/ui`'s modules), by specifier, each
+   * with the variant props its `cva` calls give it and their values: what
+   * a page picks instead of restyling one (classes.ts).
+   */
+  components: Record<string, Record<string, string[]>>;
+  /**
+   * The theme's own colours, by name (`primary`, `muted-foreground`): the
+   * `--color-*` the kit's stylesheet declares beyond Tailwind's palette.
+   */
+  colors: string[];
+  /**
    * What each of the preview kit's modules imports, by flat name: the kit
    * built for a chat's preview (spec 19.2.1), with React's development
    * builds and React Fast Refresh. Its own chunks, so its own graph.
@@ -72,8 +83,9 @@ export const compilerAssets = {
   /** Ultracite's lint and format of App code (src/ultracite-worker.ts). */
   ultracite: "ultracite.js",
   /**
-   * oxlint's, oxfmt's and oxc's parser's WebAssembly (oxc-wasm/), which
-   * Ultracite's isolate lints with, and parses its ESLint lints with.
+   * oxc's WebAssembly (oxc-wasm/): its React transform and parser, which
+   * the compiler's isolate builds with, and oxlint and oxfmt, which
+   * Ultracite's isolate lints and formats with.
    */
   oxcWasm: "oxc.wasm",
   /** esbuild's WebAssembly, which the package builder runs. */

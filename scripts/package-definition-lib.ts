@@ -83,12 +83,13 @@ import {
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import { graspLockSchema } from "@grasp-os/shared/packages";
 import type { GraspLock, LockedPackage } from "@grasp-os/shared/packages";
-import shadcnPreset from "ultracite/oxlint/shadcn";
 import { parse } from "yaml";
 import { z } from "zod";
 
-import { oxcWasmPin } from "../packages/compiler/oxc-wasm/wasm.ts";
-import { designRuleLevels } from "../packages/compiler/src/design-rules.ts";
+import {
+  oxcWasmModule,
+  oxcWasmPin,
+} from "../packages/compiler/oxc-wasm/wasm.ts";
 import {
   buildFiles,
   codeExtensions,
@@ -99,7 +100,7 @@ import {
   sourceFolder,
 } from "../packages/compiler/src/inputs.ts";
 import { pageReferences } from "../packages/compiler/src/kit.ts";
-import { designNote } from "../packages/compiler/src/lint.ts";
+import { startOxc } from "../packages/compiler/src/oxc.ts";
 import { routeTree } from "../packages/compiler/src/route-tree.ts";
 import {
   appCodeTarget,
@@ -110,6 +111,7 @@ import {
 import type { TypeTarget } from "../packages/compiler/src/type-check.ts";
 import {
   leftOut,
+  pageOverride,
   ultraciteFormat,
   ultracitePresets,
 } from "../packages/compiler/ultracite-config.ts";
@@ -132,24 +134,20 @@ const projectDependencies = [
  * Its own development tools, each pinned as the catalog pins it: what its
  * check (`grasp/check.ts`) runs as the platform does, the checker App code
  * is type-checked with (`@tsrs/wasm`, the compiler's) and the parser that
- * reads its comments and ambient declarations (`@babel/parser`).
+ * reads its comments and ambient declarations (`oxc-parser`, the release
+ * of the oxc Grasp parses App code with).
  */
 const projectDevDependencies = [
-  "@babel/parser",
+  "oxc-parser",
   "@tsrs/wasm",
   "@types/react",
   "@types/react-dom",
   // Its lint and format, as Grasp holds App code to them (`planTooling`):
   // oxlint and oxfmt, the releases Grasp's isolate runs (`oxcReleases`),
-  // with Ultracite's presets and config, and @shadcn/lint as oxlint's JS
-  // plugin.
+  // with Ultracite's presets and config.
   "oxlint",
   "oxfmt",
   "ultracite",
-  "@shadcn/lint",
-  // What the kit's theme imports, which @shadcn/lint builds to read the
-  // classes and tokens it has, as Grasp's lint reads them (`lintProject`).
-  "tailwindcss",
 ] as const;
 
 /** The identity the generated references carry: no deployment's own. */
@@ -453,6 +451,7 @@ const planApp = async (
   // their own, so the project's pages type-check against the routes they
   // have.
   const built = buildFiles(app.files);
+  startOxc(await oxcWasmModule());
   const tree = await routeTree(built);
   for (const [file, text] of Object.entries({ ...app.files, ...tree.routes })) {
     project.add(`app/${safePath(file, "app")}`, text);
@@ -754,8 +753,6 @@ const compilerSource = "packages/compiler/src";
 const checkFiles = {
   "grasp/check.ts": "standalone-check.ts",
   "grasp/steering.ts": "steering.ts",
-  // And its design rules for pages, which the project's lint runs.
-  "grasp/design-rules.ts": "design-rules.ts",
 } as const;
 
 /** Server code as spec 8 lays it out, as the platform's check reads it. */
@@ -873,33 +870,23 @@ const ignoredGlobs = [
  */
 const formatted = `--no-error-on-unmatched-pattern "app/**/*.{${codeExtensions.join(",")}}"`;
 
-/**
- * What the design-system lint holds, as Grasp's lint does
- * (`isDesignLinted`, compiler inputs.ts): the App's front end.
- */
-const designLinted = [`app/${sourceFolder}**`];
-
-/** The compiler's design rules, as the project's oxlint loads them. */
-const designPlugin = "grasp/design-plugin.ts";
-
 /** `value` as data in the oxlint config's object, at its indent. */
 const configData = (value: unknown): string =>
   JSON.stringify(value, null, 2).replaceAll("\n", "\n  ");
 
 /**
- * The project's oxlint config, App code held to exactly what Grasp holds
- * it to, every list read from where Grasp reads it (ultracite-config.ts),
- * as data:
+ * The project's oxlint config, App code held to exactly what Grasp's lint
+ * holds it to, every list read from where Grasp reads it
+ * (ultracite-config.ts), as data:
  * - Ultracite's `core`, `react`, `tanstack` and `vitest` presets, less the
  *   rules Grasp leaves out (`leftOut`);
- * - on pages and components, the design system's lint, as the
- *   compiler's (lint.ts): @shadcn/lint's rules and its own.
+ * - on pages and components, the pages' own rules (`pageOverride`).
  */
 const oxlintConfigText = (): string => {
   const presets = Object.entries(ultracitePresets);
   return `// Written by Grasp when it exported this App: App code held to what
 // Grasp holds it to. Ultracite's presets, less the rules Grasp leaves
-// out, and the design system's lint on pages and components.
+// out, and the pages' own rules on pages and components.
 import { defineConfig } from "oxlint";
 ${presets
   .map(([name]) => `import ${name} from "ultracite/oxlint/${name}";`)
@@ -908,59 +895,18 @@ ${presets
 export default defineConfig({
   extends: [${presets.map(([name]) => name).join(", ")}],
   ignorePatterns: ${configData(ignoredGlobs)},
-  jsPlugins: ${configData([
-    ...(shadcnPreset.jsPlugins ?? []),
-    { name: "grasp", specifier: `./${designPlugin}` },
-  ])},
   rules: ${configData(Object.fromEntries(leftOut.map((rule) => [rule, "off"])))},
-  overrides: ${configData([
-    {
-      files: designLinted,
-      rules: { ...shadcnPreset.rules, ...designRuleLevels },
-    },
-  ])},
-  settings: ${configData({ shadcn: { note: designNote } })},
+  overrides: ${configData([pageOverride("app/")])},
 });
 `;
 };
 
-const componentsJsonSchema = z.looseObject({
-  tailwind: z.looseObject({ css: z.string() }),
-});
-
 /**
- * The project's lint and format: oxlint (`oxlintConfigText`) with the
- * compiler's design rules as its JS plugin, and oxfmt with the config
- * Grasp formats App code with (ultracite.ts `tidy`). @shadcn/lint reads the kit as Grasp's lint
- * reads it (compiler build.ts `collectLintProject`): by the kit's
- * `components.json`, its theme where the vendored kit has it.
+ * The project's lint and format: oxlint (`oxlintConfigText`), and oxfmt
+ * with the config Grasp formats App code with (ultracite.ts `tidy`).
  */
-const planTooling = (project: Plan, repo: string): void => {
-  const components = componentsJsonSchema.parse(
-    JSON.parse(
-      readFileSync(path.join(repo, "packages/ui/components.json"), "utf-8")
-    )
-  );
-  project.add(
-    "components.json",
-    jsonText({
-      ...components,
-      tailwind: {
-        ...components.tailwind,
-        css: `vendor/@grasp-os/ui/${components.tailwind.css}`,
-      },
-    })
-  );
+const planTooling = (project: Plan): void => {
   project.add("oxlint.config.ts", oxlintConfigText());
-  project.add(
-    designPlugin,
-    `// The compiler's design rules for pages (design-rules.ts), as oxlint's
-// JS plugin.
-import { designRules } from "./design-rules.ts";
-
-export default designRules;
-`
-  );
   project.add(
     ".oxfmtrc.json",
     jsonText({ ...ultraciteFormat(), ignorePatterns: ignoredGlobs })
@@ -1231,7 +1177,7 @@ export const planProject = async (
     readFileSync(path.join(input.repo, "LICENSE"), "utf-8")
   );
   project.add("THIRD-PARTY-NOTICES.md", noticesText(notices));
-  planTooling(project, input.repo);
+  planTooling(project);
   return project.files;
 };
 

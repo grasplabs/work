@@ -60,7 +60,7 @@ const appName = "Invoice desk";
 /** The Ledger's definition, which its first version got: empty, as it has pages alone. */
 const ledgerDefinition = appDefinition({ name: "Ledger" });
 
-/** A page whose button is restyled, which @shadcn/lint refuses. */
+/** A page whose button is restyled, which the design system's class checks refuse. */
 const restyled = `import { Button } from "@grasp-os/ui/components/button";
 import { createFileRoute } from "@tanstack/react-router";
 
@@ -422,7 +422,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       errors: 2,
       diagnostics: [
         { file: "src/routes/index.tsx", line: 4, rule: "TS2322" },
-        { file: "src/routes/index.tsx", line: 9, rule: "shadcn/no-restyle" },
+        { file: "src/routes/index.tsx", line: 9, rule: "design/no-restyle" },
       ],
       leftOut: 0,
     });

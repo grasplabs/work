@@ -1,12 +1,8 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 
+import type { ClassSite } from "./classes.ts";
 import type { Diagnostic } from "./diagnostic.ts";
-import {
-  buildFiles,
-  declarationFile,
-  isDesignLinted,
-  sourceCode,
-} from "./inputs.ts";
+import { buildFiles, declarationFile, sourceCode } from "./inputs.ts";
 import { pageReferences } from "./kit.ts";
 
 // What a pages build keeps of each of its files, so the next build of
@@ -17,19 +13,20 @@ import { pageReferences } from "./kit.ts";
 // build; the compiler uses one only under the key it works out itself
 // from what the record stands for, and checks everything else again.
 //
-// - A module's transform (Babel's React Compiler, types stripped, imports
-//   pointed at flat names) is a function of its path and source, the
+// - A module's transform (oxc's React Compiler, types stripped, imports
+//   pointed at flat names) and the classes it writes is a function of its path and source, the
 //   App's files it may import, the declarations its types may name, and
 //   whether it is a preview's: its key is the hash of all of those, so a
 //   change to any is a new key, and the module is compiled again.
 // - The type check reads every file each build, in an isolate of its own
 //   (checker.ts): tsrs keeps no program between checks, and checks a whole
 //   App in about the time a kept check would save. The CSS is built again
-//   from every module's candidates, and the lint runs over every file:
-//   "incremental" never skips a gate.
+//   from every module's candidates, its classes checked again against the
+//   kit (classes.ts), and the lint runs over every file: "incremental"
+//   never skips a gate.
 
 /** Part of every key: a change to what a record holds or means misses every one. */
-export const incrementSchema = "i1";
+export const incrementSchema = "i2";
 
 /** A module's transform, as a build keeps it. */
 export interface ModuleRecord {
@@ -40,6 +37,8 @@ export interface ModuleRecord {
   kit: string[];
   /** Its Tailwind class candidates (candidates.ts). */
   candidates: string[];
+  /** The classes it writes where a class goes, which the build checks (classes.ts). */
+  classes: ClassSite[];
 }
 
 /** What a build is handed of earlier ones, or keeps of its own: records by key. */
@@ -131,36 +130,12 @@ export const pageSources = (
 };
 
 /**
- * What the design lint of a page or a component reads beside it
- * (`lintKey`): the App's pages and components (`app`, those
- * `isDesignLinted` reads), as one key.
- */
-export const designContextKey = async (
-  app: Readonly<Record<string, string>>
-): Promise<string> =>
-  await keyOf([
-    "design",
-    Object.entries(app).toSorted(([a], [b]) => (a < b ? -1 : 1)),
-  ]);
-
-/**
  * The key Ultracite's lint of `path` (`source`) is kept under (`lint`,
- * ultracite.ts): its result reads that file alone, and, of a page or a
- * component, the App's others (`designContext`, `designContextKey`),
- * which a page may wrap the kit's components in. The compiler's
+ * ultracite.ts): its result reads that file alone. The compiler's
  * version, which every cache key holds, stands for the rules.
  */
-export const lintKey = async (
-  path: string,
-  source: string,
-  designContext: string
-): Promise<string> =>
-  await keyOf([
-    "lint",
-    path,
-    source,
-    isDesignLinted(path) ? designContext : "",
-  ]);
+export const lintKey = async (path: string, source: string): Promise<string> =>
+  await keyOf(["lint", path, source]);
 
 /** Ultracite's lint of one file, as core keeps it. */
 export interface LintRecord {
@@ -170,6 +145,27 @@ export interface LintRecord {
 
 const isStrings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((each) => typeof each === "string");
+
+const isClassSites = (value: unknown): value is ClassSite[] =>
+  Array.isArray(value) &&
+  value.every(
+    (each: unknown) =>
+      typeof each === "object" &&
+      each !== null &&
+      "name" in each &&
+      typeof each.name === "string" &&
+      "line" in each &&
+      typeof each.line === "number" &&
+      "column" in each &&
+      typeof each.column === "number" &&
+      (!("component" in each) ||
+        (typeof each.component === "object" &&
+          each.component !== null &&
+          "name" in each.component &&
+          typeof each.component.name === "string" &&
+          "module" in each.component &&
+          typeof each.component.module === "string"))
+  );
 
 /** `value` as a module record of `path`, or nothing when it isn't one. */
 export const moduleRecordOf = (
@@ -187,13 +183,16 @@ export const moduleRecordOf = (
   "kit" in value &&
   isStrings(value.kit) &&
   "candidates" in value &&
-  isStrings(value.candidates)
+  isStrings(value.candidates) &&
+  "classes" in value &&
+  isClassSites(value.classes)
     ? {
         path,
         code: value.code,
         app: value.app,
         kit: value.kit,
         candidates: value.candidates,
+        classes: value.classes,
       }
     : undefined;
 

@@ -41,15 +41,23 @@ const summaries = async (files: Record<string, string>) => {
 // What App code may try, to reach beyond the kit or to wear the compiler out.
 describe("page sandbox", { timeout: 60_000 }, () => {
   it("refuses a JSX runtime from outside the kit", async () => {
+    // A pragma the transform reads only where a file starts.
+    const pragma = (source: string): Record<string, string> =>
+      Object.fromEntries(
+        Object.entries(page("")).map(([path, code]) => [
+          path,
+          `${source}\n${code}`,
+        ])
+      );
     await expect(
-      summaries(page("/** @jsxImportSource evil */"))
+      summaries(pragma("/** @jsxImportSource evil */"))
     ).resolves.toStrictEqual([
       expect.stringContaining(
         'src/routes/index.tsx:undefined imports: "evil/jsx-runtime" is outside the kit'
       ),
     ]);
     await expect(
-      summaries(page("/** @jsxImportSource https://evil.example */"))
+      summaries(pragma("/** @jsxImportSource https://evil.example */"))
     ).resolves.toStrictEqual([
       expect.stringContaining(
         '"https://evil.example/jsx-runtime" is outside the kit'
@@ -257,12 +265,12 @@ describe(
         anew,
         anewRead: read.slice(before).toSorted(),
       }).toStrictEqual({
-        together: ["compiler.js", "kit.json"],
+        together: ["compiler.js", "kit.json", "oxc.wasm"],
         checks: ["checked", "checked", "checked"],
         warm: "checked",
         warmRead: [],
         anew: "checked",
-        anewRead: ["compiler.js", "kit.json"],
+        anewRead: ["compiler.js", "kit.json", "oxc.wasm"],
       });
     });
 
@@ -297,9 +305,15 @@ describe(
         ultracite.lint({ "src/components/one.ts": "export const one = 1;\n" }),
       ]);
 
-      const lintFiles = new Set(["ultracite.js", "oxc.wasm"]);
-      const lint = reads.filter(({ file }) => lintFiles.has(file));
-      const compilerReads = reads.filter(({ file }) => !lintFiles.has(file));
+      // Each isolate reads oxc.wasm beside its own module, in its turn.
+      const during = (file: string) => (read: (typeof reads)[number]) =>
+        reads.some(
+          (one) => one.file === file && read.from < one.to && one.from < read.to
+        );
+      const lint = reads.filter(
+        (read) => read.file === "ultracite.js" || during("ultracite.js")(read)
+      );
+      const compilerReads = reads.filter((read) => !lint.includes(read));
       const overlap = lint.some((one) =>
         compilerReads.some(({ from, to }) => one.from < to && from < one.to)
       );
@@ -309,7 +323,13 @@ describe(
         overlap,
       }).toStrictEqual({
         answers: ["checked", { "src/components/one.ts": [] }],
-        files: ["compiler.js", "kit.json", "oxc.wasm", "ultracite.js"],
+        files: [
+          "compiler.js",
+          "kit.json",
+          "oxc.wasm",
+          "oxc.wasm",
+          "ultracite.js",
+        ],
         overlap: false,
       });
     });

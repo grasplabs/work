@@ -14,6 +14,7 @@ describe("records handed to a build", () => {
       app: [],
       kit: [],
       candidates: [],
+      classes: [],
     };
     expect({
       module: moduleRecordOf(module, "src/components/card.tsx")?.path,

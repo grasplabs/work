@@ -2,7 +2,6 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import Babel from "@babel/standalone";
 import type { SurfaceKind } from "@grasp-os/shared/pages";
 import { surfaceKinds } from "@grasp-os/shared/pages";
 import {
@@ -15,7 +14,8 @@ import type { RouteNode } from "@tanstack/router-generator";
 import type { Diagnostic } from "./diagnostic.ts";
 import { isPageFile, pagesFolder, rootPage, routeTreePath } from "./inputs.ts";
 import { problem } from "./refusals.ts";
-import { parserPlugins } from "./steering.ts";
+import { child, children, parsed } from "./syntax.ts";
+import type { Node, Parsed } from "./syntax.ts";
 
 // An App's pages are TanStack Router file routes under `src/routes/`
 // (`index.tsx` is `/`, `tasks.$taskId.tsx` is `/tasks/$taskId`,
@@ -72,37 +72,22 @@ const registerRouter = [
 
 const surfaceTitleMax = 100;
 
-/** What the surface reader reads of Babel's nodes. */
-interface Node {
-  type: string;
-  loc?: { start: { line: number; column: number } } | null;
-  name?: string;
-  value?: unknown;
-  kind?: string;
-  id?: Node;
-  init?: Node | null;
-  key?: Node;
-  computed?: boolean;
-  expression?: Node;
-  declaration?: Node | null;
-  declarations?: Node[];
-  properties?: Node[];
-}
-
 const surfaceShape =
   'A page\'s surface is `export const surface = { kind: "sidebar" | "panel" | "settings", title: "…" }`, with literal values.';
 
-/** `node` without the type assertions around it (`as const`, `satisfies`). */
-const unwrapped = (node: Node | null | undefined): Node | undefined => {
-  let current = node ?? undefined;
-  while (
-    current !== undefined &&
-    (current.type === "TSAsExpression" ||
-      current.type === "TSSatisfiesExpression" ||
-      current.type === "TSNonNullExpression" ||
-      current.type === "ParenthesizedExpression")
-  ) {
-    current = current.expression;
+/** The type assertions a value may be wrapped in (`as const`, `satisfies`). */
+const assertions = new Set([
+  "TSAsExpression",
+  "TSSatisfiesExpression",
+  "TSNonNullExpression",
+  "ParenthesizedExpression",
+]);
+
+/** `node` without the type assertions around it. */
+const unwrapped = (node: Node | undefined): Node | undefined => {
+  let current = node;
+  while (current !== undefined && assertions.has(current.type)) {
+    current = child(current, "expression");
   }
   return current;
 };
@@ -112,21 +97,23 @@ const stringProperties = (
   object: Node
 ): Map<string, string | undefined> | undefined => {
   const read = new Map<string, string | undefined>();
-  for (const property of object.properties ?? []) {
-    if (property.type !== "ObjectProperty" || property.computed === true) {
+  for (const property of children(object, "properties")) {
+    if (
+      property.type !== "Property" ||
+      property.computed === true ||
+      property.kind !== "init"
+    ) {
       return undefined;
     }
-    const key = property.key?.name ?? property.key?.value;
-    if (typeof key !== "string") {
+    const key = child(property, "key");
+    const name = key?.type === "Identifier" ? key.name : key?.value;
+    if (typeof name !== "string") {
       return undefined;
     }
-    // SAFETY: an object property's value is an expression node, which
-    // `unwrapped` reads only by its `type`.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    const value = unwrapped(property.value as Node | undefined);
+    const value = unwrapped(child(property, "value"));
     read.set(
-      key,
-      value?.type === "StringLiteral" && typeof value.value === "string"
+      name,
+      value?.type === "Literal" && typeof value.value === "string"
         ? value.value
         : undefined
     );
@@ -141,48 +128,27 @@ const stringProperties = (
  */
 const surfaceOf = (
   file: string,
-  source: string
+  tree: Parsed | undefined
 ): { surface?: Omit<SurfaceManifest, "path">; errors: Diagnostic[] } => {
-  const declared: Node[] = [];
-  const collect = () => ({
-    visitor: {
-      ExportNamedDeclaration: (visited: { node: Node }) => {
-        const { declaration } = visited.node;
-        if (declaration?.type !== "VariableDeclaration") {
-          return;
-        }
-        for (const each of declaration.declarations ?? []) {
-          if (each.id?.name === "surface") {
-            declared.push({ ...each, kind: declaration.kind });
-          }
-        }
-      },
-    },
-  });
-  try {
-    Babel.transform(source, {
-      filename: file,
-      babelrc: false,
-      configFile: false,
-      sourceType: "module",
-      code: false,
-      parserOpts: { plugins: parserPlugins(file) },
-      plugins: [collect],
-    });
-  } catch {
+  if (tree === undefined) {
     return { errors: [] };
   }
+  // `export const surface = …`, at the module's top level.
+  const declared = children(tree.program, "body").flatMap((statement) => {
+    const declaration = child(statement, "declaration");
+    return statement.type === "ExportNamedDeclaration" &&
+      declaration?.type === "VariableDeclaration"
+      ? children(declaration, "declarations")
+          .filter((each) => child(each, "id")?.name === "surface")
+          .map((each) => ({ each, kind: declaration.kind }))
+      : [];
+  });
   const [found] = declared;
   if (found === undefined) {
     return { errors: [] };
   }
-  const at = {
-    file,
-    ...(found.loc === null || found.loc === undefined
-      ? {}
-      : { line: found.loc.start.line, column: found.loc.start.column + 1 }),
-  };
-  const object = unwrapped(found.init);
+  const at = { file, ...tree.at(found.each.start) };
+  const object = unwrapped(child(found.each, "init"));
   const read =
     found.kind === "const" && object?.type === "ObjectExpression"
       ? stringProperties(object)
@@ -258,27 +224,6 @@ const generatorProblem = (error: unknown, root: string): Diagnostic => {
 };
 
 /**
- * Whether `source` parses: a file that doesn't is left to its compile,
- * which says where, rather than failing the generator for every page.
- */
-const parses = (file: string, source: string): boolean => {
-  try {
-    Babel.transform(source, {
-      filename: file,
-      babelrc: false,
-      configFile: false,
-      sourceType: "module",
-      code: false,
-      parserOpts: { plugins: parserPlugins(file) },
-      plugins: [],
-    });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/**
  * The route tree of `files`' pages (`src/routes/**`), as TanStack's
  * generator makes it, with the surfaces its pages declare, and why the
  * generator refused them, a page exports no route or a surface is
@@ -287,9 +232,18 @@ const parses = (file: string, source: string): boolean => {
 export const routeTree = async (
   files: Readonly<Record<string, string>>
 ): Promise<RouteTree> => {
-  const routes = Object.entries(files).filter(
-    ([file, source]) => file.startsWith(pagesFolder) && parses(file, source)
-  );
+  // A file that doesn't parse is left to its compile, which says where,
+  // rather than failing the generator for every page.
+  const trees = new Map<string, Parsed>();
+  for (const [file, source] of Object.entries(files)) {
+    const tree = file.startsWith(pagesFolder)
+      ? parsed(file, source)
+      : undefined;
+    if (tree !== undefined) {
+      trees.set(file, tree);
+    }
+  }
+  const routes = Object.entries(files).filter(([file]) => trees.has(file));
   const root = path.join(tmpdir(), `routes-${crypto.randomUUID()}`);
   let nodes: RouteNode[] = [];
   try {
@@ -363,7 +317,7 @@ export const routeTree = async (
         root,
         path.join(root, pagesFolder, node.filePath)
       );
-      const read = surfaceOf(file, files[file] ?? "");
+      const read = surfaceOf(file, trees.get(file));
       errors.push(...read.errors);
       if (read.surface === undefined) {
         continue;
