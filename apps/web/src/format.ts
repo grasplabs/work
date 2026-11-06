@@ -55,6 +55,10 @@ export const formatNumber = (value: number): string =>
     value
   );
 
+/** A count at a glance, as the page's language shortens it: "1.2K", "1,2 Mio.". */
+export const formatCompact = (value: number): string =>
+  new Intl.NumberFormat(i18n.locale, { notation: "compact" }).format(value);
+
 /** 0.42 as "42%", or "42 %" where a language puts a space before it. */
 export const formatPercent = (fraction: number): string =>
   new Intl.NumberFormat(i18n.locale, {

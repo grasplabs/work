@@ -663,6 +663,10 @@ msgstr "{kind}, {severity}, {about}: {summary}"
 msgid "{kind}: {contractId}"
 msgstr "{kind}: {contractId}"
 
+#: src/engines/app-data-model.tsx
+msgid "{kind}: {options}"
+msgstr "{kind}: {options}"
+
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: \"Place is All\""
@@ -3387,10 +3391,6 @@ msgid "Change “{was}” to “{now}”."
 msgstr "Cambia «{was}» por «{now}»."
 
 #: src/engines/app-data-model.tsx
-msgid "Change {fieldName}"
-msgstr "Cambiar {fieldName}"
-
-#: src/engines/app-data-model.tsx
 msgid "Change {name}"
 msgstr "Cambiar {name}"
 
@@ -4975,6 +4975,10 @@ msgid "Edit"
 msgstr "Editar"
 
 #: src/engines/app-data-model.tsx
+msgid "Edit {fieldName}"
+msgstr "Editar {fieldName}"
+
+#: src/engines/app-data-model.tsx
 msgid "Edit {name}"
 msgstr "Editar {name}"
 
@@ -5393,6 +5397,11 @@ msgstr "Campo para {column}"
 #: src/engines/app-data-model.tsx
 msgid "Field name"
 msgstr "Nombre del campo"
+
+#: src/engines/app-data-model.tsx
+msgctxt "a table's fields"
+msgid "Fields"
+msgstr "Campos"
 
 #: src/labels.ts
 msgid "File"
@@ -7798,10 +7807,6 @@ msgstr "Más sobre cuando va de otra manera."
 msgid "More people are asked about it in the next interviews."
 msgstr "En las próximas entrevistas se preguntará a más personas."
 
-#: src/engines/app-data.tsx
-msgid "More records"
-msgstr "Más registros"
-
 #: src/brain/brain-atlas.ts
 msgid "More teams"
 msgstr "Más equipos"
@@ -9377,6 +9382,10 @@ msgctxt "business process"
 msgid "Opportunity-to-Cash"
 msgstr "Opportunity-to-Cash"
 
+#: src/engines/app-data-model.tsx
+msgid "Options"
+msgstr "Opciones"
+
 #: src/engines/app-settings.tsx
 msgctxt "the settings an app offers itself"
 msgid "Options"
@@ -10327,6 +10336,11 @@ msgstr "ID del registro"
 msgctxt "business process"
 msgid "Record-to-Report"
 msgstr "Record-to-Report"
+
+#: src/engines/app-data-model.tsx
+msgctxt "a table's records"
+msgid "Records"
+msgstr "Registros"
 
 #: src/engines/store-changes.tsx
 msgid "Records checked: {scanned}. Filled in: {filled}."
@@ -11736,6 +11750,7 @@ msgid "Sharing"
 msgstr "Compartir"
 
 #: src/brain/atlas-overlays.tsx
+#: src/engines/app-data-model.tsx
 msgid "Show"
 msgstr "Mostrar"
 

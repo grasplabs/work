@@ -14,7 +14,7 @@ import {
 } from "@grasp-os/ui/components/record-grid";
 import type { RecordGridColumn } from "@grasp-os/ui/components/record-grid";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
-import { HashIcon, PlusIcon, TypeIcon } from "lucide-react";
+import { HashIcon, TypeIcon } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { ComponentType } from "react";
 
@@ -140,8 +140,8 @@ const DataGridDemo = () => {
   );
 };
 
-/** A few hundred orders, as a table of an App holds them. */
-const orders = Array.from({ length: 300 }, (_, index) => ({
+/** A hundred thousand orders: only those in view are drawn. */
+const orders = Array.from({ length: 100_000 }, (_, index) => ({
   id: `order-${index + 1}`,
   customer: ["Ada", "Grace", "Alan", "Edsger"][index % 4] ?? "",
   amount: (index * 37) % 1000,
@@ -173,11 +173,6 @@ const RecordGridDemo = () => (
       label="Orders"
       rowKey={(order) => order.id}
       rows={orders}
-      trailing={
-        <button aria-label="Add a field" type="button">
-          <PlusIcon />
-        </button>
-      }
     />
   </div>
 );

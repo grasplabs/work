@@ -663,6 +663,10 @@ msgstr "{kind}, {severity}, {about}: {summary}"
 msgid "{kind}: {contractId}"
 msgstr "{kind}: {contractId}"
 
+#: src/engines/app-data-model.tsx
+msgid "{kind}: {options}"
+msgstr "{kind}: {options}"
+
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/requests/request-filters.tsx
 msgctxt "filter: \"Place is All\""
@@ -3387,10 +3391,6 @@ msgid "Change “{was}” to “{now}”."
 msgstr "Verander „{was}” in „{now}”."
 
 #: src/engines/app-data-model.tsx
-msgid "Change {fieldName}"
-msgstr "{fieldName} wijzigen"
-
-#: src/engines/app-data-model.tsx
 msgid "Change {name}"
 msgstr "{name} wijzigen"
 
@@ -4975,6 +4975,10 @@ msgid "Edit"
 msgstr "Bewerken"
 
 #: src/engines/app-data-model.tsx
+msgid "Edit {fieldName}"
+msgstr "{fieldName} bewerken"
+
+#: src/engines/app-data-model.tsx
 msgid "Edit {name}"
 msgstr "{name} bewerken"
 
@@ -5393,6 +5397,11 @@ msgstr "Veld voor {column}"
 #: src/engines/app-data-model.tsx
 msgid "Field name"
 msgstr "Veldnaam"
+
+#: src/engines/app-data-model.tsx
+msgctxt "a table's fields"
+msgid "Fields"
+msgstr "Velden"
 
 #: src/labels.ts
 msgid "File"
@@ -7798,10 +7807,6 @@ msgstr "Nog meer over als het anders gaat."
 msgid "More people are asked about it in the next interviews."
 msgstr "In de volgende interviews worden meer mensen erover gevraagd."
 
-#: src/engines/app-data.tsx
-msgid "More records"
-msgstr "Meer records"
-
 #: src/brain/brain-atlas.ts
 msgid "More teams"
 msgstr "Meer teams"
@@ -9377,6 +9382,10 @@ msgctxt "business process"
 msgid "Opportunity-to-Cash"
 msgstr "Opportunity-to-Cash"
 
+#: src/engines/app-data-model.tsx
+msgid "Options"
+msgstr "Opties"
+
 #: src/engines/app-settings.tsx
 msgctxt "the settings an app offers itself"
 msgid "Options"
@@ -10327,6 +10336,11 @@ msgstr "Record-ID"
 msgctxt "business process"
 msgid "Record-to-Report"
 msgstr "Record-to-Report"
+
+#: src/engines/app-data-model.tsx
+msgctxt "a table's records"
+msgid "Records"
+msgstr "Records"
 
 #: src/engines/store-changes.tsx
 msgid "Records checked: {scanned}. Filled in: {filled}."
@@ -11736,6 +11750,7 @@ msgid "Sharing"
 msgstr "Delen"
 
 #: src/brain/atlas-overlays.tsx
+#: src/engines/app-data-model.tsx
 msgid "Show"
 msgstr "Tonen"
 

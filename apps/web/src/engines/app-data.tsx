@@ -519,7 +519,7 @@ export interface RecordColumn {
 
 /** A header that only names its column. */
 export const PlainHeader = ({ children }: { children: ReactNode }) => (
-  <RecordGridHeader render={<div />}>{children}</RecordGridHeader>
+  <RecordGridHeader>{children}</RecordGridHeader>
 );
 
 /** The grid's columns: each record's ID, which opens it, its fields, and when it last changed. */
@@ -626,9 +626,10 @@ const RecordNotes = ({
 /**
  * One table's records in a grid, a page at a time, with find, export and
  * import, the App's version `version` read: its columns the page's
- * (`columns`, by field), and a trailing header cell (`trailing`) and the
- * start of the bar above it (`toolbar`) the page's too. None for a table
- * the version doesn't have (`table` undefined), or with no version.
+ * (`columns`, by field), and the start of the bar above it (`toolbar`)
+ * the page's too. The next page loads as the grid nears its last row, so
+ * a table of any size scrolls through. None for a table the version
+ * doesn't have (`table` undefined), or with no version.
  */
 export const TableRecords = ({
   app,
@@ -636,16 +637,17 @@ export const TableRecords = ({
   table,
   label,
   columns,
-  trailing,
   toolbar,
+  instead,
 }: {
   app: string;
   version: number | null;
   table: AppDataTable | undefined;
   label: string;
   columns: RecordColumn[];
-  trailing?: ReactNode;
   toolbar?: ReactNode;
+  /** What the page shows in place of the records (the table's fields), if anything. */
+  instead?: ReactNode;
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
@@ -732,7 +734,7 @@ export const TableRecords = ({
       <div className="flex flex-none flex-wrap items-center gap-2 border-b px-3 py-1.5">
         {toolbar}
         <div className="flex-1" />
-        {live === undefined ? null : (
+        {live === undefined || instead !== undefined ? null : (
           <>
             <form
               className="flex items-center gap-1"
@@ -788,35 +790,30 @@ export const TableRecords = ({
           </>
         )}
       </div>
-      <RecordNotes failure={failure} missing={missing} stale={stale} />
-      <RecordGrid
-        columns={gridColumns}
-        empty={
-          <p className="text-muted-foreground px-3 py-6 text-sm">
-            <Trans>No records</Trans>
-          </p>
-        }
-        footer={
-          cursor === null ? null : (
-            <div className="p-2">
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  void load(cursor);
-                }}
-                size="sm"
-                variant="outline"
-              >
-                <Trans>More records</Trans>
-              </Button>
-            </div>
-          )
-        }
-        label={label}
-        rowKey={(record) => record.id}
-        rows={records ?? []}
-        trailing={trailing}
-      />
+      {instead}
+      {instead === undefined ? (
+        <RecordNotes failure={failure} missing={missing} stale={stale} />
+      ) : null}
+      {instead === undefined ? (
+        <RecordGrid
+          columns={gridColumns}
+          empty={
+            <p className="text-muted-foreground px-3 py-6 text-sm">
+              <Trans>No records</Trans>
+            </p>
+          }
+          label={label}
+          onEndReached={() => {
+            // One page at a time: none while a read is out, nor once the
+            // last page came, nor after a read failed (Reload reads again).
+            if (cursor !== null && !busy && failure === undefined) {
+              void load(cursor);
+            }
+          }}
+          rowKey={(record) => record.id}
+          rows={records ?? []}
+        />
+      ) : null}
       {open === undefined || live === undefined ? null : (
         <RecordSheet
           app={app}

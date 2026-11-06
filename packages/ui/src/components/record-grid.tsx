@@ -1,5 +1,3 @@
-import { mergeProps } from "@base-ui/react/merge-props";
-import { useRender } from "@base-ui/react/use-render";
 import { cssVars } from "@grasp-os/ui/lib/css-vars";
 import { cn } from "@grasp-os/ui/lib/utils";
 import {
@@ -10,23 +8,24 @@ import {
 import type { ColumnDef } from "@tanstack/react-table";
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
-import { ChevronDownIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type * as React from "react";
 
 /*
  * A dense grid of records, as a database's studio shows a table: a sticky
- * row of column headers (each the page's to fill: a field's kind and
- * name, what edits it), then the records, a row each. TanStack Table keeps
- * the columns, their widths and the rows. Only the rows and columns in
- * view are drawn, so a table of thousands of rows and dozens of fields
- * scrolls as one of ten: every row is one height and every column has a
- * width, so what is in view is plain arithmetic on where the grid is
- * scrolled to (`windowOf`). TanStack Virtual would do the same, but its
- * `useVirtualizer` is one the React Compiler can't compile, and every
- * component here is compiled. A trailing header cell (`trailing`) holds
- * what adds a column. It reads as an ARIA grid: rows and cells by role,
- * with the table's whole size given (`aria-rowcount`, `aria-colcount`).
+ * row of column headers (each the page's to fill: a field's kind, name and
+ * whether it is required), then the records, a row each. TanStack Table
+ * keeps the columns, their widths and the rows. Only the rows and
+ * columns in view are drawn, so a table of a million rows and dozens of
+ * fields scrolls as one of ten: every row is one height and every column
+ * has a width, so what is in view is arithmetic on where the grid is
+ * scrolled to (`windowOf`). Not TanStack Virtual: the React Compiler
+ * refuses its `useVirtualizer` (its list of known-incompatible APIs: the
+ * hook's results can't be memoized), which fails the build, and every
+ * component here is compiled. Nearing the last row it has,
+ * the grid asks for more (`onEndReached`), so the page loads the next one
+ * as people scroll. It reads as an ARIA grid: rows and cells by role, with
+ * the table's whole size given (`aria-rowcount`, `aria-colcount`).
  *
  * The structure follows tablecn's data grid (https://github.com/sadmann7/
  * tablecn, MIT, (c) 2024 Sadman Sakib), redrawn in the kit's own tokens.
@@ -51,6 +50,9 @@ const overscanRows = 8;
 
 /** How far past either side columns are drawn, in px. */
 const overscanWidth = 400;
+
+/** How near its last row the grid asks for more, in rows. */
+const endReachedWithin = 20;
 
 /**
  * Where the grid is scrolled to, and how large it shows: a laptop's screen
@@ -83,13 +85,12 @@ const windowOf = (
 const features = tableFeatures({ columnSizingFeature });
 
 const cellVariants = cva(
-  "flex h-9 min-w-0 shrink-0 items-center border-e border-b text-sm",
+  "flex h-9 min-w-0 shrink-0 items-center border-e border-b px-2.5 text-sm",
   {
     variants: {
       part: {
         header: "bg-muted text-muted-foreground font-medium",
-        body: "bg-background px-2.5",
-        trailing: "bg-muted flex-1 justify-start px-1",
+        body: "bg-background",
       },
     },
     defaultVariants: { part: "body" },
@@ -98,26 +99,24 @@ const cellVariants = cva(
 
 /**
  * The records `rows` in `columns`, named `label`, each row keyed by
- * `rowKey`. `empty` stands under the headers when there are none; `footer`
- * under the rows (more to load).
+ * `rowKey`. `empty` stands under the headers when there are none;
+ * `onEndReached` hears that the last rows came into view.
  */
 function RecordGrid<Row extends object>({
   label,
   columns,
   rows,
   rowKey,
-  trailing,
   empty,
-  footer,
+  onEndReached,
   className,
 }: {
   label: string;
   columns: readonly RecordGridColumn<Row>[];
   rows: readonly Row[];
   rowKey: (row: Row) => string;
-  trailing?: React.ReactNode;
   empty?: React.ReactNode;
-  footer?: React.ReactNode;
+  onEndReached?: () => void;
   className?: string;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
@@ -151,12 +150,10 @@ function RecordGrid<Row extends object>({
     getRowId: (row) => rowKey(row),
   });
   const tableRows = table.getRowModel().rows;
-  const sized = table
-    .getAllLeafColumns()
-    .map((column) => ({ id: column.id, size: column.getSize() }));
+  const leaves = table.getAllLeafColumns();
   const columnEnds: number[] = [];
-  for (const { size } of sized) {
-    columnEnds.push((columnEnds.at(-1) ?? 0) + size);
+  for (const leaf of leaves) {
+    columnEnds.push((columnEnds.at(-1) ?? 0) + leaf.getSize());
   }
   const totalWidth = columnEnds.at(-1) ?? 0;
   const [firstColumn, pastColumn] = windowOf(
@@ -174,9 +171,25 @@ function RecordGrid<Row extends object>({
     tableRows.length,
     Math.ceil((viewport.top + viewport.height) / rowHeight) + overscanRows
   );
-  const shownColumns = sized
+  const shownColumns = leaves
     .slice(firstColumn, pastColumn)
-    .map((column, offset) => ({ ...column, index: firstColumn + offset }));
+    .map((leaf, offset) => ({
+      id: leaf.id,
+      size: leaf.getSize(),
+      index: firstColumn + offset,
+    }));
+  const count = tableRows.length;
+  const nearEnd = count > 0 && pastRow > count - endReachedWithin;
+  const reachEnd = useEffectEvent(() => {
+    onEndReached?.();
+  });
+  // Each time the rows near their end, once per count of rows: a page
+  // that loaded nothing more isn't asked again until it has.
+  useEffect(() => {
+    if (nearEnd && count > 0) {
+      reachEnd();
+    }
+  }, [nearEnd, count]);
   const byId = new Map(columns.map((column) => [column.id, column]));
   // One row's cells (or the headers'), the ones in view, with room kept
   // for those left out on either side.
@@ -187,17 +200,17 @@ function RecordGrid<Row extends object>({
         className="w-(--gap) shrink-0"
         ref={cssVars({ "--gap": `${before}px` })}
       />
-      {shownColumns.map(({ id, size, index }) => {
-        const column = byId.get(id);
+      {shownColumns.map((item) => {
+        const column = byId.get(item.id);
         return column === undefined ? null : (
           <div
-            aria-colindex={index + 1}
+            aria-colindex={item.index + 1}
             className={cn(
               cellVariants({ part: row === undefined ? "header" : "body" }),
               "w-(--width)"
             )}
-            key={id}
-            ref={cssVars({ "--width": `${size}px` })}
+            key={column.id}
+            ref={cssVars({ "--width": `${item.size}px` })}
             role={row === undefined ? "columnheader" : "gridcell"}
           >
             {row === undefined ? column.header : column.cell(row)}
@@ -236,14 +249,7 @@ function RecordGrid<Row extends object>({
           role="row"
         >
           {cellsOf()}
-          {trailing === undefined ? null : (
-            <div
-              className={cellVariants({ part: "trailing" })}
-              role="columnheader"
-            >
-              {trailing}
-            </div>
-          )}
+          <div aria-hidden className="flex-1 border-b" />
         </div>
         {rows.length === 0 ? (
           empty
@@ -268,20 +274,14 @@ function RecordGrid<Row extends object>({
             })}
           </div>
         )}
-        {footer}
       </div>
     </div>
   );
 }
 
-const recordGridHeaderVariants = cva(
-  "group/record-grid-header focus-visible:ring-ring/50 hover:bg-background/60 aria-expanded:bg-background/60 flex h-full w-full min-w-0 items-center gap-1.5 px-2.5 text-start text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-inset disabled:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0"
-);
-
 /**
- * A column header that opens what edits its field: the field's kind as an
- * icon, its name, and a mark when it is required. A button, or what
- * `render` makes it (a popover's trigger).
+ * A column header: the field's kind as an icon, its name, and a mark when
+ * it is required (`requiredLabel` says it to assistive technology).
  */
 function RecordGridHeader({
   icon,
@@ -289,42 +289,34 @@ function RecordGridHeader({
   requiredLabel,
   children,
   className,
-  render,
   ...props
-}: useRender.ComponentProps<"button"> & {
+}: React.ComponentProps<"span"> & {
   icon?: React.ReactNode;
   required?: boolean;
-  /** What the required mark says to assistive technology. */
   requiredLabel?: string;
 }) {
-  return useRender({
-    defaultTagName: "button",
-    props: mergeProps<"button">(
-      {
-        type: "button",
-        className: cn(recordGridHeaderVariants(), className),
-        children: (
-          <>
-            {icon}
-            <span className="min-w-0 truncate">{children}</span>
-            {required ? (
-              <span
-                aria-label={requiredLabel}
-                className="text-status-attention"
-                role="img"
-              >
-                *
-              </span>
-            ) : null}
-            <ChevronDownIcon className="text-muted-foreground ms-auto opacity-0 group-hover/record-grid-header:opacity-100" />
-          </>
-        ),
-      },
-      props
-    ),
-    render,
-    state: { slot: "record-grid-header" },
-  });
+  return (
+    <span
+      data-slot="record-grid-header"
+      className={cn(
+        "flex min-w-0 items-center gap-1.5 [&_svg]:size-3.5 [&_svg]:shrink-0",
+        className
+      )}
+      {...props}
+    >
+      {icon}
+      <span className="min-w-0 truncate">{children}</span>
+      {required ? (
+        <span
+          aria-label={requiredLabel}
+          className="text-status-attention"
+          role="img"
+        >
+          *
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 const recordGridValueVariants = cva("min-w-0 truncate", {
@@ -338,7 +330,7 @@ const recordGridValueVariants = cva("min-w-0 truncate", {
   defaultVariants: { tone: "default" },
 });
 
-/** A cell's value, cut to its column: plain, muted (none), or an ID. */
+/** A cell's value, cut to its column: plain, muted, or an ID. */
 function RecordGridValue({
   tone,
   className,

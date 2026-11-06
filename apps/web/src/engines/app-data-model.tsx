@@ -1,4 +1,4 @@
-import type { AppDataAccess } from "@grasp-os/shared/app-data";
+import type { AppDataAccess, AppDataTables } from "@grasp-os/shared/app-data";
 import { fieldCode, fieldKindCode } from "@grasp-os/shared/data-model";
 import type {
   DataModel,
@@ -13,6 +13,7 @@ import type {
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
+  FieldTypeIcon,
   FieldTypePicker,
   ModelTableItem,
   ModelTableList,
@@ -43,10 +44,14 @@ import {
 } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@grasp-os/ui/components/popover";
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
 import { RecordGridHeader } from "@grasp-os/ui/components/record-grid";
 import {
   Select,
@@ -64,12 +69,19 @@ import {
 } from "@grasp-os/ui/components/sheet";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Switch } from "@grasp-os/ui/components/switch";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/ui/components/toggle-group";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import {
+  Columns3Icon,
   DatabaseIcon,
   ListOrderedIcon,
   MoreHorizontalIcon,
+  PencilIcon,
   PlusIcon,
+  Rows3Icon,
   ShieldIcon,
   Table2Icon,
   TrashIcon,
@@ -78,6 +90,7 @@ import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { formatCompact, formatList } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
 import { TableRecords } from "./app-data.tsx";
@@ -88,11 +101,12 @@ import { KindIcon, pickedKinds, useFieldKinds } from "./field-kinds.tsx";
 import { useCoreRead } from "./use-core-read.ts";
 
 // An App's data model in its workspace's Data view, as a database studio
-// shows one: the tables in a column, and the open one as a grid whose
-// column headers are its fields and whose rows are the live App's records.
-// A field is added from the grid's last column and changed from its own
-// header; who reaches the records and the orders they're read in sit
-// behind the bar's two quieter buttons. Whoever builds the App changes it
+// shows one: the tables in a column, each with how many records it holds,
+// and the open one as a grid whose column headers are its fields and
+// whose rows are the live App's records, loaded as people scroll. Its
+// Fields view lists the fields, each changed in place with room for all
+// it takes, and adds new ones; who reaches the records and the orders
+// they're read in sit behind the bar's two quieter buttons. Whoever builds the App changes it
 // here as the chat's agent does, through the definition's own operations,
 // into the chat's draft (`chats.defineDraft`): nothing changes for the
 // App's people until the draft is published, and a change that removes,
@@ -193,54 +207,69 @@ const TypeChoice = ({
   const tableItems = tables.map((table) => ({ value: table, label: table }));
   return (
     <>
-      <FieldTypePicker
-        className="w-full"
-        disabled={disabled}
-        label={t`Type`}
-        onValueChange={(value) => {
-          const kind = pickedKinds.find((each) => each === value);
-          if (kind !== undefined) {
-            onChange({ ...draft, kind });
-          }
-        }}
-        options={options}
-        value={draft.kind}
-      />
-      {draft.kind === "choice" ? (
-        <Input
-          aria-label={t`Options, separated by commas`}
+      <Field>
+        <FieldLabel>
+          <Trans>Type</Trans>
+        </FieldLabel>
+        <FieldTypePicker
+          className="w-full"
           disabled={disabled}
-          onChange={(event) => {
-            onChange({ ...draft, values: event.target.value });
-          }}
-          placeholder={t`Open, Done`}
-          value={draft.values}
-        />
-      ) : null}
-      {draft.kind === "link" ? (
-        <Select
-          disabled={disabled}
-          items={tableItems}
-          onValueChange={(next: unknown) => {
-            if (typeof next === "string") {
-              onChange({ ...draft, table: next });
+          label={t`Type`}
+          onValueChange={(value) => {
+            const kind = pickedKinds.find((each) => each === value);
+            if (kind !== undefined) {
+              onChange({ ...draft, kind });
             }
           }}
-          value={draft.table === "" ? null : draft.table}
-        >
-          <SelectTrigger aria-label={t`Linked table`} className="w-full">
-            <SelectValue placeholder={t`Pick a table`} />
-          </SelectTrigger>
-          <SelectContent>
-            {tableItems.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                {item.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          options={options}
+          value={draft.kind}
+        />
+      </Field>
+      {draft.kind === "choice" ? (
+        <Field>
+          <FieldLabel>
+            <Trans>Options</Trans>
+          </FieldLabel>
+          <Input
+            aria-label={t`Options, separated by commas`}
+            disabled={disabled}
+            onChange={(event) => {
+              onChange({ ...draft, values: event.target.value });
+            }}
+            placeholder={t`Open, Done`}
+            value={draft.values}
+          />
+        </Field>
       ) : null}
-      <Field orientation="horizontal">
+      {draft.kind === "link" ? (
+        <Field>
+          <FieldLabel>
+            <Trans>Linked table</Trans>
+          </FieldLabel>
+          <Select
+            disabled={disabled}
+            items={tableItems}
+            onValueChange={(next: unknown) => {
+              if (typeof next === "string") {
+                onChange({ ...draft, table: next });
+              }
+            }}
+            value={draft.table === "" ? null : draft.table}
+          >
+            <SelectTrigger aria-label={t`Linked table`} className="w-full">
+              <SelectValue placeholder={t`Pick a table`} />
+            </SelectTrigger>
+            <SelectContent>
+              {tableItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      ) : null}
+      <Field className="self-end" orientation="horizontal">
         <Switch
           checked={draft.required}
           disabled={disabled}
@@ -269,6 +298,7 @@ const FieldEditor = ({
   disabled,
   onChange,
   onDone,
+  onCancel,
 }: {
   table: DataModelTable;
   field: DataModelField | undefined;
@@ -276,6 +306,7 @@ const FieldEditor = ({
   disabled: boolean;
   onChange: (operation: ModelOperation) => Promise<boolean>;
   onDone: () => void;
+  onCancel: () => void;
 }) => {
   const { t } = useLingui();
   const [name, setName] = useState(field?.name ?? "");
@@ -322,7 +353,7 @@ const FieldEditor = ({
   return (
     <form
       aria-label={field === undefined ? t`Add a field` : t`Edit ${name}`}
-      className="flex flex-col gap-3"
+      className="flex w-full flex-col gap-3"
       onSubmit={(event) => {
         event.preventDefault();
         void (async () => {
@@ -336,31 +367,33 @@ const FieldEditor = ({
         })();
       }}
     >
-      <Field>
-        <FieldLabel>
-          <Trans>Name</Trans>
-        </FieldLabel>
-        <Input
-          aria-label={t`Field name`}
-          autoFocus
+      <div className="grid items-start gap-3 md:grid-cols-2">
+        <Field>
+          <FieldLabel>
+            <Trans>Name</Trans>
+          </FieldLabel>
+          <Input
+            aria-label={t`Field name`}
+            autoFocus
+            disabled={disabled}
+            onChange={(event) => {
+              setName(event.target.value);
+            }}
+            value={name}
+          />
+          {named !== "" && named !== name.trim() ? (
+            <FieldDescription>
+              <Trans>Saved as {named}</Trans>
+            </FieldDescription>
+          ) : null}
+        </Field>
+        <TypeChoice
           disabled={disabled}
-          onChange={(event) => {
-            setName(event.target.value);
-          }}
-          value={name}
+          draft={draft}
+          onChange={setDraft}
+          tables={tables}
         />
-        {named !== "" && named !== name.trim() ? (
-          <FieldDescription>
-            <Trans>Saved as {named}</Trans>
-          </FieldDescription>
-        ) : null}
-      </Field>
-      <TypeChoice
-        disabled={disabled}
-        draft={draft}
-        onChange={setDraft}
-        tables={tables}
-      />
+      </div>
       <div className="flex items-center gap-2">
         {field === undefined ? null : (
           <Button
@@ -388,6 +421,14 @@ const FieldEditor = ({
         )}
         <Button
           className="ms-auto"
+          onClick={onCancel}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          <Trans>Cancel</Trans>
+        </Button>
+        <Button
           disabled={disabled || made.length === 0}
           size="sm"
           type="submit"
@@ -399,61 +440,74 @@ const FieldEditor = ({
   );
 };
 
-/** A field's column header, which opens what edits it. */
-const FieldHeader = ({
-  table,
+/** What a field is, in words: its kind, a choice's options, a link's table. */
+const FieldSummary = ({ field }: { field: DataModelField }) => {
+  const { describe } = useFieldKinds();
+  const kind = describe(field.type);
+  if (field.type.kind === "choice") {
+    const options = formatList(field.type.values);
+    return (
+      <Trans>
+        {kind}: {options}
+      </Trans>
+    );
+  }
+  return kind;
+};
+
+/** A field as its table's Fields view lists it, and the way to change it. */
+const FieldRow = ({
   field,
-  tables,
   disabled,
-  onChange,
+  onEdit,
 }: {
-  table: DataModelTable;
   field: DataModelField;
-  tables: string[];
   disabled: boolean;
-  onChange: (operation: ModelOperation) => Promise<boolean>;
+  onEdit: () => void;
 }) => {
   const { t } = useLingui();
-  const { describe } = useFieldKinds();
-  const [open, setOpen] = useState(false);
   const fieldName = field.name;
   return (
-    <Popover onOpenChange={setOpen} open={open}>
-      <PopoverTrigger
-        disabled={disabled}
-        render={
-          <RecordGridHeader
-            aria-label={t`Change ${fieldName}`}
-            icon={<KindIcon kind={field.type.kind} />}
-            required={field.required}
-            requiredLabel={t`Required`}
-            title={describe(field.type)}
-          />
-        }
-      >
-        {field.name}
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-72">
-        {/* Each opening its own form, from the field as it now is. */}
-        {open ? (
-          <FieldEditor
-            disabled={disabled}
-            field={field}
-            onChange={onChange}
-            onDone={() => {
-              setOpen(false);
-            }}
-            table={table}
-            tables={tables}
-          />
-        ) : null}
-      </PopoverContent>
-    </Popover>
+    <Item render={<li />} size="sm" variant="row">
+      <ItemMedia>
+        <FieldTypeIcon size="sm">
+          <KindIcon kind={field.type.kind} />
+        </FieldTypeIcon>
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>
+          {field.name}
+          {field.required ? (
+            <Badge variant="secondary">
+              <Trans>Required</Trans>
+            </Badge>
+          ) : null}
+        </ItemTitle>
+        <ItemDescription>
+          <FieldSummary field={field} />
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <Button
+          aria-label={t`Edit ${fieldName}`}
+          disabled={disabled}
+          onClick={onEdit}
+          size="icon-sm"
+          title={t`Edit ${fieldName}`}
+          variant="ghost"
+        >
+          <PencilIcon />
+        </Button>
+      </ItemActions>
+    </Item>
   );
 };
 
-/** The grid's last column: a new field. */
-const AddFieldColumn = ({
+/**
+ * A table's fields, each changed in place, and a new one added under
+ * them: one open at a time, with room for all it takes.
+ */
+const FieldsView = ({
   table,
   tables,
   disabled,
@@ -464,38 +518,64 @@ const AddFieldColumn = ({
   disabled: boolean;
   onChange: (operation: ModelOperation) => Promise<boolean>;
 }) => {
-  const { t } = useLingui();
-  const [open, setOpen] = useState(false);
-  return (
-    <Popover onOpenChange={setOpen} open={open}>
-      <PopoverTrigger
+  // The field open (its ID), a new one (`new`), or none: a table with no
+  // fields opens on its first.
+  const [open, setOpen] = useState<string | undefined>(
+    table.fields.length === 0 ? "new" : undefined
+  );
+  const close = (): void => {
+    setOpen(undefined);
+  };
+  const editor = (field?: DataModelField) => (
+    <Item key={field?.id ?? "new"} render={<li />} size="sm" variant="row">
+      <FieldEditor
         disabled={disabled}
-        render={
-          <Button
-            aria-label={t`Add a field`}
-            size="icon-sm"
-            title={t`Add a field`}
-            variant="ghost"
-          />
-        }
-      >
-        <PlusIcon />
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-72">
-        {open ? (
-          <FieldEditor
-            disabled={disabled}
-            field={undefined}
-            onChange={onChange}
-            onDone={() => {
-              setOpen(false);
-            }}
-            table={table}
-            tables={tables}
-          />
+        field={field}
+        onCancel={close}
+        onChange={onChange}
+        onDone={close}
+        table={table}
+        tables={tables}
+      />
+    </Item>
+  );
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="flex max-w-3xl flex-col gap-3 p-3">
+        <ItemGroup render={<ul />} variant="card">
+          {table.fields.map((field) =>
+            open === field.id ? (
+              editor(field)
+            ) : (
+              <FieldRow
+                disabled={disabled || open !== undefined}
+                field={field}
+                key={field.id}
+                onEdit={() => {
+                  setOpen(field.id);
+                }}
+              />
+            )
+          )}
+          {open === "new" ? editor() : null}
+        </ItemGroup>
+        {open === undefined ? (
+          <div>
+            <Button
+              disabled={disabled}
+              onClick={() => {
+                setOpen("new");
+              }}
+              size="sm"
+              variant="outline"
+            >
+              <PlusIcon data-icon="inline-start" />
+              <Trans>Add field</Trans>
+            </Button>
+          </div>
         ) : null}
-      </PopoverContent>
-    </Popover>
+      </div>
+    </div>
   );
 };
 
@@ -542,19 +622,22 @@ const useLiveTables = (app: string) => {
 /** The table open: its fields as the grid's columns, its records as rows. */
 const TableView = ({
   app,
+  live,
   table,
   tables,
   disabled,
   onChange,
 }: {
   app: string;
+  /** The live App's tables and their version; none while read. */
+  live: AppDataTables | undefined;
   table: DataModelTable;
   tables: string[];
   disabled: boolean;
   onChange: (operation: ModelOperation) => Promise<boolean>;
 }) => {
   const { t } = useLingui();
-  const live = useLiveTables(app);
+  const [showing, setShowing] = useState<"records" | "fields">("records");
   const { name } = table;
   return (
     <TableRecords
@@ -562,21 +645,50 @@ const TableView = ({
       columns={table.fields.map((field) => ({
         field: field.name,
         header: (
-          <FieldHeader
+          <RecordGridHeader
+            icon={<KindIcon kind={field.type.kind} />}
+            required={field.required}
+            requiredLabel={t`Required`}
+          >
+            {field.name}
+          </RecordGridHeader>
+        ),
+      }))}
+      instead={
+        showing === "fields" ? (
+          <FieldsView
             disabled={disabled}
-            field={field}
             onChange={onChange}
             table={table}
             tables={tables}
           />
-        ),
-      }))}
+        ) : undefined
+      }
       // The live App's records of this table, once the App has it.
       key={`${table.id}/${live?.version ?? ""}`}
       label={name}
       table={live?.tables.find((held) => held.name === name)}
       toolbar={
         <>
+          <ToggleGroup
+            aria-label={t`Show`}
+            onValueChange={(chosen: unknown[]) => {
+              setShowing(chosen[0] === "fields" ? "fields" : "records");
+            }}
+            size="sm"
+            spacing={0}
+            value={[showing]}
+            variant="outline"
+          >
+            <ToggleGroupItem value="records">
+              <Rows3Icon data-icon="inline-start" />
+              <Trans context="a table's records">Records</Trans>
+            </ToggleGroupItem>
+            <ToggleGroupItem value="fields">
+              <Columns3Icon data-icon="inline-start" />
+              <Trans context="a table's fields">Fields</Trans>
+            </ToggleGroupItem>
+          </ToggleGroup>
           <SideView icon={<ShieldIcon />} label={t`Access`}>
             <AccessPanel
               disabled={disabled}
@@ -621,14 +733,6 @@ const TableView = ({
             </DropdownMenuContent>
           </DropdownMenu>
         </>
-      }
-      trailing={
-        <AddFieldColumn
-          disabled={disabled}
-          onChange={onChange}
-          table={table}
-          tables={tables}
-        />
       }
       version={live?.version ?? null}
     />
@@ -833,6 +937,7 @@ export const AppDataModel = ({
   // What a change made here answered, at the revision it was made over:
   // shown until the draft's next revision is read.
   const [made, setMade] = useState<DraftDataModel & { revision: number }>();
+  const live = useLiveTables(app);
   const [picked, setPicked] = useState<string>();
   const [creating, setCreating] = useState(false);
   const changes = useModelChanges({
@@ -909,18 +1014,29 @@ export const AppDataModel = ({
           <Trans>New table</Trans>
         </Button>
         <ModelTableList>
-          {model.tables.map((each) => (
-            <ModelTableItem
-              active={each.id === table?.id}
-              icon={<Table2Icon />}
-              key={each.id}
-              onClick={() => {
-                setPicked(each.id);
-              }}
-            >
-              {each.name}
-            </ModelTableItem>
-          ))}
+          {model.tables.map((each) => {
+            const records = live?.tables.find(
+              ({ name }) => name === each.name
+            )?.records;
+            return (
+              <ModelTableItem
+                active={each.id === table?.id}
+                icon={<Table2Icon />}
+                key={each.id}
+                // How many records the live App holds; none for a table it
+                // doesn't have yet, or whose records each person sees only
+                // some of.
+                {...(records === undefined || records === null
+                  ? {}
+                  : { meta: formatCompact(records) })}
+                onClick={() => {
+                  setPicked(each.id);
+                }}
+              >
+                {each.name}
+              </ModelTableItem>
+            );
+          })}
         </ModelTableList>
         <div className="mt-auto">
           <PublishPlan onAnswer={answer} plan={plan} />
@@ -949,6 +1065,7 @@ export const AppDataModel = ({
         ) : (
           <TableView
             app={app}
+            live={live}
             disabled={disabled}
             // Each table its own grid, popovers and sheets.
             key={table.id}

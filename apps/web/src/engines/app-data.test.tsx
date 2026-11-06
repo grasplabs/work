@@ -67,8 +67,29 @@ const tables: Record<string, AppDataTable[]> = {
 const shown = async () => {
   const apps = {
     data: {
-      records: async (app: string, table: string) => {
+      // The first App's notes come in two pages; every other table in one.
+      records: async (
+        app: string,
+        table: string,
+        _version: number,
+        cursor: string | null
+      ) => {
         await Promise.resolve();
+        if (app === "first" && table === "notes" && cursor === null) {
+          return { records: [recordOf(app, table)], cursor: "page-2" };
+        }
+        if (cursor === "page-2") {
+          return {
+            records: [
+              {
+                ...recordOf(app, table),
+                id: `${app}-${table}-2`,
+                fields: { title: `${app}'s second ${table}` },
+              },
+            ],
+            cursor: null,
+          };
+        }
         return { records: [recordOf(app, table)], cursor: null };
       },
       history: async () => {
@@ -191,6 +212,18 @@ describe("an App's data page", () => {
       second: document.querySelector('[title="second-bare-1"]') !== null,
       first: document.querySelector('[title="first-notes-1"]') !== null,
     }).toStrictEqual({ second: true, first: false });
+  });
+
+  it("loads a table's next page as its last rows come into view, until there is none", async () => {
+    await shown();
+    await settled();
+    await settled();
+
+    expect({
+      first: document.body.textContent.includes("first's notes"),
+      second: document.body.textContent.includes("first's second notes"),
+      rows: document.querySelectorAll('[role="grid"] [role="row"]').length,
+    }).toStrictEqual({ first: true, second: true, rows: 3 });
   });
 
   it("opens a record by its ID, in a table that declares no fields", async () => {

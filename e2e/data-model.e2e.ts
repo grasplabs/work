@@ -39,25 +39,29 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   await dialog.getByRole("button", { name: "Create table" }).click();
   await expect(page.getByRole("grid", { name: "tasks" })).toBeVisible(read);
 
-  // Its fields, each a column added from the grid's last one: a required
-  // text and a choice.
-  const grid = page.getByRole("grid", { name: "tasks" });
-  await grid.getByRole("button", { name: "Add a field" }).click();
+  // Its fields, added in its Fields view: a required text and a choice,
+  // then each a column of the grid.
+  await page.getByRole("button", { name: "Fields", exact: true }).click();
   await page.getByLabel("Field name").fill("title");
   await page.getByText("Required", { exact: true }).last().click();
   await page.getByRole("button", { name: "Add field" }).click();
-  await expect(grid.getByRole("button", { name: "Change title" })).toBeVisible(
+  await expect(page.getByRole("button", { name: "Edit title" })).toBeVisible(
     read
   );
-  await grid.getByRole("button", { name: "Add a field" }).click();
+  await page.getByRole("button", { name: "Add field" }).click();
   await page.getByLabel("Field name").fill("status");
   await page.getByLabel("Type", { exact: true }).click();
   await page.getByRole("option", { name: /^Choice/u }).click();
   await page.getByLabel("Options, separated by commas").fill("Open, Done");
   await page.getByRole("button", { name: "Add field" }).click();
-  await expect(grid.getByRole("button", { name: "Change status" })).toBeVisible(
+  await expect(page.getByRole("button", { name: "Edit status" })).toBeVisible(
     read
   );
+  await page.getByRole("button", { name: "Records", exact: true }).click();
+  const grid = page.getByRole("grid", { name: "tasks" });
+  await expect(
+    grid.getByRole("columnheader", { name: /^status/u })
+  ).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "Tables" }).getByText("tasks")
   ).toBeVisible();

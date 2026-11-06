@@ -235,19 +235,25 @@ const choose = async (label: string, option: string): Promise<void> => {
   );
 };
 
-/** The fields the grid's headers show, by name, a required one marked `*`. */
+/** The fields the table's Fields view lists, by name. */
 const fieldsShown = (): string[] =>
-  [...document.querySelectorAll('[role="grid"] [aria-label^="Change "]')].map(
-    (header) => header.textContent.trim()
+  [...document.querySelectorAll('[data-slot="item-title"]')].map((title) =>
+    (title.firstChild?.textContent ?? "").trim()
   );
 
-/** Adds a field from the grid's last column: its name, kind, and what more it takes. */
+/** Opens the table's Fields view, from its bar. */
+const showFields = async (): Promise<void> => {
+  await press(button("Fields"));
+};
+
+/** Adds a field in the Fields view: its name, kind, and what more it takes. */
 const addField = async (
   name: string,
   kind: string,
   more?: () => Promise<void>
 ): Promise<void> => {
-  await press(button("Add a field"));
+  // Opens a new field's form; a table with none has it open already.
+  await press(button("Add field"));
   await type("Field name", name);
   await choose("Type", kind);
   await more?.();
@@ -341,6 +347,7 @@ describe("an App's data model, changed in its workspace", () => {
         },
       ],
     ];
+    await showFields();
     for (const [name, kind, more] of kinds) {
       // oxlint-disable-next-line no-await-in-loop -- one field after another, as a person adds them
       await addField(name, kind, more);
@@ -355,9 +362,6 @@ describe("an App's data model, changed in its workspace", () => {
         .map(({ operation }) => operation),
       previewedFirst: sent.filter(({ preview }) => preview).length,
       fields: fieldsShown(),
-      columns: document
-        .querySelector('[role="grid"]')
-        ?.getAttribute("aria-colcount"),
     }).toStrictEqual({
       emptyShown: true,
       savedAs: true,
@@ -439,9 +443,9 @@ describe("an App's data model, changed in its workspace", () => {
         "parent",
         "owner",
         "contact",
+        "attachment",
+        "budget",
       ],
-      // Every field a column, though only those in view are drawn.
-      columns: "12",
     });
   });
 
@@ -500,12 +504,13 @@ describe("an App's data model, changed in its workspace", () => {
     });
 
     // Each from its own column's header, in place.
-    await press(button("Change title"));
+    await showFields();
+    await press(button("Edit title"));
     await type("Field name", "heading");
     await press(button("Save"));
     const renamed = fieldsShown();
 
-    await press(button("Change status"));
+    await press(button("Edit status"));
     await choose("Type", "Choice");
     await type("Options, separated by commas", "open, done");
     await press(labelledBy("Required"));
@@ -530,7 +535,7 @@ describe("an App's data model, changed in its workspace", () => {
         .filter(({ preview }) => !preview)
         .map(({ operation }) => operation),
     }).toStrictEqual({
-      renamed: ["heading*", "status"],
+      renamed: ["heading", "status"],
       asked: true,
       blocked: true,
       planned: true,
@@ -574,7 +579,8 @@ describe("an App's data model, changed in its workspace", () => {
       };
     });
 
-    await press(button("Change status"));
+    await showFields();
+    await press(button("Edit status"));
     await press(button("Remove"));
     const said = document.body.textContent.includes(
       "Keeps the values of status in notes, though nothing reads them any more."
@@ -592,7 +598,7 @@ describe("an App's data model, changed in its workspace", () => {
         .map(({ operation }) => operation.op),
     }).toStrictEqual({
       said: true,
-      removed: ["title*"],
+      removed: ["title"],
       problem:
         "`notes` has a field `title` already: change it with changeField.",
       made: ["removeField"],
@@ -608,10 +614,12 @@ describe("an App's data model, changed in its workspace", () => {
       { running: true }
     );
 
+    await showFields();
+
     expect({
       newTable: button("New table")?.hasAttribute("disabled"),
-      addField: button("Add a field")?.hasAttribute("disabled"),
-      change: button("Change title")?.hasAttribute("disabled"),
+      addField: button("Add field")?.hasAttribute("disabled"),
+      change: button("Edit title")?.hasAttribute("disabled"),
     }).toStrictEqual({
       newTable: true,
       addField: true,
