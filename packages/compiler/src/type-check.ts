@@ -298,7 +298,7 @@ export const diagnosticsOfRun = (
 
 /**
  * Type-checks the App files of `request` (paths relative to the App, e.g.
- * `pages/desk.tsx`) against `kit`, with tsrs's `module`, and the App's
+ * `src/routes/index.tsx`) against `kit`, with tsrs's `module`, and the App's
  * own declaration files among them, which are checked too. Only the App
  * files' diagnostics and the program's own count, never the kit's. A run
  * that crashed (a type that recurses past the stack) or ended otherwise

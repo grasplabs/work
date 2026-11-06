@@ -446,7 +446,7 @@ const Page = () => null;
 export const Route = createFileRoute("/archive")({ component: Page });
 `,
       // Not a page: code the pages share.
-      "pages/parts/row.tsx": "export const Row = () => null;\n",
+      "src/components/row.tsx": "export const Row = () => null;\n",
     });
     // Committed, not yet current: what runs is still version 1.
     const beforeCurrent = await apps.contents(app.id);

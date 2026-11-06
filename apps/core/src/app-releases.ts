@@ -536,7 +536,7 @@ const bindingAgrees = (
  * artifacts not read: `version.not_sealed`, `version.revoked` or
  * `version.manifest_corrupt` as `loadRelease` says.
  */
-const checkedManifest = async (
+export const checkedManifest = async (
   env: Env,
   app: AppId,
   version: number,

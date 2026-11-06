@@ -1029,7 +1029,7 @@ const noActions: readonly never[] = [];
  *   ]}
  *   search="Search customers"
  *   bulkActions={[{ label: "Archive", onSelect: async (rows) => await archive({ ids: rows.map((row) => row._id) }) }]}
- *   rowActions={[{ label: "Open", onSelect: async (row) => await navigate(pages.customer, { id: row._id }) }]}
+ *   rowActions={[{ label: "Open", onSelect: async (row) => await navigate({ to: "/customers/$customerId", params: { customerId: row._id } }) }]}
  * />
  * ```
  */

@@ -1582,7 +1582,11 @@ const buildDeclaration = `/**
  * plain words what you're stuck on. Nothing here makes a change live: a
  * builder of the App does that in Grasp.
  *
- * Pages are \`pages/<name>.tsx\` on @grasp-os/ui components with their
+ * Pages are TanStack Router file routes in \`src/routes/\` (\`index.tsx\`
+ * is \`/\`, \`tasks.$taskId.tsx\` is \`/tasks/$taskId\`), each
+ * \`export const Route = createFileRoute("/tasks/$taskId")({ component })\`
+ * and moving between them with TanStack's \`Link\` and \`useNavigate\`,
+ * built on @grasp-os/ui components with their
  * variants and sizes and the theme's tokens: no raw colours, arbitrary
  * values or restyled components (the lint names what to use instead).
  * Don't wire tables and forms by hand:
@@ -1600,7 +1604,8 @@ const buildDeclaration = `/**
  *   read-only. \`bulkActions\` (rows with an \`_id\`) make rows selectable,
  *   \`rowActions\` give each row a menu, and a failed action or edit is
  *   shown. It shows its own empty, loading and failed states.
- *   \`<DataGrid label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, { field: "due", day: true }, { field: "notes", cell: (task) => <RichText value={task.notes} /> }]} search="Search tasks" rowActions={[{ label: "Open", onSelect: async (task) => await navigate(pages.task, { id: task._id }) }]} />\`
+ *   \`<DataGrid label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, { field: "due", day: true }, { field: "notes", cell: (task) => <RichText value={task.notes} /> }]} search="Search tasks" rowActions={[{ label: "Open", onSelect: async (task) => await navigate({ to: "/tasks/$taskId", params: { taskId: task._id } }) }]} />\`
+ *   (\`navigate\` is \`useNavigate()\` from \`@tanstack/react-router\`)
  * - A form is \`useForm\` (a mutation's or action's arguments, a record, or a
  *   \`v.object\`) with the fields of \`@grasp-os/ui/form\`, one per kind of
  *   value; each takes \`form\`, \`name\` and \`label\`, and its choices,
@@ -1635,7 +1640,6 @@ const buildDeclaration = `/**
  * from \`@server/_generated/server\`; pages call them through
  * \`@server/_generated/api\`. A query or mutation that needs fewer tables
  * than their access gives narrows them: \`tables: { notes: { read: true } }\`.
- * Its pages are TanStack Router file routes in \`src/routes/\` (\`index.tsx\` is \`/\`).
  * An App holds no workflows,
  * and a write under \`workflows/\` is refused: for something that runs on
  * its own or takes steps, build an independent workflow with
@@ -1693,11 +1697,10 @@ const buildDeclaration = `/**
  *
  * To tell people about something in the App (a request to approve, an
  * order shipped), an action calls
- * \`ctx.notifyPeople(to, { title, body, link })\` (await sends one at a
+ * \`ctx.notifyPeople(to, { title, body })\` (await sends one at a
  * time) and a mutation \`ctx.afterCommit.notifyPeople(to, { ... })\`,
- * sent once it commits: \`to\` is a person's or a team's ID, \`link\` the
- * name of the App's page it opens on (optional, never a URL). It reaches
- * their Grasp notifications; only members who can open the App are told
+ * sent once it commits: \`to\` is a person's or a team's ID. It reaches
+ * their Grasp notifications, which open the App; only members who can open the App are told
  * (anyone else is skipped), at most 50 people a send and 200 notifications
  * an App an hour, a title of 120 characters and a body of 1000. A
  * mutation's \`ctx.notify(event, ...)\` is a workflow run's event, not

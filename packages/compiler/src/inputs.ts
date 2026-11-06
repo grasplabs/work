@@ -54,7 +54,7 @@ export const isLintedCode = (path: string): boolean =>
  * import may name one (`declarationValueImportError`).
  */
 export const declarationFile =
-  /^(?:[\w-]+|src\/(?:[\w$-][\w.$-]*\/)*[\w$-][\w.$-]*)\.d\.ts$/u;
+  /^(?:[\w-]+|src\/(?:[\w$()-][\w.$()-]*\/)*[\w$()-][\w.$()-]*)\.d\.ts$/u;
 
 /**
  * Whether every folder and file name in `path` is one an App's path may

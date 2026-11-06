@@ -4,6 +4,7 @@ import { pageErrors } from "@grasp-os/shared/pages";
 
 import {
   isSealed,
+  checkedManifest,
   sealedPage,
   versionReferenceSource,
 } from "./app-releases.ts";
@@ -59,11 +60,15 @@ export const versionPageCodes = async (
   files: Record<string, string>,
   { unsealed }: { unsealed: "build" | "refuse" }
 ): Promise<BuiltPage> => {
-  if (
-    isAppLayout(files) &&
-    (unsealed === "refuse" || (await isSealed(env, app, version)))
-  ) {
+  const sealed = isAppLayout(files) && (await isSealed(env, app, version));
+  if (isAppLayout(files) && (unsealed === "refuse" || sealed)) {
     if (!Object.keys(files).some((path) => isPageFile(path))) {
+      // A release sealed before pages were file routes holds its pages
+      // under screens/: its release format refuses it, to publish anew,
+      // rather than reading as an App without pages.
+      if (sealed) {
+        await checkedManifest(env, app, version);
+      }
       throw pageErrors.create("page.not_found");
     }
     return await sealedPage(env, app, version);

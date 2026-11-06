@@ -24,7 +24,7 @@ import { platformLimits } from "./platform-limits.ts";
 
 /**
  * A file's path in an App, relative to its root and `/`-separated, such
- * as `pages/inbox.tsx` or `server/notes.ts`. No absolute paths, no empty,
+ * as `src/routes/inbox.tsx` or `server/notes.ts`. No absolute paths, no empty,
  * `.` or `..` segments, no backslashes.
  */
 export const appPathSchema = z

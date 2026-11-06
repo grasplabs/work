@@ -39,6 +39,17 @@ export const Route = createFileRoute("/settings")({ component: Settings });
 `,
 });
 
+/** A route at `path` whose page says `text`, placed as `surface` says. */
+const route = (path: string, text: string, surface?: string) =>
+  `import { createFileRoute } from "@tanstack/react-router";
+${surface === undefined ? "" : `\nexport const surface = ${surface} as const;\n`}
+function Page() {
+  return <p>${text}</p>;
+}
+
+export const Route = createFileRoute("${path}")({ component: Page });
+`;
+
 /** A builder's surfaced Notes, current: its pages need nobody's approval. */
 const surfacedApp = async (name = "Notes") => {
   const builder = await personApi("builder");
@@ -104,6 +115,66 @@ describe("an App's surfaces", () => {
       ],
       strangerList: "app.not_found",
       strangerSidebar: [],
+    });
+  });
+
+  it("are saved, built and listed at their route's address, however TanStack's file naming names the route", async () => {
+    const builder = await personApi("builder");
+    const { id: app } = await builder.api.apps.create({ name: "Routed" });
+    const { version } = await builder.api.apps.files.commit(
+      app,
+      {
+        ...notesFiles,
+        // A route group: a folder that adds nothing to the address.
+        "src/routes/(admin)/settings.tsx": route(
+          "/(admin)/settings",
+          "Preferences",
+          '{ kind: "settings", title: "Preferences" }'
+        ),
+        // A pathless layout, and a route inside it.
+        "src/routes/_layout.tsx": `import { Outlet, createFileRoute } from "@tanstack/react-router";
+
+export const Route = createFileRoute("/_layout")({ component: Outlet });
+`,
+        "src/routes/_layout.inbox.tsx": route(
+          "/_layout/inbox",
+          "Inbox",
+          '{ kind: "sidebar", title: "Inbox" }'
+        ),
+        // A parameter, and a route out of its parent's layout.
+        "src/routes/tasks.$taskId.tsx": route("/tasks/$taskId", "Task"),
+        "src/routes/tasks_.new.tsx": route(
+          "/tasks_/new",
+          "New task",
+          '{ kind: "panel", title: "New task" }'
+        ),
+      },
+      "First"
+    );
+    await builder.api.apps.versions.setCurrent(app, version);
+
+    expect({
+      files: Object.keys(await builder.api.apps.files.read(app)).filter(
+        (path) => path.startsWith("src/routes/")
+      ),
+      surfaces: await builder.api.pages.surfaces(app),
+      // Built and sealed: the App's pages open.
+      opens: await outcome(builder.api.pages.open(app)),
+    }).toStrictEqual({
+      files: [
+        "src/routes/(admin)/settings.tsx",
+        "src/routes/_layout.inbox.tsx",
+        "src/routes/_layout.tsx",
+        "src/routes/index.tsx",
+        "src/routes/tasks.$taskId.tsx",
+        "src/routes/tasks_.new.tsx",
+      ],
+      surfaces: [
+        { path: "/inbox", kind: "sidebar", title: "Inbox" },
+        { path: "/settings", kind: "settings", title: "Preferences" },
+        { path: "/tasks/new", kind: "panel", title: "New task" },
+      ],
+      opens: "ok",
     });
   });
 
