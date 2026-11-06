@@ -144,11 +144,13 @@ const writePart = async (
  * form-data-encoder (4.1.0): it splits a chunk over 64 KiB from the start
  * of its whole buffer, ignoring `byteOffset`, so it would send a stream's
  * view into a larger buffer as other bytes, silently and after our check.
+ * `sent` is called once its last byte has gone out.
  */
 const formBody = (
   boundary: string,
   parts: readonly FormPart[],
-  failed: AbortController
+  failed: AbortController,
+  sent?: () => void
 ): ReadableStream<Uint8Array> => {
   const headed = parts.map((part) => ({
     part,
@@ -177,6 +179,7 @@ const formBody = (
       }
       await writer.write(tail);
       await writer.close();
+      sent?.();
     } catch (error) {
       await writer.abort(error);
     }
@@ -188,13 +191,15 @@ const formBody = (
 
 /**
  * The result of `call` sending `parts` as its multipart form, made again
- * for each attempt. A part that can't be read stops it with why.
+ * for each attempt. A part that can't be read stops it with why. `sent`
+ * is called once an attempt's whole form has gone out.
  */
 const callWithForm = async <T>(
   api: CloudflareApi,
   call: ApiCall,
   parts: readonly FormPart[],
-  schema: z.ZodType<T>
+  schema: z.ZodType<T>,
+  sent?: () => void
 ): Promise<T> => {
   const boundary = crypto.randomUUID();
   const failed = new AbortController();
@@ -202,7 +207,7 @@ const callWithForm = async <T>(
     {
       ...call,
       headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
-      body: () => formBody(boundary, parts, failed),
+      body: () => formBody(boundary, parts, failed, sent),
       signal:
         call.signal === undefined
           ? failed.signal
@@ -575,13 +580,14 @@ export const deleteTargetScript = async (
  * Object migration isn't retried after a server error or no answer: if it
  * went through, its migration ran, and sending it again would be refused
  * on the migration's tag. The caller reads the script's migration tag to
- * find out.
+ * find out. `sent` is called once the script's whole upload has gone out:
+ * until then, Cloudflare can't have taken it.
  */
 export const uploadTargetScript = async (
   api: CloudflareApi,
   target: ScriptTarget,
   upload: WorkerUpload,
-  { signal }: { signal?: AbortSignal } = {}
+  { signal, sent }: { signal?: AbortSignal; sent?: () => void } = {}
 ): Promise<void> => {
   const path = targetPath(target);
   await callWithForm(
@@ -593,7 +599,8 @@ export const uploadTargetScript = async (
       ...(signal === undefined ? {} : { signal }),
     },
     await uploadForm(api, target.accountId, path, upload),
-    z.unknown()
+    z.unknown(),
+    sent
   );
 };
 

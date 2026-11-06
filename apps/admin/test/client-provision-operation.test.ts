@@ -1099,8 +1099,20 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("stops core's upload before the last chunk of a module whose bytes aren't the release's, and doesn't retry it", async () => {
-    const manifest = await importRelease();
+  it("stops core's upload before the last chunk of a module whose bytes aren't the release's, doesn't retry it, and still lets the client roll back past the migration it never ran", async () => {
+    const live = await importRelease();
+    const { account, clientId } = await liveClient(live);
+    // A release with a new Durable Object migration, which core never runs.
+    const manifest = await importRelease(
+      { notes: "feat(core): new class", core: "export default { core: 9 };" },
+      (entry) => ({
+        ...entry,
+        durableObjectMigrations: [
+          ...entry.durableObjectMigrations,
+          { tag: "v2", new_sqlite_classes: ["Extra"] },
+        ],
+      })
+    );
     const [module] = manifest.workers.core?.modules ?? [];
     if (module === undefined) {
       throw new Error("The test release's core has no module");
@@ -1163,24 +1175,46 @@ describe("provisioning a placed client", () => {
         body: text,
       });
     });
-    const { account, held } = await setUp(manifest);
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: manifest.releaseId,
+    });
 
-    const failure = await failing(held, { ...context, store });
+    const failure = await failing(await attempt(clientId), {
+      ...context,
+      store,
+    });
 
-    expect(codeFrom(failure)).toBe("release_blob_mismatch");
     const decoder = new TextDecoder();
     const [first = "", second = "", last = ""] = chunks.map((chunk) =>
       decoder.decode(chunk)
     );
-    // Sent once, up to the module's last chunk, and never whole.
-    expect(sent).toHaveLength(1);
+    const { progress } = (await operationOf(clientId)) ?? {};
+    expect({
+      code: codeFrom(failure),
+      // Sent once.
+      sends: sent.length,
+      // What core ran is recorded as it was: v1, never v2.
+      migrated: z
+        .object({ migrated: z.record(z.string(), z.string().nullable()) })
+        .parse(JSON.parse(progress ?? "{}")).migrated.core,
+      ran: [...clientScripts(account)]
+        .filter(([name]) => name.endsWith("-core"))
+        .map(([, script]) => script.migrationTag),
+      rollback: await codeOf(
+        startClientRelease(db, staff, await attempt(clientId), {
+          rollback: true,
+        })
+      ),
+    }).toStrictEqual({
+      code: "release_blob_mismatch",
+      sends: 1,
+      migrated: "v1",
+      ran: ["v1"],
+      rollback: "started",
+    });
+    // Up to the module's last chunk, and never whole.
     expect(sent[0]).toContain(`${first}${second}`);
     expect(sent[0]).not.toContain(`${first}${second}${last}`);
-    expect(
-      [...clientScripts(account).keys()].filter((name) =>
-        name.endsWith("-core")
-      )
-    ).toStrictEqual([]);
   });
 
   it("does nothing once done", async () => {
