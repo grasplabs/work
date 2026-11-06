@@ -23,7 +23,7 @@ export default defineSchema({
 const operations = `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
 import { action, doc, internalMutation, mutation, query } from "@server/_generated/server";
 import { internal } from "@server/_generated/internal";
-import { noteFields } from "../schema.ts";
+import { noteFields } from "./schema.ts";
 
 export const list = query({
   args: { pagination: paginationOptionsValidator },
