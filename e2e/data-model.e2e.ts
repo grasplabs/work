@@ -39,20 +39,25 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   await dialog.getByRole("button", { name: "Create table" }).click();
   await expect(page.getByRole("heading", { name: "tasks" })).toBeVisible(read);
 
-  // Its fields, in line: a required text and a choice.
-  const fields = page.getByRole("tabpanel");
+  // Its fields, each a column added from the grid's last one: a required
+  // text and a choice.
+  const grid = page.getByRole("grid", { name: "tasks" });
+  await grid.getByRole("button", { name: "Add a field" }).click();
   await page.getByLabel("Field name").fill("title");
   await page.getByText("Required", { exact: true }).last().click();
   await page.getByRole("button", { name: "Add field" }).click();
-  await expect(fields.getByText("v.string()", { exact: true })).toBeVisible(
+  await expect(grid.getByRole("button", { name: "Change title" })).toBeVisible(
     read
   );
+  await grid.getByRole("button", { name: "Add a field" }).click();
   await page.getByLabel("Field name").fill("status");
   await page.getByLabel("Type", { exact: true }).click();
   await page.getByRole("option", { name: /^Choice/u }).click();
   await page.getByLabel("Options, separated by commas").fill("Open, Done");
   await page.getByRole("button", { name: "Add field" }).click();
-  await expect(fields.getByText("Choice: Open and Done")).toBeVisible(read);
+  await expect(grid.getByRole("button", { name: "Change status" })).toBeVisible(
+    read
+  );
   await expect(
     page.getByRole("navigation", { name: "Tables" }).getByText("tasks")
   ).toBeVisible();

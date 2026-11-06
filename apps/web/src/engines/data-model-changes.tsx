@@ -10,7 +10,6 @@ import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -407,12 +406,6 @@ const ReviewDialog = ({
           <DialogTitle>
             <Trans>Before you make this change</Trans>
           </DialogTitle>
-          <DialogDescription>
-            <Trans>
-              What publishing your changes will do to the records the App holds.
-              Nothing changes for its people until you publish.
-            </Trans>
-          </DialogDescription>
         </DialogHeader>
         <form
           className="flex flex-col gap-4"

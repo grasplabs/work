@@ -160,12 +160,6 @@ const AccessPart = ({
       </Select>
       {narrows(mode) ? (
         <div className="flex flex-col gap-3">
-          <FieldDescription>
-            <Trans>
-              Narrow it to each person&apos;s own records, or leave all unticked
-              for every record.
-            </Trans>
-          </FieldDescription>
           {choices.map(({ rule, label }) => {
             const key = ruleKey(rule);
             return (
@@ -405,12 +399,6 @@ export const IndexesPanel = ({
           <FieldLegend>
             <Trans>Add an order</Trans>
           </FieldLegend>
-          <FieldDescription>
-            <Trans>
-              An index lets the App list records in an order quickly, however
-              many it holds.
-            </Trans>
-          </FieldDescription>
           <div className="flex flex-wrap items-center gap-2">
             <Input
               aria-label={t`Index name`}
@@ -470,11 +458,6 @@ export const IndexesPanel = ({
             <FieldLegend>
               <Trans>Add search</Trans>
             </FieldLegend>
-            <FieldDescription>
-              <Trans>
-                Lets people find records by the words in these text fields.
-              </Trans>
-            </FieldDescription>
             <div className="flex flex-col gap-3">
               {texts.map((field) => (
                 <Field key={field} orientation="horizontal">

@@ -13,10 +13,10 @@ import type * as React from "react";
 /*
  * A data model as a no-code tool shows one (an App's tables and their
  * fields, in its workspace): the tables in a column of their own, the one
- * open standing out; each field's kind as an icon on a tile, the same in
- * the list of fields and in the picker a kind is chosen from; and a
- * field's type as code declares it, for whoever reads code. Every word is
- * the page's: the kit holds no language of its own.
+ * open standing out; and the picker a field's kind is chosen from, each
+ * kind with its icon on a tile. Every word is the page's: the kit holds
+ * no language of its own. The fields themselves are a grid's columns
+ * (record-grid.tsx).
  */
 
 const fieldTypeIconVariants = cva(
@@ -195,25 +195,5 @@ function ModelTableItem({
   );
 }
 
-/** A field's type as code declares it, for whoever reads code. */
-function FieldCode({ className, ...props }: React.ComponentProps<"code">) {
-  return (
-    <code
-      data-slot="field-code"
-      className={cn(
-        "text-muted-foreground truncate font-mono text-xs",
-        className
-      )}
-      {...props}
-    />
-  );
-}
-
-export {
-  FieldCode,
-  FieldTypeIcon,
-  FieldTypePicker,
-  ModelTableItem,
-  ModelTableList,
-};
+export { FieldTypeIcon, FieldTypePicker, ModelTableItem, ModelTableList };
 export type { FieldTypeOption };

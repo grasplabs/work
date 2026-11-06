@@ -884,19 +884,17 @@ const readTables = async (session: Session, app: string) =>
 const LiveData = ({ app }: { app: string }) => {
   const read = useAppRead(app, readTables);
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-6 md:px-6">
-        <Read read={read}>
-          {({ version, tables }) => (
-            <AppData
-              app={app}
-              key={`${app}/${version ?? ""}`}
-              tables={tables}
-              version={version}
-            />
-          )}
-        </Read>
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <Read read={read}>
+        {({ version, tables }) => (
+          <AppData
+            app={app}
+            key={`${app}/${version ?? ""}`}
+            tables={tables}
+            version={version}
+          />
+        )}
+      </Read>
     </div>
   );
 };

@@ -18,7 +18,6 @@ import {
   ComboboxList,
 } from "@grasp-os/ui/components/combobox";
 import {
-  FieldCode,
   FieldTypeIcon,
   FieldTypePicker,
   ModelTableItem,
@@ -331,7 +330,6 @@ const DataModelDemo = () => {
         <span className="flex items-center gap-2 text-sm">
           <FieldTypeIcon>{picked?.icon}</FieldTypeIcon>
           due
-          <FieldCode>v.timestamp().optional()</FieldCode>
         </span>
       </div>
     </div>

@@ -7,7 +7,14 @@ import type { Infer, InferInput, OperationReference } from "@grasp-os/sdk";
 import { GraspClient } from "@grasp-os/sdk/client";
 import { GraspProvider } from "@grasp-os/sdk/react";
 import { DataGrid } from "@grasp-os/ui/components/data-grid";
+import {
+  RecordGrid,
+  RecordGridHeader,
+  RecordGridValue,
+} from "@grasp-os/ui/components/record-grid";
+import type { RecordGridColumn } from "@grasp-os/ui/components/record-grid";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
+import { HashIcon, PlusIcon, TypeIcon } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { ComponentType } from "react";
 
@@ -133,6 +140,49 @@ const DataGridDemo = () => {
   );
 };
 
+/** A few hundred orders, as a table of an App holds them. */
+const orders = Array.from({ length: 300 }, (_, index) => ({
+  id: `order-${index + 1}`,
+  customer: ["Ada", "Grace", "Alan", "Edsger"][index % 4] ?? "",
+  amount: (index * 37) % 1000,
+}));
+
+/** The orders' columns: a required customer, and an amount. */
+const orderColumns: RecordGridColumn<(typeof orders)[number]>[] = [
+  {
+    id: "customer",
+    header: (
+      <RecordGridHeader icon={<TypeIcon />} required requiredLabel="Required">
+        customer
+      </RecordGridHeader>
+    ),
+    cell: (order) => <RecordGridValue>{order.customer}</RecordGridValue>,
+  },
+  {
+    id: "amount",
+    width: 140,
+    header: <RecordGridHeader icon={<HashIcon />}>amount</RecordGridHeader>,
+    cell: (order) => <RecordGridValue>{order.amount}</RecordGridValue>,
+  },
+];
+
+const RecordGridDemo = () => (
+  <div className="flex h-80 flex-col border">
+    <RecordGrid
+      columns={orderColumns}
+      label="Orders"
+      rowKey={(order) => order.id}
+      rows={orders}
+      trailing={
+        <button aria-label="Add a field" type="button">
+          <PlusIcon />
+        </button>
+      }
+    />
+  </div>
+);
+
 export const dataGridDemos: Record<string, ComponentType> = {
   "data-grid": DataGridDemo,
+  "record-grid": RecordGridDemo,
 };

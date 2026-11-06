@@ -129,10 +129,22 @@ const shown = async (
       return answered;
     },
   };
+  // The live App: no version yet, so no records to read.
+  const apps = {
+    data: {
+      tables: async () => {
+        await Promise.resolve();
+        return { version: null, tables: [] };
+      },
+    },
+  };
   const core = {
     withSession: async <T,>(
-      action: (session: { chats: typeof chats }) => Promise<T>
-    ): Promise<T> => await action({ chats }),
+      action: (session: {
+        chats: typeof chats;
+        apps: typeof apps;
+      }) => Promise<T>
+    ): Promise<T> => await action({ chats, apps }),
   };
   const rootRoute = createRootRoute({
     component: () => (
@@ -223,17 +235,24 @@ const choose = async (label: string, option: string): Promise<void> => {
   );
 };
 
-/** A menu's item, by what it says. */
-const menuItem = (name: string) =>
-  [...document.querySelectorAll('[role="menuitem"]')].find(
-    (each) => each.textContent.trim() === name
+/** The fields the grid's headers show, by name, a required one marked `*`. */
+const fieldsShown = (): string[] =>
+  [...document.querySelectorAll('[role="grid"] [aria-label^="Change "]')].map(
+    (header) => header.textContent.trim()
   );
 
-/** The fields the open table lists, by name. */
-const fieldsShown = (): string[] =>
-  [...document.querySelectorAll('[data-slot="item-title"]')].map((title) =>
-    (title.firstChild?.textContent ?? "").trim()
-  );
+/** Adds a field from the grid's last column: its name, kind, and what more it takes. */
+const addField = async (
+  name: string,
+  kind: string,
+  more?: () => Promise<void>
+): Promise<void> => {
+  await press(button("Add a field"));
+  await type("Field name", name);
+  await choose("Type", kind);
+  await more?.();
+  await press(button("Add field"));
+};
 
 /** `model` with `field` added to its first table. */
 const withField = (model: DataModel, field: DataModelField): DataModel => ({
@@ -322,13 +341,7 @@ describe("an App's data model, changed in its workspace", () => {
     ];
     for (const [name, kind, more] of kinds) {
       // oxlint-disable-next-line no-await-in-loop -- one field after another, as a person adds them
-      await type("Field name", name);
-      // oxlint-disable-next-line no-await-in-loop -- as above
-      await choose("Type", kind);
-      // oxlint-disable-next-line no-await-in-loop -- as above
-      await more?.();
-      // oxlint-disable-next-line no-await-in-loop -- as above
-      await press(button("Add field"));
+      await addField(name, kind, more);
     }
 
     expect({
@@ -340,6 +353,9 @@ describe("an App's data model, changed in its workspace", () => {
         .map(({ operation }) => operation),
       previewedFirst: sent.filter(({ preview }) => preview).length,
       fields: fieldsShown(),
+      columns: document
+        .querySelector('[role="grid"]')
+        ?.getAttribute("aria-colcount"),
     }).toStrictEqual({
       emptyShown: true,
       savedAs: true,
@@ -421,9 +437,9 @@ describe("an App's data model, changed in its workspace", () => {
         "parent",
         "owner",
         "contact",
-        "attachment",
-        "budget",
       ],
+      // Every field a column, though only those in view are drawn.
+      columns: "12",
     });
   });
 
@@ -481,18 +497,17 @@ describe("an App's data model, changed in its workspace", () => {
       throw new Error(`Not asked for: ${operation.op}`);
     });
 
+    // Each from its own column's header, in place.
     await press(button("Change title"));
-    await press(menuItem("Rename"));
-    await type("New name", "heading");
-    await press(button("Rename"));
+    await type("Field name", "heading");
+    await press(button("Save"));
     const renamed = fieldsShown();
 
     await press(button("Change status"));
-    await press(menuItem("Change type"));
     await choose("Type", "Choice");
     await type("Options, separated by commas", "open, done");
     await press(labelledBy("Required"));
-    await press(button("Review the change"));
+    await press(button("Save"));
     const asked = document.body.textContent.includes(
       "notes already holds records. What should the ones without status get?"
     );
@@ -513,7 +528,7 @@ describe("an App's data model, changed in its workspace", () => {
         .filter(({ preview }) => !preview)
         .map(({ operation }) => operation),
     }).toStrictEqual({
-      renamed: ["heading", "status"],
+      renamed: ["heading*", "status"],
       asked: true,
       blocked: true,
       planned: true,
@@ -558,14 +573,13 @@ describe("an App's data model, changed in its workspace", () => {
     });
 
     await press(button("Change status"));
-    await press(menuItem("Remove"));
+    await press(button("Remove"));
     const said = document.body.textContent.includes(
       "Keeps the values of status in notes, though nothing reads them any more."
     );
     await press(button("Remove"));
     const removed = fieldsShown();
-    await type("Field name", "title");
-    await press(button("Add field"));
+    await addField("title", "Text");
 
     expect({
       said,
@@ -576,7 +590,7 @@ describe("an App's data model, changed in its workspace", () => {
         .map(({ operation }) => operation.op),
     }).toStrictEqual({
       said: true,
-      removed: ["title"],
+      removed: ["title*"],
       problem:
         "`notes` has a field `title` already: change it with changeField.",
       made: ["removeField"],
@@ -593,14 +607,10 @@ describe("an App's data model, changed in its workspace", () => {
     );
 
     expect({
-      said: document.body.textContent.includes(
-        "Grasp is changing the App in the chat."
-      ),
       newTable: button("New table")?.hasAttribute("disabled"),
-      addField: button("Add field")?.hasAttribute("disabled"),
+      addField: button("Add a field")?.hasAttribute("disabled"),
       change: button("Change title")?.hasAttribute("disabled"),
     }).toStrictEqual({
-      said: true,
       newTable: true,
       addField: true,
       change: true,

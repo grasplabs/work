@@ -18,6 +18,7 @@
     "@grasp-os/sdk": "workspace:*",
     "@shadcn/react": "catalog:",
     "@tanstack/react-form": "catalog:",
+    "@tanstack/react-table": "catalog:",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
     "cmdk": "catalog:",

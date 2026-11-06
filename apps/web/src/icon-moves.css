@@ -3066,6 +3066,12 @@
   --icon-wait: 0.08s;
 }
 
+/* The note's coin turns over. */
+.lucide-banknote > :nth-child(2) {
+  --icon-move: icon-there;
+  --icon-wide: 0.2;
+}
+
 /* The shield rises to guard and settles. */
 .lucide-shield > :nth-child(1) {
   --icon-move: icon-there;
