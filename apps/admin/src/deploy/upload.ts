@@ -107,28 +107,32 @@ const assetType = (path: string): string => {
 };
 
 /**
- * `worker`'s static files, each read from R2 and checked against the key
- * the manifest gives it only as it's uploaded (`AssetFile`).
+ * `worker`'s static files, if it serves any, each read from R2 and checked
+ * against the key the manifest gives it only as it's uploaded
+ * (`AssetFile`, `uploadTargetAssets`).
  */
-const assetsOf = (store: ReleaseStore, worker: WorkerEntry): AssetFile[] =>
-  Object.entries(worker.assets?.manifest ?? {}).map(
-    ([path, { hash, size }]) => ({
-      path,
-      key: hash,
-      size,
-      type: assetType(path),
-      readBase64: async () =>
-        await readAssetBase64(store, { path, key: hash, size }),
-    })
-  );
+export const workerAssets = (
+  store: ReleaseStore,
+  worker: WorkerEntry
+): AssetFile[] | undefined =>
+  worker.assets === undefined
+    ? undefined
+    : Object.entries(worker.assets.manifest).map(([path, { hash, size }]) => ({
+        path,
+        key: hash,
+        size,
+        type: assetType(path),
+        readBase64: async () =>
+          await readAssetBase64(store, { path, key: hash, size }),
+      }));
 
 /**
  * What `worker` of `manifest` is uploaded as, `bindings` rendered already:
  * a placed client's, mapped onto its inventory (src/hosting/inventory.ts),
  * its mail locked (`lockMailSender`). Its metadata on the release's
  * compatibility date and flags, `vars` added as JSON bindings, and its
- * modules and static files, each read from `store` and checked against
- * the manifest as the upload sends it.
+ * modules, each read from `store` and checked against the manifest as the
+ * upload sends it. Its static files go up before it (`workerAssets`).
  */
 export const renderedWorkerUpload = (
   store: ReleaseStore,
@@ -160,12 +164,7 @@ export const renderedWorkerUpload = (
       ? {}
       : { assets: { config: worker.assets.config } }),
   };
-  return {
-    releaseId: manifest.releaseId,
-    metadata,
-    modules,
-    ...(worker.assets === undefined ? {} : { assets: assetsOf(store, worker) }),
-  };
+  return { releaseId: manifest.releaseId, metadata, modules };
 };
 
 /**

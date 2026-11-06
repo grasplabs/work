@@ -98,6 +98,7 @@ import {
   putTargetSecret,
   targetMigrationState,
   targetSecretNames,
+  uploadTargetAssets,
   uploadTargetScript,
 } from "../cloudflare/workers.ts";
 import type { ScriptTarget } from "../cloudflare/workers.ts";
@@ -125,6 +126,7 @@ import {
   keyedHash,
   lockMailSender,
   renderedWorkerUpload,
+  workerAssets,
   secretsFingerprint,
 } from "../deploy/upload.ts";
 import { deployOrder, pendingMigrations } from "../deploy/versions.ts";
@@ -1775,6 +1777,22 @@ const upload = async (
       rendered.bindings,
       vars
     );
+    // Its static files first, with a deadline of their own: they're named
+    // by their content and change nothing a script runs until its upload
+    // names them, so they need no mark (`sendHolding`) and don't spend the
+    // upload's. Each request checks this attempt still holds the client.
+    const assets = workerAssets(store, worker);
+    const assetsJwt =
+      assets === undefined
+        ? undefined
+        : await uploadTargetAssets(api, target, assets, {
+            signal: AbortSignal.timeout(
+              context.sendTimeoutMs ?? defaultSendTimeoutMs
+            ),
+            beforeSend: async () => {
+              await assertHolds(db, held);
+            },
+          });
     await noteSuperseded(db, loaded, progress, app);
     // Delivered secrets go with the next delivery, whatever this upload
     // keeps.
@@ -1796,6 +1814,7 @@ const upload = async (
                 ...prepared.metadata,
                 ...(migrations === undefined ? {} : { migrations }),
               },
+              ...(assetsJwt === undefined ? {} : { assetsJwt }),
             },
             { signal, sent }
           );

@@ -1072,7 +1072,7 @@ describe("provisioning a placed client", () => {
 
     const { core } = await scriptsOf(clientId);
     // Each file is read once, right before the request that carries it:
-    // its own static file upload, or the script's upload with its modules,
+    // a static files upload, or the script's upload with its modules,
     // each module streamed into it.
     const carriers = [...Map.groupBy(readAt, (at) => at)].map(([at, reads]) => {
       const path = cloudflare.calls[at]?.path ?? "";
@@ -1086,16 +1086,44 @@ describe("provisioning a placed client", () => {
     expect(readWhole).toStrictEqual([]);
     expect(readAt).toHaveLength(coreFiles.size);
     expect(carriers).toStrictEqual(
-      carriers.map(() => ({
+      carriers.map(({ sent }) => ({
         to: `/accounts/${platformAccountId}/workers/assets/upload`,
-        read: 1,
-        sent: 1,
+        read: sent,
+        sent,
       }))
     );
     expect(script).toStrictEqual({
       to: "script",
       read: modules.size,
       sent: modules.size,
+    });
+  });
+
+  it("uploads a first deploy's static files before core's script, so they don't spend its send limit", async () => {
+    // Forty static files, each upload answered after 50 ms: one file a
+    // request in the script's window would take 2 s of its 500 ms.
+    const manifest = await importRelease({
+      assets: Object.fromEntries(
+        Array.from({ length: 40 }, (_, index) => [
+          `/assets/chunk-${index}.js`,
+          `export default "${crypto.randomUUID()}";`,
+        ])
+      ),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      if (new URL(request.url).pathname.endsWith("/workers/assets/upload")) {
+        await scheduler.wait(50);
+      }
+      return await cloudflare.fetch(request);
+    });
+    const { clientId, held } = await setUp(manifest);
+
+    await runClientProvision({ ...context, sendTimeoutMs: 500 }, held);
+
+    await expect(operationOf(clientId)).resolves.toMatchObject({
+      status: "done",
+      error: null,
     });
   });
 
