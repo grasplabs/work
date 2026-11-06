@@ -5,8 +5,8 @@ import { appReady, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
 
 // An App, end to end, as a builder makes one: New App, what to build, the
-// App's own chat building it (the stack's scripted model reads Grasp's
-// reference, writes the App's files and says it's ready, e2e/
+// App's own chat building it (the stack's scripted model reads the
+// deployment's docs, writes the App's files and says it's ready, e2e/
 // model-scripts.ts), the draft's page in the workspace's preview, then
 // Publish changes, as the chat never proposed it, and its review made
 // current and published. Shared with someone as a user, they open the
@@ -50,11 +50,8 @@ test("a builder has an App built in its chat, publishes it, and someone it is sh
   await expect(page).toHaveURL(/\/apps\/[^/]+\/edit/u, built);
   const app = new URL(page.url()).pathname.split("/").at(-2) ?? "";
 
-  // The chat looks up how an App is written, writes it, and says so.
+  // The chat reads how an App is written, writes it, and says so.
   const chat = page.getByRole("region", { name: "Chat" });
-  await expect(
-    chat.getByText("Searched Grasp's reference for export const defineApp =")
-  ).toBeVisible(agentTurn);
   await expect(chat.getByText(appReady)).toBeVisible(agentTurn);
 
   // The preview is the draft's page, on a store of its own.

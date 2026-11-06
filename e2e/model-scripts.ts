@@ -83,9 +83,12 @@ const writesTally = (
   outputTokens: 40,
 });
 
-/** The SDK's `defineApp`, as a search of Grasp's reference finds it (core's agent-tools.ts). */
-const sdkApp =
-  /(?<found>@grasp-os\/sdk\/src\/app\.ts:\d+:export const defineApp =)/u;
+/**
+ * A docs page's title, as `readDocs` reads the page's Markdown (core's
+ * agent-docs.ts): in its frontmatter, which the guides in the system
+ * prompt leave out.
+ */
+const docsPage = /^title: (?<found>.+)$/mu;
 
 /** A table the agent adds with `addTable`, every member reading and writing it. */
 const sharedTable = (
@@ -198,8 +201,8 @@ export const modelScripts = {
     ],
   },
   /**
-   * A new App built in its own chat: the agent reads how an App is
-   * written in Grasp's reference (a search of it), writes a contact
+   * A new App built in its own chat: the agent reads how an App's
+   * project is laid out in the deployment's docs, writes a contact
    * list's files into its draft, and says it is ready to try. It never proposes it: the builder
    * publishes the draft themselves.
    */
@@ -207,14 +210,11 @@ export const modelScripts = {
     opener:
       "A contact list for the sales team: each contact's name, added from its page.",
     replies: [
-      calls("findsapp1", "searchFiles", {
-        text: "export const defineApp =",
-        path: "@grasp-os/sdk/src/app.ts",
-      }),
-      // Only once the reference answered with how `defineApp` is declared:
-      // a search that failed or found nothing ends the script.
+      calls("findsapp1", "readDocs", { path: "/guides/project" }),
+      // Only once the docs answered with the page: a read that failed
+      // ends the script.
       (said) => {
-        readIn(said, sdkApp);
+        readIn(said, docsPage);
         return calls(
           "definesap1",
           "addTable",
