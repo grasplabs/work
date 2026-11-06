@@ -92,8 +92,12 @@ const later = async <T>(value: T): Promise<T> => await Promise.resolve(value);
 const madeUp = (
   start: { open: Numbers; hidden: Numbers },
   script: Scripted[],
-  { limitedOnce = false }: { limitedOnce?: boolean } = {}
+  {
+    limitedOnce = false,
+    failsOnce = false,
+  }: { limitedOnce?: boolean; failsOnce?: boolean } = {}
 ) => {
+  let failed = !failsOnce;
   let kept = { ...start };
   let pending: Scripted | null = null;
   let offered = 0;
@@ -111,6 +115,10 @@ const madeUp = (
   });
   const world: ClimbWorld = {
     measure: async (set, benches) => {
+      if (!failed) {
+        failed = true;
+        throw new Error("`vp run lab practice 06` stopped (1).");
+      }
       if (!limitHit) {
         limitHit = true;
         throw new Error("The model call was refused (model.rate_limited)");
@@ -160,7 +168,7 @@ const madeUp = (
       seen.commits.push(message);
       await later(null);
     },
-    limited: async () => await later(true),
+    limited: async () => await later(!failsOnce),
     wait: async (ms) => {
       seen.waited += ms;
       await later(null);
@@ -283,6 +291,20 @@ describe("the climb", () => {
     const outcome = await climb(world, options);
 
     expect(seen.waited).toBe(defaultClimb.limitLookMs);
+    expect(outcome.why).toBe("reached");
+  });
+
+  it("measures once more after a failure that isn't the usage limit, then goes on", async () => {
+    const start = { ...startingNumbers(0.93), heard: 0.8 };
+    const { world, seen } = madeUp(
+      { open: start, hidden: start },
+      [{ open: { heard: 0.92 } }],
+      { failsOnce: true }
+    );
+
+    const outcome = await climb(world, options);
+
+    expect(seen.lines.some((line) => line.includes("once more"))).toBeTruthy();
     expect(outcome.why).toBe("reached");
   });
 

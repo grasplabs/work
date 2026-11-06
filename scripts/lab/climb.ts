@@ -203,13 +203,24 @@ export const wrapped = (line: string, width = 72): string[] => {
 const shown = (value: number | null | undefined): string =>
   value === null || value === undefined ? "–" : value.toFixed(1);
 
-/** Runs `step`, waiting out the account's usage limit when that is why it failed. */
+/** How long a measuring that failed for another reason waits before its one more try. */
+const againAfterMs = 60_000;
+
+/**
+ * Runs `step`, waiting out the account's usage limit when that is why it
+ * failed. A step that may run `again` gets one more try after any other
+ * failure: one call in thousands that hangs (Claude Code that never
+ * answers) shouldn't end a climb of days. Measuring may; asking for a
+ * change may not, as a second try would start from a first one's edits.
+ */
 const patiently = async <T>(
   world: ClimbWorld,
   options: ClimbOptions,
-  step: () => Promise<T>
+  step: () => Promise<T>,
+  { again = false }: { again?: boolean } = {}
 ): Promise<T> => {
   let waited = 0;
+  let triedAgain = !again;
   for (;;) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one try at a time
@@ -217,6 +228,15 @@ const patiently = async <T>(
     } catch (error) {
       // oxlint-disable-next-line no-await-in-loop -- asked after each failure
       const limited = await world.limited();
+      if (!limited && !triedAgain) {
+        triedAgain = true;
+        world.log(
+          `It failed (${error instanceof Error ? error.message : "it stopped"}). Trying it once more in a minute.`
+        );
+        // oxlint-disable-next-line no-await-in-loop -- waits before the one more try
+        await world.wait(againAfterMs);
+        continue;
+      }
       if (!limited || waited >= options.limitWaitMs) {
         throw error;
       }
@@ -240,14 +260,19 @@ type Measure = (
 const measureFor =
   (world: ClimbWorld, options: ClimbOptions): Measure =>
   async (set, benches, what) =>
-    await patiently(world, options, async () => {
-      const runs = await world.measure(
-        set,
-        benches,
-        `climb-${options.id}-${what}`
-      );
-      return runs;
-    });
+    await patiently(
+      world,
+      options,
+      async () => {
+        const runs = await world.measure(
+          set,
+          benches,
+          `climb-${options.id}-${what}`
+        );
+        return runs;
+      },
+      { again: true }
+    );
 
 /** Where the climb stands between rounds: on both sets, with the noise and his texts at the start. */
 interface Place {
