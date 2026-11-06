@@ -1,7 +1,6 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
 import { valueDepth } from "@grasp-os/shared/value-depth";
-import { generatedWorkflowProtocol } from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowDuration } from "@grasp-os/workerflow/contracts";
 import { runInDurableObject } from "cloudflare:test";
@@ -109,6 +108,62 @@ import { unique } from "./sign-in.ts";
 // And the calls the isolate filled in as sealed go out: a connector's, its
 // sensitive value put in by the host, audited with the arguments it sent,
 // and a model's.
+/** A version's build, as its manifest holds it. */
+const storedBuildSchema = z.looseObject({
+  generator: z.string(),
+  protocol: z.number().optional(),
+  compilerVersion: z.string(),
+  hash: z.string(),
+  artifacts: z.array(
+    z.object({ path: z.string(), sha256: z.string(), bytes: z.number() })
+  ),
+});
+
+type StoredBuild = z.infer<typeof storedBuildSchema>;
+
+/** A build's executable identity, as workflow-builds.ts computes it. */
+const buildIdentity = async (build: StoredBuild): Promise<string> =>
+  await sha256Hex(
+    canonicalJson({
+      generator: build.generator,
+      ...(build.protocol === undefined ? {} : { protocol: build.protocol }),
+      compilerVersion: build.compilerVersion,
+      artifacts: build.artifacts.filter(
+        ({ path }) => !path.startsWith("source/") && path !== "source-map.json"
+      ),
+    })
+  );
+
+/**
+ * Rewrites the build of workflow `id`'s version 1 by `change`, with the
+ * manifest's hash, which every start pins, made to match, past the
+ * records' immutability.
+ */
+const rewriteBuild = async (
+  id: string,
+  change: (build: StoredBuild) => Promise<void>
+): Promise<void> => {
+  const row = await env.DB.prepare(
+    "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+  )
+    .bind(id)
+    .first<{ manifest: string }>();
+  const manifest = z
+    .looseObject({ build: storedBuildSchema })
+    .parse(JSON.parse(row?.manifest ?? "{}"));
+  await change(manifest.build);
+  const text = canonicalText(manifest);
+  await env.DB.batch([
+    env.DB.prepare("DROP TRIGGER workflow_resource_versions_immutable_update"),
+    env.DB.prepare(
+      "UPDATE workflow_resource_versions SET manifest = ?, manifest_hash = ? WHERE workflow_resource_id = ? AND version = 1"
+    ).bind(text, await sha256Hex(text), id),
+    env.DB.prepare(
+      "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
+    ),
+  ]);
+};
+
 describe("a sealed build's run on the run host", () => {
   let sealed: Sealed;
 
@@ -557,39 +612,33 @@ return { before, after: await late };
     });
   });
 
-  it("refuses a version built for another protocol as one to publish again, not as one changed", async () => {
-    const old = await sealedWorkflow();
-    const row = await env.DB.prepare(
-      "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
-    )
-      .bind(old.workflow.id)
-      .first<{ manifest: string }>();
-    // As a version published before this protocol: its manifest, and the
-    // hash every pin reads it by, of the protocol before.
-    const manifest = (row?.manifest ?? "").replace(
-      `"protocol":${generatedWorkflowProtocol}`,
-      `"protocol":${generatedWorkflowProtocol - 1}`
-    );
-    await env.DB.batch([
-      env.DB.prepare(
-        "DROP TRIGGER workflow_resource_versions_immutable_update"
-      ),
-      env.DB.prepare(
-        "UPDATE workflow_resource_versions SET manifest = ?, manifest_hash = ? WHERE workflow_resource_id = ? AND version = 1"
-      ).bind(manifest, await sha256Hex(manifest), old.workflow.id),
-      env.DB.prepare(
-        "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
-      ),
-    ]);
-    await expect(
-      startWorkflow(
+  it.each([
+    ["its identity counting it", "loaded"],
+    ["an identity that doesn't count it", "workflow.version_corrupt"],
+  ])(
+    "runs a version whose build still names a protocol, with %s",
+    async (_case, outcome) => {
+      const old = await sealedWorkflow();
+      await rewriteBuild(old.workflow.id, async (build) => {
+        build.protocol = 9;
+        if (outcome === "loaded") {
+          build.hash = await buildIdentity(build);
+        }
+      });
+      const { runId } = await startWorkflow(
         serving,
         { type: "person", person: old.by },
         old.workflow.id,
         { version: 1, input: { who: "Ada" }, key: unique() }
-      )
-    ).rejects.toMatchObject({ code: "workflow.protocol_unsupported" });
-  });
+      );
+      await expect(
+        sealedRunOf(runId ?? "").then(
+          () => "loaded",
+          (error: unknown) => z.object({ code: z.string() }).parse(error).code
+        )
+      ).resolves.toBe(outcome);
+    }
+  );
 });
 
 /** Task `id`'s own step, recording `record`, with `options` besides. */
