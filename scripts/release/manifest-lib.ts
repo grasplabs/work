@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 
 import {
   assetKey,
@@ -291,11 +292,68 @@ export interface ReleaseInfo {
   packages: Record<string, string>;
 }
 
+const mebibytes = (bytes: number): string =>
+  `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+
+/**
+ * What one release may carry to a client, with headroom, so a build that
+ * outgrows it fails in CI rather than on a client's deploy days later:
+ * - A static file: Cloudflare takes 25 MiB at most.
+ * - A Worker's modules, gzipped as the upload is measured: Cloudflare
+ *   takes 10 MiB at most.
+ * - One module: the admin's deploy holds the largest whole in memory,
+ *   twice (read from R2, then copied into the upload's form), in an
+ *   isolate stopped past 128 MB (apps/admin/src/cloudflare/workers.ts).
+ * Static files in total aren't bounded here: the deploy reads them one
+ * upload bucket at a time.
+ */
+export const releaseBudget = {
+  staticFile: 20 * 1024 * 1024,
+  workerGzipped: 8 * 1024 * 1024,
+  module: 32 * 1024 * 1024,
+} as const;
+
+/** Throws when a Worker's build carries more than `releaseBudget` allows. */
+const checkBudget = (build: WorkerBuild): void => {
+  const over: string[] = [];
+  for (const module of build.modules) {
+    if (module.size > releaseBudget.module) {
+      over.push(
+        `module ${module.name} is ${mebibytes(module.size)} (budget ${mebibytes(releaseBudget.module)})`
+      );
+    }
+  }
+  const gzipped = build.modules.reduce(
+    (total, module) => total + gzipSync(module.bytes).length,
+    0
+  );
+  if (gzipped > releaseBudget.workerGzipped) {
+    over.push(
+      `its modules are ${mebibytes(gzipped)} gzipped (budget ${mebibytes(releaseBudget.workerGzipped)})`
+    );
+  }
+  for (const [file, { size }] of Object.entries(build.assets?.manifest ?? {})) {
+    if (size > releaseBudget.staticFile) {
+      over.push(
+        `static file ${file} is ${mebibytes(size)} (budget ${mebibytes(releaseBudget.staticFile)})`
+      );
+    }
+  }
+  if (over.length > 0) {
+    throw new Error(
+      `${build.key} is over the release budget: ${over.join("; ")}`
+    );
+  }
+};
+
 /** Assembles the manifest from each Worker's build. */
 export const generateManifest = (
   info: ReleaseInfo,
   workers: WorkerBuild[]
 ): ReleaseManifest => {
+  for (const build of workers) {
+    checkBudget(build);
+  }
   const dates = new Set(workers.map((w) => w.config.compatibility_date));
   const [compatibilityDate] = dates;
   if (compatibilityDate === undefined || dates.size > 1) {

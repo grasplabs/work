@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 /**
  * The release manifest, generated from the real wrangler.jsonc of core and
  * connect (fixture-release.ts). Changing either config fails the golden test until the golden file is
@@ -24,6 +25,7 @@ import {
   assertReleaseDir,
   generateManifest,
   parseWranglerConfig,
+  releaseBudget,
   verifyRelease,
   writeRelease,
 } from "./manifest-lib.ts";
@@ -161,6 +163,54 @@ describe("the release manifest", () => {
     expect(() => generateManifest(info, [connect, coreWithoutAssets])).toThrow(
       /assets/u
     );
+  });
+
+  it("refuses a build over what a client's deploy can carry", () => {
+    const [connect, core] = fixture;
+    const [main] = core?.modules ?? [];
+    if (connect === undefined || core === undefined || main === undefined) {
+      throw new Error("expected two builds");
+    }
+    const sized = (size: number, bytes = Buffer.alloc(size)) => ({
+      ...main,
+      name: "big.js",
+      size,
+      bytes,
+    });
+    const withModule = (module: ReturnType<typeof sized>) => [
+      connect,
+      { ...core, modules: [...core.modules, module] },
+    ];
+    expect(() =>
+      generateManifest(info, withModule(sized(releaseBudget.module + 1)))
+    ).toThrow(/core is over the release budget: module big\.js/u);
+    // Random bytes don't compress.
+    const incompressible = randomBytes(releaseBudget.workerGzipped);
+    expect(() =>
+      generateManifest(
+        info,
+        withModule(sized(incompressible.length, incompressible))
+      )
+    ).toThrow(/its modules are [\d.]+ MiB gzipped/u);
+    expect(() =>
+      generateManifest(info, [
+        connect,
+        {
+          ...core,
+          assets: {
+            blobs: core.assets?.blobs ?? new Map<string, Buffer>(),
+            manifest: {
+              ...core.assets?.manifest,
+              "/big.wasm": {
+                hash: "0".repeat(32),
+                size: releaseBudget.staticFile + 1,
+              },
+            },
+          },
+        },
+      ])
+    ).toThrow(/static file \/big\.wasm/u);
+    expect(() => generateManifest(info, [connect, core])).not.toThrow();
   });
 });
 
