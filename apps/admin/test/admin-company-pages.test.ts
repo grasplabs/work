@@ -159,11 +159,51 @@ describe("the company pages, in the admin", () => {
     });
   });
 
+  it("says why a later run stopped by its own losses, not by an earlier deploy's failure", async () => {
+    const release = await importedRelease("feat(core): failed, then applied");
+    const client = await recordClient("active", release);
+    const now = new Date();
+    // An earlier deploy failed with its own code; then an apply ran the
+    // operation, and its every attempt was lost after the migrations.
+    await db.insert(clientDeploys).values({
+      clientId: client.id,
+      releaseId: release,
+      runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+      status: "failed",
+      error: "cloudflare_400_10000",
+      startedAt: now,
+      endedAt: now,
+    });
+    await db.insert(clientProvisions).values({
+      id: crypto.randomUUID(),
+      clientId: client.id,
+      releaseId: release,
+      status: "running",
+      step: "migrations",
+      runId: `${client.id}-apply`,
+      startedBy: "system",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const { html } = await setupOf(client.id);
+
+    expect({
+      own: html.includes(
+        "A try stopped in its connect step without recording why"
+      ),
+      earlier: html
+        .slice(0, html.indexOf('aria-label="Steps"'))
+        .includes("cloudflare_400_10000"),
+    }).toStrictEqual({ own: true, earlier: false });
+  });
+
   it("says a live organization's deploy that stopped failed at the step it reached, with why and Retry beside it, never that it's still installing", async () => {
     const before = await importedRelease("feat(core): runs");
     const release = await importedRelease("feat(core): stopped deploying");
     const client = await recordClient("active", release);
     const now = new Date();
+    const runId = `deploy-${crypto.randomUUID().slice(0, 8)}`;
     // Its deploy's every attempt was lost after its migrations: the
     // operation is left running, its run ended and the client released.
     await db.insert(clientProvisions).values({
@@ -173,7 +213,7 @@ describe("the company pages, in the admin", () => {
       previousReleaseId: before,
       status: "running",
       step: "migrations",
-      runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+      runId,
       startedBy: "system",
       createdAt: now,
       updatedAt: now,
@@ -181,7 +221,7 @@ describe("the company pages, in the admin", () => {
     await db.insert(clientDeploys).values({
       clientId: client.id,
       releaseId: release,
-      runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+      runId,
       status: "failed",
       error: "attempt_lost: connect",
       startedAt: now,

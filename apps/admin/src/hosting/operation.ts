@@ -2550,7 +2550,6 @@ const runOperation = async (
   if (operation.status === "done") {
     return undefined;
   }
-  await noteLostAttempt(db, operation, held);
   let step: ProvisionStep = "validated";
   try {
     // Before anything is read or asked of Cloudflare: an admin whose
@@ -2702,6 +2701,13 @@ export const runClientProvision = async (
   held: HeldClient,
   { rollBackOnProbe = true }: { rollBackOnProbe?: boolean } = {}
 ): Promise<void> => {
+  // Here, as the attempt enters, and not in `runOperation`: a rollback
+  // that this attempt starts runs the operation again as the same attempt,
+  // from a start of its own, with nothing of it lost.
+  const entered = await provisionOf(context.db, held.clientId);
+  if (entered !== undefined) {
+    await noteLostAttempt(context.db, entered, held);
+  }
   const stopped = await runOperation(context, held);
   if (stopped === undefined) {
     return;

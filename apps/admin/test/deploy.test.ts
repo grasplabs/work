@@ -435,6 +435,74 @@ describe("a client's deploy", () => {
     }
   });
 
+  it("records only the lost attempt when its retry fails its probe and rolls back, never the rollback as another loss", async () => {
+    const before = await placedRelease("feat(core): before");
+    await releaseToEdge(env, [before]);
+    const client = await live(before);
+    const release = await placedRelease("feat(core): lost, then broken");
+    const { core } = await scriptsOf(client.clientId);
+    // The first attempt dies in core's step; its retry goes live and fails
+    // its probe, and its rollback finds core answering as it should again.
+    const first = heldAfter(
+      (call: ApiCall) =>
+        call.method === "GET" && call.path.endsWith(`/scripts/${core}`)
+    );
+    const isConnectUpload = (call: { method: string; path: string }) =>
+      call.method === "PUT" &&
+      call.path.startsWith(`/accounts/${client.account.id}/`) &&
+      call.path.endsWith("-connect");
+    client.core.coreProbe = { asClient: "someone-else" };
+    // oxlint-disable require-await -- the fake waits on these; nothing to wait for
+    cloudflare.beforeAnswering(isConnectUpload, async () => {
+      cloudflare.beforeAnswering(isConnectUpload, async () => {
+        delete client.core.coreProbe;
+      });
+    });
+    // oxlint-enable require-await
+    const takeovers: Promise<void>[] = [];
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await using runs = followRuns();
+    try {
+      await releaseToEdge(env, [release]);
+      await runs.tick();
+      const runId = await runs.latest();
+      await first.read();
+      takeovers.push(deliverAlarm(adminWorkflows.deploy, runId));
+      await ended(adminWorkflows.deploy, runId);
+      const lost = await db
+        .select({ detail: auditEvents.detail })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.clientId, client.clientId),
+            eq(auditEvents.action, "provision.attempt_lost")
+          )
+        );
+
+      expect({
+        deploy: await deployOf(client.clientId),
+        lost: lost.map(({ detail }) =>
+          z
+            .object({ attempt: z.number(), step: z.string() })
+            .parse(JSON.parse(detail ?? "{}"))
+        ),
+        releases: await releasesOf(client.clientId),
+      }).toStrictEqual({
+        deploy: {
+          releaseId: release,
+          status: "failed",
+          error: "release_rolled_back",
+        },
+        lost: [{ attempt: 1, step: "core" }],
+        releases: on(before),
+      });
+    } finally {
+      first.release();
+      await Promise.allSettled(takeovers);
+      errors.mockRestore();
+    }
+  });
+
   it("fails a deploy whose every attempt is killed before its first step there, as the operation it started is its own", async () => {
     const before = await placedRelease("feat(core): before");
     const client = await live(before);

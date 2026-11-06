@@ -297,14 +297,15 @@ const runOf = async (
 
 /**
  * Why client `clientId`'s operation stopped, as a code: what it recorded;
- * else its deploy's, once that failed (`deploy.fail`); else its last
- * attempt lost at the step it reached (`attemptLostCode`), as one whose
- * run ended with the operation still running was.
+ * else the deploy that ran it, once that failed (`deploy.fail`; another
+ * run's, such as an earlier deploy's before an apply, says nothing of
+ * it); else its last attempt lost at the step it reached
+ * (`attemptLostCode`), as one whose run ended with it still running was.
  */
 const stopCodeOf = async (
   db: AdminDatabase,
   clientId: string,
-  operation: { error: string | null; step: string | null }
+  operation: { error: string | null; step: string | null; runId: string | null }
 ): Promise<string> => {
   if (operation.error !== null) {
     return operation.error;
@@ -315,7 +316,8 @@ const stopCodeOf = async (
     .where(
       and(
         eq(clientDeploys.clientId, clientId),
-        eq(clientDeploys.status, "failed")
+        eq(clientDeploys.status, "failed"),
+        eq(clientDeploys.runId, operation.runId ?? "")
       )
     )
     .get();
