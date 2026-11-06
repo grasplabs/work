@@ -58,7 +58,7 @@ export const DraftPreview = ({
   return (
     <section
       aria-label={t`Preview of ${name}`}
-      className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border"
+      className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden"
     >
       <PreviewFrame
         app={app}
@@ -279,25 +279,28 @@ export const ChatStudio = ({
                 shown={shown.draft.app}
               />
             ) : null}
+            {/* Framed on the studio's ground, as the workspace's fills its own. */}
             <div className="bg-muted flex min-h-0 flex-1 flex-col p-4">
-              <DraftPreview
-                app={shown.draft.app}
-                chatId={chatId}
-                draft={shown.draft}
-                key={shown.draft.app}
-                name={shown.name}
-                onEnded={(ended) => {
-                  if (
-                    ended.status === "failed" &&
-                    ended.reason === "not-running" &&
-                    !changesApp(shown.draft)
-                  ) {
-                    const key = unbuiltKey(shown.draft);
-                    setUnbuilt((before) => new Set([...before, key]));
-                  }
-                }}
-                version={version}
-              />
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border">
+                <DraftPreview
+                  app={shown.draft.app}
+                  chatId={chatId}
+                  draft={shown.draft}
+                  key={shown.draft.app}
+                  name={shown.name}
+                  onEnded={(ended) => {
+                    if (
+                      ended.status === "failed" &&
+                      ended.reason === "not-running" &&
+                      !changesApp(shown.draft)
+                    ) {
+                      const key = unbuiltKey(shown.draft);
+                      setUnbuilt((before) => new Set([...before, key]));
+                    }
+                  }}
+                  version={version}
+                />
+              </div>
             </div>
           </section>
         ) : null}

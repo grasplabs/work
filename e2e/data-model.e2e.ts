@@ -68,9 +68,9 @@ test("a builder creates a table and its fields in the Data view, and sees them i
     page.getByText("Unpublished changes", { exact: true })
   ).toBeVisible(read);
   await page.getByRole("link", { name: "Preview" }).click();
-  await expect(
-    page.getByText(/^Unpublished changes: this preview changes nothing/u)
-  ).toBeVisible(read);
+  await expect(page.getByRole("region", { name: /^Preview of /u })).toBeVisible(
+    read
+  );
   await page.getByRole("link", { name: "Code" }).click();
   await page
     .getByRole("navigation", { name: "Files" })

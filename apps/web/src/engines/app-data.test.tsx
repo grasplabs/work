@@ -133,10 +133,12 @@ const settled = async () => {
   });
 };
 
-/** Presses the button whose text is `name`. */
+/** Presses the button whose text, or name, is `name`. */
 const press = async (name: string) => {
   const button = [...document.querySelectorAll("button")].find(
-    (each) => each.textContent?.trim() === name
+    (each) =>
+      each.textContent?.trim() === name ||
+      each.getAttribute("aria-label") === name
   );
   if (button === undefined) {
     throw new Error(`No button ${name}`);

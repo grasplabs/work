@@ -641,12 +641,6 @@ const PreviewBar = ({
   let says: ReactNode = null;
   let action: ReactNode = null;
   if (draft !== undefined) {
-    says = (
-      <Trans>
-        Unpublished changes: this preview changes nothing and reads no real
-        data.
-      </Trans>
-    );
     action = (
       <DraftVersionBar
         chatId={chatId}
@@ -657,12 +651,7 @@ const PreviewBar = ({
     );
   } else if (shows !== undefined && shows === pendingVersion) {
     const version = shows;
-    says = (
-      <Trans>
-        Version {version} is ready to publish: this preview changes nothing and
-        reads no real data.
-      </Trans>
-    );
+    says = <Trans>Version {version} is ready to publish</Trans>;
     action = (
       <ReviewAndPublish app={app} size="sm" version={shows}>
         <Trans>Review and publish</Trans>
@@ -670,19 +659,11 @@ const PreviewBar = ({
     );
   } else if (shows !== undefined && shows === currentVersion) {
     const version = shows;
-    says = (
-      <Trans>
-        Version {version} is live: this preview changes nothing and reads no
-        real data.
-      </Trans>
-    );
+    says = <Trans>Version {version} is live</Trans>;
   } else if (shows !== undefined) {
     const version = shows;
     says = (
-      <Trans>
-        Version {version} isn&apos;t published or up for review: this preview
-        changes nothing and reads no real data.
-      </Trans>
+      <Trans>Version {version} isn&apos;t published or up for review</Trans>
     );
   }
   return (
@@ -854,7 +835,7 @@ const PreviewArea = ({
         }}
         shown={version}
       />
-      <div className="bg-muted flex min-h-0 flex-1 flex-col p-3">
+      <div className="flex min-h-0 flex-1 flex-col">
         <DraftPreview
           app={app.id}
           chatId={chatId}
