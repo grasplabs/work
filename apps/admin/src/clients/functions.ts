@@ -25,10 +25,13 @@ import type { LiveStatus } from "./grid.ts";
 import {
   sealedSecretInputSchema,
   setSealedSecret,
+  closeStaffWindow,
+  openStaffWindow,
   setSignIn,
   setTeamsBot,
   SettingsError,
   signInInputSchema,
+  staffWindowInputSchema,
   teamsBotInputSchema,
 } from "./settings.ts";
 import type { SettingsErrorCode } from "./settings.ts";
@@ -144,6 +147,28 @@ export const setSignInFn = createServerFn({ method: "POST" })
   .handler(
     async ({ data, context }) =>
       await change(async () => await setSignIn(env, context.staff, data))
+  );
+
+/**
+ * Opens Grasp's staff window on a client, for 1 to 7 days, so staff can
+ * bring in its kickoff and steer its onboarding once it is applied.
+ */
+export const openStaffWindowFn = createServerFn({ method: "POST" })
+  .validator(staffWindowInputSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => {
+        await openStaffWindow(env, context.staff, data);
+        return true;
+      })
+  );
+
+/** Closes Grasp's staff window on a client, once it is applied. */
+export const closeStaffWindowFn = createServerFn({ method: "POST" })
+  .validator(clientSchema)
+  .handler(
+    async ({ data, context }) =>
+      await change(async () => await closeStaffWindow(env, context.staff, data))
   );
 
 /**

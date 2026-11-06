@@ -175,6 +175,14 @@ export const clients = sqliteTable(
      */
     teamsBot: text("teams_bot"),
     /**
+     * Grasp's staff window, while staff opened one: JSON
+     * (`staffWindowSchema`, src/deploy/core-config.ts), when it opened,
+     * until when, and its scope. Every deploy makes core's `SIGN_IN.staff`
+     * from it, which the kickoff and staff's commands need; null while
+     * none is open.
+     */
+    staffWindow: text("staff_window"),
+    /**
      * When staff last changed what a deploy sets on its core: its sign-in
      * or a setting (src/clients/settings.ts). A rollout deploys a client
      * whose latest done deploy started before this, even on the release

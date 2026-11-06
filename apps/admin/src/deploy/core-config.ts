@@ -10,6 +10,7 @@
  */
 import {
   signInConfigSchema,
+  staffWindowMaxMs,
   unreachableAdmins,
 } from "@grasp-os/shared/deployment-config";
 import type {
@@ -134,7 +135,96 @@ export type ClientSignInRecord = z.output<typeof clientSignInSchema>;
 export interface SignInApps {
   entraClientId?: string;
   googleClientId?: string;
+  /**
+   * Grasp's own staff as core's `SIGN_IN.staff` names them: Grasp's Entra
+   * tenant, the email domains its staff sign in with and the Entra object
+   * ids of the staff who may sign in to a client's site. Unset while the
+   * admin has none: a staff window then lets the admin act, and nobody
+   * sign in as staff.
+   */
+  staff?: GraspStaff;
 }
+
+/** Grasp's own staff, as a client's staff window lets them in. */
+export interface GraspStaff {
+  tenantId: string;
+  domains: string[];
+  oids: string[];
+}
+
+/** The longest window staff may open, in days: core closes a longer one. */
+export const staffWindowMaxDays = Math.floor(
+  staffWindowMaxMs / (24 * 60 * 60 * 1000)
+);
+
+/**
+ * A client's staff window as its record keeps it (`clients.staffWindow`,
+ * JSON): when staff opened it, until when, and what Grasp's staff reach
+ * in it (`onboarding`: the onboarding alone). Every deploy makes core's
+ * `SIGN_IN.staff` from it and the admin's `GraspStaff`.
+ */
+export const staffWindowSchema = z
+  .object({
+    opened: z.iso.datetime({ offset: true }),
+    until: z.iso.datetime({ offset: true }),
+    scope: z.enum(["full", "onboarding"]),
+  })
+  .refine(
+    ({ opened, until }) => {
+      const span = Date.parse(until) - Date.parse(opened);
+      return span > 0 && span <= staffWindowMaxMs;
+    },
+    { message: "A window of at most seven days", path: ["until"] }
+  );
+export type StaffWindow = z.output<typeof staffWindowSchema>;
+
+/** The staff window `value` (a record's JSON) keeps, or null for none or one that doesn't parse. */
+export const staffWindowOf = (value: string | null): StaffWindow | null => {
+  if (value === null) {
+    return null;
+  }
+  try {
+    const parsed = staffWindowSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Core's `SIGN_IN.staff` for a client whose record keeps `staffWindow`:
+ * while it is open, Grasp's admin may act in its core (its kickoff and
+ * commands, signed with the client's key), as admins of what the scope
+ * reaches. When the admin knows Grasp's staff (`apps.staff`) and Entra
+ * app, it also names them, so the listed staff can sign in to the
+ * client's site through Grasp's own tenant; without them nobody does.
+ * Undefined while no window is kept.
+ */
+const staffSignInOf = (
+  staffWindow: string | null,
+  apps: SignInApps
+): SignInConfig["staff"] => {
+  const opened = staffWindowOf(staffWindow);
+  if (opened === null) {
+    return undefined;
+  }
+  const window = {
+    role: "admin" as const,
+    scope: opened.scope,
+    opened: opened.opened,
+    until: opened.until,
+  };
+  if (apps.staff === undefined || apps.entraClientId === undefined) {
+    return window;
+  }
+  return {
+    tenantId: apps.staff.tenantId,
+    clientId: apps.entraClientId,
+    domains: apps.staff.domains,
+    oids: apps.staff.oids,
+    ...window,
+  };
+};
 
 /**
  * Client `clientId`'s `SIGN_IN`, from its record's `signIn` (JSON), at
@@ -149,7 +239,8 @@ const signInOf = (
   signIn: string | null,
   domain: string,
   apps: SignInApps,
-  oauthRelay: Stage | undefined
+  oauthRelay: Stage | undefined,
+  staffWindow: string | null
 ): SignInConfig | undefined => {
   if (signIn === null) {
     return undefined;
@@ -188,6 +279,7 @@ const signInOf = (
       `the OAuth relay serves clients under ${clientDomain(oauthRelay)}, not ${domain}`
     );
   }
+  const staff = staffSignInOf(staffWindow, apps);
   const config = signInConfigSchema.safeParse({
     origin: `https://${clientId}.${domain}`,
     // Relay mode: the client's IdPs send people back through the stage's
@@ -209,6 +301,7 @@ const signInOf = (
             clientId: apps.googleClientId,
           },
         }),
+    ...(staff === undefined ? {} : { staff }),
   });
   if (!config.success) {
     throw incomplete("core wouldn't take it");
@@ -293,6 +386,8 @@ export interface CoreConfigInputs {
   clientId: string;
   /** Its record's sign-in, JSON; null when it has none. */
   signIn: string | null;
+  /** Its record's staff window, JSON (`staffWindowSchema`); null or absent when none was opened. */
+  staffWindow?: string | null;
   /** The domain clients are served under. */
   domain: string;
   apps: SignInApps;
@@ -318,8 +413,16 @@ export const derivedCoreConfig = ({
   domain,
   apps,
   oauthRelay,
+  staffWindow = null,
 }: CoreConfigInputs): Record<string, unknown> => {
-  const config = signInOf(clientId, signIn, domain, apps, oauthRelay);
+  const config = signInOf(
+    clientId,
+    signIn,
+    domain,
+    apps,
+    oauthRelay,
+    staffWindow
+  );
   return {
     RUNTIME_PROFILE: clientRuntimeProfile,
     CLIENT_ID: clientId,

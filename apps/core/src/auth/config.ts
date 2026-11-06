@@ -140,14 +140,23 @@ export const oidcProviders = (
     });
   }
   // Staff sign in through Grasp's own tenant on the same multi-tenant app.
-  if (config.staff && isSet(entraSecret) && staffWindowOpen(config, now)) {
+  // Only for a window that names who may sign in: one without lets
+  // Grasp's admin act, and nobody sign in as staff.
+  const tenantId = config.staff?.tenantId;
+  const clientId = config.staff?.clientId;
+  if (
+    tenantId !== undefined &&
+    clientId !== undefined &&
+    isSet(entraSecret) &&
+    staffWindowOpen(config, now)
+  ) {
     providers.push(
       entraProvider(
         entra,
         providerIds.staff,
         "Grasp staff",
-        config.staff.tenantId,
-        config.staff.clientId,
+        tenantId,
+        clientId,
         entraSecret
       )
     );

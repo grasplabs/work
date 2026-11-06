@@ -14,6 +14,7 @@ import {
   stageNamed,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
+import { z } from "zod";
 
 import type { ClientDispatcher } from "../clients/core-address.ts";
 import { cloudflareApi } from "../cloudflare/api.ts";
@@ -22,7 +23,7 @@ import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import type { ReleaseStore } from "../releases/import.ts";
 import { ClientDomainUnsetError } from "./client-domain.ts";
-import type { SignInApps } from "./core-config.ts";
+import type { GraspStaff, SignInApps } from "./core-config.ts";
 import type { RouterHosts, SmokeOptions } from "./router.ts";
 import type { DeploySecrets } from "./secrets.ts";
 
@@ -261,6 +262,39 @@ const varOf = (value: string | undefined): string | undefined => {
   return trimmed === "" ? undefined : trimmed;
 };
 
+const graspStaffSchema = z.object({
+  tenantId: z.guid(),
+  oids: z.array(z.guid()).min(1),
+  domains: z.array(z.string().min(1)).min(1),
+});
+
+/** A comma-separated var's entries, trimmed, without empty ones. */
+const listOf = (value: string | undefined): string[] =>
+  (value ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "");
+
+/**
+ * Grasp's own staff, as a client's staff window lets them in, from the
+ * admin's vars: STAFF_ENTRA_TENANT_ID (Grasp's Entra tenant),
+ * STAFF_ENTRA_OIDS (the object ids of the staff who may come in) and
+ * STAFF_EMAIL_DOMAINS (joingrasp.com unless set). Undefined while the
+ * tenant or the ids aren't set, or aren't GUIDs: no window opens then.
+ */
+export const graspStaffOf = (env: {
+  STAFF_ENTRA_TENANT_ID?: string;
+  STAFF_ENTRA_OIDS?: string;
+  STAFF_EMAIL_DOMAINS?: string;
+}): GraspStaff | undefined => {
+  const parsed = graspStaffSchema.safeParse({
+    tenantId: varOf(env.STAFF_ENTRA_TENANT_ID),
+    oids: listOf(env.STAFF_ENTRA_OIDS),
+    domains: listOf(env.STAFF_EMAIL_DOMAINS ?? "joingrasp.com"),
+  });
+  return parsed.success ? parsed.data : undefined;
+};
+
 /**
  * Grasp's OAuth apps' client ids, from the admin's vars (wrangler.jsonc):
  * not secrets, their secrets are shared secrets above.
@@ -268,9 +302,11 @@ const varOf = (value: string | undefined): string | undefined => {
 export const signInApps = (env: Env): SignInApps => {
   const entraClientId = varOf(env.ENTRA_CLIENT_ID);
   const googleClientId = varOf(env.GOOGLE_CLIENT_ID);
+  const staff = graspStaffOf(env);
   return {
     ...(entraClientId === undefined ? {} : { entraClientId }),
     ...(googleClientId === undefined ? {} : { googleClientId }),
+    ...(staff === undefined ? {} : { staff }),
   };
 };
 

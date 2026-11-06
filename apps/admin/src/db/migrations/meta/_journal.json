@@ -372,6 +372,13 @@
       "when": 1793682699653,
       "tag": "0052_drop_rollout_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1793965781998,
+      "tag": "0053_client_staff_window",
+      "breakpoints": true
     }
   ]
 }

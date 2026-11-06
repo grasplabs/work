@@ -17,7 +17,9 @@ import {
   clientSealedSecrets,
   clientWorkers,
 } from "../db/schema.ts";
-import type { ClientSignInRecord } from "../deploy/core-config.ts";
+import { signInApps } from "../deploy/context.ts";
+import { staffWindowOf } from "../deploy/core-config.ts";
+import type { ClientSignInRecord, StaffWindow } from "../deploy/core-config.ts";
 import { importedManifest } from "../deploy/release.ts";
 import { bucketNames, databaseNames } from "../deploy/resources.ts";
 import { getProvisioning } from "../provision/queries.ts";
@@ -81,6 +83,8 @@ export interface ClientSetup {
   teamsBotSecretDays: number | null;
   /** Whether a change to what a deploy sets on its core waits for its next deploy. */
   configPending: boolean;
+  /** Grasp's staff window on it (`staffWindowSetupOf`). */
+  staffWindow: StaffWindowSetup;
   /**
    * The secrets of its own staff sealed for it, such as its Teams bot's
    * (src/deploy/sealed-secrets.ts): who set each and when, never the
@@ -140,6 +144,7 @@ const byHand: ReadonlySet<string> = new Set([
   "client.sign_in",
   "client.sealed_secret",
   "client.teams_bot",
+  "client.staff_window",
   "client.apply_settings",
   "client.stripe_customer",
   "client.attio_company",
@@ -193,6 +198,38 @@ const resourcesOf = async (
   };
 };
 
+/** Grasp's staff window on a client, as its Setup shows it. */
+export interface StaffWindowSetup {
+  /** As staff last opened it; null while none is kept. Its core has it once applied. */
+  window: StaffWindow | null;
+  /** Whether it is open now: kept, and not yet past its end. */
+  open: boolean;
+  /**
+   * Whether the admin knows Grasp's staff and Entra app, so the staff it
+   * lists can also sign in to the company's site while it is open.
+   */
+  staffSignIn: boolean;
+}
+
+/** Client `clientId`'s staff window, read now. */
+const staffWindowSetupOf = async (
+  env: Env,
+  db: AdminDatabase,
+  clientId: string
+): Promise<StaffWindowSetup> => {
+  const [row] = await db
+    .select({ staffWindow: clients.staffWindow })
+    .from(clients)
+    .where(eq(clients.id, clientId));
+  const window = staffWindowOf(row?.staffWindow ?? null);
+  const apps = signInApps(env);
+  return {
+    window,
+    open: window !== null && Date.parse(window.until) > Date.now(),
+    staffSignIn: apps.staff !== undefined && apps.entraClientId !== undefined,
+  };
+};
+
 /** Client `clientId`'s last deploy by the reconciler. */
 const deployOf = async (
   db: AdminDatabase,
@@ -228,16 +265,25 @@ export const getClientSetup = async (
     })
     .from(clients)
     .where(eq(clients.id, clientId));
-  const [settings, sealedSecrets, workers, listed, deploy, history, watched] =
-    await Promise.all([
-      clientSettings(db, clientId),
-      sealedSecretsOf(db, clientId),
-      workersOf(db, clientId),
-      listReleases(db),
-      deployOf(db, clientId),
-      clientHistory(db, clientId),
-      lastWatched(env, clientId),
-    ]);
+  const [
+    settings,
+    sealedSecrets,
+    workers,
+    listed,
+    deploy,
+    history,
+    watched,
+    staffWindow,
+  ] = await Promise.all([
+    clientSettings(db, clientId),
+    sealedSecretsOf(db, clientId),
+    workersOf(db, clientId),
+    listReleases(db),
+    deployOf(db, clientId),
+    clientHistory(db, clientId),
+    lastWatched(env, clientId),
+    staffWindowSetupOf(env, db, clientId),
+  ]);
   const target = await targetReleaseOf(db, clientId);
   // Core's release is the one its people meet.
   const runs =
@@ -252,6 +298,7 @@ export const getClientSetup = async (
         ? null
         : daysUntil(settings.teamsBot.secretExpiresOn, new Date()),
     configPending: settings?.configPending ?? false,
+    staffWindow,
     sealedSecrets,
     watched,
     workers,

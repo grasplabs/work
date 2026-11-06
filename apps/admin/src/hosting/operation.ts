@@ -913,6 +913,7 @@ interface Loaded {
     generation: number;
     rotationLiveAt: Date | null;
     signIn: string | null;
+    staffWindow: string | null;
     teamsBot: string | null;
     /** Where its data is kept: what its Durable Objects are made in. */
     jurisdiction: "eu" | "none";
@@ -1378,6 +1379,7 @@ const coreVarsOf = (
   const derived = derivedCoreConfig({
     clientId: loaded.held.clientId,
     signIn: loaded.client.signIn,
+    staffWindow: loaded.client.staffWindow,
     domain: context.router.domain,
     apps: context.signInApps ?? {},
     ...(context.router.oauthRelay === undefined
@@ -1448,6 +1450,7 @@ const load = async (
       generation: clients.generation,
       rotationLiveAt: clients.rotationLiveAt,
       signIn: clients.signIn,
+      staffWindow: clients.staffWindow,
       teamsBot: clients.teamsBot,
       jurisdiction: clients.jurisdiction,
     })

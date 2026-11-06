@@ -1,8 +1,10 @@
+import { signInConfigSchema } from "@grasp-os/shared/deployment-config";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   adminUnreachable,
   clientSignInSchema,
+  derivedCoreConfig,
   signInProblem,
   signInSettingProblem,
 } from "../src/deploy/core-config.ts";
@@ -108,5 +110,84 @@ describe("a client's sign-in", () => {
     ).toBe(
       "bo@gmail.test can't sign in: every first admin's email must be in the email domains (acme.test, acme-group.test)."
     );
+  });
+
+  describe("with Grasp's staff window", () => {
+    const record = JSON.stringify({
+      ...entra,
+      admins: ["ada@acme.test"],
+    });
+    const staff = {
+      tenantId: "4b2c6e1a-9d3f-4a7b-8c5e-1f2a3b4c5d6e",
+      domains: ["joingrasp.com"],
+      oids: ["0f1e2d3c-4b5a-4968-8776-655443322110"],
+    };
+    const window = JSON.stringify({
+      opened: "2026-11-06T09:00:00.000Z",
+      until: "2026-11-13T09:00:00.000Z",
+      scope: "onboarding",
+    });
+    const entraClientId = "01228906-bd5b-488e-b7c1-720f4dc12dc2";
+
+    it("gives core's SIGN_IN Grasp's staff, as admins of the onboarding, while a window is open", () => {
+      const config = derivedCoreConfig({
+        clientId: "acme",
+        signIn: record,
+        domain: "grasp.test",
+        apps: { entraClientId, staff },
+        staffWindow: window,
+      });
+      expect(signInConfigSchema.parse(config.SIGN_IN).staff).toStrictEqual({
+        tenantId: staff.tenantId,
+        clientId: entraClientId,
+        domains: staff.domains,
+        oids: staff.oids,
+        role: "admin",
+        scope: "onboarding",
+        opened: "2026-11-06T09:00:00.000Z",
+        until: "2026-11-13T09:00:00.000Z",
+      });
+      expect(signInSettingProblem(config.SIGN_IN)).toBeNull();
+    });
+
+    it("gives none without a window, or with one longer than seven days", () => {
+      const staffOf = (staffWindow: string | null) =>
+        signInConfigSchema.parse(
+          derivedCoreConfig({
+            clientId: "acme",
+            signIn: record,
+            domain: "grasp.test",
+            apps: { entraClientId, staff },
+            staffWindow,
+          }).SIGN_IN
+        ).staff;
+      expect({
+        none: staffOf(null),
+        tooLong: staffOf(
+          JSON.stringify({
+            opened: "2026-11-01T09:00:00.000Z",
+            until: "2026-11-13T09:00:00.000Z",
+            scope: "onboarding",
+          })
+        ),
+      }).toStrictEqual({ none: undefined, tooLong: undefined });
+    });
+
+    it("gives a window without Grasp's staff sign-in while the admin doesn't know Grasp's staff", () => {
+      const config = derivedCoreConfig({
+        clientId: "acme",
+        signIn: record,
+        domain: "grasp.test",
+        apps: { entraClientId },
+        staffWindow: window,
+      });
+      expect(signInConfigSchema.parse(config.SIGN_IN).staff).toStrictEqual({
+        role: "admin",
+        scope: "onboarding",
+        opened: "2026-11-06T09:00:00.000Z",
+        until: "2026-11-13T09:00:00.000Z",
+      });
+      expect(signInSettingProblem(config.SIGN_IN)).toBeNull();
+    });
   });
 });
