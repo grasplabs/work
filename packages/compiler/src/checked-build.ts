@@ -4,6 +4,7 @@
  * starts once the compiler has answered, and `withTypeCheck` puts its
  * diagnostics together with the build's, as the build itself would have.
  */
+import type { FileReferences } from "./check-plan.ts";
 import { isError, together } from "./diagnostic.ts";
 import type { Diagnostic } from "./diagnostic.ts";
 import type { TypeCheckRequest } from "./type-check.ts";
@@ -11,6 +12,12 @@ import type { TypeCheckRequest } from "./type-check.ts";
 /** What a build's type check checks, and how its diagnostics join the build's. */
 export interface TypeCheckPlan {
   readonly request: TypeCheckRequest;
+  /**
+   * What each of its files references (check-graph.ts), from the build's
+   * own parse, for core to check it a part at a time should it be too
+   * large for one run (check-plan.ts); without it, one check of all.
+   */
+  readonly graph?: Readonly<Record<string, FileReferences>>;
   /** What the build found before the check (compile and import errors). */
   readonly found?: readonly Diagnostic[];
   /** The files the parser refused, and those whose JSX runtime was refused (`together`). */

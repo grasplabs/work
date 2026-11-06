@@ -4,6 +4,13 @@ import {
   appTestFiles,
   isPageFile,
   buildFiles,
+  checkBatches,
+  checkCharacters,
+  checkedDiagnostics,
+  checkKeys,
+  checkRecords,
+  checkStopped,
+  checksInParts,
   compilerVersion,
   kitModuleName,
   kitModules,
@@ -24,6 +31,7 @@ import {
 import type {
   AppCodeBuild,
   BuildMetrics,
+  CheckRecord,
   CompileTarget,
   Diagnostic,
   InspectTarget,
@@ -36,6 +44,8 @@ import type {
   TypedExpression,
   PageBuild,
   SurfaceManifest,
+  TypeCheckPlan,
+  TypeCheckRequest,
   Unchecked,
 } from "@grasp-os/compiler";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
@@ -60,8 +70,11 @@ import {
 } from "./build-cache.ts";
 import type { Built, CacheEnv } from "./build-cache.ts";
 import {
+  checksPrefix,
   incrementPrefixes,
+  keepChecks,
   keepIncrements,
+  readChecks,
   readIncrements,
 } from "./module-cache.ts";
 import type { IncrementKeys } from "./module-cache.ts";
@@ -153,7 +166,7 @@ interface FailedBuild {
 /** What building reads from core's env. */
 export type BuildEnv = PlatformEnv &
   CacheEnv &
-  Pick<Env, "BUILD_BATCH_CPU_MS"> & {
+  Pick<Env, "BUILD_BATCH_CPU_MS" | "TYPE_CHECK_CHARACTERS"> & {
     /** Where builds are cached: core's R2 bucket, in the EU. */
     FILES: Pick<R2Bucket, "get" | "put">;
   };
@@ -238,19 +251,162 @@ const isBuildShaped = (value: unknown): boolean =>
       "diagnostics" in value &&
       Array.isArray(value.diagnostics)));
 
+const day = 24 * 60 * 60 * 1000;
+
+/**
+ * How long a cached build is kept after it was last used: the clock's
+ * sweep deletes what is older (`sweepBuilds`). A build is the compiler's
+ * output for files core keeps, under its version, so one swept is built
+ * again, the same, the next time it is asked for: what runs never rests
+ * on the cache. Builds of an older compiler are never asked for again,
+ * and go once their time is up.
+ */
+export const buildKeepMs = 30 * day;
+
+/**
+ * How old a cached build may be and still be served as it is: past this,
+ * serving it writes it again (`cachedBuild`), so one in use never reaches
+ * `buildKeepMs`.
+ */
+export const buildRefreshMs = buildKeepMs / 2;
+
+/** What a build holds while it runs: whose it is, its lease, and where it keeps what it may reuse. */
+interface BuildLease {
+  env: BuildEnv;
+  whose: string;
+  leaseMs: number;
+  /** Renews the build's lease, as each call starts. */
+  renew: () => Promise<void>;
+}
+
+/** The most characters one run of tsrs reads: `checkCharacters`, or fewer where tests set `TYPE_CHECK_CHARACTERS`. */
+const checkCharactersOf = (env: BuildEnv): number => {
+  const set = Number(env.TYPE_CHECK_CHARACTERS);
+  return Number.isInteger(set) && set > 0 && set < checkCharacters
+    ? set
+    : checkCharacters;
+};
+
+/**
+ * How many parts a check of an App too large for one run takes between
+ * keeping what they said: a few seconds of checking, so a build stopped
+ * part way resumes from close to where it stopped, in a handful of
+ * writes however many parts it takes.
+ */
+const partsPerKeep = 25;
+
+/** One run of the type checker's isolate over `request`: its diagnostics. */
+const checkerRun = async (
+  runner: PlatformRunner,
+  request: TypeCheckRequest,
+  renew: () => Promise<void>
+): Promise<Diagnostic[]> => {
+  await renew();
+  const diagnostics = await runner.run("type-checker", "check", [request]);
+  if (!Array.isArray(diagnostics)) {
+    throw new TypeError(
+      "The type checker answered something else than diagnostics."
+    );
+  }
+  // SAFETY: the checker's answer, core's own code, checked an array.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return diagnostics as Diagnostic[];
+};
+
+/**
+ * What a check of the whole of `plan`'s files says. Within what one run
+ * of tsrs reads (`checkCharacters`), one call over every file, keeping
+ * nothing, as ever. Larger, a part at a time (the compiler's
+ * check-plan.ts): what the App's earlier checks of the target said of a
+ * file is reused where it was kept under the key of everything the file's
+ * check reads, and the files with none are checked in parts that each
+ * hold their closures, one checker call each. What they said is kept in
+ * one object per App and target, every `partsPerKeep` parts and at the
+ * end. So a write checks only what it can change, and no part reads much
+ * more than the largest page and what it pulls in. A plan without a graph
+ * is checked whole. A part whose check stopped is kept for none of its
+ * files: its stop is said, and the next build checks it again.
+ */
+const typeChecked = async (
+  runner: PlatformRunner,
+  { request, graph }: TypeCheckPlan,
+  { env, whose, leaseMs, renew }: BuildLease
+): Promise<Diagnostic[]> => {
+  const most = checkCharactersOf(env);
+  if (graph === undefined || !checksInParts(request, most)) {
+    return await checkerRun(runner, request, renew);
+  }
+  const paths = Object.keys(request.files);
+  const { keys, closures } = await checkKeys(request, graph);
+  const set = await sha256Hex(
+    JSON.stringify([whose, request.options, request.allowed ?? null])
+  );
+  const kept =
+    keys === undefined
+      ? new Map<string, CheckRecord>()
+      : await readChecks(env, set, buildRefreshMs);
+  const records = new Map<string, CheckRecord>();
+  for (const path of paths) {
+    const record = kept.get(keys?.[path] ?? "");
+    if (record?.path === path) {
+      records.set(path, record);
+    }
+  }
+  const due = paths.filter((path) => !records.has(path));
+  // What may be kept: by the key of each file whose check didn't stop.
+  const keeping = new Map<string, CheckRecord>();
+  const keep = async (): Promise<void> => {
+    if (keys === undefined) {
+      return;
+    }
+    for (const [path, record] of records) {
+      const key = keys[path];
+      if (key !== undefined && !checkStopped(record.program)) {
+        keeping.set(key, record);
+      }
+    }
+    await keepChecks(env, set, keeping, leaseMs);
+  };
+  let parts = 0;
+  for (const part of checkBatches(request, closures, due, most)) {
+    parts += 1;
+    // oxlint-disable-next-line no-await-in-loop -- one part at a time: each takes an isolate's memory
+    const diagnostics = await checkerRun(runner, part, renew);
+    for (const record of checkRecords(Object.keys(part.files), diagnostics)) {
+      if (!records.has(record.path)) {
+        records.set(record.path, record);
+      }
+    }
+    if (parts % partsPerKeep === 0) {
+      // oxlint-disable-next-line no-await-in-loop -- kept part way, so a build stopped later resumes from it
+      await keep();
+    }
+  }
+  if (parts % partsPerKeep !== 0) {
+    await keep();
+  }
+  log.info("build.check", {
+    files: paths.length,
+    reused: paths.length - due.length,
+    parts,
+  });
+  return checkedDiagnostics(paths, records);
+};
+
 /**
  * The build the compiler answered (`Unchecked`), with its type check put
  * in: run in the type checker's isolate (the compiler's `checker.ts`),
- * once the compiler has answered, never inside its call, and put
- * together with the build as the build would have (`withTypeCheck`). A
- * build that waits on no check (one that failed before it) is as it came.
- * The build's lease is renewed as the check starts (`renew`): the check is
- * a call of its own, on-prem with its own wait for a place.
+ * once the compiler has answered, never inside its call, a part at a time
+ * (`typeChecked`), and put together with the build as the build would
+ * have (`withTypeCheck`). A build that waits on no check (one that failed
+ * before it) is as it came. The build's lease is renewed as each check
+ * call starts: each is a call of its own, on-prem with its own wait for a
+ * place.
  */
 const withItsCheck = async (
   runner: PlatformRunner,
   answer: unknown,
-  renew: () => Promise<void>
+  lease: BuildLease
 ): Promise<unknown> => {
   if (
     typeof answer !== "object" ||
@@ -267,18 +423,10 @@ const withItsCheck = async (
   if (unchecked.typeCheck === undefined) {
     return unchecked.built;
   }
-  await renew();
-  const diagnostics = await runner.run("type-checker", "check", [
-    unchecked.typeCheck.request,
-  ]);
-  if (!Array.isArray(diagnostics)) {
-    throw new TypeError(
-      "The type checker answered something else than diagnostics."
-    );
-  }
-  // SAFETY: the checker's answer, core's own code, checked an array.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return withTypeCheck(unchecked, diagnostics as Diagnostic[]);
+  return withTypeCheck(
+    unchecked,
+    await typeChecked(runner, unchecked.typeCheck, lease)
+  );
 };
 
 /**
@@ -302,15 +450,15 @@ const compiled = async (
   kind: BuildKind,
   files: AppFiles,
   profile: BuildProfile,
-  /** Renews the build's lease, as its type check starts. */
-  renew: () => Promise<void>,
+  /** The build's lease, renewed as each type check call starts. */
+  lease: BuildLease,
   /** The compiler call, when not the kind's own: what it answers as the build. */
   call: () => Promise<unknown> = async () => {
     const [method, target] = compilerCallOf(kind, profile);
     const answer = await runner.run("compiler", method, [target, files]);
     // Inspection checks no types: its build is as it came.
     return method === "build"
-      ? await withItsCheck(runner, answer, renew)
+      ? await withItsCheck(runner, answer, lease)
       : answer;
   }
 ): Promise<{ built: unknown; cache: boolean }> => {
@@ -341,25 +489,6 @@ const compiled = async (
     return { built: failed, cache: error.own };
   }
 };
-
-const day = 24 * 60 * 60 * 1000;
-
-/**
- * How long a cached build is kept after it was last used: the clock's
- * sweep deletes what is older (`sweepBuilds`). A build is the compiler's
- * output for files core keeps, under its version, so one swept is built
- * again, the same, the next time it is asked for: what runs never rests
- * on the cache. Builds of an older compiler are never asked for again,
- * and go once their time is up.
- */
-export const buildKeepMs = 30 * day;
-
-/**
- * How old a cached build may be and still be served as it is: past this,
- * serving it writes it again (`cachedBuild`), so one in use never reaches
- * `buildKeepMs`.
- */
-export const buildRefreshMs = buildKeepMs / 2;
 
 /** Whether `value` is what the compiler's `buildIncrementally` answers, its build aside. */
 const incrementalShaped = (
@@ -511,22 +640,13 @@ const transformInBatches = async (
  * compiler's run, and how much of each part was done now or reused.
  */
 const compiledIncrementally = async (
-  env: BuildEnv,
   runner: PlatformRunner,
   files: AppFiles,
-  {
-    profile,
-    checks,
-    leaseMs,
-    renew,
-  }: {
-    profile: BuildProfile;
-    checks: boolean;
-    leaseMs: number;
-    /** Renews the build's lease: as each batch starts, before the build's own call, and before its check. */
-    renew: () => Promise<void>;
-  }
+  { profile, checks }: { profile: BuildProfile; checks: boolean },
+  /** Its lease, renewed as each batch starts, before the build's own call, and before each check call. */
+  lease: BuildLease
 ): Promise<{ built: unknown; cache: boolean }> => {
+  const { env, leaseMs, renew } = lease;
   const preview = profile === "preview";
   const [, target] = compilerCallOf("page", profile, checks);
   const started = Date.now();
@@ -556,7 +676,7 @@ const compiledIncrementally = async (
     "page",
     files,
     profile,
-    renew,
+    lease,
     async () => {
       answer = await runner.run("compiler", "buildIncrementally", [
         target,
@@ -568,7 +688,7 @@ const compiledIncrementally = async (
           "The compiler answered something else than an incremental build."
         );
       }
-      return await withItsCheck(runner, answer.built, renew);
+      return await withItsCheck(runner, answer.built, lease);
     }
   );
   const ran = Date.now();
@@ -634,6 +754,7 @@ const buildPrefixes = [
   // `screen-checks/`, for the same reason.
   "screen-builds/",
   "screen-modules/",
+  checksPrefix,
 ];
 
 const buildSweepSchema = z.object({
@@ -865,15 +986,16 @@ const cachedBuild = async <Build>(
         // Held as long as a build may take, and a little more.
         leaseMs,
         async (renew) => {
+          const lease = { env, whose, leaseMs, renew };
           const answer =
             kind === "page"
-              ? await compiledIncrementally(env, runner, files, {
-                  profile,
-                  checks,
-                  leaseMs,
-                  renew,
-                })
-              : await compiled(runner, kind, files, profile, renew);
+              ? await compiledIncrementally(
+                  runner,
+                  files,
+                  { profile, checks },
+                  lease
+                )
+              : await compiled(runner, kind, files, profile, lease);
           if (!isBuild(answer.built)) {
             throw new TypeError(
               "The compiler answered something else than a build."

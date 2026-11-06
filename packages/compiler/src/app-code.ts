@@ -39,6 +39,7 @@
  */
 import { appPathSegmentPattern } from "@grasp-os/shared/app-limits";
 
+import { joinedPath } from "./app-paths.ts";
 import {
   generatedServerFolder,
   hasAppPathSegments,
@@ -387,20 +388,15 @@ const resolveRelative = (
   specifier: string,
   files: ReadonlySet<string>
 ): string | undefined => {
-  const parts = importer.split("/").slice(0, -1);
-  for (const part of specifier.replace(javascriptExtension, ".ts").split("/")) {
-    if (part === "..") {
-      if (parts.pop() === undefined) {
-        return undefined;
-      }
-    } else if (part !== ".") {
-      parts.push(part);
-    }
-  }
-  const path = parts.join("/");
-  return importSuffixes
-    .map((suffix) => `${path}${suffix}`)
-    .find((candidate) => files.has(candidate));
+  const { path, escaped } = joinedPath(
+    importer,
+    specifier.replace(javascriptExtension, ".ts")
+  );
+  return escaped
+    ? undefined
+    : importSuffixes
+        .map((suffix) => `${path}${suffix}`)
+        .find((candidate) => files.has(candidate));
 };
 
 const isRelative = (specifier: string): boolean =>

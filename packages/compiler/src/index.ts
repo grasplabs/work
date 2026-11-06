@@ -83,6 +83,7 @@ export {
   pageRuntime,
 } from "./kit.ts";
 export {
+  checkRecordOf,
   designContextKey,
   incrementSchema,
   lintKey,
@@ -93,11 +94,22 @@ export {
 } from "./increments.ts";
 export type {
   BuildMetrics,
+  CheckRecord,
   IncrementalBuild,
   Increments,
   LintRecord,
   ModuleRecord,
 } from "./increments.ts";
+export {
+  checkBatches,
+  checkCharacters,
+  checkedDiagnostics,
+  checkKeys,
+  checkRecords,
+  checkStopped,
+  checksInParts,
+} from "./check-plan.ts";
+export type { FileReferences } from "./check-plan.ts";
 export { pageRefusals } from "./refusals.ts";
 export type { SurfaceManifest } from "./route-tree.ts";
 export { platformPeers, platformScope } from "./packages/platform.ts";

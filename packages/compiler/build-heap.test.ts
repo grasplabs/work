@@ -32,6 +32,17 @@ const heapMb = 128;
  */
 const checkMb = 192;
 
+/** How many files the large App has: ten times an App's most (`appLimits.files`). */
+const largeAppFiles = 2000;
+
+/**
+ * What one part of a check may take of WebAssembly memory, in MB: a part
+ * of `checkCharacters` measured 174 MB. With the checker isolate's own
+ * heap, about 15 MB, under `checkMb`. Counted apart from the heap here,
+ * as this harness's heap holds the whole large App, which no checker does.
+ */
+const partWasmMb = 180;
+
 let release = "";
 let files = "";
 let answers = "";
@@ -103,5 +114,49 @@ describe("a release's compiler and type checker", { timeout: 300_000 }, () => {
         within: true,
       })),
     });
+  });
+
+  it(`checks an App of ${largeAppFiles} files a part at a time, each part in ${partWasmMb} MB of WebAssembly, finding its errors`, () => {
+    // One check of every file took 663 MB at this size; a part reads no
+    // more than its files' closures, up to `checkCharacters`.
+    const lines = harnessRun(["parts", release, String(largeAppFiles)])
+      .trim()
+      .split("\n")
+      .map((line): unknown => JSON.parse(line));
+    const parts = z
+      .array(z.object({ wasmMb: z.number() }))
+      .parse(lines.slice(0, -1));
+    const { errors } = z
+      .object({ errors: z.array(z.string()) })
+      .parse(lines.at(-1));
+    expect({
+      parts: parts.length > 1,
+      beyond: parts.filter(({ wasmMb }) => wasmMb > partWasmMb),
+      errors: [...new Set(errors)],
+    }).toStrictEqual({
+      parts: true,
+      beyond: [],
+      errors: [
+        "components/c1099.tsx TS2322",
+        "screens/s0.tsx TS2322",
+        "screens/s1.tsx TS2322",
+      ],
+    });
+  });
+
+  it("says of an App checked in parts what one run over every file says, with the kit's types and JSX", () => {
+    // 150 files in parts of 100,000 characters: dozens of parts.
+    const said = z
+      .object({
+        parts: z.number(),
+        inParts: z.array(z.string()),
+        whole: z.array(z.string()),
+      })
+      .parse(JSON.parse(harnessRun(["both", release, "150", "100000"])));
+    expect({
+      parts: said.parts > 10,
+      errors: said.whole.length > 0,
+      inParts: said.inParts,
+    }).toStrictEqual({ parts: true, errors: true, inParts: said.whole });
   });
 });

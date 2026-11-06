@@ -16,6 +16,11 @@
  *   check them (src/checked-build.ts), and prints each build's outcome
  *   and the heap after its compile, one JSON line each. It fails should
  *   a build fail, and V8 ends it should the heap pass the cap.
+ * - `node build-heap.ts parts <release> <count>` type-checks a large
+ *   synthetic App of `count` files a part at a time in the release's
+ *   checker, as core does, and prints what each part took.
+ * - `node build-heap.ts both <release> <count> <characters>` checks it whole
+ *   and in parts of at most `characters`, and prints what each said.
  */
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
@@ -31,10 +36,19 @@ import {
   migrationsFolder,
   schemaPath,
 } from "./src/app-code.ts";
+import { graphOf } from "./src/check-graph.ts";
+import {
+  checkBatches,
+  checkedDiagnostics,
+  checkKeys,
+  checkRecords,
+} from "./src/check-plan.ts";
 import { withTypeCheck } from "./src/checked-build.ts";
 import type { Unchecked } from "./src/checked-build.ts";
 import type { Diagnostic } from "./src/diagnostic.ts";
+import type { CheckRecord } from "./src/increments.ts";
 import { compilerAssets, kitModule, typesModule } from "./src/kit.ts";
+import { pageTarget, typeCheckRequest } from "./src/type-check.ts";
 import type { TypeCheckRequest } from "./src/type-check.ts";
 import type { CompileTarget } from "./src/worker.ts";
 
@@ -383,6 +397,197 @@ const checkAll = async (
   }
 };
 
+/** `count` exports of a few lines each, named after `name`: a file's bulk. */
+const exportsOf = (name: string, count: number): string =>
+  Array.from(
+    { length: count },
+    (_unused, index) => `
+export interface ${name}Row${index} { id: string; label: string; count: number; tags: readonly string[] }
+export const ${name.toLowerCase()}Total${index} = (rows: readonly ${name}Row${index}[]): number =>
+  rows.reduce((sum, row) => sum + row.count + row.tags.filter((tag) => tag.length > ${index}).length, 0);
+`
+  ).join("");
+
+/**
+ * A screens build's files of `count` files of about 7,000 characters,
+ * shaped as a large business App: helpers, components that use two of
+ * them and one in two another component, and screens of four components
+ * each, picked by a fixed sequence. Two files hold a type error: the
+ * first screen, and the last component.
+ */
+const largeApp = (count: number): Record<string, string> => {
+  const helpers = Math.round(count * 0.05);
+  const components = Math.round(count * 0.55);
+  const screens = count - helpers - components;
+  let seed = 7;
+  const pick = (below: number): number => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return seed % below;
+  };
+  const files: Record<string, string> = {};
+  for (let helper = 0; helper < helpers; helper += 1) {
+    files[`components/lib/h${helper}.ts`] = exportsOf(`H${helper}`, 25);
+  }
+  for (let component = 0; component < components; component += 1) {
+    const uses = [...new Set([pick(helpers), pick(helpers)])];
+    const child = component > 0 && pick(2) === 0 ? pick(component) : undefined;
+    const wrong =
+      component === components - 1 ? 'export const wrong: number = "x";\n' : "";
+    files[`components/c${component}.tsx`] =
+      `import { Button } from "@grasp-os/ui/components/button";
+import { useState } from "react";
+${uses.map((helper) => `import { h${helper}Total0 } from "./lib/h${helper}";`).join("\n")}
+${child === undefined ? "" : `import { C${child} } from "./c${child}";`}
+${exportsOf(`C${component}`, 24)}${wrong}
+export const C${component} = ({ title }: { title: string }) => {
+  const [open, setOpen] = useState(false);
+  const total: number = ${uses.map((helper) => `h${helper}Total0([])`).join(" + ")};
+  return (
+    <div>
+      <Button onClick={() => setOpen(!open)}>{title} {total}</Button>
+      ${child === undefined ? "" : `<C${child} title={title} />`}
+    </div>
+  );
+};
+`;
+  }
+  for (let screen = 0; screen < screens; screen += 1) {
+    const uses = [
+      ...new Set([
+        pick(components),
+        pick(components),
+        pick(components),
+        pick(components),
+      ]),
+    ];
+    const wrong = screen === 0 ? "export const wrong: string = 1;\n" : "";
+    // The second screen gives a component a prop of the wrong type: an
+    // error only its component's types make.
+    const title = screen === 1 ? "{1}" : `"S${screen}"`;
+    files[`screens/s${screen}.tsx`] =
+      `${uses.map((component) => `import { C${component} } from "../components/c${component}";`).join("\n")}
+${exportsOf(`S${screen}`, 24)}${wrong}
+const Screen = () => (
+  <main>
+    ${uses.map((component) => `<C${component} title=${title} />`).join("\n    ")}
+  </main>
+);
+export default Screen;
+`;
+  }
+  return files;
+};
+
+/**
+ * The release's checker, as its isolate runs it, and a screens check of
+ * `largeApp(count)`, against the kit's types and JSX as a screen has them.
+ */
+const largeCheck = async (
+  release: string,
+  count: number
+): Promise<{
+  checker: Checker;
+  files: Record<string, string>;
+  request: TypeCheckRequest;
+}> => {
+  hookRelease(release);
+  recordInstances();
+  // SAFETY: the release's checker module is src/checker.ts built, whose
+  // default export is the entrypoint of this shape.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const checker = (await entrypointOf(
+    release,
+    compilerAssets.checker
+  )) as Checker;
+  const kit = z
+    .object({ resolved: z.record(z.string(), z.string()) })
+    .parse(
+      JSON.parse(
+        readFileSync(path.join(release, compilerAssets.types), "utf-8")
+      )
+    );
+  const files = largeApp(count);
+  const request = typeCheckRequest(
+    files,
+    pageTarget(new Set(Object.keys(kit.resolved)))
+  );
+  return { checker, files, request };
+};
+
+/** A diagnostic as one line: where, what and what it says. */
+const lineOf = ({ file, line, column, rule, message }: Diagnostic): string =>
+  `${file ?? "(App)"}:${line ?? 0}:${column ?? 0} ${rule} ${message}`;
+
+/**
+ * Type-checks `largeApp(count)` in the release's checker twice: whole, in
+ * one run, and a part at a time in parts of at most `most` characters, as
+ * core runs an App too large for one run (core's screens.ts
+ * `typeChecked`), and prints how many parts and what each check said.
+ */
+const checkBothWays = async (
+  release: string,
+  count: number,
+  most: number
+): Promise<void> => {
+  const { checker, files, request } = await largeCheck(release, count);
+  const { closures } = await checkKeys(request, graphOf(files, "auto"));
+  const parts = checkBatches(request, closures, Object.keys(files), most);
+  const records = new Map<string, CheckRecord>();
+  for (const part of parts) {
+    for (const record of checkRecords(
+      Object.keys(part.files),
+      checker.check(part)
+    )) {
+      records.set(record.path, records.get(record.path) ?? record);
+    }
+  }
+  console.info(
+    JSON.stringify({
+      parts: parts.length,
+      inParts: checkedDiagnostics(Object.keys(files), records)
+        .map(lineOf)
+        .toSorted(),
+      whole: checker.check(request).map(lineOf).toSorted(),
+    })
+  );
+};
+
+/**
+ * Type-checks a large App (`largeApp` of `count` files) a part at a time
+ * in the release's checker alone, as core runs it (core's screens.ts
+ * `typeChecked`), printing what each part read and took, V8's heap and
+ * tsrs's WebAssembly memory, then the App's errors, one JSON line each.
+ */
+const checkInParts = async (release: string, count: number): Promise<void> => {
+  const { checker, files, request } = await largeCheck(release, count);
+  const { closures } = await checkKeys(request, graphOf(files, "auto"));
+  const records = new Map<string, CheckRecord>();
+  for (const part of checkBatches(request, closures, Object.keys(files))) {
+    const diagnostics = checker.check(part);
+    const wasm = lastInstanceMemory();
+    const heap = heapUsed();
+    for (const record of checkRecords(Object.keys(part.files), diagnostics)) {
+      records.set(record.path, records.get(record.path) ?? record);
+    }
+    console.info(
+      JSON.stringify({
+        files: Object.keys(part.files).length,
+        characters: Object.values(part.files).join("").length,
+        heapMb: megabytes(heap),
+        wasmMb: megabytes(wasm),
+        totalMb: megabytes(heap + wasm),
+      })
+    );
+  }
+  console.info(
+    JSON.stringify({
+      errors: checkedDiagnostics(Object.keys(files), records).map(
+        ({ file, rule }) => `${file ?? "(App)"} ${rule}`
+      ),
+    })
+  );
+};
+
 const [mode, from = "", to = "", out = ""] = process.argv.slice(2);
 if (mode === "files") {
   writeFileSync(to, JSON.stringify(await blueprintFiles(from)));
@@ -390,8 +595,12 @@ if (mode === "files") {
   await buildAll(from, to, out);
 } else if (mode === "check") {
   await checkAll(from, to);
+} else if (mode === "parts") {
+  await checkInParts(from, Number(to));
+} else if (mode === "both") {
+  await checkBothWays(from, Number(to), Number(out));
 } else {
   throw new Error(
-    "Usage: build-heap.ts files <blueprints> <out.json> | build <release> <files.json> <answers.json> | check <release> <answers.json>"
+    "Usage: build-heap.ts files <blueprints> <out.json> | build <release> <files.json> <answers.json> | check <release> <answers.json> | parts <release> <files> | both <release> <files> <characters>"
   );
 }

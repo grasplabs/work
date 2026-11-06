@@ -8,10 +8,11 @@
  * project's check (standalone-check.ts) both parse with Babel and refuse
  * the same things through this file.
  *
- * It imports nothing: a standalone definition project
- * (scripts/package-definition-lib.ts) carries this very file beside its
- * own check, so the two can't drift.
+ * It imports only app-paths.ts, which imports nothing: a standalone
+ * definition project (scripts/package-definition-lib.ts) carries both
+ * files beside its own check, so the two can't drift.
  */
+import { joinedPath } from "./app-paths.ts";
 
 /**
  * A triple-slash directive TypeScript obeys: `/// <reference …/>`,
@@ -164,17 +165,15 @@ export const ambientOf = ({
 const ownReference =
   /^\/\/\/[ \t]*<reference[ \t]+path[ \t]*=[ \t]*(?:"(?<double>[^"]*)"|'(?<single>[^']*)')[ \t]*\/>[ \t]*$/u;
 
-/** Where `/// <reference path>` in `file` points: a path from the App's root. */
-const referencedPath = (file: string, reference: string): string => {
-  const parts = reference.startsWith("/") ? [] : file.split("/").slice(0, -1);
-  for (const part of reference.split("/")) {
-    if (part === "..") {
-      parts.pop();
-    } else if (part !== "." && part !== "") {
-      parts.push(part);
-    }
-  }
-  return parts.join("/");
+/**
+ * Where the one directive an App file may hold (`ownReference`) points,
+ * as written; undefined for any other directive.
+ */
+export const ownReferencePath = (directive: string): string | undefined => {
+  const groups = ownReference.exec(directive)?.groups;
+  return groups === undefined
+    ? undefined
+    : (groups.double ?? groups.single ?? "");
 };
 
 /**
@@ -196,12 +195,11 @@ export const referenceError = (
   if (!directive.startsWith("///")) {
     return undefined;
   }
-  const groups = ownReference.exec(directive)?.groups;
-  if (groups === undefined) {
+  const name = ownReferencePath(directive);
+  if (name === undefined) {
     return `${directive} is never in App files: a triple-slash directive names only another of the App's files, as /// <reference path="./types.d.ts" />.`;
   }
-  const name = groups.double ?? groups.single ?? "";
-  return files.has(referencedPath(file, name))
+  return files.has(joinedPath(file, name).path)
     ? undefined
     : `"${name}" is not one of the App's files: a reference path names only those.`;
 };

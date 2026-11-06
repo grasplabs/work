@@ -1,4 +1,5 @@
 import {
+  checkRecordOf,
   compilerVersion,
   incrementSchema,
   lintKey,
@@ -6,6 +7,7 @@ import {
   moduleRecordOf,
 } from "@grasp-os/compiler";
 import type {
+  CheckRecord,
   Diagnostic,
   Increments,
   pageIncrementKeys,
@@ -24,14 +26,17 @@ import {
 import type { CacheEnv } from "./build-cache.ts";
 
 // What a pages build keeps of each file for the next (GRA-958): each
-// module's transform (the compiler's increments.ts); and each file's
-// Ultracite lint, which a draft's lint build keeps (save-builds.ts). They
-// are kept as whole builds are (build-cache.ts): in
-// R2 under a key of their content, each served only as its receipt says
-// its build wrote it, written by one build at a time under the key's
-// lease, quarantined after repeated integrity failures, swept like builds
-// once unused (pages.ts `sweepBuilds`). The compiler uses one only
-// under the key it works out itself; here they are only fetched and kept.
+// module's transform (the compiler's increments.ts); each file's
+// Ultracite lint, which a draft's lint build keeps (save-builds.ts); and,
+// for an App too large to type-check in one run, what each file's check
+// said (the compiler's check-plan.ts, pages.ts `typeChecked`), kept
+// together, one object per App and target, so a build reads and writes
+// them in a handful of calls. They are kept as whole builds are
+// (build-cache.ts): in R2, each served only as its receipt says its build
+// wrote it, written by one build at a time under the key's lease,
+// quarantined after repeated integrity failures, swept like builds once
+// unused (pages.ts `sweepBuilds`). The compiler uses one only under the
+// key it works out itself; here they are only fetched and kept.
 
 /** Where each part's records are kept: swept with the builds. */
 export const incrementPrefixes = {
@@ -39,11 +44,19 @@ export const incrementPrefixes = {
   lints: "lint-results/",
 } as const;
 
-type Part = keyof typeof incrementPrefixes;
+/**
+ * Where each App's type checks are kept: swept with the builds, apart
+ * from `incrementPrefixes` as the sweep lists it last (pages.ts).
+ */
+export const checksPrefix = "type-checks/";
+
+const prefixes = { ...incrementPrefixes, checks: checksPrefix } as const;
+
+type Part = keyof typeof prefixes;
 
 /** The cache key of a record of `part` under its content key. */
 const cacheKeyOf = (part: Part, key: string): string =>
-  `${incrementPrefixes[part]}${keySchema}/${incrementSchema}/${compilerVersion}/${key}.json`;
+  `${prefixes[part]}${keySchema}/${incrementSchema}/${compilerVersion}/${key}.json`;
 
 /** Most records read or kept at once. */
 const concurrency = 8;
@@ -214,4 +227,60 @@ export const keepLints = async (
       }
     }
   );
+};
+
+/**
+ * What an App's earlier checks of one target (`set`, its key: pages.ts
+ * `typeChecked`) said of each file, by the file's key (the compiler's
+ * `checkKeys`): one read. A record is used only under the key it is kept
+ * by, and only for its own file, where it is read (pages.ts).
+ */
+export const readChecks = async (
+  env: CacheEnv,
+  set: string,
+  refreshAfterMs: number
+): Promise<Map<string, CheckRecord>> => {
+  const kept = await readRecord(env, "checks", set, refreshAfterMs);
+  const found = new Map<string, CheckRecord>();
+  if (typeof kept !== "object" || kept === null) {
+    return found;
+  }
+  const entries: [string, unknown][] = Object.entries(kept);
+  for (const [key, value] of entries) {
+    const record =
+      typeof value === "object" &&
+      value !== null &&
+      "path" in value &&
+      typeof value.path === "string"
+        ? checkRecordOf(value, value.path)
+        : undefined;
+    if (record !== undefined) {
+      found.set(key, record);
+    }
+  }
+  return found;
+};
+
+/**
+ * Keeps what an App's check of one target (`set`) said of each file, by
+ * the file's key (`records`), in place of what was kept before: one
+ * write, held for `leaseMs`. Never throws: a check not kept is done again
+ * next time.
+ */
+export const keepChecks = async (
+  env: CacheEnv,
+  set: string,
+  records: ReadonlyMap<string, CheckRecord>,
+  leaseMs: number
+): Promise<void> => {
+  try {
+    await keepUnderLease(
+      env,
+      cacheKeyOf("checks", set),
+      JSON.stringify(Object.fromEntries(records)),
+      leaseMs
+    );
+  } catch (error) {
+    log.warn("build.check_keep_failed", errorFields(error));
+  }
 };

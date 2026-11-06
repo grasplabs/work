@@ -1,5 +1,6 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 
+import type { FileReferences } from "./check-plan.ts";
 import type { Diagnostic } from "./diagnostic.ts";
 import {
   buildFiles,
@@ -22,11 +23,12 @@ import { pageReferences } from "./kit.ts";
 //   App's files it may import, the declarations its types may name, and
 //   whether it is a preview's: its key is the hash of all of those, so a
 //   change to any is a new key, and the module is compiled again.
-// - The type check reads every file each build, in an isolate of its own
-//   (checker.ts): tsrs keeps no program between checks, and checks a whole
-//   App in about the time a kept check would save. The CSS is built again
-//   from every module's candidates, and the lint runs over every file:
-//   "incremental" never skips a gate.
+// - A module's references (check-graph.ts), which the type check is
+//   planned on (check-plan.ts), a function of its path and source alone.
+// - Each file's type check is kept by core under a key of everything it
+//   reads (check-plan.ts), never here. The CSS is built again from every
+//   module's candidates, and the lint runs over every file: "incremental"
+//   never skips a gate.
 
 /** Part of every key: a change to what a record holds or means misses every one. */
 export const incrementSchema = "i1";
@@ -40,6 +42,8 @@ export interface ModuleRecord {
   kit: string[];
   /** Its Tailwind class candidates (candidates.ts). */
   candidates: string[];
+  /** What its type check reads of other files (check-graph.ts); null if that parse failed. */
+  references: FileReferences | null;
 }
 
 /** What a build is handed of earlier ones, or keeps of its own: records by key. */
@@ -171,6 +175,14 @@ export interface LintRecord {
 const isStrings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((each) => typeof each === "string");
 
+const isReferences = (value: unknown): value is FileReferences =>
+  typeof value === "object" &&
+  value !== null &&
+  "specifiers" in value &&
+  isStrings(value.specifiers) &&
+  "global" in value &&
+  typeof value.global === "boolean";
+
 /** `value` as a module record of `path`, or nothing when it isn't one. */
 export const moduleRecordOf = (
   value: unknown,
@@ -187,13 +199,16 @@ export const moduleRecordOf = (
   "kit" in value &&
   isStrings(value.kit) &&
   "candidates" in value &&
-  isStrings(value.candidates)
+  isStrings(value.candidates) &&
+  "references" in value &&
+  (value.references === null || isReferences(value.references))
     ? {
         path,
         code: value.code,
         app: value.app,
         kit: value.kit,
         candidates: value.candidates,
+        references: value.references,
       }
     : undefined;
 
@@ -210,6 +225,30 @@ const isDiagnostics = (value: unknown): value is Diagnostic[] =>
       "severity" in each &&
       (each.severity === "error" || each.severity === "warning")
   );
+
+/** What a type check said of one file, as core keeps it (check-plan.ts). */
+export interface CheckRecord {
+  path: string;
+  diagnostics: Diagnostic[];
+  /** The program's own, which every check of the App says alike. */
+  program: Diagnostic[];
+}
+
+/** `value` as a check record of `path`'s, if it is one. */
+export const checkRecordOf = (
+  value: unknown,
+  path: string
+): CheckRecord | undefined =>
+  typeof value === "object" &&
+  value !== null &&
+  "path" in value &&
+  value.path === path &&
+  "diagnostics" in value &&
+  isDiagnostics(value.diagnostics) &&
+  "program" in value &&
+  isDiagnostics(value.program)
+    ? { path, diagnostics: value.diagnostics, program: value.program }
+    : undefined;
 
 /** `value` as a lint record of `path`'s, if it is one. */
 export const lintRecordOf = (

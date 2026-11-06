@@ -1,5 +1,5 @@
-import { typeCheckerName } from "@grasp-os/compiler";
-import type { Diagnostic } from "@grasp-os/compiler";
+import { buildFiles, typeCheckerName, withTypeCheck } from "@grasp-os/compiler";
+import type { Diagnostic, Unchecked } from "@grasp-os/compiler";
 import { generateModules } from "@grasp-os/sdk/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -8,7 +8,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { loadBuiltinRelease } from "../src/builtins.ts";
 import { inspectDraft, withDraftReferences } from "../src/draft-references.ts";
-import { buildComputeModules, buildPages, checkAppCode } from "../src/pages.ts";
+import {
+  appCodeAndTestFiles,
+  buildComputeModules,
+  buildPages,
+  checkAppCode,
+} from "../src/pages.ts";
+import { platformRunner } from "../src/platform-sandbox.ts";
 
 // The type check is a gate: what it passes is sealed and run. These tests
 // hold the checker to what the platform's previous one (TypeScript 6's
@@ -352,6 +358,159 @@ describe(
     });
   }
 );
+
+/** Every diagnostic of a build, as one line each, sorted, and whether it passed. */
+const outcome = (built: {
+  ok: boolean;
+  diagnostics?: Diagnostic[];
+}): { ok: boolean; said: string[] } => ({
+  ok: built.ok,
+  said: (built.diagnostics ?? [])
+    .map(
+      ({ file, line, column, rule, severity, message }) =>
+        `${file ?? "(App)"}:${line ?? 0}:${column ?? 0} ${rule} ${severity} ${message}`
+    )
+    .toSorted(),
+});
+
+/**
+ * What a build of `files` says with its type check run whole, in one call
+ * of the checker over every file, as core ran it before it ran in parts.
+ */
+const checkedWhole = async (
+  app: AppId,
+  target: "pages" | "app",
+  files: Record<string, string>
+): Promise<{ ok: boolean; said: string[] }> => {
+  const runner = platformRunner(env, app);
+  // SAFETY: the compiler's own answer to a build.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const answer = (await runner.run("compiler", "build", [
+    target,
+    files,
+  ])) as Unchecked<{ ok: boolean; diagnostics?: Diagnostic[] }>;
+  const diagnostics =
+    answer.typeCheck === undefined
+      ? []
+      : await runner.run("type-checker", "check", [answer.typeCheck.request]);
+  // SAFETY: the checker's answer: diagnostics.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return outcome(withTypeCheck(answer, diagnostics as Diagnostic[]));
+};
+
+/**
+ * Core's env with a check's run sized to 20,000 characters: a blueprint
+ * is checked as an App too large for one run is, a part at a time.
+ */
+const inPartsEnv = { ...env, TYPE_CHECK_CHARACTERS: "20000" };
+
+describe("the type check, a part at a time", { timeout: 300_000 }, () => {
+  // Each edit is built after the last, so each reuses what the builds
+  // before it kept of every file the edit can't change.
+  it("says after each edit to a page's files what one check of every file says", async () => {
+    const { app, files } = await blueprintApp("intake");
+    const base = { ...files, ...pageMistakes };
+    const {
+      "src/components/statements.tsx": statements = "",
+      ...withoutStatements
+    } = base;
+    const edits: [string, Record<string, string>][] = [
+      ["first", base],
+      [
+        "a type it imports changes shape",
+        {
+          ...base,
+          "src/components/intake.ts": (
+            base["src/components/intake.ts"] ?? ""
+          ).replace("{ error: string }", "{ failure: string }"),
+        },
+      ],
+      [
+        "an export renamed",
+        {
+          ...base,
+          "src/components/pending.ts": (
+            base["src/components/pending.ts"] ?? ""
+          ).replace("export const whilePending", "export const whileBusy"),
+        },
+      ],
+      ["a file deleted", withoutStatements],
+      [
+        "the deleted file written again",
+        {
+          ...withoutStatements,
+          "src/components/statements.tsx": `${statements}\nexport const added: number = "x";\n`,
+        },
+      ],
+      // The route tree the build generates changes with its routes, and
+      // types every route through its module augmentation.
+      [
+        "a route added",
+        {
+          ...base,
+          "src/routes/about.tsx":
+            'import { createFileRoute } from "@tanstack/react-router";\n\nconst About = () => <p>About</p>;\n\nexport const Route = createFileRoute("/about")({ component: About });\n',
+        },
+      ],
+      [
+        "a route given a wrong path",
+        {
+          ...base,
+          "src/routes/about.tsx":
+            'import { createFileRoute } from "@tanstack/react-router";\n\nconst About = () => <p>About</p>;\n\nexport const Route = createFileRoute("/nowhere")({ component: About });\n',
+        },
+      ],
+    ];
+    const inParts: [string, { ok: boolean; said: string[] }][] = [];
+    const whole: typeof inParts = [];
+    for (const [edit, edited] of edits) {
+      // oxlint-disable-next-line no-await-in-loop -- each edit after the last
+      const built = await buildPages(inPartsEnv, edited, app);
+      inParts.push([edit, outcome(built)]);
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      const checked = await checkedWhole(app, "pages", buildFiles(edited));
+      whole.push([edit, checked]);
+    }
+    expect(inParts).toStrictEqual(whole);
+  });
+
+  it("says after each edit to server code what one check of every file says", async () => {
+    const { app, files } = await blueprintApp("intake");
+    const base: Record<string, string> = {
+      ...(await sealedServer(app, files)),
+      ...serverMistakes,
+      "server/m-uses.ts":
+        'import { wrong } from "./m-assign";\n\nexport const uses: string = wrong;\n',
+    };
+    const { "server/m-assign.ts": _deleted, ...withoutAssign } = base;
+    const edits: [string, Record<string, string>][] = [
+      ["first", base],
+      [
+        "an export renamed",
+        {
+          ...base,
+          "server/m-assign.ts": 'export const right: number = "x";\n',
+        },
+      ],
+      ["a file deleted", withoutAssign],
+    ];
+    const inParts: [string, { ok: boolean; said: string[] }][] = [];
+    const whole: typeof inParts = [];
+    for (const [edit, edited] of edits) {
+      // oxlint-disable-next-line no-await-in-loop -- each edit after the last
+      const built = await checkAppCode(inPartsEnv, edited, app);
+      inParts.push([edit, outcome(built)]);
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      const checked = await checkedWhole(
+        app,
+        "app",
+        appCodeAndTestFiles(edited)
+      );
+      whole.push([edit, checked]);
+    }
+    expect(inParts).toStrictEqual(whole);
+  });
+});
 
 describe("the type checker's isolate", { timeout: 120_000 }, () => {
   it("is one per release, its name holding no App's ID and none of its code, whichever App checks", async () => {

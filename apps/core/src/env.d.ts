@@ -152,6 +152,12 @@ interface __BaseEnv_Env {
    */
   BUILD_BATCH_CPU_MS?: string;
   /**
+   * Tests only: fewer characters a type check reads in one run, so a small
+   * App is checked a part at a time (src/screens.ts, the compiler's
+   * `checkCharacters`), never more.
+   */
+  TYPE_CHECK_CHARACTERS?: string;
+  /**
    * Tests only: a shorter bound on one load of a release, before it is
    * taken for abandoned (src/app-releases.ts).
    */

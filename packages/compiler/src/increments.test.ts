@@ -14,6 +14,7 @@ describe("records handed to a build", () => {
       app: [],
       kit: [],
       candidates: [],
+      references: { specifiers: [], global: false },
     };
     expect({
       module: moduleRecordOf(module, "src/components/card.tsx")?.path,
@@ -22,10 +23,15 @@ describe("records handed to a build", () => {
         { ...module, code: 1 },
         "src/components/card.tsx"
       ),
+      badReferences: moduleRecordOf(
+        { ...module, references: { specifiers: [1], global: false } },
+        "src/components/card.tsx"
+      ),
     }).toStrictEqual({
       module: "src/components/card.tsx",
       otherFile: undefined,
       badCode: undefined,
+      badReferences: undefined,
     });
   });
 });

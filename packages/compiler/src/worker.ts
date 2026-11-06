@@ -37,6 +37,13 @@ import {
 } from "./app-code.ts";
 import { assertNoBindings } from "./authority.ts";
 import { extractCandidates } from "./candidates.ts";
+import {
+  moduleNotes,
+  noteModule,
+  parsedReferences,
+  referencesOf,
+} from "./check-graph.ts";
+import type { FileReferences } from "./check-plan.ts";
 import type { TypeCheckPlan, Unchecked } from "./checked-build.ts";
 import {
   compileModule,
@@ -236,33 +243,70 @@ const referenceErrors = (
   });
 
 /**
+ * What a build notes of its files as it compiles them, for its type
+ * check: the files the parser refused, those whose JSX runtime was
+ * refused (`together`), and what each parsed file references
+ * (check-graph.ts).
+ */
+interface PageNotes {
+  unparsed: Set<string>;
+  untyped: Set<string>;
+  references: Map<string, FileReferences>;
+}
+
+/** What a build of server code or tests notes of its files (`PageNotes`). */
+type CodeNotes = Pick<PageNotes, "unparsed" | "references">;
+
+const pageNotes = (): PageNotes => ({
+  unparsed: new Set(),
+  untyped: new Set(),
+  references: new Map(),
+});
+
+/**
  * Compiles one App file, with what it imports, or says why it can't be:
  * with `refresh`, for a preview, instrumented for React Fast Refresh. A
  * file the parser refuses is added to `unparsed`, and one whose compiled
  * code imports what its source doesn't (a refused JSX runtime) to
- * `untyped` (`together`).
+ * `untyped` (`together`). What a parsed file references is noted in
+ * `references` (check-graph.ts).
  */
 const compileFile = (
   path: string,
   source: string,
   files: ReadonlySet<string>,
   typeFiles: ReadonlySet<string>,
-  { unparsed, untyped }: { unparsed: Set<string>; untyped: Set<string> },
+  { unparsed, untyped, references }: PageNotes,
   refresh = false
 ): { code: string; imported: ModuleImports } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
   const directives: DirectiveSite[] = [];
+  const noted = moduleNotes();
   let compiled: string;
   try {
     compiled = compileModule(
       source,
       path,
-      [collectImports(imports), collectDirectives(directives)],
+      [
+        collectImports(imports),
+        collectDirectives(directives),
+        noteModule(noted),
+      ],
       { refresh }
+    );
+    references.set(
+      path,
+      referencesOf(path, { imports, directives, noted }, "auto")
     );
   } catch (error) {
     if (parseFailed(error)) {
       unparsed.add(path);
+    } else {
+      // Refused past its parse (the React Compiler's): read on its own.
+      const parsed = parsedReferences(path, source, "auto");
+      if (parsed !== undefined) {
+        references.set(path, parsed);
+      }
     }
     const message = messageIn(path, error);
     return {
@@ -328,15 +372,21 @@ const declarationImportErrors = (
   path: string,
   source: string,
   typeFiles: ReadonlySet<string>,
-  unparsed: Set<string>
+  { unparsed, references }: PageNotes
 ): Diagnostic[] => {
   const imports: ImportSite[] = [];
   const directives: DirectiveSite[] = [];
+  const noted = moduleNotes();
   try {
     stripTypes(source, path, [
       collectImports(imports),
       collectDirectives(directives),
+      noteModule(noted),
     ]);
+    references.set(
+      path,
+      referencesOf(path, { imports, directives, noted }, "auto")
+    );
   } catch (error) {
     if (parseFailed(error)) {
       unparsed.add(path);
@@ -374,10 +424,10 @@ const transformSource = (
     known,
     typeFiles,
   }: { known: ReadonlySet<string>; typeFiles: ReadonlySet<string> },
-  flags: { unparsed: Set<string>; untyped: Set<string> },
+  notes: PageNotes,
   preview: boolean
 ): { record: ModuleRecord } | { errors: Diagnostic[] } => {
-  const result = compileFile(path, source, known, typeFiles, flags, preview);
+  const result = compileFile(path, source, known, typeFiles, notes, preview);
   if (!("code" in result)) {
     return result;
   }
@@ -392,6 +442,7 @@ const transformSource = (
         path === pageReferences.path || path === routeTreePath
           ? []
           : extractCandidates(source),
+      references: notes.references.get(path) ?? null,
     },
   };
 };
@@ -501,17 +552,13 @@ const ownRecord = (record: Record<string, unknown>, key: string): unknown =>
  */
 const pagesCheck = (
   app: Record<string, string>,
-  {
-    found,
-    unparsed,
-    untyped,
-  }: {
-    found: Diagnostic[];
-    unparsed: ReadonlySet<string>;
-    untyped: ReadonlySet<string>;
-  }
+  found: Diagnostic[],
+  { unparsed, untyped, references }: PageNotes
 ): TypeCheckPlan => ({
   request: typeCheckRequest(app, pagesTarget),
+  // What each checked file references, as its compile read the source
+  // checked (a route as the generator corrected it, the route tree).
+  graph: Object.fromEntries(references),
   found,
   unparsed: [...unparsed],
   untyped: [...untyped],
@@ -591,10 +638,10 @@ export const buildPagesIncrementally = async (
   const imports = new Map<string, ModuleImports>();
   const candidates: string[] = [];
   const errors: Diagnostic[] = [];
-  // The files the parser refused, whose checks past the break are guesses.
-  const unparsed = new Set<string>();
-  // The files whose JSX runtime was refused, whose types are its guesses.
-  const untyped = new Set<string>();
+  // The files the parser refused, whose checks past the break are guesses;
+  // those whose JSX runtime was refused, whose types are its guesses; and
+  // what each file references, for the type check.
+  const notes = pageNotes();
   const keyed = await Promise.all(
     sources.map(
       async ([path, source]) =>
@@ -612,6 +659,9 @@ export const buildPagesIncrementally = async (
     )
   );
   const take = (record: ModuleRecord): void => {
+    if (record.references !== null) {
+      notes.references.set(record.path, record.references);
+    }
     const name = appModuleName(record.path);
     modules[name] = record.code;
     imports.set(name, { app: new Set(record.app), kit: new Set(record.kit) });
@@ -630,7 +680,7 @@ export const buildPagesIncrementally = async (
       path,
       routed[path] ?? source,
       { known, typeFiles },
-      { unparsed, untyped },
+      notes,
       preview
     );
     if ("record" in result) {
@@ -650,7 +700,7 @@ export const buildPagesIncrementally = async (
       routeTreePath,
       tree.source,
       { known: new Set([...known, routeTreePath]), typeFiles },
-      { unparsed, untyped },
+      notes,
       preview
     );
     if ("record" in compiledTree) {
@@ -664,9 +714,7 @@ export const buildPagesIncrementally = async (
   // own types are.
   for (const [path, source] of Object.entries(routed)) {
     if (declarationFile.test(path)) {
-      errors.push(
-        ...declarationImportErrors(path, source, typeFiles, unparsed)
-      );
+      errors.push(...declarationImportErrors(path, source, typeFiles, notes));
     }
   }
   // The type check runs whatever the compile found, so one build names
@@ -678,7 +726,8 @@ export const buildPagesIncrementally = async (
         tree.source === undefined
           ? routed
           : { ...routed, [routeTreePath]: tree.source },
-        { found: errors, unparsed, untyped }
+        errors,
+        notes
       )
     : undefined;
   if (errors.some((diagnostic) => isError(diagnostic))) {
@@ -725,7 +774,7 @@ const transformPages = async (
   preview: boolean
 ): Promise<Record<string, ModuleRecord>> => {
   const sets = { known: new Set(known), typeFiles: new Set(typeFiles) };
-  const flags = { unparsed: new Set<string>(), untyped: new Set<string>() };
+  const notes = pageNotes();
   const { routes } = await routeTree(buildFiles(batch));
   const records = await Promise.all(
     Object.entries(batch)
@@ -735,7 +784,7 @@ const transformPages = async (
         if (compiled === undefined) {
           return [];
         }
-        const result = transformSource(path, compiled, sets, flags, preview);
+        const result = transformSource(path, compiled, sets, notes, preview);
         if (!("record" in result)) {
           return [];
         }
@@ -1004,24 +1053,32 @@ const typeImportErrorAsResult = (
 
 /**
  * Compiles one file of an App's server code, or says why it can't be. A
- * file the parser refuses is added to `unparsed` (`together`).
+ * file the parser refuses is added to `unparsed` (`together`), and what a
+ * parsed one references is noted in `references` (check-graph.ts).
  */
 const compileAppCodeFile = (
   path: string,
   source: string,
   files: ReadonlySet<string>,
-  unparsed: Set<string>,
+  { unparsed, references }: CodeNotes,
   /** What its types may name by path: every file the build was given. */
   typeFiles: ReadonlySet<string> = files
 ): { code: string } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
   const directives: DirectiveSite[] = [];
+  const noted = moduleNotes();
   let compiled: string;
   try {
     compiled = stripTypes(source, path, [
       collectImports(imports),
       collectDirectives(directives),
+      noteModule(noted),
     ]);
+    // Every file a module of its own (`serverTarget`'s `moduleDetection`).
+    references.set(
+      path,
+      referencesOf(path, { imports, directives, noted }, "force")
+    );
   } catch (error) {
     if (parseFailed(error)) {
       unparsed.add(path);
@@ -1092,10 +1149,10 @@ const compileAppCodeFile = (
   }
 };
 
-/** `buildAppCode` (below), adding each file the parser refuses to `unparsed`. */
+/** `buildAppCode` (below), noting what it parses of each file (`CodeNotes`). */
 const buildAppCodeNoting = (
   files: Record<string, string>,
-  unparsed: Set<string>
+  notes: CodeNotes
 ): AppCodeBuild => {
   const code = appCodeFiles(files);
   const tooMuch = appCodeLimitErrors(code);
@@ -1147,7 +1204,7 @@ const buildAppCodeNoting = (
       continue;
     }
     named.set(name, path);
-    const result = compileAppCodeFile(path, source, known, unparsed);
+    const result = compileAppCodeFile(path, source, known, notes);
     if ("code" in result) {
       modules[name] = result.code;
     } else {
@@ -1166,15 +1223,13 @@ const buildAppCodeNoting = (
  * stripped, not checked.
  */
 export const buildAppCode = (files: Record<string, string>): AppCodeBuild =>
-  buildAppCodeNoting(files, new Set());
+  buildAppCodeNoting(files, pageNotes());
 
-/**
- * Builds an App's tests (`tests/**`), each held to what a test may import
- * (app-code.ts): only the test files become modules. The schema and
- * values they import, and the `@server/_generated/api` references, are the release's own
- * modules, which core loads with them. Types are stripped, not checked.
- */
-export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
+/** `buildAppTests` (below), noting what it parses of each file (`CodeNotes`). */
+const buildAppTestsNoting = (
+  files: Record<string, string>,
+  notes: CodeNotes
+): AppCodeBuild => {
   const code = appTestFiles(files);
   const tooMuch = limitErrors(code);
   if (tooMuch.length > 0) {
@@ -1218,7 +1273,7 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
         path,
         source,
         known,
-        new Set(),
+        notes,
         new Set(Object.keys(files))
       );
       if ("code" in result) {
@@ -1232,6 +1287,15 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
     ? { ok: false, diagnostics: errors }
     : { ok: true, modules };
 };
+
+/**
+ * Builds an App's tests (`tests/**`), each held to what a test may import
+ * (app-code.ts): only the test files become modules. The schema and
+ * values they import, and the `@server/_generated/api` references, are the release's own
+ * modules, which core loads with them. Types are stripped, not checked.
+ */
+export const buildAppTests = (files: Record<string, string>): AppCodeBuild =>
+  buildAppTestsNoting(files, pageNotes());
 
 /**
  * An App's server code of spec 8's layout built (`buildAppCode`) and
@@ -1251,8 +1315,8 @@ export const checkAppCode = (
   }
   // The type check runs whatever the build found, so one check names
   // everything there is to fix (`together`).
-  const unparsed = new Set<string>();
-  const built = buildAppCodeNoting(files, unparsed);
+  const notes = pageNotes();
+  const built = buildAppCodeNoting(files, notes);
   // Its tests, checked in the same program: their `@server/_generated/api` is the
   // references generated for this very release, which exist only here.
   // Only tests that build (`buildAppTests`: what a test may import and
@@ -1263,7 +1327,8 @@ export const checkAppCode = (
     Object.entries(files).filter(([path]) => appCodeKind(path) === "test")
   );
   const tests =
-    Object.keys(candidates).length > 0 && buildAppTests(files).ok
+    Object.keys(candidates).length > 0 &&
+    buildAppTestsNoting(files, { ...notes, unparsed: new Set() }).ok
       ? candidates
       : {};
   // Its migrations included: a migration's row is typed as the previous
@@ -1271,12 +1336,14 @@ export const checkAppCode = (
   // it declares none, so a correct one checks and a wrong output fails here,
   // before the host refuses it at run time anyway.
   const checked = { ...appCodeFiles(files), ...tests };
+  const request = typeCheckRequest(checked, appCodeTarget);
   return {
     built,
     typeCheck: {
-      request: typeCheckRequest(checked, appCodeTarget),
+      request,
+      graph: Object.fromEntries(notes.references),
       found: built.ok ? [] : built.diagnostics,
-      unparsed: [...unparsed],
+      unparsed: [...notes.unparsed],
       // A draft whose server code doesn't register is checked against the
       // stand-ins (core's save-builds.ts).
       lenient: readsStandIns(checked) ? callbackParameters(checked) : [],

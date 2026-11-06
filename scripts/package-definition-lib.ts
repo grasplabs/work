@@ -754,6 +754,8 @@ const compilerSource = "packages/compiler/src";
 const checkFiles = {
   "grasp/check.ts": "standalone-check.ts",
   "grasp/steering.ts": "steering.ts",
+  // Which steering.ts resolves a reference path with.
+  "grasp/app-paths.ts": "app-paths.ts",
   // And its design rules for pages, which the project's lint runs.
   "grasp/design-rules.ts": "design-rules.ts",
 } as const;

@@ -1,4 +1,5 @@
 import { appCodeImport, pageImportError, typeImportError } from "./app-code.ts";
+import { joinedPath, pathSpecifier, typeCandidates } from "./app-paths.ts";
 import { routeTreePath } from "./inputs.ts";
 import {
   appModuleName,
@@ -287,20 +288,12 @@ export const resolveRelative = (
   specifier: string,
   files: ReadonlySet<string>
 ): string | undefined => {
-  const parts = importer.split("/").slice(0, -1);
-  for (const part of specifier.split("/")) {
-    if (part === "..") {
-      if (parts.pop() === undefined) {
-        return undefined;
-      }
-    } else if (part !== ".") {
-      parts.push(part);
-    }
-  }
-  const path = parts.join("/");
-  return importSuffixes
-    .map((suffix) => `${path}${suffix}`)
-    .find((candidate) => files.has(candidate));
+  const { path, escaped } = joinedPath(importer, specifier);
+  return escaped
+    ? undefined
+    : importSuffixes
+        .map((suffix) => `${path}${suffix}`)
+        .find((candidate) => files.has(candidate));
 };
 
 /** The packages App code may import from, for error messages. */
@@ -331,51 +324,20 @@ const iconError = (
 };
 
 /**
- * How a type import may name an App file, as TypeScript resolves one:
- * as written, by its extension (declarations included), or as a folder's
- * index.
- */
-const typeSuffixes = [
-  "",
-  ".ts",
-  ".tsx",
-  ".d.ts",
-  "/index.ts",
-  "/index.tsx",
-  "/index.d.ts",
-];
-
-const scriptExtension = /\.(?:js|jsx)$/u;
-
-/**
  * The App file a page's type import names, if there is one: resolved
- * as TypeScript would (`./types` for `types.d.ts` or `types/index.d.ts`,
- * `./x.js` for `x.ts`), but only ever among `files`, the build's own, so
- * no path, folder or extension reaches anything else.
+ * as TypeScript would (`typeCandidates`), but only ever among `files`,
+ * the build's own, so no path, folder or extension reaches anything else.
  */
 const resolveTypeFile = (
   file: string,
   specifier: string,
   files: ReadonlySet<string>
 ): string | undefined => {
-  const parts = file.split("/").slice(0, -1);
-  for (const part of specifier.replace(scriptExtension, "").split("/")) {
-    if (part === "..") {
-      if (parts.pop() === undefined) {
-        return undefined;
-      }
-    } else if (part !== ".") {
-      parts.push(part);
-    }
-  }
-  const path = parts.join("/");
-  return typeSuffixes
-    .map((suffix) => `${path}${suffix}`)
-    .find((candidate) => files.has(candidate));
+  const { path, escaped } = joinedPath(file, specifier);
+  return escaped
+    ? undefined
+    : typeCandidates(path).find((candidate) => files.has(candidate));
 };
-
-/** A specifier TypeScript resolves as a path rather than by name: relative, or absolute. */
-const pathSpecifier = /^(?:\.\.?(?:\/|$)|\/)/u;
 
 /**
  * Why a type import of App code that isn't a page's names a path that
