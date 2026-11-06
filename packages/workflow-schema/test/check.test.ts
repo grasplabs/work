@@ -53,6 +53,20 @@ const withSteps = (change: (steps: unknown[]) => unknown[]) => {
   return { ...document, steps: change(document.steps) };
 };
 
+/** `everyStep` binding the run's files and a Brain collection, `steps` last. */
+const reaching = (steps: unknown[]) => {
+  const document = everyStep();
+  return {
+    ...document,
+    bindings: {
+      ...document.bindings,
+      files: { kind: "files", contract: "run-files" },
+      docs: { kind: "brain", contract: "handbook" },
+    },
+    steps: [...document.steps, ...steps],
+  };
+};
+
 /** `everyStep` with `steps` first and an unmarked parameter, `apiKey`. */
 const withKey = (steps: unknown[]) => {
   const document = everyStep();
@@ -187,6 +201,43 @@ describe("checking a workflow", () => {
       kind: ["/steps/5/binding"],
       none: ["/steps/5/binding"],
       operation: ["/steps/5"],
+    });
+  });
+
+  it("lets only an action reach files and the Brain: no step calls a files or brain binding, and neither is the workflow's own module", () => {
+    expect({
+      declared: codesAt(reaching([])),
+      read: codesAt(
+        reaching([
+          {
+            id: "read",
+            type: "do",
+            binding: "files",
+            arguments: { file: { $expr: "input.who" } },
+          },
+        ])
+      ),
+      search: codesAt(
+        reaching([
+          {
+            id: "search",
+            type: "agent",
+            binding: "docs",
+            instructions: "Find leave.",
+            input: null,
+            output: { type: "string" },
+          },
+        ])
+      ),
+      local: codesAt({
+        ...everyStep(),
+        bindings: { docs: { kind: "brain", contract: "local:code/a.ts#a" } },
+      }),
+    }).toStrictEqual({
+      declared: "ok",
+      read: { "/steps/5/binding": "workflow.binding_kind" },
+      search: { "/steps/5/binding": "workflow.binding_kind" },
+      local: { "/bindings/docs/contract": "workflow.invalid_contract" },
     });
   });
 

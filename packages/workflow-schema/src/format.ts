@@ -131,7 +131,16 @@ export const isPlain = (param: Param): param is PlainParam =>
 /** Whether `param` is sensitive: every parameter not marked otherwise. */
 export const isSensitive = (param: Param): boolean => !isPlain(param);
 
-/** What a binding reaches, as the host's catalog has its contracts. */
+/**
+ * What a binding reaches, as the host's catalog has its contracts. A step
+ * calls the first seven; `files` (the run's own files) and `brain` (one
+ * Brain collection) only the workflow's own actions reach, as uses they
+ * declare: no step calls them itself. What an action returns is its
+ * step's output, recorded as any other, so the action chooses what that
+ * holds: a file's reference, `{ file: <id> }`, which only its own run's
+ * files resolve, rather than its content; and of the Brain, only what the
+ * run's person may read, as its audience and the run's restriction allow.
+ */
 export const bindingKinds = [
   "connector",
   "operation",
@@ -140,13 +149,16 @@ export const bindingKinds = [
   "action",
   "decision",
   "event",
+  "files",
+  "brain",
 ] as const;
 export type BindingKind = (typeof bindingKinds)[number];
 
 /**
  * A binding: what a step calls, by the contract an admin approves. A
  * `compute` or `action` binding names one of the workflow's own modules
- * (`local:code/<file>.ts#<export>`).
+ * (`local:code/<file>.ts#<export>`); every other a contract of the
+ * host's catalog.
  */
 export interface Binding {
   readonly kind: BindingKind;
