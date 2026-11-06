@@ -11,7 +11,7 @@
  */
 @custom-variant dark {
   @media screen {
-    &:is(.dark *) {
+    &:is(.dark *, [data-theme="dark"] *) {
       @slot;
     }
   }
@@ -160,9 +160,12 @@
   --shadow-glow: inset 0 0 0 1px #bfe58c, 0 12px 24px -14px #6fae2ecc;
 }
 
-/* On screen only: paper keeps the light theme. */
+/*
+ * On screen only: paper keeps the light theme. `data-theme="dark"` is how
+ * the SDK docs (apps/docs, Blume) switch to the dark theme.
+ */
 @media screen {
-  .dark {
+  :is(.dark, [data-theme="dark"]) {
     --background: #0d1714;
     --foreground: #eef4f0;
     --card: #14211c;

@@ -97,9 +97,15 @@ export const journeyFiles = [
  * this, a change to web alone ran core's projects, four fifths of the
  * suite's time (October 2026). A package that depends on web for its code
  * belongs elsewhere.
+ *
+ * Core depends on the docs the same way: its build adds their site to the
+ * frontend's files, and its tests serve a stand-in of it
+ * (apps/core/test/fixtures/assets/docs). A change to the docs, their
+ * build and config included, runs their own project: their examples and
+ * their build's output (apps/docs/*.test.ts).
  */
 export const buildOnlyDependencies: ReadonlyMap<string, readonly string[]> =
-  new Map([["@grasp-os/core", ["@grasp-os/web"]]]);
+  new Map([["@grasp-os/core", ["@grasp-os/web", "@grasp-os/docs"]]]);
 
 /** A workspace package: its name, directory and workspace dependencies. */
 export interface WorkspacePackage {

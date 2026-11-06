@@ -53,6 +53,7 @@ import {
   handleConnectionCallback,
   isCatalogLogoPath,
 } from "./connections.ts";
+import { docsResponse } from "./docs.ts";
 import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
@@ -80,6 +81,7 @@ import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
 import { screenFrameResponse, screenModuleResponse } from "./screen-frame.ts";
 import {
+  isDocsPath,
   isRefusedToProductPage,
   setSecurityHeaders,
 } from "./security-headers.ts";
@@ -170,9 +172,9 @@ const pageResponse = async (
 };
 
 /**
- * The frontend's files; unknown paths get index.html (single-page app).
- * Never at a path the browser and the static files would read
- * differently: the browser matches the page's policy on the path as
+ * The frontend's files, the docs among them (docs.ts); unknown paths get
+ * index.html (single-page app). Never at a path the browser and the
+ * static files would read differently: the browser matches the page's policy on the path as
  * written, so `/assets/..%2Fscreen-modules/…` passes as one of the
  * frontend's files, while the static files decode it into another path,
  * from which core would answer. No file of the frontend has such a path.
@@ -190,7 +192,9 @@ const frontendResponse = async (
       requestId
     );
   }
-  return await pageResponse(pathname, request, env);
+  return isDocsPath(pathname)
+    ? await docsResponse(request, env)
+    : await pageResponse(pathname, request, env);
 };
 
 /** `/api/knowledge/uploads/<id>/original`: an upload's original. */

@@ -78,6 +78,57 @@ const contentSecurityPolicy = (origin: string): string =>
     "frame-ancestors": "'none'",
   });
 
+/** Where core serves the SDK docs (docs.ts), among the frontend's files. */
+export const docsPath = "/docs";
+
+/** Where the docs' build puts every script and stylesheet it loads. */
+const docsAssets = `${docsPath}/_astro/`;
+
+/** The hashes of the docs' inline code, as sources (docs.ts). */
+export interface InlineHashes {
+  readonly scripts: readonly string[];
+  readonly styles: readonly string[];
+  /** Of its elements' `style` attributes. */
+  readonly styleAttributes: readonly string[];
+}
+
+/**
+ * The policy of a docs page (docs.ts), on a deployment people reach at
+ * `origin`: the frontend's, with the docs' own scripts and styles in
+ * place of the frontend's, and their inline code by its hashes
+ * (`inline`), as the release built it. Nothing injected into a page
+ * later runs or applies. The docs post no forms and frame nothing.
+ */
+export const docsPolicy = (origin: string, inline: InlineHashes): string =>
+  policy({
+    "default-src": "'self'",
+    "script-src": [`${origin}${docsAssets}`, ...inline.scripts].join(" "),
+    // `'unsafe-hashes'` lets the hashes match `style` attributes too (the
+    // highlighted code's colours): only those the docs have, so no other
+    // attribute applies.
+    "style-src": [
+      `${origin}${docsAssets}`,
+      ...inline.styles,
+      ...(inline.styleAttributes.length === 0
+        ? []
+        : ["'unsafe-hashes'", ...inline.styleAttributes]),
+    ].join(" "),
+    "worker-src": "'none'",
+    "img-src": `${origin}${docsPath}/ data:`,
+    // The docs fetch only their own files (the next page, the search
+    // index), the start page by its address without a `/` too.
+    "connect-src": `${origin}${docsPath} ${origin}${docsPath}/`,
+    "object-src": "'none'",
+    "base-uri": "'none'",
+    "form-action": "'none'",
+    "frame-src": "'none'",
+    "frame-ancestors": "'none'",
+  });
+
+/** Whether `pathname` is one of the docs' (docs.ts). */
+export const isDocsPath = (pathname: string): boolean =>
+  pathname === docsPath || pathname.startsWith(`${docsPath}/`);
+
 /**
  * Whether `pathname` is where core serves code we didn't write: a
  * screen's modules or the files of an App's npm packages.
@@ -266,7 +317,10 @@ export const setSecurityHeaders = (
     headers.set("content-security-policy", "default-src 'none'; sandbox");
     headers.set("cross-origin-resource-policy", "same-origin");
   } else if (url.pathname !== screenFramePath) {
-    headers.set("content-security-policy", contentSecurityPolicy(origin));
+    // The docs' answers carry their own, naming their inline code (docs.ts).
+    if (!(isDocsPath(url.pathname) && headers.has("content-security-policy"))) {
+      headers.set("content-security-policy", contentSecurityPolicy(origin));
+    }
     // A page opened from another site keeps no handle on its opener, and
     // that site none on it: a screen's frame could otherwise post what it
     // read to `top.opener`, which no policy of its own stops. Popups the

@@ -31,6 +31,17 @@ catalog:
   # Type-checks App code in a stateless isolate of its own: tsrs, the Rust
   # port of TypeScript 7's checker, as WebAssembly (packages/compiler).
   "@tsrs/wasm": 0.20.1-ts7.1.0-beta
+  # The SDK docs (apps/docs): the site, its API reference from the SDK's
+  # types and doc comments (TypeDoc, on the typescript6 catalog's
+  # TypeScript, as its JavaScript API needs), and the guides' code blocks,
+  # read with a Markdown parser to type-check them.
+  blume: 2.2.6
+  typedoc: 0.28.20
+  typedoc-plugin-markdown: 4.14.1
+  mdast-util-from-markdown: 2.1.0
+  "@types/mdast": 4.0.4
+  # Reads the built pages for the hashes of their inline code (apps/docs).
+  parse5: 8.1.0
   # Signs the release upload to R2's S3 API (scripts/release).
   aws4fetch: 1.0.20
   secretlint: 13.0.5
@@ -236,6 +247,12 @@ catalogs:
   # The admin deploys with Cloudflare's cf CLI, whose Vite builds need the
   # Cloudflare Vite plugin's v2, still in beta (apps/admin/cloudflare.config.ts).
   # Core, connect and the web stay on the catalog's v1 until v2 is stable.
+  # TypeScript 6 for the SDK docs' build alone (apps/docs/build.ts):
+  # TypeDoc reads the SDK through TypeScript's JavaScript API, which 7 has
+  # none of. Blume depends on 6 itself (^6.0.3), so the docs bring it in
+  # either way; nothing that runs in a Worker or checks App code uses it.
+  typescript6:
+    typescript: 6.0.3
   cf:
     "@cloudflare/vite-plugin": 2.0.0-beta.v.8
     cf: 1.0.0-beta.26
