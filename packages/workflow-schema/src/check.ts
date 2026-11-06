@@ -21,6 +21,7 @@ import {
   durationMs,
   errorTypeBase,
   formatLimits,
+  inboxRoot,
   isPlain,
   isSensitive,
   isValueList,
@@ -43,7 +44,9 @@ import { stepTypes, workflowSchema } from "./schema.ts";
 // - step IDs unique in the workflow, each step's engine names its own;
 // - every expression checked where it stands (`@grasp-os/sdk/expression-check`): it reads
 //   only steps that ran before it, declared parameters that aren't
-//   sensitive, and `error` only in a catch;
+//   sensitive, `error` only in a catch, and `inbox.<alias>` only of a
+//   declared event binding (whether its contract takes email replies is
+//   publication's to check, against the catalog);
 // - a sensitive parameter only as a whole argument of a connector call,
 //   which the host fills in and the run's code never sees;
 // - each step's binding declared, of a kind the step calls;
@@ -531,6 +534,20 @@ const refusalOf = (
       };
     }
   }
+  if (read.root === inboxRoot) {
+    const bindings = walk.document.bindings ?? {};
+    const binding =
+      typeof first === "string" && Object.hasOwn(bindings, first)
+        ? bindings[first]
+        : undefined;
+    if (binding?.kind !== "event") {
+      return {
+        message:
+          "`inbox.<alias>` reads the reply address of a declared event binding.",
+        remedy: "Name an event binding the workflow declares.",
+      };
+    }
+  }
   if (
     read.root === "params" &&
     (typeof first !== "string" || !walk.params.has(first))
@@ -565,6 +582,7 @@ const checkExpressionAt = (
   }
   const checked = checkExpression(expression.$expr, {
     roots: [
+      inboxRoot,
       ...(place.error ? (["error"] as const) : []),
       ...(place.item ? (["item"] as const) : []),
     ],

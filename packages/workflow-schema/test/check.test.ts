@@ -72,6 +72,23 @@ const send = (to: unknown) => ({
   arguments: { to },
 });
 
+/** A mail asking for a reply to `replyTo`, then the wait for it. */
+const asking = (replyTo: string) =>
+  withEventWaits(
+    {
+      id: "ask",
+      type: "do",
+      binding: "mail",
+      operation: "mail.send",
+      arguments: {
+        to: { $expr: "input.who" },
+        subject: "Hi",
+        replyTo: { $expr: replyTo },
+      },
+    },
+    eventWait()
+  );
+
 describe("checking a workflow", () => {
   it("accepts every step kind of the format", () => {
     expect(problemsAt(everyStep())).toBe("ok");
@@ -515,6 +532,23 @@ describe("checking a workflow", () => {
       fromArgument: "ok",
       alsoFor: { "/steps/5": "workflow.wait_kind" },
       timeoutOnSleep: { "/steps/5/timeout": "workflow.unknown_property" },
+    });
+  });
+
+  it("lets `inbox.<alias>` read only a declared event binding's reply address", () => {
+    const at = "/steps/5/arguments/replyTo/$expr";
+    expect({
+      ok: codesAt(asking("inbox.replies")),
+      optional: codesAt(asking('inbox.replies ?? "nobody@acme.test"')),
+      connector: codesAt(asking("inbox.mail")),
+      undeclared: codesAt(asking("inbox.nope")),
+      whole: codesAt(asking("inbox")),
+    }).toStrictEqual({
+      ok: "ok",
+      optional: "ok",
+      connector: { [at]: "workflow.unreadable" },
+      undeclared: { [at]: "workflow.unreadable" },
+      whole: { [at]: "workflow.unreadable" },
     });
   });
 

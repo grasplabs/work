@@ -78,6 +78,24 @@ const fixtures = {
       ],
     }),
   // Event waits, one in a loop's items, and steps reading how they ended.
+  // A mail whose replies go to the run's inbox, a string or `undefined`,
+  // and the wait that takes the reply.
+  inbox: () =>
+    withEventWaits(
+      {
+        id: "ask",
+        type: "do",
+        binding: "mail",
+        operation: "mail.send",
+        if: { $expr: 'typeof inbox.replies === "string"' },
+        arguments: {
+          to: { $expr: "input.who" },
+          subject: { $expr: '"Reply to " + (inbox.replies ?? "")' },
+          replyTo: { $expr: "inbox.replies" },
+        },
+      },
+      eventWait()
+    ),
   eventWaits: () =>
     withEventWaits(
       eventWait({ if: { $expr: 'input.who !== "Ada"' } }),

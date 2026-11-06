@@ -529,8 +529,9 @@ const workflowBuildDeclaration = `/**
  * - \`raise\`: \`{ error: { type, status, title?, detail? } }\` fails the run with the workflow's
  *   own error (a URI type, never the host's).
  * Values are JSON; any part may be an expression \`{ "$expr": "steps.extract.output.total" }\`,
- * a JavaScript expression over \`input\`, \`params\`, \`steps.<id>.output\` (earlier steps only)
- * and, in a catch, \`error\`. A string is always text, never interpolated. At most
+ * a JavaScript expression over \`input\`, \`params\`, \`steps.<id>.output\` (earlier steps only),
+ * \`inbox.<alias>\` (the run's reply address for event binding \`<alias>\`: give it a mail as its
+ * reply-to, then wait on that binding for the reply) and, in a catch, \`error\`. A string is always text, never interpolated. At most
  * ${formatLimits.steps} steps in all.
  * Never write judgement, an outside system or a person's approval as code: when the catalog
  * has no contract for such a step, say which one (its kind, input and output) an admin
