@@ -22,7 +22,6 @@ import {
   checkEvidencePath,
   releaseFormatVersion,
   releaseManifestSchema,
-  sdkProtocolVersion,
   versionErrors,
 } from "@grasp-os/shared/app-releases";
 import type {
@@ -469,8 +468,7 @@ const verifiedRelease = async (
 /**
  * The manifest in `text`, the release of `key`'s: canonical, of the known
  * shape, and naming that release; `version.format_unsupported` for one
- * sealed in another release format, `version.protocol_unsupported` for
- * one sealed for another protocol, `version.manifest_corrupt` otherwise.
+ * sealed in another release format, `version.manifest_corrupt` otherwise.
  */
 const manifestOf = (
   text: string,
@@ -482,19 +480,14 @@ const manifestOf = (
   } catch {
     throw versionErrors.create("version.manifest_corrupt");
   }
-  // Its hash checked already: a protocol this platform doesn't run is a
+  // Its hash checked already: a format this platform doesn't read is a
   // release of another platform version, not tampering.
-  const field = (name: string): unknown =>
+  const format: unknown =
     typeof parsed === "object" && parsed !== null
-      ? Reflect.get(parsed, name)
+      ? Reflect.get(parsed, "formatVersion")
       : undefined;
-  const format = field("formatVersion");
   if (typeof format === "number" && format !== releaseFormatVersion) {
     throw versionErrors.create("version.format_unsupported");
-  }
-  const protocol = field("sdkProtocolVersion");
-  if (typeof protocol === "number" && protocol !== sdkProtocolVersion) {
-    throw versionErrors.create("version.protocol_unsupported");
   }
   let manifest: ReleaseManifest;
   try {
@@ -1479,7 +1472,6 @@ const packaged = async (
     schemaHash: schema,
     contractHash: await sha256Hex(contracts),
     sdkVersion: sdk.version,
-    sdkProtocolVersion,
     uiVersion: kit.version,
     compilerVersion,
     dependencyLockHash: await sha256Hex(emptyLock),

@@ -18,29 +18,14 @@ import { defineErrorFamily } from "./errors.ts";
  * The format of `ReleaseManifest` and of the check evidence it names:
  * version 2 records the evidence (`checkEvidenceSchema`) every load
  * verifies; version 3 seals an App's pages as its file routes in
- * `src/routes/` (`pages.json`), where earlier ones sealed its screens. A
- * release sealed in another format is refused as such
- * (`version.format_unsupported`), sealing it again included, since its
- * manifest is stored for good: a new version replaces it, and none is
- * read as this.
+ * `src/routes/` (`pages.json`), where earlier ones sealed its screens;
+ * version 4 names the SDK it seals by `sdkVersion` alone, the platform
+ * release's own, never gated on. A release sealed in another format is
+ * refused as such (`version.format_unsupported`), sealing it again
+ * included, since its manifest is stored for good: a new version
+ * replaces it, and none is read as this.
  */
-export const releaseFormatVersion = 3;
-
-/**
- * The version of the protocol between the host and an App's isolate. The
- * host's half (its run module, app-functions.ts) imports from a release's
- * sealed SDK only what this version pins: version 1 pins the runner's
- * `runFunction` (and `manifestOfApp`, for inspection); version 2 adds
- * `runMigration`, which runs an App's explicit migrations
- * (apps/core/src/migration-transform.ts), and the App manifest's
- * `migrations`; version 3 adds `registerFunctions`, which the entry the
- * host generates for every App calls with its server modules (the
- * compiler's `serverEntrySource`). Anything else the host's half needs in
- * the isolate is a host module it loads itself. A new import from the
- * sealed SDK requires a new version, since releases sealed before it
- * don't have it.
- */
-export const sdkProtocolVersion = 3;
+export const releaseFormatVersion = 4;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 
@@ -137,7 +122,6 @@ export const releaseManifestSchema = z.strictObject({
   schemaHash: sha256Schema,
   contractHash: sha256Schema,
   sdkVersion: z.string().min(1).max(128),
-  sdkProtocolVersion: z.literal(sdkProtocolVersion),
   uiVersion: z.string().min(1).max(128),
   compilerVersion: z.string().min(1).max(128),
   dependencyLockHash: sha256Schema,
@@ -197,7 +181,6 @@ export const checkEvidenceSchema = z.strictObject({
     target: z.enum(["app", "workflow", "store"]),
     compilerVersion: z.string().min(1).max(128),
     sdkVersion: z.string().min(1).max(128),
-    sdkProtocolVersion: z.literal(sdkProtocolVersion),
     uiVersion: z.string().min(1).max(128),
   }),
   /** SHA-256 of what the checks read and made, each canonical JSON but the texts. */
@@ -246,8 +229,6 @@ export const versionErrors = defineErrorFamily({
     "A file of this App or of a workflow it binds holds what looks like a secret, so it can't be exported. Remove it from that file, publish or seal again, then export.",
   "version.format_unsupported":
     "This version was sealed in a release format this platform doesn't read. Publish a new version and make it current.",
-  "version.protocol_unsupported":
-    "This version was sealed for a protocol between the platform and App code that this platform doesn't run. Publish a new version and make it current.",
   "version.manifest_corrupt":
     "This version's sealed manifest no longer matches its hash.",
   "version.artifact_corrupt":

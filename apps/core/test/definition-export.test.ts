@@ -285,7 +285,6 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
         "generated",
         "manifestHash",
         "schemaHash",
-        "sdkProtocolVersion",
         "sdkVersion",
         "sourceTreeHash",
         "uiVersion",

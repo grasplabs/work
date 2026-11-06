@@ -314,7 +314,6 @@ export const exportAppDefinition = async (
         schemaHash: manifest.schemaHash,
         dependencyLockHash: manifest.dependencyLockHash,
         sdkVersion: manifest.sdkVersion,
-        sdkProtocolVersion: manifest.sdkProtocolVersion,
         uiVersion: manifest.uiVersion,
         compilerVersion: manifest.compilerVersion,
         generated,

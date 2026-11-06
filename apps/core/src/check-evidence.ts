@@ -54,7 +54,6 @@ export type CheckedRelease = Pick<
   | "target"
   | "compilerVersion"
   | "sdkVersion"
-  | "sdkProtocolVersion"
   | "uiVersion"
   | "migrationEvidence"
 >;
@@ -96,7 +95,6 @@ const evidenceOf = async (
       target: release.target,
       compilerVersion: release.compilerVersion,
       sdkVersion: release.sdkVersion,
-      sdkProtocolVersion: release.sdkProtocolVersion,
       uiVersion: release.uiVersion,
     },
     observed: {

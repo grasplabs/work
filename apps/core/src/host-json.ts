@@ -20,9 +20,9 @@ import { valueDepth } from "@grasp-os/shared/value-depth";
 //   module with core's own Wrangler settings, minified and not, and runs
 //   the source it yields with nothing but the language's built-ins in
 //   scope (host-json.bundle.test.ts).
-// - The host's half of the isolate protocol comes to depend on the sealed
-//   SDK: this is a host module, never an SDK export, so the run module
-//   imports from a release's SDK only what `sdkProtocolVersion` pins.
+// - The host's half of the isolate comes to depend on the sealed SDK: this
+//   is a host module, never an SDK export, so it reads as this host does
+//   whichever SDK a release sealed.
 
 /** The host module's name in the isolate: a platform name, loaded last. */
 export const hostJsonModule = "grasp-host-json.js";
