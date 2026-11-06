@@ -54,7 +54,6 @@ import {
 import { usableApp } from "./apps.ts";
 import { keepAuditEvent } from "./audit-outbox.ts";
 import { openStore } from "./data-stores.ts";
-import type { OpenStore } from "./data-stores.ts";
 import { callOperation } from "./operations.ts";
 import type { Invocation, ProgressSink, UseRefusal } from "./operations.ts";
 import {
@@ -68,10 +67,8 @@ import { readWindow } from "./query-windows.ts";
 import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
 import type {
-  AppFunctionCall,
   InvocationProvenance,
   InvocationSources,
-  RunOrigin,
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
 import { keptSensitiveReads } from "./sensitive-reads.ts";
@@ -115,47 +112,7 @@ interface FunctionCaller {
    * it stages needs again when it is dispatched.
    */
   readonly agent?: CallingAgent;
-  /**
-   * The Apps whose calls this one was made through (resource-apps.ts),
-   * the first App's first: none for a page's or an agent's own call.
-   */
-  readonly chain?: readonly AppId[] | undefined;
-  /**
-   * How the invocation's app resources call another App's function
-   * (`BindingCaller.callApp`): as a page's call of it runs. None, and
-   * they call nothing.
-   */
-  readonly callApp?: AppFunctionCall;
-  /** Called from a workflow run's chain: it starts no workflows (`BindingCaller.fromRun`). */
-  readonly fromRun?: boolean | undefined;
-  /** The whole call's count of calls between Apps (`BindingCaller.appCalls`). */
-  readonly appCalls?: { used: number } | undefined;
-  /**
-   * For a call from a workflow run's chain: its step's lease, checked
-   * just before each commit and resource request, with nothing awaited
-   * between that and it.
-   */
-  readonly requireHolds?: (() => void) | undefined;
-  /** For a call from a workflow run's chain: the run (`BindingCaller.runOrigin`). */
-  readonly runOrigin?: RunOrigin | undefined;
-  /** Aborted once the call is cancelled (`BindingCaller.cancelled`). */
-  readonly cancelled?: AbortSignal | undefined;
 }
-
-/**
- * `store`, its commits made only while the attempt still holds its lease,
- * checked with nothing awaited between that and the commit.
- */
-const fencedStore = (
-  store: OpenStore,
-  requireHolds: () => void
-): OpenStore => ({
-  ...store,
-  commit: async (commit) => {
-    requireHolds();
-    return await store.commit(commit);
-  },
-});
 
 /** Whose call a refused use's evidence names (`keptUseRefusals`). */
 interface UseRefusalContext {
@@ -218,28 +175,12 @@ const keptUseRefusals =
 
 /**
  * Who makes a call core resolved for `person`, as the audit log names
- * them: the run whose chain it comes from; else the agent acting for them;
- * else the App whose function called this one; else the person.
+ * them: the agent acting for them, else the person.
  */
-const callerActor = (
-  person: string,
-  {
-    agent,
-    chain,
-    runOrigin,
-  }: Pick<FunctionCaller, "agent" | "chain" | "runOrigin">
-): AuditActor => {
-  if (runOrigin !== undefined) {
-    return runOrigin.actor;
-  }
-  if (agent !== undefined) {
-    return { type: "agent", agentId: agent.agentId, onBehalfOf: person };
-  }
-  const caller = chain?.at(-1);
-  return caller === undefined
+const callerActor = (person: string, agent?: CallingAgent): AuditActor =>
+  agent === undefined
     ? { type: "person", userId: person }
-    : { type: "app", appId: caller, part: "server" };
-};
+    : { type: "agent", agentId: agent.agentId, onBehalfOf: person };
 
 /**
  * The invocation of `release` for `caller`: the store from the release
@@ -256,13 +197,6 @@ export const invocationFor = async (
     stillAllowed,
     sources = invocationSources(),
     agent,
-    chain = [],
-    callApp,
-    fromRun = false,
-    appCalls,
-    requireHolds,
-    runOrigin,
-    cancelled,
   }: FunctionCaller
 ): Promise<Invocation> => {
   // SAFETY: a release's resource ID is the App it was sealed for.
@@ -283,20 +217,7 @@ export const invocationFor = async (
   const authorize = async () => {
     await requireNotRevoked(env, app, release.manifest.resourceVersion);
     await stillAllowed?.();
-    const roles = await operationRoles(env, by, app);
-    // Called through another App (`chain`): its person is a member of this
-    // App at most, never a builder, so the calling App's code, which this
-    // App's builders never reviewed, can't use what only they may do
-    // whenever one of them uses it (a confused deputy). The binding's
-    // review names no role the calls carry: there is only one.
-    admitted =
-      chain.length === 0
-        ? roles
-        : {
-            ...roles,
-            appMember: roles.appMember || roles.appBuilder,
-            appBuilder: false,
-          };
+    admitted = await operationRoles(env, by, app);
     return admitted;
   };
   const bindings = resourceBindingsFor(env, {
@@ -306,20 +227,12 @@ export const invocationFor = async (
     sources,
     actor: delegateActorOf(authority),
     admit: authorize,
-    chain: [...chain, app],
-    ...(callApp === undefined ? {} : { callApp }),
-    fromRun,
-    ...(agent === undefined ? {} : { agent }),
-    ...(appCalls === undefined ? {} : { appCalls }),
-    ...(requireHolds === undefined ? {} : { requireHolds }),
-    ...(runOrigin === undefined ? {} : { runOrigin }),
-    ...(cancelled === undefined ? {} : { cancelled }),
   });
   const store =
     release.store === null
       ? noStore()
       : await openStore(env, release.store.storeId);
-  const actor = callerActor(by.userId, { agent, chain, runOrigin });
+  const actor = callerActor(by.userId, agent);
   return {
     principal: by.userId,
     actor,
@@ -345,10 +258,7 @@ export const invocationFor = async (
       actor: delegateActorOf(authority),
       requestId,
     }),
-    // Called from a run's chain: its commits only while the run's step
-    // still holds its lease.
-    store:
-      requireHolds === undefined ? store : fencedStore(store, requireHolds),
+    store,
     requestId,
     deadline,
     runId: null,
@@ -367,28 +277,18 @@ export const invocationFor = async (
     resources: bindings,
     // The workflows the App binds, started as the App for the person
     // calling: each start admitted on the App's own grant and the
-    // person's role in the App, read again as it is admitted. None for a
-    // call from a workflow run's chain, as for the run's own call: a run
-    // starts no workflow.
-    ...(fromRun
-      ? {}
-      : {
-          workflows: appWorkflowStarts(env, authority, agent ?? null),
-          // A mutation's notifications of the App's runs, likewise: one
-          // made in a run's chain is that run's own business, left out
-          // until decided on its own.
-          notifications: appWorkflowNotifications(
-            env,
-            authority,
-            release,
-            agent ?? null
-          ),
-          // The people the App tells, through the platform's
-          // notifications, as the App for the person calling. None for a
-          // run's chain: a workflow tells people its own way, decided on
-          // its own.
-          notifyPeople: appPeopleNotifications(env, authority, agent ?? null),
-        }),
+    // person's role in the App, read again as it is admitted.
+    workflows: appWorkflowStarts(env, authority, agent ?? null),
+    // A mutation's notifications of the App's runs, likewise.
+    notifications: appWorkflowNotifications(
+      env,
+      authority,
+      release,
+      agent ?? null
+    ),
+    // The people the App tells, through the platform's notifications, as
+    // the App for the person calling.
+    notifyPeople: appPeopleNotifications(env, authority, agent ?? null),
   };
 };
 
@@ -476,10 +376,6 @@ export const publicOperationOf = (
   return operation.path;
 };
 
-/** The fingerprint of the contract of `release`'s function at `path`, if it has one. */
-const fingerprintOf = (release: Release, path: string): string | null =>
-  release.fingerprints[path] ?? null;
-
 /** What a call answers (spec 32.6). */
 export interface FunctionAnswer {
   readonly result: OperationResult;
@@ -547,30 +443,6 @@ interface FunctionCallOptions {
   ) => void;
   /** The agent whose call this is (`FunctionCaller.agent`). */
   readonly agent?: CallingAgent;
-  /** The Apps whose calls this one was made through (`FunctionCaller.chain`). */
-  readonly chain?: readonly AppId[];
-  /** Called from a workflow run's chain (`FunctionCaller.fromRun`). */
-  readonly fromRun?: boolean;
-  /** The whole call's count of calls between Apps (`FunctionCaller.appCalls`). */
-  readonly appCalls?: { used: number };
-  /** A run's lease, for a call from its chain (`FunctionCaller.requireHolds`). */
-  readonly requireHolds?: () => void;
-  /** The run a call from its chain started from (`FunctionCaller.runOrigin`). */
-  readonly runOrigin?: RunOrigin;
-  /** Aborted once the calling page's call is cancelled (`FunctionCaller.cancelled`). */
-  readonly cancelled?: AbortSignal;
-  /**
-   * The calling invocation's sources, for a call from another App's
-   * function (`AppFunctionCall`): the call reads into them. None, and it
-   * starts with its own.
-   */
-  readonly sources?: InvocationSources;
-  /**
-   * A call from another App's function, through its reviewed binding: the
-   * release and contract the binding was checked against, the only ones
-   * it runs on (`version.mismatch` otherwise).
-   */
-  readonly pinned?: { readonly version: number; readonly fingerprint: string };
 }
 
 /**
@@ -904,8 +776,7 @@ const currentResolution = async (
   by: Pick<Identity, "userId" | "role" | "teams"> &
     Partial<Pick<Identity, "staff">>,
   app: unknown,
-  call: FunctionRequest,
-  pinned: FunctionCallOptions["pinned"]
+  call: FunctionRequest
 ) => {
   const found = await usableApp(env, by, app);
   if (found.currentVersion === null) {
@@ -913,14 +784,6 @@ const currentResolution = async (
   }
   const release = await loadRelease(env, found.id, found.currentVersion);
   const resolved = await referenceIn(release, call.reference);
-  // Another App's call runs only on what its binding was checked against.
-  if (
-    pinned !== undefined &&
-    (pinned.version !== found.currentVersion ||
-      fingerprintOf(release, resolved.path) !== pinned.fingerprint)
-  ) {
-    throw versionErrors.create("version.mismatch");
-  }
   return { release, appId: found.id, ...resolved };
 };
 
@@ -940,15 +803,9 @@ const callFunction = async (
     observeReads,
     chargeWindow,
     agent,
-    chain,
-    fromRun,
-    appCalls,
-    requireHolds,
-    runOrigin,
-    cancelled,
     tellsForm,
-    sources = invocationSources(),
   } = options;
+  const sources = invocationSources();
   const requestId = crypto.randomUUID();
   const refused = (error: unknown): FunctionAnswer => ({
     result: { ok: false, error: refusalOf(error, requestId) },
@@ -976,7 +833,7 @@ const callFunction = async (
   }
   let resolved: Awaited<ReturnType<typeof currentResolution>>;
   try {
-    resolved = await currentResolution(env, by, app, call, options.pinned);
+    resolved = await currentResolution(env, by, app, call);
   } catch (error) {
     return refused(error);
   }
@@ -1017,16 +874,6 @@ const callFunction = async (
       ...(stillAllowed === undefined ? {} : { stillAllowed }),
       ...(agent === undefined ? {} : { agent }),
       sources,
-      chain,
-      fromRun,
-      appCalls,
-      requireHolds,
-      runOrigin,
-      cancelled,
-      // Another App's function, as this call of one runs: its role
-      // checked, the chain carried on.
-      callApp: async (person, called, appRequest, appOptions) =>
-        await callFunction(env, person, called, appRequest, appOptions),
     });
     const observed = observedInvocation(invocation, release, observeReads);
     const hosted = hostedRelease(env, release);
@@ -1042,7 +889,6 @@ const callFunction = async (
               ? {}
               : { idempotencyKey: call.idempotencyKey }),
             ...(parentSession === undefined ? {} : { parentSession }),
-            ...(cancelled === undefined ? {} : { cancelled }),
             ...(tellsForm !== true ||
             submittedCall.reference.kind !== "mutation" ||
             submittedKey === undefined
@@ -1571,10 +1417,6 @@ export const invokeAppAction = async (
       by,
       requestId,
       deadline,
-      cancelled,
-      // Another App's function, as a page's call of it runs.
-      callApp: async (person, called, appRequest, appOptions) =>
-        await callFunction(env, person, called, appRequest, appOptions),
     });
     reached = true;
     const result = await callOperation(

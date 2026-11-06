@@ -331,14 +331,13 @@ const clientOf = (
 
 /**
  * The permissions `fn` uses, as its context holds them: `ai`, `brain` and
- * `guests` when listed, and the connections and other Apps by alias.
+ * `grasp` and `guests` when listed, and the connections by alias.
  */
 const permissionsOf = (
   fn: AnyFunction,
   channel: OperationChannel
 ): Record<string, unknown> => {
   const connections: Record<string, unknown> = {};
-  const apps: Record<string, unknown> = {};
   const clients: Record<string, unknown> = {};
   for (const use of fn.uses) {
     if (!isPermission(use)) {
@@ -348,8 +347,6 @@ const permissionsOf = (
     const client = clientOf(use, channel);
     if (kind === "connections") {
       connections[use.alias] = client;
-    } else if (kind === "apps") {
-      apps[use.alias] = client;
     } else {
       clients[kind] = client;
     }
@@ -357,7 +354,6 @@ const permissionsOf = (
   return {
     ...clients,
     connections: Object.freeze(connections),
-    apps: Object.freeze(apps),
   };
 };
 

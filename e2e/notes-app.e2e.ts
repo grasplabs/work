@@ -84,7 +84,7 @@ const createNote = async (
   await form.getByRole("button", { name: "Create note" }).click();
 };
 
-test("a person creates, loads, edits and deletes notes, and a stale save keeps the draft", async ({
+test("a person creates, loads, edits and deletes notes, and a stale save keeps what they typed", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("notesApp");
@@ -131,7 +131,8 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
   const list = reloaded.getByRole("list", { name: "Notes" });
   await expect(list.getByRole("listitem")).toHaveCount(2);
 
-  // Edited with explicit Save; the list follows the committed note.
+  // Edited with explicit Save; the list follows the committed note, and
+  // the editor opens again on it.
   await reloaded.getByRole("button", { name: "Edit Call Acme" }).click();
   const editor = reloaded.getByRole("form", { name: "Edit note" });
   await expect(editor.getByLabel("Title")).toHaveValue("Call Acme");
@@ -141,8 +142,8 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
   await expect(list.getByText("Call Acme back", { exact: true })).toBeVisible();
   await expect(editor.getByLabel("Body")).toHaveValue("On Monday");
 
-  // The same note open in a second tab, its draft started from the same
-  // revision. The first tab saves; the second's save is stale.
+  // The same note open in a second tab, its edit started from the same
+  // revision. The first tab saves again; the second's save is stale.
   const other = await pageOf(builder);
   const second = await openNotes(other, app);
   await second.getByRole("button", { name: "Edit Call Acme back" }).click();
@@ -156,7 +157,7 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
 
   await draft.getByRole("button", { name: "Save changes" }).click();
   await expect(draft.getByRole("alert")).toContainText("changed since");
-  // The draft survived the refusal, unchanged.
+  // What they typed survived the refusal, unchanged.
   await expect(draft.getByLabel("Title")).toHaveValue("Their title");
 
   // Only a deliberate, confirmed reload gives it up for the latest version.
@@ -168,10 +169,10 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
   await expect(draft.getByLabel("Title")).toHaveValue("My title");
   await expect(draft.getByRole("alert")).toHaveCount(0);
 
-  // Deleted, from the first tab.
+  // Deleted, from the first tab, while the second still has it open.
   await reloaded.getByRole("button", { name: "Delete My title" }).click();
   await expect(list.getByRole("listitem")).toHaveText([/Send the invoice/u]);
-  await expect(reloaded.getByText("This note is gone.")).toBeVisible();
+  await expect(second.getByText("This note is gone.")).toBeVisible();
   await reloaded
     .getByRole("button", { name: "Delete Send the invoice" })
     .click();
@@ -396,54 +397,6 @@ test("a list loads five notes at a time and keeps the loaded notes current acros
     /Note 2/u,
     /Note 1/u,
   ]);
-});
-
-test("a draft survives a newer note, and is re-applied on the latest version", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("notesDrafts");
-  const app = await notesApp(builder);
-  const mine = await pageOf(builder);
-  const theirPage = await pageOf(builder);
-  const theirs = await openNotes(theirPage, app);
-  await createNote(theirs, "Plan", "First body");
-  const list = theirs.getByRole("list", { name: "Notes" });
-  await expect(list.getByText("Plan", { exact: true })).toBeVisible();
-
-  // I start editing the title; someone else saves a new body meanwhile.
-  const appPage = await openNotes(mine, app);
-  await appPage.getByRole("button", { name: "Edit Plan" }).click();
-  const editor = appPage.getByRole("form", { name: "Edit note" });
-  await editor.getByLabel("Title").fill("My plan");
-
-  await theirs.getByRole("button", { name: "Edit Plan" }).click();
-  const other = theirs.getByRole("form", { name: "Edit note" });
-  await other.getByLabel("Body").fill("Their body");
-  await other.getByRole("button", { name: "Save changes" }).click();
-  await expect(other.getByLabel("Body")).toHaveValue("Their body");
-
-  // The newer note arrives: my draft stays as it was, and I see what
-  // changed beside what I changed.
-  const changes = editor.getByRole("status").filter({
-    hasText: "This changed since you started editing",
-  });
-  await expect(changes).toContainText("Latest version: Their body");
-  await expect(changes).toContainText("Yours: My plan");
-  // Each field changed shows both versions: what re-applying replaces.
-  await expect(changes).toContainText("Latest version: Plan");
-  await expect(changes).toContainText("Yours: First body");
-  await expect(editor.getByLabel("Title")).toHaveValue("My plan");
-  await expect(editor.getByLabel("Body")).toHaveValue("First body");
-
-  // Re-applied on the latest version, then saved: both changes are kept.
-  await changes
-    .getByRole("button", { name: "Re-apply my changes to the latest version" })
-    .click();
-  await expect(editor.getByLabel("Title")).toHaveValue("My plan");
-  await expect(editor.getByLabel("Body")).toHaveValue("Their body");
-  await editor.getByRole("button", { name: "Save changes" }).click();
-  await expect(list.getByText("My plan", { exact: true })).toBeVisible();
-  await expect(changes).toHaveCount(0);
 });
 
 test("a page's frame speaks the page's language", async ({ pageOf }) => {

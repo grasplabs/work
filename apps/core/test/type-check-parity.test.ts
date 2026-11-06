@@ -70,7 +70,7 @@ const typeDiagnostics = (
     )
     .toSorted();
 
-const blueprints = ["intake", "board-page", "workflow-map"];
+const blueprints = ["intake", "workflow-map"];
 
 /** Mistakes in a page's files, each a component of its own. */
 const pageMistakes: Record<string, string> = {

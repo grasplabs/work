@@ -76,13 +76,9 @@ import { readWorkflowReference, workflowChannel } from "./client-workflow.ts";
 import type { PaginationResult } from "./database.ts";
 import { useGraspForm } from "./form.ts";
 import type {
-  AnswersRecord,
-  EditableKey,
   FormOptionsInput,
   GraspForm,
   OperationFormOptions,
-  RecordForm,
-  RecordFormOptions,
   SchemaFormOptions,
 } from "./form.ts";
 import { peopleDirectory, peopleReferences } from "./people.ts";
@@ -145,14 +141,10 @@ export type {
 } from "./people.ts";
 export type { UploadView } from "./upload-transfer.ts";
 export type {
-  FieldChange,
   FormFailure,
   FormStatus,
   GraspForm,
   OperationFormOptions,
-  RecordChanges,
-  RecordForm,
-  RecordFormOptions,
   SchemaFormOptions,
   SubmitPhase,
   TextFieldName,
@@ -625,17 +617,8 @@ export const useFile = <Reference extends FilesReference>(
   return shown.view;
 };
 
-/** `useForm`'s three ways in, each typed by what it binds. */
+/** `useForm`'s two ways in, each typed by what it binds. */
 interface UseForm {
-  <
-    Reference extends MutationReference,
-    Doc,
-    Field extends EditableKey<Reference, Doc>,
-  >(
-    reference: Reference,
-    options: RecordFormOptions<Reference, Doc, Field> &
-      AnswersRecord<Reference, Doc>
-  ): RecordForm<Pick<Doc, Field>, ReturnOf<Reference>>;
   <Reference extends MutationReference | ActionReference>(
     reference: Reference,
     options: OperationFormOptions<Reference>
@@ -649,17 +632,14 @@ interface UseForm {
 }
 
 /**
- * A form (spec 10.2.1–10.3), one hook with three ways in:
+ * A form (spec 10.2.1–10.2.4), one hook with two ways in:
  *
  * - `useForm(ref, { defaultValues, onSuccess?, resetOnSuccess? })`: a
  *   public mutation or action, its input the fields, the argument
  *   descriptor its reference carries the validator (core checks again
- *   with its own).
- * - `useForm(ref, { record, fields, args, onSuccess? })`: a live document
- *   edited with explicit Save, through a mutation that returns the record
- *   it saved (or `null`, delete-style); a save answering anything else
- *   fails as `contract.invalid_result`. `fields` are editable; `args` maps the
- *   captured baseline to the rest of the arguments (its ID and revision).
+ *   with its own). To edit a record, start `defaultValues` from it, its
+ *   `_id` and `expectedRevision: record._rev` among them: a stale save
+ *   fails as `data.conflict`, shown at the form's level.
  * - `useForm(schema, { defaultValues, onSubmit })`: a local form, checked
  *   by a native schema, `onSubmit` given its normalized output.
  *
@@ -667,7 +647,7 @@ interface UseForm {
  * `SubmitButton` from `@grasp-os/ui/form`, or custom controls through
  * `form.Field`.
  */
-// SAFETY: one implementation serves the three typed ways in above; it
+// SAFETY: one implementation serves the two typed ways in above; it
 // reads which one it was given at run time (form.ts, `targetOf`).
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
 export const useForm = ((target: unknown, options: FormOptionsInput) =>

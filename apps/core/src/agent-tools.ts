@@ -740,7 +740,7 @@ const definitions = (known: Set<string>) => [
     name: "addPermission",
     label: "Add a permission",
     api: "build",
-    description: `Adds something the App reaches outside itself, written as code declares it: \`permission.ai({ maxOutputTokens: 2000 })\`, \`permission.connection("mail", { contract: "microsoft-365.mail@1", actions: ["send"] })\`, \`permission.workflow("triage", { input: v.object({...}), output: v.object({...}) })\`, \`permission.app("crm", { functions: {...} })\`, \`permission.grasp()\`, \`permission.brain({...})\`, \`permission.guests({...})\`, \`permission.files({ operations: [...] })\`, \`permission.links({ origins: [...] })\`, or \`people\` (reading the organization's people). Server code imports it as \`permissions.<alias>\` from grasp.config.ts and lists it in a function's \`uses\`. It grants nothing: an admin binds or grants each. ${definitionAnswer}`,
+    description: `Adds something the App reaches outside itself, written as code declares it: \`permission.ai({ maxOutputTokens: 2000 })\`, \`permission.connection("mail", { contract: "microsoft-365.mail@1", actions: ["send"] })\`, \`permission.workflow("triage", { input: v.object({...}), output: v.object({...}) })\`, \`permission.grasp()\` (the platform's statistics), \`permission.brain({...})\`, \`permission.guests({...})\`, \`permission.files({ operations: [...] })\`, \`permission.links({ origins: [...] })\`, or \`people\` (reading the organization's people). Server code imports it as \`permissions.<alias>\` from grasp.config.ts and lists it in a function's \`uses\`. It grants nothing: an admin binds or grants each. ${definitionAnswer}`,
     parameters: Type.Object(
       {
         app: appParameter,

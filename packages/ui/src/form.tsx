@@ -9,17 +9,11 @@ import type { ValueDescriptor } from "@grasp-os/sdk/form-binding";
 import { useQuery, useRetryFailed, useUpload } from "@grasp-os/sdk/react";
 import type {
   Declaring,
-  FieldChange,
   FormStatus,
   GraspForm,
-  RecordForm,
   TextFieldName,
 } from "@grasp-os/sdk/react";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/ui/components/alert";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import { ButtonGroup } from "@grasp-os/ui/components/button-group";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
@@ -63,8 +57,6 @@ import {
 import { useId, useRef, useState, useSyncExternalStore } from "react";
 import type * as React from "react";
 
-import { changesTexts, shownValue } from "./internal/form-changes-text.ts";
-import type { ChangesText } from "./internal/form-changes-text.ts";
 import { pageText } from "./internal/language.ts";
 import type { Texts } from "./internal/language.ts";
 import { QueryBoundary } from "./internal/query-boundary.tsx";
@@ -1579,7 +1571,7 @@ const UncertainSubmission = ({
 
 /**
  * What `form`'s last submission came to, when there is something to say:
- * why it failed or was refused (a conflict among them), that its outcome
+ * why it failed or was refused (a stale save's `data.conflict` among them), that its outcome
  * is unknown (submitting sends it again; discarding it, once confirmed,
  * unlocks the fields), or that what came after a save failed. Each message is
  * the platform's or the App's own, safe to show.
@@ -1641,119 +1633,6 @@ const FormError = ({
   return null;
 };
 
-/** One field that changed, as the latest record and the draft have it. */
-const ChangedField = ({
-  change,
-  label,
-  latestLabel,
-  yoursLabel,
-  text,
-}: {
-  change: FieldChange;
-  label: React.ReactNode;
-  latestLabel: string;
-  yoursLabel: string;
-  text: ChangesText;
-}): React.JSX.Element => (
-  <div className="flex flex-col gap-1">
-    <dt className="font-medium">{label}</dt>
-    <dd>
-      {latestLabel}: {shownValue(change.latest, text)}
-    </dd>
-    <dd>
-      {yoursLabel}: {shownValue(change.draft, text)}
-    </dd>
-  </div>
-);
-
-/**
- * What changed since a record form's draft started, once a newer record
- * arrived or a save was refused as stale (GRA-254): each field the
- * latest record or the person changed, both versions side by side, and
- * a button that re-applies the person's changes on the latest record, as
- * a draft to review and save. Discarding the draft (`form.reload()`) is
- * the App's own control, since it loses edits and asks first.
- */
-const FormChanges = <Values,>({
-  form,
-  labels,
-  title,
-  waiting,
-  latestLabel,
-  yoursLabel,
-  reapplyLabel,
-  className,
-}: {
-  form: RecordForm<Values, unknown>;
-  /** What each field is called, by its name; its name otherwise. */
-  labels?: Readonly<Record<string, React.ReactNode>>;
-  title?: string;
-  /** While the latest record is still on its way. */
-  waiting?: string;
-  latestLabel?: string;
-  yoursLabel?: string;
-  reapplyLabel?: string;
-  className?: string;
-}): React.JSX.Element | null => {
-  const status = useFormStatus(form);
-  if (!status.newer && !status.conflict) {
-    return null;
-  }
-  const locked = status.phase !== "idle";
-  // In the page's language unless the App says otherwise.
-  const text = pageText(changesTexts);
-  return (
-    <form.Subscribe selector={(state) => state.values}>
-      {() => {
-        const changes = bindingOf(form).changes();
-        return (
-          <Alert className={className} live="polite">
-            <AlertTitle>{title ?? text.title}</AlertTitle>
-            <AlertDescription>
-              {/* The changes follow the person's typing: shown, never
-                  announced again with each keystroke (the heading is). */}
-              {changes.latestKnown ? (
-                <dl aria-live="off" className="flex flex-col gap-2">
-                  {changes.fields.map((change) => (
-                    <ChangedField
-                      change={change}
-                      key={change.field}
-                      label={
-                        labels !== undefined &&
-                        Object.hasOwn(labels, change.field)
-                          ? labels[change.field]
-                          : change.field
-                      }
-                      latestLabel={latestLabel ?? text.latest}
-                      text={text}
-                      yoursLabel={yoursLabel ?? text.yours}
-                    />
-                  ))}
-                </dl>
-              ) : (
-                <p>{waiting ?? text.waiting}</p>
-              )}
-              <p>
-                <Button
-                  disabled={!changes.latestKnown || locked}
-                  onClick={() => {
-                    form.reapply();
-                  }}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {reapplyLabel ?? text.reapply}
-                </Button>
-              </p>
-            </AlertDescription>
-          </Alert>
-        );
-      }}
-    </form.Subscribe>
-  );
-};
-
 /**
  * `form`'s submit button: it submits on its own click (and so on Enter in
  * a field), shows when a submission is in flight, and takes no second
@@ -1791,7 +1670,6 @@ export {
   DateTimeField,
   FileField,
   Form,
-  FormChanges,
   FormError,
   MultiSelectField,
   NumberField,

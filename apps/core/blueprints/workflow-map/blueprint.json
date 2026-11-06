@@ -1,4 +1,13 @@
 {
   "name": "Workflow map",
-  "description": "Draws the company's workflows as steps with numbers, designs how they should run, and shows the hours each would save. Its workflows, teams and every version of each live in the App's own store: everyone who may open it reads them, and only its builders change them."
+  "description": "Draws the company's workflows as steps with numbers, designs how they should run, and shows the hours each would save. Its board page takes dated snapshots of those numbers and shows one for the board: maturity, where the hours go, before and after, improvement signals and the decision needed, printed on one page. Its workflows, teams, every version of each and its snapshots live in the App's own store: everyone who may open it reads them, and only its builders change them or take snapshots.",
+  "permissions": [
+    {
+      "object": {
+        "type": "platform"
+      },
+      "actions": ["statistics"],
+      "binding": "PLATFORM"
+    }
+  ]
 }

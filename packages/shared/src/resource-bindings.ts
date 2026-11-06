@@ -37,10 +37,6 @@ const modelNameSchema = z
  * - `knowledge` (`brain`): one of the App's collection permissions for
  *   each collection the declaration names, read as a delegate on every
  *   call;
- * - `app` (`apps`): another App, whose current release serves each
- *   declared public function exactly as declared: each call runs as the
- *   person the calling App's call acts for, under that App's own roles
- *   (core's resource-apps.ts). The admin's approval is the grant;
  * - `grasp` (`apps`, alias `grasp`): the platform's own read-only
  *   functions, under one of the App's `{ type: "platform" }` permissions
  *   to read the platform's statistics (`statistics`), checked on every
@@ -76,7 +72,6 @@ export const bindingTargetSchema = z.discriminatedUnion("kind", [
     kind: z.literal("guests"),
     permissionId: permissionIdSchema,
   }),
-  z.strictObject({ kind: z.literal("app"), appId: appIdSchema }),
 ]);
 export type BindingTarget = z.infer<typeof bindingTargetSchema>;
 export type BindingTargetInput = z.input<typeof bindingTargetSchema>;
@@ -167,12 +162,6 @@ export interface PlatformChoice {
   permissionId: string;
 }
 
-/** Another App, as an apps permission's choice. */
-export interface AppChoice {
-  appId: string;
-  name: string;
-}
-
 /**
  * What an admin may bind a declared permission to now, by its kind:
  *
@@ -184,8 +173,6 @@ export interface AppChoice {
  * - `grasp`: the App's own active permissions to read the platform's
  *   statistics;
  * - `guests`: the App's own active permissions to invite guests.
- * - `app`: other Apps the admin may see whose current release serves every
- *   declared function, public and exactly as declared.
  *
  * Approving checks the choice again: one that stopped serving since is
  * refused (`resource.target_invalid`). `truncated` says some were left
@@ -198,7 +185,6 @@ export type BindingChoices = { truncated: boolean } & (
   | { kind: "knowledge"; permissions: CollectionChoice[] }
   | { kind: "grasp"; permissions: PlatformChoice[] }
   | { kind: "guests"; permissions: PlatformChoice[] }
-  | { kind: "app"; apps: AppChoice[] }
 );
 
 /**

@@ -287,23 +287,35 @@ import {
   AlertDialogTrigger,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
-import { Form, FormChanges, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
+import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
 import { useState } from "react";
 import { api } from "@server/_generated/api";
 
 export type Note = NonNullable<ReturnOf<typeof api.notes.get>>;
 
 /**
- * One note, edited with explicit Save: the draft keeps the revision it
- * started from, and a save someone else's overtook keeps the draft until
- * the person chooses to load the latest version, or to re-apply their
- * changes on it.
+ * One note, edited with explicit Save from the version it opened at: its
+ * revision goes with the save, so a save someone else's overtook fails as
+ * \`data.conflict\` and keeps what the person typed until they choose to
+ * load the latest version. Saved, it opens again on the note it saved.
  */
-export function NoteEditor({ note }: { note: Note }) {
+export function NoteEditor({
+  note,
+  onSaved,
+  onReload,
+}: {
+  note: Note;
+  onSaved: (saved: Note) => void;
+  onReload: () => void;
+}) {
   const form = useForm(api.notes.update, {
-    record: note,
-    fields: ["title", "body"],
-    args: (baseline) => ({ id: baseline._id, expectedRevision: baseline._rev }),
+    defaultValues: {
+      id: note._id,
+      expectedRevision: note._rev,
+      title: note.title,
+      body: note.body,
+    },
+    onSuccess: onSaved,
   });
   const [confirming, setConfirming] = useState(false);
   return (
@@ -311,7 +323,6 @@ export function NoteEditor({ note }: { note: Note }) {
       <TextField form={form} label="Title" name="title" />
       <TextareaField form={form} label="Body" name="body" />
       <FormError form={form} />
-      <FormChanges form={form} labels={{ title: "Title", body: "Body" }} />
       <div className="flex gap-2">
         <SubmitButton form={form}>Save changes</SubmitButton>
         <AlertDialog onOpenChange={setConfirming} open={confirming}>
@@ -329,8 +340,8 @@ export function NoteEditor({ note }: { note: Note }) {
               <AlertDialogCancel>Keep editing</AlertDialogCancel>
               <AlertDialogAction
                 onClick={() => {
-                  form.reload();
                   setConfirming(false);
+                  onReload();
                 }}
                 variant="destructive"
               >
@@ -355,20 +366,35 @@ import { Attachments } from "../components/attachments.tsx";
 import { CreateNote } from "../components/create-note.tsx";
 import { ImportNote } from "../components/import-note.tsx";
 import { NoteEditor } from "../components/note-editor.tsx";
+import type { Note } from "../components/note-editor.tsx";
 
 /** The note chosen, loaded live; null is a note that is gone. */
 function SelectedNote({ id }: { id: Id<"notes"> }) {
   const note = useQuery(api.notes.get, { id });
+  // Saving, or loading the latest version, opens the editor afresh: from
+  // the note it saved, or the note as it is now, whichever is newer, as the
+  // live note may not have caught up with a save yet.
+  const [opened, setOpened] = useState<{ loads: number; saved: Note | null }>({
+    loads: 0,
+    saved: null,
+  });
   if (note === undefined) {
     return <p role="status">Loading the note…</p>;
   }
   if (note === null) {
     return <p>This note is gone.</p>;
   }
-  // A note chosen anew is a new editor: its draft never carries over.
+  const { saved } = opened;
+  const from = saved !== null && saved._rev > note._rev ? saved : note;
+  // A note chosen anew is a new editor: what was typed never carries over.
   return (
     <>
-      <NoteEditor key={note._id} note={note} />
+      <NoteEditor
+        key={\`\${note._id}:\${opened.loads}\`}
+        note={from}
+        onReload={() => setOpened(({ loads }) => ({ loads: loads + 1, saved: null }))}
+        onSaved={(next) => setOpened(({ loads }) => ({ loads: loads + 1, saved: next }))}
+      />
       <Attachments note={note} />
     </>
   );

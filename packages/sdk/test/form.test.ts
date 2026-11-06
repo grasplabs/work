@@ -17,8 +17,8 @@ import { api, workflows } from "./notes/server/_generated/api.ts";
 // A form's submission state through the real session client, against the
 // network it reaches the host through: an outcome it can't tell, given up
 // only by the person, and never sent again as anyone else; server issues
-// where they belong; records the parent supplies, adopted while the draft
-// holds what the record holds; and its callback's own failures.
+// where they belong; a stale save of a record shown at the form's level;
+// and its callback's own failures.
 
 /** What the host answers one call: core's `{ result }`, a refusal, or nothing. */
 type Answer =
@@ -450,82 +450,39 @@ describe("a form's issues", () => {
   });
 });
 
-describe("a record form and the records it is supplied", () => {
+describe("a form editing a record", () => {
   const record = { _id: noteId, _rev: 3, title: "Before", body: "" };
 
-  /** A record form over `record`, its title edited and saved, the host answering the save with `answer`. */
-  const saved = async (answer: () => unknown) => {
-    const { client } = host(() => ({ value: answer() }));
+  it("shows a stale save as the form's own data.conflict, keeping the person's values", async () => {
+    const { client, sent } = host(() => ({
+      failed: "data.conflict",
+      category: "domain",
+    }));
     const { binding, form } = formOf(client, api.notes.update, {
-      record,
-      fields: ["title", "body"],
-      args: () => ({ id: record._id, expectedRevision: record._rev }),
+      defaultValues: {
+        id: record._id,
+        expectedRevision: record._rev,
+        title: record.title,
+        body: record.body,
+      },
     });
     form.setFieldValue("title", "Edited");
     const outcome = await settle(binding.submit());
-    return { binding, form, outcome };
-  };
-
-  /** The committed record, as `notes.update` answers it. */
-  const committed = () => ({ ...record, _rev: 4, title: "Edited" });
-
-  it("adopts a newer record while the draft holds what the record does, in whatever order", () => {
-    const { client } = host(() => ({ value: null }));
-    const withMeta = { ...record, meta: { color: "blue", size: 2 } };
-    const { binding, form } = formOf(client, api.notes.update, {
-      record: withMeta,
-      fields: ["title", "meta"],
-      args: () => ({ id: record._id, expectedRevision: record._rev }),
+    expect({
+      outcome,
+      status: binding.status(),
+      values: form.state.values,
+      sent: sent.map(({ input }) => input),
+    }).toMatchObject({
+      outcome: { rejected: { code: "data.conflict" } },
+      status: {
+        phase: "idle",
+        failure: { code: "data.conflict" },
+        fieldIssues: {},
+      },
+      values: { title: "Edited" },
+      sent: [{ id: record._id, expectedRevision: 3, title: "Edited" }],
     });
-    // The same value, its keys in another order: no edit.
-    form.setFieldValue("meta", { size: 2, color: "blue" });
-    binding.supply({ ...withMeta, _rev: 4, title: "Second" });
-    expect(binding.status().newer).toBeFalsy();
-    expect(form.state.values).toMatchObject({ title: "Second" });
-  });
-
-  it("refuses an answer that isn't the record, keeping the values and adopting nothing", async () => {
-    const { binding, form, outcome } = await saved(() => record._id);
-    expect(outcome).toMatchObject({
-      rejected: { code: "contract.invalid_result" },
-    });
-    expect(binding.status()).toMatchObject({
-      phase: "idle",
-      failure: { code: "contract.invalid_result" },
-    });
-    expect(form.state.values).toMatchObject({ title: "Edited" });
-  });
-
-  it("adopts nothing, without failing, when a delete-style save answers null", async () => {
-    const { binding, form, outcome } = await saved(() => null);
-    expect(outcome).toStrictEqual({ resolved: null });
-    expect(binding.status()).toMatchObject({
-      phase: "idle",
-      failure: undefined,
-    });
-    expect(form.state.values).toMatchObject({ title: "Edited" });
-  });
-
-  it("adopts the committed record, then a newer revision with no edits since", async () => {
-    const { binding, form } = await saved(committed);
-    binding.supply({ ...committed(), _rev: 5, body: "Set too" });
-    expect(binding.status()).toMatchObject({ phase: "idle", newer: false });
-    expect(form.state.values).toMatchObject({ body: "Set too" });
-  });
-
-  it("keeps edits made since over a newer revision, saying one came", async () => {
-    const { binding, form } = await saved(committed);
-    form.setFieldValue("title", "Edited again");
-    binding.supply({ ...committed(), _rev: 5 });
-    expect(binding.status()).toMatchObject({ newer: true });
-    expect(form.state.values).toMatchObject({ title: "Edited again" });
-  });
-
-  it("ignores a read sent before the save that answers after it", async () => {
-    const { binding, form } = await saved(committed);
-    binding.supply({ ...record });
-    expect(binding.status()).toMatchObject({ newer: false });
-    expect(form.state.values).toMatchObject({ title: "Edited" });
   });
 });
 
@@ -904,8 +861,8 @@ describe("a form with a file uploading", () => {
   });
 });
 
-describe("a form whose draft is discarded while a file uploads", () => {
-  it("cancels the upload, and says its file belongs to no draft any more", async () => {
+describe("a form whose edits are discarded while a file uploads", () => {
+  it("cancels the upload, and says its file belongs to no edits any more", async () => {
     const { client } = host(() => ({ value: 1 }));
     const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
     let cancelled = 0;

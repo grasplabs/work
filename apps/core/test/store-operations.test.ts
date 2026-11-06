@@ -19,7 +19,6 @@ import {
   requestPermission,
   revokePermission,
 } from "../src/permissions.ts";
-import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { isRestricted, restrict } from "../src/restricted.ts";
 import {
   callStoreOperation,
@@ -1260,46 +1259,6 @@ export const list = query({
 `,
 };
 
-/** An App that reads and adds the CRM's leads through its public functions (`permission.app`). */
-const leadsDeskFiles: Record<string, string> = {
-  ...appDefinition({
-    name: "Desk",
-    tables: {},
-    permissions: [
-      'permission.app("crm", {\n  functions: {\n    "leads.list": { kind: "query", args: {}, returns: v.array(v.string()) },\n    "leads.add": {\n      kind: "mutation",\n      args: { name: v.string(), team: v.string(), assignee: v.string().optional() },\n      returns: v.null(),\n    },\n  },\n})',
-    ],
-  }),
-  "server/desk.ts": `import { v } from "@grasp-os/sdk";
-import { action } from "@server/_generated/server";
-import { permissions } from "../grasp.config.ts";
-
-export const crm = permissions.crm;
-
-/** What a call answered, as JSON, or the code it failed with. */
-const attempt = async (work: () => Promise<unknown>): Promise<string> => {
-  try {
-    return JSON.stringify(await work());
-  } catch (error) {
-    return \`error:\${String(Reflect.get(Object(error), "code"))}\`;
-  }
-};
-
-export const list = action({
-  args: {},
-  returns: v.string(),
-  uses: [crm],
-  handler: async (ctx) => await attempt(() => ctx.apps.crm.call("leads.list", {})),
-});
-
-export const add = action({
-  args: { name: v.string(), team: v.string(), assignee: v.string().optional() },
-  returns: v.string(),
-  uses: [crm],
-  handler: async (ctx, args) => await attempt(() => ctx.apps.crm.call("leads.add", args)),
-});
-`,
-};
-
 /** Puts `people` in a new team, in core's records; answers its ID. */
 const teamOf = async (...people: Person[]): Promise<string> => {
   const id = crypto.randomUUID();
@@ -1320,48 +1279,14 @@ const teamOf = async (...people: Person[]): Promise<string> => {
 };
 
 describe("a store's public operations and its tables' row rules", () => {
-  it("hold another App's and a workflow's calls to the rows the person they act for may reach, by team and by assignee", async () => {
+  it("hold a workflow's calls to the rows the person it acts for may reach, by team", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const crm = await sealedApp(leadsCrmFiles, "Leads");
-    const desk = await sealedApp(leadsDeskFiles, "Desk");
-    await approveResourceBinding(env, admin, {
-      app: desk.app,
-      alias: "crm",
-      target: { kind: "app", appId: crm.app },
-      reviewed: { version: 1 },
-    });
-    // Desk's owner uses the CRM too: a call through another App runs under
-    // that App's own roles.
-    await env.DB.prepare(
-      "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
-    )
-      .bind(crm.app, desk.owner.userId, admin.userId, Date.now())
-      .run();
-    // Desk's owner is in Sales; the admin in Support; Ada, whose workflow
-    // calls the CRM, in Sales too.
-    const sales = await teamOf(desk.owner, ada);
+    // Ada, whose workflow calls the CRM, is in Sales with the CRM's owner,
+    // who reads what lands; the admin is in Support.
+    const sales = await teamOf(ada, crm.owner);
     const support = await teamOf(admin);
-    const viaDesk = async (by: Person, path: string, input: unknown = {}) =>
-      await call(by, desk, path, input);
-    const added = {
-      own: await viaDesk(desk.owner, "desk.add", { name: "Acme", team: sales }),
-      // A Support lead, assigned to Desk's owner, who reads it as its assignee.
-      assigned: await viaDesk(admin, "desk.add", {
-        name: "Initech",
-        team: support,
-        assignee: desk.owner.userId,
-      }),
-      hidden: await viaDesk(admin, "desk.add", {
-        name: "Globex",
-        team: support,
-      }),
-      // Not into a team they aren't in.
-      otherTeam: await viaDesk(desk.owner, "desk.add", {
-        name: "Umbrella",
-        team: support,
-      }),
-    };
     const key = await contractOf(admin, crm.release, "leads.add");
     const workflow = await workflowOf(ada, key, {
       ...byName,
@@ -1406,240 +1331,14 @@ describe("a store's public operations and its tables' row rules", () => {
       ownTeam: await run("Hooli", sales),
       otherTeam: await run("Wayne", support),
     };
+    // Refused: a consumer is told no more than that it isn't served, and
+    // nothing of it lands, as the CRM's own read shows.
     expect({
-      added,
       ran,
-      deskOwnerReads: await viaDesk(desk.owner, "desk.list"),
-      adminReads: await viaDesk(admin, "desk.list"),
+      crmSees: await call(crm.owner, crm, "leads.list"),
     }).toStrictEqual({
-      added: {
-        own: null,
-        assigned: null,
-        hidden: null,
-        // Refused: a consumer is told no more than that it isn't served,
-        // and nothing of it lands, as the reads below show.
-        otherTeam: "error:resource.unavailable",
-      },
       ran: { ownTeam: "ok", otherTeam: "resource.unavailable" },
-      deskOwnerReads: ["Acme", "Hooli", "Initech"],
-      adminReads: ["Globex", "Initech"],
-    });
-  });
-});
-
-/**
- * A CRM whose plans only its builders read and change, and whose memos
- * everyone with a role in it does, by role rules on member tables.
- */
-const rolesCrmFiles: Record<string, string> = {
-  ...appDefinition({
-    name: "Roles CRM",
-    tables: {
-      plans: {
-        fields: { text: "v.string()" },
-        access: {
-          read: "appMembers",
-          write: "appMembers",
-          rows: { read: [{ kind: "role", role: "builder" }] },
-        },
-      },
-      memos: {
-        fields: { text: "v.string()" },
-        access: {
-          read: "appMembers",
-          write: "appMembers",
-          rows: { read: [{ kind: "role", role: "user" }] },
-        },
-      },
-    },
-  }),
-  "server/crm.ts": `import { AppError, v } from "@grasp-os/sdk";
-import { mutation, query } from "@server/_generated/server";
-
-export const addPlan = mutation({
-  args: { text: v.string() },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    await ctx.db.insert("plans", args);
-    return null;
-  },
-});
-
-export const plans = query({
-  args: {},
-  returns: v.array(v.string()),
-  handler: async (ctx) => (await ctx.db.query("plans").take(100)).map(({ text }) => text),
-});
-
-export const addMemo = mutation({
-  args: { text: v.string() },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    await ctx.db.insert("memos", args);
-    return null;
-  },
-});
-
-export const memos = query({
-  args: {},
-  returns: v.array(v.string()),
-  handler: async (ctx) => (await ctx.db.query("memos").take(100)).map(({ text }) => text),
-});
-
-/** What only the CRM's builders may run: its own check of who calls. */
-export const forBuilders = query({
-  args: {},
-  returns: v.boolean(),
-  handler: async (ctx) => {
-    const user = await ctx.auth.getUser();
-    if (!user.roles.includes("builder")) {
-      throw new AppError("crm.builders_only", "Only the CRM's builders run this.");
-    }
-    return true;
-  },
-});
-`,
-};
-
-/** An App that reads and adds the CRM's plans and memos through its public functions (`permission.app`). */
-const rolesDeskFiles: Record<string, string> = {
-  ...appDefinition({
-    name: "Desk",
-    tables: {},
-    permissions: [
-      'permission.app("crm", {\n  functions: {\n    "crm.plans": { kind: "query", args: {}, returns: v.array(v.string()) },\n    "crm.memos": { kind: "query", args: {}, returns: v.array(v.string()) },\n    "crm.addPlan": { kind: "mutation", args: { text: v.string() }, returns: v.null() },\n    "crm.addMemo": { kind: "mutation", args: { text: v.string() }, returns: v.null() },\n    "crm.forBuilders": { kind: "query", args: {}, returns: v.boolean() },\n  },\n})',
-    ],
-  }),
-  "server/desk.ts": `import { v } from "@grasp-os/sdk";
-import { action } from "@server/_generated/server";
-import { permissions } from "../grasp.config.ts";
-
-export const crm = permissions.crm;
-
-/** What a call answered, as JSON, or the code it failed with. */
-const attempt = async (work: () => Promise<unknown>): Promise<string> => {
-  try {
-    return JSON.stringify(await work());
-  } catch (error) {
-    return \`error:\${String(Reflect.get(Object(error), "code"))}\`;
-  }
-};
-
-export const plans = action({
-  args: {},
-  returns: v.string(),
-  uses: [crm],
-  handler: async (ctx) => await attempt(() => ctx.apps.crm.call("crm.plans", {})),
-});
-
-export const memos = action({
-  args: {},
-  returns: v.string(),
-  uses: [crm],
-  handler: async (ctx) => await attempt(() => ctx.apps.crm.call("crm.memos", {})),
-});
-
-export const addPlan = action({
-  args: { text: v.string() },
-  returns: v.string(),
-  uses: [crm],
-  handler: async (ctx, args) => await attempt(() => ctx.apps.crm.call("crm.addPlan", args)),
-});
-
-export const addMemo = action({
-  args: { text: v.string() },
-  returns: v.string(),
-  uses: [crm],
-  handler: async (ctx, args) => await attempt(() => ctx.apps.crm.call("crm.addMemo", args)),
-});
-
-export const forBuilders = action({
-  args: {},
-  returns: v.string(),
-  uses: [crm],
-  // The CRM's own code for the refusal, which its contract gives every
-  // caller under \`resource.operation_failed\`.
-  handler: async (ctx) => {
-    try {
-      return JSON.stringify(await ctx.apps.crm.call("crm.forBuilders", {}));
-    } catch (error) {
-      const details = Object(Reflect.get(Object(error), "details"));
-      return \`error:\${String(Reflect.get(details, "code"))}\`;
-    }
-  },
-});
-`,
-};
-
-describe("another App's public functions and its tables' role rules", () => {
-  it("serve another App's calls as a member's, never a builder's: a builders' rule admits no row, a users' rule every one", async () => {
-    const admin = await person("admin");
-    const crm = await sealedApp(rolesCrmFiles, "Roles CRM");
-    const desk = await sealedApp(rolesDeskFiles, "Desk");
-    await approveResourceBinding(env, admin, {
-      app: desk.app,
-      alias: "crm",
-      target: { kind: "app", appId: crm.app },
-      reviewed: { version: 1 },
-    });
-    // Desk's owner uses the CRM too: a call through another App runs as
-    // the person, a member of that App at most.
-    await env.DB.prepare(
-      "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
-    )
-      .bind(crm.app, desk.owner.userId, admin.userId, Date.now())
-      .run();
-    await call(crm.owner, crm, "crm.addPlan", { text: "Launch plan" });
-    await call(crm.owner, crm, "crm.addMemo", { text: "Team memo" });
-
-    expect({
-      // The admin builds every App, the CRM included: in it, they read
-      // the builders' plans; through Desk, as a member, none.
-      adminInCrm: await call(admin, crm, "crm.plans"),
-      adminPlansThroughDesk: await call(admin, desk, "desk.plans"),
-      adminMemosThroughDesk: await call(admin, desk, "desk.memos"),
-      deskOwnerPlans: await call(desk.owner, desk, "desk.plans"),
-      // A builders' plan can't be written through Desk; a memo can.
-      addedPlan: await call(admin, desk, "desk.addPlan", { text: "Forged" }),
-      addedMemo: await call(desk.owner, desk, "desk.addMemo", {
-        text: "Desk memo",
-      }),
-      plansAfter: await call(crm.owner, crm, "crm.plans"),
-      memosAfter: await call(crm.owner, crm, "crm.memos"),
-    }).toStrictEqual({
-      adminInCrm: ["Launch plan"],
-      adminPlansThroughDesk: [],
-      adminMemosThroughDesk: ["Team memo"],
-      deskOwnerPlans: [],
-      addedPlan: "error:resource.unavailable",
-      addedMemo: null,
-      plansAfter: ["Launch plan"],
-      memosAfter: ["Team memo", "Desk memo"],
-    });
-  });
-
-  it("never lets a builder of the called App reach its builders' functions through another App", async () => {
-    // The confused deputy: Desk's code, which the CRM's builders never
-    // reviewed, calls the CRM whenever one of its builders uses Desk.
-    const admin = await person("admin");
-    const crm = await sealedApp(rolesCrmFiles, "Roles CRM");
-    const desk = await sealedApp(rolesDeskFiles, "Desk");
-    await approveResourceBinding(env, admin, {
-      app: desk.app,
-      alias: "crm",
-      target: { kind: "app", appId: crm.app },
-      reviewed: { version: 1 },
-    });
-    expect({
-      // In the CRM itself, its builders run it: the admin builds every App.
-      direct: await call(admin, crm, "crm.forBuilders"),
-      ownerDirect: await call(crm.owner, crm, "crm.forBuilders"),
-      // Through Desk, the same people are the CRM's members at most.
-      throughDesk: await call(admin, desk, "desk.forBuilders"),
-    }).toStrictEqual({
-      direct: true,
-      ownerDirect: true,
-      throughDesk: "error:crm.builders_only",
+      crmSees: ["Hooli"],
     });
   });
 });

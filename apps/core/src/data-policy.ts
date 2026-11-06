@@ -46,8 +46,7 @@ export type Grantee =
  *   versions binds it: what it reads comes back to what started it.
  *
  * So more for a workflow reaches the Apps starting it, or starting one
- * that runs it. App resources (resource-apps.ts) aren't followed yet:
- * GRA-954.
+ * that runs it.
  */
 const reachingSql = (grantee: Grantee): SQL => {
   const seed =

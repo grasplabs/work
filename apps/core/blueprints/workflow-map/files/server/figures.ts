@@ -9,14 +9,14 @@ import type { Doc, QueryCtx } from "@server/_generated/server";
 import { appLink, shortTextMax, workflowStates } from "../values.ts";
 import { teamsMax } from "./teams.ts";
 
-// The map's numbers, for another App to read (the board page, through an
-// `app` resource an admin binds to this App): each workflow's hours a
-// week as it runs now or as designed, and, for a designed one, as the
-// version of it last drawn ran; with the minutes one pass through its
-// steps takes, which its runs a week turn into hours as it runs. Worked
-// out here, where the steps are, so a reader is sent numbers, not steps,
-// and a page of them stays small. It reads as whoever calls, under the
-// map's own roles: everyone the map is shared with.
+// The map's numbers, as its board page freezes them in a snapshot
+// (snapshots.ts): each workflow's hours a week as it runs now or as
+// designed, and, for a designed one, as the version of it last drawn ran;
+// with the minutes one pass through its steps takes, which its runs a
+// week turn into hours as it runs. Worked out here, where the steps are,
+// so a reader is sent numbers, not steps, and a page of them stays small.
+// It reads as whoever calls, under the map's own roles: everyone the map
+// is shared with.
 
 /**
  * Most workflows one page holds, whatever the page asks for. A figure at

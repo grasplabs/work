@@ -4,7 +4,7 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
-import { appIdSchema, identifierMaxLength } from "@grasp-os/shared/ids";
+import { identifierMaxLength } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -58,12 +58,6 @@ import type {
   ResourceAdapter,
   ServedBinding,
 } from "./resource-adapter.ts";
-import {
-  appAdapter,
-  currentReleaseOf,
-  declaredFingerprints,
-  servedIn,
-} from "./resource-apps.ts";
 import { connectorAdapter, contractReader } from "./resource-connector.ts";
 import type {
   ConnectionGrantRow,
@@ -80,8 +74,8 @@ import type { PlatformAction } from "./resource-platform.ts";
 // Approved resource bindings (spec 12, 16.1, 32.3): what lets an action of
 // an App of spec 8's layout reach what its permissions declare: a model
 // (`ctx.ai`), a connection (`ctx.connections.<alias>`), the Brain
-// (`ctx.brain`), another App or the platform's own functions
-// (`ctx.apps.<alias>`) and guest chats (`ctx.guests`). Threat model, and
+// (`ctx.brain`), the platform's own functions (`ctx.grasp`) and
+// guest chats (`ctx.guests`). Threat model, and
 // how each is closed:
 //
 // - A declaration self-grants: a declaration is App code's requirement and
@@ -133,7 +127,6 @@ const adapters: {
   connector: connectorAdapter,
   grasp: graspAdapter,
   guests: guestsAdapter,
-  app: appAdapter,
 };
 
 /**
@@ -236,9 +229,6 @@ const targetDetail = (target: BindingTarget): Record<string, Json> => {
     return joined.length <= identifierMaxLength
       ? { permissionIds: joined }
       : { permissionCount: ids.length };
-  }
-  if (target.kind === "app") {
-    return { appId: target.appId };
   }
   return { permissionId: target.permissionId };
 };
@@ -584,19 +574,6 @@ const choicesMax = 100;
  */
 const reviewContractAsksMax = 50;
 
-/**
- * The most other Apps one review considers as an app resource's choices,
- * newest first: each one's current release is read once for the whole
- * review, `reviewAppChecksAtOnce` at a time, and checked against each
- * app resource's declaration in memory. An App past it can
- * still be bound by its ID (`approve` checks any App the same way); the
- * review says some were left out.
- */
-const reviewAppCandidatesMax = 100;
-
-/** How many of a review's candidate Apps' releases are read at once. */
-const reviewAppChecksAtOnce = 10;
-
 const actionListSchema = z.array(z.string());
 
 /**
@@ -648,61 +625,7 @@ interface ReviewGrants {
   readonly platform: (
     action: PlatformAction
   ) => Promise<{ ids: string[]; truncated: boolean }>;
-  /**
-   * The other Apps an app resource may be bound to, newest first, at most
-   * `reviewAppCandidatesMax`, each with its current release (undefined
-   * once it has none), read once for the review; and whether there were
-   * more.
-   */
-  readonly apps: () => Promise<{
-    apps: ReviewedApp[];
-    truncated: boolean;
-  }>;
 }
-
-/** Another App a review considers for an app resource, with its current release. */
-interface ReviewedApp {
-  readonly appId: AppId;
-  readonly name: string;
-  readonly release: Release | undefined;
-}
-
-/**
- * The other Apps `app`'s app resources may be bound to, newest first, at
- * most `reviewAppCandidatesMax`, each with its current release, read
- * `reviewAppChecksAtOnce` at a time; and whether there were more.
- */
-const reviewedApps = async (
-  env: Env,
-  app: AppId
-): Promise<{ apps: ReviewedApp[]; truncated: boolean }> => {
-  const rows = await drizzle(env.DB)
-    .select({ id: apps.id, name: apps.name })
-    .from(apps)
-    .where(sql`${apps.id} <> ${app} AND ${apps.currentVersion} IS NOT NULL`)
-    .orderBy(desc(apps.createdAt))
-    .limit(reviewAppCandidatesMax + 1);
-  const candidates = rows
-    .slice(0, reviewAppCandidatesMax)
-    .map(({ id, name }) => ({ appId: appIdSchema.parse(id), name }));
-  const reviewed: ReviewedApp[] = [];
-  for (
-    let start = 0;
-    start < candidates.length;
-    start += reviewAppChecksAtOnce
-  ) {
-    const batch = candidates.slice(start, start + reviewAppChecksAtOnce);
-    // oxlint-disable-next-line no-await-in-loop -- a few at a time, bounded
-    const read = await Promise.all(
-      batch.map(async (candidate) => ({
-        ...candidate,
-        release: await currentReleaseOf(env, candidate.appId),
-      }))
-    );
-    reviewed.push(...read);
-  }
-  return { apps: reviewed, truncated: rows.length > reviewAppCandidatesMax };
-};
 
 /** The App's grants and their collections' names, read once for a review. */
 const reviewGrants = async (
@@ -728,12 +651,7 @@ const reviewGrants = async (
           .from(collections)
           .where(inList(collections.id, ids));
   const platform = new Map<PlatformAction, Promise<string[]>>();
-  let others: Promise<{ apps: ReviewedApp[]; truncated: boolean }> | undefined;
   return {
-    apps: async () => {
-      others ??= reviewedApps(env, app);
-      return await others;
-    },
     platform: async (action) => {
       const reading =
         platform.get(action) ??
@@ -804,23 +722,6 @@ const choicesFor = async (
       permissions: granted.ids.map((permissionId) => ({ permissionId })),
       truncated: granted.truncated,
     };
-  }
-  if (declaration["~permission"] === "apps") {
-    // Every candidate's release, read once for the review, checked in
-    // memory: an older App that serves the declaration is offered as a
-    // newer one is, however many other Apps the App declares.
-    const [others, declared] = await Promise.all([
-      grants.apps(),
-      declaredFingerprints(declaration),
-    ]);
-    const serving = others.apps
-      .filter(
-        ({ release }) =>
-          release !== undefined &&
-          servedIn(release, declaration, declared) !== undefined
-      )
-      .map(({ appId, name }) => ({ appId, name }));
-    return { kind: "app", apps: serving, truncated: others.truncated };
   }
   return {
     kind: "knowledge",
@@ -947,8 +848,8 @@ const targetLabels = async (
 };
 
 /**
- * The Brain's or guests' declared operations, or another App's (or the
- * platform's) functions, by path; none for other kinds.
+ * The Brain's or guests' declared operations, or the platform's functions,
+ * by path; none for other kinds.
  */
 const operationsOf = (declaration: AnyPermission): string[] => {
   if (
@@ -957,7 +858,7 @@ const operationsOf = (declaration: AnyPermission): string[] => {
   ) {
     return [...declaration.operations];
   }
-  return declaration["~permission"] === "apps"
+  return declaration["~permission"] === "grasp"
     ? Object.keys(declaration.functions).toSorted()
     : [];
 };
@@ -1070,7 +971,6 @@ export const resourceBindingsFor = (
   const caller: BindingCaller = {
     ...given,
     counts: given.counts ?? new Map<string, number>(),
-    appCalls: given.appCalls ?? { used: 0 },
   };
   return async (
     declaration: AnyPermission

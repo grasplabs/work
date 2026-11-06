@@ -1712,7 +1712,7 @@ const buildDeclaration = `/**
  *   shown. It shows its own empty, loading and failed states.
  *   \`<DataGrid label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, { field: "due", day: true }, { field: "notes", cell: (task) => <RichText value={task.notes} /> }]} search="Search tasks" rowActions={[{ label: "Open", onSelect: async (task) => await navigate({ to: "/tasks/$taskId", params: { taskId: task._id } }) }]} />\`
  *   (\`navigate\` is \`useNavigate()\` from \`@tanstack/react-router\`)
- * - A form is \`useForm\` (a mutation's or action's arguments, a record, or a
+ * - A form is \`useForm\` (a mutation's or action's arguments, or a
  *   \`v.object\`) with the fields of \`@grasp-os/ui/form\`, one per kind of
  *   value; each takes \`form\`, \`name\` and \`label\`, and its choices,
  *   bounds and whether it is required come from the schema: \`TextField\`,
@@ -1941,7 +1941,7 @@ build: {
    * but a \`warning\` (React's development warnings); \`check.preview.seen\` is
    * false when nobody has the preview open, so its pages weren't run:
    * say so, or \`call\` the server yourself. A preview reaches nothing
-   * outside it: a function's resource call (a connection, another App,
+   * outside it: a function's resource call (a connection,
    * Knowledge, a model) rejects with \`resource.unavailable\`, and a
    * page's workflow run with \`app.preview_side_effect\`. Handle either
    * as a failed call, as a page must live.

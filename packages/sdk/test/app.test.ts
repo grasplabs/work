@@ -382,63 +382,40 @@ describe("permissions", () => {
       alias: "grasp",
       paths: ["statistics.read"],
     });
+    // A manifest can't widen the platform's functions under its alias.
     expect(
-      [
-        // Another App can't pose as the platform, in code or in a manifest.
-        refusal(() =>
-          permission.app("grasp", {
-            functions: {
-              "statistics.read": {
-                kind: "query",
-                args: {},
-                returns: v.null(),
-              },
-            },
-          })
-        ),
-        refusal(() =>
-          readPermissionDeclaration({
-            "~permission": "apps",
-            alias: "grasp",
-            functions: { "statistics.write": shape },
-          })
-        ),
-      ].map((message) => message.includes("grasp"))
-    ).toStrictEqual([true, true]);
+      refusal(() =>
+        readPermissionDeclaration({
+          "~permission": "grasp",
+          alias: "grasp",
+          functions: { "statistics.write": shape },
+        })
+      )
+    ).toContain("grasp");
   });
-});
 
-/** Reads an apps declaration of `functions` back, as a manifest holds it. */
-const declareApp = (functions: unknown) => () =>
-  readPermissionDeclaration({ "~permission": "apps", alias: "crm", functions });
-
-describe("an apps declaration", () => {
-  test("reads back as code declared it, and calls another App's queries, mutations and actions only", () => {
-    const crm = permission.app("crm", {
-      functions: {
-        "contacts.find": {
-          kind: "query",
-          args: { name: v.string() },
-          returns: v.array(v.string()),
-        },
-        "contacts.mail": { kind: "action", args: {}, returns: v.null() },
-      },
-    });
-    const shape = structuredClone(crm.functions["contacts.find"]);
+  test("an App never declares another App's functions, in code or in a manifest", () => {
+    const grasp = permission.grasp();
     expect({
-      read: JSON.stringify(readPermissionDeclaration(structuredClone(crm))),
-      frozen: Reflect.set(crm.functions, "contacts.drop", shape),
-    }).toStrictEqual({ read: JSON.stringify(crm), frozen: false });
-    expect(
-      [
-        declareApp({ "contacts.find": { ...shape, kind: "stream" } }),
-        declareApp({ "contacts..find": shape }),
-        declareApp({ "a.b.c.d.e": shape }),
-        declareApp({}),
-        declareApp({ "contacts.find": { ...shape, args: shape?.returns } }),
-        declareApp({ "contacts.find": { ...shape, extra: true } }),
-      ].map((declaration) => refusal(declaration).length > 0)
-    ).toStrictEqual([true, true, true, true, true, true]);
+      // No constructor for it: Apps don't call each other.
+      inCode: Object.hasOwn(permission, "app"),
+      // A manifest that names another App's functions is no declaration
+      // this SDK reads: no `apps` kind, and `grasp` only as the platform's.
+      asApps: refusal(() =>
+        readPermissionDeclaration({
+          "~permission": "apps",
+          alias: "crm",
+          functions: grasp.functions,
+        })
+      ).includes("isn't one this SDK knows"),
+      underAnotherAlias: refusal(() =>
+        readPermissionDeclaration({
+          "~permission": "grasp",
+          alias: "crm",
+          functions: grasp.functions,
+        })
+      ).includes("always `grasp`"),
+    }).toStrictEqual({ inCode: false, asApps: true, underAnotherAlias: true });
   });
 });
 
@@ -723,11 +700,10 @@ describe("uses", () => {
           {
             permissions: {
               workflows: [followUp],
-              apps: [
-                permission.app("followUp", {
-                  functions: {
-                    "a.b": { kind: "query", args: {}, returns: v.null() },
-                  },
+              connections: [
+                permission.connection("followUp", {
+                  contract: "microsoft-365.mail@1",
+                  actions: ["send"],
                 }),
               ],
             },

@@ -52,7 +52,7 @@ const harnessRun = (args: string[]): string =>
   );
 
 const every = <T>(each: (blueprint: string, target: string) => T): T[] =>
-  ["board-page", "intake", "workflow-map"].flatMap((blueprint) =>
+  ["intake", "workflow-map"].flatMap((blueprint) =>
     ["pages", "preview-pages", "app"].map((target) => each(blueprint, target))
   );
 

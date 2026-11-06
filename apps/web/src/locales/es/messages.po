@@ -766,10 +766,6 @@ msgstr "{name} · con {teams}"
 msgid "{name} ({apart})"
 msgstr "{name} ({apart})"
 
-#: src/engines/resource-bindings.tsx
-msgid "{name} ({appId})"
-msgstr "{name} ({appId})"
-
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
 msgstr "{name} (personal de Grasp)"
@@ -2396,10 +2392,6 @@ msgstr "Y más."
 msgid "And the rest."
 msgstr "Y el resto."
 
-#: src/engines/resource-bindings.tsx
-msgid "Another App"
-msgstr "Otra aplicación"
-
 #: src/onboarding/send-plan-form.tsx
 msgid "Another day"
 msgstr "Otro día"
@@ -2488,7 +2480,6 @@ msgstr "¿Algo más?"
 
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/dependency-requests.tsx
-#: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
 #: src/pages/page-frame.tsx
 #: src/projects/new-item-dialog.tsx
@@ -2507,7 +2498,6 @@ msgstr "Aplicación"
 
 #: src/connections/connection-list.tsx
 #: src/engines/app-data.tsx
-#: src/engines/resource-bindings.tsx
 msgid "App {app}"
 msgstr "Aplicación {app}"
 
@@ -8360,10 +8350,6 @@ msgstr "Aún no hay ningún modelo configurado en este despliegue."
 #: src/workflows/module-files.tsx
 msgid "No modules yet. A module holds calculations a task calls through a local binding."
 msgstr "Aún no hay módulos. Un módulo contiene cálculos que una tarea llama mediante una vinculación local."
-
-#: src/engines/resource-bindings.tsx
-msgid "No other App serves every function it declares, public and exactly as declared."
-msgstr "Ninguna otra aplicación ofrece todas las funciones que declara, públicas y exactamente como se declaran."
 
 #: src/people/person-picker.tsx
 msgid "No owner yet"

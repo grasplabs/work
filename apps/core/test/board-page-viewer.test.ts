@@ -4,8 +4,8 @@ import { describe, expect, it } from "vite-plus/test";
 import type {
   Outcome,
   Snapshot,
-} from "../blueprints/board-page/files/src/components/snapshot.ts";
-import { viewer } from "../blueprints/board-page/files/src/components/viewer.ts";
+} from "../blueprints/workflow-map/files/src/components/snapshot.ts";
+import { viewer } from "../blueprints/workflow-map/files/src/components/viewer.ts";
 
 // Which snapshot the board page shows as its answers come in
 // (components/viewer.ts): pure logic, so tested on its own, with the

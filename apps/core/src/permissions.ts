@@ -649,9 +649,9 @@ const requireSenderFits = (
 };
 
 /**
- * Refuses an `app` permission for anyone but an agent: an App, a workflow
- * or a store reaches another App's functions only through an app resource
- * an admin approved (resource-apps.ts).
+ * Refuses an `app` permission for anyone but an agent: Apps don't call
+ * each other, and a workflow or a store calls no App's functions through
+ * a permission.
  */
 const requireAppCallerFits = (
   subject: PermissionSubject,
@@ -659,7 +659,7 @@ const requireAppCallerFits = (
 ): void => {
   if (object.type === "app" && subject.type !== "agent") {
     refuseRequest(
-      "subject: Only an agent calls an App's functions through a permission. An App calls another's through an app resource."
+      "subject: Only an agent calls an App's functions through a permission."
     );
   }
 };

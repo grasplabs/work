@@ -1,4 +1,4 @@
-// The board page's snapshots as its page reads them from the App's
+// The board page's snapshots as its screen reads them from the App's
 // store (server/snapshots.ts), and what each refusal means to the
 // person using it.
 
@@ -139,7 +139,7 @@ export const refusal = (code: string): string => {
       return "The workflow map has more workflows than one snapshot holds (250).";
     }
     case "resource.unavailable": {
-      return "The page can't read the workflow map yet: an admin binds it to the map first.";
+      return "The page can't read the platform's statistics yet: an admin binds them first.";
     }
     case "app.unreachable": {
       return "Grasp can't be reached right now. Try again in a moment.";

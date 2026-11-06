@@ -2,7 +2,7 @@ import { AppError } from "@grasp-os/sdk";
 import type { Infer } from "@grasp-os/sdk";
 
 import { figuresMax, hoursMax, signalsMax, titleMax } from "../values.ts";
-import type { mapFigure } from "../values.ts";
+import type { figure } from "./figures.ts";
 
 // What a snapshot freezes when the board page takes it: each workflow of
 // the map with its hours a week, as drawn, as designed and as it runs, and
@@ -17,7 +17,7 @@ import type { mapFigure } from "../values.ts";
 // was observed to start over the last `windowDays` days, which the
 // platform's statistics count.
 
-export type MapFigure = Infer<typeof mapFigure>;
+export type MapFigure = Infer<typeof figure>;
 
 /** A group of a statistics read: its dimensions, added up. */
 interface StatisticGroup {
@@ -44,7 +44,7 @@ interface StatisticAnswer {
   computation?: string | null;
 }
 
-/** The platform's statistics, as the page reads them (`ctx.apps.grasp`). */
+/** The platform's statistics, as the page reads them (`ctx.grasp`). */
 export type ReadStatistics = (
   query: StatisticQuery
 ) => Promise<StatisticAnswer>;
@@ -321,6 +321,12 @@ const frozenOf = (
   };
 };
 
+/** Where `kind` comes in the platform's order of kinds: past it, unknown. */
+const rank = (kind: string): number => {
+  const at = kindOrder.indexOf(kind);
+  return at === -1 ? kindOrder.length : at;
+};
+
 /**
  * What a snapshot taken now freezes of the map's workflows `figures`:
  * each with its hours, and the improvement signals of the App workflows
@@ -358,10 +364,6 @@ export const freeze = async (
       linked.set(key, id);
     }
   }
-  const rank = (kind: string): number => {
-    const at = kindOrder.indexOf(kind);
-    return at === -1 ? kindOrder.length : at;
-  };
   const frozenSignals = [...linked].flatMap(([key, workflow]) =>
     [...(signals.get(key) ?? [])].map(([kind, value]) => ({
       workflow,

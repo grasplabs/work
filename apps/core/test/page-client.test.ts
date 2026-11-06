@@ -806,7 +806,7 @@ export const Route = createFileRoute("/")({ component: Notes });
     ).resolves.toStrictEqual([]);
   });
 
-  it("builds forms of the operations, the record and a native schema, typed by what they bind", async () => {
+  it("builds forms of the operations, a record's edit and a native schema, typed by what they bind", async () => {
     const formPage = `import { createFileRoute } from "@tanstack/react-router";
 import { v } from "@grasp-os/sdk";
 import type { ReturnOf } from "@grasp-os/sdk";
@@ -821,9 +821,7 @@ const searchSchema = v.object({ search: v.string().trim().min(1) });
 export function Editor({ note }: { note: Note }) {
   const create = useForm(api.notes.create, { defaultValues: { title: "", body: "" }, resetOnSuccess: true });
   const edit = useForm(api.notes.update, {
-    record: note,
-    fields: ["title", "body"],
-    args: (baseline) => ({ id: baseline._id, expectedRevision: baseline._rev }),
+    defaultValues: { id: note._id, expectedRevision: note._rev, title: note.title, body: note.body },
   });
   const search = useForm(searchSchema, { defaultValues: { search: "" }, onSubmit: (values) => values.search });
   return (

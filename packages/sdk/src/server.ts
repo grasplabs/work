@@ -7,13 +7,13 @@ import type {
   AiClient,
   AiPermission,
   AnyPermission,
-  AppClientOf,
-  AppPermission,
   BrainClientOf,
   BrainPermission,
   ConnectionClientOf,
   ConnectionPermission,
   GuestsClientOf,
+  GraspClient,
+  GraspPermission,
   GuestsPermission,
   WorkflowPermission,
 } from "./permissions.ts";
@@ -66,7 +66,7 @@ import type {
 // - an action has no `db` at all: it composes the App's functions
 //   (`runQuery`, `runMutation`, `runAction`), each its own invocation,
 //   and reaches outside the App only through the permissions its `uses`
-//   lists (`ctx.ai`, `ctx.connections`, `ctx.brain`, `ctx.apps`,
+//   lists (`ctx.ai`, `ctx.connections`, `ctx.brain`, `ctx.grasp`,
 //   `ctx.guests`), starts only the workflows it lists (`ctx.workflows`),
 //   and tells people through the platform's notifications
 //   (`ctx.notifyPeople`).
@@ -322,8 +322,8 @@ type AiOf<Uses extends readonly Use[]> = [
 
 /**
  * What an action reaches through the permissions its `Uses` lists, each
- * only when listed: `ai`, `brain` and `guests`, and the connections and
- * other Apps by alias.
+ * only when listed: `ai`, `brain`, `grasp` (the platform's own functions)
+ * and `guests`, and the connections by alias.
  */
 export type PermissionClients<Uses extends readonly Use[]> = {
   /** Each connection `Uses` lists, by alias. */
@@ -335,13 +335,13 @@ export type PermissionClients<Uses extends readonly Use[]> = {
       > as Connection["alias"]
     ]: ConnectionClientOf<Connection>;
   };
-  /** Each other App `Uses` lists, by alias (the platform's: `grasp`). */
-  readonly apps: {
-    readonly [
-      Called in Extract<Uses[number], AppPermission> as Called["alias"]
-    ]: AppClientOf<Called>;
-  };
 } & Present<"ai", AiOf<Uses>> &
+  Present<
+    "grasp",
+    [Extract<Uses[number], GraspPermission>] extends [never]
+      ? never
+      : GraspClient
+  > &
   Present<"brain", BrainClientOf<Extract<Uses[number], BrainPermission>>> &
   Present<"guests", GuestsClientOf<Extract<Uses[number], GuestsPermission>>>;
 

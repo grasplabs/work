@@ -22,7 +22,6 @@ import type { AppManifest, OperationManifest } from "@grasp-os/sdk/host";
 import type { MutationStart, OperationChannel } from "@grasp-os/sdk/runner";
 import type { RunHandle } from "@grasp-os/sdk/server";
 import { fileErrors } from "@grasp-os/shared/app-files";
-import { appCallLimits } from "@grasp-os/shared/apps";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -1803,7 +1802,7 @@ const isNormalized = (descriptor: unknown, result: Json): boolean => {
 
 /**
  * Whether `result` is the return the declared operation or function `args`
- * names declares, already normalized, as the store's or the called App's
+ * names declares, already normalized, as the store's or the platform's
  * own contract answered it (`allowedRequest` found the path).
  */
 const returnsDeclared = (
@@ -1822,7 +1821,7 @@ const returnsDeclared = (
 /**
  * What a permission answered, if its contract allows it: AI's text, or the
  * value the request asked for; the Brain's hits or document; a guest
- * chat; another App's function's return, as it declares it. A
+ * chat; the platform's function's return, as it declares it. A
  * connection's answer is checked as JSON here; its action's own descriptor
  * comes with generated connector contracts.
  */
@@ -1852,7 +1851,7 @@ const checkedResourceResult = (
         method === "read" ||
         method === "revoke") &&
       guestResults[method].safeParse(result).success;
-  } else if (declaration["~permission"] === "apps") {
+  } else if (declaration["~permission"] === "grasp") {
     valid = returnsDeclared(declaration.functions, args, result);
   } else {
     valid = true;
@@ -1892,7 +1891,7 @@ const busyDetails = (
 
 /** Which bound of a resource's a request reached, and when to ask again. */
 const limitDetailsSchema = z.strictObject({
-  limit: z.enum(["call", "minute", "day", "open", "cycle", "depth", "calls"]),
+  limit: z.enum(["call", "minute", "day", "open"]),
   retryAfterSeconds: z.int().positive().max(60).optional(),
 });
 
@@ -2430,10 +2429,9 @@ const scopeOf = async (
 
 /**
  * How deep functions may call each other within one call: the caller's
- * own function and three nested in it, as calls between Apps
- * (`appCallLimits.depth`).
+ * own function and three nested in it.
  */
-export const callMaxDepth = appCallLimits.depth;
+export const callMaxDepth = 3;
 
 /**
  * What a draft's code threw in the current attempt of the function the
@@ -2587,7 +2585,7 @@ const trackedCalls = (
   /**
    * Settles once every call still under way has, however each ended: what
    * a run stopped at its deadline or cancelled left running in the host
-   * (an App it called committing, that call's refusal recorded), which
+   * (a mutation it called committing, a request's refusal recorded), which
    * `letGo` keeps alive a little longer.
    */
   inFlight: () => Promise<unknown>;
@@ -2801,7 +2799,7 @@ const letGoMs = 1000;
  * Waits, a little, for a run stopped at its deadline or cancelled to let go
  * of what it holds (an on-prem sandbox process, which its runner frees when
  * the run's signal aborts), and for what it left under way in the host to
- * settle (`inFlight`: a called App's commit, that call's refusal recorded;
+ * settle (`inFlight`: a mutation's commit, a request's refusal recorded;
  * a call its handler started and didn't wait for). Past the answer, the
  * request that frees or finishes them may itself be cancelled, its object
  * evicted: kept alive this long, they finish rather than being cut off

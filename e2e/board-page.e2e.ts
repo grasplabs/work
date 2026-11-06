@@ -4,13 +4,11 @@ import type { FrameLocator, Page } from "@playwright/test";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
-// The board page, the built-in App, end to end: an admin creates an App
-// from it and one from the workflow map, binds the page's `map` to that
-// map, draws workflows in the map, takes a snapshot of them on the page,
-// writes its narrative and decision, and prints it: the page alone, on
-// one sheet of A4.
+// The workflow map's board page, end to end: an admin creates an App from
+// the built-in workflow map, draws workflows in the map, takes a snapshot
+// of them on its board page, writes its narrative and decision, and
+// prints it: the page alone, on one sheet of A4.
 
-const boardPage = "board-page";
 const workflowMap = "workflow-map";
 
 /**
@@ -36,9 +34,10 @@ const pageObject = /\/Type\s*\/Page(?![a-z])/gu;
 const openPage = async (
   page: Page,
   app: string,
+  path: string,
   heading: string
 ): Promise<FrameLocator> => {
-  await page.goto(`/apps/${app}/full`);
+  await page.goto(`/apps/${app}/full${path === "/" ? "" : path}`);
   const frame = page.frameLocator('iframe[title="App"]');
   // The first open builds the page, which takes a while on a loaded machine.
   await expect(frame.getByRole("heading", { name: heading })).toBeVisible({
@@ -71,15 +70,12 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
   const run = crypto.randomUUID().slice(0, 8);
   const { core, api } = apiOf(admin);
   let app: string;
-  let map: string;
   try {
     await expect
       .poll(
         async () => {
           const listed = await api.apps.blueprints.list();
-          return [boardPage, workflowMap].every((builtin) =>
-            listed.some(({ id }) => id === builtin)
-          );
+          return listed.some(({ id }) => id === workflowMap);
         },
         { timeout: installedMs }
       )
@@ -93,22 +89,14 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
       await api.apps.publish(created.app.id);
       return created.app.id;
     };
-    app = await copy(boardPage, `Board page ${run}`);
-    map = await copy(workflowMap, `Workflow map ${run}`);
-    // The map it reads, bound as an admin binds it on the engine's
-    // Resources tab. Its statistics stay unbound: nothing here runs.
-    await api.resourceBindings.approve({
-      app,
-      alias: "map",
-      target: { kind: "app", appId: map },
-      reviewed: { version: 1 },
-    });
+    // Its statistics stay unbound: nothing here runs.
+    app = await copy(workflowMap, `Workflow map ${run}`);
   } finally {
     core[Symbol.dispose]();
   }
 
   const page = await pageOf(admin);
-  const mapPage = await openPage(page, map, "Workflow map");
+  const mapPage = await openPage(page, app, "/", "Workflow map");
   for (let index = 1; index <= seeded; index += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one drawing at a time
     await draw(
@@ -117,7 +105,7 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
       index * 10
     );
   }
-  const appPage = await openPage(page, app, "Board page");
+  const appPage = await openPage(page, app, "/board", "Board page");
 
   await appPage.getByRole("combobox", { name: "Maturity" }).click();
   await appPage.getByRole("option", { name: "Maturity 2 of 5" }).click();
@@ -128,9 +116,11 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
     board.getByRole("table", { name: "Where the hours go" }).getByRole("row")
   ).toHaveCount(6);
 
-  await appPage.getByLabel("Edit the decision needed").fill(decision);
   await appPage
-    .getByLabel("Edit the narrative")
+    .getByRole("textbox", { name: "Decision needed" })
+    .fill(decision);
+  await appPage
+    .getByRole("textbox", { name: "Narrative", exact: true })
     .fill(
       Array.from(
         { length: 30 },
@@ -151,7 +141,9 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
   await expect(
     appPage.getByRole("button", { name: "Take a snapshot" })
   ).toBeHidden();
-  await expect(appPage.getByLabel("Edit the narrative")).toBeHidden();
+  await expect(
+    appPage.getByRole("textbox", { name: "Narrative", exact: true })
+  ).toBeHidden();
   await expect(page.getByText("App page")).toBeHidden();
   const frame = page
     .frames()

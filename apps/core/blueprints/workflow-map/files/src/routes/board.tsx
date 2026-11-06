@@ -198,7 +198,6 @@ const Board = () => {
                 onSaved={(id) => {
                   void snapshots.current.saved(id, to);
                 }}
-                onRefused={refused}
               />
             </div>
           ) : null}
@@ -208,4 +207,4 @@ const Board = () => {
   );
 };
 
-export const Route = createFileRoute("/")({ component: Board });
+export const Route = createFileRoute("/board")({ component: Board });

@@ -15,18 +15,11 @@ export type {
   MigrationContext,
   MigrationDefinition,
 } from "./migration.ts";
-export {
-  graspAlias,
-  graspFunctions,
-  httpContract,
-  permission,
-} from "./permissions.ts";
+export { graspFunctions, httpContract, permission } from "./permissions.ts";
 export type {
   AiClient,
   AiPermission,
   AnyPermission,
-  AppClient,
-  AppPermission,
   BrainClient,
   BrainHit,
   BrainOperation,
@@ -39,7 +32,9 @@ export type {
   ConnectorAction,
   ConnectorContract,
   FilesPermission,
+  GraspClient,
   GraspFunctions,
+  GraspPermission,
   GuestsClient,
   GuestsOperation,
   GuestsPermission,
