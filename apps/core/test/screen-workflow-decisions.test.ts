@@ -123,9 +123,20 @@ const objectDocument = (properties: Record<string, unknown>) => ({
   additionalProperties: false,
 });
 
-/** An approval workflow asking, in `ask`, for decision `contract` as `approval`. */
-const definitionOf = (contract: string): string =>
-  JSON.stringify({
+/**
+ * An approval workflow asking, in `ask`, for decision `contract` as
+ * `approval`; with `looped`, once for each item of a `forEach`, `lines`.
+ */
+const definitionOf = (contract: string, looped = false): string => {
+  const ask = {
+    id: "ask",
+    type: "decision",
+    binding: "approval",
+    recipients: ["role:admin"],
+    prompt: "Approve this invoice?",
+    input: { amount: { $expr: "input.amount" } },
+  };
+  return JSON.stringify({
     $schema: workflowSchemaUrl,
     input: objectDocument({ amount: { type: "number" } }),
     output: {
@@ -133,24 +144,27 @@ const definitionOf = (contract: string): string =>
       value: { status: "done" },
     },
     bindings: { approval: { kind: "decision", contract } },
-    steps: [
-      {
-        id: "ask",
-        type: "decision",
-        binding: "approval",
-        recipients: ["role:admin"],
-        prompt: "Approve this invoice?",
-        input: { amount: { $expr: "input.amount" } },
-      },
-    ],
+    steps: looped
+      ? [
+          {
+            id: "lines",
+            type: "forEach",
+            items: { $expr: "[1, 2]" },
+            do: [ask],
+          },
+        ]
+      : [ask],
   });
+};
 
 // Null too: a decision's context may be JSON `null` when its contract takes it.
 const context = v.object({ amount: v.number() }).nullable();
 const value = v.object({ comment: v.string() });
 
 /** An App bound to a workflow version with a decision binding, as `review`. */
-const boundApp = async (): Promise<{
+const boundApp = async (
+  looped = false
+): Promise<{
   fixture: Fixture;
   binding: string;
   workflowId: string;
@@ -170,7 +184,7 @@ const boundApp = async (): Promise<{
     `approve-${unique()}`
   );
   await publishWorkflowVersion(env, fixture.owner, workflow.id, {
-    definition: definitionOf(key),
+    definition: definitionOf(key, looped),
     basedOn: null,
   });
   const { id } = await bindWorkflowToApp(env, fixture.owner, workflow.id, {
@@ -422,8 +436,8 @@ const answerOf = (result: OperationResult): unknown =>
  * version it started for the starter, each asking the admins; and a call
  * of its decision queries, as whoever calls.
  */
-const decisionInbox = async () => {
-  const { fixture, workflowId, binding } = await boundApp();
+const decisionInbox = async (looped = false) => {
+  const { fixture, workflowId, binding } = await boundApp(looped);
   const release = await seal(fixture);
   await setCurrentVersion(env, fixture.owner, fixture.app, 1);
   const [reviewer, starter, outsider] = await Promise.all([
@@ -716,6 +730,51 @@ describe(
           nextCursor: null,
           hasMore: false,
         },
+      });
+    });
+
+    it("list and answer a decision asked in a loop's item, as the run host names its step", async () => {
+      const { fixture, opened, reviewer, runAsking, ask } =
+        await decisionInbox(true);
+      // As the SDK names the item's step: its key, `task@0`, URI-encoded.
+      const looped = await runAsking(fixture.app, opened, {
+        step: "ask:task%400",
+      });
+      // Its key in no encoding the SDK writes, and a part of a decision.
+      const unencoded = await runAsking(fixture.app, opened + 1000, {
+        step: "ask:task@0",
+      });
+      const part = await runAsking(fixture.app, opened + 2000, {
+        step: "ask:task%400#answer",
+      });
+      const list = await ask(reviewer, "decisions", { pagination: {} });
+      const listed =
+        typeof list === "object" && list !== null && "items" in list
+          ? list.items
+          : list;
+      const detail = async (of: { runId: string; decisionId: string }) =>
+        await ask(reviewer, "decision", {
+          runId: of.runId,
+          decisionId: of.decisionId,
+        });
+      expect({
+        listed: z
+          .array(
+            z.object({
+              run: z.object({ runId: z.string() }),
+              wait: z.object({ taskId: z.string() }),
+            })
+          )
+          .parse(listed)
+          .map(({ run, wait }) => ({ runId: run.runId, taskId: wait.taskId })),
+        looped: z.object({ key: z.string() }).parse(await detail(looped)).key,
+        unencoded: await detail(unencoded),
+        part: await detail(part),
+      }).toStrictEqual({
+        listed: [{ runId: looped.runId, taskId: "ask" }],
+        looped: "approval",
+        unencoded: "workflow.decision_unavailable",
+        part: "workflow.decision_unavailable",
       });
     });
 

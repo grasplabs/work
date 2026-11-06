@@ -1258,6 +1258,78 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     });
   });
 
+  it("names each step of a loop's items by its task, as the run host names it", async () => {
+    const admin = await person("admin");
+    const bob = await person("user");
+    const owner = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      owner,
+      `loop-${unique()}`
+    );
+    await publishWorkflowVersion(env, owner, workflow.id, {
+      definition: JSON.stringify({
+        $schema: workflowSchemaUrl,
+        input: objectSchema({ who: { type: "string" } }),
+        output: {
+          schema: objectSchema({ status: { type: "string" } }),
+          value: { status: "done" },
+        },
+        steps: [
+          {
+            id: "each",
+            type: "forEach",
+            items: { $expr: "[1, 2]" },
+            do: [passing("greet")],
+          },
+        ],
+      }),
+      basedOn: null,
+    });
+    const { fixture, release } = await pinnedApp(
+      admin,
+      [bob],
+      workflow.id,
+      owner
+    );
+    const { result } = await callAppFunction(
+      env,
+      bob,
+      fixture.app,
+      JSON.stringify({
+        reference: { name: "requests.kickOff", kind: "action" },
+        input: { who: "Bob" },
+      })
+    );
+    if (!result.ok) {
+      throw new Error(result.error.code);
+    }
+    const { runId } = z.object({ runId: z.string() }).parse(result.value);
+    await vi.waitFor(
+      async () => {
+        const run = await resourceRunFor(env, admin, workflow.id, runId);
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    const { result: read } = await callAppFunction(
+      env,
+      bob,
+      fixture.app,
+      JSON.stringify({
+        reference: queryReference(release, "followUp", "history"),
+        input: { runId, pagination: {} },
+      })
+    );
+    const { items } = historySchema.parse(read.ok ? read.value : read);
+    const greetSteps = items.filter(
+      (item) => item.kind === "step" && item.taskId === "greet"
+    );
+    // Each item's step of `greet` (`greet:task%40<i>`), started and
+    // completed: none of them left without its task.
+    expect(greetSteps).toHaveLength(4);
+  });
+
   it("fills a window of more than a page from successive pages of the history", async () => {
     const admin = await person("admin");
     const bob = await person("user");
