@@ -307,7 +307,9 @@ describe("an App's data model, changed in its workspace", () => {
     const savedAs = document.body.textContent.includes("Saved as openTasks");
     await choose("Who can see and change its records", "Only the person");
     await press(button("Create table"));
-    const title = document.querySelector("h2")?.textContent;
+    const title = document.querySelector(
+      'nav [aria-current="true"]'
+    )?.textContent;
 
     const kinds: [string, string, (() => Promise<void>)?][] = [
       ["title", "Text"],

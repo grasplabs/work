@@ -577,7 +577,6 @@ const TableView = ({
       table={live?.tables.find((held) => held.name === name)}
       toolbar={
         <>
-          <h2 className="text-sm font-medium">{name}</h2>
           <SideView icon={<ShieldIcon />} label={t`Access`}>
             <AccessPanel
               disabled={disabled}
@@ -915,7 +914,6 @@ export const AppDataModel = ({
               active={each.id === table?.id}
               icon={<Table2Icon />}
               key={each.id}
-              meta={each.fields.length}
               onClick={() => {
                 setPicked(each.id);
               }}

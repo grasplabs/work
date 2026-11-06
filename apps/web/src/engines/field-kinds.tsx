@@ -8,7 +8,7 @@ import {
   BracesIcon,
   CalendarIcon,
   CircleDotIcon,
-  BanknoteIcon,
+  DollarSignIcon,
   HashIcon,
   LinkIcon,
   PaperclipIcon,
@@ -46,7 +46,7 @@ const kindIcons: Record<FieldKind, LucideIcon> = {
   link: LinkIcon,
   person: UserIcon,
   file: PaperclipIcon,
-  money: BanknoteIcon,
+  money: DollarSignIcon,
   other: BracesIcon,
 };
 

@@ -5331,10 +5331,6 @@ msgstr "Finanzen und Buchhaltung"
 msgid "Find"
 msgstr "Suchen"
 
-#: src/engines/app-data.tsx
-msgid "Find a record by its ID"
-msgstr "Datensatz nach ID suchen"
-
 #: src/settings/where-stephen.tsx
 msgid "Find Stephen under Apps in your Slack workspace."
 msgstr "Sie finden Stephen unter „Apps“ in Ihrem Slack-Workspace."

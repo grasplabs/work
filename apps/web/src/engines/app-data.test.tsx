@@ -138,7 +138,8 @@ const press = async (name: string) => {
   const button = [...document.querySelectorAll("button")].find(
     (each) =>
       each.textContent?.trim() === name ||
-      each.getAttribute("aria-label") === name
+      each.getAttribute("aria-label") === name ||
+      each.getAttribute("title") === name
   );
   if (button === undefined) {
     throw new Error(`No button ${name}`);
@@ -184,8 +185,11 @@ describe("an App's data page", () => {
     expect(document.body.textContent).toContain("first's notes");
 
     await press("Open second");
-    expect(document.body.textContent).toContain("second-bare-1");
-    expect(document.body.textContent).not.toContain("first-notes-1");
+    // Each record by its ID, the whole of it on the button that opens it.
+    expect({
+      second: document.querySelector('[title="second-bare-1"]') !== null,
+      first: document.querySelector('[title="first-notes-1"]') !== null,
+    }).toStrictEqual({ second: true, first: false });
   });
 
   it("opens a record by its ID, in a table that declares no fields", async () => {

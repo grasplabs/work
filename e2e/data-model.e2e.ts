@@ -37,7 +37,7 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   const dialog = page.getByRole("dialog", { name: "New table" });
   await dialog.getByLabel("Table name").fill("Tasks");
   await dialog.getByRole("button", { name: "Create table" }).click();
-  await expect(page.getByRole("heading", { name: "tasks" })).toBeVisible(read);
+  await expect(page.getByRole("grid", { name: "tasks" })).toBeVisible(read);
 
   // Its fields, each a column added from the grid's last one: a required
   // text and a choice.

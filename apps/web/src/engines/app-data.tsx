@@ -529,7 +529,7 @@ const recordColumns = (
 ): RecordGridColumn<AppDataRecord>[] => [
   {
     id: "_id",
-    width: 132,
+    width: 96,
     header: (
       <PlainHeader>
         <Trans>Record</Trans>
@@ -541,9 +541,12 @@ const recordColumns = (
           onOpen(record);
         }}
         size="xs"
+        title={record.id}
         variant="link"
       >
-        <RecordGridValue tone="code">{record.id}</RecordGridValue>
+        {/* A UUIDv7 starts with its time, the same for records made
+            together: its end tells them apart. */}
+        <RecordGridValue tone="code">…{record.id.slice(-6)}</RecordGridValue>
       </Button>
     ),
   },
@@ -744,7 +747,7 @@ export const TableRecords = ({
                 onChange={(event) => {
                   setWanted(event.target.value);
                 }}
-                placeholder={t`Find a record by its ID`}
+                placeholder={t`Record ID`}
                 value={wanted}
               />
               <Button

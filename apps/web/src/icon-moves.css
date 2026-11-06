@@ -3066,10 +3066,12 @@
   --icon-wait: 0.08s;
 }
 
-/* The note's coin turns over. */
-.lucide-banknote > :nth-child(2) {
-  --icon-move: icon-there;
-  --icon-wide: 0.2;
+/* The S is drawn through its line. */
+.lucide-dollar-sign > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 30 100;
+  --icon-from: 31.5;
+  --icon-time: 0.4s;
 }
 
 /* The shield rises to guard and settles. */
