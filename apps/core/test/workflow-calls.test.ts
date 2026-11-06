@@ -2636,44 +2636,53 @@ describe("runs started by a restricted App, waiting on a held call", () => {
   });
 
   it("go on once their person confirms, though the engine refused the wake: the repair sends it", async () => {
-    await withSlowChecks(async () => {
-      const admin = await person("admin");
-      const ada = await person("builder");
-      const { workflow, mail, serving } = await mailingWorkflow(ada, admin);
-      const starter = await startingApp(ada, admin, workflow.id, {
-        restricted: true,
-      });
-      const runId = await starter.start(serving);
-      const held = await heldFor(ada, runId);
-      await waiting(runId);
-      // Confirmed while the engine takes no event: the wake stays owed.
-      await whileEngineRefuses(
-        (method) => method === "sendEvent",
-        async () => {
-          await confirmPendingAction(env, ada, held.id, held.inputHash);
-        }
-      );
-      const owed = await env.DB.prepare(
-        "SELECT count(*) AS n FROM workflow_run_wakes WHERE resource_run_id = ?"
+    // Who sent the wake is on the record, so this holds however the run's
+    // own timed checks fall: the repair's `workflow.wake.repaired` names
+    // the wake the refused request owed.
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin);
+    const starter = await startingApp(ada, admin, workflow.id, {
+      restricted: true,
+    });
+    const runId = await starter.start(serving);
+    const held = await heldFor(ada, runId);
+    await waiting(runId);
+    // Confirmed while the engine takes no event: the wake stays owed.
+    await whileEngineRefuses(
+      (method) => method === "sendEvent",
+      async () => {
+        await confirmPendingAction(env, ada, held.id, held.inputHash);
+      }
+    );
+    const owed = await env.DB.prepare(
+      "SELECT id FROM workflow_run_wakes WHERE resource_run_id = ?"
+    )
+      .bind(runId)
+      .all<{ id: string }>();
+    await repairWakes(env, new Date(Date.now() + 60_000));
+    const run = await ended(ada, workflow.id, runId);
+    const sent = await mail.did();
+    const events = await allEvents();
+    const repaired = events
+      .filter(
+        ({ action, target }) =>
+          action === "workflow.wake.repaired" && target?.id === runId
       )
-        .bind(runId)
-        .first<{ n: number }>();
-      const stillWaiting = await liveStatus(runId);
-      await repairWakes(env, new Date(Date.now() + 60_000));
-      const run = await ended(ada, workflow.id, runId);
-      const sent = await mail.did();
+      .map(({ actor, detail }) => ({ actor, wake: detail.wake }));
 
-      expect({
-        owed: owed?.n,
-        stillWaiting,
-        end: endOf(run),
-        sent: sent.calls,
-      }).toStrictEqual({
-        owed: 1,
-        stillWaiting: "waiting",
-        end: { status: "completed", output: { status: "message-1" } },
-        sent: 1,
-      });
+    expect({
+      owed: owed.results.length,
+      repaired,
+      left: await wakesOwed(runId),
+      end: endOf(run),
+      sent: sent.calls,
+    }).toStrictEqual({
+      owed: 1,
+      repaired: [{ actor: { type: "system" }, wake: owed.results[0]?.id }],
+      left: 0,
+      end: { status: "completed", output: { status: "message-1" } },
+      sent: 1,
     });
   });
 

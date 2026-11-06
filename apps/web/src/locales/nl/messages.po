@@ -15129,6 +15129,10 @@ msgstr "Heeft een uitnodiging ingetrokken"
 msgid "without a person"
 msgstr "zonder een persoon"
 
+#: src/activity/audit-words.ts
+msgid "Woke a waiting run whose wake hadn't got through"
+msgstr "Een wachtende run gewekt waarvan de wekker niet was aangekomen"
+
 #: src/interview/words.ts
 msgid "Word"
 msgstr "Woord"

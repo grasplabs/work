@@ -242,6 +242,9 @@ const typeRules: readonly {
   // show it calling.
   { action: "workflow.call.refused", type: "permission" },
   { action: "workflow.run", type: "action" },
+  // A wake the request that owed it didn't get through, sent by the
+  // platform's repair (core's src/workflows/wakes.ts).
+  { action: "workflow.wake.repaired", type: "action" },
   { action: "workflow.step", type: "action" },
   { action: "workflow.param", type: "config" },
   // A schedule stopped after its run kept failing to start.

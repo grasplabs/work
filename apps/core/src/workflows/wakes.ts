@@ -7,6 +7,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
+import { keepAuditEvent } from "../audit-outbox.ts";
 import {
   workflowResourceRuns,
   workflowRunWakes,
@@ -158,9 +159,9 @@ const settle = async (db: DrizzleD1Database, id: string): Promise<void> => {
  * decision's deadline, are left to find what it would have told. Never
  * throws: a failure, of the engine or of the database, is logged, and the
  * row stays for the repair, so the request that owed it answers as what
- * it recorded.
+ * it recorded. Answers whether the engine took it.
  */
-export const sendWake = async (env: Env, id: string): Promise<void> => {
+export const sendWake = async (env: Env, id: string): Promise<boolean> => {
   try {
     const db = drizzle(env.DB);
     const wake = await db
@@ -169,7 +170,7 @@ export const sendWake = async (env: Env, id: string): Promise<void> => {
       .where(eq(workflowRunWakes.id, id))
       .get();
     if (wake === undefined) {
-      return;
+      return false;
     }
     const resends = wake.resendUntil !== null;
     const runId = runOfWake(wake);
@@ -181,13 +182,15 @@ export const sendWake = async (env: Env, id: string): Promise<void> => {
     if (sent === "refused") {
       log.error("workflow.wake_refused", { runId, wake: wake.id });
       await settle(db, wake.id);
-      return;
+      return false;
     }
     if (!resends) {
       await settle(db, wake.id);
     }
+    return true;
   } catch (error) {
     log.warn("workflow.wake_failed", { wake: id, ...errorFields(error) });
+    return false;
   }
 };
 
@@ -335,7 +338,17 @@ export const repairWakes = async (env: Env, at = new Date()): Promise<void> => {
             ),
           })
           .where(eq(workflowRunWakes.id, wake.id));
-        await sendWake(env, wake.id);
+        // A run the repair woke is on the record: the request that owed
+        // the wake didn't get it through, so this is the platform acting
+        // on the run, after the fact.
+        if (await sendWake(env, wake.id)) {
+          await keepAuditEvent(env, db, {
+            actor: { type: "system" },
+            action: "workflow.wake.repaired",
+            target: { type: "workflow_run", id: runOfWake(wake) },
+            detail: { wake: wake.id, retries: wake.retries + 1 },
+          });
+        }
       } catch (error) {
         log.error("workflow.wake_repair_failed", {
           runId: runOfWake(wake),

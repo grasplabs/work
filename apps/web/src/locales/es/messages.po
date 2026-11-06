@@ -15129,6 +15129,10 @@ msgstr "Retiró una invitación"
 msgid "without a person"
 msgstr "sin una persona"
 
+#: src/activity/audit-words.ts
+msgid "Woke a waiting run whose wake hadn't got through"
+msgstr "Despertó una ejecución en espera cuyo aviso no había llegado"
+
 #: src/interview/words.ts
 msgid "Word"
 msgstr "Palabra"
