@@ -86,6 +86,8 @@ export const callMethod: (
 /** `optionalChain`, for generated code: on `Read` values. */
 export const optionalChain: (value: Read, rest: (value: Read) => Read) => Read =
   optionalGuard;
+// What generated code holds the state it keeps and reads to.
+export { fittedState, fittedValue } from "./fitted-value.ts";
 export type { ParamKind, ParamValue } from "./params.ts";
 // The value each kind of parameter holds: generated code parses the
 // recipients a decision records as `person` values, as `from` takes one.

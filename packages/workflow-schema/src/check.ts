@@ -1,6 +1,6 @@
 import { Validator } from "@cfworker/json-schema";
 import type { OutputUnit } from "@cfworker/json-schema";
-import type { ValueDescriptor } from "@grasp-os/sdk";
+import type { ValueDescriptor, ValueSchema } from "@grasp-os/sdk";
 import { checkExpression } from "@grasp-os/sdk/expression-check";
 import type {
   ExpressionErrorCode,
@@ -25,12 +25,14 @@ import {
   isPlain,
   isSensitive,
   isValueList,
+  stateStepTypes,
 } from "./format.ts";
 import type {
   Binding,
   Duration,
   Json,
   Param,
+  StateWrites,
   Step,
   Value,
   WorkflowDocument,
@@ -44,9 +46,17 @@ import { stepTypes, workflowSchema } from "./schema.ts";
 // - step IDs unique in the workflow, each step's engine names its own;
 // - every expression checked where it stands (`@grasp-os/sdk/expression-check`): it reads
 //   only steps that ran before it, declared parameters that aren't
-//   sensitive, `error` only in a catch, and `inbox.<alias>` only of a
+//   sensitive, `error` only in a catch, `inbox.<alias>` only of a
 //   declared event binding (whether its contract takes email replies is
-//   publication's to check, against the catalog);
+//   publication's to check, against the catalog), and `output` (the
+//   step's own result) only in a step's `state`; `state` it reads
+//   anywhere, a key no run kept yet `undefined` (`readMember`'s
+//   `Json | undefined`);
+// - `state` only on a step that keeps it (`stateStepTypes`), writing only
+//   keys the workflow declares, a literal value of its key's schema (an
+//   expression's value the generated code checks as the step records
+//   it); what the state holds in all is the run host's cap (64 KB), which
+//   only a run can reach;
 // - a sensitive parameter only as a whole argument of a connector call,
 //   which the host fills in and the run's code never sees;
 // - each step's binding declared, of a kind the step calls;
@@ -84,6 +94,10 @@ export type ProblemCode =
   | "workflow.invalid_currency"
   | "workflow.invalid_uri"
   | "workflow.wait_kind"
+  | "workflow.state_not_allowed"
+  | "workflow.invalid_state_key"
+  | "workflow.undeclared_state_key"
+  | "workflow.state_type"
   | "workflow.invalid"
   | "workflow.duplicate_id"
   | "workflow.duplicate"
@@ -132,6 +146,12 @@ export interface CheckedWorkflow {
     readonly output: ValueDescriptor;
     readonly params: ReadonlyMap<string, ValueDescriptor>;
   };
+  /**
+   * Each declared key of the state, as an SDK descriptor: what the
+   * generated code and the host hold a kept value to, as this check holds
+   * a literal one.
+   */
+  readonly state: ReadonlyMap<string, ValueDescriptor>;
 }
 
 export type CheckResult =
@@ -288,6 +308,14 @@ const patternProblem = ({
         "Name a compute or action binding's module and export, `local:code/<file>.ts#<export>`; any other binding names a catalog contract, never `local:`.",
     };
   }
+  if (parent.endsWith("/state")) {
+    return {
+      code: "workflow.invalid_state_key",
+      message: "Not a key of the workflow's state.",
+      remedy:
+        "Start with a letter, then letters, digits and `_` only, e.g. `lastSeen`; never `constructor` or `prototype`.",
+    };
+  }
   if (parent === "/params") {
     return {
       code: "workflow.invalid_name",
@@ -336,6 +364,13 @@ const propertyProblem = (
 ): Omit<Problem, "pointer"> | undefined => {
   const { keyword, pointer } = error;
   const name = lastOf(pointer);
+  if (keyword === "false" && name === "state") {
+    return {
+      code: "workflow.state_not_allowed",
+      message: `Only a ${stateStepTypes.map((type) => `\`${type}\``).join(" or ")} step keeps state: no other records a result of its own to write it with.`,
+      remedy: "Move `state` to the `do` or `agent` step whose result it keeps.",
+    };
+  }
   if (keyword === "false") {
     return {
       code: "workflow.unknown_property",
@@ -488,14 +523,20 @@ interface Walk {
   readonly answers: Map<string, ValueDescriptor>;
   /** How many array and object literals each expression nests, by pointer. */
   readonly literals: Map<string, number>;
+  /** Each declared key of the state, by its compiled schema. */
+  readonly state: Map<string, ValueSchema<unknown, unknown>>;
   count: number;
 }
 
-/** Where an expression stands: the steps that ran, a catch's error, a loop's item. */
+/**
+ * Where an expression stands: the steps that ran, a catch's error, a
+ * loop's item, and a step's own result in its `state`.
+ */
 interface Place {
   readonly steps: ReadonlySet<string>;
   readonly error: boolean;
   readonly item: boolean;
+  readonly output: boolean;
 }
 
 const problem = (
@@ -583,8 +624,10 @@ const checkExpressionAt = (
   const checked = checkExpression(expression.$expr, {
     roots: [
       inboxRoot,
+      "state",
       ...(place.error ? (["error"] as const) : []),
       ...(place.item ? (["item"] as const) : []),
+      ...(place.output ? (["output"] as const) : []),
     ],
   });
   if (!checked.ok) {
@@ -799,13 +842,14 @@ const paramSchemaOf = (param: Param): Json => {
   }
 };
 
-const checkSchema = (
+/** `schema` at `pointer` as the SDK's schema, or its problems reported. */
+const compiledSchema = (
   walk: Walk,
   schema: Json,
   pointer: string,
   /** The value it defaults to, if any: a parameter's `default`. */
   rootDefault?: Json
-): ValueDescriptor | undefined => {
+): ValueSchema<unknown, unknown> | undefined => {
   // SAFETY: JSON either way; compileDataSchema's type is only mutable.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const document = schema as Parameters<typeof compileDataSchema>[0];
@@ -833,7 +877,89 @@ const checkSchema = (
     }
     return undefined;
   }
-  return compiled.schema.descriptor;
+  return compiled.schema;
+};
+
+const checkSchema = (
+  walk: Walk,
+  schema: Json,
+  pointer: string,
+  /** The value it defaults to, if any: a parameter's `default`. */
+  rootDefault?: Json
+): ValueDescriptor | undefined =>
+  compiledSchema(walk, schema, pointer, rootDefault)?.descriptor;
+
+/** Whether `value` holds no expression anywhere: JSON as written. */
+const isLiteral = (value: Value): value is Json => {
+  if (value === null || typeof value !== "object") {
+    return true;
+  }
+  if (isExpression(value)) {
+    return false;
+  }
+  const items: readonly Value[] = isValueList(value)
+    ? value
+    : Object.values(value);
+  return items.every(isLiteral);
+};
+
+/**
+ * Why `value`, a literal, isn't of `schema`, if it isn't: the first issue
+ * the SDK's validator finds, where in the value it is.
+ */
+const unfitOf = (
+  schema: ValueSchema<unknown, unknown>,
+  value: Json
+): string | undefined => {
+  const result = schema["~standard"].validate(value);
+  if (result instanceof Promise || result.issues === undefined) {
+    return undefined;
+  }
+  const [issue] = result.issues;
+  const path = (issue?.path ?? []).join(".");
+  return `${path === "" ? "" : `\`${path}\`: `}${issue?.message ?? "not of its schema"}`;
+};
+
+/**
+ * Checks what a step keeps in its state: each value where the step
+ * stands, its own result in scope as `output`.
+ */
+const checkState = (
+  walk: Walk,
+  state: StateWrites | undefined,
+  pointer: string,
+  place: Place
+): void => {
+  for (const [key, value] of Object.entries(state ?? {})) {
+    const at = join(pointer, "state", key);
+    const schema = walk.state.get(key);
+    const declared = Object.hasOwn(walk.document.state ?? {}, key);
+    if (!declared) {
+      problem(
+        walk,
+        at,
+        "workflow.undeclared_state_key",
+        `The workflow keeps no \`${key}\` in its state.`,
+        "Declare it under the workflow's `state`, with its schema, or write a key that is."
+      );
+      continue;
+    }
+    const unfit =
+      schema !== undefined && isLiteral(value)
+        ? unfitOf(schema, value)
+        : undefined;
+    if (unfit !== undefined) {
+      problem(
+        walk,
+        at,
+        "workflow.state_type",
+        `Not of \`${key}\`'s schema: ${unfit}`,
+        `Write a value of the schema the workflow's \`state\` declares for \`${key}\`, or change that schema.`
+      );
+      continue;
+    }
+    checkValue(walk, value, at, { ...place, output: true }, false);
+  }
 };
 
 /**
@@ -909,6 +1035,7 @@ const checkDo = (
     binding?.kind === "connector"
   );
   checkCallDepth(walk, step.arguments, join(pointer, "arguments"), 0);
+  checkState(walk, step.state, pointer, place);
 };
 
 const checkAgent = (
@@ -934,6 +1061,7 @@ const checkAgent = (
   if (answer !== undefined) {
     walk.answers.set(pointer, answer);
   }
+  checkState(walk, step.state, pointer, place);
 };
 
 /** A list of steps' checks, as `checkSteps` makes them (lists nest). */
@@ -1171,6 +1299,7 @@ export const checkWorkflow = (json: unknown): CheckResult => {
     placeholders: new Map(),
     answers: new Map(),
     literals: new Map(),
+    state: new Map(),
     count: 0,
   };
   checkParams(walk, params);
@@ -1187,7 +1316,18 @@ export const checkWorkflow = (json: unknown): CheckResult => {
     }
   }
   const input = checkSchema(walk, document.input ?? noInput, "/input");
-  const top: Place = { steps: new Set(), error: false, item: false };
+  for (const [key, schema] of Object.entries(document.state ?? {})) {
+    const compiled = compiledSchema(walk, schema, join("/state", key));
+    if (compiled !== undefined) {
+      walk.state.set(key, compiled);
+    }
+  }
+  const top: Place = {
+    steps: new Set(),
+    error: false,
+    item: false,
+    output: false,
+  };
   checkSteps(walk, document.steps, "/steps", top, 1);
   if (walk.count > formatLimits.steps) {
     problem(
@@ -1211,6 +1351,7 @@ export const checkWorkflow = (json: unknown): CheckResult => {
         steps: new Set(document.steps.map(({ id }) => id)),
         error: false,
         item: false,
+        output: false,
       },
       false
     );
@@ -1235,6 +1376,9 @@ export const checkWorkflow = (json: unknown): CheckResult => {
       placeholders: walk.placeholders,
       answers: walk.answers,
       contract: { input, output, params: paramDescriptors },
+      state: new Map(
+        [...walk.state].map(([key, schema]) => [key, schema.descriptor])
+      ),
     },
   };
 };

@@ -48,9 +48,9 @@ export interface ValueRecord {
 
 /**
  * An expression (expressions.ts): JavaScript a run evaluates where it
- * stands, reading `input`, `params`, `steps`, `inbox` and, in a catch,
- * `error`. As JSON, it is an object of one value, so it is a
- * `ValueRecord` too.
+ * stands, reading `input`, `params`, `steps`, `inbox`, `state` and, in a
+ * catch, `error`; in a step's `state`, `output` too. As JSON, it is an
+ * object of one value, so it is a `ValueRecord` too.
  */
 export type Expression = ValueRecord & { readonly $expr: string };
 
@@ -184,6 +184,16 @@ interface StepBase {
   readonly if?: Expression;
 }
 
+/**
+ * What a step keeps in its workflow's state, by a key the workflow
+ * declares (`WorkflowDocument.state`): each value written from the step's
+ * own result (`output` in its expressions) once the step succeeded, and
+ * read by every later run as `state.<key>`. A step its `if` skips writes
+ * nothing. A restricted run reads the workflow's state but
+ * doesn't change it, and nor does a test run: the host skips the write.
+ */
+export type StateWrites = Readonly<Record<string, Value>>;
+
 /** Calls a binding: a connector's operation, a store operation, code. */
 export interface DoStep extends StepBase {
   readonly type: "do";
@@ -193,6 +203,7 @@ export interface DoStep extends StepBase {
   readonly arguments?: Value;
   /** The most one attempt may take. */
   readonly timeout?: Duration;
+  readonly state?: StateWrites;
 }
 
 /** Asks a model, through a model binding, for an answer of `output`'s shape. */
@@ -204,6 +215,7 @@ export interface AgentStep extends StepBase {
   /** A JSON Schema the answer must match. */
   readonly output: Json;
   readonly timeout?: Duration;
+  readonly state?: StateWrites;
 }
 
 /**
@@ -362,6 +374,11 @@ export interface WorkflowDocument {
   readonly output?: { readonly schema: Json; readonly value: Value };
   readonly params?: Readonly<Record<string, Param>>;
   readonly bindings?: Readonly<Record<string, Binding>>;
+  /**
+   * What it keeps between its runs: each key's data schema, as `input`'s.
+   * A step writes only these keys, each value of its key's schema.
+   */
+  readonly state?: Readonly<Record<string, Json>>;
   readonly steps: readonly Step[];
 }
 
@@ -389,6 +406,8 @@ export const formatLimits = {
   titleLength: 200,
   params: 64,
   bindings: 64,
+  /** The keys one step keeps in its workflow's state, as the host seals them. */
+  stateKeys: 64,
 } as const;
 
 const unitMs: Readonly<Record<DurationUnit, number>> = {
@@ -419,6 +438,24 @@ export const durationMs = (duration: Duration): number => {
  */
 export const forEachDescription = `Runs \`do\` for each of \`items\`, one item at a time, in order, with \`item\` in scope in its steps and in \`while\`. A run takes at most ${platformLimits.workflowSteps.toLocaleString("en")} steps in all, every step of every item counted, and that ceiling is what bounds a loop: a list may hold ${platformLimits.workflowCollectionItems.toLocaleString("en")} items, but a loop reaches the ceiling well before that when its items take more than one step each. A run that reaches it fails with workflow.too_many_steps: split the work over more runs, a run per page of items, say.`;
 
+/**
+ * The steps that may keep state: those whose own recorded step is their
+ * call's, which the host writes the state with. A decision, a wait, a
+ * loop, an `if`, a `try` and a raise record no result of their own there.
+ */
+export const stateStepTypes = ["do", "agent"] as const;
+
+/**
+ * What a step's `state` is, to whoever writes one: the schema's
+ * description. The 64 KB is the run host's cap on a workflow's state in
+ * all (core's `workflowStateMaxBytes`), which only a run can reach: no
+ * check of the document can.
+ */
+export const stateDescription = `What the step keeps in its workflow's state once it succeeded: \`{ "<key>": <value> }\`, each key one the workflow declares under its top-level \`state\`, and each value of that key's schema. A value is JSON, any part of which may be an expression; there \`output\` is this step's result. A literal value is checked against its key's schema as the workflow is; every value is checked again as the step records it, and one of another shape fails the step, keeping nothing. Every expression of the workflow reads the state as it was when the run started, as \`state.<key>\`, which is undefined until a run kept it: write \`state.<key> ?? <default>\`. Every version of the workflow keeps the same state, so a value kept under an older schema that doesn't fit this version's reads as undefined too, as a key never written. A step its \`if\` skips keeps nothing, and a replay never writes twice. A restricted run reads the workflow's state but doesn't change it, and nor does a test run. A workflow's state holds at most 64 KB in all, which only a run can reach: a step that would pass it fails with workflow.state_too_large, and since its call already answered, the run ends with workflow.failed_after_effect, as it does when a value isn't of its key's schema. Only a \`do\` or an \`agent\` step keeps state.`;
+
+/** What a workflow's `state` declares, to whoever writes one. */
+export const stateDeclarationDescription = `What the workflow keeps between its runs: \`{ "<key>": <JSON Schema> }\`, at most ${formatLimits.stateKeys} keys, each a letter then letters, digits and \`_\`, each with a data schema as \`input\` has one. A \`do\` or \`agent\` step's \`state\` writes these keys alone, and every expression reads them as \`state.<key>\`.`;
+
 /** What a wait is, to whoever writes one: the schema's description. */
 export const waitDescription =
   "Waits for a time span (`for`), until a deadline (`until`, ms since the epoch), or for an event sent to the run (`event: { from, type }`, `from` an event binding and `type` one or a list of the types its contract admits). An event wait names its `timeout`, at most a year, and its output is `{ timedOut: false, event: { id, type, source, subject?, time, data } }`, or `{ timedOut: true }` when no event came in time: a timeout is no failure, so read `steps.<id>.output.timedOut` before `steps.<id>.output.event.data`. To wait for a reply to the run's mail, give the mail `inbox.<from>` (the run's reply address for that binding, or `undefined` when it has none) as its reply-to address, then wait on the same binding. Any failure of an event wait fails the run; no `try` catches it: its binding revoked, the run's person no longer active, or a test run's wait limit. The run checks its binding again on every replay, so a catch would let a replay after a revocation take a path the run never took.";
@@ -442,6 +479,12 @@ export const stepIdPattern = "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$";
  * made: a parameter is renamed by its `label`.
  */
 export const paramNamePattern = "^[a-z][A-Za-z0-9]{0,63}$";
+
+/**
+ * A key of a workflow's state, as the host keeps it and an expression
+ * reads it (`state.<key>`).
+ */
+export const stateKeyPattern = "^[A-Za-z][A-Za-z0-9_]{0,63}$";
 
 /** A binding's alias, as the host's bindings take it. */
 export const aliasPattern = "^[A-Za-z][A-Za-z0-9_]{0,63}$";

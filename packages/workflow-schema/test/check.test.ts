@@ -7,6 +7,8 @@ import {
   emojiType,
   eventWait,
   everyStep,
+  followedBy,
+  keeping,
   withDecisions,
   withEventWaits,
   withLoops,
@@ -600,6 +602,125 @@ describe("checking a workflow", () => {
       connector: { [at]: "workflow.unreadable" },
       undeclared: { [at]: "workflow.unreadable" },
       whole: { [at]: "workflow.unreadable" },
+    });
+  });
+
+  it("keeps state from a do or agent step's own output, which every expression reads as `state`", () => {
+    const at = (change: Record<string, unknown>) =>
+      codesAt(followedBy(keeping(change)));
+    const kept = { state: { last: { $expr: "steps.send.output.id" } } };
+    const sleep = { id: "nap", type: "wait", for: "1 hour" };
+    expect({
+      ok: codesAt(
+        withDecisions(
+          keeping(),
+          {
+            id: "ask",
+            type: "agent",
+            binding: "summary",
+            if: { $expr: "state.previous !== state.last" },
+            instructions: { $expr: '"Last: " + state.last' },
+            input: { who: { $expr: "input.who" } },
+            output: {
+              type: "object",
+              properties: { line: { type: "string" } },
+              required: ["line"],
+              additionalProperties: false,
+            },
+            state: { summary: { $expr: "output" } },
+          },
+          {
+            id: "rows",
+            type: "forEach",
+            items: { $expr: "state.kept" },
+            do: [keeping({ id: "row", state: { row: { $expr: "item" } } })],
+          },
+          decision({ prompt: { $expr: 'state.summary?.line ?? "Approve?"' } })
+        )
+      ),
+      outputInArguments: at({
+        arguments: { to: { $expr: "output.id" } },
+      }),
+      outputInIf: at({ if: { $expr: "output.ok" } }),
+      laterStep: at({ state: { last: { $expr: "steps.later.output" } } }),
+      sensitive: at({ state: { last: { $expr: "params.token" } } }),
+      undeclared: at({ state: { next: { $expr: "output.id" } } }),
+      wrongLiteral: at({ state: { marked: "yes" } }),
+      belowMinimum: at({ state: { runs: -1 } }),
+      wrongItem: at({ state: { kept: ["a", 1] } }),
+      badDeclaredKey: codesAt({
+        ...followedBy(),
+        state: { "1st": { type: "string" } },
+      }),
+      openDeclared: codesAt({
+        ...followedBy(),
+        state: { open: { type: "object" } },
+      }),
+      tooManyDeclared: codesAt({
+        ...followedBy(),
+        state: Object.fromEntries(
+          Array.from({ length: 65 }, (_, index) => [
+            `k${index}`,
+            { type: "string" },
+          ])
+        ),
+      }),
+      badKey: at({ state: { "1st": 1 } }),
+      dashedKey: at({ state: { "last-seen": 1 } }),
+      blockedKey: at({ state: { constructor: 1 } }),
+      tooMany: at({
+        state: Object.fromEntries(
+          Array.from({ length: 65 }, (_, index) => [`k${index}`, index])
+        ),
+      }),
+      onDecision: codesAt(withDecisions(decision(kept))),
+      onSleep: codesAt(followedBy({ ...sleep, ...kept })),
+      onEventWait: codesAt(withEventWaits(eventWait(kept))),
+      onLoop: codesAt(
+        followedBy({
+          id: "rows",
+          type: "forEach",
+          items: { $expr: "input.rows" },
+          do: [sleep],
+          ...kept,
+        })
+      ),
+      onIf: codesAt(
+        followedBy({
+          id: "check",
+          type: "if",
+          condition: { $expr: "true" },
+          // oxlint-disable-next-line unicorn/no-thenable -- the if step's list
+          then: [sleep],
+          ...kept,
+        })
+      ),
+    }).toStrictEqual({
+      ok: "ok",
+      outputInArguments: { "/steps/5/arguments/to/$expr": "expression.global" },
+      outputInIf: { "/steps/5/if/$expr": "expression.global" },
+      laterStep: { "/steps/5/state/last/$expr": "workflow.unreadable" },
+      sensitive: { "/steps/5/state/last/$expr": "workflow.sensitive" },
+      undeclared: { "/steps/5/state/next": "workflow.undeclared_state_key" },
+      wrongLiteral: { "/steps/5/state/marked": "workflow.state_type" },
+      belowMinimum: { "/steps/5/state/runs": "workflow.state_type" },
+      wrongItem: { "/steps/5/state/kept": "workflow.state_type" },
+      badDeclaredKey: { "/state/1st": "workflow.invalid_state_key" },
+      openDeclared: {
+        "/state/open/additionalProperties": "schema.open_object",
+      },
+      tooManyDeclared: { "/state": "workflow.out_of_bounds" },
+      badKey: { "/steps/5/state/1st": "workflow.invalid_state_key" },
+      dashedKey: { "/steps/5/state/last-seen": "workflow.invalid_state_key" },
+      blockedKey: {
+        "/steps/5/state/constructor": "workflow.invalid_state_key",
+      },
+      tooMany: { "/steps/5/state": "workflow.out_of_bounds" },
+      onDecision: { "/steps/5/state": "workflow.state_not_allowed" },
+      onSleep: { "/steps/5/state": "workflow.state_not_allowed" },
+      onEventWait: { "/steps/5/state": "workflow.state_not_allowed" },
+      onLoop: { "/steps/5/state": "workflow.state_not_allowed" },
+      onIf: { "/steps/5/state": "workflow.state_not_allowed" },
     });
   });
 

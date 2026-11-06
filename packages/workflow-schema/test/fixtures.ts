@@ -33,6 +33,21 @@ export const everyStep = () => ({
     mail: { kind: "connector", contract: "composio.mail@1" },
     summary: { kind: "model", contract: "summary" },
   },
+  // What it keeps between runs: what `keeping` and its kin write.
+  state: {
+    last: { type: "string" },
+    previous: { type: "string" },
+    runs: { type: "integer", minimum: 0 },
+    kept: { type: "array", items: { type: "string" } },
+    marked: { type: "boolean" },
+    row: { type: "string" },
+    summary: {
+      type: "object",
+      properties: { line: { type: "string" } },
+      required: ["line"],
+      additionalProperties: false,
+    },
+  },
   steps: [
     { id: "linger", type: "wait", for: "1 hour" },
     {
@@ -261,6 +276,36 @@ export const eventWait = (change: Record<string, unknown> = {}) => ({
   type: "wait",
   event: { from: "replies", type: "grasp.reply.received" },
   timeout: "3 days",
+  ...change,
+});
+
+/** `everyStep` with `steps` after its own: the first of them at `/steps/5`. */
+export const followedBy = (...steps: unknown[]) => {
+  const document = everyStep();
+  return { ...document, steps: [...document.steps, ...steps] };
+};
+
+/**
+ * A connector call keeping in state what it answered (`output`), what an
+ * earlier run kept, a count of the runs that kept it, a list and a
+ * literal, its subject read from the state.
+ */
+export const keeping = (change: Record<string, unknown> = {}) => ({
+  id: "remember",
+  type: "do",
+  binding: "mail",
+  operation: "mail.send",
+  arguments: {
+    to: { $expr: "input.who" },
+    subject: { $expr: 'state.last ?? "none"' },
+  },
+  state: {
+    last: { $expr: "output.id" },
+    previous: { $expr: 'state.last ?? "none"' },
+    runs: { $expr: "(state.runs ?? 0) + 1" },
+    kept: ["kept", { $expr: "output.id" }],
+    marked: true,
+  },
   ...change,
 });
 

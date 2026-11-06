@@ -14,6 +14,8 @@ import {
   eventWait,
   everyOperator,
   everyStep,
+  followedBy,
+  keeping,
   withDecisions,
   withEventWaits,
   withLoops,
@@ -120,6 +122,28 @@ const fixtures = {
             event: { from: "replies", type: ["grasp.a", "grasp.b"] },
           }),
         ],
+      }
+    ),
+  // State kept by a call (a count of runs among it), an `if`-guarded one
+  // and one in a loop's items, read by an agent's instructions.
+  state: () =>
+    followedBy(
+      keeping(),
+      keeping({ id: "maybe", if: { $expr: "input.who === state.last" } }),
+      {
+        id: "rows",
+        type: "forEach",
+        items: { $expr: "state.kept" },
+        do: [keeping({ id: "row", state: { row: { $expr: "item" } } })],
+      },
+      {
+        id: "ask",
+        type: "agent",
+        binding: "summary",
+        instructions: { $expr: '"Runs so far: " + (state.runs ?? 0)' },
+        input: { last: { $expr: "state.last" } },
+        output: everyStep().state.summary,
+        state: { summary: { $expr: "output" } },
       }
     ),
 };

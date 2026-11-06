@@ -1,3 +1,4 @@
+import type { ValueDescriptor } from "@grasp-os/sdk";
 import { runtimeNames } from "@grasp-os/sdk/expression-check";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { z } from "zod";
@@ -50,7 +51,11 @@ import type {
 // evaluated inside a recorded step (`#decided`), never between steps: a
 // step's `if` in its first step, which records `{ skipped: true }` where
 // it doesn't hold; an `if` step's condition in its own task step; the
-// output in `workflow:output`.
+// output in `workflow:output`. A call step that keeps state records
+// `{ output, state }` in its task step, its state's values evaluated
+// there from its result, which the host writes once that step succeeded;
+// every expression reads the run's snapshot of it, `state` of the run's
+// context, frozen.
 //
 // Threat model, and how each is closed:
 //
@@ -82,7 +87,9 @@ import type {
 //   from the code: which steps exist, which call each makes through which
 //   binding, every literal of its arguments, each catch's filter, each
 //   raise's error, each wait's length, each event wait's binding, types
-//   and timeout.
+//   and timeout, and the keys each task keeps in state with the template
+//   of each value: a record keeping any other key, or another value, is
+//   the host's to refuse.
 
 /** The SDK the generated module imports, and nothing else. */
 export const generatedImport = "@grasp-os/sdk/workflow";
@@ -421,6 +428,15 @@ class Generator {
     };
   }
 
+  /** The descriptor of state key `key`'s declared schema. */
+  #descriptorOf(key: string): ValueDescriptor {
+    const descriptor = this.#workflow.state.get(key);
+    if (descriptor === undefined) {
+      throw new Error(`No checked state key ${key}`);
+    }
+    return descriptor;
+  }
+
   #binding(alias: string): Binding {
     const binding = this.#workflow.document.bindings?.[alias];
     if (binding === undefined) {
@@ -492,6 +508,19 @@ class Generator {
     depth: number,
     sealed: { call: SealedCall; operation: string; arguments: string }
   ): void {
+    const state = Object.entries(step.state ?? {}).map(
+      ([key, value]) =>
+        [
+          key,
+          // A value made from the task's result, as the host's sealed table
+          // names one (its stages are for review: the isolate computes it).
+          this.#value(value, `${step.pointer}/state/${key}`, {
+            taskId: step.id,
+            stage: "taskState",
+            result: "json",
+          }),
+        ] as const
+    );
     this.#task({
       id: step.id,
       kind: "call",
@@ -501,17 +530,48 @@ class Generator {
       ...(step.timeout === undefined
         ? {}
         : { timeoutMs: durationMs(step.timeout) }),
+      ...(state.length === 0
+        ? {}
+        : {
+            state: Object.fromEntries(
+              state.map(([key, { template }]) => [
+                key,
+                { template, value: z.json().parse(this.#descriptorOf(key)) },
+              ])
+            ),
+          }),
     });
+    const called = `z.json().parse(await env[${literal(step.binding)}].call(${literal(sealed.operation)}, ${sealed.arguments}))`;
+    // Its state is evaluated from its result, `output`, in the step that
+    // records both, so the host writes exactly what that step recorded.
+    // Each value is held first to its key's declared schema, by the SDK's
+    // own validator (`fittedValue`), as the check and the host hold it:
+    // one of another shape fails the step, unchanged, which then records,
+    // and so keeps, nothing.
+    if (state.length > 0) {
+      this.#imports.add("fittedValue");
+    }
+    const kept = state.map(
+      ([key, { code }]) =>
+        `[${literal(key)}]: fittedValue(${literal(JSON.stringify(this.#descriptorOf(key)))}, ${code})`
+    );
+    const record =
+      state.length === 0
+        ? `{ output: ${called} }`
+        : `((output) => ({ output, state: { ${kept.join(", ")} } }))(${called})`;
     // Its `if` is decided in its task step, with its call: skipped, the
-    // step makes none.
+    // step makes none and keeps nothing.
     const retry = retryOf(tries, depth);
     this.#decided(
       step,
       depth,
       "task",
-      `{ output: z.json().parse(await env[${literal(step.binding)}].call(${literal(sealed.operation)}, ${sealed.arguments})) }`,
+      record,
       (inner, recorded) => {
-        this.#line(inner, `steps[${literal(step.id)}] = ${recorded};`);
+        this.#line(
+          inner,
+          `steps[${literal(step.id)}] = { output: ${recorded}.output };`
+        );
       },
       retry === undefined ? [] : [`retry: ${retry}`]
     );
@@ -1067,6 +1127,19 @@ class Generator {
     }
     this.#line(1, "const run = { id: runId };");
     this.#line(1, "const steps = Object.create(null);");
+    // The snapshot is untrusted input: every version of the workflow
+    // writes the same state, so a value an older one kept may not fit this
+    // one's schema. What this build reads is only its declared keys whose
+    // values fit (`fittedState`), each other one undefined.
+    this.#imports.add("fittedState");
+    const declared = [...this.#workflow.state.keys()].map(
+      (key) =>
+        `[${literal(key)}]: ${literal(JSON.stringify(this.#descriptorOf(key)))}`
+    );
+    this.#line(
+      1,
+      `const state = fittedState(snapshot, { ${declared.join(", ")} });`
+    );
     this.#list(document.steps, "/steps", [], 1);
     if (document.output === undefined) {
       this.#line(1, "return null;");
@@ -1091,7 +1164,7 @@ class Generator {
       `export default workflow(${literal(id)}, {`,
       `  params: { ${params.map(([name, param]) => `[${literal(name)}]: ${paramCall(param)}`).join(", ")} },`,
       "  input: z.json(),",
-      `}, async (step, { input, params, env, runId, ${inboxRoot} }) => {`,
+      `}, async (step, { input, params, env, runId, ${inboxRoot}, state: snapshot }) => {`,
     ];
     const offset = prelude.length;
     return {
