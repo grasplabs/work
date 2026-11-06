@@ -28,26 +28,20 @@ export default Tally;
 `;
 
 /**
- * A tally of spec 8's layout: a table, a query and a mutation, and a
- * screen on the React SDK that reads the count live through the host's
- * references (`@server/_generated/api`). `label` says whose count it is: the App's, or
- * the draft's preview.
+ * The tally's server code, its count saying `label` after the number,
+ * reading `limit` records: past 100 it fails its type check.
  */
-export const tallyFiles = (label: string): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  tally: defineTable({ added: v.boolean() }),
-});
-`,
-  "server/tally.ts": `import { v } from "@grasp-os/sdk";
+export const tallyServer = (
+  label: string,
+  limit = 100
+): string => `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
 export const count = query({
   args: {},
   returns: v.string(),
   handler: async (ctx) => {
-    const added = await ctx.db.query("tally").take(100);
+    const added = await ctx.db.query("tally").take(${String(limit)});
     return \`\${String(added.length)} ${label}\`;
   },
 });
@@ -60,7 +54,22 @@ export const add = mutation({
     return null;
   },
 });
+`;
+
+/**
+ * A tally of spec 8's layout: a table, a query and a mutation, and a
+ * screen on the React SDK that reads the count live through the host's
+ * references (`@server/_generated/api`). `label` says whose count it is: the App's, or
+ * the draft's preview.
+ */
+export const tallyFiles = (label: string): Record<string, string> => ({
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  tally: defineTable({ added: v.boolean() }),
+});
 `,
+  "server/tally.ts": tallyServer(label),
   "app.ts": `import { app } from "@grasp-os/sdk";
 import schema from "./schema.ts";
 

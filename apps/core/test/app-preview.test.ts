@@ -4,6 +4,7 @@ import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import type { AppVersionPush } from "@grasp-os/shared/screens";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { openTestRun } from "./agent-chat.ts";
 import { release } from "./apps.ts";
@@ -313,14 +314,17 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     const server = await chats.preview(serverChat, app);
     const deleted = await chats.preview(screenless, app);
 
+    // The draft's screens build against the App's latest version's server
+    // code in place of its own, which doesn't: the problem is being fixed.
     expect({
       server: {
         fallback: server.fallback,
+        serverUnbuilt: server.refresh?.serverUnbuilt,
         titles: await titlesAt(builder, serverChat, app, callsAt(server)),
       },
       deleted: { fallback: deleted.fallback, screen: deleted.screen },
     }).toStrictEqual({
-      server: { fallback: true, titles: [] },
+      server: { fallback: undefined, serverUnbuilt: true, titles: [] },
       deleted: { fallback: true, screen: "desk" },
     });
   });
@@ -347,6 +351,60 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       saved,
       broken: await answer(builder.api.chats.preview(chatId, app)),
     }).toStrictEqual({ saved: true, broken: "screen.build_failed" });
+  });
+
+  it("says the server code doesn't build, and where, when no server code of the App's builds, never that it has none", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id } = await builder.api.apps.create({ name: "Unbuilt" });
+    const app = appIdSchema.parse(id);
+    const chatId = await appChat(builder, app);
+    const files = notesFiles("unbuilt");
+    await chatsOf(builder).saveDraft(
+      chatId,
+      app,
+      null,
+      {
+        ...files,
+        "server/notes.ts": (files["server/notes.ts"] ?? "").replace(
+          'ctx.db.query("notes").take(100)',
+          'ctx.db.query("notes").take(1000)'
+        ),
+      },
+      [],
+      0,
+      await openTestRun(chatsOf(builder), chatId)
+    );
+    let refused: unknown;
+    try {
+      await builder.api.chats.preview(chatId, app);
+    } catch (error) {
+      refused = error;
+    }
+    const details = z
+      .object({
+        code: z.string(),
+        details: z.object({
+          diagnostics: z.array(
+            z.object({ file: z.string().nullable(), message: z.string() })
+          ),
+        }),
+      })
+      .parse(refused);
+
+    // The type error names the limit, and what to use past it.
+    expect({
+      code: details.code,
+      files: details.details.diagnostics.map(({ file }) => file),
+      namesLimit: details.details.diagnostics.some(({ message }) =>
+        message.includes(
+          "take() returns 0 to 100 records: use paginate() for more"
+        )
+      ),
+    }).toStrictEqual({
+      code: "version.build_failed",
+      files: ["server/notes.ts"],
+      namesLimit: true,
+    });
   });
 
   it("shows the App's latest version again once the chat's draft is discarded", async () => {

@@ -1020,6 +1020,47 @@ describe(
       await expect(reread.ended).resolves.toBe("ok");
     });
 
+    it("keeps a stream on the last server code that built running across a write of the draft's screens alone, while its own server code doesn't build", async () => {
+      const { builder, app, chatId, revision, write } = await setUp();
+      // Sealed, then server code that fails its type check, which the
+      // preview runs on the server code before in place of.
+      await requestFor(builder, { chatId, app, revision }, "notes.titles");
+      const broken = await write(
+        {
+          "server/notes.ts": (
+            notesFiles("drafted")["server/notes.ts"] ?? ""
+          ).replace(".take(100)", ".take(1000)"),
+        },
+        revision
+      );
+      const seat = { chatId, app, revision: broken };
+      const request = await streamRequest(
+        builder,
+        seat,
+        "notes.slow",
+        { title: "kept" },
+        crypto.randomUUID()
+      );
+      const followed = await follow(builder, seat, "stream", request);
+      await progressed(followed.frames);
+      // A write of a screen alone: the server code the stream runs on is
+      // still what the preview runs.
+      const page = await write(
+        {
+          "screens/desk.tsx":
+            "export default function Desk() {\n  return <main>Desk</main>;\n}\n",
+        },
+        broken
+      );
+      const cancelled = await builder.api.chats.previewCancelStream(
+        chatId,
+        app,
+        page,
+        request
+      );
+      expect(cancelled).toStrictEqual({ requested: true });
+    });
+
     it("reads again only what runs: an attach or a cancel of a preview not running seals nothing", async () => {
       const { builder, app, chatId, revision } = await setUp();
       const seat = { chatId, app, revision };

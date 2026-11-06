@@ -336,13 +336,15 @@ interface Following {
 
 /**
  * What the connection's access check says, before each push of data: open,
- * no role in the App, or the build refused (`revoked`, `unreviewed`).
+ * no role in the App, the build refused (`revoked`, `unreviewed`), or a
+ * build of a chat's preview the preview no longer serves (`outdated`),
+ * whose frame follows its queries again at the build it shows next.
  */
 export type AccessCheck<By = Identity> = (
   by: By,
   app: AppId,
   build: LeasedBuild | undefined
-) => Promise<"open" | "role" | "revoked" | "unreviewed">;
+) => Promise<"open" | "role" | "revoked" | "unreviewed" | "outdated">;
 
 /** Whoever a connection's live queries are read for, by `userId`. */
 export interface Reader {
@@ -1051,6 +1053,11 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     ) {
       return {
         refusal: refusalResult(screenErrors.create(`screen.${access}`)),
+      };
+    }
+    if (read.value !== undefined && access === "outdated") {
+      return {
+        refusal: refusalResult(appErrors.create("app.preview_outdated")),
       };
     }
     return {

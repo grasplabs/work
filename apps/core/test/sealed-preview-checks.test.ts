@@ -281,7 +281,10 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
         sealing: message.startsWith("version.build_failed"),
       })),
     }).toStrictEqual({
-      called: "version.build_failed",
+      // Run on the App's latest version in place of the draft's server
+      // code, its own preview store empty; the agent still hears why the
+      // draft's doesn't seal.
+      called: [],
       problems: [{ source: "server", at: "notes.titles", sealing: true }],
     });
   });

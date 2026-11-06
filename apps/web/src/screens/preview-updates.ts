@@ -5,8 +5,8 @@ import type {
   PreviewRefresh,
   PreviewUpdate,
 } from "@grasp-os/shared/chat";
+import { draftSealFailures } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { screenErrors } from "@grasp-os/shared/screens";
 
 // The page's side of a chat's preview taking its draft's writes in the
 // frame it has open (spec 19.2.1): each time the chat says the draft is
@@ -61,6 +61,21 @@ export interface PreviewUpdatesHost {
   /** The frame shows the App's `appVersion` now, or the draft's own changes. */
   shows: (appVersion: number | undefined) => void;
 }
+
+/**
+ * Whether `error` says the draft's code doesn't build: its screens
+ * (`screen.build_failed`), or its server code (`draftSealFailures`).
+ */
+const unbuilt = (error: unknown): boolean => {
+  const code: unknown =
+    typeof error === "object" && error !== null
+      ? Reflect.get(error, "code")
+      : undefined;
+  return (
+    code === "screen.build_failed" ||
+    (typeof code === "string" && draftSealFailures.has(code))
+  );
+};
 
 /** What the frame's receiver answers each version with. */
 type FrameReceiver = (load: PreviewLoad) => Promise<PreviewApplied>;
@@ -136,7 +151,8 @@ export class PreviewUpdates {
     fallback = false
   ) {
     this.#app = app;
-    this.#health = fallback ? "fixing" : "working";
+    this.#health =
+      fallback || opened.serverUnbuilt === true ? "fixing" : "working";
     this.#applied = opened;
     this.#host = host;
     this.#kit = new Set(opened.kit);
@@ -263,8 +279,9 @@ export class PreviewUpdates {
     try {
       answered = await this.#host.fetch(revision, this.#applied.appVersion);
     } catch (error) {
-      // Its code doesn't build: the frame keeps what it shows.
-      if (screenErrors.codeOf(error) === "screen.build_failed") {
+      // Its code doesn't build, its screens' or its server code's: the
+      // frame keeps what it shows.
+      if (unbuilt(error)) {
         this.#say("fixing");
       }
       // Anything else (the draft moved past it, core out of reach) is
@@ -328,8 +345,11 @@ export class PreviewUpdates {
       this.#host.moved(shownAt(update));
     }
     // Working once an update shows without a problem of its own: one it
-    // reported as it came in keeps the problem being fixed.
-    if (!this.#troubled) {
+    // reported as it came in, or one on the last server code that built
+    // while the draft's own doesn't, keeps the problem being fixed.
+    if (update.serverUnbuilt === true) {
+      this.#say("fixing");
+    } else if (!this.#troubled) {
       this.#say("working");
     }
     return true;

@@ -1,3 +1,4 @@
+import { isAppLayout } from "@grasp-os/compiler";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { AppFiles } from "@grasp-os/shared/apps";
@@ -33,6 +34,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { draftSealFailures } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -207,17 +209,22 @@ const builderRolesKey = async (env: Env, userId: string): Promise<string> => {
  */
 const previewReads = (env: Env, check: SessionCheck): LiveReads<Identity> => ({
   check,
-  // The draft still served at the subscription's revision (its own, or
-  // one since which only its screens changed), and the person still
-  // building the App: a read under way as the draft's server code moved
-  // on pushes nothing, and its subscription ends.
+  // The person still building the App, and the build the subscription
+  // names still served (`SealedPreviews.served`): a read under way as the
+  // preview moved on to other server code pushes nothing, and its
+  // subscription ends as out of date, never as the App gone, so the frame
+  // follows it again at the build it shows next (the page's
+  // screen-host.ts).
   access: async (by, app, key) => {
+    if (!(await buildsNow(env, by, app))) {
+      return "role";
+    }
     const { chatId, at } = previewOfKey(key);
     const served = await workspace(
       env,
       personalWorkspaceId(by.userId)
     ).previewServes(chatId, app, at);
-    return served && (await buildsNow(env, by, app)) ? "open" : "role";
+    return served ? "open" : "outdated";
   },
   // The teams they are in now with them, which a table's row rules read
   // (store-rules.ts): a preview read under one set is never pushed under
@@ -263,13 +270,19 @@ const encoder = new TextEncoder();
  * draft at `revision` (@grasp-os/sdk's preview-runtime.ts): its screen's
  * module, by address, and the App's and the kit's modules it loads, and
  * the App's version it is of, when it shows one
- * (`PreviewRefresh.appVersion`).
+ * (`PreviewRefresh.appVersion`), and whether it runs in place of server
+ * code that doesn't build (`PreviewRefresh.serverUnbuilt`).
  */
 const refreshOf = (
   revision: number,
-  { screen, code }: Pick<BuiltScreen, "screen" | "code">,
+  {
+    screen,
+    code,
+    serverUnbuilt,
+  }: Pick<PreviewScreen, "screen" | "code" | "serverUnbuilt">,
   appVersion: number | undefined
 ): PreviewRefresh => ({
+  ...(serverUnbuilt ? { serverUnbuilt: true } : {}),
   revision,
   screen,
   entry: code.addresses[code.entry] ?? "",
@@ -293,18 +306,34 @@ const refreshOf = (
  */
 interface Previewed {
   files: Map<string, string>;
-  references: () => Promise<string | null>;
+  references: () => Promise<PreviewReferences>;
   revision: number;
   shows?: number;
 }
 
-/** Whether `error` says code didn't build (`*.build_failed`). */
+/**
+ * The references a preview's screens import, and whether they are of
+ * other server code than the draft's, which doesn't build
+ * (`Workspace.previewReferences`).
+ */
+interface PreviewReferences {
+  references: string | null;
+  serverUnbuilt: boolean;
+}
+
+/** A screen of a preview, built (`ChatsRpc.#previewBuild`). */
+type PreviewScreen = BuiltScreen & { serverUnbuilt: boolean };
+
+/**
+ * Whether `error` says code didn't build: its screens
+ * (`screen.build_failed`), or its server code (`draftSealFailures`).
+ */
 const buildFailed = (error: unknown): boolean =>
   typeof error === "object" &&
   error !== null &&
   "code" in error &&
   typeof error.code === "string" &&
-  error.code.endsWith(".build_failed");
+  (error.code === "screen.build_failed" || draftSealFailures.has(error.code));
 
 export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   readonly #env: Env;
@@ -890,8 +919,10 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       const draft = await chats.draftVersion(chat, by.userId, id, version);
       return {
         files: await draftFiles(this.#env, id, draft),
-        references: async () =>
-          await draftVersionReferences(this.#env, id, draft),
+        references: async () => ({
+          references: await draftVersionReferences(this.#env, id, draft),
+          serverUnbuilt: false,
+        }),
         // A version opened read-only names no revision a draft is at, so
         // nothing it calls runs, even when it is the draft as it is now.
         revision: readOnlyRevision,
@@ -932,7 +963,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   ): Promise<PreviewBundle> {
     const now = await this.#previewed(by, chatId, id, { version });
     let shown = now;
-    let built: BuiltScreen;
+    let built: PreviewScreen;
     try {
       built = await this.#screenOf(now, id, screen);
     } catch (error) {
@@ -990,7 +1021,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     previewed: Previewed,
     id: AppId,
     screen: string | undefined
-  ): Promise<BuiltScreen> {
+  ): Promise<PreviewScreen> {
     const screens = screensIn(previewed.files);
     const [first] = screens;
     if (first === undefined) {
@@ -1012,15 +1043,43 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    */
   async #previewBuild(
     files: Map<string, string>,
-    references: () => Promise<string | null>,
+    references: () => Promise<PreviewReferences>,
     id: AppId,
     screen: string | undefined
-  ): Promise<BuiltScreen> {
-    const withReferences = await withReferencesText(
-      Object.fromEntries(files),
-      async () => (await references()) ?? undefined
-    );
-    return await screenCode(
+  ): Promise<PreviewScreen> {
+    const source = Object.fromEntries(files);
+    // Its server code read whatever its screens import: whether it builds
+    // is said even of screens that call none of it.
+    const reading = isAppLayout(source) ? references() : undefined;
+    let read:
+      | { references: PreviewReferences }
+      | { failed: unknown }
+      | undefined;
+    if (reading !== undefined) {
+      try {
+        read = { references: await reading };
+      } catch (error) {
+        read = { failed: error };
+      }
+    }
+    let needed = false;
+    const withReferences = await withReferencesText(source, async () => {
+      needed = true;
+      const got = await reading;
+      return got?.references ?? undefined;
+    });
+    // Its screens import references that couldn't be had: why (its server
+    // code doesn't build, say) is what to tell, never that the App has no
+    // server code, which a build without them would say.
+    if (needed && read !== undefined && "failed" in read) {
+      throw read.failed;
+    }
+    const serverUnbuilt =
+      read !== undefined &&
+      ("failed" in read
+        ? buildFailed(read.failed)
+        : read.references.serverUnbuilt);
+    const built = await screenCode(
       this.#env,
       withReferences,
       screen,
@@ -1029,6 +1088,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       "preview",
       { checks: false }
     );
+    return { ...built, serverUnbuilt };
   }
 
   /**

@@ -12,7 +12,11 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { streamMaxRunning } from "@grasp-os/shared/operation-limits";
-import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
+import {
+  draftSealFailures,
+  jsonOf,
+  operationErrors,
+} from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -129,13 +133,17 @@ import type { Draft } from "./workspace.ts";
 //   build the App before every call (chats-rpc.ts), and each protected
 //   step of a call (its start, every commit) checks again that they are a
 //   member who builds the App (`authorize`).
-// - The preview outlives its draft: a revision with other server code, a
-//   dropped or proposed draft, or a deleted chat drops it (`drop`). A
-//   call for another revision is `app.preview_outdated` (chats-rpc.ts), a
-//   call already running commits nothing more (each protected step checks
-//   its preview is still the one running), and its store is discarded. A
-//   revision that changed only screens (`serverOf`) runs the same sealed
-//   code on the same store: what was sealed is still what runs.
+// - The preview outlives its draft: other server code of the draft, once
+//   it seals, takes its place, and a dropped or proposed draft, or a
+//   deleted chat, drops it (`drop`). A call of a frame it no longer serves
+//   is `app.preview_outdated` (`served`, chats-rpc.ts), a call already
+//   running commits nothing more (each protected step checks its preview
+//   is still the one running), and its store is discarded. A revision that
+//   changed only screens (`serverOf`) runs the same sealed code on the
+//   same store: what was sealed is still what runs. Server code that
+//   doesn't seal takes nothing's place: the draft's frames run on the last
+//   server code of this preview that did, as the frames were built
+//   against it (`served`), until other server code seals.
 // - One preview's data reaches another's: a store per chat, App and
 //   server code, created empty, shared with nothing.
 // - A store is lost: each is recorded here before its object is first
@@ -434,6 +442,15 @@ export const sweepPreviewStores = async (
 interface Running {
   /** The revision it started at, which its store is kept under. */
   readonly revision: number;
+  /** The draft it is sealed from: what a frame it serves calls (`served`). */
+  readonly draft: Draft;
+  /**
+   * The first revision of the draft whose frames it serves (`served`):
+   * where its server code began. None for a version of the App, which
+   * serves the draft's frames only in place of server code that doesn't
+   * seal.
+   */
+  readonly since: number;
   /** Its server code (`serverOf`): what it runs while that stays the same. */
   readonly server: string;
   /** The version the draft would become: the identity it is sealed with. */
@@ -554,6 +571,14 @@ export interface PreviewCallOptions {
    */
   readonly revision?: number;
 }
+
+/** Whether `error` says the draft's code doesn't seal, which a change of it fixes. */
+const isDraftSealFailure = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  typeof error.code === "string" &&
+  draftSealFailures.has(error.code);
 
 /** The version a draft's release is sealed as: the one it would become. */
 const sealedAs = (draft: Pick<Draft, "base">): number => (draft.base ?? 0) + 1;
@@ -681,14 +706,27 @@ export class SealedPreviews {
   readonly #stuck = new Set<string>();
   /** The stores being discarded now, so none is discarded twice at once. */
   readonly #discarding = new Set<string>();
-  /** What each preview runs, by `nameOf`. In memory: a restart loads it again. */
+  /**
+   * What each preview runs, by `nameOf`: the last server code it sealed.
+   * In memory: a restart loads it again.
+   */
   readonly #running = new Map<string, Running>();
   /**
+   * The server code each preview seals now, by `nameOf`: it takes the
+   * place of what the preview runs once it seals (`#settle`).
+   */
+  readonly #sealing = new Map<string, Running>();
+  /**
    * The server code of each chat's draft of an App, by `nameOf`, and the
-   * first revision it has been that since (`serves`). In memory: a
+   * first revision it has been that since (`served`). In memory: a
    * restart knows only the draft's revision now.
    */
   readonly #serverSince = new Map<string, { server: string; since: number }>();
+  /**
+   * The server code of each chat's draft of an App that didn't seal, by
+   * `nameOf` (`serverUnbuilt`): its frames run on what the preview runs.
+   */
+  readonly #unbuilt = new Map<string, string>();
   /** The receipts kept of settled invocations, oldest first (`#kept`). */
   readonly #receipts: { running: Running; name: string; live: Live }[] = [];
 
@@ -1031,9 +1069,8 @@ export class SealedPreviews {
     app: AppId,
     running: Running
   ): () => Promise<WriterRoles> {
-    const name = nameOf(chatId, app);
     const requireCurrent = (): void => {
-      if (this.#running.get(name) !== running) {
+      if (!this.#current(chatId, app, running)) {
         throw appErrors.create("app.preview_outdated");
       }
     };
@@ -1187,18 +1224,28 @@ export class SealedPreviews {
       throw operationErrors.create("contract.invalid_request");
     }
     // Which preview it is for is decided now, with the draft the caller
-    // just read, before anything awaits: a draft saved meanwhile drops
-    // this preview, and the stream is then refused rather than recreate
-    // it over the newer one. An attach reads only what runs: a preview
-    // not running holds nothing, and none is sealed just to say so.
+    // just read, before anything awaits: other server code sealed
+    // meanwhile takes this preview's place, and the stream is then refused
+    // rather than recreate it over the newer one. An attach reads only
+    // what runs: a preview not running holds nothing, and none is sealed
+    // just to say so.
     const running = attach
       ? this.#runningAt(chatId, app, draft)
       : this.#runningFor(chatId, app, draft);
     const inputHash = await sha256Hex(canonicalJson(input ?? null));
-    if (
-      running !== undefined &&
-      this.#running.get(nameOf(chatId, app)) !== running
-    ) {
+    // Server code being sealed runs once it has taken its place. Code that
+    // doesn't seal is the draft's to fix: its stream's result says why,
+    // as a call's answer does.
+    if (running !== undefined) {
+      try {
+        await running.release;
+      } catch (error) {
+        if (isDraftSealFailure(error)) {
+          return resultOf(refusedResult(error));
+        }
+      }
+    }
+    if (running !== undefined && !this.#current(chatId, app, running)) {
       throw appErrors.create("app.preview_outdated");
     }
     const name = streamName(personId, call, key);
@@ -1254,12 +1301,12 @@ export class SealedPreviews {
       // Settled, it keeps no snapshot: its readers get its result next.
       live.progress = null;
       wake(live);
-      // A dropped preview keeps no receipt: nothing can attach to it, and
-      // it would take the place of a current preview's. Nor does a run
-      // that ran nothing of the App's, as a live one keeps none
+      // A preview no longer current keeps no receipt: nothing can attach
+      // to it, and it would take the place of a current preview's. Nor
+      // does a run that ran nothing of the App's, as a live one keeps none
       // (`keepsReceipt`): the same key may run again once, say, the
       // sandbox is back.
-      if (this.#running.get(nameOf(chatId, app)) !== running) {
+      if (!this.#current(chatId, app, running)) {
         return;
       }
       if (keepsReceipt(outcome)) {
@@ -1406,8 +1453,13 @@ export class SealedPreviews {
 
   /**
    * The preview of `draft`: the one running, while it runs the draft's
-   * server code (a write of its screens alone changes none of it);
-   * otherwise a new one, the one before dropped first.
+   * server code (a write of its screens alone changes none of it), or the
+   * one sealing it; otherwise a new one, which takes the place of the one
+   * running once it seals (`#settle`). Only the draft's own server code
+   * now is ever sealed anew, or a version of the App's: a call that read
+   * an earlier revision of the draft, then waited while the draft moved
+   * on, is `app.preview_outdated`, never its code sealed again over what
+   * runs.
    */
   #runningFor(chatId: ChatId, app: AppId, draft: Draft): Running {
     const name = nameOf(chatId, app);
@@ -1415,24 +1467,132 @@ export class SealedPreviews {
     if (known !== undefined && runsServerOf(known, draft)) {
       return known;
     }
-    if (known !== undefined) {
-      this.drop(chatId, app);
+    const sealing = this.#sealing.get(name);
+    if (sealing !== undefined && runsServerOf(sealing, draft)) {
+      return sealing;
     }
-    const version = sealedAs(draft);
     const server = serverOf(draft);
+    const kept = this.#serverSince.get(name);
+    if (draft.revision >= 0 && kept !== undefined && kept.server !== server) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    let since = kept?.server === server ? kept.since : draft.revision;
+    // A version of the App (a negative revision) begins no server code of
+    // the draft.
+    if (draft.revision < 0) {
+      since = Number.POSITIVE_INFINITY;
+    }
+    const sealed = Promise.withResolvers<Release>();
     const running: Running = {
       revision: draft.revision,
+      draft,
+      since,
       server,
-      version,
-      release: this.#sealed(chatId, app, draft, version, server),
+      version: sealedAs(draft),
+      release: sealed.promise,
       streams: new Map(),
     };
     // Not left unhandled while nothing awaits it: each call that does
     // hears how it went.
     void heard(running.release);
+    this.#sealing.set(name, running);
+    void this.#settled(chatId, app, running, sealed);
+    return running;
+  }
+
+  /** Settles `sealed`, `running`'s release, as `#settle` goes. */
+  async #settled(
+    chatId: ChatId,
+    app: AppId,
+    running: Running,
+    sealed: PromiseWithResolvers<Release>
+  ): Promise<void> {
+    try {
+      sealed.resolve(await this.#settle(chatId, app, running));
+    } catch (error) {
+      sealed.reject(error);
+    }
+  }
+
+  /**
+   * Seals `running`, which then takes the place of what the preview runs,
+   * the one before stopped: unless other server code took its place to
+   * seal meanwhile (`app.preview_outdated`). Server code that doesn't seal
+   * takes nothing's place: the preview runs on what it ran, and the
+   * draft's frames with it (`served`).
+   */
+  async #settle(
+    chatId: ChatId,
+    app: AppId,
+    running: Running
+  ): Promise<Release> {
+    const name = nameOf(chatId, app);
+    let release: Release;
+    try {
+      release = await this.#sealed(
+        chatId,
+        app,
+        running.draft,
+        running.version,
+        running.server
+      );
+    } catch (error) {
+      if (this.#sealing.get(name) === running) {
+        this.#sealing.delete(name);
+        if (isDraftSealFailure(error)) {
+          this.#unbuilt.set(name, running.server);
+          this.#restore(chatId, app);
+        }
+      }
+      throw error;
+    }
+    if (this.#sealing.get(name) !== running) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    this.#sealing.delete(name);
+    const before = this.#running.get(name);
+    if (before !== undefined) {
+      this.#stop(chatId, app, before);
+    }
     this.#running.set(name, running);
     this.#discardLeftovers();
-    return running;
+    return release;
+  }
+
+  /**
+   * Runs again the last server code of the chat's draft of `app` that
+   * sealed, as kept (`previewReleases`), when nothing runs: after this
+   * object started again, so the draft's frames still run on it, store
+   * and all, while the draft's own server code doesn't seal (`served`).
+   * Its draft names only the revision and version it was sealed at, all a
+   * call of it is matched by (`runsServerOf`): its files are kept sealed.
+   * Never a version of the App's (a negative revision): the draft's frames
+   * then run on the App's latest version, as before anything sealed.
+   */
+  #restore(chatId: ChatId, app: AppId): void {
+    const name = nameOf(chatId, app);
+    const kept = this.#keptRelease(chatId, app);
+    if (this.#running.has(name) || kept === undefined || kept.revision < 0) {
+      return;
+    }
+    const draft: Draft = {
+      base: kept.version - 1,
+      changes: {},
+      revision: kept.revision,
+    };
+    const running: Running = {
+      revision: kept.revision,
+      draft,
+      since: kept.revision,
+      // Its files aren't read again, so its server code is named by the
+      // revision it was sealed at: never any draft's or version's own.
+      server: canonicalJson({ sealedAt: kept.revision }),
+      version: kept.version,
+      release: this.#load(chatId, app, kept.version),
+      streams: new Map(),
+    };
+    void heard(running.release);
+    this.#running.set(name, running);
   }
 
   /**
@@ -1452,7 +1612,7 @@ export class SealedPreviews {
       const files = await draftFiles(this.#env, app, draft);
       const sealed = await sealDraftRelease(this.#env, { app, version }, files);
       // Replaced while it was sealed: nothing of it is kept.
-      if (this.#running.get(nameOf(chatId, app))?.server !== server) {
+      if (this.#sealing.get(nameOf(chatId, app))?.server !== server) {
         throw appErrors.create("app.preview_outdated");
       }
       this.#ctx.storage.transactionSync(() => {
@@ -1539,10 +1699,31 @@ export class SealedPreviews {
     running: Running
   ): Promise<Release> {
     const release = await running.release;
-    if (this.#running.get(nameOf(chatId, app)) !== running) {
+    if (!this.#current(chatId, app, running)) {
       throw appErrors.create("app.preview_outdated");
     }
     return release;
+  }
+
+  /**
+   * Whether `running` is what the chat's preview of `app` runs, and serves
+   * the draft now: its server code is the draft's, or the draft's doesn't
+   * seal, so the draft's frames run on it (`served`). A version of the
+   * App's serves the frames on that version. While other server code of
+   * the draft seals, nothing it runs commits: the draft moved on.
+   */
+  #current(chatId: ChatId, app: string, running: Running): boolean {
+    const name = nameOf(chatId, app);
+    if (this.#running.get(name) !== running) {
+      return false;
+    }
+    const kept = this.#serverSince.get(name);
+    return (
+      running.since === Number.POSITIVE_INFINITY ||
+      kept === undefined ||
+      kept.server === running.server ||
+      this.#unbuilt.get(name) === kept.server
+    );
   }
 
   /**
@@ -1765,17 +1946,32 @@ export class SealedPreviews {
   }
 
   /**
-   * The chat's draft of `app` is at `draft` now: its preview stops
-   * (`drop`) unless it runs the draft's server code still, which a write
-   * of its screens alone leaves as it was (`serverOf`).
+   * The chat's draft of `app` is at `draft` now. Once its server code
+   * changed, what its preview runs serves nothing (`#current`), its
+   * streaming actions stopped, but is kept: other server code takes its
+   * place only once it seals (`#runningFor`), and should that code not
+   * seal, the draft's frames run on it again (`served`). Server code the
+   * draft no longer has is sealed for nothing.
    */
   revised(chatId: ChatId, app: string, draft: Draft): void {
     const name = nameOf(chatId, app);
     const server = serverOf(draft);
     const kept = this.#serverSince.get(name);
-    const known = this.#running.get(name);
-    if (known === undefined || !runsServerOf(known, draft)) {
-      this.drop(chatId, app);
+    const sealing = this.#sealing.get(name);
+    if (sealing !== undefined && !runsServerOf(sealing, draft)) {
+      this.#sealing.delete(name);
+    }
+    // Only a write that changed the server code: one of screens alone
+    // leaves what runs as it was, in place of server code that doesn't
+    // seal too.
+    const running = this.#running.get(name);
+    if (
+      kept?.server !== server &&
+      running !== undefined &&
+      running.since !== Number.POSITIVE_INFINITY &&
+      running.server !== server
+    ) {
+      this.#halt(running);
     }
     this.#serverSince.set(
       name,
@@ -1784,34 +1980,54 @@ export class SealedPreviews {
   }
 
   /**
-   * Whether a screen of the draft at `revision` may call `draft`, the
-   * chat's draft of `app` now: at its revision, or at one since which
-   * only its screens changed (`serverOf`), so what it calls is the very
-   * code and store the draft runs now. A frame keeps the last version of
-   * its screen that worked while a write of it fails, and calls from
-   * there; one past the draft's server code is `app.preview_outdated`.
-   * After this object starts again, only the draft's own revision, as it
-   * knows of no earlier one.
+   * What a screen of the draft at `revision` calls, `draft` being the
+   * chat's draft of `app` now: the draft itself at its revision or at one
+   * since which only its screens changed (`serverOf`), so what it calls is
+   * the very code and store the draft runs now; or, while the draft's
+   * server code doesn't seal, what the preview runs (its `draft`), the
+   * last server code that did, which the draft's screens were built
+   * against meanwhile; with none, the draft itself, whose calls are then
+   * refused with why it doesn't seal. A frame keeps the last version of its screen that worked while
+   * a write of it fails, and calls from there. Undefined, so
+   * `app.preview_outdated`, for any other. After this object starts
+   * again, only the draft's own revision, as it knows of no earlier one.
    */
-  serves(
+  served(
     chatId: ChatId,
     app: string,
     draft: Draft,
     revision: unknown
-  ): boolean {
+  ): Draft | undefined {
     if (
       typeof revision !== "number" ||
       !Number.isSafeInteger(revision) ||
       revision === readOnlyRevision ||
       revision > draft.revision
     ) {
-      return false;
+      return undefined;
     }
-    if (revision === draft.revision) {
-      return true;
+    const name = nameOf(chatId, app);
+    const server = serverOf(draft);
+    const kept = this.#serverSince.get(name);
+    const since = kept?.server === server ? kept.since : draft.revision;
+    const running = this.#running.get(name);
+    const unbuilt = this.#unbuilt.get(name) === server;
+    // With no server code of the preview that sealed, the draft's own:
+    // its call is refused with why it doesn't seal, never as out of date.
+    if (revision >= since) {
+      return unbuilt && running !== undefined ? running.draft : draft;
     }
-    const kept = this.#serverSince.get(nameOf(chatId, app));
-    return kept?.server === serverOf(draft) && revision >= kept.since;
+    return unbuilt && running !== undefined && revision >= running.since
+      ? running.draft
+      : undefined;
+  }
+
+  /**
+   * Whether the server code of `draft`, the chat's draft of `app`, didn't
+   * seal: its frames run on what the preview runs (`served`).
+   */
+  serverUnbuilt(chatId: ChatId, app: string, draft: Draft): boolean {
+    return this.#unbuilt.get(nameOf(chatId, app)) === serverOf(draft);
   }
 
   /**
@@ -1820,24 +2036,30 @@ export class SealedPreviews {
    * its stores are discarded.
    */
   drop(chatId: ChatId, app: string): void {
-    const running = this.#running.get(nameOf(chatId, app));
-    this.#running.delete(nameOf(chatId, app));
+    const name = nameOf(chatId, app);
+    const running = this.#running.get(name);
+    this.#running.delete(name);
+    this.#sealing.delete(name);
+    this.#unbuilt.delete(name);
     // No earlier revision serves once the draft was dropped or proposed.
-    this.#serverSince.delete(nameOf(chatId, app));
-    // Its streaming actions stop, and commit nothing more: each protected
-    // step checks the preview is still the one running.
-    for (const { live } of running?.streams.values() ?? []) {
-      live.stop.abort();
-    }
-    // Its receipts go with it.
-    for (let at = this.#receipts.length - 1; at >= 0; at -= 1) {
-      if (this.#receipts[at]?.running === running) {
-        this.#receipts.splice(at, 1);
-      }
-    }
+    this.#serverSince.delete(name);
     this.#ctx.storage.transactionSync(() => {
       this.#forgetRelease(chatId, app);
     });
+    this.#stop(chatId, app, running);
+  }
+
+  /**
+   * Stops `running`, a preview no longer running, if there is one: its
+   * streaming actions, which commit nothing more (each protected step
+   * checks the preview is still the one running), and its receipts. The
+   * stores of the chat's previews of `app` are discarded: what runs next
+   * starts its own.
+   */
+  #stop(chatId: ChatId, app: string, running: Running | undefined): void {
+    if (running !== undefined) {
+      this.#halt(running);
+    }
     const stores = this.#db
       .select({ storeId: previewStores.storeId })
       .from(previewStores)
@@ -1851,6 +2073,19 @@ export class SealedPreviews {
       stores.map(({ storeId }) => storeId),
       running?.store
     );
+  }
+
+  /** Stops `running`'s streaming actions, and forgets their receipts. */
+  #halt(running: Running): void {
+    for (const { live } of running.streams.values()) {
+      live.stop.abort();
+    }
+    running.streams.clear();
+    for (let at = this.#receipts.length - 1; at >= 0; at -= 1) {
+      if (this.#receipts[at]?.running === running) {
+        this.#receipts.splice(at, 1);
+      }
+    }
   }
 
   /** Forgets the draft release kept for the chat's preview of `app`. */
@@ -1882,6 +2117,18 @@ export class SealedPreviews {
         ([name, { revision }]) => `${name}:${revision}`
       )
     );
+    // The last server code each preview sealed, kept across a restart,
+    // and its store with it: what `#restore` runs again.
+    for (const kept of this.#db
+      .select({
+        chatId: previewReleases.chatId,
+        appId: previewReleases.appId,
+        revision: previewReleases.revision,
+      })
+      .from(previewReleases)
+      .all()) {
+      running.add(`${nameOf(kept.chatId, kept.appId)}:${kept.revision}`);
+    }
     const left = this.#db
       .select({
         storeId: previewStores.storeId,

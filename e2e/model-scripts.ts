@@ -13,7 +13,7 @@ import { z } from "zod";
 import type { Answer } from "../apps/core/test/provider-streams.ts";
 import { contactsApp } from "./contacts-app.ts";
 import { invoiceApproval } from "./invoice-approval.ts";
-import { tallyFiles, tallyScreen } from "./tally-app.ts";
+import { tallyFiles, tallyScreen, tallyServer } from "./tally-app.ts";
 
 /** An agent's turn: its answer, or its answer to what the chat said so far. */
 export type ScriptedReply = Answer | ((said: string) => Answer);
@@ -59,6 +59,28 @@ const readIn = (said: string, pattern: RegExp): string => {
 
 /** The App an App's own chat builds, as its system prompt names it (core's agent.ts). */
 const ownApp = /This chat is the App (?<found>\S+)'s own chat/u;
+
+/**
+ * The agent says `text` and writes `files` into its draft of the App
+ * whose own chat it is, as tool call `id`.
+ */
+const writesTally = (
+  said: string,
+  id: string,
+  text: string,
+  files: Record<string, string>
+): Answer => ({
+  text,
+  toolCalls: [
+    {
+      id,
+      name: "writeFile",
+      arguments: { app: readIn(said, ownApp), files },
+    },
+  ],
+  inputTokens: 200,
+  outputTokens: 40,
+});
 
 /** The SDK's `app`, as a search of Grasp's reference finds it (core's agent-tools.ts). */
 const sdkApp = /(?<found>@grasp-os\/sdk\/src\/app\.ts:\d+:export const app =)/u;
@@ -140,6 +162,26 @@ export const modelScripts = {
         outputTokens: 40,
       }),
       says("The button is renamed."),
+      // A write of its server code alone, which the open preview takes in
+      // place too.
+      (said) =>
+        writesTally(said, "count-anew", "Counting anew.", {
+          "server/tally.ts": tallyServer("counted anew"),
+        }),
+      says("It counts anew."),
+      // Server code that doesn't build, with a write of its screen: the
+      // screen shows, on the server code that last built.
+      (said) =>
+        writesTally(said, "take-more", "Taking more.", {
+          "server/tally.ts": tallyServer("taken", 1000),
+          "screens/tally.tsx": tallyScreen("Add more"),
+        }),
+      says("It takes more."),
+      (said) =>
+        writesTally(said, "fix-server", "Fixing the count.", {
+          "server/tally.ts": tallyServer("fixed"),
+        }),
+      says("The count is fixed."),
     ],
   },
   /**

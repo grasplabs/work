@@ -316,6 +316,12 @@ export interface PreviewRefresh {
    * a frame in place of a draft whose screen doesn't build.
    */
   appVersion?: number;
+  /**
+   * The draft's server code at `revision` doesn't build: its screen is
+   * built against, and calls, the last server code of the preview that
+   * did (or the App's latest version), and the problem is being fixed.
+   */
+  serverUnbuilt?: true;
 }
 
 /**

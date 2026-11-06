@@ -234,7 +234,7 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
   }
 });
 
-test("an App's own chat writes its screen, and its workspace previews it, taking each write in place", async ({
+test("an App's own chat writes its screen and server code, and its workspace previews it, taking each write in place, its screen's even while the server code doesn't build", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("chatPreview");
@@ -308,6 +308,49 @@ test("an App's own chat writes its screen, and its workspace previews it, taking
       sameDocument,
     }).toStrictEqual({ count: "1 in the preview", sameDocument: true });
 
+    // The agent writes its server code alone: the frame takes it in
+    // place, its live count read again on the new code, on a store of
+    // that code's own.
+    await ask.fill("Count anew.");
+    await ask.press("Enter");
+    await expect(chat.getByText("It counts anew.")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(frame.getByRole("status")).toHaveText("0 counted anew", {
+      timeout: 10_000,
+    });
+    await frame.getByRole("button", { name: "Add another" }).click();
+    await expect(frame.getByRole("status")).toHaveText("1 counted anew");
+
+    // Server code that doesn't build, with a write of the screen: the
+    // screen shows on the server code that last built, its data kept,
+    // while the problem is being fixed.
+    await ask.fill("Take more.");
+    await ask.press("Enter");
+    await expect(chat.getByText("It takes more.")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(frame.getByRole("button", { name: "Add more" })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(preview.getByText("Fixing a problem…")).toBeVisible();
+    await expect(frame.getByRole("status")).toHaveText("1 counted anew");
+
+    // Once it builds, the frame takes it as any write.
+    await ask.fill("Fix the count.");
+    await ask.press("Enter");
+    await expect(chat.getByText("The count is fixed.")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(frame.getByRole("status")).toHaveText("0 fixed", {
+      timeout: 10_000,
+    });
+    await expect(preview.getByText("Fixing a problem…")).toHaveCount(0);
+    const stillSameDocument: unknown = await screenFrame?.evaluate(
+      (): unknown => Reflect.get(globalThis, "stillThisDocument")
+    );
+    expect(stillSameDocument).toBe(true);
+
     // The Code view shows the draft the preview does, before anything is
     // published: the App's project as the agent wrote it, its last write
     // too.
@@ -329,7 +372,7 @@ test("an App's own chat writes its screen, and its workspace previews it, taking
     const code = page.getByRole("region", {
       name: "Code of screens/tally.tsx",
     });
-    await expect(code).toContainText("Add another");
+    await expect(code).toContainText("Add more");
     await expect(
       page.getByRole("navigation", { name: "Open file" })
     ).toHaveText(/screens.*tally\.tsx/u);
