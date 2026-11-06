@@ -1563,6 +1563,9 @@ const leftBehind = (contract: SchemaManifest, manifest: string): boolean =>
  * clock; tests choose them, inside the object. Not a Durable Object
  * itself, so none of this is reachable over RPC.
  */
+/** A receipt's seed: 32 bytes, as hex. */
+const seedPattern = /^[0-9a-f]{64}$/u;
+
 export class StoreHost {
   readonly ctx: DurableObjectState;
   readonly env: Env;
@@ -4042,19 +4045,24 @@ export class StoreHost {
         };
       }
       const fence = receipt.fence + 1;
+      // One without a seed of its own (written by a release from before
+      // receipts kept one, after a rollback) is given one now, kept for
+      // its later attempts.
+      const kept = seedPattern.test(receipt.seed) ? receipt.seed : seed;
       this.#db
         .update(receipts)
         .set({
           fence,
           deadline,
           retainUntil: Math.max(receipt.retainUntil, now + retentionMs),
+          seed: kept,
         })
         .where(eq(receipts.receiptId, receiptId))
         .run();
       return {
         held: { receiptId, fence },
         startedAt: receipt.createdAt,
-        seed: receipt.seed,
+        seed: kept,
       };
     });
     await this.schedule();

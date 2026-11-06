@@ -928,9 +928,12 @@ export const flood = query({ args: {}, handler: () => "x".repeat(2 * 1024 * 1024
 
 /**
  * An App that reads the clock and randomness in each kind of function,
- * the platform's own functions as App code held them before the host
- * started anything included. `roll` fails with what it read, so nothing
- * commits and its caller may send it again under its key.
+ * every way the platform has of reading them: the platform's own
+ * functions as App code held them before the host started anything, the
+ * real `Date`'s `now` through its descriptor, the performance timeline, a
+ * formatter given no date, and a new file's and mark's time. `roll` fails
+ * with what it read, and what a query it runs read, so nothing commits
+ * and its caller may send it again under its key.
  */
 const diceFiles: Record<string, string> = {
   ...appDefinition({
@@ -947,11 +950,25 @@ import { action, mutation, query } from "@server/_generated/server";
 
 const heldRandom = Math.random;
 const heldNow = Date.now;
+const formatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  fractionalSecondDigits: 3,
+});
 
 const read = () => ({
   now: Date.now(),
   date: new Date().getTime(),
   heldNow: heldNow(),
+  descriptorNow: Object.getOwnPropertyDescriptor(Date, "now")?.value(),
+  performanceNow: performance.now(),
+  formatted: formatter.format(),
+  fileTime: new File([], "a").lastModified,
+  // Where the platform has the timeline's marks: its compatibility date
+  // decides.
+  markTime: "mark" in performance ? performance.mark("a").startTime : null,
   random: Math.random(),
   heldRandom: heldRandom(),
   uuid: crypto.randomUUID(),
@@ -965,11 +982,29 @@ const twice = async () => {
   return { before, after: read() };
 };
 
+export const sample = query({ args: {}, handler: () => read() });
+
+/** Whether generating a key, which no seed reaches, is refused. */
+const keyRefused = async () => {
+  try {
+    await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign"]);
+    return false;
+  } catch {
+    return true;
+  }
+};
+
 export const roll = mutation({
   args: {},
+  uses: [sample],
   handler: async (ctx) => {
     await ctx.db.query("rolls").take(1);
-    throw new AppError("dice.rolled", "Rolled.", await twice());
+    const read = await twice();
+    throw new AppError("dice.rolled", "Rolled.", {
+      ...read,
+      nested: [await ctx.runQuery(sample, {}), await ctx.runQuery(sample, {})],
+      keyRefused: await keyRefused(),
+    });
   },
 });
 
@@ -998,6 +1033,8 @@ export const tamper = mutation({
 export const look = query({ args: {}, handler: twice });
 
 export const peek = action({ args: {}, handler: twice });
+
+export const generate = action({ args: {}, handler: keyRefused });
 `,
 };
 
@@ -1006,6 +1043,11 @@ const readSchema = z.strictObject({
   now: z.number(),
   date: z.number(),
   heldNow: z.number(),
+  descriptorNow: z.number(),
+  performanceNow: z.number(),
+  formatted: z.string(),
+  fileTime: z.number(),
+  markTime: z.number().nullable(),
   random: z.number(),
   heldRandom: z.number(),
   uuid: z.string(),
@@ -1014,6 +1056,31 @@ const readSchema = z.strictObject({
 
 /** Two reads, one before and one after time passed. */
 const twiceSchema = z.strictObject({ before: readSchema, after: readSchema });
+
+/** What `roll` fails with. */
+const rolledSchema = z.strictObject({
+  before: readSchema,
+  after: readSchema,
+  nested: z.tuple([readSchema, readSchema]),
+  keyRefused: z.boolean(),
+});
+
+/** `read`'s randomness alone. */
+const randomnessOf = ({
+  random,
+  heldRandom,
+  uuid,
+  bytes,
+}: z.infer<typeof readSchema>) => [random, heldRandom, uuid, bytes.join(",")];
+
+/** `read`'s times alone, from every way it reads one. */
+const timesOf = (read: z.infer<typeof readSchema>) => ({
+  date: read.date,
+  heldNow: read.heldNow,
+  descriptorNow: read.descriptorNow,
+  formatted: read.formatted,
+  fileTime: read.fileTime,
+});
 
 describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
   it("are the same in every attempt of one submission, and new for another", async () => {
@@ -1032,34 +1099,57 @@ describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
       if (answered.result.ok) {
         throw new Error("Expected the roll to fail");
       }
-      return twiceSchema.parse(answered.result.error.details);
+      return rolledSchema.parse(answered.result.error.details);
     };
     const started = Date.now();
     const first = await roll("roll-one");
     const again = await roll("roll-one");
     const other = await roll("roll-two");
     const ended = Date.now();
-    const { before } = first;
+    const { before, after, nested } = first;
+    const formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "UTC",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3,
+    });
+    const startedAt = {
+      date: before.now,
+      heldNow: before.now,
+      descriptorNow: before.now,
+      formatted: formatter.format(before.now),
+      fileTime: before.now,
+    };
     expect({
       again,
-      // Held still while it ran, and by what App code held from before.
-      stillAfterWaiting: first.after.now === before.now,
-      sameClock: before.date === before.now && before.heldNow === before.now,
+      // Held still while it ran, every way it is read, in the queries it
+      // ran too.
+      times: [before, after, ...nested].map(timesOf),
+      timeline: [after, ...nested].map(
+        ({ performanceNow, markTime }) =>
+          performanceNow === before.performanceNow &&
+          (markTime === null || markTime === before.performanceNow)
+      ),
       whenStarted: before.now >= started && before.now <= ended,
-      newForAnother: [
-        other.before.random === before.random,
-        other.before.heldRandom === before.heldRandom,
-        other.before.uuid === before.uuid,
-        other.before.bytes.join(",") === before.bytes.join(","),
-      ],
+      // Each query a seed of its own, never the mutation's.
+      ownSeeds: new Set(
+        [before, ...nested].map((read) => randomnessOf(read).join(","))
+      ).size,
+      newForAnother: randomnessOf(other.before).map(
+        (value, index) => value === randomnessOf(before)[index]
+      ),
       aUuid: z.uuidv4().safeParse(before.uuid).success,
+      keyRefused: first.keyRefused,
     }).toStrictEqual({
       again: first,
-      stillAfterWaiting: true,
-      sameClock: true,
+      times: [startedAt, startedAt, startedAt, startedAt],
+      timeline: [true, true, true],
       whenStarted: true,
+      ownSeeds: 3,
       newForAnother: [false, false, false, false],
       aUuid: true,
+      keyRefused: true,
     });
   });
 
@@ -1080,7 +1170,15 @@ describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
         valueOf(await call(dice, dice.owner, path, {}))
       );
       return {
-        moves: after.now > before.now && after.date > before.date,
+        moves:
+          after.now > before.now &&
+          after.date > before.date &&
+          after.descriptorNow > before.descriptorNow &&
+          after.performanceNow > before.performanceNow &&
+          after.fileTime > before.fileTime &&
+          (after.markTime === null ||
+            before.markTime === null ||
+            after.markTime > before.markTime),
         whenRead: before.now >= started && after.now <= Date.now(),
         differs: [
           after.random === before.random,
@@ -1098,7 +1196,8 @@ describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
     expect({
       query: await live("dice.look"),
       action: await live("dice.peek"),
-    }).toStrictEqual({ query: platform, action: platform });
+      keyRefused: valueOf(await call(dice, dice.owner, "dice.generate", {})),
+    }).toStrictEqual({ query: platform, action: platform, keyRefused: false });
   });
 });
 

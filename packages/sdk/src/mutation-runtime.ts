@@ -1,6 +1,12 @@
 import { rngChacha20 } from "@noble/ciphers/chacha.js";
 import { hexToBytes } from "@noble/ciphers/utils.js";
 
+import {
+  replaceClockAndRandomness,
+  seal,
+  sealWhereReached,
+} from "./clock-and-randomness.ts";
+
 // A mutation's time and randomness, as Convex's: inside a mutation
 // `Date.now()` and `new Date()` answer the time it started, and
 // `Math.random()`, `crypto.getRandomValues()` and `crypto.randomUUID()`
@@ -11,10 +17,13 @@ import { hexToBytes } from "@noble/ciphers/utils.js";
 //
 // Installed by the host's module of a function's isolate before any App
 // module loads (release-runner.ts), so App code never holds the platform's
-// functions, and for good (neither writable nor configurable), so it can't
-// put them back. Until the host starts a mutation each answers as the
-// platform's does. The isolate runs one invocation and is thrown away, so
-// nothing reaches another call.
+// functions, and for good, through what a workflow's calculation is locked
+// down with (clock-and-randomness.ts), so it can't put them back. Besides
+// those: the performance timeline's clock, and `File`'s and
+// `PerformanceMark`'s times; generating a key and measuring the timeline
+// are refused, as no seed reaches them. Until the host starts a mutation
+// each answers as the platform's does. The isolate runs one invocation and
+// is thrown away, so nothing reaches another call.
 
 /** When a mutation started, and the seed of its randomness (64 hex digits). */
 export interface MutationStart {
@@ -42,16 +51,6 @@ const isIntegerArray = (value: unknown): value is ArrayBufferView =>
   value instanceof Uint32Array ||
   value instanceof BigInt64Array ||
   value instanceof BigUint64Array;
-
-/** Puts `value` at `object[key]` for good: neither writable nor configurable. */
-const replace = (object: object, key: string, value: unknown): void => {
-  Object.defineProperty(object, key, {
-    value,
-    writable: false,
-    configurable: false,
-    enumerable: false,
-  });
-};
 
 /** A float in [0, 1) from 53 of `bytes`' bits, as `Math.random` answers. */
 const unitInterval = (bytes: Uint8Array): number => {
@@ -87,71 +86,168 @@ const uuidOf = (bytes: Uint8Array): string => {
     .join("-");
 };
 
+/** What a mutation can't use: the platform's, which answers no rerun the same. */
+const unavailable = (what: string): Error =>
+  new Error(
+    `A mutation answers the same when it runs again: ${what} isn't available in one. Use an action.`
+  );
+
+/** `options` with `key` set to `value` when it doesn't set it. */
+const withDefault = (
+  options: unknown,
+  key: string,
+  value: number
+): Record<string, unknown> => ({
+  [key]: value,
+  ...(typeof options === "object" && options !== null ? options : {}),
+});
+
+/**
+ * Puts in place of the global class `name` (and its prototype's
+ * `constructor`) one whose instances take the time they are made,
+ * `options[key]`, from `time` when its argument at `index` doesn't set
+ * it. Whether it took; nothing to do where the platform has no such class.
+ */
+const sealTimedClass = (
+  name: string,
+  index: number,
+  key: string,
+  time: () => number
+): boolean => {
+  const Class: unknown = Reflect.get(globalThis, name);
+  if (typeof Class !== "function") {
+    return true;
+  }
+  // SAFETY: the handler has exactly a `ProxyHandler`'s `construct` trap;
+  // `__proto__: null` only sets its prototype.
+  const timed = new Proxy(Class, {
+    // No prototype: a trap the handler doesn't have is never looked up on
+    // `Object.prototype`, where App code could define one.
+    __proto__: null,
+    construct: (target, args: unknown[], newTarget) => {
+      const given = [...args];
+      given[index] = withDefault(args[index], key, time());
+      const made: unknown = Reflect.construct(target, given, newTarget);
+      // SAFETY: constructing the platform's class makes one of its instances.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      return made as object;
+    },
+  } as ProxyHandler<typeof Class>);
+  const prototype: unknown = Class.prototype;
+  return (
+    typeof prototype === "object" &&
+    prototype !== null &&
+    seal(globalThis, name, timed) &&
+    seal(prototype, "constructor", timed)
+  );
+};
+
 /**
  * Puts the mutation runtime in place of the clock and randomness, for
  * good: what the host's isolate module calls first. Answers how the host
- * starts the invocation's mutation, once.
+ * starts the invocation's mutation, once. Throws when a replacement
+ * didn't take: no function runs in an isolate where one didn't.
  */
 export const installMutationRuntime = (): ((start: MutationStart) => void) => {
   let fixed: Fixed | undefined;
-  const PlatformDate = Date;
+  // The platform's own, as they are before anything is replaced: read
+  // through an instance, as workerd may hand a method only to one.
   const platformNow = Date.now.bind(Date);
   const platformRandom = Math.random.bind(Math);
-  const cryptoPrototype: unknown = Object.getPrototypeOf(crypto);
   const platformRandomValues = crypto.getRandomValues.bind(crypto);
   const platformRandomUUID = crypto.randomUUID.bind(crypto);
+  const platformGenerateKey: unknown = Reflect.get(
+    crypto.subtle,
+    "generateKey"
+  );
+  const platformPerformanceNow = performance.now.bind(performance);
+  const platformMark: unknown = Reflect.get(performance, "mark");
+  const platformMeasure: unknown = Reflect.get(performance, "measure");
+  const { timeOrigin } = performance;
 
   const now = (): number => fixed?.time ?? platformNow();
-  const MutationDate: DateConstructor = new Proxy(PlatformDate, {
-    // `Date()` is the time as a string.
-    apply: (): string => new PlatformDate(now()).toString(),
-    construct: (target, args: unknown[], newTarget): Date =>
-      // SAFETY: constructing `Date`, or a subclass of it, makes a `Date`.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      Reflect.construct(
-        target,
-        args.length === 0 ? [now()] : args,
-        // A subclass's, or our own: never the platform's `Date` itself.
-        newTarget === MutationDate ? target : newTarget
-      ) as Date,
-    get: (target, key, receiver): unknown =>
-      key === "now" ? now : Reflect.get(target, key, receiver),
-  });
-  const random = (): number =>
-    fixed === undefined ? platformRandom() : unitInterval(fixed.bytes(8));
-  const getRandomValues = (array: ArrayBufferView<ArrayBuffer>): unknown => {
-    if (fixed === undefined) {
-      // The platform's, which checks `array` itself.
-      return platformRandomValues(array);
-    }
-    if (!isIntegerArray(array)) {
-      throw new TypeError("getRandomValues takes an integer typed array.");
-    }
-    if (array.byteLength > randomValuesMaxBytes) {
-      throw new DOMException(
-        `getRandomValues fills at most ${randomValuesMaxBytes} bytes.`,
-        "QuotaExceededError"
-      );
-    }
-    new Uint8Array(array.buffer, array.byteOffset, array.byteLength).set(
-      fixed.bytes(array.byteLength)
+  /** `performance.now()`: the mutation's start, on the timeline's origin. */
+  const performanceNow = (): number =>
+    fixed === undefined ? platformPerformanceNow() : fixed.time - timeOrigin;
+  const sealed = [
+    replaceClockAndRandomness({
+      now,
+      random: () =>
+        fixed === undefined ? platformRandom() : unitInterval(fixed.bytes(8)),
+      getRandomValues: (array) => {
+        if (fixed === undefined) {
+          // The platform's, which checks `array` itself.
+          return platformRandomValues(array);
+        }
+        if (!isIntegerArray(array)) {
+          throw new TypeError("getRandomValues takes an integer typed array.");
+        }
+        if (array.byteLength > randomValuesMaxBytes) {
+          throw new DOMException(
+            `getRandomValues fills at most ${randomValuesMaxBytes} bytes.`,
+            "QuotaExceededError"
+          );
+        }
+        new Uint8Array(array.buffer, array.byteOffset, array.byteLength).set(
+          fixed.bytes(array.byteLength)
+        );
+        return array;
+      },
+      randomUUID: () =>
+        fixed === undefined ? platformRandomUUID() : uuidOf(fixed.bytes(16)),
+      // A key from the platform's randomness, which no seed reaches.
+      generateKey(this: unknown, ...args: unknown[]): unknown {
+        if (fixed !== undefined || typeof platformGenerateKey !== "function") {
+          throw unavailable("generating a key");
+        }
+        const generated: unknown = Reflect.apply(
+          platformGenerateKey,
+          this,
+          args
+        );
+        return generated;
+      },
+    }),
+    // The performance timeline's clock, and what reads it: a mark's
+    // time, and a measure's end, unless given.
+    sealWhereReached(performance, "now", performanceNow),
+    // Where the platform has them (its compatibility date decides).
+    typeof platformMark !== "function" ||
+      sealWhereReached(
+        performance,
+        "mark",
+        function mark(
+          this: unknown,
+          name: unknown,
+          options?: unknown
+        ): unknown {
+          const marked: unknown = Reflect.apply(platformMark, this, [
+            name,
+            withDefault(options, "startTime", performanceNow()),
+          ]);
+          return marked;
+        }
+      ),
+    typeof platformMeasure !== "function" ||
+      sealWhereReached(
+        performance,
+        "measure",
+        function measure(this: unknown, ...args: unknown[]): unknown {
+          if (fixed !== undefined) {
+            throw unavailable("performance.measure");
+          }
+          const measured: unknown = Reflect.apply(platformMeasure, this, args);
+          return measured;
+        }
+      ),
+    // A file's `lastModified` and a mark's `startTime`, unless given.
+    sealTimedClass("File", 2, "lastModified", now),
+    sealTimedClass("PerformanceMark", 1, "startTime", performanceNow),
+  ];
+  if (!sealed.every(Boolean)) {
+    throw new Error(
+      "The mutation runtime couldn't replace the platform's clock and randomness."
     );
-    return array;
-  };
-  const randomUUID = (): string =>
-    fixed === undefined ? platformRandomUUID() : uuidOf(fixed.bytes(16));
-
-  replace(globalThis, "Date", MutationDate);
-  replace(PlatformDate.prototype, "constructor", MutationDate);
-  replace(Math, "random", random);
-  // On the object and its prototype: `Crypto.prototype.randomUUID.call(crypto)`
-  // reaches the same.
-  for (const target of [crypto, cryptoPrototype]) {
-    if (typeof target !== "object" || target === null) {
-      continue;
-    }
-    replace(target, "getRandomValues", getRandomValues);
-    replace(target, "randomUUID", randomUUID);
   }
 
   return ({ startedAt, seed }) => {

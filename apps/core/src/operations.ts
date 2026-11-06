@@ -3068,7 +3068,8 @@ const stagedQuery = async (
   callee: OperationManifest,
   args: Json,
   reader: StoreReader,
-  spend: () => void
+  spend: () => void,
+  start: Promise<MutationStart>
 ): Promise<Json> => {
   // A mutation runs queries only (inspection and `nestedCall` see to it):
   // checked again here, where anything else would see its staged state.
@@ -3087,12 +3088,19 @@ const stagedQuery = async (
       ])
     ),
   };
-  return await runHandler(run, narrowed, args, {
-    read: async (request) => {
-      spend();
-      return await readFor(run, narrowed, reader, request);
+  return await runHandler(
+    run,
+    narrowed,
+    args,
+    {
+      read: async (request) => {
+        spend();
+        return await readFor(run, narrowed, reader, request);
+      },
     },
-  });
+    undefined,
+    await start
+  );
 };
 
 /**
@@ -3159,6 +3167,8 @@ const startNested = async (
         readonly reader: StoreReader;
         /** Spends one of the mutation's reads (`spendRead`). */
         readonly spend: () => void;
+        /** The nested query's time and seed, from the mutation's. */
+        readonly start: Promise<MutationStart>;
       }
     | {
         readonly type: "action";
@@ -3209,7 +3219,8 @@ const startNested = async (
         callee,
         admitted,
         within.reader,
-        within.spend
+        within.spend,
+        within.start
       );
     }
     // oxlint-disable-next-line no-use-before-define -- an action's calls run functions of every kind, actions among them
@@ -3330,6 +3341,17 @@ const runMutation = async (
     // oxlint-disable-next-line no-await-in-loop -- one run after the other
     const scope = await scopeOf(compiled, invocation, roles);
     const staging = stagingFor(compiled, operation, Date.now());
+    // Each query it runs answers as it does from the mutation's start and
+    // a seed of its own, by the order this run calls them: the same in
+    // every run of the mutation, never the mutation's own seed again.
+    let nestedCalls = 0;
+    const nestedStart = async (): Promise<MutationStart> => {
+      nestedCalls += 1;
+      return {
+        startedAt: claimed.startedAt,
+        seed: await sha256Hex(`${claimed.seed}:${nestedCalls}`),
+      };
+    };
     // The workflows it starts once it commits, staged by this run alone: a
     // run again for stale reads stages its own from nothing. A start holds
     // its place from before it is admitted (`placed`).
@@ -3368,7 +3390,7 @@ const runMutation = async (
               run,
               operation,
               { kind, path, args: callArgs },
-              { type: "mutation", reader, spend }
+              { type: "mutation", reader, spend, start: nestedStart() }
             ),
           // Its only reach past the store: starts of the workflows it
           // lists, staged for its commit and made from its outbox after.
