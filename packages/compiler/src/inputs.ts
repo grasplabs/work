@@ -136,7 +136,7 @@ export const Route = createRootRoute();
 /**
  * The files a build reads: the App's front end and declarations, the
  * references the host generated for the App's server code, which pages
- * import as `@server/_generated/api`, and, for an App with a schema, its
+ * import as `@server/_generated/api`, and, for a front end beside a schema, its
  * data model's types (`pageDataModel`), generated here from it as the
  * host generates them, with the default root route (`defaultRoot`) when
  * the App's pages have none. Never a route tree of the App's own: the
@@ -145,21 +145,32 @@ export const Route = createRootRoute();
 export const buildFiles = (
   files: Record<string, string>
 ): Record<string, string> => {
-  const typesRead: readonly string[] = pageDataModel.reads;
   const read = Object.fromEntries(
     Object.entries(files).filter(
       ([path]) =>
         path !== routeTreePath &&
         (path.startsWith(sourceFolder) ||
           declarationFile.test(path) ||
-          path === pageReferences.path ||
-          typesRead.includes(path))
+          path === pageReferences.path)
     )
   );
+  // Only for a front end: an App of server code alone has no pages to build.
   const [schema] = pageDataModel.reads;
-  const typed = Object.hasOwn(read, schema)
-    ? { ...read, [pageDataModel.path]: dataModelSource }
-    : read;
+  const frontEnd = Object.keys(read).some((path) =>
+    path.startsWith(sourceFolder)
+  );
+  const typed =
+    frontEnd && Object.hasOwn(files, schema)
+      ? {
+          ...read,
+          ...Object.fromEntries(
+            pageDataModel.reads.flatMap((path) =>
+              Object.hasOwn(files, path) ? [[path, files[path]]] : []
+            )
+          ),
+          [pageDataModel.path]: dataModelSource,
+        }
+      : read;
   const routed = Object.keys(typed).some((path) => isPageFile(path));
   return routed && !Object.hasOwn(typed, rootPage)
     ? { ...typed, [rootPage]: defaultRoot }
