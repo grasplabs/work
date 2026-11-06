@@ -202,8 +202,6 @@ export const handFiles = async (
   target: {
     readonly runId: string;
     readonly workflowId: string;
-    /** Whether a run is admitted with the start: none, nothing to hand a file to. */
-    readonly runs: boolean;
   },
   files: StartFiles | undefined
 ): Promise<HandedFiles> => {
@@ -212,11 +210,7 @@ export const handFiles = async (
   if (slots.length === 0) {
     return { input, runId: undefined, admitted: undefined };
   }
-  if (
-    files === undefined ||
-    !target.runs ||
-    slots.length > runFileLimits.startFiles
-  ) {
+  if (files === undefined || slots.length > runFileLimits.startFiles) {
     throw runFileErrors.create("file.start_files");
   }
   let handed: Json = value;

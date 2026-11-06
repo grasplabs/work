@@ -4,12 +4,11 @@
  * installs, type-checks, lints, formats and builds outside Grasp: the
  * App's source with the references generated from its sealed
  * registration, the code of the workflow versions it binds (never their
- * definitions), and the checkout's own SDK, UI kit, Brain, shared and
- * workflow-expressions packages under `vendor/`, with their licence and
- * the notices of every direct dependency. Its `lint` and `format` hold
- * the App's code to what Grasp holds it to (`planTooling`): oxlint and
- * oxfmt, the releases Grasp runs as WebAssembly, with the config Grasp
- * lints and formats it with.
+ * definitions), and the checkout's own SDK, UI kit, Brain and shared
+ * packages under `vendor/`, with their licence and the notices of every
+ * direct dependency. Its `lint` and `format` hold the App's code to what
+ * Grasp holds it to (`planTooling`): oxlint and oxfmt, the releases Grasp
+ * runs as WebAssembly, with the config Grasp lints and formats it with.
  *
  * Threat model (GRA-713), and how each is closed:
  *
@@ -120,13 +119,7 @@ import {
 import type { Importer, LockfileInput } from "./package-definition-lockfile.ts";
 
 /** The workspace packages a project vendors, each with what it depends on. */
-const vendored = [
-  "brain",
-  "shared",
-  "sdk",
-  "ui",
-  "workflow-expressions",
-] as const;
+const vendored = ["brain", "shared", "sdk", "ui"] as const;
 
 /** The catalog packages every project depends on itself. */
 const projectDependencies = ["react", "react-dom"] as const;
@@ -240,10 +233,7 @@ export const safePath = (relative: string, where: string): string => {
   return relative;
 };
 
-/**
- * A file's contents: text, or bytes for a vendored source that isn't text
- * (the jq WebAssembly the SDK's `evaluate` runs).
- */
+/** A file's contents: text, or a vendored source's bytes, copied exactly. */
 type Contents = string | Uint8Array;
 
 /** A project as planned: every file by its path, before any is written. */
@@ -757,8 +747,8 @@ const checkFiles = {
 
 /** Server code as spec 8 lays it out, as the platform's check reads it. */
 const serverCodeIncludes = [
-  "app.ts",
-  "schema.ts",
+  "grasp.config.ts",
+  "screens.ts",
   "values.ts",
   "server/**/*.ts",
   ".grasp/*.ts",
@@ -1213,8 +1203,6 @@ export const planProject = async (
           key,
           {
             provenance: workflow.provenance,
-            withheldDefaults: workflow.withheldDefaults,
-            withheldConstraints: workflow.withheldConstraints,
             packages:
               workflow.packages === null
                 ? null

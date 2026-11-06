@@ -49,7 +49,7 @@ import type { Wake } from "./wakes.ts";
 //   been billed, and is never sent again within its attempt; the run's next try, after a wait, is a request of its own. An
 //   independent run's call is tried once, so it waits only when the
 //   gateway saw that its call provably billed nothing (models.ts,
-//   `provablyUnbilled`); any other failure fails it (resource-host.ts).
+//   `provablyUnbilled`); any other failure fails it (sealed-run.ts, `#sent`).
 // - A forged or stray wake of its type costs the run one try.
 // - A row of a run that ended (cancelled, or failed past its hold) is
 //   never shown, and is pruned with the next wake.

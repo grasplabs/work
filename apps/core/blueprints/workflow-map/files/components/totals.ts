@@ -118,7 +118,7 @@ export const expectedGain = (
   return Math.max(0, Math.round(saved * 10) / 10);
 };
 
-// A workflow's limits (schema.ts, which the store checks again on every
+// A workflow's limits (values.ts, which the store checks again on every
 // save). Each input is bounded; the gain is worked out from them, and a
 // product of in-range numbers can still pass its limit, so the map checks
 // it before saving (record.ts `draftProblem`).

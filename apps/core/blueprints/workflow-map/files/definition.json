@@ -1,0 +1,702 @@
+{
+  "name": "Workflow map",
+  "permissions": [],
+  "preferences": [],
+  "tables": [
+    {
+      "id": "9f23c47b-332f-499f-9ad3-2dd52285834e",
+      "name": "teams",
+      "fields": [
+        {
+          "id": "94dc490a-61b1-4b20-bed9-2857372f83a1",
+          "name": "title",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "string",
+            "trim": true,
+            "email": false,
+            "min": 1,
+            "max": 200
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "name": "by_title",
+          "fields": ["94dc490a-61b1-4b20-bed9-2857372f83a1"]
+        }
+      ],
+      "access": {
+        "read": "appMembers",
+        "write": "appBuilders"
+      }
+    },
+    {
+      "id": "8b91bf40-1b60-4d1e-94a4-06d7917b7f32",
+      "name": "workflows",
+      "fields": [
+        {
+          "id": "7520d8b0-5a60-4443-a0b9-85295fe28c7f",
+          "name": "title",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "string",
+            "trim": true,
+            "email": false,
+            "min": 1,
+            "max": 200
+          }
+        },
+        {
+          "id": "2afc4c12-2b6d-4616-862e-2abf6856a6af",
+          "name": "state",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "enum",
+            "values": ["drawn", "designed"]
+          }
+        },
+        {
+          "id": "e66aea6a-d82c-4ea7-863a-6502c36432c0",
+          "name": "team",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": true,
+            "presence": "required",
+            "kind": "id",
+            "tableName": "teams"
+          }
+        },
+        {
+          "id": "64118c35-4e9e-426f-8e8a-4d0330975834",
+          "name": "steps",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "array",
+            "item": {
+              "descriptorVersion": 1,
+              "nullable": false,
+              "presence": "required",
+              "kind": "object",
+              "fields": {
+                "name": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "required",
+                  "kind": "string",
+                  "trim": true,
+                  "email": false,
+                  "min": 1,
+                  "max": 200
+                },
+                "who": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "kind": "string",
+                  "trim": true,
+                  "email": false,
+                  "min": 1,
+                  "max": 200
+                },
+                "tool": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "kind": "string",
+                  "trim": true,
+                  "email": false,
+                  "min": 1,
+                  "max": 200
+                },
+                "handover": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "default",
+                  "defaultValue": false,
+                  "kind": "boolean"
+                },
+                "kind": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "kind": "enum",
+                  "values": ["automated", "ai_checked", "tool", "instruction"]
+                },
+                "numbers": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "kind": "object",
+                  "fields": {
+                    "frequency": {
+                      "descriptorVersion": 1,
+                      "nullable": false,
+                      "presence": "optional",
+                      "kind": "object",
+                      "fields": {
+                        "value": {
+                          "descriptorVersion": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "kind": "number",
+                          "integer": false,
+                          "min": 0,
+                          "max": 10000
+                        },
+                        "basis": {
+                          "descriptorVersion": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "kind": "enum",
+                          "values": ["estimated", "observed"]
+                        }
+                      }
+                    },
+                    "minutes": {
+                      "descriptorVersion": 1,
+                      "nullable": false,
+                      "presence": "optional",
+                      "kind": "object",
+                      "fields": {
+                        "value": {
+                          "descriptorVersion": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "kind": "number",
+                          "integer": false,
+                          "min": 0,
+                          "max": 10000
+                        },
+                        "basis": {
+                          "descriptorVersion": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "kind": "enum",
+                          "values": ["estimated", "observed"]
+                        }
+                      }
+                    },
+                    "people": {
+                      "descriptorVersion": 1,
+                      "nullable": false,
+                      "presence": "optional",
+                      "kind": "object",
+                      "fields": {
+                        "value": {
+                          "descriptorVersion": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "kind": "number",
+                          "integer": false,
+                          "min": 0,
+                          "max": 10000
+                        },
+                        "basis": {
+                          "descriptorVersion": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "kind": "enum",
+                          "values": ["estimated", "observed"]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "max": 100
+          }
+        },
+        {
+          "id": "f735b843-6e6a-4d22-a20e-6dc794f65865",
+          "name": "parameters",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "array",
+            "item": {
+              "descriptorVersion": 1,
+              "nullable": false,
+              "presence": "required",
+              "kind": "object",
+              "fields": {
+                "name": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "required",
+                  "kind": "string",
+                  "trim": true,
+                  "email": false,
+                  "min": 1,
+                  "max": 200
+                },
+                "value": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "kind": "string",
+                  "trim": true,
+                  "email": false,
+                  "max": 1000
+                }
+              }
+            },
+            "max": 50
+          }
+        },
+        {
+          "id": "f03365f8-e1e3-458d-b70e-349c1aafe237",
+          "name": "gain",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": true,
+            "presence": "required",
+            "kind": "object",
+            "fields": {
+              "hoursPerWeek": {
+                "descriptorVersion": 1,
+                "nullable": false,
+                "presence": "required",
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 100000
+              }
+            }
+          }
+        },
+        {
+          "id": "da1bbd48-1b9e-4fb5-9b78-87858077727e",
+          "name": "notes",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "string",
+            "trim": false,
+            "email": false,
+            "max": 30000
+          }
+        },
+        {
+          "id": "2219268b-e34b-460d-b8b0-656b1bbfbecb",
+          "name": "version",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "number",
+            "integer": true,
+            "min": 1
+          }
+        },
+        {
+          "id": "1e217820-dde4-4a03-ad23-8b2d26381cf3",
+          "name": "drawnVersion",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": true,
+            "presence": "required",
+            "kind": "number",
+            "integer": true,
+            "min": 1
+          }
+        },
+        {
+          "id": "ab32941f-3e61-4df7-9b08-13084bda0534",
+          "name": "app",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": true,
+            "presence": "required",
+            "kind": "object",
+            "fields": {
+              "appId": {
+                "descriptorVersion": 1,
+                "nullable": false,
+                "presence": "required",
+                "kind": "string",
+                "trim": false,
+                "email": false,
+                "min": 1,
+                "max": 256
+              },
+              "workflowId": {
+                "descriptorVersion": 1,
+                "nullable": false,
+                "presence": "required",
+                "kind": "string",
+                "trim": false,
+                "email": false,
+                "min": 1,
+                "max": 256
+              }
+            }
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "name": "by_title",
+          "fields": ["7520d8b0-5a60-4443-a0b9-85295fe28c7f"]
+        },
+        {
+          "name": "by_created",
+          "fields": ["_createdAt"]
+        }
+      ],
+      "access": {
+        "read": "appMembers",
+        "write": "appBuilders"
+      }
+    },
+    {
+      "id": "8e1f5689-fd55-434b-81b5-d57196b95378",
+      "name": "workflowVersions",
+      "fields": [
+        {
+          "id": "69eaf686-7799-422c-a0f6-46f72eafac1d",
+          "name": "title",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "string",
+            "trim": true,
+            "email": false,
+            "min": 1,
+            "max": 200
+          }
+        },
+        {
+          "id": "f33165c7-9b06-434e-8c84-7a73875728f5",
+          "name": "state",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "enum",
+            "values": ["drawn", "designed"]
+          }
+        },
+        {
+          "id": "c5770c2d-76b0-46e3-b3fc-465a6a208fb9",
+          "name": "team",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": true,
+            "presence": "required",
+            "kind": "id",
+            "tableName": "teams"
+          }
+        },
+        {
+          "id": "f7b32c1b-d8a5-4fc7-b61e-1f7cb18c3b2e",
+          "name": "steps",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "array",
+            "item": {
+              "descriptorVersion": 1,
+              "nullable": false,
+              "presence": "required",
+              "kind": "object",
+              "fields": {
+                "name": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "required",
+                  "kind": "string",
+                  "trim": true,
+                  "email": false,
+                  "min": 1,
+                  "max": 200
+                },
+                "who": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "kind": "string",
+                  "trim": true,
+                  "email": false,
+                  "min": 1,
+                  "max": 200
+                },
+                "tool": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "kind": "string",
+                  "trim": true,
+                  "email": false,
+                  "min": 1,
+                  "max": 200
+                },
+                "handover": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "default",
+                  "defaultValue": false,
+                  "kind": "boolean"
+                },
+                "kind": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "kind": "enum",
+                  "values": ["automated", "ai_checked", "tool", "instruction"]
+                },
+                "numbers": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "kind": "object",
+                  "fields": {
+                    "frequency": {
+                      "descriptorVersion": 1,
+                      "nullable": false,
+                      "presence": "optional",
+                      "kind": "object",
+                      "fields": {
+                        "value": {
+                          "descriptorVersion": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "kind": "number",
+                          "integer": false,
+                          "min": 0,
+                          "max": 10000
+                        },
+                        "basis": {
+                          "descriptorVersion": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "kind": "enum",
+                          "values": ["estimated", "observed"]
+                        }
+                      }
+                    },
+                    "minutes": {
+                      "descriptorVersion": 1,
+                      "nullable": false,
+                      "presence": "optional",
+                      "kind": "object",
+                      "fields": {
+                        "value": {
+                          "descriptorVersion": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "kind": "number",
+                          "integer": false,
+                          "min": 0,
+                          "max": 10000
+                        },
+                        "basis": {
+                          "descriptorVersion": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "kind": "enum",
+                          "values": ["estimated", "observed"]
+                        }
+                      }
+                    },
+                    "people": {
+                      "descriptorVersion": 1,
+                      "nullable": false,
+                      "presence": "optional",
+                      "kind": "object",
+                      "fields": {
+                        "value": {
+                          "descriptorVersion": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "kind": "number",
+                          "integer": false,
+                          "min": 0,
+                          "max": 10000
+                        },
+                        "basis": {
+                          "descriptorVersion": 1,
+                          "nullable": false,
+                          "presence": "required",
+                          "kind": "enum",
+                          "values": ["estimated", "observed"]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "max": 100
+          }
+        },
+        {
+          "id": "b39fba72-4b87-404a-93fc-cbd57b705cab",
+          "name": "parameters",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "array",
+            "item": {
+              "descriptorVersion": 1,
+              "nullable": false,
+              "presence": "required",
+              "kind": "object",
+              "fields": {
+                "name": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "required",
+                  "kind": "string",
+                  "trim": true,
+                  "email": false,
+                  "min": 1,
+                  "max": 200
+                },
+                "value": {
+                  "descriptorVersion": 1,
+                  "nullable": false,
+                  "presence": "optional",
+                  "kind": "string",
+                  "trim": true,
+                  "email": false,
+                  "max": 1000
+                }
+              }
+            },
+            "max": 50
+          }
+        },
+        {
+          "id": "07a12d87-e0bf-4199-8050-715c7919bd08",
+          "name": "gain",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": true,
+            "presence": "required",
+            "kind": "object",
+            "fields": {
+              "hoursPerWeek": {
+                "descriptorVersion": 1,
+                "nullable": false,
+                "presence": "required",
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 100000
+              }
+            }
+          }
+        },
+        {
+          "id": "e8f9dd9e-80b3-4d40-91c2-4988f8f79e05",
+          "name": "notes",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "string",
+            "trim": false,
+            "email": false,
+            "max": 30000
+          }
+        },
+        {
+          "id": "853cd50c-cfce-45ef-a193-221c4e270d27",
+          "name": "version",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "number",
+            "integer": true,
+            "min": 1
+          }
+        },
+        {
+          "id": "69eb9c82-9b6e-4a63-8cc5-0106d4903a4b",
+          "name": "drawnVersion",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": true,
+            "presence": "required",
+            "kind": "number",
+            "integer": true,
+            "min": 1
+          }
+        },
+        {
+          "id": "1a043466-f4a3-49de-9f81-ae36c93a924b",
+          "name": "app",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": true,
+            "presence": "required",
+            "kind": "object",
+            "fields": {
+              "appId": {
+                "descriptorVersion": 1,
+                "nullable": false,
+                "presence": "required",
+                "kind": "string",
+                "trim": false,
+                "email": false,
+                "min": 1,
+                "max": 256
+              },
+              "workflowId": {
+                "descriptorVersion": 1,
+                "nullable": false,
+                "presence": "required",
+                "kind": "string",
+                "trim": false,
+                "email": false,
+                "min": 1,
+                "max": 256
+              }
+            }
+          }
+        },
+        {
+          "id": "cedd9004-8a20-4a82-a81f-b7ba392c8263",
+          "name": "workflow",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "id",
+            "tableName": "workflows"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "name": "by_workflow",
+          "fields": [
+            "cedd9004-8a20-4a82-a81f-b7ba392c8263",
+            "853cd50c-cfce-45ef-a193-221c4e270d27"
+          ]
+        }
+      ],
+      "access": {
+        "read": "appMembers",
+        "write": "appBuilders"
+      }
+    }
+  ],
+  "answers": []
+}

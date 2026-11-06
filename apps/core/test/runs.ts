@@ -162,13 +162,13 @@ export const woken = async (run: string, step = "go"): Promise<void> => {
 };
 
 /**
- * A look a decision wait records (resource-host.ts and host.ts, `look`):
+ * A look a decision wait records (host.ts, `look`):
  * when it looked, by the clock, and whether anyone had answered.
  */
 const decisionLook = /(?::reached|:decision:reminded|:woken:\d+)$/u;
 const lookedSchema = z.looseObject({ at: z.number() });
 /**
- * An enter step's journal with its task's deadline (resource-host.ts,
+ * An enter step's journal with its task's deadline (sealed-run.ts,
  * `#entered`): its record's `until`.
  */
 const deadlineSchema = z.looseObject({

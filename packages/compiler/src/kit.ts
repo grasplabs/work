@@ -84,11 +84,6 @@ export const compilerAssets = {
    * write App code that checks (`referenceFiles`).
    */
   reference: "reference.json",
-  /**
-   * jq's WebAssembly, which the workflow SDK's `evaluate` runs: a module
-   * of every workflow isolate (`jqWasmModule`).
-   */
-  jqWasm: "jq.wasm",
   /** The type checker's module (src/checker.ts). */
   checker: "checker.js",
   /**
@@ -124,12 +119,6 @@ export const referenceOf = (
       )
       .map(([path, text]) => [path.slice("/node_modules/".length), text])
   );
-
-/**
- * The flat name jq's WebAssembly has among a workflow isolate's modules,
- * which the workflow SDK's modules import it by.
- */
-export const jqWasmModule = "sdk~jq.wasm";
 
 /**
  * The lock a build of the compiler into the assets directory `assets`

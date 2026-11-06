@@ -203,7 +203,18 @@ describe("a chat for an App", () => {
     }).toStrictEqual({
       told: [app.id],
       code: [{ isError: false, text: "Returned:\napp.chat_has_app" }],
-      drafts: [{ app: app.id, changed: ["screens/home.tsx"] }],
+      // Its first write, with the definition a new App's first files get.
+      drafts: [
+        {
+          app: app.id,
+          changed: [
+            "definition.json",
+            "grasp.config.ts",
+            "screens/home.tsx",
+            "server/schema.ts",
+          ],
+        },
+      ],
       apps: [app.id],
     });
   });

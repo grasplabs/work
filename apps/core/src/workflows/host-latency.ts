@@ -1,6 +1,6 @@
 // Tests only: a random delay where a JSON workflow's host does I/O of its
 // own between the run's code asking for a step and the engine hearing of
-// it (resource-host.ts: the check of the run's person, the wait for one
+// it (host.ts: the check of the run's person, the wait for one
 // of the run's attempt slots). Local D1 answers in well under a
 // macrotask, which hid replays that only held together while the host
 // was that quick; `WORKFLOW_HOST_LATENCY_MS` lets the tests put a

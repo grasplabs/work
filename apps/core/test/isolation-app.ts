@@ -1,3 +1,5 @@
+import { appDefinition } from "./app-definitions.ts";
+
 // An App of spec 8's layout whose functions try to carry one invocation's
 // authority into another (GRA-383, GRA-387): `hold` keeps its channel in
 // module state and holds its call open until a "release" note appears,
@@ -9,12 +11,15 @@
 
 /** The App's files, its `notes` table readable and writable by its members. */
 export const isolationFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }),
-});
-`,
+  ...appDefinition({
+    name: "Isolation",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
@@ -122,16 +127,6 @@ export const probe = query({
     String(loose({}).polluted ?? "clean"),
     String(loose(AppError.prototype).leaked ?? "clean"),
   ],
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Isolation",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
 });
 `,
 };

@@ -1,12 +1,9 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  workflowNamespace,
-  workflowResourceErrors,
-} from "@grasp-os/shared/workflow-resources";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -35,6 +32,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 
@@ -46,19 +44,23 @@ import { unique } from "./sign-in.ts";
 // this is the same path from the release's own code.
 
 const files = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  requests: defineTable({ who: v.string() }),
-});
-`,
-  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Requests",
+    tables: {
+      requests: {
+        fields: { who: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const followUp = permission.workflow("followUp", {
-  input: v.object({ who: v.string().trim().min(1) }),
-  output: v.object({ status: v.string() }),
-});
+export const followUp = permissions.followUp;
 
 export const submit = mutation({
   args: { who: v.string() },
@@ -82,47 +84,41 @@ export const kickOff = action({
   handler: async (ctx, args) => await ctx.workflows.followUp.start({ who: args.who }),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { followUp } from "./server/requests.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
-  permissions: { workflows: [followUp] },
-});
-`,
 });
 
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
-/** A greeting workflow's definition. */
-const definitionOf = (name: string, semver = "1.0.0"): string =>
+/**
+ * A step `id` that runs and ends at once: a raise its `if` skips for
+ * anyone with a name, so the run's history has a step of it.
+ */
+const passing = (id: string) => ({
+  id,
+  type: "raise",
+  if: { $expr: 'input.who === ""' },
+  error: { type: "urn:grasp:error:nameless", status: 422 },
+});
+
+/**
+ * A greeting workflow's definition, its one step `greet`; `wait`, if
+ * given, a wait first, so one version differs from another.
+ */
+const definitionOf = (wait?: string): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: semver,
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: { $expr: '"Hello, " + input.who' } },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
+    steps: [
+      ...(wait === undefined ? [] : [{ id: "pause", type: "wait", for: wait }]),
+      passing("greet"),
     ],
   });
 
@@ -157,7 +153,7 @@ describe("a sealed App's functions", { timeout: 120_000 }, () => {
       `greet-${unique()}`
     );
     await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: definitionOf(workflow.name),
+      definition: definitionOf(),
       basedOn: null,
     });
     await bindWorkflowToApp(env, owner, workflow.id, {
@@ -262,7 +258,7 @@ const greetingOf = async (owner: Identity) => {
     `greet-${unique()}`
   );
   await publishWorkflowVersion(env, owner, workflow.id, {
-    definition: definitionOf(workflow.name),
+    definition: definitionOf(),
     basedOn: null,
   });
   return workflow;
@@ -353,7 +349,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       `greet-${unique()}`
     );
     await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: definitionOf(workflow.name),
+      definition: definitionOf(),
       basedOn: null,
     });
     const binding = await bindWorkflowToApp(env, owner, workflow.id, {
@@ -743,48 +739,37 @@ const pinnedApp = async (
 };
 
 /** A workflow of `name` running `tasks` steps, one after another. */
-const longDefinitionOf = (name: string, tasks: number): string =>
+const longDefinitionOf = (tasks: number): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: "done" },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: Array.from({ length: tasks }, (_, index) => ({
-      [`step-${index}`]: { set: { status: `${index}` } },
-    })),
+    steps: Array.from({ length: tasks }, (_, index) =>
+      passing(`step-${index}`)
+    ),
   });
 
-/** A workflow whose task fails on an expression that reads the input. */
-const failingDefinitionOf = (name: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "2.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
+/**
+ * A workflow whose step `greet` fails on an expression that reads the
+ * input: a text has no `toFixed`.
+ */
+const failingDefinition = JSON.stringify({
+  $schema: workflowSchemaUrl,
+  input: objectSchema({ who: { type: "string" } }),
+  output: {
+    schema: objectSchema({ status: { type: "string" } }),
+    value: { status: "done" },
+  },
+  steps: [
+    {
+      ...passing("greet"),
+      if: { $expr: 'input.who.split("")[9999].toUpperCase() === ""' },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      {
-        greet: {
-          set: { status: "${ $workflow.input.who | tonumber | tostring }" },
-        },
-      },
-    ],
-  });
+  ],
+});
 
 const historySchema = z.object({
   items: z.array(z.looseObject({ sequence: z.number(), kind: z.string() })),
@@ -881,7 +866,7 @@ describe("a workflow reference's run list", { timeout: 120_000 }, () => {
     // The alias bound to another version of the same workflow: its runs
     // still listed, none of them watchable through this release.
     await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: definitionOf(workflow.name, "2.0.0"),
+      definition: definitionOf("1 second"),
       basedOn: 1,
     });
     await bindWorkflowToApp(env, owner, workflow.id, {
@@ -1084,6 +1069,9 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
         { taskId: null, kind: "lifecycle", status: "running" },
         { taskId: "greet", kind: "step", state: "started", attempt: 1 },
         { taskId: "greet", kind: "step", state: "completed", attempt: 1 },
+        // The output's own step, of no task.
+        { taskId: null, kind: "step", state: "started", attempt: 1 },
+        { taskId: null, kind: "step", state: "completed", attempt: 1 },
         { taskId: null, kind: "lifecycle", status: "completed" },
       ],
       ascending: true,
@@ -1135,7 +1123,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       ownBadCursor: "data.invalid_cursor",
       lastCursor: 0,
       pastCursor: "data.invalid_cursor",
-      carolOwn: 5,
+      carolOwn: 7,
       unknownCode: "workflow.run_unavailable",
     });
 
@@ -1190,7 +1178,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     // release tells none of version 2's runs, and a release sealed after
     // the rebind, none of version 1's. A failure's own words never leave.
     await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: failingDefinitionOf(workflow.name),
+      definition: failingDefinition,
       basedOn: 1,
     });
     await bindWorkflowToApp(env, owner, workflow.id, {
@@ -1210,7 +1198,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       app,
       {
         ...files(),
-        "app.ts": `${files()["app.ts"] ?? ""}// Sealed again.\n`,
+        "server/requests.ts": `${files()["server/requests.ts"] ?? ""}// Sealed again.\n`,
       },
       "Seal again"
     );
@@ -1263,6 +1251,78 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
     });
   });
 
+  it("names each step of a loop's items by its task, as the run host names it", async () => {
+    const admin = await person("admin");
+    const bob = await person("user");
+    const owner = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      owner,
+      `loop-${unique()}`
+    );
+    await publishWorkflowVersion(env, owner, workflow.id, {
+      definition: JSON.stringify({
+        $schema: workflowSchemaUrl,
+        input: objectSchema({ who: { type: "string" } }),
+        output: {
+          schema: objectSchema({ status: { type: "string" } }),
+          value: { status: "done" },
+        },
+        steps: [
+          {
+            id: "each",
+            type: "forEach",
+            items: { $expr: "[1, 2]" },
+            do: [passing("greet")],
+          },
+        ],
+      }),
+      basedOn: null,
+    });
+    const { fixture, release } = await pinnedApp(
+      admin,
+      [bob],
+      workflow.id,
+      owner
+    );
+    const { result } = await callAppFunction(
+      env,
+      bob,
+      fixture.app,
+      JSON.stringify({
+        reference: { name: "requests.kickOff", kind: "action" },
+        input: { who: "Bob" },
+      })
+    );
+    if (!result.ok) {
+      throw new Error(result.error.code);
+    }
+    const { runId } = z.object({ runId: z.string() }).parse(result.value);
+    await vi.waitFor(
+      async () => {
+        const run = await resourceRunFor(env, admin, workflow.id, runId);
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 30_000, interval: 100 }
+    );
+    const { result: read } = await callAppFunction(
+      env,
+      bob,
+      fixture.app,
+      JSON.stringify({
+        reference: queryReference(release, "followUp", "history"),
+        input: { runId, pagination: {} },
+      })
+    );
+    const { items } = historySchema.parse(read.ok ? read.value : read);
+    const greetSteps = items.filter(
+      (item) => item.kind === "step" && item.taskId === "greet"
+    );
+    // Each item's step of `greet` (`greet:task%40<i>`), started and
+    // completed: none of them left without its task.
+    expect(greetSteps).toHaveLength(4);
+  });
+
   it("fills a window of more than a page from successive pages of the history", async () => {
     const admin = await person("admin");
     const bob = await person("user");
@@ -1273,7 +1333,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       `long-${unique()}`
     );
     await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: longDefinitionOf(workflow.name, 60),
+      definition: longDefinitionOf(60),
       basedOn: null,
     });
     const { fixture, release } = await pinnedApp(

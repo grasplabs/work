@@ -318,7 +318,9 @@ describe("a draft's preferences in its preview", { timeout: 180_000 }, () => {
     // its preferences, go; the next revision starts from the defaults. (A
     // write of its screens alone keeps them: preview-hot-updates.test.ts.)
     const next = await first.write(
-      { "schema.ts": `${deskFiles()["schema.ts"] ?? ""}// Again\n` },
+      {
+        "screens.ts": `${deskFiles()["screens.ts"] ?? ""}// Again\n`,
+      },
       first.revision
     );
     const outdated = await failure(

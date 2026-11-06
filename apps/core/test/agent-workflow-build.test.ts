@@ -1,14 +1,13 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { profileCalls } from "@grasp-os/open-workflow/calls";
-import { v } from "@grasp-os/sdk";
+import { checkExpression } from "@grasp-os/sdk/expression-check";
 import { appErrors } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
-  workflowNamespace,
-  workflowResourceErrors,
-} from "@grasp-os/shared/workflow-resources";
+  stepListPaths,
+  workflowSchemaUrl,
+} from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -40,6 +39,9 @@ import { signedInApi, unique } from "./sign-in.ts";
 
 const idp = mockIdp();
 
+/** An example `{ "$expr": "…" }` in a request's body, as JSON escapes it. */
+const exampleExpression = /\\"\$expr\\": \\"(?<source>[^"\\]*)\\"/gu;
+
 const returned = (text: string | undefined): unknown =>
   z.unknown().parse(JSON.parse(text?.replace("Returned:\n", "") ?? "null"));
 
@@ -59,31 +61,22 @@ const tryEach = (calls: Record<string, string>, before = ""): string =>
   };`;
 
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
-/** A definition of workflow `name` that passes and ends with `status`. */
-const definitionOf = (name: string, status = "done"): string =>
+/** A definition that passes and ends with `status`. */
+const definitionOf = (status = "done"): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [{ finish: { set: { status } } }],
+    steps: [],
   });
 
 /**
@@ -124,7 +117,7 @@ describe("the agent building an independent workflow", () => {
       const started = await env.workflowBuild.draft(created.id);
       const saved = await env.workflowBuild.edit(created.id, {
         expectedRevision: started.revision,
-        source: ${JSON.stringify(definitionOf(name))},
+        source: ${JSON.stringify(definitionOf())},
         modules: {},
       });
       const { runId } = await env.workflowBuild.startTest(created.id, {
@@ -151,7 +144,7 @@ describe("the agent building an independent workflow", () => {
         notes: [started.note, run.note],
         problems: saved.problems,
         test: { status: run.status, output: run.output },
-        published: { version: published.version, executable: published.executable },
+        published: { version: published.version },
         bound: { app: bound.app, alias: bound.alias, version: bound.version },
       };
     };`;
@@ -174,7 +167,7 @@ describe("the agent building an independent workflow", () => {
       ],
       problems: [],
       test: { status: "completed", output: { status: "done" } },
-      published: { version: 1, executable: true },
+      published: { version: 1 },
       bound: { app, alias: "summary", version: 1 },
     });
     // What it changed, each the agent's, acting for the person.
@@ -205,73 +198,30 @@ describe("the agent building an independent workflow", () => {
     ).toStrictEqual(new Set([JSON.stringify(agentActor)]));
   });
 
-  it("drafts a model step and a person's decision from the catalog it reads, and publishes them as catalog bindings, not code", async () => {
+  it("drafts a model step from the catalog it reads, one step at a time as the canvas does, and publishes it as a catalog binding, not code", async () => {
     const name = `expenses-${unique()}`;
     const { admin, chat, grant } = await setUp([]);
     const judge = `judge-${unique()}`;
-    const approval = `approval-${unique()}`;
     await admin.api.workflowResources.publishContract({
       key: judge,
       kind: "model",
     });
-    await admin.api.workflowResources.publishContract({
-      key: approval,
-      kind: "decision",
-      input: JSON.stringify(v.object({ summary: v.string() }).descriptor),
-      response: JSON.stringify(v.object({ comment: v.string() }).descriptor),
-    });
     const definition = JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name,
-        version: "1.0.0",
-        title: name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: {
-              judge: { kind: "model", contract: judge },
-              approval: { kind: "decision", contract: approval },
-            },
-          },
-        },
+      $schema: workflowSchemaUrl,
+      input: objectSchema({ claim: { type: "string" } }),
+      output: {
+        schema: objectSchema({ summary: { type: "string" } }),
+        value: { summary: { $expr: "steps.assess.output.summary" } },
       },
-      input: { schema: objectSchema({ claim: { type: "string" } }) },
-      output: { schema: objectSchema({ status: { type: "string" } }) },
-      do: [
+      bindings: { judge: { kind: "model", contract: judge } },
+      steps: [
         {
-          assess: {
-            call: "grasp.model",
-            with: {
-              binding: "judge",
-              instructions: "Summarise the expense claim for its approver.",
-              input: { claim: "${ $workflow.input.claim }" },
-              outputSchema: objectSchema({ summary: { type: "string" } }),
-            },
-            export: { as: "${ {summary: .summary} }" },
-          },
-        },
-        {
-          approve: {
-            call: "grasp.decision",
-            with: {
-              binding: "approval",
-              recipients: ["role:admin"],
-              prompt: "Approve this expense claim?",
-              input: { summary: "${ $context.summary }" },
-            },
-            export: { as: "${ {approved: .approved} }" },
-          },
-        },
-        {
-          finish: {
-            set: {
-              status:
-                '${ if $context.approved then "approved" else "declined" end }',
-            },
-          },
+          id: "assess",
+          type: "agent",
+          binding: "judge",
+          instructions: "Summarise the expense claim.",
+          input: { claim: { $expr: "input.claim" } },
+          output: objectSchema({ summary: { type: "string" } }),
         },
       ],
     });
@@ -284,13 +234,26 @@ describe("the agent building an independent workflow", () => {
         source: ${JSON.stringify(definition)},
         modules: {},
       });
+      const renamed = await env.workflowBuild.editStep(created.id, {
+        expectedRevision: saved.revision,
+        edit: {
+          kind: "change",
+          pointer: "/steps/0",
+          step: { ...JSON.parse(saved.source).steps[0], title: "Assess the claim" },
+        },
+      });
+      const paused = await env.workflowBuild.editStep(created.id, {
+        expectedRevision: renamed.revision,
+        edit: { kind: "insert", list: "/steps", index: 0, id: "settle", step: { type: "wait", for: "1 second" } },
+      });
       const published = await env.workflowBuild.publish(created.id, {
-        revision: saved.checkpoint.revision,
+        revision: paused.checkpoint.revision,
         basedOn: null,
       });
       return {
-        catalog: catalog.filter(({ key }) => [${JSON.stringify(judge)}, ${JSON.stringify(approval)}].includes(key)),
-        problems: saved.problems,
+        catalog: catalog.filter(({ key }) => key === ${JSON.stringify(judge)}),
+        problems: paused.problems,
+        steps: JSON.parse(paused.source).steps.map(({ id, title }) => [id, title ?? null]),
         bindings: published.bindings,
       };
     };`;
@@ -301,34 +264,33 @@ describe("the agent building an independent workflow", () => {
     );
     await grant();
 
-    await chat.ask("Build me a workflow that approves expense claims");
+    await chat.ask("Build me a workflow that summarises expense claims");
 
-    // The declaration it read gives each of the profile's calls, so a
-    // judgement or an approval needn't be written as code.
+    // The declaration it read gives each of the format's step types, so
+    // a judgement needn't be written as code.
     const declared = JSON.stringify(provider.requests[1]?.body);
     expect(
-      Object.keys(profileCalls).filter(
-        (call) => !declared.includes(`call: \\"${call}\\"`)
+      Object.keys(stepListPaths).filter(
+        (type) => !declared.includes(`\`${type}\`: `)
       )
+    ).toStrictEqual([]);
+    // And each example expression in it is one the format takes.
+    const examples = [...declared.matchAll(exampleExpression)].map(
+      (match) => match.groups?.source ?? ""
+    );
+    expect(examples.length).toBeGreaterThan(0);
+    expect(
+      examples.filter((source) => !checkExpression(source).ok)
     ).toStrictEqual([]);
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toStrictEqual({
-      // What a model contract and a decision contract take, as it binds
-      // them.
-      catalog: [
-        {
-          key: approval,
-          kind: "decision",
-          input: v.object({ summary: v.string() }).descriptor,
-          response: v.object({ comment: v.string() }).descriptor,
-        },
-        { key: judge, kind: "model" },
-      ].toSorted((a, b) => a.key.localeCompare(b.key)),
+      catalog: [{ key: judge, kind: "model" }],
       problems: [],
-      bindings: [
-        { alias: "approval", kind: "decision", contractId: approval },
-        { alias: "judge", kind: "model", contractId: judge },
+      steps: [
+        ["settle", null],
+        ["assess", "Assess the claim"],
       ],
+      bindings: [{ alias: "judge", kind: "model", contractId: judge }],
     });
   });
 
@@ -340,7 +302,7 @@ describe("the agent building an independent workflow", () => {
     const started = await builder.api.workflowResources.draft(flow.id);
     await builder.api.workflowResources.editDraft(flow.id, {
       expectedRevision: started.revision,
-      source: definitionOf(flow.name),
+      source: definitionOf(),
       modules: {},
     });
     const calls = tryEach({
@@ -408,7 +370,7 @@ describe("the agent building an independent workflow", () => {
     const started = await builder.api.workflowResources.draft(flow.id);
     await builder.api.workflowResources.editDraft(flow.id, {
       expectedRevision: started.revision,
-      source: definitionOf(flow.name),
+      source: definitionOf(),
       modules: {},
     });
     await builder.api.workflowResources.publishDraft(flow.id, {
@@ -513,7 +475,7 @@ describe("the agent building an independent workflow", () => {
     const started = await builder.api.workflowResources.draft(flow.id);
     await builder.api.workflowResources.editDraft(flow.id, {
       expectedRevision: started.revision,
-      source: definitionOf(flow.name),
+      source: definitionOf(),
       modules: {},
     });
     await builder.api.workflowResources.publishDraft(flow.id, {
@@ -522,7 +484,7 @@ describe("the agent building an independent workflow", () => {
     });
     await builder.api.workflowResources.editDraft(flow.id, {
       expectedRevision: 1,
-      source: definitionOf(flow.name, "later").replace('"1.0.0"', '"1.1.0"'),
+      source: definitionOf("later"),
       modules: {},
     });
     await builder.api.workflowResources.publishDraft(flow.id, {
@@ -609,7 +571,7 @@ describe("the agent building an independent workflow", () => {
     const started = await builder.api.workflowResources.draft(mine.id);
     await builder.api.workflowResources.editDraft(mine.id, {
       expectedRevision: started.revision,
-      source: definitionOf(mine.name),
+      source: definitionOf(),
       modules: {},
     });
     await builder.api.workflowResources.publishDraft(mine.id, {
@@ -741,7 +703,7 @@ describe("the agent following independent workflows", () => {
     const started = await builder.api.workflowResources.draft(flow.id);
     await builder.api.workflowResources.editDraft(flow.id, {
       expectedRevision: started.revision,
-      source: definitionOf(flow.name),
+      source: definitionOf(),
       modules: {},
     });
     await builder.api.workflowResources.publishDraft(flow.id, {

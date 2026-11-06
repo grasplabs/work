@@ -32,6 +32,8 @@ import {
 import { appDefaultStores, sdkStoreOwners } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { abandonStoreBackfill, storeBackfill } from "../src/store-abandon.ts";
+import { appDefinition } from "./app-definitions.ts";
+import type { AppSpec } from "./app-definitions.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { commit as commitTo } from "./pending-stores.ts";
@@ -44,13 +46,20 @@ import { newRecordId } from "./store-schemas.ts";
 // one and binds to every later version, so the App's data outlives its
 // versions; nothing makes such a version current unsealed.
 
-const notesFiles = (title = "Notes"): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }),
+/** The Notes App's definition, named `title`, its tables `notes` and `more`. */
+const notesSpec = (title: string, more: AppSpec["tables"] = {}): AppSpec => ({
+  name: title,
+  tables: {
+    notes: {
+      fields: { title: "v.string().min(1).max(200)" },
+      access: { read: "appMembers", write: "appMembers" },
+    },
+    ...more,
+  },
 });
-`,
+
+const notesFiles = (title = "Notes"): Record<string, string> => ({
+  ...appDefinition(notesSpec(title)),
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
@@ -66,23 +75,10 @@ export const titles = query({
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: ${JSON.stringify(title)},
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
-});
-`,
 });
 
 const emptyFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
-
-export default defineSchema({});
-`,
+  ...appDefinition({ name: "Hello", tables: {} }),
   "server/hello.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
@@ -90,16 +86,6 @@ export const hello = query({
   args: {},
   returns: v.string(),
   handler: () => "hello",
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Hello",
-  schema,
-  access: { tables: {} },
-  screens: [],
 });
 `,
 };
@@ -181,12 +167,25 @@ const evolvingFiles = (
   ].join("");
   const fields = `title: v.string().min(1).max(200), ${extra}`;
   return {
-    "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ ${fields} })${indexed ? '.index("by_title", ["title"])' : ""},
-});
-`,
+    ...appDefinition({
+      name: "Notes",
+      tables: {
+        notes: {
+          fields: {
+            title: "v.string().min(1).max(200)",
+            ...Object.fromEntries(
+              Object.entries(optional).map(([name, validator]) => [
+                name,
+                `${validator}.optional()`,
+              ])
+            ),
+            ...defaulted,
+          },
+          ...(indexed ? { indexes: { by_title: ["title"] } } : {}),
+          access: { read: "appMembers", write: "appMembers" },
+        },
+      },
+    }),
     "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
@@ -227,16 +226,6 @@ export const rows = query({
     (await ctx.db.query("notes").take(100))
       .map(({ _id, _ownerId, _rev, _createdAt, _updatedAt, ...fields }) => fields)
       .toSorted((a, b) => (a.title < b.title ? -1 : 1)),
-});
-`,
-    "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
 });
 `,
   };
@@ -510,7 +499,7 @@ describe(
         env,
         owner,
         app,
-        { ...notesFiles(), "app.ts": "export default 42;\n" },
+        { ...notesFiles(), "server/broken.ts": 'throw new Error("Broken");\n' },
         "Broken"
       );
       await expect(
@@ -667,11 +656,12 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
     await commitFiles(env, owner, app, notesFiles("Notes 2"), "Renamed");
     await activateVersion(env, owner, app, 2);
     // Another table: a second definition.
-    const widened = notesFiles("Notes 3");
-    widened["schema.ts"] = (widened["schema.ts"] ?? "").replace(
-      "export default defineSchema({",
-      "export default defineSchema({\n  tags: defineTable({ name: v.string() }),"
-    );
+    const widened = {
+      ...notesFiles("Notes 3"),
+      ...appDefinition(
+        notesSpec("Notes 3", { tags: { fields: { name: "v.string()" } } })
+      ),
+    };
     await commitFiles(env, owner, app, widened, "Tags");
     await activateVersion(env, owner, app, 3);
     const [recorded] = await defaultStores(app);
@@ -1070,9 +1060,8 @@ describe(
               notes: defineTable({
                 title: v.string().min(1).max(200),
                 category: v.string().optional(),
-              }),
-            }),
-            { tables: { notes: { read: "appMembers", write: "appMembers" } } }
+              }).access({ read: "appMembers", write: "appMembers" }),
+            })
           )
         ),
         { resourceId: app, resourceVersion: second }

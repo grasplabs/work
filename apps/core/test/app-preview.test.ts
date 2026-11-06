@@ -9,7 +9,12 @@ import { z } from "zod";
 import { openTestRun } from "./agent-chat.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { deskFiles, notesApp, notesFiles } from "./preview-drafts.ts";
+import {
+  deskFiles,
+  livePushes,
+  notesApp,
+  notesFiles,
+} from "./preview-drafts.ts";
 import { chatsOf, chatWithDraft, outcome, refreshed } from "./previews.ts";
 import { loadFrame, servedFrom } from "./screen-frames.ts";
 import { followedVersion, signedInApi } from "./sign-in.ts";
@@ -295,6 +300,72 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     });
   });
 
+  it("keeps serving the App's latest version a frame shows in place of a draft whose screen doesn't build, its live query and store included, while the draft's update seals the draft's server code", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await notesApp(builder);
+    const { chats } = builder.api;
+    const chatId = await appChat(builder, app);
+    // The draft's server code seals; its screen doesn't build.
+    await writeDraft(
+      builder,
+      chatId,
+      app,
+      {
+        "screens/desk.tsx": "export default function Desk( {",
+        "server/notes.ts": renamedTitles,
+      },
+      0
+    );
+    const broken = await chats.preview(chatId, app);
+    const at = callsAt(broken);
+    /** Has the frame on the version write a note titled `title`. */
+    const create = async (title: string): Promise<unknown> =>
+      outcome(
+        await chats.previewFunction(
+          chatId,
+          app,
+          at,
+          JSON.stringify({
+            reference: { name: "notes.create", kind: "mutation" },
+            input: { title },
+          })
+        )
+      );
+    await create("Before");
+    const live = livePushes();
+    await chats.previewWatchQuery(chatId, app, at, titlesRequest, live.push);
+    await live.until((latest) => {
+      expect(latest?.result).toStrictEqual({ ok: true, value: ["Before"] });
+    });
+    // The page checks the draft's update: that builds the draft's screen,
+    // which seals the draft's server code.
+    const update = await answer(
+      chats.previewUpdate(chatId, app, 1, { screen: "desk", appVersion: 1 })
+    );
+    // The frame still shows the version, on its own store: what it wrote
+    // before is there, and what it writes now its live query reads.
+    const kept = await titlesAt(builder, chatId, app, at);
+    const refused = (): unknown[] =>
+      live.pushed.filter(
+        ({ result }) => !z.object({ ok: z.boolean() }).parse(result).ok
+      );
+    expect({ at, update, kept, refused: refused() }).toStrictEqual({
+      at: { appVersion: 1 },
+      update: "screen.build_failed",
+      kept: ["Before"],
+      refused: [],
+    });
+
+    await create("After");
+    await live.until((latest) => {
+      expect(latest?.result).toStrictEqual({
+        ok: true,
+        value: ["After", "Before"],
+      });
+    });
+    expect(refused()).toStrictEqual([]);
+  });
+
   it("opens a draft whose server code doesn't build, or that deletes every screen, on the App's latest version", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
@@ -505,7 +576,7 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     const afterCommit = await updated();
     // Another chat's draft, proposed.
     const { chatId: proposing } = await chatWithDraft(builder, app, {
-      "schema.ts": `${deskFiles()["schema.ts"] ?? ""}// Proposed elsewhere.\n`,
+      "screens.ts": `${deskFiles()["screens.ts"] ?? ""}// Proposed elsewhere.\n`,
     });
     const beforeProposal = await follow();
     await chats.proposeDraft(proposing, app, "Proposed elsewhere");

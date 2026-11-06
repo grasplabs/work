@@ -19,7 +19,6 @@ import type {
   Id,
   Infer,
   InferInput,
-  RunHandle,
   WorkflowDecisionWait,
   WorkflowEventReference,
   WorkflowEventsOf,
@@ -162,9 +161,6 @@ if (wait.kind === "timer") {
   expectTypeOf(wait.purpose).toEqualTypeOf<"sleep" | "retry">();
   // @ts-expect-error -- a timer has no event
   void wait.event;
-}
-if (wait.kind === "child") {
-  expectTypeOf(wait.child).toEqualTypeOf<RunHandle>();
 }
 
 // A run of archiveNotes listens for its own event only.

@@ -1,11 +1,5 @@
 import { Validator } from "@cfworker/json-schema";
 import type { OutputUnit } from "@cfworker/json-schema";
-import { compileDataSchema } from "@grasp-os/open-workflow/data-schema";
-import type { SchemaProblem } from "@grasp-os/open-workflow/data-schema";
-import {
-  diagnosticMessages,
-  pointerJoin,
-} from "@grasp-os/open-workflow/diagnostics";
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import { checkExpression } from "@grasp-os/sdk/expression-check";
 import type {
@@ -18,8 +12,17 @@ import { passedBound, plainDataBounds } from "@grasp-os/shared/value-bounds";
 import { paramDeclarationSchema } from "@grasp-os/shared/workflows";
 
 import {
+  compileDataSchema,
+  pointerJoin,
+  schemaProblemMessages,
+} from "./data-schema.ts";
+import type { JsonValue, SchemaProblem } from "./data-schema.ts";
+import {
   durationMs,
+  errorTypeBase,
   formatLimits,
+  inboxRoot,
+  isPlain,
   isSensitive,
   isValueList,
 } from "./format.ts";
@@ -41,7 +44,9 @@ import { stepTypes, workflowSchema } from "./schema.ts";
 // - step IDs unique in the workflow, each step's engine names its own;
 // - every expression checked where it stands (`@grasp-os/sdk/expression-check`): it reads
 //   only steps that ran before it, declared parameters that aren't
-//   sensitive, and `error` only in a catch;
+//   sensitive, `error` only in a catch, and `inbox.<alias>` only of a
+//   declared event binding (whether its contract takes email replies is
+//   publication's to check, against the catalog);
 // - a sensitive parameter only as a whole argument of a connector call,
 //   which the host fills in and the run's code never sees;
 // - each step's binding declared, of a kind the step calls;
@@ -95,7 +100,9 @@ export type ProblemCode =
   | "workflow.pointer_too_long"
   | "workflow.arguments_too_deep"
   | "workflow.too_many_expressions"
-  | "workflow.duration_too_long";
+  | "workflow.duration_too_long"
+  | "workflow.reserved_error_type"
+  | "workflow.reserved_error_status";
 
 /** A problem with a workflow: what, where it is, and how to fix it. */
 export interface Problem {
@@ -114,6 +121,17 @@ export interface CheckedWorkflow {
   readonly placeholders: ReadonlyMap<string, string>;
   /** Each agent step's answer, as an SDK descriptor, by its step's pointer. */
   readonly answers: ReadonlyMap<string, ValueDescriptor>;
+  /**
+   * What a caller relies on, as SDK descriptors: what starts a run (an
+   * empty object when the document declares no `input`), what it ends
+   * with (null when it declares no `output`), and each parameter's value,
+   * its default in it.
+   */
+  readonly contract: {
+    readonly input: ValueDescriptor;
+    readonly output: ValueDescriptor;
+    readonly params: ReadonlyMap<string, ValueDescriptor>;
+  };
 }
 
 export type CheckResult =
@@ -516,6 +534,20 @@ const refusalOf = (
       };
     }
   }
+  if (read.root === inboxRoot) {
+    const bindings = walk.document.bindings ?? {};
+    const binding =
+      typeof first === "string" && Object.hasOwn(bindings, first)
+        ? bindings[first]
+        : undefined;
+    if (binding?.kind !== "event") {
+      return {
+        message:
+          "`inbox.<alias>` reads the reply address of a declared event binding.",
+        remedy: "Name an event binding the workflow declares.",
+      };
+    }
+  }
   if (
     read.root === "params" &&
     (typeof first !== "string" || !walk.params.has(first))
@@ -550,6 +582,7 @@ const checkExpressionAt = (
   }
   const checked = checkExpression(expression.$expr, {
     roots: [
+      inboxRoot,
       ...(place.error ? (["error"] as const) : []),
       ...(place.item ? (["item"] as const) : []),
     ],
@@ -729,28 +762,108 @@ const bindingFor = (
   return binding;
 };
 
+/** What a workflow that declares no `input` takes: an empty object. */
+const noInput: Json = {
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+};
+
+/** What a workflow that declares no `output` ends with: null. */
+const noOutput: Json = { type: "null" };
+
+/**
+ * A parameter's value as a data schema, as the SDK's parameter kinds hold
+ * it (`@grasp-os/sdk/params`): an amount of money in whole minor units, a
+ * schedule as cron fields, a person and a template by reference.
+ */
+const paramSchemaOf = (param: Param): Json => {
+  switch (param.kind) {
+    case "number": {
+      return { type: "number" };
+    }
+    case "money": {
+      return { type: "integer" };
+    }
+    case "person":
+    case "template": {
+      return { type: "string", "x-grasp-value": { kind: param.kind } };
+    }
+    case "text":
+    case "schedule": {
+      return { type: "string" };
+    }
+    default: {
+      return param.kind satisfies never;
+    }
+  }
+};
+
 const checkSchema = (
   walk: Walk,
   schema: Json,
-  pointer: string
+  pointer: string,
+  /** The value it defaults to, if any: a parameter's `default`. */
+  rootDefault?: Json
 ): ValueDescriptor | undefined => {
   // SAFETY: JSON either way; compileDataSchema's type is only mutable.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const document = schema as Parameters<typeof compileDataSchema>[0];
-  const compiled = compileDataSchema(document, pointer);
+  const compiled = compileDataSchema(
+    document,
+    pointer,
+    rootDefault === undefined
+      ? undefined
+      : {
+          // SAFETY: as above.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          value: rootDefault as JsonValue,
+          pointer: join(pointer, "default"),
+        }
+  );
   if (!compiled.ok) {
     for (const each of compiled.problems) {
       problem(
         walk,
         each.pointer,
         each.code,
-        diagnosticMessages[each.code],
+        schemaProblemMessages[each.code],
         each.remedy
       );
     }
     return undefined;
   }
   return compiled.schema.descriptor;
+};
+
+/**
+ * A raise's error must be the workflow's own: not one of the host's kinds
+ * (`errorTypeBase`), which a catch reads as the platform's, and not 401
+ * or 403, which say a person wasn't allowed when nobody was asked.
+ */
+const checkRaise = (
+  walk: Walk,
+  step: Extract<Step, { type: "raise" }>,
+  pointer: string
+): void => {
+  if (step.error.type.startsWith(errorTypeBase)) {
+    problem(
+      walk,
+      join(pointer, "error", "type"),
+      "workflow.reserved_error_type",
+      "A raise names an error kind of the platform's own.",
+      "Name the workflow's own kind, such as `urn:acme:error:rejected`."
+    );
+  }
+  if (step.error.status === 401 || step.error.status === 403) {
+    problem(
+      walk,
+      join(pointer, "error", "status"),
+      "workflow.reserved_error_status",
+      "A raise can't answer 401 or 403: nobody was asked to sign in.",
+      "Use another status, such as 400 or 422."
+    );
+  }
 };
 
 const checkDo = (
@@ -943,6 +1056,7 @@ const checkStep = (
       break;
     }
     case "raise": {
+      checkRaise(walk, step, pointer);
       break;
     }
     default: {
@@ -1060,9 +1174,19 @@ export const checkWorkflow = (json: unknown): CheckResult => {
     count: 0,
   };
   checkParams(walk, params);
-  if (document.input !== undefined) {
-    checkSchema(walk, document.input, "/input");
+  const paramDescriptors = new Map<string, ValueDescriptor>();
+  for (const [name, param] of Object.entries(params)) {
+    const descriptor = checkSchema(
+      walk,
+      paramSchemaOf(param),
+      join("/params", name),
+      isPlain(param) ? param.default : undefined
+    );
+    if (descriptor !== undefined) {
+      paramDescriptors.set(name, descriptor);
+    }
   }
+  const input = checkSchema(walk, document.input ?? noInput, "/input");
   const top: Place = { steps: new Set(), error: false, item: false };
   checkSteps(walk, document.steps, "/steps", top, 1);
   if (walk.count > formatLimits.steps) {
@@ -1074,8 +1198,11 @@ export const checkWorkflow = (json: unknown): CheckResult => {
       "Split it into workflows of their own."
     );
   }
+  const output =
+    document.output === undefined
+      ? checkSchema(walk, noOutput, "/output")
+      : checkSchema(walk, document.output.schema, "/output/schema");
   if (document.output !== undefined) {
-    checkSchema(walk, document.output.schema, "/output/schema");
     checkValue(
       walk,
       document.output.value,
@@ -1097,7 +1224,7 @@ export const checkWorkflow = (json: unknown): CheckResult => {
       "Compute a list in one expression rather than each of its items."
     );
   }
-  if (walk.problems.length > 0) {
+  if (walk.problems.length > 0 || input === undefined || output === undefined) {
     return { ok: false, problems: walk.problems.slice(0, maxProblems) };
   }
   return {
@@ -1107,6 +1234,7 @@ export const checkWorkflow = (json: unknown): CheckResult => {
       code: walk.code,
       placeholders: walk.placeholders,
       answers: walk.answers,
+      contract: { input, output, params: paramDescriptors },
     },
   };
 };

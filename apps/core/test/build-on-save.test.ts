@@ -3,6 +3,7 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { sealRelease } from "../src/app-releases.ts";
 import { commitFiles, setCurrentVersion, versionFiles } from "../src/apps.ts";
 import { buildOnSave, draftLintBuild } from "../src/save-builds.ts";
 import { buildScreens, screenCode } from "../src/screens.ts";
@@ -136,14 +137,11 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder);
     // Registration throws (never inspected before: no kept manifest).
-    const throwing = (notesFiles["app.ts"] ?? "").replace(
-      "\nexport default app({",
-      `\nif (schema !== undefined) throw new Error("No notes today ${crypto.randomUUID()}");\nexport default app({`
-    );
+    const throwing = `${notesFiles["server/notes.ts"] ?? ""}\nif (globalThis.Object === Object) throw new Error("No notes today ${crypto.randomUUID()}");\n`;
 
     const { builds } = await builder.api.apps.files.commit(
       app,
-      { ...notesFiles, "app.ts": throwing },
+      { ...notesFiles, "server/notes.ts": throwing },
       "Notes"
     );
 
@@ -292,6 +290,9 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
       screen(crypto.randomUUID()),
       "Save"
     );
+    // Its server code, the config and schema of the definition its first
+    // version got, sealed first, as a review would.
+    await sealRelease(env, { app: appIdSchema.parse(app), version, by });
     const held = Promise.withResolvers<boolean>();
     // Screen builds answer only once the test lets them: making the
     // version current reads its files and workflows, never a screen build.

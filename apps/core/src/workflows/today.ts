@@ -277,7 +277,7 @@ export const workflowsToday = async (
       createdAt: run.createdAt,
       endedAt: run.endedAt,
       status: run.status,
-      from: run.invokerType === "workflow" ? run.invokerId : null,
+      from: null,
     }))
     .toSorted(
       (one, other) => one.createdAt.getTime() - other.createdAt.getTime()

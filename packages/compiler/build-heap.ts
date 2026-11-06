@@ -25,7 +25,13 @@ import { getHeapStatistics } from "node:v8";
 
 import { z } from "zod";
 
-import { isServerModule } from "./src/app-code.ts";
+import {
+  configPath,
+  isServerModule,
+  migrationsFolder,
+  schemaPath,
+  screensPath,
+} from "./src/app-code.ts";
 import { withTypeCheck } from "./src/checked-build.ts";
 import type { Unchecked } from "./src/checked-build.ts";
 import type { Diagnostic } from "./src/diagnostic.ts";
@@ -49,8 +55,8 @@ const blueprintsSchema = z.record(z.string(), z.record(z.string(), z.string()));
 
 /**
  * Each blueprint's files, by path relative to the App, and the modules
- * the host generates for it, by `files/app.ts`'s registration with the
- * functions its server modules export (`registerFunctions`, as the host's
+ * the host generates for it, by its config, schema and screens with the
+ * functions its server modules export (`registerApp`, as the host's
  * entry registers them). Its server code imports
  * `@server/_generated/server`, which resolves to the blueprint's
  * `server-types.ts`, as its tsconfig maps it.
@@ -74,18 +80,21 @@ const blueprintFiles = async (
       );
     },
   });
-  const { generateModules, inspectApp, registerFunctions } =
+  const { generateModules, inspectApp, registerApp } =
     await import("@grasp-os/sdk/host");
   const all: z.infer<typeof blueprintsSchema> = {};
   const names = readdirSync(blueprints).filter((name) =>
-    existsSync(path.join(blueprints, name, "files/app.ts"))
+    existsSync(path.join(blueprints, name, "files", configPath))
   );
+  /** A blueprint's file's default export, or undefined without the file. */
+  const defaultOf = async (dir: string, file: string): Promise<unknown> =>
+    existsSync(path.join(dir, file))
+      ? defaultExport.parse(
+          await import(pathToFileURL(path.join(dir, file)).href)
+        ).default
+      : undefined;
   for (const name of names.toSorted()) {
     const dir = path.join(blueprints, name, "files");
-    // oxlint-disable-next-line no-await-in-loop -- one App at a time
-    const app: unknown = await import(
-      pathToFileURL(path.join(dir, "app.ts")).href
-    );
     const files: Record<string, string> = {};
     for (const file of readdirSync(dir, {
       recursive: true,
@@ -104,17 +113,31 @@ const blueprintFiles = async (
       modules[file.slice("server/".length, -".ts".length)] =
         moduleSchema.parse(namespace);
     }
-    // SAFETY: the App's default export; `registerFunctions` refuses
-    // anything `app` didn't register.
+    const migrations: unknown[] = [];
+    for (const migrationFile of Object.keys(files)
+      .filter((candidate) => migrationsFolder.isFile(candidate))
+      .toSorted()) {
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      migrations.push(await defaultOf(dir, migrationFile));
+    }
+    // SAFETY: the App's parts, as its files export them; `registerApp`
+    // refuses anything that isn't one.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    const registered = defaultExport.parse(app).default as Parameters<
-      typeof registerFunctions
-    >[0];
+    const parts = {
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      config: await defaultOf(dir, configPath),
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      schema: await defaultOf(dir, schemaPath),
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      screens: await defaultOf(dir, screensPath),
+      modules,
+      migrations,
+    } as Parameters<typeof registerApp>[0];
     all[name] = {
       ...files,
       // oxlint-disable-next-line no-await-in-loop -- as above
       ...(await generateModules(
-        inspectApp(registerFunctions(registered, modules)).manifest,
+        inspectApp(registerApp(parts)).manifest,
         identity
       )),
     };

@@ -8,11 +8,10 @@ import { z } from "zod";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import type { StoredEvent } from "./event-envelopes.ts";
 
-// The event contracts a run's start pinned, as both ways events cross a
-// run read them: those admitted to its inbox (run-events.ts) and those
-// its `emit` tasks send (emitted-events.ts). A type is one only when the
-// pinned contract, by its fingerprint, admits it, and data is what that
-// type's native descriptor takes.
+// The event contracts a run's start pinned, as the events admitted to its
+// inbox (run-events.ts) read them. A type is one only when the pinned
+// contract, by its fingerprint, admits it, and data is what that type's
+// native descriptor takes.
 
 /**
  * `data` as the contract's descriptor `descriptor` takes it, normalized:

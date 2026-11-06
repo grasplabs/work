@@ -3,17 +3,17 @@ import { canonicalText } from "@grasp-os/shared/json";
 import { appMaxOperations } from "@grasp-os/shared/operation-limits";
 
 import {
-  app,
   AppDefinitionError,
+  defineApp,
   inspectApp,
-  registerFunctions,
+  registerApp,
 } from "./app.ts";
 import type {
+  AppConfig,
   AppManifest,
-  OperationAccess,
+  AppScreens,
   ScreenDefinition,
   SurfaceDefinition,
-  TableVerbs,
 } from "./app.ts";
 import { migration } from "./migration.ts";
 import type { Migration } from "./migration.ts";
@@ -29,9 +29,8 @@ import type {
   WorkflowPermission,
 } from "./permissions.ts";
 import { readSchemaManifest } from "./schema-manifest.ts";
-import type { TableAccess } from "./schema-manifest.ts";
 import { serverModule } from "./server.ts";
-import type { FunctionKind, Visibility } from "./server.ts";
+import type { FunctionKind, TableVerbs, Visibility } from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import { schemaOf } from "./value-schema.ts";
@@ -48,7 +47,8 @@ import type { AnySchema } from "./value-schema.ts";
 // `readSchemaManifest`, each function through `serverModule(schema)` with
 // schemas rebuilt from its descriptors and a handler that runs nothing,
 // each permission through `permission`, each migration through `migration`
-// (its handler running nothing too), and the App through `app`. What that
+// (its handler running nothing too), and the App through `defineApp` and
+// `registerApp`. What that
 // registration's inspection makes must then be exactly the manifest read,
 // canonically: anything a declaration couldn't have made (a widened verb,
 // a use of something unregistered, a path no module's export makes, a key
@@ -147,7 +147,7 @@ const useFrom = (
         ? operations[use.path]
         : undefined;
     const visibility = isPlainObject(target) ? target.visibility : undefined;
-    // A reference by its path, which `app` resolves against what is
+    // A reference by its path, which `registerApp` resolves against what is
     // registered there, as it does a generated one.
     return { name: use.path, visibility, kind: use.kind };
   }
@@ -296,7 +296,7 @@ const screensFrom = (input: unknown): ScreenDefinition[] =>
     if (screen.name !== name) {
       return refuse(`Screen \`${name}\` is filed under another name.`);
     }
-    // SAFETY: `app` checks each part as it checks a declaration's.
+    // SAFETY: `registerApp` checks each part as it checks a declaration's.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     return {
       name,
@@ -317,7 +317,7 @@ const surfacesFrom = (input: unknown): SurfaceDefinition[] =>
     if (surface.name !== name) {
       return refuse(`Surface \`${name}\` is filed under another name.`);
     }
-    // SAFETY: `app` checks each part as it checks a declaration's.
+    // SAFETY: `registerApp` checks each part as it checks a declaration's.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     return {
       name,
@@ -366,7 +366,7 @@ const migrationsFrom = (input: unknown): Migration[] =>
       return refuse(`Migration \`${name}\` is filed under another name.`);
     }
     // SAFETY: `migration` checks each part as it checks a declaration's,
-    // and `app` checks it against the schema.
+    // and `registerApp` checks it against the schema.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     return migration({
       name,
@@ -405,7 +405,7 @@ const declaredFrom = <Declaration extends { readonly alias: string }>(
 
 /**
  * The App's `permissions` the manifest's maps hold, by kind, as a
- * registration lists them: `app` refuses any declaration filed under a
+ * config lists them: `defineApp` refuses any declaration filed under a
  * key that isn't its kind.
  */
 const permissionsFrom = (
@@ -494,9 +494,7 @@ export const readAppManifest = (text: string): AppManifest => {
       "An App's manifest is `{ name, schema, operations, resources, browserResources, workflows, screens, surfaces, preferences, people?, migrations, answers? }`."
     );
   }
-  const { schema, manifest: schemaManifest } = readSchemaManifest(
-    JSON.stringify(data.schema)
-  );
+  const { schema } = readSchemaManifest(JSON.stringify(data.schema));
 
   const resources = declaredFrom(
     data.resources,
@@ -531,10 +529,27 @@ export const readAppManifest = (text: string): AppManifest => {
   // is called as what it is at run time.
   const server: object = serverModule(schema);
 
-  /** The registration, with `overrides` narrowing access by path. */
-  const declare = (
-    overrides: Readonly<Record<string, OperationAccess>>
-  ): AppManifest => {
+  const config = defineApp(
+    // SAFETY: `defineApp` checks the whole config at run time, as it
+    // checks one App code declares.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    {
+      name: data.name,
+      ...(data.preferences === null
+        ? {}
+        : { preferences: schemaFrom(data.preferences) }),
+      permissions: permissionsFrom(resources, browser, workflows, readsPeople),
+      ...(answers ? { answers: data.answers } : {}),
+    } as AppConfig
+  );
+  const screens: AppScreens = {
+    screens: screensFrom(data.screens),
+    surfaces: surfacesFrom(data.surfaces),
+  };
+  const migrations = migrationsFrom(data.migrations);
+
+  /** The registration, each function narrowed by `narrowed`'s `tables`. */
+  const declare = (narrowed: ReadonlyMap<string, unknown>): AppManifest => {
     const modules: Record<string, Record<string, unknown>> = {};
     for (const { path, kind, visibility, declaration } of functions) {
       const construct: unknown = Reflect.get(
@@ -544,50 +559,32 @@ export const readAppManifest = (text: string): AppManifest => {
       if (typeof construct !== "function") {
         return refuse(`\`${path}\` has no constructor.`);
       }
-      place(modules, path, Reflect.apply(construct, undefined, [declaration]));
+      const tables = narrowed.get(path);
+      place(
+        modules,
+        path,
+        Reflect.apply(construct, undefined, [
+          tables === undefined ? declaration : { ...declaration, tables },
+        ])
+      );
     }
-    const access: Record<string, TableAccess> = {};
-    for (const [name, table] of Object.entries(schemaManifest.tables)) {
-      access[name] = table.access;
-    }
-    // SAFETY: `app` checks the whole registration at run time, as it
-    // checks one App code declares.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    const definition = {
-      name: data.name,
-      schema,
-      access: { tables: access },
-      operationAccess: overrides,
-      screens: screensFrom(data.screens),
-      surfaces: surfacesFrom(data.surfaces),
-      ...(data.preferences === null
-        ? {}
-        : { preferences: schemaFrom(data.preferences) }),
-      permissions: permissionsFrom(resources, browser, workflows, readsPeople),
-      migrations: migrationsFrom(data.migrations),
-      ...(answers ? { answers: data.answers } : {}),
-    } as Parameters<typeof app>[0];
-    return inspectApp(registerFunctions(app(definition), modules)).manifest;
+    return inspectApp(
+      registerApp({ config, schema, screens, modules, migrations })
+    ).manifest;
   };
 
-  // A function whose verbs aren't what its kind and the App's access give
-  // it was narrowed by `operationAccess`: declared again with its verbs as
-  // the override, which `app` refuses if they widen anything.
-  const base = declare({});
-  const overrides: Record<string, OperationAccess> = {};
+  // A function whose verbs aren't what its kind and its tables' access
+  // give it was narrowed by its `tables`: declared again with its verbs
+  // as them, which `registerApp` refuses if they widen anything.
+  const base = declare(new Map());
+  const narrowed = new Map<string, unknown>();
   for (const { path, tables } of functions) {
     const derived = base.operations[path]?.tables;
     if (derived === undefined || !sameVerbs(derived, tables)) {
-      if (!isPlainObject(tables)) {
-        refuse(`\`${path}\`'s tables are a map of verbs.`);
-      }
-      // SAFETY: `app` checks every table and verb of an override.
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      overrides[path] = { tables } as OperationAccess;
+      narrowed.set(path, tables);
     }
   }
-  const manifest =
-    Object.keys(overrides).length === 0 ? base : declare(overrides);
+  const manifest = narrowed.size === 0 ? base : declare(narrowed);
   if (canonicalText(manifest) !== canonicalText(data)) {
     return refuse("The App's manifest isn't what its declaration makes.");
   }

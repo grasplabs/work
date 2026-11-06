@@ -611,7 +611,7 @@ export const callApprovedStoreOperation = async (
 export const requireTargetServes = async (
   env: Env,
   id: string,
-  declared: Extract<PinnedBinding, { resourceId: null }>,
+  declared: PinnedBinding,
   target: WorkflowBindingTarget
 ): Promise<
   Awaited<ReturnType<typeof requireStoreOperationServes>> | undefined
@@ -798,7 +798,7 @@ export const approveWorkflowBinding = async (
   const declared = versions
     .get(reviewed.version)
     ?.find((binding) => binding.alias === alias);
-  if (declared === undefined || declared.resourceId !== null) {
+  if (declared === undefined) {
     throw invalid(
       "alias: The version reviewed declares no such catalog binding."
     );
@@ -974,7 +974,7 @@ export const approvalServing = async (
   env: Env,
   id: string,
   version: number,
-  binding: Extract<PinnedBinding, { resourceId: null }>
+  binding: PinnedBinding
 ): Promise<WorkflowBindingApproval | undefined> => {
   const row = await drizzle(env.DB)
     .select()

@@ -1,9 +1,9 @@
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { triggerStartBinding } from "@grasp-os/shared/workflow-triggers";
 import { maxFailedStarts, workflowErrors } from "@grasp-os/shared/workflows";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -34,6 +34,7 @@ import {
 } from "../src/workflows/resource-runs.ts";
 import { startDueScheduleTriggers } from "../src/workflows/schedule-triggers.ts";
 import { allEvents } from "./audit-events.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
 import { outcome, unique } from "./sign-in.ts";
 
 // Independent schedule triggers (workflows/schedule-triggers.ts), from
@@ -70,32 +71,28 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
-/** Version `version` of workflow `name`, taking `{ [field]: string }` and handing it back. */
-const definitionOf = (name: string, field: string, version = "1.0.0"): string =>
+/**
+ * Version `version` of a workflow taking `{ [field]: string }` and handing
+ * it back: a step that never runs carries `version` as its title, so each
+ * version's document differs.
+ */
+const definitionOf = (field: string, version = "1"): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ [field]: { type: "string" } }),
+    output: {
+      schema: objectSchema({ [field]: { type: "string" } }),
+      value: { [field]: { $expr: `input.${field}` } },
     },
-    input: { schema: objectSchema({ [field]: { type: "string" } }) },
-    output: { schema: objectSchema({ [field]: { type: "string" } }) },
-    do: [{ finish: { set: { [field]: `\${ $workflow.input.${field} }` } } }],
+    steps: [
+      {
+        id: "mark",
+        title: `Version ${version}`,
+        type: "raise",
+        if: { $expr: "false" },
+        error: { type: "urn:grasp:error:never", status: 422 },
+      },
+    ],
   });
 
 /** A workflow of `admin`'s taking a `report`, with a second version taking a `job`. */
@@ -106,7 +103,7 @@ const reporting = async (admin: Identity) => {
     `report-${unique()}`
   );
   await publishWorkflowVersion(env, admin, workflow.id, {
-    definition: definitionOf(workflow.name, "report"),
+    definition: definitionOf("report"),
     basedOn: null,
   });
   return workflow;
@@ -579,7 +576,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     const admin = await person("admin");
     const workflow = await reporting(admin);
     await publishWorkflowVersion(env, admin, workflow.id, {
-      definition: definitionOf(workflow.name, "report", "2.0.0"),
+      definition: definitionOf("report", "2"),
       basedOn: 1,
     });
     const disabled = await scheduleTrigger(admin, workflow.id);
@@ -1087,7 +1084,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
       const admin = await person("admin");
       const workflow = await reporting(admin);
       await publishWorkflowVersion(env, admin, workflow.id, {
-        definition: definitionOf(workflow.name, "report", "2.0.0"),
+        definition: definitionOf("report", "2"),
         basedOn: 1,
       });
       const trigger = await scheduleTrigger(admin, workflow.id);
@@ -1183,7 +1180,7 @@ describe("schedule triggers", { timeout: 120_000 }, () => {
     const admin = await person("admin");
     const workflow = await reporting(admin);
     await publishWorkflowVersion(env, admin, workflow.id, {
-      definition: definitionOf(workflow.name, "job", "2.0.0"),
+      definition: definitionOf("job", "2"),
       basedOn: 1,
     });
     const create = async (config: unknown) =>

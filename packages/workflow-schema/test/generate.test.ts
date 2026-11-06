@@ -3,6 +3,7 @@ import type { ParserOptions } from "@babel/parser";
 import { describe, expect, it } from "vite-plus/test";
 
 import { generateWorkflow } from "../src/generate.ts";
+import type { Generation } from "../src/generate.ts";
 import {
   checked,
   decision,
@@ -24,6 +25,14 @@ const asModule = {
   sourceType: "module",
   plugins: ["typescript"],
 } satisfies ParserOptions;
+
+/** What task `id` of `generated` seals as `part`, if it has one. */
+const sealedOf = (generated: Generation, id: string, part: string): unknown => {
+  const task = generated.tasks.find((each) => each.id === id);
+  return task === undefined
+    ? undefined
+    : Object.entries(task).find(([key]) => key === part)?.[1];
+};
 
 /** Every identifier and every call's callee name in `source`, a module. */
 const namesIn = (source: string): Set<string> => {
@@ -231,7 +240,7 @@ describe("generating a workflow", () => {
       pwned: names.has("pwned"),
       // The only comment is the fixed header.
       comments: parse(generated.source, asModule).comments?.length,
-      sealed: generated.tasks.find(({ id }) => id === "send")?.call,
+      sealed: sealedOf(generated, "send", "call"),
     }).toStrictEqual({
       pwned: false,
       comments: 1,
@@ -294,13 +303,12 @@ describe("generating a workflow", () => {
       pointer.startsWith("/steps/5")
     );
     expect({
-      tasks: tasks.map(({ id, kind, steps, scope, branches, loop }) => ({
-        id,
-        kind,
-        steps,
-        scope,
-        branches,
-        ...(loop === undefined ? {} : { loop }),
+      tasks: tasks.map((task) => ({
+        id: task.id,
+        kind: task.kind,
+        steps: task.steps,
+        scope: task.scope,
+        ...(task.kind === "for" ? { loop: task.loop } : {}),
       })),
     }).toStrictEqual({
       tasks: [
@@ -309,12 +317,10 @@ describe("generating a workflow", () => {
           kind: "for",
           steps: ["enter"],
           scope: [],
-          branches: [],
           loop: {
             in: { slot: slotOf("/steps/5/items") },
             each: "item",
             at: "index",
-            concurrency: 1,
           },
         },
         {
@@ -322,12 +328,10 @@ describe("generating a workflow", () => {
           kind: "for",
           steps: ["enter", "item"],
           scope: ["pages"],
-          branches: [null],
           loop: {
             in: { slot: slotOf("/steps/5/do/0/items") },
             each: "item",
             at: "index",
-            concurrency: 1,
             while: slotOf("/steps/5/do/0/while"),
           },
         },
@@ -336,21 +340,18 @@ describe("generating a workflow", () => {
           kind: "call",
           steps: ["enter", "task"],
           scope: ["pages", "rows"],
-          branches: [null, null],
         },
         {
           id: "guard",
           kind: "try",
           steps: ["catch"],
           scope: ["pages", "rows"],
-          branches: [null, null],
         },
         {
           id: "mail",
           kind: "call",
           steps: ["task"],
           scope: ["pages", "rows"],
-          branches: [null, null],
         },
       ],
     });
@@ -365,12 +366,12 @@ describe("generating a workflow", () => {
         pointer,
         steps,
       })),
-      send: generated.tasks.find(({ id }) => id === "send")?.call,
-      greet: generated.tasks.find(({ id }) => id === "greet")?.call,
-      linger: generated.tasks.find(({ id }) => id === "linger")?.milliseconds,
-      pause: generated.tasks.find(({ id }) => id === "pause")?.call,
-      stop: generated.tasks.find(({ id }) => id === "stop")?.error,
-      guarded: generated.tasks.find(({ id }) => id === "guarded")?.catch,
+      send: sealedOf(generated, "send", "call"),
+      greet: sealedOf(generated, "greet", "call"),
+      linger: sealedOf(generated, "linger", "milliseconds"),
+      pause: sealedOf(generated, "pause", "call"),
+      stop: sealedOf(generated, "stop", "error"),
+      guarded: sealedOf(generated, "guarded", "catch"),
       params: generated.params,
       // Each slot, in the order the code evaluates them.
       slots: generated.expressions.map(({ slot, pointer, result }) => [
@@ -511,9 +512,9 @@ describe("generating a workflow", () => {
       approve: approve && {
         kind: approve.kind,
         steps: approve.steps,
-        call: approve.call,
+        call: sealedOf(generated, "approve", "call"),
       },
-      later: generated.tasks.find(({ id }) => id === "later")?.call,
+      later: sealedOf(generated, "later", "call"),
     }).toStrictEqual({
       approve: {
         kind: "call",
@@ -578,7 +579,7 @@ describe("generating a workflow", () => {
           kind: task.kind,
           steps: task.steps,
           scope: task.scope,
-          listen: task.listen,
+          listen: sealedOf(generated, id, "listen"),
           timeoutMs: task.timeoutMs,
         }
       );

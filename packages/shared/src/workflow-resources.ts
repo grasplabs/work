@@ -26,7 +26,7 @@ import type { RunAiProviderWait } from "./workflows.ts";
 // versions, never part of an App. An App, an agent, a trigger or the
 // system may later start one; none of them owns it, and grouping it with
 // an App in the product gives nothing. Each version is one validated
-// workflow.json (grasp-open-workflow/1), published once and never
+// workflow.json (grasp-workflow/1), published once and never
 // changed.
 
 /**
@@ -119,11 +119,7 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.name_busy":
     "What names the deleted workflow kept changing while its name was released. Try again in a moment.",
   "workflow.definition_invalid":
-    "The workflow definition doesn't pass the grasp-open-workflow/1 profile.",
-  "workflow.identity_mismatch":
-    "The definition names another workflow than this one: its namespace and name must be the workflow's own.",
-  "workflow.version_exists":
-    "This workflow already has a version with this semantic version and different content: give the new one a version of its own.",
+    "The workflow definition isn't a valid grasp-workflow/1 document.",
   "workflow.version_conflict":
     "Someone published another version since you started from this one. Start again from the current version.",
   "workflow.version_not_found": "This workflow has no such version.",
@@ -135,8 +131,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "You have created as many workflows as one person may, deleted ones included.",
   "workflow.version_corrupt":
     "This version's stored record doesn't match what was published, so it isn't used. Report it to Grasp.",
-  "workflow.evaluator_changed":
-    "This version was published for an expression evaluator the platform no longer runs, so its runs can't evaluate as it was published. Publish it again as a new version.",
   "workflow.build_failed":
     "The code generated from this definition didn't build, so it wasn't published. Report it to Grasp.",
   "workflow.build_slow":
@@ -172,11 +166,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "That delivery key was used for another event to this run. Send a new event under a new key.",
   "workflow.event_timeout":
     "A listen task's events didn't all arrive before its timeout.",
-  "workflow.child_unavailable":
-    "This run can't start that child workflow: the version its binding pins has no executable build, or the run has no child workflows here.",
-  "workflow.child_failed": "A child workflow this run started didn't complete.",
-  "workflow.child_timeout":
-    "A child workflow this run started didn't end while its lineage could still run.",
   "workflow.run_paused":
     "This run is paused. Resume it, then confirm what it holds.",
   "workflow.start_unconfirmed":
@@ -262,8 +251,6 @@ export const workflowResourceErrors = defineErrorFamily({
     "This test run made a call its start gave no answer for. A test run never calls anything: give each binding it calls an answer, then start it again.",
   "workflow.test_unfixtured":
     "This test's run made a model or store call its fixture gives nothing for. A test's run never calls a real model or store: in the fixture's workflows, give each model binding it calls an answer, and each operation binding an operation of the App.",
-  "workflow.candidate_unexecutable":
-    "This checkpoint uses something a run can't do yet, so it can't be test-run.",
   "workflow.candidate_unavailable":
     "This test run doesn't exist, or isn't one you can see.",
   "workflow.candidate_limit":
@@ -344,7 +331,7 @@ export const workflowEventTypeSchema = z
 /**
  * A catalog contract as an admin publishes it: its key, kind, and the SDK
  * value descriptors (as JSON text) of what a call passes and returns, as
- * `@grasp-os/open-workflow`'s catalog reads them.
+ * `@grasp-os/workflow-schema`'s catalog reads them.
  */
 export const catalogContractSchema = z
   .strictObject({
@@ -686,7 +673,7 @@ export interface WorkflowStart {
   version: number;
   manifestHash: string;
   invoker: {
-    type: "person" | "app" | "agent" | "trigger" | "workflow";
+    type: "person" | "app" | "agent" | "trigger";
     id: string;
   };
   principal: string;
@@ -696,12 +683,8 @@ export interface WorkflowStart {
   paramsRevision: number;
   /** The SHA-256 of the frozen bindings. */
   bindingsHash: string;
-  /**
-   * The run executing it, under its own ID, pinned to the version's sealed
-   * build; null for a version that has no executable build
-   * (`WorkflowVersionBuild`), which is admitted and never runs.
-   */
-  runId: string | null;
+  /** The run executing it, pinned to the version's build. */
+  runId: string;
   createdAt: string;
 }
 
@@ -840,11 +823,9 @@ export interface WorkflowResource {
  */
 export interface WorkflowVersionBinding {
   alias: string;
-  kind: "workflow" | CatalogBindingKind;
-  resourceId: string | null;
-  resourceVersion: number | null;
+  kind: CatalogBindingKind;
   /** The contract key the definition named. */
-  contractId: string | null;
+  contractId: string;
   /** The target version's contract hash. */
   fingerprint: string;
 }
@@ -884,14 +865,8 @@ export interface WorkflowActionReview extends WorkflowVersionAction {
   modelSteeredWrites: SteeredWrite[];
 }
 
-/**
- * Why a deletion was refused with `workflow.resource_bound`, in its
- * details: the workflows whose current version binds it that the caller
- * may see, and how many more there are that they may not.
- */
+/** Why a deletion was refused with `workflow.resource_bound`, in its details. */
 export interface WorkflowBinders {
-  binders: { id: string; name: string }[];
-  hidden: number;
   /**
    * Enabled triggers holding an active `start` grant whose current version
    * starts it: those the caller may see, and how many more.
@@ -913,34 +888,21 @@ export interface WorkflowBinders {
 /**
  * The version of the protocol between the host and the code generated
  * from a JSON workflow: what core's run module calls of the sealed SDK
- * (`openWorkflow`'s definition and engine, `@grasp-os/sdk/open-workflow`).
+ * (`@grasp-os/sdk/workflow`).
  * A version built for another one doesn't run
  * (`workflow.protocol_unsupported`): its sealed SDK speaks something else.
  */
-export const openWorkflowProtocol = 8;
-
-/**
- * Something of a definition the code generator doesn't lower yet: its
- * place, the task it is in, and what it is (a task kind such as
- * `call:grasp.model`, or a property such as `then`).
- */
-export interface UnsupportedConstruct {
-  pointer: string;
-  taskId: string | null;
-  feature: string;
-}
+export const generatedWorkflowProtocol = 9;
 
 /**
  * What a version runs: code generated from its definition, compiled and
  * sealed with it, named by `hash`, its executable identity (the same
- * definition, generator, compiler and SDK always make the same hash); or,
- * for a definition that uses what the generator doesn't lower yet,
- * nothing, and what those constructs are. Such a version is published and
- * can be started, but no run executes it.
+ * definition, generator, compiler and SDK always make the same hash).
+ * Every definition that passes generates, so every version has one.
  */
-export type WorkflowVersionBuild =
-  | { executable: true; hash: string }
-  | { executable: false; unsupported: UnsupportedConstruct[] };
+export interface WorkflowVersionBuild {
+  hash: string;
+}
 
 /** One published version of a workflow. */
 export interface WorkflowResourceVersion {
@@ -968,10 +930,11 @@ export interface WorkflowResourceVersion {
 }
 
 /**
- * A version's portable source, for its builders: the definition exactly as
- * published and the SDK TypeScript generated from it, by path (nothing
- * generated for a version that isn't executable). Edited generated code
- * can't come back: a version is only ever published from a definition.
+ * A version's portable source, for its builders: the SDK TypeScript
+ * generated from its definition and its own modules, by path. The
+ * definition itself stays with the version, for review: what leaves is
+ * the code. Edited generated code can't come back: a version is only ever
+ * published from a definition.
  */
 export interface WorkflowVersionSource {
   files: Record<string, string>;
@@ -1007,26 +970,25 @@ export interface WorkflowMember {
  * read (0 before the first edit), which must still be the latest.
  */
 /**
- * A JSON Pointer to a task in a draft, as the diagram names it
- * (`DiagramTask.pointer`), or to a list of tasks (one ending in `do`,
- * `try` or `branches`).
+ * A JSON Pointer to a step in a draft, as the diagram names it
+ * (`DiagramTask.pointer`, `/steps/0/then/1`), or to a list of steps: the
+ * workflow's own (`/steps`) or one a step holds (`/steps/0/else`).
  */
 const stepPointerSchema = z.string().startsWith("/").max(4096);
 
-/** A task's body: its single key's value, as the profile reads it. */
-const stepBodySchema = z.record(z.string(), z.json());
-
-/** How a run's trace is read (`runTrace`): with its doors unless `doors` is false. */
-export const workflowRunTraceOptionsSchema = z
-  .strictObject({ doors: z.boolean().default(true) })
-  .default({ doors: true });
+/**
+ * A step's fields besides its `id`, as grasp-workflow/1 has them: `type`,
+ * `title` and the rest. Checked with the draft, as any edit.
+ */
+const stepFieldsSchema = z.record(z.string(), z.json());
 
 /**
- * One step of a draft edited from the canvas (`editStep`), as the next
- * revision over `expectedRevision`: `change` replaces the body of the task
- * at `pointer`, keeping its ID; `insert` puts task `id` with `body` at
- * `index` of the task list at `list`. The draft is saved checked, as any
- * edit, problems and all.
+ * One step of a draft edited on the canvas or by the agent (`editStep`),
+ * as the next revision over `expectedRevision`: `change` replaces the
+ * fields of the step at `pointer`, keeping its ID (a rename is a new
+ * `title`); `insert` puts step `id` with `step`'s fields at `index` of the
+ * list of steps at `list`. The draft is saved checked, as any edit,
+ * problems and all.
  */
 export const workflowStepEditSchema = z.strictObject({
   expectedRevision: z.int().min(0),
@@ -1034,14 +996,14 @@ export const workflowStepEditSchema = z.strictObject({
     z.strictObject({
       kind: z.literal("change"),
       pointer: stepPointerSchema,
-      body: stepBodySchema,
+      step: stepFieldsSchema,
     }),
     z.strictObject({
       kind: z.literal("insert"),
       list: stepPointerSchema,
       index: z.int().min(0),
       id: z.string().min(1).max(128),
-      body: stepBodySchema,
+      step: stepFieldsSchema,
     }),
   ]),
 });
@@ -1225,7 +1187,7 @@ export interface WorkflowDraft {
     /**
      * Drawn from the checkpoint's own JSON, as it passed. An edit that
      * didn't pass leaves an earlier edit the checkpoint, as the editor
-     * already holds it: its answer draws that diagram without doors.
+     * already holds it.
      */
     diagram: WorkflowDiagram;
   } | null;
@@ -1409,17 +1371,8 @@ export interface WorkflowResourcesApi {
    * gone.
    */
   runFiles: (id: string, runId: string) => Promise<RunFileListing[] | null>;
-  /**
-   * What run `runId` did, over its version's diagram, for builders. With
-   * `doors` false (`workflowRunTraceOptionsSchema`) the diagram is drawn
-   * without its doors: a trace followed while the run goes keeps the
-   * diagram its first read drew, as the run's version never changes.
-   */
-  runTrace: (
-    id: string,
-    runId: string,
-    options?: unknown
-  ) => Promise<WorkflowRunTrace>;
+  /** What run `runId` did, over its version's diagram, for builders. */
+  runTrace: (id: string, runId: string) => Promise<WorkflowRunTrace>;
   /**
    * Starts a test run of the draft's checkpoint at an exact revision,
    * never published, its calls answered from the start's fixtures; for

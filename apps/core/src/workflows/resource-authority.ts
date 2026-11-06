@@ -54,45 +54,16 @@ import { accountOf } from "./quotas.ts";
 const catalogBindingSchema = z.strictObject({
   alias: z.string().min(1).max(64),
   kind: z.enum(catalogBindingKinds),
-  resourceId: z.null(),
-  resourceVersion: z.null(),
   contractId: z.string().min(1).max(256),
   fingerprint: z.string().min(1).max(128),
   approval: z.string().min(1).max(128),
   target: workflowBindingTargetSchema,
 });
 
-/** Another workflow as a start froze it: run by `run` tasks (GRA-277). */
-const workflowBindingSchema = z.strictObject({
-  alias: z.string().min(1).max(64),
-  kind: z.literal("workflow"),
-  resourceId: z.string().min(1).max(128),
-  resourceVersion: z.int().min(1),
-  contractId: z.string().min(1).max(256),
-  fingerprint: z.string().min(1).max(128),
-});
-
-const frozenBindingsSchema = z.array(
-  z.union([catalogBindingSchema, workflowBindingSchema])
-);
-
 /** A catalog binding of a run's start, its approval and target frozen. */
 export type FrozenCatalogBinding = z.infer<typeof catalogBindingSchema>;
 
-/** Another workflow a run's start froze: the exact version its `run` tasks start. */
-export type FrozenWorkflowBinding = z.infer<typeof workflowBindingSchema>;
-
-/** The workflow bindings a start froze (its receipt's `bindings`), by alias. */
-export const frozenWorkflowsOf = (
-  text: string
-): ReadonlyMap<string, FrozenWorkflowBinding> =>
-  new Map(
-    frozenBindingsSchema
-      .parse(JSON.parse(text))
-      .flatMap((binding) =>
-        binding.kind === "workflow" ? [[binding.alias, binding] as const] : []
-      )
-  );
+const frozenBindingsSchema = z.array(catalogBindingSchema);
 
 /** The catalog bindings a start froze (its receipt's `bindings`), by alias. */
 export const frozenBindingsOf = (
@@ -101,9 +72,7 @@ export const frozenBindingsOf = (
   new Map(
     frozenBindingsSchema
       .parse(JSON.parse(text))
-      .flatMap((binding) =>
-        binding.kind === "workflow" ? [] : [[binding.alias, binding] as const]
-      )
+      .map((binding) => [binding.alias, binding] as const)
   );
 
 /** What a call of a run needs to know of it, from its row and receipt. */
@@ -128,19 +97,12 @@ export interface CallingRun {
    * start by code needs the grant that let it start still to hold.
    */
   readonly invoker: {
-    readonly type: "person" | "app" | "agent" | "trigger" | "workflow";
+    readonly type: "person" | "app" | "agent" | "trigger";
     readonly id: string;
     readonly appVersion: number | null;
-    /** For a child run (`workflow`): its parent run's workflow. */
-    readonly parentWorkflowId?: string | null;
   };
   /** The catalog bindings its start froze, by alias. */
   readonly bindings: ReadonlyMap<string, FrozenCatalogBinding>;
-  /**
-   * The other workflows its start froze, by alias: what its `run` tasks
-   * start (run-children.ts). None unless given.
-   */
-  readonly workflows?: ReadonlyMap<string, FrozenWorkflowBinding>;
   /**
    * Whether it runs in restricted mode, as its start decided and its row
    * pins (restricted.ts): what it sends an App restricts that App first.
@@ -251,26 +213,6 @@ const invokerSql = (run: CallingRun): SQL => {
         "start"
       )})`;
     }
-    case "workflow": {
-      // A child run: its person still in its parent's workflow, its parent
-      // still going, and the parent workflow's own grant to start this one
-      // still active (run-children.ts).
-      const parentWorkflow = invoker.parentWorkflowId;
-      if (parentWorkflow === undefined || parentWorkflow === null) {
-        return sql`0`;
-      }
-      return sql`${workflowRoleSql(run.principal, parentWorkflow)} AND EXISTS (SELECT 1 FROM workflow_resource_runs AS parent_run
-        JOIN permissions AS held
-          ON held.subject_type = 'workflow'
-            AND held.subject_id = parent_run.workflow_resource_id
-        WHERE parent_run.id = ${invoker.id}
-          AND parent_run.status IN ('starting', 'running', 'paused')
-          AND held.object_type = 'workflow' AND held.object_id = ${run.workflowId}
-          AND held.resource IS NULL
-          AND held.status = 'active'
-          AND parent_run.workflow_resource_id = ${parentWorkflow}
-          AND EXISTS (SELECT 1 FROM json_each(held.actions) WHERE value = 'start'))`;
-    }
     case "agent": {
       // A chat's grant holds only for the person who asked for it there
       // (permissions.ts, `holdsIn`): another person's never keeps this
@@ -341,12 +283,6 @@ const runRowOf = async (env: Env, runId: string) =>
       originAppVersion: workflowStartReceipts.originAppVersion,
       bindings: workflowStartReceipts.bindings,
       detailsRemovedAt: workflowStartReceipts.detailsRemovedAt,
-      // A child's parent's workflow, read from the parent's own row.
-      parentWorkflowId: sql<
-        string | null
-      >`(SELECT parent_run.workflow_resource_id FROM workflow_resource_runs AS parent_run
-        WHERE ${workflowStartReceipts.invokerType} = 'workflow'
-          AND parent_run.id = ${workflowStartReceipts.invokerId})`,
     })
     .from(workflowResourceRuns)
     .innerJoin(
@@ -371,10 +307,8 @@ const callingRunFrom = (
     type: row.invokerType,
     id: row.invokerId,
     appVersion: row.originAppVersion,
-    parentWorkflowId: row.parentWorkflowId,
   },
   bindings: frozenBindingsOf(row.bindings),
-  workflows: frozenWorkflowsOf(row.bindings),
   restricted: row.restricted,
   paused: row.status === "paused",
 });
@@ -408,11 +342,10 @@ export const callingRunOf = async (
 };
 
 /**
- * Run `runId` as its evidence is checked under (resource-reads.ts), ended
- * or not: a child whose output a run took and holds (`runEvidenceHolds`),
- * checked under its own workflow's authority as it stands now.
- * `undefined` once its details are gone (retention.ts): its row stays,
- * but not the evidence its output carried, so it can't be checked.
+ * Run `runId` with its frozen bindings, ended or not: the run a reply to
+ * its mail goes to (inbound-email.ts), whose binding says what the reply
+ * may be. `undefined` once its details are gone (retention.ts): its row
+ * stays, but not what it was bound to.
  */
 export const heldRunOf = async (
   env: Env,

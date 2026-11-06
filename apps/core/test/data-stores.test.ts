@@ -309,14 +309,14 @@ const notesSchema = (order: "declared" | "reordered") => {
       : { body, title: v.string().max(200).min(1).trim() };
   const notes = defineTable(fields)
     .index("by_updated", ["_updatedAt"])
-    .index("by_title", ["title"]);
+    .index("by_title", ["title"])
+    .access({ read: "owner", write: "owner" });
   return schemaManifest(
     defineSchema(
       order === "declared"
         ? { notes, people: defineTable({ name: v.string() }) }
         : { people: defineTable({ name: v.string() }), notes }
-    ),
-    { tables: { notes: { read: "owner", write: "owner" } } }
+    )
   );
 };
 
@@ -336,9 +336,9 @@ const notesManifest = ({
     indexes === "declared"
       ? table.index("by_updated", ["_updatedAt"]).index("by_title", ["title"])
       : table.index("by_title", ["title"]).index("by_updated", ["_updatedAt"]);
-  return schemaManifest(defineSchema({ notes }), {
-    tables: { notes: { read, write: "owner" } },
-  });
+  return schemaManifest(
+    defineSchema({ notes: notes.access({ read, write: "owner" }) })
+  );
 };
 
 /** The Notes manifest's JSON, changed by `change`, as text. */
@@ -1176,14 +1176,15 @@ describe("writes under the pinned schema's access", () => {
       schemaManifest(
         defineSchema(
           Object.fromEntries(
-            tables.map((name) => [name, defineTable({ title: v.string() })])
+            tables.map((name) => [
+              name,
+              defineTable({ title: v.string() }).access({
+                read: "owner",
+                write: modes[name],
+              }),
+            ])
           )
-        ),
-        {
-          tables: Object.fromEntries(
-            tables.map((name) => [name, { read: "owner", write: modes[name] }])
-          ),
-        }
+        )
       )
     );
     const { schemaHash: hash } = await store.defineTables(text);
@@ -1415,7 +1416,10 @@ describe("a staged read", () => {
 const linksManifest = manifestText(
   schemaManifest(
     defineSchema({
-      notes: defineTable({ title: v.string() }),
+      notes: defineTable({ title: v.string() }).access({
+        read: "appMembers",
+        write: "appMembers",
+      }),
       links: defineTable({
         note: v.id("notes").optional(),
         nested: v.object({ to: v.id("notes").optional() }).optional(),
@@ -1432,18 +1436,16 @@ const linksManifest = manifestText(
         secret: v.id("secrets").optional(),
         draft: v.id("drafts").optional(),
         label: v.string().optional(),
+      }).access({ read: "appMembers", write: "appMembers" }),
+      secrets: defineTable({ title: v.string() }).access({
+        read: "owner",
+        write: "owner",
       }),
-      secrets: defineTable({ title: v.string() }),
-      drafts: defineTable({ title: v.string() }),
-    }),
-    {
-      tables: {
-        notes: { read: "appMembers", write: "appMembers" },
-        links: { read: "appMembers", write: "appMembers" },
-        secrets: { read: "owner", write: "owner" },
-        drafts: { read: "appBuilders", write: "appBuilders" },
-      },
-    }
+      drafts: defineTable({ title: v.string() }).access({
+        read: "appBuilders",
+        write: "appBuilders",
+      }),
+    })
   )
 );
 const linksHash = await manifestHash(linksManifest);
@@ -1518,15 +1520,15 @@ const notesAndLinks = (links: ValueShape): string =>
   manifestText(
     schemaManifest(
       defineSchema({
-        notes: defineTable({ title: v.string() }),
-        links: defineTable(links),
-      }),
-      {
-        tables: {
-          notes: { read: "appMembers", write: "appMembers" },
-          links: { read: "appMembers", write: "appMembers" },
-        },
-      }
+        notes: defineTable({ title: v.string() }).access({
+          read: "appMembers",
+          write: "appMembers",
+        }),
+        links: defineTable(links).access({
+          read: "appMembers",
+          write: "appMembers",
+        }),
+      })
     )
   );
 
@@ -1805,17 +1807,19 @@ describe("a store's references", () => {
     const later = manifestText(
       schemaManifest(
         defineSchema({
-          notes: defineTable({ title: v.string() }),
-          links: defineTable({ note: v.id("notes").optional() }),
-          more: defineTable({ title: v.string() }),
-        }),
-        {
-          tables: {
-            notes: { read: "appMembers", write: "appMembers" },
-            links: { read: "appMembers", write: "appMembers" },
-            more: { read: "appMembers", write: "appMembers" },
-          },
-        }
+          notes: defineTable({ title: v.string() }).access({
+            read: "appMembers",
+            write: "appMembers",
+          }),
+          links: defineTable({ note: v.id("notes").optional() }).access({
+            read: "appMembers",
+            write: "appMembers",
+          }),
+          more: defineTable({ title: v.string() }).access({
+            read: "appMembers",
+            write: "appMembers",
+          }),
+        })
       )
     );
     await store.defineTables(later);
@@ -1942,27 +1946,23 @@ describe("a store's references", () => {
 const cascadeManifest = manifestText(
   schemaManifest(
     defineSchema({
-      notes: defineTable({ title: v.string() }),
+      notes: defineTable({ title: v.string() }).access({
+        read: "appMembers",
+        write: "appMembers",
+      }),
       links: defineTable({
         note: v.id("notes", { onDelete: "cascade" }).optional(),
         kept: v.id("notes").optional(),
         either: v
           .union(v.id("notes", { onDelete: "cascade" }), v.id("subs"))
           .optional(),
-      }),
+      }).access({ read: "appMembers", write: "appBuilders" }),
       subs: defineTable({
         link: v.id("links", { onDelete: "cascade" }).optional(),
         pinned: v.id("links").optional(),
         parent: v.id("subs", { onDelete: "cascade" }).optional(),
-      }),
-    }),
-    {
-      tables: {
-        notes: { read: "appMembers", write: "appMembers" },
-        links: { read: "appMembers", write: "appBuilders" },
-        subs: { read: "appMembers", write: "appMembers" },
-      },
-    }
+      }).access({ read: "appMembers", write: "appMembers" }),
+    })
   )
 );
 const cascadeHash = await manifestHash(cascadeManifest);
@@ -2435,17 +2435,14 @@ const deepCascade = async (store: OpenStore, links: number, subs: number) => {
 const ownedManifest = manifestText(
   schemaManifest(
     defineSchema({
-      notes: defineTable({ title: v.string() }),
+      notes: defineTable({ title: v.string() }).access({
+        read: "appMembers",
+        write: "appMembers",
+      }),
       pins: defineTable({
         note: v.id("notes", { onDelete: "cascade" }).optional(),
-      }),
-    }),
-    {
-      tables: {
-        notes: { read: "appMembers", write: "appMembers" },
-        pins: { read: "owner", write: "owner" },
-      },
-    }
+      }).access({ read: "owner", write: "owner" }),
+    })
   )
 );
 const ownedHash = await manifestHash(ownedManifest);

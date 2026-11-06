@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
 import {
   declaredWorkflows,
@@ -18,7 +17,7 @@ import {
   screenLeaseHeader,
   screenPersonHeader,
 } from "@grasp-os/shared/screens";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -43,7 +42,9 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
 import { liveStatus } from "./runs.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -61,45 +62,32 @@ import { auditedDuring, routed, signedInApi, unique } from "./sign-in.ts";
 const idp = mockIdp();
 
 const files = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Invoices",
+    tables: {
+      invoices: {
+        fields: { amount: "v.number()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("review", {\n  input: v.object({ jobId: v.string() }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/invoices.ts": `import { v } from "@grasp-os/sdk";
+import { permissions } from "../grasp.config.ts";
 
-export default defineSchema({
-  invoices: defineTable({ amount: v.number() }),
-});
+export const review = permissions.review;
 `,
-  "server/invoices.ts": `import { permission, v } from "@grasp-os/sdk";
 
-export const review = permission.workflow("review", {
-  input: v.object({ jobId: v.string() }),
-  output: v.object({ status: v.string() }),
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { review } from "./server/invoices.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Invoices",
-  schema,
-  access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
+  "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  permissions: { workflows: [review] },
-});
+};
 `,
   "screens/desk.tsx": `export default function Desk() {
   return <main>Invoices</main>;
 }
 `,
-});
-
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
 });
 
 const completed = "grasp.job.completed";
@@ -117,44 +105,29 @@ const jobEvents = {
 };
 
 /**
- * A workflow waiting, in `await-job`, for its job's completion through
+ * A workflow waiting, in `job`, for its job's completion through
  * `jobEvents`, then ending with the event's source and job.
  */
-const definitionOf = (name: string, contract: string): string =>
+const definitionOf = (contract: string): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: { jobEvents: { kind: "event", contract } },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ jobId: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: {
+        status: {
+          $expr:
+            '(steps.job.output.event?.source ?? "") + " " + (steps.job.output.event?.data.jobId ?? "")',
         },
       },
     },
-    input: { schema: objectSchema({ jobId: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
+    bindings: { jobEvents: { kind: "event", contract } },
+    steps: [
       {
-        "await-job": {
-          listen: {
-            to: {
-              one: { with: { type: completed } },
-            },
-            read: "envelope",
-          },
-          timeout: { after: { hours: 1 } },
-          metadata: { grasp: { binding: "jobEvents" } },
-        },
-      },
-      {
-        finish: {
-          set: { status: '${ .[0].source + " " + .[0].data.jobId }' },
-        },
+        id: "job",
+        type: "wait",
+        event: { from: "jobEvents", type: completed },
+        timeout: "1 hour",
       },
     ],
   });
@@ -291,7 +264,7 @@ const invoicesApp = async (actions: readonly string[][]) => {
     `review-${unique()}`
   );
   await publishWorkflowVersion(env, builder.acting, workflow.id, {
-    definition: definitionOf(workflow.name, contract),
+    definition: definitionOf(contract),
     basedOn: null,
   });
   await approveWorkflowBinding(env, admin.acting, workflow.id, {

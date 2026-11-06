@@ -6,7 +6,9 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { isAdmin, roleSchema } from "@grasp-os/shared/roles";
+import { valueDepth } from "@grasp-os/shared/value-depth";
 import {
   workflowResourceErrors,
   workflowRunsListed,
@@ -16,12 +18,9 @@ import type {
   WorkflowRunStatus,
 } from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import { encode } from "@grasp-os/workerflow/codec";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { namedError } from "@grasp-os/workerflow/errors";
-import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
-import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
-import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
+import type { AttemptLease } from "@grasp-os/workerflow/run";
 import {
   and,
   asc,
@@ -54,10 +53,8 @@ import type { Acting } from "../auth/identity.ts";
 import { tellOfferedRunEnd } from "../channels/offered-runs.ts";
 import {
   members,
-  runEvidenceHolds,
   workflowResourceRunControls,
   workflowResourceRunTerminations,
-  workflowResourceVersions,
   workflowResourceRuns,
   workflowStartReceipts,
 } from "../db/core/schema.ts";
@@ -67,10 +64,9 @@ import { requireWorkflowRole, versionContract } from "../workflow-resources.ts";
 import { aiWaitsOf } from "./ai-waits.ts";
 import { afterCpuKill, trackAttemptCalls } from "./attempt-calls.ts";
 import type { AttemptCall } from "./attempt-calls.ts";
+import { writeJson } from "./bounded-json.ts";
 import { markResourceRunStopped, runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
-import { childEndType } from "./event-envelopes.ts";
-import type { ChildEnd } from "./event-envelopes.ts";
 import {
   countedStep,
   forIsolate,
@@ -83,17 +79,8 @@ import {
 } from "./host.ts";
 import type { AiCalls, RunStep } from "./host.ts";
 import { admitAttempt, triggeredAccountOf } from "./quotas.ts";
-import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import { callingRunOf } from "./resource-authority.ts";
 import type { CallingRun } from "./resource-authority.ts";
-import {
-  maxResultBytes,
-  openRunMain,
-  openRunModule,
-  resourceAttemptMethods,
-  ResourceRunHost,
-} from "./resource-host.ts";
-import type { HostedResourceRun, ResourceHostHooks } from "./resource-host.ts";
 import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellQueryFollowers } from "./run-changes.ts";
@@ -106,13 +93,14 @@ import {
 } from "./sealed-isolate.ts";
 import type { Settled, StepError } from "./sealed-isolate.ts";
 import {
-  generatedForRunHost,
   sealedRun,
   sealedRunFrom,
   sealedRunModules,
   sealedRunStart,
 } from "./sealed-run.ts";
 import type {
+  ActionModelCalls,
+  HostedResourceRun,
   HostedSealedRun,
   SealedRunKind,
   SentCalls,
@@ -169,15 +157,13 @@ import type {
 //   root of its own lineage (quotas.ts), in the same tables, and each of
 //   its steps' attempts is admitted by the same admission, against the
 //   lineage's active time, host calls, age and steps and the client's
-//   shares of attempts running at once (resource-host.ts): a retry, a
-//   restart or a replay counts on, never afresh. A run its own start
-//   admitted is its lineage's root; a child its `run` task starts
-//   (run-children.ts) joins that lineage, one level deeper, admitted
-//   against its levels and descendant runs, and counts on its root. A run
-//   a trigger starts in another run's lineage (an event or a stamped
-//   message of that run) takes its place there the same way, but counts
-//   on its workflow's account in it (quotas.ts, `triggeredAccountClaimed`),
-//   as do its children. A workflow's own
+//   shares of attempts running at once: a retry, a restart or a replay
+//   counts on, never afresh. A run its own start admitted is its
+//   lineage's root. A run a trigger starts in another run's lineage (an
+//   event or a stamped message of that run) joins that lineage, one level
+//   deeper, admitted against its levels and descendant runs, but counts
+//   on its workflow's account in it (quotas.ts,
+//   `triggeredAccountClaimed`). A workflow's own
 //   `limits` lower those: `maxSteps` the step limit and `maxModelCalls`
 //   the model requests a lineage may make (the lower of each and the
 //   host's, `loadedRun`, one request per call). A `maxActiveMs` isn't
@@ -219,30 +205,22 @@ export interface RunAdmission {
   restricted: boolean;
   createdAt: number;
   /**
-   * For a child run: the run that started it, and where it sits in its
-   * lineage (quotas.ts, `admitChild`); for a run an event's trigger
-   * started, where it sits, with no parent (event-delivery.ts). None for
-   * the root of its own.
+   * For a run an event's trigger started in another run's lineage, where
+   * it sits there (quotas.ts, `admitInLineage`). None for the root of its own.
    */
-  lineage?: { parentRunId: string | null; rootRunId: string; depth: number };
+  lineage?: { rootRunId: string; depth: number };
 }
 
 /**
  * The account a start's run is charged to, as SQL (quotas.ts): for a run
  * a trigger started in another run's lineage, its workflow's account
  * there, which its start claimed just before (`triggeredAccountClaimed`);
- * for a child, its parent's; none for a root, nor a child charged to its
- * root.
+ * none for a root.
  */
-const accountOfAdmitted = (run: RunAdmission): SQL => {
-  const { lineage } = run;
-  if (lineage === undefined) {
-    return sql`NULL`;
-  }
-  return lineage.parentRunId === null
-    ? triggeredAccountOf(lineage.rootRunId, run.workflowId)
-    : sql`(SELECT parent_run.account_run_id FROM ${workflowResourceRuns} AS parent_run WHERE parent_run.id = ${lineage.parentRunId})`;
-};
+const accountOfAdmitted = (run: RunAdmission): SQL =>
+  run.lineage === undefined
+    ? sql`NULL`
+    : triggeredAccountOf(run.lineage.rootRunId, run.workflowId);
 
 /**
  * The statement that admits a start's run, for the receipt's own batch:
@@ -270,9 +248,9 @@ export const runAdmitted = (db: DrizzleD1Database, run: RunAdmission) =>
         failureCode: sql<null>`NULL`.as("failure"),
         sharesFencedThrough: sql<number>`0`.as("fenced"),
         restricted: sql<number>`${run.restricted ? 1 : 0}`.as("restricted"),
-        parentRunId: sql<string | null>`${run.lineage?.parentRunId ?? null}`.as(
-          "parent"
-        ),
+        // NULL on every row until GRA-1589 drops the column: an insert
+        // from a select names every column.
+        parentRunId: sql<null>`NULL`.as("parent"),
         rootRunId: sql<string | null>`${run.lineage?.rootRunId ?? null}`.as(
           "root"
         ),
@@ -493,17 +471,17 @@ const sendStart = async (env: Env, row: RunRow): Promise<void> => {
 /**
  * Sends the start of the run receipt `id` admitted to the engine, while
  * its row says it is still starting: the engine takes a start once, so
- * sending it again is safe. Answers the run's ID; null when the receipt
- * admitted no run (its version has no executable build). A start the
- * engine didn't take is left to the repair (`repairResourceStarts`).
+ * sending it again is safe. Answers the run's ID, which every admitted
+ * start has. A start the engine didn't take is left to the repair
+ * (`repairResourceStarts`).
  */
 export const startResourceRun = async (
   env: Env,
   id: string
-): Promise<string | null> => {
+): Promise<string> => {
   const row = await runOf(env, id);
   if (row === undefined) {
-    return null;
+    throw new Error(`Start ${id} admitted no run`);
   }
   if (row.status === "starting") {
     try {
@@ -813,13 +791,10 @@ const settledRun = async (
 
 /** What an activation of a run is given by its object (run-object.ts). */
 export interface ResourceRunMemory {
-  leaseOf: ResourceHostHooks["leaseOf"];
-  /** What the run keeps of its tried-once attempts (`TriedOnceMarks`). */
-  triedOnce?: ResourceHostHooks["triedOnce"];
-  /** The run's settled scopes of items and branches (`ScopeFences`). */
-  fences?: ResourceHostHooks["fences"];
+  /** The engine's lease of a step's attempt, while it holds. */
+  leaseOf: (key: string, attempt: number) => AttemptLease | undefined;
   /** The model calls it and its actions made (`ActionModelCalls`). */
-  modelCalls?: ResourceHostHooks["modelCalls"];
+  modelCalls?: ActionModelCalls;
   /** A sealed build's calls tried once that went out (sealed-run.ts). */
   sentCalls?: SentCalls;
   /** Its AI calls in flight and answers no attempt took (host.ts). */
@@ -828,22 +803,13 @@ export interface ResourceRunMemory {
   over?: AbortSignal;
   /** Whether the run is still this activation's. */
   current?: () => boolean;
-  /** Child runs, for its `run` tasks (run-children.ts); none unless given. */
-  children?: ResourceHostHooks["children"];
 }
 
 /**
  * When run `row`'s lineage started, in ms: its root's admission, which its
- * waits are bounded by (resource-host.ts, `#until`). A child runs nothing
- * once its parent ended (run-children.ts): `workflow.run_ended`.
+ * waits are bounded by.
  */
 const lineageStartOf = async (env: Env, row: RunRow): Promise<number> => {
-  if (row.parentRunId !== null) {
-    const parent = await runOf(env, row.parentRunId);
-    if (parent === undefined || !unended.includes(parent.status)) {
-      throw workflowResourceErrors.create("workflow.run_ended");
-    }
-  }
   const root = row.rootRunId === null ? row : await runOf(env, row.rootRunId);
   if (root === undefined) {
     throw new Error(`Run ${row.id}'s lineage root has no record`);
@@ -882,26 +848,6 @@ const loadedRun = async (
   ) {
     throw new Error(`Run ${runId}'s receipt doesn't admit it`);
   }
-  // The expressions run only under the evaluator the version was published
-  // with: the platform ships one, so a deploy that changed it fails runs of
-  // versions sealed under another, saying so, rather than evaluate them
-  // under rules they weren't published with (or keep old evaluators).
-  const sealed = await drizzle(env.DB)
-    .select({ evaluatorHash: workflowResourceVersions.evaluatorHash })
-    .from(workflowResourceVersions)
-    .where(
-      and(
-        eq(workflowResourceVersions.workflowResourceId, pin.workflow),
-        eq(workflowResourceVersions.version, pin.version)
-      )
-    )
-    .get();
-  if (sealed === undefined) {
-    throw workflowResourceErrors.create("workflow.version_not_found");
-  }
-  if (sealed.evaluatorHash !== jqProvenance.sha256) {
-    throw workflowResourceErrors.create("workflow.evaluator_changed");
-  }
   const build = await loadWorkflowBuild(
     env,
     pin.workflow,
@@ -939,15 +885,14 @@ const loadedRun = async (
       lineageStartedAt,
       build,
       calling,
-      // The workflow's own limit only ever lowers the host's ceiling.
-      maxModelCalls: Math.min(
-        modelCalls,
-        build.limits.maxModelCalls ?? modelCalls
-      ),
+      maxModelCalls: modelCalls,
     },
     output: JSON.stringify(contract.output),
   };
 };
+
+/** What a run's output may take as JSON: a step's result. */
+const maxResultBytes = platformLimits.stepPayloadBytes;
 
 /**
  * `value` as plain JSON if it is within what a step's result may take:
@@ -957,10 +902,8 @@ const loadedRun = async (
 const resultJson = (value: unknown): Json | undefined => {
   const written = writeJson(value, {
     maxBytes: maxResultBytes,
-    maxDepth: evaluatorLimits.maxJsonDepth + 2,
+    maxDepth: valueDepth + 2,
     maxNodes: maxResultBytes,
-    sortKeys: false,
-    safeIntegers: false,
   });
   return written.ok
     ? z.json().safeParse(JSON.parse(written.text)).data
@@ -971,8 +914,8 @@ const resultJson = (value: unknown): Json | undefined => {
  * `value`, from the isolate, if it is what the version's output schema
  * (`descriptor`) takes, by the SDK's own validator, and within what a
  * step's result may take, before and after its defaults are filled in:
- * the module's own result, never read past that bound, as a task's isn't
- * (resource-host.ts). `workflow.output_invalid` otherwise.
+ * the module's own result, never read past that bound.
+ * `workflow.output_invalid` otherwise.
  */
 const acceptedOutput = (descriptor: string, value: unknown): unknown => {
   const bounded = resultJson(value);
@@ -1031,106 +974,6 @@ export interface HostedActivation {
     | "fixture";
 }
 
-/** `runActivation` of a build of today's generator, on resource-host.ts. */
-const resourceHostActivation = async (
-  env: Env,
-  engineStep: RunStep,
-  memory: ResourceRunMemory,
-  activation: HostedActivation
-): Promise<unknown> => {
-  const { run, output, owner, admission } = activation;
-  const { runId } = run;
-  // The workflow's own step limit only ever lowers the host's.
-  const ceiling = stepLimitOf(env);
-  const step = countedStep(
-    engineStep,
-    Math.min(ceiling, run.build.limits.maxSteps ?? ceiling)
-  );
-  const calls: AttemptCall[] = [];
-  let tampered: StepError | undefined;
-  // The run's own sandbox session on-prem, its actions' parent.
-  let sessionId: string | undefined;
-  const host = new ResourceRunHost(env, step, run, {
-    sessionId: () => sessionId,
-    leaseOf: memory.leaseOf,
-    ...(memory.triedOnce === undefined ? {} : { triedOnce: memory.triedOnce }),
-    ...(memory.fences === undefined ? {} : { fences: memory.fences }),
-    ...(memory.modelCalls === undefined
-      ? {}
-      : { modelCalls: memory.modelCalls }),
-    ...(memory.children === undefined ? {} : { children: memory.children }),
-    attemptCall: trackAttemptCalls(calls),
-    tampered: (error) => {
-      tampered ??= error;
-    },
-    ...(admission === "fixture"
-      ? {
-          fixture: true,
-          admitAttempt: async () => await Promise.resolve(unadmitted),
-        }
-      : {
-          admitAttempt: async (attempt) =>
-            await admitAttempt(env, { ...admission, resource: owner }, attempt),
-        }),
-  });
-  const code = loadSealedIsolate<ResourceAttemptHost>(
-    env,
-    {
-      owner,
-      mainModule: openRunModule,
-      modules: async () =>
-        await Promise.resolve({
-          ...run.build.sdk,
-          ...run.build.modules,
-          [openRunModule]: openRunMain,
-        }),
-      attemptHostMethods: resourceAttemptMethods,
-    },
-    {
-      onSession: (id) => {
-        sessionId = id;
-      },
-      ...(memory.over === undefined ? {} : { over: memory.over }),
-      ...(memory.current === undefined ? {} : { current: memory.current }),
-    }
-  );
-  const result = await settledRun(async () => {
-    try {
-      return await code.run(host, { input: run.input });
-    } catch (error) {
-      host.isolateDone();
-      return await afterCpuKill(error, calls);
-    } finally {
-      // Nothing more comes from it (resource-host.ts, `#account`).
-      host.isolateDone();
-    }
-  });
-  if (!result.ok && memory.current?.() === false) {
-    throw new Error(`Run ${runId} is no longer this activation's`);
-  }
-  // The refusal that caught the isolate asking for what generated code
-  // never does: the run fails with it, whatever the code made of it.
-  // Ended well past a failure no catch took: its code went on past it.
-  const untaken =
-    result.ok && host.failureUntaken
-      ? forIsolate(workflowErrors.create("workflow.invalid"))
-      : undefined;
-  // Its output leaves the run (its parent, its screens, its details), and
-  // so does its failure: neither once it may no longer read what it
-  // recalled (resource-reads.ts). A run caught tampering fails all the
-  // same, but checked first: the refusal can hold what the run said.
-  const evidenceRefused = await evidenceRefusal(env, run.calling);
-  const failed =
-    evidenceRefused ??
-    tampered ??
-    untaken ??
-    (result.ok ? undefined : result.error);
-  if (failed !== undefined) {
-    throw namedError(failed.name, failed.message, failed.code);
-  }
-  return acceptedOutput(output, result.ok ? result.value : undefined);
-};
-
 /** What one activation of a sealed build's run runs (`sealedActivation`). */
 export interface SealedActivation {
   readonly run: HostedSealedRun;
@@ -1170,12 +1013,7 @@ export const sealedActivation = async (
   if (sentCalls === undefined || modelCalls === undefined) {
     throw new Error(`Run ${runId} has no object to keep its calls with`);
   }
-  // The workflow's own step limit only ever lowers the host's.
-  const ceiling = stepLimitOf(env);
-  const step = countedStep(
-    engineStep,
-    Math.min(ceiling, run.build.limits.maxSteps ?? ceiling)
-  );
+  const step = countedStep(engineStep, stepLimitOf(env));
   const calls: AttemptCall[] = [];
   let tampered: StepError | undefined;
   // The run's own sandbox session on-prem, its actions' parent.
@@ -1279,12 +1117,7 @@ export const sealedActivationOf = ({
  * Runs one activation of `activation.run` (an independent workflow's run,
  * a run an App's test started, fixture-runs.ts, or a test run of its draft's
  * checkpoint, candidate-runs.ts): the build's generated module in an
- * isolate of its own against a host of the run: the run host, for a
- * build generated for it (`sealedActivation`), else resource-host.ts until
- * GRA-1366 removes it. Which one is the build's own, sealed generator's
- * to say (sealed-run.ts, `generatedForRunHost`): one stack moving onto
- * one engine, never a fallback, as a build of each generator runs only on
- * the engine it was generated for.
+ * isolate of its own on the run host (`sealedActivation`).
  * Answers the run's output, once it matches its version's output schema.
  */
 export const runActivation = async (
@@ -1293,9 +1126,6 @@ export const runActivation = async (
   memory: ResourceRunMemory,
   activation: HostedActivation
 ): Promise<unknown> => {
-  if (!generatedForRunHost(activation.run.build)) {
-    return await resourceHostActivation(env, engineStep, memory, activation);
-  }
   const sealed = sealedActivationOf(activation);
   return await sealedActivation(env, engineStep, memory, sealed, () =>
     sealedRunModules(sealed.run)
@@ -1317,9 +1147,9 @@ export const loadedActivation = async (
     run,
     output,
     owner: workflowOwnerOf(pin.workflow),
-    // Counted on its account: its lineage's root (its own, or its
-    // parent's for a child), or its workflow's account in the lineage a
-    // trigger started it in (quotas.ts, `triggeredAccountClaimed`).
+    // Counted on its account: its own, as its lineage's root, or its
+    // workflow's account in the lineage a trigger started it in
+    // (quotas.ts, `triggeredAccountClaimed`).
     admission: { run: runId, root: run.calling.accountRunId },
   };
 };
@@ -1442,154 +1272,6 @@ export const resultOf = async (
 };
 
 /**
- * Tells child run `row`'s parent that it ended, and how (`ChildEnd`): an
- * event under the child's ID as its key, which the parent's wait for it
- * takes, once, and journals, past the parent's inbox limits (`reserved`),
- * so no sender can crowd it out: one per child, so bounded by the
- * lineage's descendant runs. An
- * output too large for an event is told as a failure
- * (`workflow.child_output_too_large`), never dropped. Told again, it is
- * the same event; a parent that ended, or that the engine removed after it
- * ended, takes none. An event already under
- * its key that isn't the same (the child's details gone since it was
- * first told) is what the parent takes: what was told first stands.
- * Throws for anything else (a full inbox, a parent the engine has no
- * record of), so the engine tells the end again. Nothing for a run that
- * isn't a child or hasn't ended.
- */
-/**
- * The most a child's end may take, encoded, as its parent is told it: so
- * a lineage's ends, past its parent's inbox limits, take at most its
- * descendant runs times this.
- */
-export const maxChildEndBytes = 256 * 1024;
-
-/**
- * How ended child run `row` ended, as its parent is told (`ChildEnd`): an
- * output past `maxChildEndBytes` told as a failure, never dropped.
- */
-const childEndOf = async (env: Env, row: RunRow): Promise<ChildEnd> => {
-  const { output, error } = await resultOf(env, row);
-  if (row.status !== "completed") {
-    return {
-      status: row.status === "cancelled" ? "cancelled" : "failed",
-      code: error?.code ?? null,
-    };
-  }
-  const end: ChildEnd = {
-    status: "completed",
-    output: z.json().parse(output ?? null),
-  };
-  // Within what its parent's inbox takes of a child's end, which isn't
-  // held to the inbox's limits: told as a failure past it.
-  try {
-    if (new TextEncoder().encode(encode(end)).byteLength <= maxChildEndBytes) {
-      return end;
-    }
-  } catch {
-    // Past what the journal keeps at all: past the cap too.
-  }
-  return { status: "failed", code: "workflow.child_output_too_large" };
-};
-
-/**
- * Has run `parentRunId` hold child run `childRunId`'s evidence, and every
- * run the child held (`runEvidenceHolds`): an output it takes may carry
- * what any of them recalled, so before each of its releases the parent is
- * checked against theirs too (resource-reads.ts). Kept before the parent
- * is told, so no parent holds the output without them. Again, it adds
- * nothing.
- */
-const holdChildEvidence = async (
-  env: Env,
-  parentRunId: string,
-  childRunId: string
-): Promise<void> => {
-  await drizzle(env.DB).run(
-    sql`INSERT INTO ${runEvidenceHolds} (run_id, held_run_id)
-      SELECT ${parentRunId}, ${childRunId}
-      UNION SELECT ${parentRunId}, ${runEvidenceHolds.heldRunId}
-        FROM ${runEvidenceHolds} WHERE ${runEvidenceHolds.runId} = ${childRunId}
-      ON CONFLICT DO NOTHING`
-  );
-};
-
-export const tellParentOfEnd = async (env: Env, row: RunRow): Promise<void> => {
-  if (row.parentRunId === null || unended.includes(row.status)) {
-    return;
-  }
-  const end = await childEndOf(env, row);
-  if (end.status === "completed") {
-    await holdChildEvidence(env, row.parentRunId, row.id);
-  }
-  const tell = async (told: ChildEnd) =>
-    await runEngine(env).admitEvent(row.parentRunId ?? "", {
-      type: childEndType(row.id),
-      payload: told,
-      key: row.id,
-      attributes: {},
-      reserved: true,
-    });
-  let outcome = await tell(end);
-  if (outcome === "too_large" && end.status === "completed") {
-    outcome = await tell({
-      status: "failed",
-      code: "workflow.child_output_too_large",
-    });
-  }
-  if (outcome === "missing") {
-    // The engine has no record of the parent: removed once it ended (its
-    // retention), so nothing is left to tell. A parent core still has
-    // going is one the engine must have, so that is tried again.
-    const parent = await runOf(env, row.parentRunId);
-    if (parent === undefined || !unended.includes(parent.status)) {
-      return;
-    }
-  }
-  if (
-    outcome !== "accepted" &&
-    outcome !== "duplicate" &&
-    outcome !== "conflict" &&
-    outcome !== "ended"
-  ) {
-    throw new Error(
-      `Run ${row.parentRunId} didn't take its child ${row.id}'s end: ${outcome}`
-    );
-  }
-};
-
-/**
- * What follows the end of run `row` in its lineage (run-children.ts): its
- * parent, if it is a child, told it ended, so the parent's wait for it
- * ends; its own children that haven't ended terminated in the engine, so
- * no child outlives its parent (each one's own end then does the same for
- * its children). A child the engine has no record of yet runs nothing
- * once it does: its activation refuses a run whose parent ended
- * (`loadedRun`), and each of its calls a parent that did
- * (resource-authority.ts). Each is the same done again, so the engine
- * telling an end again, until core takes it, repeats them safely; a
- * failure throws, for the engine to tell it again.
- */
-const afterEnd = async (env: Env, row: RunRow): Promise<void> => {
-  await tellParentOfEnd(env, row);
-  // Where a press on Stephen's card started it: told once, best effort.
-  await tellOfferedRunEnd(env, row);
-  const children = await drizzle(env.DB)
-    .select()
-    .from(workflowResourceRuns)
-    .where(
-      and(
-        eq(workflowResourceRuns.parentRunId, row.id),
-        inArray(workflowResourceRuns.status, unended)
-      )
-    );
-  for (const child of children) {
-    // oxlint-disable-next-line no-await-in-loop -- one at a time
-    await runEngine(env).terminate(child.id);
-  }
-};
-
-/**
  * What run projection `engine` makes of a run's row: its status, its
  * failure code (`failureCode`, the engine's), and, while it rolls back,
  * why (`compensating`, kept as JSON), which its snapshot shows as
@@ -1635,7 +1317,7 @@ export const projectResourceRun = async (
   if (!unended.includes(row.status)) {
     // Told again, as the engine tells an end until core takes it: what
     // follows an end is done again, so none of it is lost to a failure.
-    await afterEnd(env, row);
+    await tellOfferedRunEnd(env, row);
     return;
   }
   const { status, failure, compensating } = projectedOf(engine, failureCode);
@@ -1689,7 +1371,8 @@ export const projectResourceRun = async (
   // Last: a failure here has the engine tell the end again, which repeats
   // only this (above), never skipping what came before it.
   if (now !== undefined) {
-    await afterEnd(env, now);
+    // Where a press on Stephen's card started it: told once, best effort.
+    await tellOfferedRunEnd(env, now);
   }
 };
 

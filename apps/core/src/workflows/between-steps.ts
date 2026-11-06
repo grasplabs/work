@@ -260,19 +260,6 @@ export class BoundedRunHost<Attempt extends object>
     );
   }
 
-  async child(name: unknown): Promise<Settled<unknown>> {
-    const { child } = this.#host;
-    if (child === undefined) {
-      return {
-        ok: false,
-        error: { name: "Error", message: "This run has no child workflows." },
-      };
-    }
-    return await this.#clock.around(
-      async () => await child.call(this.#host, name)
-    );
-  }
-
   async waitForDecision(
     name: unknown,
     options: unknown
@@ -280,14 +267,5 @@ export class BoundedRunHost<Attempt extends object>
     return await this.#clock.around(
       async () => await this.#host.waitForDecision(name, options)
     );
-  }
-
-  /** Not a step: it passes outside the clock, as it takes no time. */
-  async quiet(made: unknown, time: unknown): Promise<Settled<null>> {
-    const { quiet } = this.#host;
-    if (quiet === undefined) {
-      return { ok: true, value: null };
-    }
-    return await quiet.call(this.#host, made, time);
   }
 }

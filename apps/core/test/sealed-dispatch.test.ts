@@ -1,10 +1,8 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { kitModuleName } from "@grasp-os/compiler";
 import { v } from "@grasp-os/sdk";
 import { declaredWorkflows, workflowFingerprint } from "@grasp-os/sdk/host";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -13,7 +11,6 @@ import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { generatedModule } from "../src/workflow-builds.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
 import {
@@ -33,30 +30,22 @@ import {
   sealedActivationOf,
 } from "../src/workflows/resource-runs.ts";
 import type { HostedActivation } from "../src/workflows/resource-runs.ts";
-import { sealedMainModules } from "../src/workflows/sealed-isolate.ts";
 import type { StepError } from "../src/workflows/sealed-isolate.ts";
+import { sealedRunModules } from "../src/workflows/sealed-run.ts";
 import type { SealedRunMemory } from "../src/workflows/sealed-run.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { engineOfTest } from "./run-host.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 
-// Which engine runs a JSON workflow's run (resource-runs.ts,
-// `runActivation`): a build generated for the run host runs there as a
-// sealed run, whatever started it, an independent run, a test run of a
-// draft's checkpoint or a run an App's test started; a build of the
-// generator before it runs on resource-host.ts until GRA-1366 removes it.
-//
-// No stored build is generated for the run host until the new generator
-// is wired into drafts and publishing (GRA-1535), so the sealed runs here
-// are started for real, their activations loaded as the dispatcher loads
-// them, and run on the run host with a module of the test's own, written
-// as that generator writes one, in place of the build's generated one,
-// through the same mapping `runActivation` takes for such a build
-// (`sealedActivationOf`). Until then every stored build takes
-// `runActivation`'s other branch, which the last test runs.
-// What each must keep on the run host, from the threat model of its kind:
+// A JSON workflow's run on the run host (resource-runs.ts,
+// `runActivation`), whatever started it: an independent run, a test run of
+// a draft's checkpoint or a run an App's test started. Each is started for
+// real, its activation loaded as the dispatcher loads it, and run on the
+// run host with its build's own generated module (`sealedRunModules`).
+// What each must keep there, from the threat model of its kind:
 //
 // - a test run of a checkpoint calls nothing: every call is answered from
 //   its start's fixtures, and its waits are held short;
@@ -66,182 +55,103 @@ import { unique } from "./sign-in.ts";
 //   step's attempts; any other call is refused before it is audited.
 
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
-/** A definition of `name`: its bindings and tasks, input `who`, output `status`. */
+/**
+ * A definition of `steps` with `bindings`: input `who`, output `status`,
+ * `status` its value.
+ */
 const definitionOf = (
-  name: string,
-  tasks: unknown[],
-  bindings: Record<string, unknown>
+  steps: unknown[],
+  bindings: Record<string, unknown>,
+  status: unknown
 ): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: tasks,
+    bindings,
+    steps,
   });
 
 /** A wait long enough that the run's own engine leaves it waiting. */
-const linger = { linger: { wait: "PT10M" } };
+const linger = { id: "linger", type: "wait", for: "10 minutes" };
 
 /** Asks the `summary` model binding to greet the input's `who`. */
 const summarize = {
-  summarize: {
-    call: "grasp.model",
-    with: {
-      binding: "summary",
-      instructions: "Greet them.",
-      input: { who: "${ $workflow.input.who }" },
-      outputSchema: objectSchema({ line: { type: "string" } }),
-    },
-  },
+  id: "summarize",
+  type: "agent",
+  binding: "summary",
+  instructions: "Greet them.",
+  input: { who: { $expr: "input.who" } },
+  output: objectSchema({ line: { type: "string" } }),
 };
+
+/** The greeting `summarize` answered, as a run's status. */
+const greeting = { $expr: "steps.summarize.output.line" };
 
 /** Saves the input's `who` through the `save` operation binding. */
 const save = {
-  save: {
-    call: "grasp.operation",
-    with: { binding: "save", arguments: { who: "${ $workflow.input.who }" } },
-  },
+  id: "save",
+  type: "do",
+  binding: "save",
+  arguments: { who: { $expr: "input.who" } },
 };
 
 /** Mails the input's `who` through the `mail` connector binding. */
 const send = {
-  send: {
-    call: "grasp.connector",
-    with: {
-      binding: "mail",
-      operation: "mail.send",
-      arguments: { to: "${ $workflow.input.who }", subject: "Hello" },
-    },
-  },
+  id: "send",
+  type: "do",
+  binding: "mail",
+  operation: "mail.send",
+  arguments: { to: { $expr: "input.who" }, subject: "Hello" },
 };
 
-/** Asks the fixture's `approver` to approve, through binding `approval`. */
-const review = {
-  review: {
-    call: "grasp.decision",
-    with: {
-      binding: "approval",
-      recipients: ["person:approver"],
-      prompt: "Approve?",
-      input: { who: "${ $workflow.input.who }" },
-    },
-  },
-};
+/** Asks `recipients` to approve the input's `who`, through binding `approval`. */
+const reviewOf = (recipients: unknown[]) => ({
+  id: "review",
+  type: "decision",
+  binding: "approval",
+  recipients,
+  prompt: "Approve?",
+  input: { who: { $expr: "input.who" } },
+});
 
-/** Asks whom the input's `who` names to approve, through binding `approval`. */
-const reviewWho = {
-  review: {
-    ...review.review,
-    with: { ...review.review.with, recipients: ["${ $workflow.input.who }"] },
-  },
+/** Asks the fixture's `approver` to approve. */
+const review = reviewOf(["person:approver"]);
+
+/** Asks whom the input's `who` names to approve. */
+const reviewWho = reviewOf([{ $expr: "input.who" }]);
+
+/** How `review` was answered, and by whom, as a run's status. */
+const reviewed = {
+  $expr:
+    '(steps.review.output.approved ? "approved" : "rejected") + " by " + steps.review.output.by',
 };
 
 /** Asks the fixture's `approver` about each of two items, in turn. */
 const batch = {
-  batch: {
-    for: { each: "w", at: "i", in: '${ ["a", "b"] }' },
-    do: [
-      {
-        sign: {
-          call: "grasp.decision",
-          with: {
-            binding: "approval",
-            recipients: ["person:approver"],
-            prompt: "Approve this one?",
-            input: { who: "${ $w }" },
-          },
-        },
-      },
-    ],
-  },
+  id: "batch",
+  type: "forEach",
+  items: { $expr: '["a", "b"]' },
+  do: [
+    {
+      id: "sign",
+      type: "decision",
+      binding: "approval",
+      recipients: ["person:approver"],
+      prompt: "Approve this one?",
+      input: { who: { $expr: "item" } },
+    },
+  ],
 };
-
-/** The workflow SDK, by the flat name the sealed build has it. */
-const sdkWorkflow = JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"));
-
-/** A task's own step, as the generator for the run host names it. */
-const task = (id: string, body: string): string =>
-  `await step.do(${JSON.stringify(id)}, { key: "task", description: "Its task" }, async () => ${body})`;
-
-/**
- * The module the generator for the run host writes for `linger` then
- * `summarize` (then `save`, with `saves`): its run's output the greeting.
- */
-const moduleOf = (saves: boolean): string => `
-import { workflow, z } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: z.object({ who: z.string() }) }, async (step, { env, input }) => {
-  await step.sleep("linger", { key: "task", description: "Its wait", duration: "10 minutes" });
-  const greeting = ${task("summarize", 'await env.summary.call("grasp.model", { instructions: "Greet them.", input: { who: input.who } })')};
-  ${saves ? `${task("save", 'await env.save.call("grasp.operation", { who: input.who })')};` : ""}
-  return { status: greeting.line };
-});
-`;
-
-/** The module the generator for the run host writes for `linger` then `send`. */
-const sendModule = `
-import { workflow, z } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: z.object({ who: z.string() }) }, async (step, { env, input }) => {
-  await step.sleep("linger", { key: "task", description: "Its wait", duration: "10 minutes" });
-  ${task("send", 'await env.mail.call("mail.send", { to: input.who, subject: "Hello" })')};
-  return { status: "sent" };
-});
-`;
-
-/**
- * The module the generator for the run host writes for `linger` then
- * `review`, its decision asking `asked` of `recipients` (code): its output the answer, and
- * how many people its code was told of, each time it asked.
- */
-const reviewModuleOf = (
-  asked = "{ who: input.who }",
-  recipients = '["person:approver"]'
-): string => `
-import { workflow, z } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: z.object({ who: z.string() }) }, async (step, { input }) => {
-  await step.sleep("linger", { key: "task", description: "Its wait", duration: "10 minutes" });
-  const entered = await step.do("review", { key: "enter", description: "Its ask" }, async () => ({ recipients: ${recipients}, prompt: "Approve?", input: ${asked} }));
-  const told = [];
-  const decided = await step.decision("review", { key: "task", description: entered.prompt, from: entered.recipients[0], timeout: "365 days", ask: async ({ recipients }) => { told.push(recipients.length); } });
-  return { status: \`\${decided.approved ? "approved" : "rejected"} by \${decided.by}, told \${told.join(",")}\` };
-});
-`;
-
-/**
- * The module the generator for the run host writes for `linger` then
- * `batch`, one item after another: its output each item's answer.
- */
-const batchModule = `
-import { workflow, z } from ${sdkWorkflow};
-export default workflow("sealed", { params: {}, input: z.object({ who: z.string() }) }, async (step) => {
-  await step.sleep("linger", { key: "task", description: "Its wait", duration: "10 minutes" });
-  const { items } = await step.do("batch", { key: "enter", description: "Its items" }, async () => ({ items: ["a", "b"] }));
-  const answers = [];
-  for (let at = 0; at < items.length; at += 1) {
-    await step.do("sign", { key: "enter@" + at, description: "Its ask" }, async () => ({ recipients: ["person:approver"], prompt: "Approve this one?", input: { who: items[at] } }));
-    const decided = await step.decision("sign", { key: "task@" + at, description: "Approve this one?", from: "person:approver", timeout: "365 days", ask: async () => undefined });
-    answers.push(decided.approved);
-  }
-  return { status: answers.join(",") };
-});
-`;
 
 /** The organization's own decisions of run `runId`, and asks audited of it. */
 const organizationsOf = async (runId: string) => {
@@ -354,14 +264,12 @@ const journalingEngine = (): Engine & { evictAfter?: string } => {
 };
 
 /**
- * Runs `activation` as `runActivation` runs a build generated for the run
- * host (`sealedActivationOf`, `sealedActivation`), with `source` in place
- * of the build's generated module, on `engine` with `memory`: its output,
- * or the code it failed with.
+ * Runs `activation` as `runActivation` runs it (`sealedActivationOf`,
+ * `sealedActivation`), its build's own modules, on `engine` with
+ * `memory`: its output, or the code it failed with.
  */
 const ranOnRunHost = async (
   activation: HostedActivation,
-  source: string,
   { engine = newerEngine(), memory = memoryOfTest() } = {}
 ): Promise<unknown> => {
   const sealed = sealedActivationOf(activation);
@@ -371,14 +279,7 @@ const ranOnRunHost = async (
       engine.step,
       { leaseOf: engine.leaseOf, ...memory },
       sealed,
-      () => ({
-        ...sealed.run.build.sdk,
-        [generatedModule]: source,
-        ...sealedMainModules({
-          module: generatedModule,
-          refusal: "No workflow.",
-        }),
-      })
+      () => sealedRunModules(sealed.run)
     );
   } catch (error) {
     const code: unknown =
@@ -416,25 +317,27 @@ const contracts = async (admin: Identity) => {
     key: approval,
     kind: "decision",
     input: JSON.stringify(v.object({ who: v.string() }).descriptor),
-    response: JSON.stringify(
-      v.union(v.null(), v.object({ comment: v.string() })).descriptor
-    ),
+    response: JSON.stringify(v.null().descriptor),
   });
   return { model, operation, mail, approval };
 };
 
-/** A workflow of `by`'s whose draft holds `tasks`, checked: its revision. */
-const drafted = async (by: Identity, tasks: unknown[]) => {
+/** A workflow of `by`'s whose draft holds `steps`, checked: its revision. */
+const drafted = async (by: Identity, steps: unknown[], status: unknown) => {
   const admin = await person("admin");
   const { model, approval } = await contracts(admin);
   const workflow = await createWorkflowResource(env, by, `test-${unique()}`);
   const { revision: base } = await workflowDraft(env, by, workflow.id);
   const saved = await editWorkflowDraft(env, by, workflow.id, {
     expectedRevision: base,
-    source: definitionOf(workflow.name, tasks, {
-      summary: { kind: "model", contract: model },
-      approval: { kind: "decision", contract: approval },
-    }),
+    source: definitionOf(
+      steps,
+      {
+        summary: { kind: "model", contract: model },
+        approval: { kind: "decision", contract: approval },
+      },
+      status
+    ),
     modules: {},
   });
   expect(saved.problems).toStrictEqual([]);
@@ -477,19 +380,23 @@ const candidatePinOf = async (workflow: string, runId: string) => {
 
 /** The Requests App's files: it binds `followUp`, keeps requests, `desk`. */
 const requestsFiles = (fixture: unknown): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  requests: defineTable({ who: v.string() }),
-});
-`,
-  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Requests",
+    tables: {
+      requests: {
+        fields: { who: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const followUp = permission.workflow("followUp", {
-  input: v.object({ who: v.string().trim().min(1) }),
-  output: v.object({ status: v.string() }),
-});
+export const followUp = permissions.followUp;
 
 export const add = mutation({
   args: { who: v.string() },
@@ -506,18 +413,7 @@ export const list = query({
   handler: async (ctx) => (await ctx.db.query("requests").take(100)).map(({ who }) => who),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { followUp } from "./server/requests.ts";
-import schema from "./schema.ts";
 
-export default app({
-  name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
-  permissions: { workflows: [followUp] },
-});
-`,
   "tests/fixtures/desk.json": JSON.stringify({
     principals: {
       "desk-user": { role: "user" },
@@ -528,11 +424,15 @@ export default app({
 });
 
 /**
- * The Requests App binding a workflow of `tasks` as `followUp` (model
- * binding `summary`, operation binding `save`, connector binding `mail`),
- * `fixture` its test's.
+ * The Requests App binding a workflow of `steps` ending in `status` as
+ * `followUp` (model binding `summary`, operation binding `save`,
+ * connector binding `mail`), `fixture` its test's.
  */
-const requestsApp = async (tasks: unknown[], fixture: unknown) => {
+const requestsApp = async (
+  steps: unknown[],
+  status: unknown,
+  fixture: unknown
+) => {
   const admin = await person("admin");
   const keys = await contracts(admin);
   const builder = await person("builder");
@@ -544,12 +444,16 @@ const requestsApp = async (tasks: unknown[], fixture: unknown) => {
     `greet-${unique()}`
   );
   await publishWorkflowVersion(env, builder, resource.id, {
-    definition: definitionOf(resource.name, tasks, {
-      summary: { kind: "model", contract: keys.model },
-      save: { kind: "operation", contract: keys.operation },
-      mail: { kind: "connector", contract: keys.mail },
-      approval: { kind: "decision", contract: keys.approval },
-    }),
+    definition: definitionOf(
+      steps,
+      {
+        summary: { kind: "model", contract: keys.model },
+        save: { kind: "operation", contract: keys.operation },
+        mail: { kind: "connector", contract: keys.mail },
+        approval: { kind: "decision", contract: keys.approval },
+      },
+      status
+    ),
     basedOn: null,
   });
   await bindWorkflowToApp(env, builder, resource.id, {
@@ -639,7 +543,11 @@ describe(
         outputTokens: 1,
       });
       const ada = await person("builder");
-      const { workflow, revision } = await drafted(ada, [linger, summarize]);
+      const { workflow, revision } = await drafted(
+        ada,
+        [linger, summarize],
+        greeting
+      );
       const { runId } = await startCandidateRun(env, ada, workflow.id, {
         revision,
         input: { who: "Ada" },
@@ -658,9 +566,38 @@ describe(
         runId
       );
       expect({
-        ended: await ranOnRunHost(activation, moduleOf(false)),
+        ended: await ranOnRunHost(activation),
         asked: provider.requests.length,
       }).toStrictEqual({ ended: { status: "Hello Ada" }, asked: 0 });
+    });
+
+    it("counts each step an App test's run completed on the run host once, by the step's ID", async () => {
+      const app = await requestsApp([summarize, save], greeting, {
+        models: { summary: { line: "Hello from the fixture" } },
+        operations: { save: "requests.add" },
+      });
+      const host = fixtureHostFor(env, app.release, app.files);
+      const session = await host.open("desk", `test-${unique()}`);
+      await session.start(
+        "desk-user",
+        await startOf(app.release, { who: "Ada" })
+      );
+      // The test's first run, by its number in the test.
+      const run = 0;
+      const completed = await vi.waitFor(
+        async () => {
+          const saved = await session.completedCount(run, "save");
+          expect(saved).toBe(1);
+          return {
+            save: saved,
+            summarize: await session.completedCount(run, "summarize"),
+            never: await session.completedCount(run, "linger"),
+          };
+        },
+        { timeout: 60_000, interval: 200 }
+      );
+      await session.close();
+      expect(completed).toStrictEqual({ save: 1, summarize: 1, never: 0 });
     });
 
     it("runs an App test's run of a version generated for the run host there, its model answered by its fixture and its store call on the test's own store", async () => {
@@ -669,7 +606,7 @@ describe(
         inputTokens: 1,
         outputTokens: 1,
       });
-      const app = await requestsApp([linger, summarize, save], {
+      const app = await requestsApp([linger, summarize, save], greeting, {
         models: { summary: { line: "Hello from the fixture" } },
         operations: { save: "requests.add" },
       });
@@ -681,8 +618,7 @@ describe(
       );
       const { runId, pin } = await fixtureRunOf(app.app);
       const ended = await ranOnRunHost(
-        await fixtureActivation(env, pin, runId),
-        moduleOf(true)
+        await fixtureActivation(env, pin, runId)
       );
       const saved = await savedIn(app, session);
       await session.close();
@@ -698,7 +634,7 @@ describe(
     });
 
     it("sends an App test's store call once on the run host, whatever its step's attempts: an evicted activation's successor fails as tried", async () => {
-      const app = await requestsApp([linger, summarize, save], {
+      const app = await requestsApp([linger, summarize, save], greeting, {
         models: { summary: { line: "Hello" } },
         operations: { save: "requests.add" },
       });
@@ -715,15 +651,9 @@ describe(
       const engine = journalingEngine();
       const memory = memoryOfTest();
       engine.evictAfter = "save:task";
-      const evicted = await ranOnRunHost(activation, moduleOf(true), {
-        engine,
-        memory,
-      });
+      const evicted = await ranOnRunHost(activation, { engine, memory });
       engine.evictAfter = undefined;
-      const resumed = await ranOnRunHost(activation, moduleOf(true), {
-        engine,
-        memory,
-      });
+      const resumed = await ranOnRunHost(activation, { engine, memory });
       const saved = await savedIn(app, session);
       await session.close();
       expect({ evicted, resumed, saved }).toStrictEqual({
@@ -735,7 +665,7 @@ describe(
     });
 
     it("refuses an App test's run on the run host a call its test doesn't serve, sending nothing", async () => {
-      const app = await requestsApp([linger, send], {});
+      const app = await requestsApp([linger, send], "sent", {});
       const host = fixtureHostFor(env, app.release, app.files);
       const session = await host.open("desk", `test-${unique()}`);
       await session.start(
@@ -744,8 +674,7 @@ describe(
       );
       const { runId, pin } = await fixtureRunOf(app.app);
       const ended = await ranOnRunHost(
-        await fixtureActivation(env, pin, runId),
-        sendModule
+        await fixtureActivation(env, pin, runId)
       );
       await session.close();
       const events = await allEvents();
@@ -761,7 +690,11 @@ describe(
 
     it("takes a draft's test run's decision on the run host from its start's fixture, as a real run asks it, opening none and asking nobody", async () => {
       const ada = await person("builder");
-      const { workflow, revision } = await drafted(ada, [linger, reviewWho]);
+      const { workflow, revision } = await drafted(
+        ada,
+        [linger, reviewWho],
+        reviewed
+      );
       /** A test run of the draft for `who`, left waiting by its own engine. */
       const waiting = async (who = "person:approver") => {
         const { runId } = await startCandidateRun(env, ada, workflow.id, {
@@ -794,31 +727,21 @@ describe(
         };
       };
       const answered = await waiting();
-      const misasked = await waiting();
       const own = await waiting(`person:${ada.userId}`);
-      const asking = reviewModuleOf(undefined, "[input.who]");
       expect({
         // Its engine waits for no event: the answer is there at its first look.
-        ended: await ranOnRunHost(answered.activation, asking),
+        ended: await ranOnRunHost(answered.activation),
         // Asked as a real run's decision is, its fixture notwithstanding:
-        // an input its contract doesn't take fails it, as a real run's.
-        misasked: await ranOnRunHost(
-          misasked.activation,
-          reviewModuleOf("{ who: 5 }", "[input.who]")
-        ),
-        // Nor of the run's own person, who can't answer it.
-        own: await ranOnRunHost(own.activation, asking),
+        // never of the run's own person, who can't answer it.
+        own: await ranOnRunHost(own.activation),
         organization: [
           await organizationsOf(answered.runId),
-          await organizationsOf(misasked.runId),
           await organizationsOf(own.runId),
         ],
       }).toStrictEqual({
-        ended: { status: "approved by person:pat, told 0" },
-        misasked: { failed: "workflow.call_invalid" },
+        ended: { status: "approved by person:pat" },
         own: { failed: "workflow.call_invalid" },
         organization: [
-          { decisions: 0, asked: 0 },
           { decisions: 0, asked: 0 },
           { decisions: 0, asked: 0 },
         ],
@@ -826,7 +749,7 @@ describe(
     });
 
     it("waits on the run host for an App test's decision its fixture's principal answers, kept with the test and asking nobody", async () => {
-      const app = await requestsApp([linger, review], {
+      const app = await requestsApp([linger, review], reviewed, {
         deciders: { approval: ["approver"] },
       });
       const host = fixtureHostFor(env, app.release, app.files);
@@ -870,7 +793,6 @@ describe(
       };
       const ended = await ranOnRunHost(
         await fixtureActivation(env, pin, runId),
-        reviewModuleOf(),
         { engine }
       );
       const kept = await env.DB.prepare(
@@ -887,7 +809,7 @@ describe(
         kept: kept.results,
         organization: await organizationsOf(runId),
       }).toStrictEqual({
-        ended: { status: "rejected by fixture-approver, told 0" },
+        ended: { status: "rejected by fixture-approver" },
         answers: [{ ok: true, value: null }],
         timeouts: [fixtureDecisionLookMs],
         kept: [
@@ -902,7 +824,7 @@ describe(
     });
 
     it("finds an App test's answer to a loop item's decision on the run host by its item, as `respond`'s `at` names it", async () => {
-      const app = await requestsApp([linger, batch], {
+      const app = await requestsApp([linger, batch], "signed", {
         deciders: { approval: ["approver"] },
       });
       const host = fixtureHostFor(env, app.release, app.files);
@@ -945,7 +867,6 @@ describe(
       };
       const ended = await ranOnRunHost(
         await fixtureActivation(env, pin, runId),
-        batchModule,
         { engine }
       );
       const kept = await env.DB.prepare(
@@ -955,7 +876,7 @@ describe(
         .all();
       await session.close();
       expect({ ended, answers, kept: kept.results }).toStrictEqual({
-        ended: { status: "true,false" },
+        ended: { status: "signed" },
         answers: [
           { ok: true, value: null },
           { ok: true, value: null },
@@ -964,35 +885,6 @@ describe(
           { step: "sign:task@0", status: "approved" },
           { step: "sign:task@1", status: "rejected" },
         ],
-      });
-    });
-
-    it("runs a build of the generator before it on resource-host.ts, as before", async () => {
-      const ada = await person("builder");
-      const { workflow, revision } = await drafted(ada, [
-        {
-          greet: {
-            ...summarize.summarize,
-            output: { as: "${ {status: .line} }" },
-          },
-        },
-      ]);
-      const { runId } = await startCandidateRun(env, ada, workflow.id, {
-        revision,
-        input: { who: "Ada" },
-        fixtures: { summary: { output: { line: "Hello Ada" } } },
-      });
-      const run = await candidateOnce(
-        ada,
-        workflow.id,
-        runId,
-        (status) => status !== "starting" && status !== "running"
-      );
-      // On the run host its build, generated for another SDK, would load
-      // nothing (sealed-run.ts, `sealedRunModules`), and the run would fail.
-      expect({ status: run.status, output: run.output }).toStrictEqual({
-        status: "completed",
-        output: { status: "Hello Ada" },
       });
     });
   }

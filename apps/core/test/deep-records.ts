@@ -1,5 +1,7 @@
 import { valueDepth } from "@grasp-os/shared/value-depth";
 
+import { appDefinition } from "./app-definitions.ts";
+
 // An App that keeps a record as deep as a table may declare one, for the
 // tests that hold every bound on its way to the store to it: the
 // operation channel's, workerd's and the on-prem sandbox session's.
@@ -17,15 +19,19 @@ export const fieldDepth = valueDepth - 1;
  * channel to the store and back.
  */
 export const deepFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-// A leaf in ${String(fieldDepth - 1)} arrays: ${String(fieldDepth)} levels, as deep as a table's field may be.
-const level0 = v.string();\n${Array.from({ length: fieldDepth - 1 }, (_value, index) => `const level${String(index + 1)} = v.array(level${String(index)});`).join("\n")}
-
-export default defineSchema({
-  deep: defineTable({ value: level${String(fieldDepth - 1)} }),
-});
-`,
+  ...appDefinition({
+    name: "Deep",
+    tables: {
+      deep: {
+        // A leaf in `fieldDepth - 1` arrays: `fieldDepth` levels, as deep
+        // as a table's field may be.
+        fields: {
+          value: `${"v.array(".repeat(fieldDepth - 1)}v.string()${")".repeat(fieldDepth - 1)}`,
+        },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+  }),
   "server/deep.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
@@ -56,16 +62,6 @@ export const read = query({
     }
     return value === "leaf" ? levels + 1 : 0;
   },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Deep",
-  schema,
-  access: { tables: { deep: { read: "owner", write: "owner" } } },
-  screens: [],
 });
 `,
 };

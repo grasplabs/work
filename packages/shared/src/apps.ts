@@ -333,7 +333,7 @@ export interface VersionReview {
   /** Its files that differ from the current version's, by path. */
   files: { path: string; change: ReviewChange }[];
   /**
-   * How its server code (`app.ts`, `schema.ts`, `values.ts`,
+   * How its server code (`grasp.config.ts`, `screens.ts`, `values.ts`,
    * `server/`, as its seal builds them) differs, if
    * it does: it runs as whoever uses the App, with every permission the
    * App holds. Its files that differ are `serverFiles`.
@@ -991,7 +991,7 @@ export const appErrors = defineErrorFamily({
   "app.too_large": "The App's files would be over its limits.",
   "app.nothing_to_commit": "The changes leave the latest version as it is.",
   "app.v1_server":
-    "An App no longer has files under app/: its server code is app.ts, schema.ts and its functions in server/. Delete the files under app/ and commit again.",
+    "An App no longer has files under app/: its server code is grasp.config.ts, server/schema.ts and its functions in server/. Delete the files under app/ and commit again.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
   "app.candidate_busy":
     "This version is already being checked to be made current. Try again in a moment.",
@@ -1022,7 +1022,11 @@ export const appErrors = defineErrorFamily({
   "app.creates_exhausted":
     "This chat created as many Apps as one question may. Tell the person what you made.",
   "app.no_workflows":
-    "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild and bind it to the App under an alias its app.ts declares (permissions.workflows, permission.workflow).",
+    "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild, add it to the App's permissions with addPermission (permission.workflow) and bind it to the App under that alias.",
+  "app.generated_file":
+    "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code Grasp generates from it: change them with addTable, addField, changeField, renameField, setAccess, addIndex and addPermission, never by writing them.",
+  "app.definition_invalid":
+    "The App's definition.json, from which its grasp.config.ts and server/schema.ts are generated, is missing or isn't valid.",
   "app.chat_has_app":
     "This chat is an App's own chat: it changes that App, whose ID the chat gives, and creates no other. Change its files with readFile, writeFile and editFile; for another App, the person starts one from New App.",
   "app.draft_failed":
@@ -1031,8 +1035,6 @@ export const appErrors = defineErrorFamily({
     "This chat neither changes that App nor is its chat, so it has no preview of it.",
   "app.preview_outdated":
     "The draft changed since this preview loaded it. Load the preview again.",
-  "app.preview_layout":
-    "A preview runs only an App of spec 8's layout: app.ts and schema.ts, with its functions in server/. This draft has no app.ts or schema.ts.",
   "app.preview_side_effect":
     "A preview changes nothing and reaches nothing outside it: no connections, no other Apps, no workflows and no writes to Knowledge.",
 });

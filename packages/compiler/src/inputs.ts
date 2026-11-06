@@ -120,41 +120,41 @@ export const buildFiles = (
  * The module the host generates from a JSON workflow's definition: one
  * file, never anything a person wrote.
  */
-export const openWorkflowEntry = ".grasp/workflow.ts";
+export const generatedWorkflowEntry = ".grasp/workflow.ts";
 
 /**
  * The most characters the generated module may have: four times the
- * largest definition the profile accepts (1 MiB), as it restates each
+ * largest definition grasp-workflow/1 takes (1 MiB, `formatLimits`), as it restates each
  * literal once, with a few characters of code around it.
  */
-const openWorkflowMaxLength = 4 * 1024 * 1024;
+const generatedWorkflowMaxLength = 4 * 1024 * 1024;
 
 /**
  * Why `files` aren't one generated workflow module within its bounds, if
- * they aren't: exactly `openWorkflowEntry`, at most
- * {@link openWorkflowMaxLength} characters.
+ * they aren't: exactly `generatedWorkflowEntry`, at most
+ * {@link generatedWorkflowMaxLength} characters.
  */
-export const openWorkflowErrors = (
+export const generatedWorkflowErrors = (
   files: Record<string, string>
 ): Diagnostic[] => {
   const paths = Object.keys(files);
-  if (paths.length !== 1 || paths[0] !== openWorkflowEntry) {
+  if (paths.length !== 1 || paths[0] !== generatedWorkflowEntry) {
     return [
       {
         rule: "limits",
         severity: "error",
-        message: `A generated workflow is one module, ${openWorkflowEntry}.`,
+        message: `A generated workflow is one module, ${generatedWorkflowEntry}.`,
       },
     ];
   }
-  const source = files[openWorkflowEntry] ?? "";
-  return source.length > openWorkflowMaxLength
+  const source = files[generatedWorkflowEntry] ?? "";
+  return source.length > generatedWorkflowMaxLength
     ? [
         {
-          file: openWorkflowEntry,
+          file: generatedWorkflowEntry,
           rule: "limits",
           severity: "error",
-          message: `The generated module has ${source.length} characters; a build takes at most ${openWorkflowMaxLength}.`,
+          message: `The generated module has ${source.length} characters; a build takes at most ${generatedWorkflowMaxLength}.`,
         },
       ]
     : [];

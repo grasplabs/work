@@ -8,7 +8,7 @@ import {
   interviewProgressSchema,
 } from "@grasp-os/shared/interview-links";
 import type { ErasureArea } from "@grasp-os/shared/members";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
@@ -23,6 +23,7 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
@@ -167,41 +168,8 @@ const waitingRuns = async (adminId: string) => {
     workflow.id,
     {
       definition: JSON.stringify({
-        document: {
-          dsl: "1.0.3",
-          namespace: workflowNamespace,
-          name: workflow.name,
-          version: "1.0.0",
-          title: workflow.name,
-          metadata: {
-            grasp: {
-              profile: "grasp-open-workflow/1",
-              params: {},
-              bindings: {},
-            },
-          },
-        },
-        input: {
-          schema: {
-            format: "json",
-            document: {
-              type: "object",
-              properties: {},
-              additionalProperties: false,
-            },
-          },
-        },
-        output: {
-          schema: {
-            format: "json",
-            document: {
-              type: "object",
-              properties: {},
-              additionalProperties: false,
-            },
-          },
-        },
-        do: [{ hold: { wait: "PT1H" } }],
+        $schema: workflowSchemaUrl,
+        steps: [{ id: "hold", type: "wait", for: "1 hour" }],
       }),
       basedOn: null,
     }
@@ -449,20 +417,15 @@ const envOf = (instance: object): object => {
 const appWithPreferences = async () => {
   const fixture = await appWith(
     {
-      "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+      ...appDefinition({
+        name: "Desk",
+        preferences: { theme: 'v.enum(["light", "dark"]).default("light")' },
+        tables: {},
+      }),
 
-export default defineSchema({});
-`,
-      "app.ts": `import { app, v } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Desk",
-  schema,
-  access: { tables: {} },
+      "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  preferences: v.object({ theme: v.enum(["light", "dark"]).default("light") }),
-});
+};
 `,
       "screens/desk.tsx": `export default function Desk() {
   return <main>Desk</main>;

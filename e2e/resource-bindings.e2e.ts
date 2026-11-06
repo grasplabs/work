@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
@@ -15,32 +16,27 @@ import { apiOf, peopleIn } from "./people.ts";
 
 /** The engine's files: an action that asks its `ai`. */
 const writerFiles = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ notes: defineTable({ title: v.string() }) });
-`,
-  "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Desk",
+    tables: {
+      notes: {
+        fields: { title: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+    permissions: ["permission.ai({ maxOutputTokens: 200 })"],
+  }),
+  "server/desk.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const ai = permission.ai({ maxOutputTokens: 200 });
+export const ai = permissions.ai;
 
 export const draft = action({
   args: {},
   returns: v.string(),
   uses: [ai],
   handler: async (ctx) => await ctx.ai.generate({ prompt: "Draft a greeting." }),
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { ai } from "./server/desk.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Desk",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
-  permissions: { ai },
 });
 `,
 });

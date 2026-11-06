@@ -20,6 +20,7 @@ import {
   frameObjectMaxBytes,
   stageFrame,
 } from "../src/screen-frame.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -40,21 +41,8 @@ import { signedInApi } from "./sign-in.ts";
 const idp = mockIdp();
 
 const files = {
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  ...appDefinition({ name: "Sealed screens", tables: {} }),
 
-export default defineSchema({});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-
-import schema from "./schema.ts";
-
-export default app({
-  name: "Sealed screens",
-  schema,
-  access: { tables: {} },
-  screens: [],
-});
-`,
   "screens/desk.tsx": `export default function Desk() {
   return <p>Desk</p>;
 }

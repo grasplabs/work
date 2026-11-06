@@ -8,7 +8,7 @@ import type {
   Use,
 } from "@grasp-os/sdk/server";
 
-import schema from "../../schema.ts";
+import schema from "../schema.ts";
 import type { DataModel } from "./dataModel.ts";
 
 export type { CallerCtx } from "@grasp-os/sdk/server";

@@ -17,8 +17,14 @@ const generated = [
   "scripts/release/testdata/**",
   // Third-party files vendored byte for byte, pinned by their hashes.
   "packages/*/vendor/**",
-  // What the host generates for an App, byte for byte (spec 8).
+  // What the host generates for an App, byte for byte (spec 8), and the
+  // config and schema an App's definition generates (the SDK's
+  // definition-source.ts), which its commits must equal.
   "**/.grasp/**",
+  "apps/core/blueprints/*/files/grasp.config.ts",
+  "apps/core/blueprints/*/files/server/schema.ts",
+  "apps/core/test/fixtures/blueprints/*/files/grasp.config.ts",
+  "apps/core/test/fixtures/blueprints/*/files/server/schema.ts",
   // The SDK's connector catalog, from the release's connectors
   // (apps/core/build-connector-catalog.ts).
   "packages/sdk/src/connector-catalog.gen.ts",
@@ -225,9 +231,6 @@ export default defineConfig({
         files: [
           "apps/core/src/workflows/host.ts",
           "apps/core/src/workflows/attempt-host.ts",
-          // The same for a run of an independent workflow's sealed build.
-          "apps/core/src/workflows/resource-host.ts",
-          "apps/core/src/workflows/resource-attempt-host.ts",
           // An action's host, which bounds each call itself, so that a
           // refusal of its bounds stands as any other (resource-action.ts).
           "apps/core/src/workflows/resource-action.ts",
@@ -300,7 +303,6 @@ export default defineConfig({
       "apps/core/vite.on-prem.config.ts",
       "apps/core/vite.brain.config.ts",
       "apps/core/vite.stephen.config.ts",
-      "apps/core/vite.latency.config.ts",
       "packages/*",
       "packages/workerflow/vite.process.config.ts",
       "packages/workerflow/vite.conformance.config.ts",

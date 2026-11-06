@@ -1,3 +1,5 @@
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
+
 /**
  * Apps whose screens attack the page around their frame, for
  * screen-attacks.e2e.ts: one leaves for the attacker's address, one for
@@ -7,11 +9,6 @@
  * build's. What they send carries only made-up markers, to receivers
  * the test runs itself.
  */
-
-const schema = `import { defineSchema } from "@grasp-os/sdk";
-
-export default defineSchema({});
-`;
 
 const operations = `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
@@ -27,18 +24,14 @@ export const html = query({
 });
 `;
 
-/** The registration of an App of `screens`, each `screens/<name>.tsx`. */
-const registration = (
+/** The screens of an App of `screens`, each `screens/<name>.tsx`. */
+const screensOf = (
   screens: readonly string[]
-): string => `import { app, v } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+): string => `import { v } from "@grasp-os/sdk";
 
-export default app({
-  name: "Attacks",
-  schema,
-  access: { tables: {} },
+export default {
   screens: [${screens.map((name) => `{ name: "${name}", path: "/${name}", source: "screens/${name}.tsx", input: v.object({ note: v.string().optional() }) }`).join(", ")}],
-});
+};
 `;
 
 /**
@@ -567,9 +560,10 @@ export const attackAppFiles = ({
     injecting: injectingScreen,
   };
   return {
-    "schema.ts": schema,
+    ...appDefinition({ name: "Attacks", tables: {} }),
     "server/attacks.ts": operations,
-    "app.ts": registration(Object.keys(screens)),
+
+    "screens.ts": screensOf(Object.keys(screens)),
     ...Object.fromEntries(
       Object.entries(screens).map(([name, code]) => [
         `screens/${name}.tsx`,
@@ -581,8 +575,9 @@ export const attackAppFiles = ({
 
 /** The attacking App with only its injecting screen. */
 export const injectingAppFiles = (): Record<string, string> => ({
-  "schema.ts": schema,
+  ...appDefinition({ name: "Attacks", tables: {} }),
   "server/attacks.ts": operations,
-  "app.ts": registration(["injecting"]),
+
+  "screens.ts": screensOf(["injecting"]),
   "screens/injecting.tsx": injectingScreen,
 });

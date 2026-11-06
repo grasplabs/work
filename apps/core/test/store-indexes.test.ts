@@ -51,9 +51,7 @@ const notesManifest = (
     table = table.index(name, fields as ["title"]);
   }
   return manifestText(
-    schemaManifest(defineSchema({ notes: table }), {
-      tables: { notes: { read, write: read } },
-    })
+    schemaManifest(defineSchema({ notes: table.access({ read, write: read }) }))
   );
 };
 
@@ -351,9 +349,10 @@ describe("SQLite's plans", () => {
       manifestText(
         schemaManifest(
           defineSchema({
-            wide: defineTable(numbers).index("by_all", keys),
-          }),
-          { tables: { wide: { read: "owner", write: "owner" } } }
+            wide: defineTable(numbers)
+              .index("by_all", keys)
+              .access({ read: "owner", write: "owner" }),
+          })
         )
       )
     );

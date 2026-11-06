@@ -16,7 +16,6 @@ import { emailLocalPartSchema } from "./workflows.ts";
 
 /** The kinds of trigger: what each is started by. */
 export const triggerKinds = [
-  "system",
   "connector",
   "webhook",
   "schedule",
@@ -39,19 +38,6 @@ export const workflowTriggerCreateSchema = z.strictObject({
 });
 
 export type WorkflowTriggerCreate = z.input<typeof workflowTriggerCreateSchema>;
-
-/**
- * A system trigger's configuration (spec 15.1: "declared resource/event
- * type"): the catalog event contract, by its key, and the type of it
- * whose emitted events start its workflow, the event's data its input.
- * Nothing else: no expression, no URL.
- */
-export const systemTriggerConfigSchema = z.strictObject({
-  event: z.strictObject({
-    contract: z.string().min(1).max(256),
-    type: z.string().min(1).max(256),
-  }),
-});
 
 /**
  * A schedule trigger's configuration (spec 15.1, 15.2): when it starts its
@@ -305,7 +291,7 @@ export const triggerEventsRequest = (
  * What a trigger holding a permission is, for whoever decides it (the
  * admin's pending requests): its kind, and what starts it, without its
  * input or mapping. A schedule's expression and time zone; a connector
- * or system trigger's event type; a connector trigger's connection.
+ * trigger's event type and connection.
  * An email trigger's address and a webhook's URL are never in it.
  */
 export interface TriggerSummary {

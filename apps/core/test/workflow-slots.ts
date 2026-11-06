@@ -11,7 +11,7 @@ import type {
   AttemptOwner,
 } from "../src/workflows/quotas.ts";
 import { workflowOwnerOf } from "../src/workflows/resource-runs.ts";
-import { published } from "./json-workflows.ts";
+import { definitionOf } from "./json-workflow-apps.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { runObject, sleeping } from "./runs.ts";
 import { unique } from "./sign-in.ts";
@@ -80,7 +80,7 @@ export const idleRun = async (
   if (runId === null) {
     throw new Error("The start admitted no run");
   }
-  await sleeping(runId, "task:idle");
+  await sleeping(runId, "idle:task");
   return runId;
 };
 
@@ -89,9 +89,13 @@ export const idleRun = async (
  * still going, to admit attempts of as its host would.
  */
 export const ownerOf = async (builder: Builder): Promise<RunOwner> => {
-  const { workflow } = await published(actingAs(builder), [
-    { idle: { wait: { days: 1 } } },
-  ]);
+  const workflow = await builder.api.workflowResources.create(
+    `idle-${unique()}`
+  );
+  await builder.api.workflowResources.publish(workflow.id, {
+    definition: definitionOf([{ id: "idle", type: "wait", for: "1 day" }]),
+    basedOn: null,
+  });
   const run = await idleRun(builder, workflow.id);
   return {
     run,

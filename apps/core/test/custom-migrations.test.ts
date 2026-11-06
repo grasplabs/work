@@ -64,9 +64,11 @@ const admin: Member = {
 /** A notes schema of `fields`, each person's own notes. */
 const notes = (fields: ValueShape): string =>
   manifestText(
-    schemaManifest(defineSchema({ notes: defineTable(fields) }), {
-      tables: { notes: { read: "owner", write: "owner" } },
-    })
+    schemaManifest(
+      defineSchema({
+        notes: defineTable(fields).access({ read: "owner", write: "owner" }),
+      })
+    )
   );
 
 const title = v.string().min(1).max(200);

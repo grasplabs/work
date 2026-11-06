@@ -617,17 +617,18 @@ describe("screens", { timeout: 60_000 }, () => {
     const app = await sampleApp(builder);
     const { id: empty } = await builder.api.apps.create({ name: "Empty" });
     const { id: broken } = await builder.api.apps.create({ name: "Broken" });
-    await release(builder, broken, {
-      "screens/desk.tsx":
-        'import leftPad from "left-pad";\nexport default () => leftPad;\n',
-    });
-
     const refused = await Promise.all([
       outcome(builder.api.screens.open(app, "nope")),
       outcome(builder.api.screens.open(app, "../app/server")),
       outcome(builder.api.screens.open(app, "__proto__")),
       outcome(builder.api.screens.open(empty, "notes")),
-      outcome(builder.api.screens.open(broken, "desk")),
+      // A version whose page doesn't build never becomes current to open.
+      outcome(
+        release(builder, broken, {
+          "screens/desk.tsx":
+            'import leftPad from "left-pad";\nexport default () => leftPad;\n',
+        })
+      ),
       outcome(builder.api.screens.open("no-such-app", "notes")),
     ]);
     expect(refused).toStrictEqual([

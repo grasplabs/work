@@ -955,7 +955,18 @@ describe(AppWorkspace, () => {
         );
       }
     );
-    await settled();
+    // The reason shows in the chat's thread, which loads on its own (lazy):
+    // each look lets what came render first.
+    await vi.waitFor(async () => {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(
+        says(
+          "Too many of your pages follow chats at once. Close some, then try again."
+        )
+      ).toBeTruthy();
+    });
 
     expect({
       askedForApp,

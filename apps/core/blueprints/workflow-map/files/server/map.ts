@@ -7,7 +7,7 @@ import {
 import { doc, mutation, query } from "@server/_generated/server";
 import type { Doc, Id, MutationCtx } from "@server/_generated/server";
 
-import { appLink, editedFields, workflowStates } from "../schema.ts";
+import { appLink, editedFields, workflowStates } from "../values.ts";
 import { requireIdentifier, requireWorkflowText } from "./text.ts";
 
 // The map's workflows: listed, opened beside the version of them last

@@ -16,6 +16,7 @@ import {
   pausedReply,
   says,
 } from "./agent-chat.ts";
+import { appDefinition, withoutDefinition } from "./app-definitions.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -53,12 +54,15 @@ const attack =
  * is fixed. Its broken code fails lint too (`prefer-structured-clone`).
  */
 const desk = (fixed: boolean): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  invoices: defineTable({ number: v.string().min(1).max(20) }),
-});
-`,
+  ...appDefinition({
+    name: "Invoice desk",
+    tables: {
+      invoices: {
+        fields: { number: "v.string().min(1).max(20)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/desk.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
@@ -73,16 +77,6 @@ export const total = query({
     return text as number;
   }`
   },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Invoice desk",
-  schema,
-  access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
 });
 `,
 });
@@ -140,12 +134,36 @@ const checkLogs = `export default async (self, env) => {
   };
 };`;
 
+/**
+ * The Invoice desk as released: its config, and a schema with the tables
+ * of every draft here, which the agent never writes (its definition's).
+ */
+const releasedDesk: Record<string, string> = {
+  "AGENTS.md": "# Invoice desk\n",
+  ...appDefinition({
+    name: "Invoice desk",
+    tables: {
+      invoices: {
+        fields: { number: "v.string().min(1).max(20)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
+};
+
+/** `files` as the agent writes them: never the definition, its config or its schema. */
+const agentWritten = withoutDefinition;
+
 /** Finds the Invoice desk, and writes `files` into its draft. */
 const write = (
   files: Record<string, string>
 ) => `export default async (self, env) => {
   const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-  await env.build.write(app.id, ${JSON.stringify(files)});
+  await env.build.write(app.id, ${JSON.stringify(agentWritten(files))});
   return "written";
 };`;
 
@@ -215,12 +233,15 @@ const previewAt = async (
  */
 /** A notes App of spec 8's layout, as the agent drafts one. */
 const spec8Notes: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }),
-});
-`,
+  ...appDefinition({
+    name: "Invoice desk",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
@@ -234,16 +255,6 @@ export const titles = query({
   args: {},
   returns: v.array(v.string()),
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title),
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Invoice desk",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
 });
 `,
 };
@@ -260,12 +271,6 @@ export const broken = query({
   },
 });
 `,
-  "app.ts": (spec8Notes["app.ts"] ?? "")
-    .replace("{ create, titles }", "{ broken, create, titles }")
-    .replace(
-      "{ notes: { create, titles } }",
-      "{ notes: { broken, create, titles } }"
-    ),
 };
 
 /**
@@ -295,11 +300,15 @@ const saidOutsideResults = (provider: FakeProvider): boolean[] =>
     return JSON.stringify({ system, said }).includes(attack);
   });
 
-const setUp = async (replies: ProviderReply[], agentBuilds = true) => {
+const setUp = async (
+  replies: ProviderReply[],
+  agentBuilds = true,
+  released: Record<string, string> = releasedDesk
+) => {
   const admin = await signedInApi(idp, "admin");
   const builder = await signedInApi(idp, "builder");
   const { id: app } = await builder.api.apps.create({ name: "Invoice desk" });
-  await release(builder, app, { "AGENTS.md": "# Invoice desk\n" });
+  await release(builder, app, released);
   const granted = await admin.api.permissions.list();
   const agentHasIt = granted.some(
     ({ subject, binding, status }) =>
@@ -399,7 +408,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     const { builder, app, chatId, stub } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-        await env.build.write(app.id, ${JSON.stringify(desk(false))});
+        await env.build.write(app.id, ${JSON.stringify(agentWritten(desk(false)))});
         const checked = await ${checkJob};
         return {
           passed: checked.passed,
@@ -818,7 +827,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     const { stub, chatId } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-        await env.build.write(app.id, ${JSON.stringify(drafted)});
+        await env.build.write(app.id, ${JSON.stringify(agentWritten(drafted))});
         const created = await env.build.call(app.id, "notes.create", { title: "Invoice 7" });
         const titles = await env.build.call(app.id, "notes.titles");
         const missing = await env.build.call(app.id, "notes.missing");
@@ -844,9 +853,10 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     });
   });
 
-  it("refuses the agent a call of a draft that isn't spec 8's layout, whatever server code it has, and loads none of it", async () => {
-    const { stub, chatId } = await setUp([
-      codeStep(`export default async (self, env) => {
+  it("runs none of a v1 server a draft holds: the draft's own code, from its definition, has no such function", async () => {
+    const { stub, chatId } = await setUp(
+      [
+        codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
         await env.build.write(app.id, {
           "app/server.ts": "export class App { count() { throw new Error(\\"ran as v1\\"); } }",
@@ -857,8 +867,11 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
           return { refused: error.code ?? String(error) };
         }
       };`),
-      says("Refused."),
-    ]);
+        says("Refused."),
+      ],
+      true,
+      { "AGENTS.md": "# Invoice desk\n" }
+    );
 
     await stub.ask(chatIdSchema.parse(chatId), {
       text: "Count the invoice desk's notes",
@@ -866,8 +879,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     });
 
     const results = await codeResults(stub, chatId);
-    expect(returned(results[0]?.text)).toStrictEqual({
-      refused: "app.preview_layout",
+    expect(returned(results[0]?.text)).toMatchObject({
+      answered: { ok: false, code: "operation.not_found" },
     });
   });
 
@@ -875,7 +888,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     const { stub, chatId, provider } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-        await env.build.write(app.id, ${JSON.stringify(spec8Broken)});
+        await env.build.write(app.id, ${JSON.stringify(agentWritten(spec8Broken))});
         const broken = await env.build.call(app.id, "notes.broken");
         return { ok: broken.ok, code: broken.code, message: broken.message };
       };`),
@@ -967,7 +980,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       const { stub, chatId } = await setUp([
         codeStep(`export default async (self, env) => {
           const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-          await env.build.write(app.id, ${JSON.stringify(spec8Notes)});
+          await env.build.write(app.id, ${JSON.stringify(agentWritten(spec8Notes))});
           const answered = [];
           for (let call = 0; call < ${screenLimits.requests.burst + 5}; call += 1) {
             try {

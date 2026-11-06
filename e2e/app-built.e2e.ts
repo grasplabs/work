@@ -53,7 +53,7 @@ test("a builder has an App built in its chat, publishes it, and someone it is sh
   // The chat looks up how an App is written, writes it, and says so.
   const chat = page.getByRole("region", { name: "Chat" });
   await expect(
-    chat.getByText("Searched Grasp's reference for export const app =")
+    chat.getByText("Searched Grasp's reference for export const defineApp =")
   ).toBeVisible(agentTurn);
   await expect(chat.getByText(appReady)).toBeVisible(agentTurn);
 

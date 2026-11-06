@@ -1,27 +1,41 @@
 import type { Id, OperationReference, ReferenceKind } from "@grasp-os/sdk";
 
 import type { Release } from "../src/app-releases.ts";
+import { appDefinition, withoutDefinition } from "./app-definitions.ts";
+import type { AppSpec } from "./app-definitions.ts";
 
 // A Notes App on the accepted SDK, and its `api` as its screens import it
 // from `@server/_generated/api`: what the session client's tests call, through a screen's
 // page (screen-client*.test.ts) or a portable host
 // (portable-client.test.ts).
 
+/** The Notes App's definition: its notes, which each person keeps their own. */
+export const notesSpec = {
+  name: "Notes",
+  tables: {
+    notes: {
+      fields: {
+        title: "v.string().trim().min(1).max(200)",
+        body: 'v.string().max(100_000).default("")',
+      },
+      access: { read: "owner", write: "owner" },
+      indexes: { by_updated: ["_updatedAt"] },
+    },
+  },
+} satisfies AppSpec;
+
 export const notesFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  ...appDefinition(notesSpec),
+  "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),
   body: v.string().max(100_000).default(""),
 };
-
-export default defineSchema({
-  notes: defineTable(noteFields).index("by_updated", ["_updatedAt"]),
-});
 `,
   "server/notes.ts": `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
 import { action, doc, mutation, query } from "@server/_generated/server";
-import { noteFields } from "../schema.ts";
+import { noteFields } from "../values.ts";
 
 export const list = query({
   args: { pagination: paginationOptionsValidator },
@@ -123,16 +137,7 @@ export const big = action({
   handler: () => "x".repeat(262_084),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
 
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
-});
-`,
   "screens/notes.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { api } from "@server/_generated/api";
@@ -160,6 +165,55 @@ const Notes = () => {
 
 export default Notes;
 `,
+};
+
+/** The Notes App's definition, as the chat's definition tools make it. */
+export const notesDefinition = [
+  {
+    op: "addTable",
+    name: "notes",
+    fields: {
+      title: "v.string().trim().min(1).max(200)",
+      body: 'v.string().max(100_000).default("")',
+    },
+    access: { read: "owner", write: "owner" },
+  },
+  {
+    op: "addIndex",
+    table: "notes",
+    name: "by_updated",
+    fields: ["_updatedAt"],
+  },
+] as const;
+
+/**
+ * What a run's code calls to give `app`'s draft the Notes definition, as
+ * the chat's agent does with its definition tools.
+ */
+export const defineNotes = `for (const operation of ${JSON.stringify(notesDefinition)}) {
+  const defined = await env.build.define(app.id, operation);
+  if (!defined.ok) throw new Error(defined.problem);
+}`;
+
+/**
+ * The Notes App's code, as the chat's agent writes it beside its
+ * definition (`notesDefinition`): the definition's config and schema are
+ * generated, so its fields' validators are its own values.
+ */
+export const notesCode: Record<string, string> = {
+  "values.ts": `import { v } from "@grasp-os/sdk";
+
+export const noteFields = {
+  title: v.string().trim().min(1).max(200),
+  body: v.string().max(100_000).default(""),
+};
+`,
+  ...Object.fromEntries(
+    Object.entries(withoutDefinition(notesFiles)).map(([path, text]) => [
+      path,
+      text.replace('from "./schema.ts";', 'from "../values.ts";'),
+    ])
+  ),
 };
 
 /** A note as the App's queries return it. */

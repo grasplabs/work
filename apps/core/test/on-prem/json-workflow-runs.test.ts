@@ -1,6 +1,4 @@
 import { v } from "@grasp-os/sdk";
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -14,24 +12,15 @@ import {
 import { startWorkflow } from "../../src/workflow-starts.ts";
 import { resourceRunFor } from "../../src/workflows/resource-runs.ts";
 import { admitRunEvent } from "../../src/workflows/run-events.ts";
+import { definitionOf, passing } from "../json-workflow-apps.ts";
 import { liveStatus } from "../runs.ts";
 import { unique } from "../sign-in.ts";
 
 // A JSON workflow's run on-prem: its sealed build loads as a sandbox
-// session owned by its workflow, with only the host's calls and each
-// attempt's `evaluate` passed in (resource-host.ts), through the real
-// engine, across a wait that ends one load and starts the next, and a
-// listen whose event comes while no load is running.
-
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
+// session owned by its workflow, with only the run host's calls passed in
+// (sealed-run.ts), through the real engine, across a wait that ends one
+// load and starts the next, and an event wait whose event comes while no
+// load is running.
 
 describe("a JSON workflow's run on-prem", () => {
   it("runs its sealed build in the sandbox, across a wait", async () => {
@@ -50,32 +39,12 @@ describe("a JSON workflow's run on-prem", () => {
     const by: Acting = { userId, role: "builder", teams: [], staff: false };
     const workflow = await createWorkflowResource(env, by, `run-${unique()}`);
     await publishWorkflowVersion(env, by, workflow.id, {
-      definition: JSON.stringify({
-        document: {
-          dsl: "1.0.3",
-          namespace: workflowNamespace,
-          name: workflow.name,
-          version: "1.0.0",
-          title: workflow.name,
-          metadata: {
-            grasp: {
-              profile: "grasp-open-workflow/1",
-              params: {},
-              bindings: {},
-            },
-          },
-        },
-        input: { schema: objectSchema({ who: { type: "string" } }) },
-        output: { schema: objectSchema({ status: { type: "string" } }) },
-        do: [
-          { pause: { wait: "PT1S" } },
-          // A wait the host resolves to a deadline, and sleeps until.
-          { linger: { wait: '${ "PT1S" }' } },
-          {
-            greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } },
-          },
-        ],
-      }),
+      definition: definitionOf([
+        { id: "pause", type: "wait", for: "1 second" },
+        // A wait the host resolves to a deadline, and sleeps until.
+        { id: "linger", type: "wait", until: { $expr: "0" } },
+        passing("greet"),
+      ]),
       basedOn: null,
     });
     const { runId } = await startWorkflow(
@@ -98,7 +67,7 @@ describe("a JSON workflow's run on-prem", () => {
     });
   });
 
-  it("takes a listen's event in the sandbox, after the load that waited for it ended", async () => {
+  it("takes an event wait's event in the sandbox, after the load that waited for it ended", async () => {
     const userId = crypto.randomUUID();
     await env.DB.batch([
       env.DB.prepare(
@@ -133,36 +102,20 @@ describe("a JSON workflow's run on-prem", () => {
     });
     const workflow = await createWorkflowResource(env, by, `run-${unique()}`);
     await publishWorkflowVersion(env, by, workflow.id, {
-      definition: JSON.stringify({
-        document: {
-          dsl: "1.0.3",
-          namespace: workflowNamespace,
-          name: workflow.name,
-          version: "1.0.0",
-          title: workflow.name,
-          metadata: {
-            grasp: {
-              profile: "grasp-open-workflow/1",
-              params: {},
-              bindings: { jobEvents: { kind: "event", contract } },
-            },
-          },
-        },
-        input: { schema: objectSchema({ who: { type: "string" } }) },
-        output: { schema: objectSchema({ status: { type: "string" } }) },
-        do: [
+      definition: definitionOf(
+        [
           {
-            "await-job": {
-              listen: {
-                to: { one: { with: { type: "grasp.job.completed" } } },
-              },
-              timeout: { after: { minutes: 5 } },
-              metadata: { grasp: { binding: "jobEvents" } },
-              output: { as: "${ { status: .[0].note } }" },
-            },
+            id: "job",
+            type: "wait",
+            event: { from: "jobEvents", type: "grasp.job.completed" },
+            timeout: "5 minutes",
           },
         ],
-      }),
+        {
+          bindings: { jobEvents: { kind: "event", contract } },
+          status: { $expr: 'steps.job.output.event?.data.note ?? ""' },
+        }
+      ),
       basedOn: null,
     });
     await approveWorkflowBinding(env, by, workflow.id, {

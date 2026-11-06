@@ -289,6 +289,10 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   },
   { action: "workflow.run.fix_asked", text: msg`Asked the agent to fix a run` },
   { action: "workflow.run", text: msg`Ran a workflow` },
+  {
+    action: "workflow.wake.repaired",
+    text: msg`Woke a waiting run whose wake hadn't got through`,
+  },
   { action: "workflow.step", text: msg`Ran a step of a workflow` },
   { action: "workflow.param", text: msg`Changed a workflow's parameter` },
   {

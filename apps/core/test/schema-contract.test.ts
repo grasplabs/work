@@ -54,9 +54,11 @@ const notes = (
   fields: ValueShape = noteFields,
   { indexed = false, read = "appMembers" }: SchemaOptions = {}
 ): string => {
-  const base = schemaManifest(defineSchema({ notes: defineTable(fields) }), {
-    tables: { notes: { read, write: "appMembers" } },
-  });
+  const base = schemaManifest(
+    defineSchema({
+      notes: defineTable(fields).access({ read, write: "appMembers" }),
+    })
+  );
   // The index as data, read back through the host's checks.
   return manifestText(
     readSchemaManifest(
@@ -358,15 +360,12 @@ describe("changes that need a migration", () => {
             notes: defineTable({
               ...noteFields,
               category: v.id("tags").optional(),
+            }).access({ read: "appMembers", write: "appMembers" }),
+            tags: defineTable({ name: v.string() }).access({
+              read: "appMembers",
+              write: "appMembers",
             }),
-            tags: defineTable({ name: v.string() }),
-          }),
-          {
-            tables: {
-              notes: { read: "appMembers", write: "appMembers" },
-              tags: { read: "appMembers", write: "appMembers" },
-            },
-          }
+          })
         )
       ),
       "field_changed",
@@ -380,15 +379,12 @@ describe("changes that need a migration", () => {
               ...noteFields,
               category: v.string().optional(),
               tag: v.id("tags").nullable().default(null),
+            }).access({ read: "appMembers", write: "appMembers" }),
+            tags: defineTable({ name: v.string() }).access({
+              read: "appMembers",
+              write: "appMembers",
             }),
-            tags: defineTable({ name: v.string() }),
-          }),
-          {
-            tables: {
-              notes: { read: "appMembers", write: "appMembers" },
-              tags: { read: "appMembers", write: "appMembers" },
-            },
-          }
+          })
         )
       ),
       "defaulted_reference_added",
@@ -554,15 +550,14 @@ describe("failures and races", () => {
         manifestText(
           schemaManifest(
             defineSchema({
-              notes: defineTable(noteFields).index("by_title", ["title"]),
-              tags: defineTable({ name: v.string() }),
-            }),
-            {
-              tables: {
-                notes: { read: "appMembers", write: "appMembers" },
-                tags: { read: "appMembers", write: "appMembers" },
-              },
-            }
+              notes: defineTable(noteFields)
+                .index("by_title", ["title"])
+                .access({ read: "appMembers", write: "appMembers" }),
+              tags: defineTable({ name: v.string() }).access({
+                read: "appMembers",
+                write: "appMembers",
+              }),
+            })
           )
         ),
         consumer(2)

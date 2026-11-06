@@ -37,7 +37,6 @@
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/workerflow": "workspace:*",
-    "@grasp-os/workflow-expressions": "workspace:*",
     "@grasp-os/workflow-schema": "workspace:*",
     "better-auth": "catalog:",
     "capnweb": "catalog:",

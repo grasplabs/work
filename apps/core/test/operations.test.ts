@@ -1,6 +1,6 @@
 import {
   AppError,
-  app,
+  defineApp,
   defineSchema,
   defineTable,
   v,
@@ -8,11 +8,7 @@ import {
   paginationResultValidator,
 } from "@grasp-os/sdk";
 import type { Id } from "@grasp-os/sdk";
-import {
-  inspectApp,
-  manifestText,
-  registerFunctions,
-} from "@grasp-os/sdk/host";
+import { inspectApp, manifestText, registerApp } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
@@ -56,7 +52,8 @@ const noteFields = {
 const schema = defineSchema({
   notes: defineTable(noteFields)
     .index("by_updated", ["_updatedAt"])
-    .index("by_title", ["title"]),
+    .index("by_title", ["title"])
+    .access({ read: "owner", write: "owner" }),
 });
 
 const { query, mutation, internalQuery, doc } = serverModule(schema);
@@ -135,8 +132,9 @@ const createAndCount = mutation({
   },
 });
 
-/** Narrowed by `operationAccess` to inserting only. */
+/** Narrowed by its `tables` to inserting only. */
 const insertOnly = mutation({
+  tables: { notes: { insert: true } },
   args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -147,8 +145,9 @@ const insertOnly = mutation({
   },
 });
 
-/** Narrowed by `operationAccess` to inserting only: it may not read. */
+/** Narrowed by its `tables` to inserting only: it may not read. */
 const peek = mutation({
+  tables: { notes: { insert: true } },
   args: { id: v.id("notes") },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -342,16 +341,14 @@ const secret = internalQuery({
   handler: () => "internal",
 });
 
-const notesRegistration = app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operationAccess: {
-    "notes.insertOnly": { tables: { notes: { insert: true } } },
-    "notes.peek": { tables: { notes: { insert: true } } },
-  },
-  screens: [],
-});
+/** Notes, with the functions `notes` exports. */
+const notesAppOf = (notes: Readonly<Record<string, unknown>>) =>
+  registerApp({
+    config: defineApp({ name: "Notes" }),
+    schema,
+    modules: { notes },
+    migrations: [],
+  });
 
 const notesFunctions = {
   list,
@@ -376,9 +373,7 @@ const notesFunctions = {
   secret,
 };
 
-const notesApp = registerFunctions(notesRegistration, {
-  notes: notesFunctions,
-});
+const notesApp = notesAppOf(notesFunctions);
 
 const { manifest } = inspectApp(notesApp);
 
@@ -386,20 +381,18 @@ const { manifest } = inspectApp(notesApp);
  * A later version of Notes whose `notes.create` takes a tag as well: a
  * function at the same path with another contract.
  */
-const taggedNotesApp = registerFunctions(notesRegistration, {
-  notes: {
-    ...notesFunctions,
-    create: mutation({
-      args: {
-        title: noteFields.title,
-        body: noteFields.body,
-        tag: v.string().optional(),
-      },
-      returns: v.id("notes"),
-      handler: async (ctx, { title, body }) =>
-        await ctx.db.insert("notes", { title, body }),
-    }),
-  },
+const taggedNotesApp = notesAppOf({
+  ...notesFunctions,
+  create: mutation({
+    args: {
+      title: noteFields.title,
+      body: noteFields.body,
+      tag: v.string().optional(),
+    },
+    returns: v.id("notes"),
+    handler: async (ctx, { title, body }) =>
+      await ctx.db.insert("notes", { title, body }),
+  }),
 });
 
 /** The Notes App as the host runs it, with `run` in place of its runner. */

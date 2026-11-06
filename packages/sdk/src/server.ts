@@ -86,6 +86,23 @@ import type {
 /** The three kinds of server function. */
 export type FunctionKind = ReferenceKind;
 
+/** The verbs a function may use on a table. */
+export interface TableVerbs {
+  readonly read: boolean;
+  readonly insert: boolean;
+  readonly update: boolean;
+  readonly delete: boolean;
+}
+
+/**
+ * How a query or a mutation narrows its tables' access (`tables`): the
+ * verbs it uses on each table it names, a verb or a table left out
+ * denied. It only narrows what the tables' access and its kind give it.
+ */
+export type TableNarrowing<Tables extends AnyTables = AnyTables> = Readonly<
+  Partial<Record<keyof Tables & string, Partial<TableVerbs>>>
+>;
+
 /** Who may call a function directly: anyone allowed, or the App's own code. */
 export type Visibility = ReferenceVisibility;
 
@@ -171,11 +188,8 @@ export interface RunHandle {
    * action called again under the same idempotency key).
    */
   readonly startId: string;
-  /**
-   * The run executing it, or null for a version that has no executable
-   * build, which is admitted and never runs.
-   */
-  readonly runId: string | null;
+  /** The run executing it. */
+  readonly runId: string;
   /** The version of the workflow it started: the one its alias binds. */
   readonly version: number;
 }
@@ -516,6 +530,8 @@ export interface ServerFunction<
   /** Its `returns` schema, which the host checks its answers against; null where it declares none. */
   readonly returns: AnySchema | null;
   readonly uses: readonly Use[];
+  /** How it narrows its tables' access, or null where it doesn't. */
+  readonly tables: TableNarrowing | null;
   /** An action's progress snapshots (spec 10.7.6), or null. */
   readonly stream: Stream;
   readonly handler: (ctx: Ctx, args: ObjectOutput<Shape>) => unknown;
@@ -531,6 +547,7 @@ export interface AnyFunction extends FunctionReference {
   readonly args: AnySchema;
   readonly returns: AnySchema | null;
   readonly uses: readonly Use[];
+  readonly tables: TableNarrowing | null;
   readonly stream: AnySchema | null;
   readonly handler: (ctx: never, args: never) => unknown;
 }
@@ -545,6 +562,8 @@ export interface QueryDefinition<
   readonly args: Shape;
   /** What it answers; without it, what its handler answers. */
   readonly returns?: Returns;
+  /** The tables it reads, when it reads fewer than its access allows. */
+  readonly tables?: TableNarrowing<Tables>;
   readonly handler: (
     ctx: QueryCtx<Tables>,
     args: ObjectOutput<Shape>
@@ -567,6 +586,8 @@ export interface MutationDefinition<
    * notifies runs of; none unless listed.
    */
   readonly uses?: Uses;
+  /** The verbs it uses on each table, when fewer than its access allows. */
+  readonly tables?: TableNarrowing<Tables>;
   readonly handler: (
     ctx: MutationCtx<Tables, Uses>,
     args: ObjectOutput<Shape>
@@ -655,8 +676,8 @@ export const functionState = (value: unknown): FunctionState => {
 
 /** The keys each kind's declaration has; any other is refused. */
 const declarationKeys: Readonly<Record<FunctionKind, readonly string[]>> = {
-  query: ["args", "returns", "handler"],
-  mutation: ["args", "returns", "uses", "handler"],
+  query: ["args", "returns", "tables", "handler"],
+  mutation: ["args", "returns", "uses", "tables", "handler"],
   action: ["args", "returns", "uses", "stream", "handler"],
 };
 
@@ -664,10 +685,60 @@ const declarationKeys: Readonly<Record<FunctionKind, readonly string[]>> = {
 const supersededHints: Readonly<Record<string, string>> = {
   input: "Declare `args`, a map of field schemas, not `input`.",
   output: "Declare `returns`, not `output`.",
-  reads: "There is no `reads` list: table access is the App's `access`.",
-  writes: "There is no `writes` list: table access is the App's `access`.",
+  reads:
+    "There is no `reads` list: a table's access is on the table, and `tables` narrows it.",
+  writes:
+    "There is no `writes` list: a table's access is on the table, and `tables` narrows it.",
   uses: "A query uses nothing: it only reads.",
   stream: "Only an action streams.",
+  tables: "An action has no tables: it runs the App's queries and mutations.",
+};
+
+const tableVerbNames: ReadonlySet<string> = new Set([
+  "read",
+  "insert",
+  "update",
+  "delete",
+]);
+
+/**
+ * A function's `tables`, checked against `schema`: each a table it has,
+ * each verb a boolean. Whether it narrows rather than widens is checked
+ * as the App registers it, against the tables' access (app.ts).
+ */
+const narrowingOf = (
+  schema: SchemaDefinition,
+  tables: unknown
+): TableNarrowing | null => {
+  if (tables === undefined) {
+    return null;
+  }
+  if (!isPlainObject(tables)) {
+    return refuse("`tables` is a map of table names to verbs.");
+  }
+  const known = tablesOf(schema);
+  const narrowing: Record<string, Partial<TableVerbs>> = {};
+  for (const [table, verbs] of Object.entries(tables)) {
+    if (!Object.hasOwn(known, table)) {
+      refuse(`\`tables\` names \`${table}\`, a table the schema doesn't have.`);
+    }
+    if (
+      !isPlainObject(verbs) ||
+      !Object.entries(verbs).every(
+        ([verb, value]) =>
+          tableVerbNames.has(verb) && typeof value === "boolean"
+      )
+    ) {
+      return refuse(
+        `\`tables.${table}\` maps \`read\`, \`insert\`, \`update\` and \`delete\` to booleans.`
+      );
+    }
+    Object.defineProperty(narrowing, table, {
+      enumerable: true,
+      value: Object.freeze({ ...verbs }),
+    });
+  }
+  return Object.freeze(narrowing);
 };
 
 const usesOf = (uses: unknown): readonly Use[] => {
@@ -716,7 +787,7 @@ const defineFunction = (
       );
     }
   }
-  const { args, returns, handler, uses, stream } = declaration;
+  const { args, returns, handler, uses, stream, tables } = declaration;
   if (!isPlainObject(args)) {
     refuse(`A ${kind}'s \`args\` is a map of field names to schemas.`);
   }
@@ -743,6 +814,7 @@ const defineFunction = (
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     returns: (returns ?? null) as AnySchema | null,
     uses: usesOf(uses),
+    tables: narrowingOf(schema, tables),
     // SAFETY: as `returns`, when given.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     stream: (stream ?? null) as AnySchema | null,

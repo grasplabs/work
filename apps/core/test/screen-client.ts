@@ -16,6 +16,7 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { definedWith } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import type { Idp } from "./idp.ts";
@@ -368,15 +369,14 @@ export const memberOf = async (opened: Opened) => {
  * (`secrets`), and its query and mutation.
  */
 export const withSecrets = (): Record<string, string> => {
-  const schema = files["schema.ts"] ?? "";
   const operations = files["server/notes.ts"] ?? "";
-  const app = files["app.ts"] ?? "";
   return {
-    ...files,
-    "schema.ts": schema.replace(
-      "export default defineSchema({",
-      "export default defineSchema({\n  secrets: defineTable({ text: v.string() }),"
-    ),
+    ...definedWith(files, {
+      op: "addTable",
+      name: "secrets",
+      fields: { text: "v.string()" },
+      access: { read: "appBuilders", write: "appBuilders" },
+    }),
     "server/notes.ts": `${operations}
 export const secrets = query({
   args: {},
@@ -390,9 +390,5 @@ export const tell = mutation({
   handler: async (ctx, args) => await ctx.db.insert("secrets", args),
 });
 `,
-    "app.ts": app.replace(
-      'access: { tables: { notes: { read: "owner", write: "owner" } } }',
-      'access: { tables: { notes: { read: "owner", write: "owner" }, secrets: { read: "appBuilders", write: "appBuilders" } } }'
-    ),
   };
 };

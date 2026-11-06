@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -7,9 +6,9 @@ import {
   maxCandidateLifetimeMs,
   maxKeptCandidateRuns,
   maxLiveCandidateRuns,
-  workflowNamespace,
 } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowCandidateRun } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -32,6 +31,7 @@ import {
 import { runEngine } from "../src/workflows/engine.ts";
 import { allEvents } from "./audit-events.ts";
 import { withCpuKills } from "./cpu-kills.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
 import { whileEngineRefuses } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
 
@@ -69,62 +69,51 @@ const person = async (role: Role, staff = false): Promise<Identity> => {
   return identityOf(userId, role, staff);
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
+/**
+ * A definition: its bindings, parameters and steps, and what its `status`
+ * ends as (an expression), `input.who` by default.
+ */
+interface Definition {
+  readonly bindings?: Record<string, unknown>;
+  readonly params?: Record<string, unknown>;
+  readonly steps?: readonly unknown[];
+  readonly status?: string;
+}
 
-/** A definition of `name`: its bindings, parameters and tasks. */
-const definitionOf = (
-  name: string,
-  {
-    bindings = {},
-    params = {},
-    tasks,
-  }: {
-    bindings?: Record<string, unknown>;
-    params?: Record<string, unknown>;
-    tasks: unknown[];
-  }
-): string =>
+/** `definition` as a grasp-workflow/1 document. */
+const definitionOf = ({
+  bindings = {},
+  params = {},
+  steps = [],
+  status = "input.who",
+}: Definition): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params, bindings },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: { $expr: status } },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: tasks,
+    params,
+    bindings,
+    steps,
   });
 
-type Definition = Parameters<typeof definitionOf>[1];
-
 /**
- * A workflow of `by`'s whose draft holds `definition` (and `modules`),
- * checked: its revision. With `publish`, version 1 is published from it
- * first, so its parameters can be set.
+ * A workflow of `by`'s whose draft holds the source `sourceOf` writes for
+ * its name (and `modules`), checked: its revision. With `publish`, version
+ * 1 is published from it first, so its parameters can be set.
  */
-const drafted = async (
+const draftedSource = async (
   by: Identity,
-  definition: Definition,
+  sourceOf: (name: string) => string,
   {
     modules = {},
     publish = false,
   }: { modules?: Record<string, string>; publish?: boolean } = {}
 ) => {
   const workflow = await createWorkflowResource(env, by, `test-${unique()}`);
-  const source = definitionOf(workflow.name, definition);
+  const source = sourceOf(workflow.name);
   if (publish) {
     await publishWorkflowVersion(env, by, workflow.id, {
       definition: source,
@@ -141,6 +130,13 @@ const drafted = async (
   expect(saved.problems).toStrictEqual([]);
   return { workflow, revision: saved.revision };
 };
+
+/** `draftedSource`, of `definition`. */
+const drafted = async (
+  by: Identity,
+  definition: Definition,
+  options: { modules?: Record<string, string>; publish?: boolean } = {}
+) => await draftedSource(by, () => definitionOf(definition), options);
 
 /** Test run `runId` of workflow `id` once it ended, as `by` reads it. */
 const ended = async (
@@ -247,7 +243,7 @@ const aroundTrigger = async (
 /** A catalog contract of `kind` published by `admin`: its key. */
 const contract = async (
   admin: Identity,
-  kind: "connector" | "operation" | "model" | "knowledge" | "template" | "files"
+  kind: "connector" | "operation" | "model"
 ): Promise<string> => {
   const key = `${kind}-${unique()}`;
   if (kind === "connector") {
@@ -274,62 +270,35 @@ const contract = async (
   return key;
 };
 
-/** A task sending mail through binding `mail`, its subject `subject`. */
+/** A step sending mail through binding `mail`, its subject `subject`. */
 const send = (subject = "Hello") => ({
-  send: {
-    call: "grasp.connector",
-    with: {
-      binding: "mail",
-      operation: "mail.send",
-      arguments: { to: "${ $workflow.input.who }", subject },
-    },
-    output: { as: "${ {status: .messageId} }" },
-  },
+  id: "send",
+  type: "do",
+  binding: "mail",
+  operation: "mail.send",
+  arguments: { to: { $expr: "input.who" }, subject },
 });
 
-/** A task looking up through binding `lookup`. */
+/** A step looking up through binding `lookup`. */
 const lookUp = {
-  look: {
-    call: "grasp.operation",
-    with: {
-      binding: "lookup",
-      arguments: { who: "${ $workflow.input.who }" },
-    },
-    output: { as: "${ {status: .greeting} }" },
-  },
+  id: "look",
+  type: "do",
+  binding: "lookup",
+  arguments: { who: { $expr: "input.who" } },
 };
 
-/** A task asking binding `summary` to greet. */
+/** A step asking binding `summary` to greet. */
 const greet = {
-  greet: {
-    call: "grasp.model",
-    with: {
-      binding: "summary",
-      instructions: "Greet them.",
-      input: { who: "${ $workflow.input.who }" },
-      outputSchema: objectSchema({ line: { type: "string" } }),
-    },
-    output: { as: "${ {status: .line} }" },
-  },
+  id: "greet",
+  type: "agent",
+  binding: "summary",
+  instructions: "Greet them.",
+  input: { who: { $expr: "input.who" } },
+  output: objectSchema({ line: { type: "string" } }),
 };
 
-/** The module of action `look`, reading `docs` and `letter`. */
-const lookModule = `import { action, resource, v } from "@grasp-os/sdk/action";
-
-export const look = action({
-  args: { doc: v.string() },
-  returns: v.object({ status: v.string() }),
-  uses: [resource.knowledge("docs", { operations: ["read"] }), resource.template("letter")],
-  handler: async (ctx, args) => {
-    if (args.doc === "letter") {
-      const letter = await ctx.resources.letter.read();
-      return { status: JSON.stringify(letter.content) };
-    }
-    const found = await ctx.resources.docs.read({ id: args.doc });
-    return { status: found.title };
-  },
-});
-`;
+/** A step waiting `span`. */
+const hold = (span: string, id = "hold") => ({ id, type: "wait", for: span });
 
 /** The module of action `notify`, sending mail through `mail`. */
 const notifyModule = `import { action, resource, v } from "@grasp-os/sdk/action";
@@ -348,96 +317,18 @@ export const notify = action({
 /** A definition calling action `notify`, which sends through `mail`. */
 const notifying = (key: string): Definition => ({
   bindings: {
-    notify: { kind: "operation", contract: "local:code/notify.ts#notify" },
+    notify: { kind: "action", contract: "local:code/notify.ts#notify" },
     mail: { kind: "connector", contract: key },
   },
-  tasks: [
+  steps: [
     {
-      notify: {
-        call: "grasp.operation",
-        with: {
-          binding: "notify",
-          arguments: { to: "${ $workflow.input.who }" },
-        },
-      },
+      id: "notify",
+      type: "do",
+      binding: "notify",
+      arguments: { to: { $expr: "input.who" } },
     },
   ],
-});
-
-/** The module of action `listFiles`, listing the run's own files. */
-const listFilesModule = `import { action, resource, v } from "@grasp-os/sdk/action";
-
-export const listFiles = action({
-  args: { who: v.string() },
-  returns: v.object({ status: v.string() }),
-  uses: [resource.files("files", { operations: ["list"] })],
-  handler: async (ctx) => {
-    const listed = await ctx.resources.files.list();
-    return { status: JSON.stringify(listed) };
-  },
-});
-`;
-
-/** The module of action `deleteFile`, deleting the file its input names. */
-const deleteFileModule = `import { action, resource, v } from "@grasp-os/sdk/action";
-
-export const deleteFile = action({
-  args: { who: v.string() },
-  returns: v.object({ status: v.string() }),
-  uses: [resource.files("files", { operations: ["delete"] })],
-  handler: async (ctx, args) => {
-    await ctx.resources.files.delete({ file: args.who });
-    return { status: "deleted" };
-  },
-});
-`;
-
-/**
- * A definition calling action `contract` (by default `listFiles`, which
- * lists through `files`) with the run's input.
- */
-const listing = (
-  key: string,
-  action = "local:code/list-files.ts#listFiles"
-): Definition => ({
-  bindings: {
-    lister: { kind: "operation", contract: action },
-    files: { kind: "files", contract: key },
-  },
-  tasks: [
-    {
-      list: {
-        call: "grasp.operation",
-        with: {
-          binding: "lister",
-          arguments: { who: "${ $workflow.input.who }" },
-        },
-      },
-    },
-  ],
-});
-
-/** A definition calling action `look`, which reads Knowledge or a template. */
-const reading = (keys: {
-  knowledge: string;
-  template: string;
-}): Definition => ({
-  bindings: {
-    look: { kind: "operation", contract: "local:code/look.ts#look" },
-    docs: { kind: "knowledge", contract: keys.knowledge },
-    letter: { kind: "template", contract: keys.template },
-  },
-  tasks: [
-    {
-      look: {
-        call: "grasp.operation",
-        with: {
-          binding: "look",
-          arguments: { doc: "${ $workflow.input.who }" },
-        },
-      },
-    },
-  ],
+  status: "steps.notify.output.status",
 });
 
 describe("test runs of a workflow's draft", () => {
@@ -448,257 +339,114 @@ describe("test runs of a workflow's draft", () => {
       connector: await contract(admin, "connector"),
       operation: await contract(admin, "operation"),
       model: await contract(admin, "model"),
-      knowledge: await contract(admin, "knowledge"),
-      template: await contract(admin, "template"),
-      files: await contract(admin, "files"),
     };
-    const direct: {
+    const cases: {
       kind: string;
       definition: Definition;
+      modules: Record<string, string>;
       alias: string;
       answer: Record<string, string>;
       status: string;
+      /** Whether its fixture is checked against the contract's output. */
+      shaped: boolean;
     }[] = [
       {
         kind: "connector",
         definition: {
           bindings: { mail: { kind: "connector", contract: keys.connector } },
-          tasks: [send()],
+          steps: [send()],
+          status: "steps.send.output.messageId",
         },
+        modules: {},
         alias: "mail",
         answer: { messageId: "m-1" },
         status: "m-1",
+        shaped: true,
       },
       {
         kind: "operation",
         definition: {
           bindings: { lookup: { kind: "operation", contract: keys.operation } },
-          tasks: [lookUp],
+          steps: [lookUp],
+          status: "steps.look.output.greeting",
         },
+        modules: {},
         alias: "lookup",
         answer: { greeting: "Hi Ada" },
         status: "Hi Ada",
+        shaped: true,
       },
       {
         kind: "model",
         definition: {
           bindings: { summary: { kind: "model", contract: keys.model } },
-          tasks: [greet],
+          steps: [greet],
+          status: "steps.greet.output.line",
         },
+        modules: {},
         alias: "summary",
         answer: { line: "Hello, Ada" },
         status: "Hello, Ada",
+        shaped: true,
       },
-    ];
-    const read = { knowledge: keys.knowledge, template: keys.template };
-    const throughAction = [
-      {
-        kind: "knowledge",
-        who: "doc-1",
-        alias: "docs",
-        answer: { id: "doc-1", title: "Leave policy", text: "…" },
-        status: "Leave policy",
-      },
-      {
-        kind: "template",
-        who: "letter",
-        alias: "letter",
-        answer: { content: { greeting: "Dear" } },
-        status: JSON.stringify({ greeting: "Dear" }),
-      },
-    ] as const;
-    const cases: {
-      kind: string;
-      who: string;
-      alias: string;
-      answer: Record<string, unknown>;
-      status: string;
-      definition: Definition;
-      modules: Record<string, string>;
-    }[] = [
-      ...direct.map((each) => ({
-        ...each,
-        who: "Ada",
-        modules: {},
-      })),
-      ...throughAction.map((each) => ({
-        ...each,
-        definition: reading(read),
-        // The action itself is the workflow's own code: only its reads
-        // are calls.
-        modules: { "code/look.ts": lookModule },
-      })),
-      // A files call an action makes: its answer is the fixture, and the
-      // run keeps no file.
-      {
-        kind: "files",
-        who: "Ada",
-        alias: "files",
-        answer: { files: [] },
-        status: JSON.stringify({ files: [] }),
-        definition: listing(keys.files),
-        modules: { "code/list-files.ts": listFilesModule },
-      },
-      // A connector call an action makes, answered as a task's is.
+      // A connector call an action makes, answered as a step's is. The
+      // action itself is the workflow's own code: only its calls are.
       {
         kind: "connector (an action's)",
-        who: "Ada",
+        definition: notifying(keys.connector),
+        modules: { "code/notify.ts": notifyModule },
         alias: "mail",
         answer: { messageId: "m-2" },
         status: JSON.stringify({ messageId: "m-2" }),
-        definition: notifying(keys.connector),
-        modules: { "code/notify.ts": notifyModule },
+        shaped: false,
       },
     ];
     const results = await Promise.all(
-      cases.map(async ({ kind, definition, modules, alias, answer, who }) => {
-        const { workflow, revision } = await drafted(ada, definition, {
-          modules,
-        });
-        const run = async (fixtures: Record<string, unknown>) => {
-          const { runId } = await startCandidateRun(env, ada, workflow.id, {
-            revision,
-            input: { who },
-            fixtures,
+      cases.map(
+        async ({ kind, definition, modules, alias, answer, shaped }) => {
+          const { workflow, revision } = await drafted(ada, definition, {
+            modules,
           });
-          return { runId, run: await ended(ada, workflow.id, runId) };
-        };
-        const answered = await run({ [alias]: { output: answer } });
-        const unanswered = await run({});
-        // An answer a real call of it would refuse, refused the same way.
-        const shaped = direct.some((each) => each.kind === kind);
-        const misshapen = shaped
-          ? await run({ [alias]: { output: { wrong: 1 } } })
-          : undefined;
-        return {
-          kind,
-          answered: endOf(answered.run),
-          unanswered: endOf(unanswered.run),
-          misshapen: misshapen === undefined ? undefined : endOf(misshapen.run),
-          // Neither went out, nor was refused on its way: no call was made.
-          calls: [
-            ...(await callsOf(answered.runId)),
-            ...(await callsOf(unanswered.runId)),
-          ],
-        };
-      })
+          const run = async (fixtures: Record<string, unknown>) => {
+            const { runId } = await startCandidateRun(env, ada, workflow.id, {
+              revision,
+              input: { who: "Ada" },
+              fixtures,
+            });
+            return { runId, run: await ended(ada, workflow.id, runId) };
+          };
+          const answered = await run({ [alias]: { output: answer } });
+          const unanswered = await run({});
+          // An answer a real call of it would refuse, refused the same way.
+          const misshapen = shaped
+            ? await run({ [alias]: { output: { wrong: 1 } } })
+            : undefined;
+          return {
+            kind,
+            answered: endOf(answered.run),
+            unanswered: endOf(unanswered.run),
+            misshapen:
+              misshapen === undefined ? undefined : endOf(misshapen.run),
+            // Neither went out, nor was refused on its way: no call was made.
+            calls: [
+              ...(await callsOf(answered.runId)),
+              ...(await callsOf(unanswered.runId)),
+            ],
+          };
+        }
+      )
     );
     expect(results).toStrictEqual(
-      cases.map(({ kind, status }) => ({
+      cases.map(({ kind, status, shaped }) => ({
         kind,
         answered: { status: "completed", output: { status } },
         unanswered: { status: "failed", code: "workflow.candidate_unfixtured" },
-        misshapen: direct.some((each) => each.kind === kind)
+        misshapen: shaped
           ? { status: "failed", code: "workflow.call_invalid" }
           : undefined,
         calls: [],
       }))
     );
-  });
-
-  it("starts no child workflow from a run task: a test run's child would run for real", async () => {
-    const ada = await person("builder");
-    const child = await createWorkflowResource(env, ada, `child-${unique()}`);
-    await publishWorkflowVersion(env, ada, child.id, {
-      definition: definitionOf(child.name, {
-        tasks: [{ done: { set: { status: "done" } } }],
-      }),
-      basedOn: null,
-    });
-    const { workflow, revision } = await drafted(ada, {
-      bindings: {
-        child: {
-          kind: "workflow",
-          contract: `${workflowNamespace}/${child.name}/1.0.0`,
-        },
-      },
-      tasks: [
-        {
-          "run-child": {
-            run: {
-              workflow: {
-                namespace: workflowNamespace,
-                name: child.name,
-                version: "1.0.0",
-                input: { who: "${ $workflow.input.who }" },
-              },
-            },
-            metadata: { grasp: { binding: "child" } },
-          },
-        },
-      ],
-    });
-    const { runId } = await startCandidateRun(env, ada, workflow.id, {
-      revision,
-      input: { who: "Ada" },
-      fixtures: {},
-    });
-    const end = endOf(await ended(ada, workflow.id, runId));
-    // Read once the test run ended: nothing it did started a child.
-    const children = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM workflow_resource_runs WHERE workflow_resource_id = ?"
-    )
-      .bind(child.id)
-      .first<{ n: number }>();
-
-    expect({ end, children: children?.n }).toStrictEqual({
-      end: { status: "failed", code: "workflow.child_unavailable" },
-      children: 0,
-    });
-  });
-
-  it("refuses a files call a real call would refuse, its fixture notwithstanding, and keeps no file", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const key = await contract(admin, "files");
-    const { workflow, revision } = await drafted(
-      ada,
-      listing(key, "local:code/delete-file.ts#deleteFile"),
-      { modules: { "code/delete-file.ts": deleteFileModule } }
-    );
-    const run = async (who: string) => {
-      const { runId } = await startCandidateRun(env, ada, workflow.id, {
-        revision,
-        input: { who },
-        fixtures: { files: { output: null } },
-      });
-      return endOf(await ended(ada, workflow.id, runId));
-    };
-    expect({
-      // No file's ID: refused as a real call is.
-      invalid: await run("not-a-file"),
-      // A file's ID: answered from the fixture, though no such file is.
-      valid: await run(crypto.randomUUID()),
-    }).toStrictEqual({
-      invalid: { status: "failed", code: "workflow.call_invalid" },
-      valid: { status: "completed", output: { status: "deleted" } },
-    });
-  });
-
-  it("refuses a model request a real call would refuse, its fixture notwithstanding", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const key = await contract(admin, "model");
-    const { workflow, revision } = await drafted(ada, {
-      bindings: { summary: { kind: "model", contract: key } },
-      tasks: [
-        {
-          greet: {
-            ...greet.greet,
-            with: { ...greet.greet.with, maxOutputTokens: "${ 0 }" },
-          },
-        },
-      ],
-    });
-    const { runId } = await startCandidateRun(env, ada, workflow.id, {
-      revision,
-      input: { who: "Ada" },
-      fixtures: { summary: { output: { line: "Hello" } } },
-    });
-    expect(endOf(await ended(ada, workflow.id, runId))).toStrictEqual({
-      status: "failed",
-      code: "workflow.call_invalid",
-    });
   });
 
   it("runs with the parameters its start gives, else the defaults, never the values stored on the workflow, a sensitive one above all", async () => {
@@ -711,33 +459,26 @@ describe("test runs of a workflow's draft", () => {
         bindings: { mail: { kind: "connector", contract: key } },
         params: {
           greeting: {
-            schema: { type: "string", maxLength: 200 },
+            kind: "text",
             label: "Greeting",
             default: "Hello",
             sensitive: false,
           },
-          token: {
-            schema: { type: "string", maxLength: 64 },
-            label: "Token",
-            default: "none",
-            sensitive: true,
-          },
+          // Sensitive, so it has no default: each start gives it.
+          token: { kind: "text", label: "Token" },
         },
-        // The token reaches the call as a binding argument, the only place
+        // The token reaches the call as a connector argument, the only place
         // a sensitive parameter may go; the greeting comes back as output.
-        tasks: [
+        steps: [
           {
-            send: {
-              call: "grasp.connector",
-              with: {
-                binding: "mail",
-                operation: "mail.send",
-                arguments: { to: "Ada", subject: "${ $params.token }" },
-              },
-            },
+            id: "send",
+            type: "do",
+            binding: "mail",
+            operation: "mail.send",
+            arguments: { to: "Ada", subject: { $expr: "params.token" } },
           },
-          { finish: { set: { status: "${ $params.greeting }" } } },
         ],
+        status: "params.greeting",
       },
       { publish: true }
     );
@@ -746,17 +487,17 @@ describe("test runs of a workflow's draft", () => {
       values: { greeting: "Stored", token: secret },
       expectedRevision: 0,
     });
-    const run = async (params?: Record<string, unknown>) => {
+    const run = async (params: Record<string, unknown>) => {
       const { runId } = await startCandidateRun(env, ada, workflow.id, {
         revision,
         input: { who: "Ada" },
-        ...(params === undefined ? {} : { params }),
+        params,
         fixtures: { mail: { output: { messageId: "m-1" } } },
       });
       return { runId, run: await ended(ada, workflow.id, runId) };
     };
-    const defaults = await run();
-    const given = await run({ greeting: "Given" });
+    const defaults = await run({ token: "none" });
+    const given = await run({ greeting: "Given", token: "none" });
     const rows = await env.DB.prepare(
       "SELECT params FROM workflow_candidate_runs WHERE id IN (?, ?) ORDER BY created_at"
     )
@@ -774,11 +515,21 @@ describe("test runs of a workflow's draft", () => {
       runs: [defaults.run, given.run],
     });
     expect({
+      // Its sensitive parameter is never the stored value: not given, it
+      // has none.
+      untold: await outcome(
+        startCandidateRun(env, ada, workflow.id, {
+          revision,
+          input: { who: "Ada" },
+          fixtures: { mail: { output: { messageId: "m-1" } } },
+        })
+      ),
       defaults: endOf(defaults.run),
       given: endOf(given.run),
       frozen: rows.results.map(({ params }): unknown => JSON.parse(params)),
       secretKept: kept.includes(secret),
     }).toStrictEqual({
+      untold: "workflow.params_invalid",
       defaults: { status: "completed", output: { status: "Hello" } },
       given: { status: "completed", output: { status: "Given" } },
       // What the draft's code was given: the defaults, or the start's.
@@ -797,7 +548,8 @@ describe("test runs of a workflow's draft", () => {
     const key = await contract(admin, "operation");
     const { workflow, revision } = await drafted(ada, {
       bindings: { lookup: { kind: "operation", contract: key } },
-      tasks: [lookUp],
+      steps: [lookUp],
+      status: "steps.look.output.greeting",
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision,
@@ -815,19 +567,19 @@ describe("test runs of a workflow's draft", () => {
         `SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = ?`,
         workflow.id
       );
-    // A draft whose task would start another run, or sleep for a schedule,
-    // names a call no workflow has: it never becomes a checkpoint.
+    // A draft whose step would start another run names a step no workflow
+    // has: it never becomes a checkpoint.
     const starting = await createWorkflowResource(env, ada, `test-${unique()}`);
     const { revision: base } = await workflowDraft(env, ada, starting.id);
     const saved = await editWorkflowDraft(env, ada, starting.id, {
       expectedRevision: base,
-      source: definitionOf(starting.name, {
-        tasks: [
+      source: definitionOf({
+        steps: [
           {
-            again: {
-              call: "grasp.start",
-              with: { workflow: workflow.id, input: { who: "Ada" } },
-            },
+            id: "again",
+            type: "start",
+            workflow: workflow.id,
+            input: { who: "Ada" },
           },
         ],
       }),
@@ -860,10 +612,7 @@ describe("test runs of a workflow's draft", () => {
   it("runs only the latest checked revision, as it named it, and refuses a build changed since it started", async () => {
     const ada = await person("builder");
     const { workflow, revision } = await drafted(ada, {
-      tasks: [
-        { hold: { wait: "PT1S" } },
-        { finish: { set: { status: "${ $workflow.input.who }" } } },
-      ],
+      steps: [hold("1 second")],
     });
     // A later revision that doesn't pass: the checkpoint stays, but is no
     // longer the latest, so neither revision runs.
@@ -955,27 +704,19 @@ describe("test runs of a workflow's draft", () => {
     const key = await contract(admin, "model");
     const { workflow, revision } = await drafted(ada, {
       bindings: { summary: { kind: "model", contract: key } },
-      tasks: [
-        {
-          greet: {
-            ...greet.greet,
-            output: undefined,
-            export: { as: "${ {line: .line} }" },
-          },
-        },
-        { finish: { set: { status: "${ $context.line }" } } },
-      ],
+      steps: [greet],
+      status: "steps.greet.output.line",
     });
     const start = {
       revision,
       input: { who: "Ada" },
       fixtures: { summary: { output: { line: "Hi" } } },
     };
-    // The step after its call is stopped once its code returned: tried
+    // The output after its call is stopped once its code returned: tried
     // again, it reads the call's answer as recorded, and the call isn't
     // made again.
     const killed = await withCpuKills(
-      "task:finish",
+      "workflow:output",
       (attempt) => attempt === 1,
       async () => {
         const { runId } = await startCandidateRun(env, ada, workflow.id, start);
@@ -1016,8 +757,9 @@ describe("test runs of a workflow's draft", () => {
       .all<{ status: string; failureCode: string | null }>();
     expect({
       killed: endOf(killed.run),
+      // Each by its step's name, past the run's `<run>:do:<n>:`.
       attempts: attempts.results.map(({ step, attempt }) => [
-        step.includes("task:greet") ? "greet" : "finish",
+        step.split(":").slice(3).join(":"),
         attempt,
       ]),
       refused: refused === "ok" ? "ok" : "refused",
@@ -1026,9 +768,10 @@ describe("test runs of a workflow's draft", () => {
     }).toStrictEqual({
       killed: { status: "completed", output: { status: "Hi" } },
       attempts: [
-        ["greet", 1],
-        ["finish", 1],
-        ["finish", 2],
+        ["$params", 1],
+        ["greet:task", 1],
+        ["workflow:output", 1],
+        ["workflow:output", 2],
       ],
       refused: "refused",
       // How each ended, in the audit log as a test run's, once: the one the
@@ -1060,10 +803,7 @@ describe("test runs of a workflow's draft", () => {
   it("runs nothing more once its workflow is deleted", async () => {
     const ada = await person("builder");
     const { workflow, revision } = await drafted(ada, {
-      tasks: [
-        { hold: { wait: "PT1S" } },
-        { finish: { set: { status: "done" } } },
-      ],
+      steps: [hold("1 second")],
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision,
@@ -1099,10 +839,7 @@ describe("test runs of a workflow's draft", () => {
     const ada = await person("builder");
     const grace = await person("builder");
     const { workflow, revision } = await drafted(ada, {
-      tasks: [
-        { hold: { wait: "PT5S" } },
-        { finish: { set: { status: "done" } } },
-      ],
+      steps: [hold("5 seconds")],
     });
     await shareWorkflowResource(env, ada, workflow.id, {
       type: "person",
@@ -1141,10 +878,7 @@ describe("test runs of a workflow's draft", () => {
   it("fails a wait longer than a test run may wait, and its builder can stop one that waits", async () => {
     const ada = await person("builder");
     const { workflow: long, revision: longRevision } = await drafted(ada, {
-      tasks: [
-        { hold: { wait: "P300D" } },
-        { finish: { set: { status: "done" } } },
-      ],
+      steps: [hold("300 days")],
     });
     const { runId: longRun } = await startCandidateRun(env, ada, long.id, {
       revision: longRevision,
@@ -1152,10 +886,7 @@ describe("test runs of a workflow's draft", () => {
       fixtures: {},
     });
     const { workflow, revision } = await drafted(ada, {
-      tasks: [
-        { hold: { wait: "PT10M" } },
-        { finish: { set: { status: "done" } } },
-      ],
+      steps: [hold("10 minutes")],
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision,
@@ -1264,11 +995,7 @@ describe("test runs of a workflow's draft", () => {
   it("fails a test run that goes on past its lifetime, however its waits are chained", async () => {
     const ada = await person("builder");
     const { workflow, revision } = await drafted(ada, {
-      tasks: [
-        { first: { wait: "PT1S" } },
-        { second: { wait: "PT1S" } },
-        { finish: { set: { status: "done" } } },
-      ],
+      steps: [hold("1 second", "first"), hold("1 second", "second")],
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision,
@@ -1291,7 +1018,7 @@ describe("test runs of a workflow's draft", () => {
   it("keeps only so many test runs of a person's, refusing more until the sweep takes old ones, and ends overdue ones the engine lost", async () => {
     const ada = await person("builder");
     const { workflow, revision } = await drafted(ada, {
-      tasks: [{ finish: { set: { status: "done" } } }],
+      steps: [],
     });
     const start = { revision, input: { who: "Ada" }, fixtures: {} };
     const { runId } = await startCandidateRun(env, ada, workflow.id, start);
@@ -1358,7 +1085,7 @@ describe("test runs of a workflow's draft", () => {
     const other = await person("builder");
     const staff = await person("admin", true);
     const { workflow, revision } = await drafted(ada, {
-      tasks: [{ finish: { set: { status: "done" } } }],
+      steps: [],
     });
     await shareWorkflowResource(env, ada, workflow.id, {
       type: "person",
@@ -1388,7 +1115,7 @@ describe("test runs of a workflow's draft", () => {
     );
     // Another of Ada's workflows never answers for this one's test run.
     const { workflow: elsewhere } = await drafted(ada, {
-      tasks: [{ finish: { set: { status: "done" } } }],
+      steps: [],
     });
     expect({
       starts,
@@ -1420,7 +1147,7 @@ describe("test runs of a workflow's draft", () => {
   it("is kept only for a week, then goes with its engine record and its build's reservation", async () => {
     const ada = await person("builder");
     const { workflow, revision } = await drafted(ada, {
-      tasks: [{ finish: { set: { status: "done" } } }],
+      steps: [],
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision,

@@ -5,6 +5,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { sealRelease } from "../src/app-releases.ts";
 import { setCurrentVersion } from "../src/apps.ts";
 import { grantReviewed, racingDb, release, reviewedOf } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -120,6 +121,22 @@ const permissionsOf = async (admin: Person, app: AppId) => {
     requestedBy,
     grantedBy,
   }));
+};
+
+/**
+ * Seals `version` of `app` as `builder`: its server code, the config and
+ * schema of its definition, as a review through the API does first.
+ */
+const sealedBy = async (
+  builder: Awaited<ReturnType<typeof personApi>>,
+  app: string,
+  version: number
+): Promise<void> => {
+  await sealRelease(env, {
+    app: appIdSchema.parse(app),
+    version,
+    by: await builder.api.whoami(),
+  });
 };
 
 describe("An App's next version", { timeout: 60_000 }, () => {
@@ -272,6 +289,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
       },
       "More"
     );
+    await sealedBy(builder, app, version);
     // The admin grants the request after everything the change reads, and
     // before its batch lands.
     const racing: Env = {
@@ -453,6 +471,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
       },
       "Demoted"
     );
+    await sealedBy(builder, app, version);
     const racing: Env = {
       ...env,
       DB: racingDb(async () => {

@@ -345,7 +345,7 @@ const seedWorkflow = async (
     }
   }
   await resources.publish(created.id, {
-    definition: definitionText(created.name, workflow.title, workflow.parts),
+    definition: definitionText(workflow.parts),
     basedOn: null,
     modules: workflow.modules,
   });
@@ -498,7 +498,9 @@ const seedEngine = async (
     // one seeded before them keeps the screens it has (nothing has
     // shipped, so no seed migrates it; reset local data to seed it anew).
     const files = await owner.api.apps.files.read(app.id, app.currentVersion);
-    if (files["app.ts"] === engineFiles(seed, screens)["app.ts"]) {
+    if (
+      files["grasp.config.ts"] === engineFiles(seed, screens)["grasp.config.ts"]
+    ) {
       await upgradeScreens(owner, adminSession, app, screens);
     } else {
       console.warn(

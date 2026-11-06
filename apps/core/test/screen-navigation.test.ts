@@ -28,14 +28,10 @@ type Person = Awaited<ReturnType<typeof personApi>>;
 /** A note's route input: its ID, and the tab it opens on, by default `view`. */
 const routedFiles = (): Record<string, string> => ({
   ...notesFiles,
-  "app.ts": (notesFiles["app.ts"] ?? "")
-    .replace(
-      'import { app } from "@grasp-os/sdk";',
-      'import { app, v } from "@grasp-os/sdk";'
-    )
-    .replace(
-      "  screens: [],",
-      `  screens: [
+  "screens.ts": `import { v } from "@grasp-os/sdk";
+
+export default {
+  screens: [
     { name: "notes", path: "/", source: "screens/notes.tsx" },
     {
       name: "note",
@@ -49,8 +45,9 @@ const routedFiles = (): Record<string, string> => ({
       source: "screens/padded.tsx",
       input: v.object({ pad: v.string().default("x".repeat(2100)) }),
     },
-  ],`
-    ),
+  ],
+};
+`,
   "screens/note.tsx": `import type { ScreenProps } from "@grasp-os/sdk/react";
 import type { screens } from "@server/_generated/api";
 

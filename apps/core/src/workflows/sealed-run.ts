@@ -1,7 +1,3 @@
-import {
-  generatedImport,
-  generatorVersion,
-} from "@grasp-os/open-workflow/generate";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -13,17 +9,22 @@ import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
+import { valueDepth } from "@grasp-os/shared/value-depth";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   executionErrors,
+  expressionErrors,
   paramsStep,
   placeholderOf,
   stepIdempotencyKey,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
 import { namedError } from "@grasp-os/workerflow/errors";
-import { expressionErrors } from "@grasp-os/workflow-expressions/errors";
-import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
+import type {
+  SealedCall,
+  SealedTask,
+  Template,
+} from "@grasp-os/workflow-schema/sealed";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -31,15 +32,10 @@ import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import { memberRole } from "../auth/identity.ts";
 import type { DecisionOutcome } from "../decisions/decisions.ts";
 import { generatedModule } from "../workflow-builds.ts";
-import type {
-  LoadedBuild,
-  SealedCall,
-  SealedTask,
-  SealedTemplate,
-} from "../workflow-builds.ts";
+import type { LoadedBuild } from "../workflow-builds.ts";
 import { AttemptHost } from "./attempt-host.ts";
 import type { AttemptCalls } from "./attempt-host.ts";
-import { emitEvent } from "./emitted-events.ts";
+import { writeJson } from "./bounded-json.ts";
 import { eventTypeKey } from "./event-envelopes.ts";
 import { fixtureCall, fixtureCalls } from "./fixture-calls.ts";
 import {
@@ -81,7 +77,7 @@ import {
   openRunDecision,
   promptOf,
   recipientsOf,
-  requireDecisionAuthority,
+  requireDecisionAsk,
   takeDecision,
 } from "./resource-decisions.ts";
 import type { DecisionAnswer } from "./resource-decisions.ts";
@@ -93,9 +89,6 @@ import {
   retryable,
 } from "./resource-errors.ts";
 import type { CaughtError, Failure } from "./resource-errors.ts";
-import { boundedJson } from "./resource-host.ts";
-import type { ActionModelCalls, HostedResourceRun } from "./resource-host.ts";
-import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { inboxOf } from "./run-inboxes.ts";
 import { sealedMainModules } from "./sealed-isolate.ts";
 import type { Settled, StepError } from "./sealed-isolate.ts";
@@ -122,24 +115,25 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   against the manifest's, which is the hash its row pins, before its
 //   isolate can be loaded with exactly that build's modules
 //   (`sealedRunModules`, which takes only a run so loaded). A
-//   tampered build never runs (`workflow.version_corrupt`), and nor does
-//   one generated for another SDK than the run's main module runs
-//   (`generatedForRunHost`): until GRA-1514, every stored build's.
+//   tampered build never runs (`workflow.version_corrupt`).
 // - A step the build doesn't have. Each engine step's name is one of the
 //   sealed table's (`stepTableOf`): `<task>:<step>` for a step of a task
 //   in no loop, `<task>:<step>@<i>/<j>…` inside items (`stepNameOf`), a
 //   decision task's parts as the SDK's `#ask`, `#asked` and `#answer`
-//   after either, `workflow:input` and `workflow:output` where the workflow has them,
-//   and the SDK's `$params`. Any other name, one in another encoding of
-//   the same key included, or a step run otherwise than it runs (a task's
+//   after either, `workflow:output` where the workflow has an output, and
+//   the SDK's `$params`. Any other name, one in another encoding of the
+//   same key included, or a step run otherwise than it runs (a task's
 //   step as a `do`, a sleeping task's own as its sleep, an event wait's
 //   own as its wait, a try's catch as a catch), beside another step, or
-//   again, is refused, and fails the run. A `fork`, a loop of items at
-//   once, every task in one, and a listen that isn't an event wait
-//   (`isEventWait`) have no steps in the table.
-// - A loop's item it never had, or out of its order. A task inside loops
-//   whose items run one after another names its item's index in each loop
-//   its build seals around it, and nothing else: its loops are its task's.
+//   again, is refused, and fails the run. A listen that isn't an event
+//   wait (`isEventWait`), and a task whose scope names anything but `for`
+//   tasks, have no steps in the table. The table holds only what the
+//   generator writes (@grasp-os/workflow-schema's sealed.ts): one that
+//   holds anything else doesn't load (workflow-builds.ts).
+// - A loop's item it never had, or out of its order. A loop's items run
+//   one after another. A task inside loops names its item's index in each
+//   loop its build seals around it, and nothing else: its loops are its
+//   task's.
 //   Each index must be of an item the loop's enter step recorded (at most
 //   the platform's 1,000 a collection, `workflow.collection_invalid`
 //   past them), in a loop the run is still in, and of the item running
@@ -167,7 +161,7 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   literal of the sealed template must be the call's exactly; an object
 //   must have exactly the template's keys, and an array exactly its
 //   length (`matched`). An expression's hole (`slot`) takes any JSON
-//   within a step's size and the evaluator's depth: the host fills in no
+//   within a step's size and a value's depth: the host fills in no
 //   slot, so a placeholder there is data. Every refusal fails the run.
 //   Arguments a correct build sends, its slots filled, may still nest
 //   past what a call takes (`requireArgumentsDepth`): the run's data put them
@@ -189,7 +183,7 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   them, placeholders and not values, as a digest: it names things and
 //   never carries their content (@grasp-os/shared/audit).
 // - Authority that changed since the start. Every call is decided again as
-//   it is made (`requireCallAuthority`, in `makeCall` and `emitEvent`): a
+//   it is made (`requireCallAuthority`, in `makeCall`): a
 //   revoked approval, permission or role stops the next call
 //   (`workflow.call_denied`). The person the run acts for must still be an
 //   active member before every step; a run an App's test started acts for
@@ -323,27 +317,94 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   as recorded), its event waits' deadlines and its retries' backoffs are
 //   held to its `maxSleepMs`
 //   (`requireWait`): one past it fails the run, and no catch takes it.
-// - An attempt longer than sealed. Each is held to its task's timeout and
-//   its tries' retry attempt durations, and its engine retries are the
-//   host's own (`limitsOf`), whatever its code declares.
+// - An attempt longer than sealed. Each is held to its task's timeout,
+//   and its engine retries are the host's own (`limitsOf`), whatever its
+//   code declares.
+
+/** The run an activation loaded (resource-runs.ts, `loadedRun`). */
+export interface HostedResourceRun {
+  runId: string;
+  workflowId: string;
+  version: number;
+  /** Whom it acts for: the person whose start admitted it. */
+  principal: string;
+  /** Its input, as its start admitted it. */
+  input: Json;
+  /** The parameter values its start froze. */
+  params: Record<string, Json>;
+  /** When it was admitted, in ms. */
+  createdAt: number;
+  /**
+   * For a run a trigger started in another run's lineage: its root and
+   * its depth under it, as its row pins them. Unset, the run is its own
+   * root, at 0.
+   */
+  rootRunId?: string;
+  depth?: number;
+  /**
+   * When its lineage's root was admitted, in ms, as the root's row says:
+   * no wait of the run's outlasts the lineage's age from then. Unset, the
+   * run is its own root: `createdAt`.
+   */
+  lineageStartedAt?: number;
+  /** Its sealed build, verified. */
+  build: LoadedBuild;
+  /** What its calls go by: its principal, invoker and frozen bindings. */
+  calling: CallingRun;
+  /** The most model calls it may make: the host's ceiling (resource-runs.ts). */
+  maxModelCalls: number;
+  /**
+   * For a test run (candidate-runs.ts): the longest any one of its waits
+   * may last, and the furthest past its start a sleep until a time may end,
+   * in ms. One past it fails the run (`workflow.candidate_wait_limit`), so
+   * no test run sits waiting for long.
+   */
+  maxSleepMs?: number;
+}
 
 /**
- * Whether `sdk` is the one a sealed build's generated module must import:
- * the SDK the run's main module runs it on (sealed-isolate.ts, `mainSource`).
+ * The model calls a run and its actions made (GRA-700), kept with the run
+ * (run-object.ts, `modelCallsIn`): an action step's record holds only its
+ * answer, and a failed attempt none, so its calls can't be counted from
+ * records on a replay. Each is kept, by its call's key, before it goes out.
  */
-const isRunHostSdk = (sdk: string): boolean => sdk === "@grasp-os/sdk/workflow";
+export interface ActionModelCalls {
+  /** How many were kept. */
+  count: () => number;
+  /** Keeps one, with its call's key: each time it is kept, as made. */
+  keep: (key: string) => void;
+}
 
 /**
- * Whether `build` was generated for the run host: by the current
- * generator, whose modules import the SDK the run's main module runs. A
- * build of the generator before it (`@grasp-os/sdk/open-workflow`, which
- * names its steps and calls its host in another way) runs on
- * resource-host.ts only, until GRA-1514 regenerates every stored version
- * onto `@grasp-os/sdk/workflow`: so none is ever loaded here, where its
- * first step would be refused as one the build doesn't seal.
+ * The most a call's arguments may take as JSON: two of what a step records
+ * (each is one, or the run's input, which a receipt bounds lower), and
+ * their framing.
  */
-export const generatedForRunHost = (build: LoadedBuild): boolean =>
-  build.generator === generatorVersion && isRunHostSdk(generatedImport);
+const maxPassedBytes = 2 * platformLimits.stepPayloadBytes + 64;
+
+/**
+ * `value` as plain JSON, with its size in UTF-16 code units, if it is
+ * plain JSON within `maxPassedBytes` and `maxDepth` (a call's depth by
+ * default): written once by the bounded writer, so nothing larger is
+ * walked, then read back from that text. `undefined` otherwise.
+ */
+const boundedJson = (
+  value: unknown,
+  maxDepth: number = sealedBuildLimits.callDepth
+): { value: Json; size: number } | undefined => {
+  const written = writeJson(value, {
+    maxBytes: maxPassedBytes,
+    maxDepth,
+    maxNodes: maxPassedBytes,
+  });
+  if (!written.ok) {
+    return undefined;
+  }
+  const parsed = z.json().safeParse(JSON.parse(written.text));
+  return parsed.success
+    ? { value: parsed.data, size: written.text.length }
+    : undefined;
+};
 
 /** A run of a sealed build, as its activation loaded it (`sealedRunFrom`). */
 export interface HostedSealedRun extends HostedRun {
@@ -365,7 +426,7 @@ export interface HostedSealedRun extends HostedRun {
   readonly input: Json;
   /** What its calls go by: its principal, invoker and frozen bindings. */
   readonly calling: CallingRun;
-  /** The most model calls it may make: its build's and the host's lower. */
+  /** The most model calls it may make: the host's ceiling. */
   readonly maxModelCalls: number;
   /**
    * For a test run (candidate-runs.ts): the longest any one of its waits
@@ -431,13 +492,9 @@ interface SealedStep {
 /** A `for` task. */
 type ForTask = Extract<SealedTask, { kind: "for" }>;
 
-/**
- * Whether `task` is a loop whose items run one after another
- * (`concurrency` 1): the only items a sealed run runs. Items at once and a
- * `fork`'s branches don't run here yet.
- */
-const isSequentialLoop = (task: SealedTask | undefined): task is ForTask =>
-  task?.kind === "for" && task.loop.concurrency === 1;
+/** Whether `task` is a loop: its items run one after another. */
+const isLoop = (task: SealedTask | undefined): task is ForTask =>
+  task?.kind === "for";
 
 /** The furthest ahead a deadline may be, as the engine sleeps: a year. */
 const maxDeadlineMs = sealedBuildLimits.deadlineMs;
@@ -447,43 +504,29 @@ type ListenTask = Extract<SealedTask, { kind: "listen" }>;
 
 /**
  * Whether `task` is an event wait the run host runs: one that takes the
- * first event of any of its sealed types (`any`), through its sealed
- * binding, until its timeout of at most a year. The sealed listen's other
- * fields (`one` and `all`, filters by an event's attributes, correlations)
- * are resource-host.ts's until GRA-1366 removes it: such a listen has no
- * steps here, so it never runs, and `read` is never read (the wait always
- * answers the host's `EventWait`).
+ * first event of any of its sealed types, through its sealed binding,
+ * until its timeout of at most a year.
  */
 const isEventWait = (task: SealedTask | undefined): task is ListenTask =>
-  task?.kind === "listen" &&
-  task.listen.strategy === "any" &&
-  task.timeoutMs <= maxDeadlineMs &&
-  task.listen.filters.every(
-    (filter) => filter.attributes.length === 0 && filter.correlate === undefined
-  );
+  task?.kind === "listen" && task.timeoutMs <= maxDeadlineMs;
 
 /**
  * The steps `build` seals, by `<task>:<kind>`, the item indices of their
- * engine names left out (`stepNameOf`): the workflow's own, every task's
- * outside any loop, and every task's inside loops whose items run one
- * after another. A `fork`, a loop of items at once, and every task inside
- * one have no steps here, so they never run.
+ * engine names left out (`stepNameOf`): the workflow's output, and every
+ * task's, outside loops or inside them. A listen that isn't an event wait,
+ * and a task whose scope names anything but loops, have no steps here, so
+ * they never run.
  */
 const stepTableOf = (build: LoadedBuild): ReadonlyMap<string, SealedStep> => {
   const table = new Map<string, SealedStep>();
-  if (build.workflow.input) {
-    table.set("workflow:input", { kind: "input" });
-  }
   if (build.workflow.output) {
     table.set("workflow:output", { kind: "output" });
   }
   const tasks = new Map(build.tasks.map((task) => [task.id, task]));
   for (const task of build.tasks) {
     const runs =
-      task.kind !== "fork" &&
-      (task.kind !== "for" || isSequentialLoop(task)) &&
       (task.kind !== "listen" || isEventWait(task)) &&
-      task.scope.every((id) => isSequentialLoop(tasks.get(id)));
+      task.scope.every((id) => isLoop(tasks.get(id)));
     if (runs) {
       for (const kind of task.steps) {
         table.set(`${task.id}:${kind}`, { task, kind });
@@ -595,8 +638,7 @@ type BoundCall = Extract<
       | "grasp.operation"
       | "grasp.model"
       | "grasp.compute"
-      | "grasp.action"
-      | "grasp.emit";
+      | "grasp.action";
   }
 >;
 
@@ -608,15 +650,8 @@ type BoundCall = Extract<
 interface CallTemplate {
   readonly call: BoundCall;
   readonly operation: string;
-  readonly arguments: SealedTemplate;
+  readonly arguments: Template;
 }
-
-/** `[key, template]`, or nothing for a part the build didn't seal. */
-const partOf = (
-  key: string,
-  template: SealedTemplate | undefined
-): [string, SealedTemplate][] =>
-  template === undefined ? [] : [[key, template]];
 
 /** The call template of `call`; none for a call the isolate never makes. */
 const callTemplateOf = (call: SealedCall): CallTemplate | undefined => {
@@ -637,24 +672,11 @@ const callTemplateOf = (call: SealedCall): CallTemplate | undefined => {
           object: [
             ["instructions", call.instructions],
             ["input", call.input],
-            ...partOf("model", call.model),
-            ...partOf("maxOutputTokens", call.maxOutputTokens),
           ],
         },
       };
     }
-    case "grasp.emit": {
-      return {
-        call,
-        operation: call.name,
-        arguments: {
-          object: [["data", call.data], ...partOf("subject", call.subject)],
-        },
-      };
-    }
-    // Made by the host, or not yet run here.
-    case "grasp.now":
-    case "grasp.random":
+    // Made by the host.
     case "grasp.sleepUntil":
     case "grasp.decision": {
       return undefined;
@@ -691,8 +713,7 @@ const leftOpen: StepError = {
 /**
  * `failure`, what the attempt that sent a tried-once call failed with, as
  * every later attempt of its step fails: never retried, its message and
- * code kept, a timeout's code `operation.deadline_exceeded` (as the old
- * host's `lastRetry`, resource-host.ts).
+ * code kept, a timeout's code `operation.deadline_exceeded`.
  */
 const triedBefore = (failure: StepError): Error =>
   namedError(
@@ -746,12 +767,11 @@ const sleepsOf = (task: SealedTask): boolean =>
   (task.kind === "call" && task.call.name === "grasp.sleepUntil");
 
 /**
- * Whether `task` sleeps until a deadline its enter step records: a wait
- * of an expression's duration, or a `grasp.sleepUntil` call.
+ * Whether `task` sleeps until a deadline its enter step records: a
+ * `grasp.sleepUntil` call.
  */
 const sleepsUntil = (task: SealedTask): boolean =>
-  (task.kind === "wait" && task.duration !== undefined) ||
-  (task.kind === "call" && task.call.name === "grasp.sleepUntil");
+  task.kind === "call" && task.call.name === "grasp.sleepUntil";
 
 /** The longest a retry's backoff may sleep, as the engine sleeps: a year. */
 const maxRetryDelayMs = sealedBuildLimits.deadlineMs;
@@ -879,14 +899,10 @@ const raisedBy = (task: Extract<SealedTask, { kind: "raise" }>): StepError => ({
 
 /**
  * Whether a catch or its retry policy decides with no condition of its
- * own (`when`, `exceptWhen`): the isolate has nothing to decide for it.
+ * own (`when`): the isolate has nothing to decide for it.
  */
-const unconditional = (
-  conditions: { when?: number; exceptWhen?: number } | undefined
-): boolean =>
-  conditions !== undefined &&
-  conditions.when === undefined &&
-  conditions.exceptWhen === undefined;
+const unconditional = (conditions: { when?: number } | undefined): boolean =>
+  conditions !== undefined && conditions.when === undefined;
 
 /**
  * Where among `tries` (innermost first) the innermost catch is that takes
@@ -916,9 +932,7 @@ const forcedRetry = (
   );
 };
 
-/**
- * The backoff before round `round + 1` of `policy`, its jitter drawn here.
- */
+/** The backoff before round `round + 1` of `policy`. */
 const backoffOf = (
   policy: NonNullable<Extract<SealedTask, { kind: "try" }>["catch"]["retry"]>,
   round: number
@@ -929,33 +943,18 @@ const backoffOf = (
   } else if (policy.backoff === "exponential") {
     factor = 2 ** (round - 1);
   }
-  const { jitter } = policy;
-  return (
-    policy.delayMs * factor +
-    (jitter === undefined
-      ? 0
-      : Math.round(
-          jitter.fromMs + Math.random() * (jitter.toMs - jitter.fromMs)
-        ))
-  );
+  return policy.delayMs * factor;
 };
 
-/**
- * Round `round + 1` of `policy` after its backoff, from `firstFailedAt`:
- * none past its duration limit, nor a year.
- */
+/** Round `round + 1` of `policy` after its backoff: none past a year. */
 const scheduled = (
   policy: NonNullable<Extract<SealedTask, { kind: "try" }>["catch"]["retry"]>,
-  round: number,
-  firstFailedAt: number
+  round: number
 ): RetryDecision => {
   const delayMs = backoffOf(policy, round);
-  const limited =
-    policy.limitMs !== undefined &&
-    Date.now() + delayMs - firstFailedAt > policy.limitMs;
-  return limited || delayMs > maxRetryDelayMs
-    ? { retry: false, delayMs: 0, firstFailedAt }
-    : { retry: true, delayMs, firstFailedAt };
+  return delayMs > maxRetryDelayMs
+    ? { retry: false, delayMs: 0 }
+    : { retry: true, delayMs };
 };
 
 /**
@@ -966,17 +965,15 @@ const scheduled = (
  * with no conditions, which takes it whatever the isolate says; and
  * whether that catch's retry `when` holds, which a policy with no
  * conditions does. Anything else is tampering. It retries while the
- * policy has rounds left, after its backoff, and none past its duration
- * limit from `firstFailedAt`, nor a year.
+ * policy has rounds left, after its backoff, and none past a year.
  */
 export const retryDecided = (
   tries: readonly Extract<SealedTask, { kind: "try" }>[],
   error: CaughtError,
   round: number,
-  choice: unknown,
-  firstFailedAt: number
+  choice: unknown
 ): RetryDecision => {
-  const stop = { retry: false, delayMs: 0, firstFailedAt };
+  const stop = { retry: false, delayMs: 0 };
   const forced = forcedOf(tries, error);
   if (choice === undefined) {
     // Its code failed to choose (an expression of a `when` that failed):
@@ -1012,7 +1009,7 @@ export const retryDecided = (
   const policy = around.catch.retry;
   return {
     ...(chosen.data.retry && policy !== undefined && round < policy.attempts
-      ? scheduled(policy, round, firstFailedAt)
+      ? scheduled(policy, round)
       : stop),
     by: around.id,
   };
@@ -1097,16 +1094,16 @@ const requireArgumentsDepth = (sent: Json): void => {
 
 /**
  * The deepest arguments a correct build sends by `template`: each literal
- * as deep as it is, each slot an evaluation's result, at most the
- * evaluator's depth, and each sensitive parameter its placeholder. Deeper
+ * as deep as it is, each slot an evaluation's result, at most a
+ * value's depth (`valueDepth`), and each sensitive parameter its placeholder. Deeper
  * is tampering, refused before anything walks it.
  */
-const deepestSent = (template: SealedTemplate): number => {
+const deepestSent = (template: Template): number => {
   if ("literal" in template) {
     return nestingOf(template.literal);
   }
   if ("slot" in template) {
-    return evaluatorLimits.maxJsonDepth;
+    return valueDepth;
   }
   if ("param" in template) {
     return 1;
@@ -1121,14 +1118,14 @@ const deepestSent = (template: SealedTemplate): number => {
 /**
  * `sent`, the arguments the isolate sent, matched against `template` at
  * `path`: each literal exactly, an object's keys exactly, an array's
- * length exactly, a slot any JSON within the evaluator's depth (the host
+ * length exactly, a slot any JSON within a value's depth (the host
  * fills in no slot, so what looks like a placeholder there is data), and
  * a sensitive parameter's place only that parameter's placeholder, its value put in
  * by `fill` (none where no sensitive parameter may be) and kept in
  * `sensitive`. Throws `tampering` for anything else.
  */
 const matched = (
-  template: SealedTemplate,
+  template: Template,
   sent: Json,
   path: string,
   fill: ((name: string) => Json | undefined) | undefined,
@@ -1141,8 +1138,8 @@ const matched = (
     return template.literal;
   }
   if ("slot" in template) {
-    // An evaluation's result, never deeper than the evaluator answers.
-    if (boundedJson(sent, evaluatorLimits.maxJsonDepth) === undefined) {
+    // An evaluation's result, never deeper than a value may nest.
+    if (boundedJson(sent, valueDepth) === undefined) {
       throw tampering(`${path} nests deeper than an expression's result may.`);
     }
     return sent;
@@ -1205,14 +1202,6 @@ const matched = (
 const modelArgumentsSchema = z.strictObject({
   instructions: z.json(),
   input: z.json(),
-  model: z.json().optional(),
-  maxOutputTokens: z.json().optional(),
-});
-
-/** An emit's arguments, as their template matched them. */
-const emitArgumentsSchema = z.strictObject({
-  data: z.json(),
-  subject: z.json().optional(),
 });
 
 /** How a connection binding's stub sends a call: `[operation, arguments, options]`. */
@@ -1335,7 +1324,7 @@ class SealedRun implements SealedRunKind {
     StepAttempt,
     { decision: string; deadline: number }
   >();
-  /** The `for` tasks whose items run here, by ID (`isSequentialLoop`). */
+  /** The `for` tasks, by ID. */
   readonly #loopTasks: ReadonlyMap<string, ForTask>;
   /**
    * The loops whose items the run may still reach, by the place of their
@@ -1360,6 +1349,7 @@ class SealedRun implements SealedRunKind {
   readonly decisionRun: RunKind["decisionRun"];
   readonly decisionsKept: DecisionsKept | undefined;
   readonly aiWaitRun: RunKind["aiWaitRun"];
+  readonly stepsAudited: boolean;
 
   constructor(
     env: Env,
@@ -1373,7 +1363,7 @@ class SealedRun implements SealedRunKind {
     this.#steps = stepTableOf(run.build);
     this.#loopTasks = new Map(
       run.build.tasks.flatMap((task) =>
-        isSequentialLoop(task) ? [[task.id, task] as const] : []
+        isLoop(task) ? [[task.id, task] as const] : []
       )
     );
     this.run = run;
@@ -1389,6 +1379,7 @@ class SealedRun implements SealedRunKind {
     this.decisionRun = decisionRunOf(run.calling);
     this.decisionsKept = decisionsKeptOf(env, run);
     this.aiWaitRun = { kind: "resource", runId: run.runId };
+    this.stepsAudited = run.calling.fixture !== true;
   }
 
   /**
@@ -1615,30 +1606,16 @@ class SealedRun implements SealedRunKind {
   /**
    * Every step's engine retries, whatever its code declared
    * (`sealedRetries`), and the longest an attempt of `step` may take: its
-   * task's timeout, and each retry policy's attempt duration of the tries
-   * around it.
+   * task's timeout.
    */
   limitsOf(step: string): StepLimits {
     const task = this.#stepOf(step)?.task;
-    if (task === undefined) {
+    // A listen's timeout is how long it waits for its events, never how
+    // long an attempt of its steps may take.
+    if (task?.timeoutMs === undefined || task.kind === "listen") {
       return { retries: sealedRetries };
     }
-    const limits = [
-      // A listen's timeout is how long it waits for its events, never
-      // how long an attempt of its steps may take.
-      ...(task.timeoutMs === undefined || task.kind === "listen"
-        ? []
-        : [task.timeoutMs]),
-      ...triesAround(this.run.build, task).flatMap((around) =>
-        around.catch.retry?.attemptMs === undefined
-          ? []
-          : [around.catch.retry.attemptMs]
-      ),
-    ];
-    return {
-      retries: sealedRetries,
-      ...(limits.length === 0 ? {} : { timeout: Math.min(...limits) }),
-    };
+    return { retries: sealedRetries, timeout: task.timeoutMs };
   }
 
   /**
@@ -2159,18 +2136,14 @@ class SealedRun implements SealedRunKind {
       unconditional(first.catch.retry);
     return {
       error: { ...failure.error },
-      decided: (choice, firstFailedAt) =>
-        retryDecided(tries, failure.error, round, choice, firstFailedAt),
+      decided: (choice) => retryDecided(tries, failure.error, round, choice),
       ...(fixed
         ? {
-            alone: (firstFailedAt: number) =>
-              retryDecided(
-                tries,
-                failure.error,
-                round,
-                { by: first.id, retry: forcedRetry(first, round) },
-                firstFailedAt
-              ),
+            alone: () =>
+              retryDecided(tries, failure.error, round, {
+                by: first.id,
+                retry: forcedRetry(first, round),
+              }),
           }
         : {}),
     };
@@ -2298,12 +2271,6 @@ class SealedRun implements SealedRunKind {
         );
       }
       const { call } = task;
-      // Not yet in v1: its own action telling them, and a reminder.
-      if (call.ask !== undefined || call.remindAfterMs !== undefined) {
-        throw callInvalid(
-          "ask: A sealed run's decision asks by the host's notice alone, once."
-        );
-      }
       const { calling, createdAt } = this.run;
       const built = {
         binding: call.binding,
@@ -2353,8 +2320,6 @@ class SealedRun implements SealedRunKind {
         this.#openings.set(attempt, opened);
         return opened;
       }
-      // Its input is shown to people other than the run's person.
-      await requireResourceRunEvidenceReadable(this.#env, calling);
       this.#requireHolds(attempt);
       const opened = await openRunDecision(
         this.#env,
@@ -2401,8 +2366,7 @@ class SealedRun implements SealedRunKind {
       }
       // Its people are shown what it asks: never once its binding was
       // revoked, or its run's evidence can't be read, since it opened.
-      await requireDecisionAuthority(this.#env, calling, task.call.binding);
-      await requireResourceRunEvidenceReadable(this.#env, calling);
+      await requireDecisionAsk(this.#env, calling, task.id, task.call.binding);
       this.#requireHolds(attempt);
       await askDeciders(this.#env, calling, opened);
       // Its people were told: a later failure of the step the host hears
@@ -2549,13 +2513,17 @@ class SealedRun implements SealedRunKind {
   /**
    * Keeps the evidence of `attempt`'s call before it goes out, or it
    * doesn't go: its sealed call and binding, and a digest of its
-   * arguments as the isolate sent them, placeholders and not values.
+   * arguments as the isolate sent them, placeholders and not values. A
+   * test's run keeps none (`stepsAudited`): its calls are its fixture's.
    */
   async #auditCall(
     attempt: StepAttempt,
     template: CallTemplate,
     sent: Json
   ): Promise<void> {
+    if (!this.stepsAudited) {
+      return;
+    }
     const db = drizzle(this.#env.DB);
     const { actor, target, detail } = this.audit;
     await auditedBatch(this.#env, db, [
@@ -2710,31 +2678,6 @@ class SealedRun implements SealedRunKind {
           value,
           effect.key
         );
-      }
-      case "grasp.emit": {
-        const { data, subject } = emitArgumentsSchema.parse(value);
-        if (calling.candidate !== undefined) {
-          return null;
-        }
-        await requireResourceRunEvidenceReadable(this.#env, calling);
-        this.#requireHolds(attempt);
-        await emitEvent(
-          this.#env,
-          calling,
-          {
-            taskId: task.id,
-            stepKey: effect.key,
-            binding: call.binding,
-            type: call.type,
-            data,
-            ...(subject === undefined ? {} : { subject }),
-            ...(call.dataschema === undefined
-              ? {}
-              : { dataschema: call.dataschema }),
-          },
-          effect.requireHolds
-        );
-        return null;
       }
       default: {
         return call satisfies never;
@@ -2922,28 +2865,18 @@ export const sealedRunFrom = (
 /**
  * The modules a sealed run's isolate loads: its verified build's SDK and
  * generated module (`sealedRunFrom`), and the main module that runs it
- * (sealed-isolate.ts, `mainSource`). Only a build generated for the run host
- * (`generatedForRunHost`): any other's module would be run on an engine
- * it wasn't written for.
+ * (sealed-isolate.ts, `mainSource`).
  */
 export const sealedRunModules = ({
-  runId,
   build,
-}: HostedSealedRun): Record<string, string> => {
-  if (!generatedForRunHost(build)) {
-    throw new Error(
-      `Run ${runId}'s build was generated for another SDK than the run host's`
-    );
-  }
-  return {
-    ...build.sdk,
-    ...build.modules,
-    ...sealedMainModules({
-      module: generatedModule,
-      refusal: "The sealed build doesn't export its workflow.",
-    }),
-  };
-};
+}: HostedSealedRun): Record<string, string> => ({
+  ...build.sdk,
+  ...build.modules,
+  ...sealedMainModules({
+    module: generatedModule,
+    refusal: "The sealed build doesn't export its workflow.",
+  }),
+});
 
 /**
  * The aliases `build`'s calls go through: each sealed task's binding. A

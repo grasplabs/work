@@ -1248,7 +1248,6 @@ export const sdkResourceBindings = sqliteTable(
     kind: text({
       enum: [
         "store",
-        "workflow",
         "operation",
         "connector",
         "model",
@@ -2133,7 +2132,7 @@ export const runLineageAccounts = sqliteTable(
 
 /**
  * The children each run lineage admitted by a trigger's key
- * (src/workflows/quotas.ts, `admitChild`): a delivery of the same message
+ * (src/workflows/quotas.ts, `admitInLineage`): a delivery of the same message
  * admitted again, at once or later, is the same child, in the same place,
  * and takes no other slot of its lineage. Removed with its run's details
  * (src/workflows/retention.ts).
@@ -2244,14 +2243,8 @@ export const runBrainEvidence = sqliteTable(
 );
 
 /**
- * The runs whose evidence a run holds (GRA-1093; workflows/resource-reads.ts):
- * a child whose output it took (resource-runs.ts, `tellParentOfEnd`), and
- * every run that child held, since its output may carry what they
- * recalled. Before each of the run's releases, the host checks each held
- * run's evidence too, under that run's own authority as it stands now. A
- * held run's details stay while a run that holds it hasn't passed its own
- * retention (retention.ts). Identifiers only; goes with the holding run's
- * details.
+ * Nothing writes or reads it. Kept until GRA-1589 drops it, so a core
+ * still serving during a rollout keeps working (expand, then contract).
  */
 export const runEvidenceHolds = sqliteTable(
   "run_evidence_holds",
@@ -3563,14 +3556,16 @@ export const workflowResources = sqliteTable(
 /**
  * Each published version of a workflow: written once, by its publication,
  * and never changed. `version` counts publications from 1;
- * `definition_version` is the definition's own semantic version, unique
- * per workflow, so a semantic version always names the same content.
- * `definition` is the workflow.json exactly as published (at most the
- * profile's 1 MiB), `contract` the canonical JSON of its input, output and
- * parameter schemas, and `manifest` the canonical JSON of what the version
- * pins: its definition, profile, evaluator, contract and the exact versions
- * its bindings resolved to (also in `sdk_resource_bindings`), each with
- * its SHA-256.
+ * `definition_version` is the semantic version publication gives it,
+ * unique per workflow, so a semantic version always names the same
+ * content. `definition` is the workflow.json exactly as published (at
+ * most the format's 1 MiB), `profile_version` its format
+ * (`grasp-workflow/1`), `contract` the canonical JSON of its input, output
+ * and parameter schemas, and `manifest` the canonical JSON of what the
+ * version pins: its definition, contract, build and the exact versions its
+ * bindings resolved to (also in `sdk_resource_bindings`), each with its
+ * SHA-256. Expressions are compiled into the build, so its hash covers
+ * them: no evaluator is pinned beside it.
  */
 export const workflowResourceVersions = sqliteTable(
   "workflow_resource_versions",
@@ -3583,6 +3578,11 @@ export const workflowResourceVersions = sqliteTable(
     definition: text().notNull(),
     definitionJsonHash: text("definition_json_hash").notNull(),
     profileVersion: text("profile_version").notNull(),
+    /**
+     * Nothing reads it: expressions are compiled into the build. Kept, and
+     * written empty, until the follow-up GRA-1605 drops it, so a core
+     * still serving during a rollout keeps working (expand, then contract).
+     */
     evaluatorHash: text("evaluator_hash").notNull(),
     contract: text().notNull(),
     contractHash: text("contract_hash").notNull(),
@@ -3646,7 +3646,7 @@ export const triggerResources = sqliteTable("trigger_resources", {
   id: text().primaryKey(),
   ownerId: text("owner_id").notNull(),
   kind: text({
-    enum: ["system", "connector", "webhook", "schedule", "email"],
+    enum: ["connector", "webhook", "schedule", "email"],
   }).notNull(),
   currentVersion: integer("current_version").notNull(),
   enabled: integer({ mode: "boolean" }).notNull(),
@@ -3699,12 +3699,11 @@ export const triggerResourceVersions = sqliteTable(
     principalBinding: text("principal_binding").notNull(),
     createdAt: timestamp("created_at").notNull(),
     /**
-     * For a system trigger: the catalog event contract and the event type
-     * of it whose emitted events start its workflow
-     * (workflows/event-delivery.ts). Null for any other kind, and for a
-     * system trigger from before they were kept, which then takes none.
+     * Never written or read. Kept, with its index, until GRA-1592 drops
+     * it (expand, then contract).
      */
     eventContract: text("event_contract"),
+    /** A connector trigger's event type. */
     eventType: text("event_type"),
     /**
      * For a schedule trigger: its five-field cron expression, the IANA time
@@ -3732,7 +3731,7 @@ export const triggerResourceVersions = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.triggerId, table.version] }),
-    // The system triggers' versions that take an event of a type.
+    // Dropped with its column (GRA-1592).
     index("trigger_resource_versions_event")
       .on(table.eventContract, table.eventType)
       .where(sql`${table.eventContract} IS NOT NULL`),
@@ -3906,7 +3905,7 @@ export const workflowStartReceipts = sqliteTable(
   {
     id: text().primaryKey(),
     invokerType: text("invoker_type", {
-      enum: ["person", "app", "agent", "trigger", "workflow"],
+      enum: ["person", "app", "agent", "trigger"],
     }).notNull(),
     invokerId: text("invoker_id").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
@@ -4040,15 +4039,18 @@ export const workflowResourceRuns = sqliteTable(
      */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
     /**
-     * For a child run (a `run` task's, workflows/run-children.ts): the run
-     * that started it, its lineage's root and its depth under it (quotas.ts,
-     * `admitChild`), pinned with it. Null, null and 0 for a run its own
-     * start admitted, the root of its own lineage. A run an emitted event's
-     * trigger started (workflows/event-delivery.ts) has a root and a depth
-     * but no parent: it joins the emitting run's lineage, not its life, and
-     * is charged to its workflow's account there (`accountRunId`).
+     * Never written or read. Kept, with its index, until GRA-1589 drops
+     * it (expand, then contract).
      */
     parentRunId: text("parent_run_id"),
+    /**
+     * For a run a trigger started from a run's stamped mail
+     * (workflows/connector-triggers.ts): its lineage's root and its depth
+     * under it (quotas.ts, `admitInLineage`), pinned with it. Null and 0 for
+     * a run its own start admitted, the root of its own lineage. It joins
+     * the mailing run's lineage, not its life, and is charged to its
+     * workflow's account there (`accountRunId`).
+     */
     rootRunId: text("root_run_id"),
     depth: integer().notNull().default(0),
     /**
@@ -4086,14 +4088,13 @@ export const workflowResourceRuns = sqliteTable(
     /**
      * The run whose allowances its work is charged to (quotas.ts,
      * `triggeredAccountClaimed`), pinned with it: for a run a trigger
-     * started in another run's lineage, its workflow's account there; for
-     * a child, its parent's. Null for a run charged to its lineage's root,
-     * or a root itself.
+     * started in another run's lineage, its workflow's account there.
+     * Null for a root.
      */
     accountRunId: text("account_run_id"),
   },
   (table) => [
-    // A run's children that haven't ended, for its end to stop them.
+    // Dropped with its column (GRA-1589).
     index("workflow_resource_runs_parent_idx")
       .on(table.parentRunId, table.status)
       .where(sql`${table.parentRunId} IS NOT NULL`),
@@ -4239,18 +4240,8 @@ export const workflowRunFileChunks = sqliteTable(
  * that end never keeps its lease or alarm.
  */
 /**
- * The events runs of independent workflows emitted (`emit` tasks,
- * workflows/emitted-events.ts): the transactional outbox of each, written
- * once, under an ID derived from its run and its task's step, so an
- * attempt run again writes nothing new. Each names its run, its pinned
- * binding and catalog contract, and the envelope the host minted: its
- * source is the emitting run, never what the workflow says. Delivery to
- * what consumes platform events (system triggers,
- * workflows/event-delivery.ts) marks it delivered, or undeliverable with
- * why; until then each waits here. Retention removes an event's
- * subject and data with its run's details (workflows/retention.ts), and
- * closes one still undelivered then (its `delivered_at` the removal's
- * time), so nothing delivers it without its data.
+ * Never written or read: workflows no longer emit events. Kept, with its
+ * indexes and trigger, until GRA-1592 drops it (expand, then contract).
  */
 export const workflowEmittedEvents = sqliteTable(
   "workflow_emitted_events",

@@ -1,3 +1,5 @@
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
+
 /**
  * A tally App the e2e tests build: in a chat's draft written straight
  * into its Workspace (chat-preview.e2e.ts), or by the scripted model
@@ -63,22 +65,19 @@ export const add = mutation({
  * the draft's preview.
  */
 export const tallyFiles = (label: string): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  tally: defineTable({ added: v.boolean() }),
-});
-`,
+  ...appDefinition({
+    name: "Tally",
+    tables: {
+      tally: {
+        fields: { added: "v.boolean()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/tally.ts": tallyServer(label),
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Tally",
-  schema,
-  access: { tables: { tally: { read: "appMembers", write: "appMembers" } } },
+  "screens.ts": `export default {
   screens: [{ name: "tally", path: "/", source: "screens/tally.tsx" }],
-});
+};
 `,
   "screens/tally.tsx": tallyScreen("Add one"),
 });

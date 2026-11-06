@@ -8,6 +8,9 @@ import { allowedMethods, callbackMethods } from "./expression-runtime.ts";
 
 export { runtimeNames } from "./expression-lowering.ts";
 export type { ExpressionRead } from "./expression-lowering.ts";
+// The methods an expression can call, for the type check's own refusal
+// of a method read without a call (`expressionTypeCheck`).
+export { allowedMethods } from "./expression-runtime.ts";
 
 /**
  * Workflow expressions, in JavaScript: what a JSON workflow writes where
@@ -320,7 +323,9 @@ class Checker {
     // oxlint-disable-next-line typescript/switch-exhaustiveness-check -- see above
     switch (node.type) {
       case "Identifier": {
-        if (!scope.has(node.name)) {
+        // `undefined` is a value, as `null` is: the global can't be written
+        // or redefined, so it reads the same in every isolate.
+        if (!scope.has(node.name) && node.name !== "undefined") {
           this.fail(
             node,
             "expression.global",

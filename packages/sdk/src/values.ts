@@ -34,12 +34,14 @@ import type { AnySchema, DescriptorDraft } from "./value-schema.ts";
 
 export { defineSchema, defineTable, rows } from "./schema.ts";
 export type {
+  AccessMode,
   IndexDefinition,
   IndexField,
   RowRole,
   RowRule,
   RowRules,
   SchemaDefinition,
+  TableAccess,
   TableDefinition,
 } from "./schema.ts";
 export { ValueDefinitionError } from "./value-descriptor.ts";

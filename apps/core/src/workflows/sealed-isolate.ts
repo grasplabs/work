@@ -1,4 +1,4 @@
-import { jqWasm, jqWasmModule, kitModuleName } from "@grasp-os/compiler";
+import { kitModuleName } from "@grasp-os/compiler";
 import type { Json } from "@grasp-os/shared/json";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
@@ -13,7 +13,6 @@ import {
   runInSession,
   sandboxVerdictOf,
 } from "../sandbox-session.ts";
-import type { PlatformModule } from "../sandbox-session.ts";
 import { sandbox } from "../sandbox.ts";
 import { sessionHost } from "../sandboxed.ts";
 import { attemptCallLabels } from "./attempt-host.ts";
@@ -25,11 +24,11 @@ import {
 } from "./between-steps.ts";
 import { cpuLimitKill } from "./host.ts";
 
-// A workflow run's isolate: a sealed build's generated module (sealed-run.ts)
-// or an independent workflow's build (resource-runs.ts), with the SDK's
+// A workflow run's isolate: a sealed build's generated module (sealed-run.ts,
+// resource-runs.ts), with the SDK's
 // modules it was built against, run in a Worker Loader isolate with no
 // network and an empty env, or on-prem in a sandbox session of its own.
-// Every binding is a call to core's host (host.ts, resource-host.ts) over
+// Every binding is a call to core's host (host.ts, sealed-run.ts) over
 // RPC. Everything in the isolate is untrusted, core's main module too:
 // every check is on core's side of the RPC.
 
@@ -100,35 +99,11 @@ const codesVerdicts: ReadonlySet<string> = new Set([
   "refused",
 ]);
 
-/**
- * jq's WebAssembly, as every run's isolate has it besides its modules: the
- * workflow SDK's `evaluate` imports it by `jqWasmModule`. In core's Loader
- * a module of its own, spread last so no module of the build's takes its
- * name; on-prem one of the release's platform modules, which the sandbox
- * host reads apart (sandbox-session.ts) and refuses a module named as. It
- * goes with every isolate, whether its code evaluates or not: about 1 MB,
- * read from the assets once per core isolate. Accepted, as every workflow
- * is code generated from a JSON workflow, which evaluates its data flow
- * with it.
- */
-const jqModules = async (
-  env: Pick<Env, "ASSETS">
-): Promise<{
-  loader: Record<string, { wasm: ArrayBuffer }>;
-  platform: Record<string, PlatformModule>;
-}> => {
-  const wasm = await jqWasm(env.ASSETS);
-  return {
-    loader: { [jqWasmModule]: { wasm } },
-    platform: { [jqWasmModule]: { type: "wasm", bytes: new Uint8Array(wasm) } },
-  };
-};
-
 /** A run's main module, by its flat name (`mainSource`). */
 export const sealedMainModule = "grasp-run.js";
 
 /**
- * The shared part of every main module (`mainSource`, resource-host.ts):
+ * The shared part of every main module (`mainSource`):
  * settling a call into plain data and back.
  */
 export const settling = `
@@ -313,8 +288,7 @@ export interface IsolateHostCalls<Attempt = AttemptHost> {
     options: unknown,
     /**
      * The attempt's function in the isolate, handed the host minted for
-     * that attempt: a sealed run's `AttemptHost`, or an independent
-     * workflow's (resource-host.ts).
+     * that attempt: a sealed run's `AttemptHost` (host.ts).
      */
     fn: (attempt: Attempt) => Promise<unknown>,
     /**
@@ -324,41 +298,20 @@ export interface IsolateHostCalls<Attempt = AttemptHost> {
     retry?: (error: Json) => Promise<unknown>
   ) => Promise<Settled<unknown>>;
   sleep: (name: unknown, duration: unknown) => Promise<Settled<null>>;
-  /**
-   * A `try` task's catch step: a sealed run's (host.ts, `RunHost.caught`);
-   * an independent workflow's run has none.
-   */
+  /** A `try` task's catch step (host.ts, `RunHost.caught`). */
   caught?: (
     name: unknown,
     options: unknown,
     fn: (attempt: Attempt, error: Json) => Promise<unknown>
   ) => Promise<Settled<unknown>>;
-  /**
-   * A durable sleep until a deadline its step recorded: an independent
-   * workflow's (resource-host.ts) or a sealed run's (host.ts).
-   */
+  /** A durable sleep until a deadline its step recorded (host.ts). */
   sleepUntil?: (name: unknown, until: unknown) => Promise<Settled<null>>;
-  /**
-   * A listen task's events, as the host takes them: an independent
-   * workflow's (resource-host.ts), or a sealed run's event wait (host.ts).
-   */
+  /** A listen task's events, as the host's event wait takes them (host.ts). */
   listen?: (name: unknown) => Promise<Settled<unknown>>;
-  /**
-   * A run task's child's output, as the host waits for it: an independent
-   * workflow's (resource-host.ts); a sealed run has none.
-   */
-  child?: (name: unknown) => Promise<Settled<unknown>>;
   waitForDecision: (
     name: unknown,
     options: unknown
   ) => Promise<Settled<unknown>>;
-  /**
-   * The run's isolate went quiet after it last got control back, having
-   * made `made` asks in all, the `time`th time it got control back: an
-   * independent workflow's (resource-host.ts), which holds the run busy
-   * until they have all arrived; a sealed run makes none.
-   */
-  quiet?: (made: unknown, time: unknown) => Promise<Settled<null>>;
 }
 
 /**
@@ -621,19 +574,8 @@ export const sessionHostCalls = <Attempt extends object = AttemptHost>(
           error: { name: "Error", message: "This run has no listen tasks." },
         }
       : await host.listen(name),
-  child: async (name) =>
-    host.child === undefined
-      ? {
-          ok: false,
-          error: { name: "Error", message: "This run has no child workflows." },
-        }
-      : await host.child(name),
   waitForDecision: async (name, options) =>
     await host.waitForDecision(name, options),
-  quiet: async (made, time) =>
-    host.quiet === undefined
-      ? { ok: true, value: null }
-      : await host.quiet(made, time),
 });
 
 /**
@@ -672,8 +614,8 @@ export interface SealedLoadOptions {
 }
 
 /**
- * What a run's isolate is loaded with: a sealed build's (sealed-run.ts) or
- * an independent workflow's build (resource-runs.ts). Its main module's
+ * What a run's isolate is loaded with: a sealed build's (sealed-run.ts,
+ * resource-runs.ts). Its main module's
  * `Run` entrypoint takes the host's calls and the run's start.
  */
 export interface SealedIsolate {
@@ -721,8 +663,7 @@ export const loadSealedIsolate = <Attempt extends object = AttemptHost>(
     return {
       run: async (host, start) => {
         // Read before the clock starts: none of the run's code runs yet.
-        const [own, jq] = await Promise.all([modules(), jqModules(env)]);
-        const loaded = { ...own, ...jq.loader };
+        const loaded = await modules();
         const entrypoint = quietLoader(env.LOADER)
           .get(null, () => ({
             ...sealedSandbox,
@@ -755,11 +696,10 @@ export const loadSealedIsolate = <Attempt extends object = AttemptHost>(
         ended: ended.promise,
       };
       const clock = betweenSteps(budgetMs);
-      const [own, jq] = await Promise.all([modules(), jqModules(env)]);
+      const own = await modules();
       const call = {
         mainModule,
         modules: own,
-        platformModules: jq.platform,
         entrypoint: "Run",
         method: "run",
         args: [
@@ -776,9 +716,7 @@ export const loadSealedIsolate = <Attempt extends object = AttemptHost>(
                 "sleepUntil",
                 "caught",
                 "listen",
-                "child",
                 "waitForDecision",
-                "quiet",
               ]
             ),
           },

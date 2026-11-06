@@ -21,3 +21,10 @@ interface __BaseEnv_Env {
   /** The email domains Grasp's staff sign in with, comma-separated; joingrasp.com unless set. */
   STAFF_EMAIL_DOMAINS?: string;
 }
+
+// workerd's streaming digest (src/deploy/release.ts): workers-types puts it
+// on its Crypto, which the DOM's, in the admin's types for its pages,
+// replaces. Merged into the DOM's.
+interface Crypto {
+  DigestStream: typeof DigestStream;
+}

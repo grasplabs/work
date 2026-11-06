@@ -1,6 +1,6 @@
+import type { SealedTask } from "@grasp-os/workflow-schema/sealed";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { SealedTask } from "../src/workflow-builds.ts";
 import { failureOf, retryable } from "../src/workflows/resource-errors.ts";
 
 // What a catch may take of a step's failure, and as what (spec 13.7): the
@@ -10,11 +10,9 @@ import { failureOf, retryable } from "../src/workflows/resource-errors.ts";
 const task: SealedTask = {
   id: "send",
   pointer: "/do/0/guard/try/0/send",
-  kind: "set",
+  kind: "switch",
   steps: ["task"],
   scope: [],
-  branches: [],
-  schemas: {},
 };
 
 /** Whether a retry policy may try again `error` of a step of `of`. */
@@ -31,8 +29,6 @@ const onceTask = (
     kind: "call" as const,
     steps: ["task" as const],
     scope: [],
-    branches: [],
-    schemas: {},
   };
   if (name === "grasp.model") {
     return {
@@ -64,7 +60,7 @@ const onceTask = (
   };
 };
 
-const standard = "https://open-workflow-specification.org/spec/1.0.0/errors/";
+const standard = "https://grasp.work/schemas/grasp-workflow/1/errors/";
 
 describe("a step's failure, as a catch sees it", () => {
   it("never lets a catch take an unknown outcome or a refusal of the module", () => {
@@ -120,8 +116,6 @@ describe("a step's failure, as a catch sees it", () => {
       kind: "call",
       steps: ["task"],
       scope: [],
-      branches: [],
-      schemas: {},
       call: {
         name: "grasp.connector",
         binding: "mail",
@@ -213,8 +207,6 @@ describe("a step's failure, as a catch sees it", () => {
       kind: "raise",
       steps: ["task"],
       scope: [],
-      branches: [],
-      schemas: {},
       error: { type: "urn:grasp:error:denied", status: 409, title: "Denied." },
     };
     const raised = {
@@ -241,14 +233,12 @@ describe("a step's failure, as a catch sees it", () => {
   });
 
   it("lets a retry policy try again only what trying again may fix", () => {
-    const raise: SealedTask = {
+    const raise: Extract<SealedTask, { kind: "raise" }> = {
       id: "deny",
       pointer: "/do/0/guard/try/0/deny",
       kind: "raise",
       steps: ["task"],
       scope: [],
-      branches: [],
-      schemas: {},
       error: { type: "urn:grasp:error:denied", status: 409 },
     };
     expect({

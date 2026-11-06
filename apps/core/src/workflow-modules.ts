@@ -4,7 +4,6 @@ import {
   kitModuleName,
   workflowSdkModules,
 } from "@grasp-os/compiler";
-import type { ContractLookup } from "@grasp-os/open-workflow/catalog";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
@@ -23,6 +22,7 @@ import {
 import type { ActionUse, SealedUse } from "@grasp-os/shared/workflow-modules";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowVersionAction } from "@grasp-os/shared/workflow-resources";
+import type { ContractLookup } from "@grasp-os/workflow-schema/catalog";
 import { z } from "zod";
 
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
@@ -298,7 +298,7 @@ const manifestKey =
 /**
  * What the version's own actions may do (GRA-709), from `modules`, the
  * contracts sealed into its compute.json in the same publication: one
- * entry per local operation binding the checked definition keeps, by
+ * entry per action binding (a `local:` one) the checked document keeps, by
  * alias. A binding without its action's contract is the platform's fault:
  * validation resolved it against these same contracts.
  */
@@ -312,7 +312,7 @@ export const versionActionsOf = (
   const actions: WorkflowVersionAction[] = [];
   for (const [alias, binding] of bindings) {
     const groups = manifestKey.exec(binding.contract)?.groups;
-    if (binding.kind !== "operation" || groups === undefined) {
+    if (binding.kind !== "action" || groups === undefined) {
       continue;
     }
     const contract = modules?.contracts.get(

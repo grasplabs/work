@@ -28,7 +28,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
 import { withHeldCheckpoint } from "./definition-editor.tsx";
-import { stepBodyAt } from "./step-body.ts";
+import { stepFieldsAt } from "./step-body.ts";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 import type { Layout } from "./workflow-diagram.tsx";
 
@@ -117,26 +117,26 @@ type Outcome =
   | { kind: "failing"; revision: number }
   | { kind: "failed"; reason: string };
 
-/** A step's body as JSON, changed and saved as the draft's next revision. */
+/** A step's fields as JSON, changed and saved as the draft's next revision. */
 const StepForm = ({
   workflow,
   draft,
   task,
-  body,
+  fields,
   onDraft,
   onDone,
 }: {
   workflow: string;
   draft: WorkflowDraft;
   task: DiagramTask;
-  body: Record<string, unknown>;
+  fields: Record<string, unknown>;
   onDraft: (draft: WorkflowDraft) => void;
   onDone: () => void;
 }) => {
   const core = useCore();
   const { t } = useLingui();
   const id = useId();
-  const [text, setText] = useState(() => JSON.stringify(body, null, 2));
+  const [text, setText] = useState(() => JSON.stringify(fields, null, 2));
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>();
 
@@ -163,7 +163,7 @@ const StepForm = ({
         async (session) =>
           await session.workflowResources.editStep(workflow, {
             expectedRevision: draft.revision,
-            edit: { kind: "change", pointer: task.pointer, body: changed },
+            edit: { kind: "change", pointer: task.pointer, step: changed },
           })
       );
     } catch (error) {
@@ -271,10 +271,10 @@ const StepSheet = ({
   onDraft: (draft: WorkflowDraft) => void;
   onClose: () => void;
 }) => {
-  const body =
+  const fields =
     task === null || draft.checkpoint === null
       ? undefined
-      : stepBodyAt(draft.checkpoint.source, task.pointer);
+      : stepFieldsAt(draft.checkpoint.source, task.pointer);
   return (
     <Sheet
       onOpenChange={(open) => {
@@ -289,10 +289,10 @@ const StepSheet = ({
           <SheetTitle>{task?.id}</SheetTitle>
           <SheetDescription>{task?.label ?? task?.kind}</SheetDescription>
         </div>
-        {task === null || body === undefined ? null : (
+        {task === null || fields === undefined ? null : (
           <StepForm
-            body={body}
             draft={draft}
+            fields={fields}
             // Each step, and each revision of it, opens afresh.
             key={`${task.pointer} ${draft.revision}`}
             onDone={onClose}

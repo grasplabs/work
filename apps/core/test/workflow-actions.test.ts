@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
@@ -8,14 +7,12 @@ import { operationErrors } from "@grasp-os/shared/operations";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import {
-  workflowNamespace,
-  workflowResourceErrors,
-} from "@grasp-os/shared/workflow-resources";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowResourceRun,
   WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -51,6 +48,7 @@ import type { BuiltCall } from "../src/workflows/resource-calls.ts";
 import { failureOf, retryable } from "../src/workflows/resource-errors.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
@@ -86,16 +84,6 @@ const person = async (role: Role): Promise<Identity> => {
   ]);
   return identityOf(userId, role);
 };
-
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
 
 const descriptorOf = (schema: { descriptor: unknown }): string =>
   JSON.stringify(schema.descriptor);
@@ -191,10 +179,6 @@ export const notify = action({
 const connector = (operations: string[]): string =>
   `resource.connector("mail", { operations: ${JSON.stringify(operations)} })`;
 
-/** The `files` use of the run's own files declaring `operations`. */
-const filesUse = (operations: string): string =>
-  `resource.files("files", { operations: ${operations} })`;
-
 /** The flag of workflow `id`'s version as `by` lists it. */
 const listed = async (id: string, by: Identity) => {
   const [version] = await workflowVersions(env, by, id);
@@ -249,8 +233,8 @@ const resealed = async (
   const hash = await sha256Hex(text);
   await expect(
     env.DB.prepare(
-      `INSERT OR REPLACE INTO workflow_resource_versions (workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, manifest, manifest_hash, author_id, created_at)
-        SELECT workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, evaluator_hash, contract, contract_hash, ?, ?, author_id, created_at
+      `INSERT OR REPLACE INTO workflow_resource_versions (workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, contract, contract_hash, manifest, manifest_hash, author_id, created_at)
+        SELECT workflow_resource_id, version, definition_version, definition, definition_json_hash, profile_version, contract, contract_hash, ?, ?, author_id, created_at
         FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1`
     )
       .bind(text, hash, id)
@@ -263,16 +247,13 @@ const resealed = async (
     ).bind(text, hash, id)
   );
 };
-/** A JSON task calling `mail`'s `op`. */
+/** A step calling `mail`'s `op`. */
 const mailTask = (op: string) => ({
-  [`call-${op.replace(".", "-")}`]: {
-    call: "grasp.connector",
-    with: {
-      binding: "mail",
-      operation: op,
-      arguments: { to: "${ $workflow.input.who }", subject: "Hi" },
-    },
-  },
+  id: `call-${op.replace(".", "-")}`,
+  type: "do",
+  binding: "mail",
+  operation: op,
+  arguments: { to: { $expr: "input.who" }, subject: "Hi" },
 });
 /** A version review flagging `writes` alike, published and listed by every role. */
 const flagged = (writes: unknown[]) => ({
@@ -342,8 +323,7 @@ const notifyCall = {
   arguments: { literal: null },
 } as const;
 
-/** A definition of `name`: binding `notify` to the action, and `mail`. */
-/** What a definition holds besides its action: its tasks before, its `mail`. */
+/** What a definition holds besides its action: its steps before, its `mail`. */
 interface DefinitionParts {
   readonly before?: readonly unknown[];
   readonly mail?: { readonly kind: string; readonly contract: string };
@@ -351,52 +331,43 @@ interface DefinitionParts {
   readonly files?: { readonly kind: "files"; readonly contract: string };
 }
 
-const definitionOf = (
-  name: string,
-  {
-    before = [],
-    mail = { kind: "connector", contract: "" },
-    files,
-  }: DefinitionParts = {}
-): string =>
+/**
+ * A definition binding `notify` to the action, and `mail`: its steps
+ * `before`, then the action's, then a pause, so a run replays.
+ */
+const definitionOf = ({
+  before = [],
+  mail = { kind: "connector", contract: "" },
+  files,
+}: DefinitionParts = {}): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: {
-            notify: {
-              kind: "operation",
-              contract: "local:code/notify.ts#notify",
-            },
-            mail,
-            ...(files === undefined ? {} : { files }),
-          },
-        },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: { $expr: "steps.notify.output.status" } },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
+    bindings: {
+      notify: { kind: "action", contract: "local:code/notify.ts#notify" },
+      mail,
+      ...(files === undefined ? {} : { files }),
+    },
+    steps: [
       ...before,
       {
-        notify: {
-          call: "grasp.operation",
-          with: {
-            binding: "notify",
-            arguments: { to: "${ $workflow.input.who }" },
-          },
-        },
+        id: "notify",
+        type: "do",
+        binding: "notify",
+        arguments: { to: { $expr: "input.who" } },
       },
-      { pause: { wait: "PT1S" } },
+      { id: "pause", type: "wait", for: "1 second" },
     ],
   });
+
+/** A definition's bindings, to change them. */
+const definitionSchema = z.looseObject({
+  bindings: z.record(z.string(), z.unknown()),
+});
 
 /**
  * A workflow of `by`'s with `module` as its action, its `mail` binding a
@@ -416,7 +387,7 @@ const actingWorkflow = async (
   }
   const workflow = await createWorkflowResource(env, by, `act-${unique()}`);
   const published = await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(workflow.name, {
+    definition: definitionOf({
       before,
       mail: { kind: "connector", contract: key },
       ...(files ? { files: { kind: "files", contract: filesKey } } : {}),
@@ -593,7 +564,7 @@ describe("a JSON workflow's own actions", () => {
       // Swallowed: the refusal stands all the same.
     }
     return { status: "caught" };`),
-      [{ hold: { wait: "PT1S" } }]
+      [{ id: "hold", type: "wait", for: "1 second" }]
     );
     const runId = await started(ada, workflow.id, serving);
     await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
@@ -614,64 +585,6 @@ describe("a JSON workflow's own actions", () => {
       receipts: ["workflow.call_denied"],
       evidence: [],
     });
-  });
-
-  it("keeps a connector's answer as a file only for a read its connector declares answers one, into a files use the action declared to write", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const into = `try {
-      await ctx.resources.mail.call("mail.send", { to: args.to, subject: "one" }, { into: "files" });
-    } catch {
-      // Swallowed: the refusal stands all the same.
-    }
-    return { status: "caught" };`;
-    const mailUse = connector(["mail.send"]);
-    const cases = [
-      // A files use to write: but mail.send answers no file (a Composio
-      // tool never declares one), refused before anything is sent.
-      { uses: `[${mailUse}, ${filesUse('["write"]')}]`, files: true },
-      // No files use declared: refused by the action's host.
-      { uses: `[${mailUse}]`, files: false },
-      // A files use that only reads: refused by the action's host.
-      { uses: `[${mailUse}, ${filesUse('["read"]')}]`, files: true },
-    ];
-    const results = await Promise.all(
-      cases.map(async ({ uses, files }) => {
-        const { workflow, mail, serving } = await actingWorkflow(
-          ada,
-          admin,
-          notifyModule(into, uses),
-          [],
-          { files }
-        );
-        const runId = await started(ada, workflow.id, serving);
-        const end = await ended(ada, workflow.id, runId);
-        const kept = await env.DB.prepare(
-          "SELECT count(*) AS n FROM workflow_run_files WHERE run_id = ?"
-        )
-          .bind(runId)
-          .first<{ n: number }>();
-        const sent = await mail.did();
-        return { end, sent: sent.calls, kept: kept?.n };
-      })
-    );
-    expect(results).toStrictEqual([
-      {
-        end: { status: "failed", code: "workflow.call_invalid" },
-        sent: 0,
-        kept: 0,
-      },
-      {
-        end: { status: "failed", code: "workflow.call_denied" },
-        sent: 0,
-        kept: 0,
-      },
-      {
-        end: { status: "failed", code: "workflow.call_denied" },
-        sent: 0,
-        kept: 0,
-      },
-    ]);
   });
 
   it("shows what each action may call in its version, as sealed, to every role alike", async () => {
@@ -748,15 +661,6 @@ describe("a JSON workflow's own actions", () => {
     });
     const writer =
       'resource.model("writer", { output: v.object({ line: v.string() }) })';
-    const definitionSchema = z.looseObject({
-      document: z.looseObject({
-        metadata: z.object({
-          grasp: z.looseObject({
-            bindings: z.record(z.string(), z.unknown()),
-          }),
-        }),
-      }),
-    });
     /** Publishes an action with `uses`; answers its flag, published and listed. */
     const reviewed = async (uses: string) => {
       const workflow = await createWorkflowResource(
@@ -771,12 +675,12 @@ describe("a JSON workflow's own actions", () => {
       });
       const definition = definitionSchema.parse(
         JSON.parse(
-          definitionOf(workflow.name, {
+          definitionOf({
             mail: { kind: "connector", contract: mail },
           })
         )
       );
-      const { bindings } = definition.document.metadata.grasp;
+      const { bindings } = definition;
       if (uses.includes("writer")) {
         bindings.writer = { kind: "model", contract: model };
       }
@@ -942,34 +846,19 @@ describe("a JSON workflow's own actions", () => {
       ...operation,
     });
     const ask = {
-      ask: {
-        call: "grasp.model",
-        with: {
-          binding: "writer",
-          instructions: "Write a line.",
-          input: { who: "${ $workflow.input.who }" },
-          outputSchema: objectSchema({ line: { type: "string" } }),
-        },
-      },
+      id: "ask",
+      type: "agent",
+      binding: "writer",
+      instructions: "Write a line.",
+      input: { who: { $expr: "input.who" } },
+      output: objectSchema({ line: { type: "string" } }),
     };
     const exportTask = {
-      share: {
-        call: "grasp.operation",
-        with: {
-          binding: "contacts",
-          arguments: { to: "${ $workflow.input.who }", subject: "Hi" },
-        },
-      },
+      id: "share",
+      type: "do",
+      binding: "contacts",
+      arguments: { to: { $expr: "input.who" }, subject: "Hi" },
     };
-    const definitionSchema = z.looseObject({
-      document: z.looseObject({
-        metadata: z.object({
-          grasp: z.looseObject({
-            bindings: z.record(z.string(), z.unknown()),
-          }),
-        }),
-      }),
-    });
     /** Publishes `before` ahead of the action, which uses `operations` of mail. */
     const reviewed = async (
       before: unknown[],
@@ -990,13 +879,13 @@ describe("a JSON workflow's own actions", () => {
       });
       const definition = definitionSchema.parse(
         JSON.parse(
-          definitionOf(workflow.name, {
+          definitionOf({
             before,
             mail: { kind: "connector", contract: mail },
           })
         )
       );
-      const { bindings } = definition.document.metadata.grasp;
+      const { bindings } = definition;
       const text = JSON.stringify(before);
       if (text.includes('"writer"')) {
         bindings.writer = { kind: "model", contract: model };
@@ -1024,7 +913,7 @@ describe("a JSON workflow's own actions", () => {
         await undo?.();
       }
       return {
-        executable: asBuilder?.build.executable,
+        executable: asBuilder?.build.hash !== undefined,
         published: published.modelSteeredWrites,
         builder: asBuilder?.modelSteeredWrites,
         reader: asReader?.modelSteeredWrites,
@@ -1096,15 +985,12 @@ describe("a JSON workflow's own actions", () => {
     const ada = await person("builder");
     const key = await mailContract(admin);
     const ask = {
-      ask: {
-        call: "grasp.model",
-        with: {
-          binding: "writer",
-          instructions: "Write a line.",
-          input: { who: "${ $workflow.input.who }" },
-          outputSchema: objectSchema({ line: { type: "string" } }),
-        },
-      },
+      id: "ask",
+      type: "agent",
+      binding: "writer",
+      instructions: "Write a line.",
+      input: { who: { $expr: "input.who" } },
+      output: objectSchema({ line: { type: "string" } }),
     };
     const problems: string[] = [];
     // No `writer` binding at all, then `writer` bound as a connector.
@@ -1115,26 +1001,16 @@ describe("a JSON workflow's own actions", () => {
         ada,
         `act-${unique()}`
       );
-      const definition = z
-        .looseObject({
-          document: z.looseObject({
-            metadata: z.object({
-              grasp: z.looseObject({
-                bindings: z.record(z.string(), z.unknown()),
-              }),
-            }),
-          }),
-        })
-        .parse(
-          JSON.parse(
-            definitionOf(workflow.name, {
-              before: [ask],
-              mail: { kind: "connector", contract: key },
-            })
-          )
-        );
+      const definition = definitionSchema.parse(
+        JSON.parse(
+          definitionOf({
+            before: [ask],
+            mail: { kind: "connector", contract: key },
+          })
+        )
+      );
       if (writer !== undefined) {
-        definition.document.metadata.grasp.bindings.writer = writer;
+        definition.bindings.writer = writer;
       }
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       const error = await refusal(
@@ -1157,8 +1033,8 @@ describe("a JSON workflow's own actions", () => {
       );
     }
     expect(problems).toStrictEqual([
-      "workflow.definition_invalid: binding.unknown",
-      "workflow.definition_invalid: binding.wrong_kind",
+      "workflow.definition_invalid: workflow.unknown_binding",
+      "workflow.definition_invalid: workflow.binding_kind",
     ]);
   });
 
@@ -1191,7 +1067,7 @@ describe("a JSON workflow's own actions", () => {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       const error = await refusal(
         publishWorkflowVersion(env, ada, workflow.id, {
-          definition: definitionOf(workflow.name, { mail }),
+          definition: definitionOf({ mail }),
           basedOn: null,
           modules: {
             "code/notify.ts": notifyModule('return { status: "x" };', uses),
@@ -1202,7 +1078,9 @@ describe("a JSON workflow's own actions", () => {
         .object({ code: z.string(), details: z.unknown() })
         .parse(error);
       expect(parsed.code).toBe("workflow.definition_invalid");
-      expect(JSON.stringify(parsed.details)).toContain("binding.unknown_use");
+      expect(JSON.stringify(parsed.details)).toContain(
+        "binding.use_undeclared"
+      );
     }
   });
 
@@ -1231,7 +1109,7 @@ describe("a JSON workflow's own actions", () => {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       const error = await refusal(
         publishWorkflowVersion(env, ada, workflow.id, {
-          definition: definitionOf(workflow.name, {
+          definition: definitionOf({
             mail: { kind: "connector", contract: key },
           }),
           basedOn: null,
@@ -1732,8 +1610,6 @@ export const notify = action({
               {
                 alias: "mail",
                 kind: "connector",
-                resourceId: null,
-                resourceVersion: null,
                 contractId: "mail",
                 fingerprint: "f",
                 approval: "a",
@@ -1873,24 +1749,14 @@ export const notify = action({
     await publishCatalogContract(env, admin, { key: model, kind: "model" });
     const mailKey = await mailContract(admin);
     const workflow = await createWorkflowResource(env, ada, `act-${unique()}`);
-    const definition = z
-      .looseObject({
-        document: z.looseObject({
-          metadata: z.object({
-            grasp: z.looseObject({
-              bindings: z.record(z.string(), z.unknown()),
-            }),
-          }),
-        }),
-      })
-      .parse(
-        JSON.parse(
-          definitionOf(workflow.name, {
-            mail: { kind: "connector", contract: mailKey },
-          })
-        )
-      );
-    definition.document.metadata.grasp.bindings.writer = {
+    const definition = definitionSchema.parse(
+      JSON.parse(
+        definitionOf({
+          mail: { kind: "connector", contract: mailKey },
+        })
+      )
+    );
+    definition.bindings.writer = {
       kind: "model",
       contract: model,
     };

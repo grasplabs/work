@@ -9,7 +9,6 @@
  * the missing-table warning (platform-updates.test.ts), which only that
  * file may trip.
  */
-import { compileExpression } from "@grasp-os/workflow-expressions/evaluate";
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterAll, afterEach, vi } from "vite-plus/test";
@@ -29,7 +28,7 @@ import { resetStorage } from "./reset-storage.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
 // Every module core loads on first use rather than at startup (each
-// `await import(` under src, and jq in @grasp-os/workflow-expressions),
+// `await import(` under src),
 // loaded here up front, for two reasons. A core module that adds one adds
 // it here.
 //
@@ -42,7 +41,7 @@ import { connectDb, testBinding } from "./test-env.ts";
 //
 // Imports cut off mid-load: a module whose first import starts inside a
 // Durable Object can never load at all. A workflow step imports
-// postal-mime or jq, a workspace imports the agent loop at a chat's first
+// postal-mime, a workspace imports the agent loop at a chat's first
 // turn. The module runner keeps that import's
 // promise for every later import of the module in this runtime, but the
 // next file's reset (reset-storage.ts) aborts the object mid-import, so
@@ -77,13 +76,6 @@ await Promise.all([
   import("../src/app-activation.ts"),
   import("../src/app-releases.ts"),
   import("../src/screen-references.ts"),
-  // jq (workflow-expressions' jq.ts), which only a compile or run loads:
-  // compiling a literal no test uses loads its runtime and WebAssembly.
-  compileExpression('"start-each-file"', {
-    stage: "taskDefinition",
-    scope: [],
-    pointer: "",
-  }),
 ]);
 
 /** Migrations, read by vite.config.ts into bindings. */

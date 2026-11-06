@@ -20,9 +20,9 @@ import type { WorkflowQueryName } from "./workflow-queries.ts";
 // - `server/_generated/server.ts` (`@server/_generated/server`): the
 //   server constructors and `doc`, specialized to the App's schema. Its
 //   code is the same for every App (`serverModule(schema)`); the
-//   specialization is in its types, which come from `schema.ts` itself.
+//   specialization is in its types, which come from `server/schema.ts`.
 // - `server/_generated/dataModel.ts` (`@server/_generated/dataModel`): the
-//   data model's types (`Doc`, `Id`, `TableName`), from `schema.ts` too.
+//   data model's types (`Doc`, `Id`, `TableName`), from the schema too.
 // - `server/_generated/internal.ts` (`@server/_generated/internal`): the
 //   `internal` tree, for the App's own server code only.
 // - `server/_generated/api.ts` (`@server/_generated/api`): the public
@@ -481,8 +481,12 @@ const typeOf = (
     : nullable;
 };
 
-/** The type of a whole value: `typeOf`, with its own presence. */
-const valueTypeOf = (descriptor: ValueDescriptor, mode: Mode): string =>
+/**
+ * The TypeScript type of a whole value `descriptor` accepts, as a caller
+ * passes it (`input`) or as it normalizes (`output`): `typeOf`, with its
+ * own presence.
+ */
+export const valueTypeOf = (descriptor: ValueDescriptor, mode: Mode): string =>
   typeOf(descriptor, mode, true);
 
 /** A tree of entries, by the segments of their dotted paths. */
@@ -629,7 +633,7 @@ const typeImports = (text: string, names: readonly string[]): string => {
 export const dataModelSource = `${banner}import type { Id as SdkId } from "@grasp-os/sdk";
 import type { Doc as SdkDoc } from "@grasp-os/sdk/database";
 
-import type schema from "../../schema.ts";
+import type schema from "../schema.ts";
 
 type Tables = (typeof schema)["tables"];
 
@@ -656,7 +660,7 @@ import type {
   Use,
 } from "@grasp-os/sdk/server";
 
-import schema from "../../schema.ts";
+import schema from "../schema.ts";
 import type { DataModel } from "./dataModel.ts";
 
 export type { CallerCtx } from "@grasp-os/sdk/server";

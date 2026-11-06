@@ -6,7 +6,7 @@ import { z } from "zod";
 import { envelopedSchema, readEnvelope } from "./connector-schemas.ts";
 
 // What a JSON workflow run's schemas and contracts check: a value as it
-// is. A task's schema (resource-host.ts) and a call's contract
+// is. A model task's output schema and a call's contract
 // (resource-calls.ts) check what crosses them; they never fill in, coerce
 // or change it. One rule, and one cache of the native schemas it uses.
 

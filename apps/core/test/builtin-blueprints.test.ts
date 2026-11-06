@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 
+import {
+  definitionPath,
+  definitionSources,
+  generatedFiles,
+  readDefinition,
+} from "@grasp-os/sdk/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { collectionIdSchema, appIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
@@ -7,7 +13,7 @@ import type {
   DeclaredPermission,
   Authority,
 } from "@grasp-os/shared/permissions";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -105,6 +111,9 @@ const releaseWith = (change: Partial<BuiltinBlueprint>): Release =>
 /** Where `hello` keeps its greeting, a function of its release. */
 const greetings = "server/greetings.ts";
 
+/** A file a later release of the built-in adds. */
+const helperPath = "values.ts";
+
 /** A release whose `hello` greets differently. */
 const changedHello = (): Release =>
   releaseWith({
@@ -164,54 +173,34 @@ const guests: DeclaredPermission = {
 
 /** A JSON Schema of an object of `properties`, all required. */
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
 /**
- * A workflow a release ships with `hello`, named `name`: a model, bound
- * as `model` to the catalog's `contract`, greets its input's `who`.
+ * A workflow a release ships with `hello`: a model, bound as `model` to
+ * the catalog's `contract`, greets its input's `who`.
  */
-const greeter = (contract: string, name = "greeter"): string =>
+const greeter = (contract: string): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: "Greeter",
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: { model: { kind: "model", contract } },
-        },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ line: { type: "string" } }),
+      value: { line: { $expr: "steps.greet.output.line" } },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ line: { type: "string" } }) },
-    do: [
+    bindings: { model: { kind: "model", contract } },
+    steps: [
       {
-        greet: {
-          call: "grasp.model",
-          with: {
-            binding: "model",
-            instructions: "Greet them.",
-            // oxlint-disable-next-line no-template-curly-in-string -- a workflow expression
-            input: { who: "${ $workflow.input.who }" },
-            outputSchema: objectSchema({ line: { type: "string" } }),
-          },
-          // oxlint-disable-next-line no-template-curly-in-string -- a workflow expression
-          export: { as: "${ {line: .line} }" },
-        },
+        id: "greet",
+        type: "agent",
+        binding: "model",
+        instructions: "Greet them.",
+        input: { who: { $expr: "input.who" } },
+        output: objectSchema({ line: { type: "string" } }),
       },
-      // oxlint-disable-next-line no-template-curly-in-string -- a workflow expression
-      { finish: { set: { line: "${ $context.line }" } } },
     ],
   });
 
@@ -278,6 +267,25 @@ describe("the built-in blueprints", () => {
     ).map((file) => file.split("/")[2] ?? file);
     expect(release.blueprints.map(({ id }) => id).toSorted()).toStrictEqual(
       [...folders, "hello"].toSorted()
+    );
+  });
+
+  it("hold their config and schema exactly as their definition generates them", () => {
+    expect(
+      release.blueprints.map(({ id, files }) => ({
+        id,
+        generated: {
+          [generatedFiles.config]: files[generatedFiles.config],
+          [generatedFiles.schema]: files[generatedFiles.schema],
+        },
+      }))
+    ).toStrictEqual(
+      release.blueprints.map(({ id, files }) => ({
+        id,
+        generated: definitionSources(
+          readDefinition(files[definitionPath] ?? "")
+        ),
+      }))
     );
   });
 
@@ -762,13 +770,14 @@ describe("the built-in blueprints", () => {
     );
     await builder.api.apps.versions.setCurrent(app.id, edited);
 
-    // A release that changes the greeting too, and the schema.
-    const schema = `${hello().files["schema.ts"]}\n// Release 2.\n`;
+    // A release that changes the greeting too, and adds a helper.
+    const helper =
+      "export const shout = (text: string) => text.toUpperCase();\n";
     const next = releaseWith({
       files: {
         ...hello().files,
         [greetings]: `${hello().files[greetings]}\n// Release 2.\n`,
-        "schema.ts": schema,
+        [helperPath]: helper,
       },
     });
     await expect(install(next)).resolves.toBeTruthy();
@@ -859,7 +868,7 @@ describe("the built-in blueprints", () => {
         from: released?.tree,
         to: installed?.tree,
         over: edited,
-        changes: [["schema.ts", "modified"]],
+        changes: [[helperPath, "added"]],
         conflicts: [greetings],
       },
       before: mine,
@@ -869,7 +878,11 @@ describe("the built-in blueprints", () => {
         ["app.committed", taken.version],
         ["app.blueprint.updated", taken.version],
       ],
-      files: { ...hello().files, [greetings]: mine, "schema.ts": schema },
+      files: {
+        ...hello().files,
+        [greetings]: mine,
+        [helperPath]: helper,
+      },
       again: "app.conflict",
       afterwards: null,
       currentBefore: edited,
@@ -904,9 +917,10 @@ describe("the built-in blueprints", () => {
       .bind(tree.tree, app.id)
       .run();
 
-    const schema = `${hello().files["schema.ts"]}\n// Release 2.\n`;
+    const helper =
+      "export const shout = (text: string) => text.toUpperCase();\n";
     await install(
-      releaseWith({ files: { ...hello().files, "schema.ts": schema } })
+      releaseWith({ files: { ...hello().files, [helperPath]: helper } })
     );
     const offered = await builder.api.apps.blueprints.update(app.id);
     if (!offered) {
@@ -922,15 +936,15 @@ describe("the built-in blueprints", () => {
       changes: offered.changes.map(({ path, change }) => [path, change]),
       conflicts: offered.conflicts,
       v1: Object.keys(taken).filter((path) => path.startsWith("app/")),
-      schema: taken["schema.ts"],
+      helper: taken[helperPath],
     }).toStrictEqual({
       changes: [
         ["app/server.ts", "deleted"],
-        ["schema.ts", "modified"],
+        [helperPath, "added"],
       ],
       conflicts: [],
       v1: [],
-      schema,
+      helper,
     });
 
     await reinstall();
@@ -1042,42 +1056,6 @@ describe("the built-in blueprints", () => {
       unapproved: "workflow.binding_unapproved",
       otherCopy: "workflow.start_denied",
       ran: "completed",
-    });
-
-    await reinstall();
-  });
-
-  it("publish a copy's workflow as its own, whatever workflow the release's definition names", async () => {
-    await reinstall();
-    const builder = await signedInApi(idp, "builder");
-    const owner = await signedInApi(idp, "builder");
-    const contract = `fixture/greeter-${unique()}`;
-    // Someone else's workflow, which the release's definition names.
-    const victim = await owner.api.workflowResources.create(
-      `victim-${unique()}`
-    );
-    await expect(
-      install(shippingGreeter(contract, greeter(contract, victim.name)))
-    ).resolves.toBeTruthy();
-    await builder.api.apps.blueprints.create("hello", { name: "Names" });
-    const [workflow] = await builder.api.workflowResources.list();
-    const definition = z
-      .object({
-        document: z.object({ namespace: z.string(), name: z.string() }),
-      })
-      .parse(
-        JSON.parse(
-          await builder.api.workflowResources.definition(workflow?.id ?? "", 1)
-        )
-      );
-    expect({
-      named: definition.document.name === workflow?.name,
-      namespace: definition.document.namespace,
-      victim: await owner.api.workflowResources.versions(victim.id),
-    }).toStrictEqual({
-      named: true,
-      namespace: workflowNamespace,
-      victim: [],
     });
 
     await reinstall();

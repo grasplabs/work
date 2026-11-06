@@ -341,7 +341,7 @@ export const BindingFrame = ({
 }: {
   alias: string;
   kind: string;
-  contractId: string | null;
+  contractId: string;
   children: ReactNode;
 }) => {
   const { t } = useLingui();
@@ -350,7 +350,7 @@ export const BindingFrame = ({
       <span className="flex flex-wrap items-center gap-2">
         <code className="font-mono">{alias}</code>
         <span className="text-muted-foreground">
-          {contractId === null ? kind : t`${kind}: ${contractId}`}
+          {t`${kind}: ${contractId}`}
         </span>
       </span>
       {children}

@@ -15,6 +15,7 @@ import { revokeRelease } from "../src/release-retention.ts";
 import { withScreenReferences } from "../src/screen-references.ts";
 import { buildScreens } from "../src/screens.ts";
 import { StoreHost } from "../src/store-host.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { apiOf, notesFiles as files } from "./notes-client-app.ts";
 import {
@@ -533,7 +534,7 @@ describe("the session client", { timeout: 120_000 }, () => {
       opened.app,
       {
         ...files,
-        "app.ts": `${files["app.ts"] ?? ""}\n// The second version.\n`,
+        "server/notes.ts": `${files["server/notes.ts"] ?? ""}\n// The second version.\n`,
       },
       "Second"
     );
@@ -794,14 +795,12 @@ export default function Notes() {
     ]);
   });
 
-  it("tells an App without server code that it has no references yet", async () => {
+  it("gives an App of pages alone its references, generated from the definition its first version gets", async () => {
     await expect(
       diagnosticsOf({
         "screens/notes.tsx": screen("  void api;"),
       })
-    ).resolves.toStrictEqual([
-      expect.stringContaining("which this App doesn't have yet"),
-    ]);
+    ).resolves.toStrictEqual([]);
   });
 
   it("builds forms of the operations, the record and a native schema, typed by what they bind", async () => {
@@ -863,7 +862,34 @@ export default function Notes() {
 
   it("builds a screen of a data grid and a field for every kind of value, typed by what each binds", async () => {
     const tasks = {
-      "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+      ...appDefinition({
+        name: "Tasks",
+        tables: {
+          tasks: {
+            fields: {
+              title: "v.string().trim().min(1).max(200)",
+              status: 'v.enum(["open", "done"])',
+              labels: 'v.array(v.enum(["red", "green"]))',
+              estimate: "v.number().integer().min(1)",
+              due: "v.timestamp()",
+              urgent: "v.boolean()",
+              owner: 'v.id("people").optional()',
+              notes: "v.string().max(10_000)",
+              brief: "v.file().optional()",
+            },
+            access: { read: "appMembers", write: "appMembers" },
+          },
+          people: {
+            fields: { name: "v.string()" },
+            access: { read: "appMembers", write: "appBuilders" },
+          },
+        },
+        permissions: [
+          'permission.files({ operations: ["upload", "read"] })',
+          'permission.links({ origins: ["https://example.com"] })',
+        ],
+      }),
+      "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const taskFields = {
   title: v.string().trim().min(1).max(200),
@@ -876,15 +902,10 @@ export const taskFields = {
   notes: v.string().max(10_000),
   brief: v.file().optional(),
 };
-
-export default defineSchema({
-  tasks: defineTable(taskFields),
-  people: defineTable({ name: v.string() }),
-});
 `,
       "server/tasks.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
 import { doc, mutation, query } from "@server/_generated/server";
-import { taskFields } from "../schema.ts";
+import { taskFields } from "../values.ts";
 
 export const list = query({
   args: { pagination: paginationOptionsValidator, search: v.string(), status: v.enum(["open", "done"]).optional() },
@@ -919,20 +940,10 @@ export const rename = mutation({
   },
 });
 `,
-      "app.ts": `import { app, permission } from "@grasp-os/sdk";
-import schema from "./schema.ts";
 
-export const briefs = permission.files({ operations: ["upload", "read"] });
-
-export const site = permission.links({ origins: ["https://example.com"] });
-
-export default app({
-  name: "Tasks",
-  schema,
-  access: { tables: { tasks: { read: "appMembers", write: "appMembers" }, people: { read: "appMembers", write: "appBuilders" } } },
+      "screens.ts": `export default {
   screens: [{ name: "tasks", path: "/", source: "screens/tasks.tsx" }],
-  permissions: { files: briefs, links: site },
-});
+};
 `,
     };
     const tasksScreen = `import { useForm, useMutation } from "@grasp-os/sdk/react";
@@ -1000,9 +1011,9 @@ export default function Tasks() {
     await expect(
       diagnosticsOf({
         ...files,
-        "screens/notes.tsx": `import { app } from "@grasp-os/sdk";
+        "screens/notes.tsx": `import { defineApp } from "@grasp-os/sdk";
 export default function Notes() {
-  return <p>{typeof app}</p>;
+  return <p>{typeof defineApp}</p>;
 }
 `,
       })

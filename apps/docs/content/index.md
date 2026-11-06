@@ -7,7 +7,7 @@ Grasp runs your company's Apps and workflows in its own deployment. You write an
 
 An App has four parts:
 
-- **A schema**: the tables the App keeps, with a type for every field. See [Data](/guides/data).
+- **A definition**: what the App is, as data: the tables it keeps, with a type for every field, who may read and write them, and its permissions. Grasp changes it with its definition tools and generates the App's config and schema from it. See [An App's project](/guides/project) and [Data](/guides/data).
 - **Server functions**: queries that read, mutations that write and actions that reach outside the App. See [Server functions](/guides/server-functions).
 - **Pages**: React components people open in Grasp, which call the server functions and stay up to date as data changes. See [Pages](/guides/pages).
 - **Permissions**: everything the App reaches beyond its own data, such as the workflows it starts. An App starts with access to nothing; an admin grants each permission. See [Workflows](/guides/workflows).

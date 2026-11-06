@@ -22,6 +22,7 @@ import { cursorKeysOf, openCursor, sealCursor } from "../src/store-cursors.ts";
 import type { CursorBinding } from "../src/store-cursors.ts";
 import { StoreHost } from "../src/store-host.ts";
 import type { AnchorValue } from "../src/store-queries.ts";
+import { accessedManifest } from "./store-schemas.ts";
 
 // Pages of a business store's records and their cursors (store-cursors.ts,
 // store-queries.ts `readPage`), through core's way into a store and its
@@ -71,7 +72,7 @@ const storeWith = async (read: AccessMode): Promise<Fixture> => {
   const store = await openStore(env, await createStore(env, builder));
   const defined = await store.defineTables(
     manifestText(
-      schemaManifest(schema, {
+      accessedManifest(schema, {
         tables: {
           notes: { read, write: read },
           people: { read, write: read },
@@ -467,15 +468,13 @@ describe("cursors", () => {
             })
               .index("by_title", ["title"])
               .index("by_done_rank", ["done", "rank"])
-              .index("by_label", ["label"]),
-            people: defineTable({ name: v.string() }),
-          }),
-          {
-            tables: {
-              notes: { read: "owner", write: "owner" },
-              people: { read: "owner", write: "owner" },
-            },
-          }
+              .index("by_label", ["label"])
+              .access({ read: "owner", write: "owner" }),
+            people: defineTable({ name: v.string() }).access({
+              read: "owner",
+              write: "owner",
+            }),
+          })
         )
       )
     );

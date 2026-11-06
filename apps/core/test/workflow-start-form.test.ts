@@ -1,5 +1,5 @@
 import type { Role } from "@grasp-os/shared/roles";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -39,50 +39,33 @@ const person = async (role: Role): Promise<Acting> => {
   return { userId, role, teams: [], staff: false };
 };
 
-/** A workflow.json named `name` at `version`, whose input is an object with `properties`. */
+/**
+ * A grasp-workflow/1 definition whose input is an object with
+ * `properties`, its one step titled `version`, so each version's document
+ * differs.
+ */
 const definitionOf = (
-  name: string,
   version: string,
   properties: Record<string, unknown>
 ): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: {},
-        },
-      },
-    },
+    $schema: workflowSchemaUrl,
     input: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties,
-          required: Object.keys(properties),
-          additionalProperties: false,
-        },
-      },
+      type: "object",
+      properties,
+      required: Object.keys(properties),
+      additionalProperties: false,
     },
     output: {
       schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: { status: { type: "string" } },
-          required: ["status"],
-          additionalProperties: false,
-        },
+        type: "object",
+        properties: { status: { type: "string" } },
+        required: ["status"],
+        additionalProperties: false,
       },
+      value: { status: "done" },
     },
-    do: [{ finish: { set: { status: "done" } } }],
+    steps: [{ id: "pause", title: version, type: "wait", for: "1 second" }],
   });
 
 /** The input `version` takes: who to greet, and how many times. */
@@ -97,7 +80,7 @@ const greetingWorkflow = async () => {
   ]);
   const workflow = await createWorkflowResource(env, ada, `greet-${unique()}`);
   await publishWorkflowVersion(env, ada, workflow.id, {
-    definition: definitionOf(workflow.name, "1.0.0", greeting),
+    definition: definitionOf("1.0.0", greeting),
     basedOn: null,
   });
   await shareWorkflowResource(env, ada, workflow.id, {
@@ -178,7 +161,7 @@ describe("starting an independent workflow by hand", () => {
     const { ada, uma } = await greetingWorkflow();
     const workflow = await createWorkflowResource(env, ada, `ask-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf(workflow.name, "1.0.0", {
+      definition: definitionOf("1.0.0", {
         approver: { type: "string", "x-grasp-value": { kind: "person" } },
         note: { type: "string" },
       }),
@@ -200,15 +183,18 @@ describe("starting an independent workflow by hand", () => {
       properties: form.input?.properties,
       // Uma, a user, picks from everyone, by name and ID alone.
       offersAda: form.people?.people.find(({ id }) => id === ada.userId),
-      // Each read on the record: how many, never whom.
-      recorded: recorded.map(({ action, actor, target, detail }) => ({
-        action,
-        actor,
-        target,
-        counts:
-          detail.people === form.people?.people.length &&
-          detail.teams === form.people?.teams.length,
-      })),
+      // Each read on the record: how many, never whom. Only this
+      // workflow's: runs elsewhere in the worker record their steps too.
+      recorded: recorded
+        .filter(({ target }) => target?.id === workflow.id)
+        .map(({ action, actor, target, detail }) => ({
+          action,
+          actor,
+          target,
+          counts:
+            detail.people === form.people?.people.length &&
+            detail.teams === form.people?.teams.length,
+        })),
       teams: Array.isArray(form.people?.teams),
       person: await startWith(`person:${ada.userId}`),
       role: await startWith("role:admin"),
@@ -261,7 +247,7 @@ describe("starting an independent workflow by hand", () => {
     });
     // Version 2 takes other input, and isn't live.
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: definitionOf(workflow.name, "1.1.0", {
+      definition: definitionOf("1.1.0", {
         who: { type: "string" },
       }),
       basedOn: 1,

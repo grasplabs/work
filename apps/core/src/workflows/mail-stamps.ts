@@ -28,7 +28,7 @@ import {
 // went to and who sent it: the mailbox the call names and its
 // connection's account. Mail back to a tokened address starts its runs
 // under the run (runs.ts, `startRun`'s `parent`), admitted against its
-// lineage's nesting and descendant limits (quotas.ts, `admitChild`), only
+// lineage's nesting and descendant limits (quotas.ts, `admitInLineage`), only
 // when it is that mail: to the address the token was put on, its envelope
 // sender one of the run's senders. Anything else is mail like any other,
 // a root.

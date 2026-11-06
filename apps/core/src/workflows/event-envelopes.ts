@@ -3,7 +3,7 @@ import { workflowEventTypeSchema } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
 // The events of a run's inbox as the host keeps them and a listen task
-// reads them (run-events.ts admits them; resource-host.ts takes them):
+// reads them (run-events.ts admits them; sealed-run.ts takes them):
 // their envelopes, all but the time minted by the host as each is
 // admitted, and the engine's type each is kept under.
 
@@ -62,25 +62,3 @@ export const envelopeOf = (
   ...stored,
   time: acceptedAt.toISOString(),
 });
-
-/**
- * The engine's type of the event a child run's end wakes its parent with
- * (run-children.ts): its run ID, within the engine's rule for types.
- */
-export const childEndType = (childRunId: string): string =>
-  `child-${childRunId}`;
-
-/**
- * What a child run's end tells its parent, as the event's payload: what it
- * completed with, or how it didn't and its error's code. The parent's wait
- * journals it with the event, so a replay reads the same outcome, however
- * long after the child's own details are gone.
- */
-export const childEndSchema = z.discriminatedUnion("status", [
-  z.strictObject({ status: z.literal("completed"), output: z.json() }),
-  z.strictObject({
-    status: z.enum(["failed", "cancelled"]),
-    code: z.string().max(256).nullable(),
-  }),
-]);
-export type ChildEnd = z.infer<typeof childEndSchema>;

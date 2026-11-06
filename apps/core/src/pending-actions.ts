@@ -40,6 +40,7 @@ import {
 } from "./workflows/resource-authority.ts";
 import type { CallingRun } from "./workflows/resource-authority.ts";
 import { attachedAgain } from "./workflows/run-files.ts";
+import { sealedStepOf } from "./workflows/sealed-steps.ts";
 import { wakingHeld } from "./workflows/wakes.ts";
 import type { HeldOutcome } from "./workspace.ts";
 
@@ -101,22 +102,16 @@ const runEnded = async (env: Env, held: PendingAction): Promise<boolean> => {
   );
 };
 
-/** How a task's step is named, and so its call's key (resource-host.ts). */
-const taskStepPrefix = "task:";
-
 /**
- * The alias of the binding task `step` (a step's name, `task:<id>`) of
- * run `run` calls, as its sealed build has it: only a connector call's.
+ * The alias of the binding task step `step` (a step's name, as the run
+ * host names it: `<id>:task`, in a loop's item `<id>:task%40<i>`) of run
+ * `run` calls, as its sealed build has it: only a connector call's.
  */
 const heldAliasOf = async (
   env: Env,
   run: CallingRun,
   step: string
 ): Promise<string | undefined> => {
-  if (!step.startsWith(taskStepPrefix)) {
-    return undefined;
-  }
-  const taskId = step.slice(taskStepPrefix.length);
   const pinned = await drizzle(env.DB)
     .select({ manifestHash: workflowResourceRuns.manifestHash })
     .from(workflowResourceRuns)
@@ -131,7 +126,14 @@ const heldAliasOf = async (
     run.version,
     pinned.manifestHash
   );
-  const task = build.tasks.find(({ id }) => id === taskId);
+  const placed = sealedStepOf(
+    step,
+    new Map(build.tasks.map((task) => [task.id, task]))
+  );
+  if (placed?.kind !== "task" || placed.part !== "") {
+    return undefined;
+  }
+  const task = build.tasks.find(({ id }) => id === placed.task);
   return task?.kind === "call" && task.call.name === "grasp.connector"
     ? task.call.binding
     : undefined;

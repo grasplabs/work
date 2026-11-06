@@ -4,13 +4,12 @@ import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
-import { and, asc, eq, inArray, lt } from "drizzle-orm";
+import { asc, eq, inArray, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import type { Release } from "../app-releases.ts";
-import { appTestRuns, workflowResourceVersions } from "../db/core/schema.ts";
+import { appTestRuns } from "../db/core/schema.ts";
 import {
   failureOf,
   outputOf,
@@ -28,7 +27,6 @@ import type { RunStep } from "./host.ts";
 import { quotaLimits } from "./quotas.ts";
 import { runActivation } from "./resource-runs.ts";
 import type { HostedActivation, ResourceRunMemory } from "./resource-runs.ts";
-import { generatedForRunHost } from "./sealed-run.ts";
 
 // Runs an App's tests start (spec 28.2, `workflowTest`): a test principal
 // starts a workflow the release under test binds, and the run is real:
@@ -51,9 +49,8 @@ import { generatedForRunHost } from "./sealed-run.ts";
 //   version's contract, as a start's.
 // - It reaches what a test may not: the run acts for the fixture's
 //   principal, no member of anything, and its host refuses every call that
-//   leaves its own sealed modules (resource-host.ts, `fixture`; on the run
-//   host, sealed-run.ts, `fixtureCalls`): connections, Knowledge,
-//   templates, files, actions and events. It holds no binding, approval or
+//   leaves its own sealed modules (sealed-run.ts, `fixtureCalls`):
+//   connections, Knowledge, templates, files, actions and events. It holds no binding, approval or
 //   grant, and none is read or written. Its decisions ask its fixture's
 //   principals alone (fixture-decisions.ts; on the run host too,
 //   `openFixtureDecision`); its model calls are answered by its fixture,
@@ -197,9 +194,6 @@ export const startFixtureRun = async (
   }
   const workflow = workflowResourceIdSchema.parse(pin.workflowId);
   const found = await pinned(env, workflow, pin.version);
-  if (found.buildHash === null) {
-    throw workflowResourceErrors.create("workflow.protocol_unsupported");
-  }
   const input = acceptedInput(found.inputDescriptor, declared.value);
   const params = await fixtureParams(
     env,
@@ -281,22 +275,6 @@ export const fixtureActivation = async (
   if (Date.now() > row.deadline.getTime()) {
     throw operationErrors.create("operation.cancelled");
   }
-  const sealed = await db
-    .select({ evaluatorHash: workflowResourceVersions.evaluatorHash })
-    .from(workflowResourceVersions)
-    .where(
-      and(
-        eq(workflowResourceVersions.workflowResourceId, pin.workflow),
-        eq(workflowResourceVersions.version, pin.version)
-      )
-    )
-    .get();
-  if (sealed === undefined) {
-    throw workflowResourceErrors.create("workflow.version_not_found");
-  }
-  if (sealed.evaluatorHash !== jqProvenance.sha256) {
-    throw workflowResourceErrors.create("workflow.evaluator_changed");
-  }
   const build = await loadWorkflowBuild(
     env,
     pin.workflow,
@@ -321,12 +299,12 @@ export const fixtureActivation = async (
       params: jsonObjectSchema.parse(JSON.parse(row.params)),
       createdAt: row.createdAt.getTime(),
       build,
-      // Its calls go nowhere real (resource-host.ts, `fixture`;
+      // Its calls go nowhere real (sealed-run.ts, `fixtureCalls`;
       // fixture-calls.ts): it binds nothing, acts for the fixture's
       // principal alone, and `makeCall` refuses every call of it.
       calling: {
         runId,
-        // Its own lineage's root: a test's run starts no children.
+        // Its own lineage's root: a test's run starts no other run.
         rootRunId: runId,
         accountRunId: runId,
         workflowId: pin.workflow,
@@ -339,10 +317,7 @@ export const fixtureActivation = async (
       },
       // As many model calls as a run of the version may make: each is
       // answered by its fixture, never a model's.
-      maxModelCalls: Math.min(
-        limits.lineageModelRequests,
-        build.limits.maxModelCalls ?? limits.lineageModelRequests
-      ),
+      maxModelCalls: limits.lineageModelRequests,
     },
     output: JSON.stringify(contract.output),
     owner: testRunOwnerOf(row.appId),
@@ -448,11 +423,9 @@ export const fixtureRunOutcome = async (
 const taskIdSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,127}$/u);
 
 /**
- * How many times test run `runId`'s task `task` completed its step: each
- * time the engine recorded it so, once however often it was replayed. The
- * step is named as its build names it: `<task>:task` on the run host
- * (sealed-run.ts), `task:<task>` on resource-host.ts. None once the run's
- * record is gone.
+ * How many times test run `runId`'s task `task` completed its step (the
+ * run host's `<id>:task`): each time the engine recorded it so, once
+ * however often it was replayed.
  */
 export const fixtureTaskCompletions = async (
   env: Env,
@@ -463,28 +436,9 @@ export const fixtureTaskCompletions = async (
   if (!parsed.success) {
     throw operationErrors.create("contract.invalid_args");
   }
-  const row = await drizzle(env.DB)
-    .select({
-      workflow: appTestRuns.workflowResourceId,
-      version: appTestRuns.version,
-      manifest: appTestRuns.manifestHash,
-    })
-    .from(appTestRuns)
-    .where(eq(appTestRuns.runId, runId))
-    .get();
-  if (row === undefined) {
-    return 0;
-  }
-  const build = await loadWorkflowBuild(
-    env,
-    row.workflow,
-    row.version,
-    row.manifest
+  return (
+    (await runEngine(env).succeededSteps(runId, `${parsed.data}:task`)) ?? 0
   );
-  const step = generatedForRunHost(build)
-    ? `${parsed.data}:task`
-    : `task:${parsed.data}`;
-  return (await runEngine(env).succeededSteps(runId, step)) ?? 0;
 };
 
 /** Most left-behind test runs one sweep removes. */

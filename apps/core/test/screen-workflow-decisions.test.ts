@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
 import {
   declaredWorkflows,
@@ -9,7 +8,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -48,6 +47,7 @@ import {
   reviewScreenDecision,
 } from "../src/workflows/screen-decisions.ts";
 import { repairWakes } from "../src/workflows/wakes.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   resumed,
@@ -81,19 +81,23 @@ export default function Desk() {
 `;
 
 const files = (screen = screenOf("approval")): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  invoices: defineTable({ amount: v.number() }),
-});
-`,
-  "server/invoices.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Invoices",
+    tables: {
+      invoices: {
+        fields: { amount: "v.number()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("review", {\n  input: v.object({ amount: v.number() }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/invoices.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const review = permission.workflow("review", {
-  input: v.object({ amount: v.number() }),
-  output: v.object({ status: v.string() }),
-});
+export const review = permissions.review;
 
 export const count = query({
   args: {},
@@ -101,72 +105,60 @@ export const count = query({
   handler: async (ctx) => (await ctx.db.query("invoices").collect()).length,
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { review } from "./server/invoices.ts";
-import schema from "./schema.ts";
 
-export default app({
-  name: "Invoices",
-  schema,
-  access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
-  permissions: { workflows: [review] },
-});
-`,
   "screens/desk.tsx": screen,
 });
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+/** The JSON Schema of an object of `properties`, each required. */
+const objectDocument = (properties: Record<string, unknown>) => ({
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
-/** An approval workflow asking for decision `contract` as `approval`. */
-const definitionOf = (name: string, contract: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: { approval: { kind: "decision", contract } },
-        },
-      },
+/**
+ * An approval workflow asking, in `ask`, for decision `contract` as
+ * `approval`; with `looped`, once for each item of a `forEach`, `lines`.
+ */
+const definitionOf = (contract: string, looped = false): string => {
+  const ask = {
+    id: "ask",
+    type: "decision",
+    binding: "approval",
+    recipients: ["role:admin"],
+    prompt: "Approve this invoice?",
+    input: { amount: { $expr: "input.amount" } },
+  };
+  return JSON.stringify({
+    $schema: workflowSchemaUrl,
+    input: objectDocument({ amount: { type: "number" } }),
+    output: {
+      schema: objectDocument({ status: { type: "string" } }),
+      value: { status: "done" },
     },
-    input: { schema: objectSchema({ amount: { type: "number" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      {
-        ask: {
-          call: "grasp.decision",
-          with: {
-            binding: "approval",
-            recipients: ["role:admin"],
-            prompt: "Approve this invoice?",
-            input: { amount: "${ $workflow.input.amount }" },
+    bindings: { approval: { kind: "decision", contract } },
+    steps: looped
+      ? [
+          {
+            id: "lines",
+            type: "forEach",
+            items: { $expr: "[1, 2]" },
+            do: [ask],
           },
-        },
-      },
-      { finish: { set: { status: "done" } } },
-    ],
+        ]
+      : [ask],
   });
+};
 
 // Null too: a decision's context may be JSON `null` when its contract takes it.
 const context = v.object({ amount: v.number() }).nullable();
 const value = v.object({ comment: v.string() });
 
 /** An App bound to a workflow version with a decision binding, as `review`. */
-const boundApp = async (): Promise<{
+const boundApp = async (
+  looped = false
+): Promise<{
   fixture: Fixture;
   binding: string;
   workflowId: string;
@@ -186,7 +178,7 @@ const boundApp = async (): Promise<{
     `approve-${unique()}`
   );
   await publishWorkflowVersion(env, fixture.owner, workflow.id, {
-    definition: definitionOf(workflow.name, key),
+    definition: definitionOf(key, looped),
     basedOn: null,
   });
   const { id } = await bindWorkflowToApp(env, fixture.owner, workflow.id, {
@@ -222,36 +214,22 @@ const jobEvents = {
 };
 
 /** A workflow waiting, in `await-job`, for the job event a screen sends. */
-const eventDefinitionOf = (name: string, contract: string): string =>
+const eventDefinitionOf = (contract: string): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: { jobEvents: { kind: "event", contract } },
-        },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectDocument({ amount: { type: "number" } }),
+    output: {
+      schema: objectDocument({ status: { type: "string" } }),
+      value: { status: "done" },
     },
-    input: { schema: objectSchema({ amount: { type: "number" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
+    bindings: { jobEvents: { kind: "event", contract } },
+    steps: [
       {
-        "await-job": {
-          listen: {
-            to: { one: { with: { type: "grasp.job.completed" } } },
-            read: "data",
-          },
-          timeout: { after: { hours: 24 } },
-          metadata: { grasp: { binding: "jobEvents" } },
-        },
+        id: "await-job",
+        type: "wait",
+        event: { from: "jobEvents", type: "grasp.job.completed" },
+        timeout: "24 hours",
       },
-      { finish: { set: { status: "done" } } },
     ],
   });
 
@@ -271,7 +249,7 @@ const eventApp = async (): Promise<Fixture> => {
     `wait-${unique()}`
   );
   await publishWorkflowVersion(env, fixture.owner, workflow.id, {
-    definition: eventDefinitionOf(workflow.name, key),
+    definition: eventDefinitionOf(key),
     basedOn: null,
   });
   await bindWorkflowToApp(env, fixture.owner, workflow.id, {
@@ -452,8 +430,8 @@ const answerOf = (result: OperationResult): unknown =>
  * version it started for the starter, each asking the admins; and a call
  * of its decision queries, as whoever calls.
  */
-const decisionInbox = async () => {
-  const { fixture, workflowId, binding } = await boundApp();
+const decisionInbox = async (looped = false) => {
+  const { fixture, workflowId, binding } = await boundApp(looped);
   const release = await seal(fixture);
   await setCurrentVersion(env, fixture.owner, fixture.app, 1);
   const [reviewer, starter, outsider] = await Promise.all([
@@ -480,7 +458,7 @@ const decisionInbox = async () => {
     app: string,
     at: number,
     {
-      step = "task:ask",
+      step = "ask:task",
       restricted = false,
       version = 1,
       input = { amount: 5 },
@@ -623,7 +601,7 @@ describe(
       // Another App's run, and a step no decision task of the build names.
       const elsewhere = await runAsking(`other-${unique()}`, opened + 2000);
       const unnamed = await runAsking(fixture.app, opened + 3000, {
-        step: "task:other",
+        step: "other:task",
       });
       const waitOf = (
         { runId, decisionId }: { runId: string; decisionId: string },
@@ -746,6 +724,51 @@ describe(
           nextCursor: null,
           hasMore: false,
         },
+      });
+    });
+
+    it("list and answer a decision asked in a loop's item, as the run host names its step", async () => {
+      const { fixture, opened, reviewer, runAsking, ask } =
+        await decisionInbox(true);
+      // As the SDK names the item's step: its key, `task@0`, URI-encoded.
+      const looped = await runAsking(fixture.app, opened, {
+        step: "ask:task%400",
+      });
+      // Its key in no encoding the SDK writes, and a part of a decision.
+      const unencoded = await runAsking(fixture.app, opened + 1000, {
+        step: "ask:task@0",
+      });
+      const part = await runAsking(fixture.app, opened + 2000, {
+        step: "ask:task%400#answer",
+      });
+      const list = await ask(reviewer, "decisions", { pagination: {} });
+      const listed =
+        typeof list === "object" && list !== null && "items" in list
+          ? list.items
+          : list;
+      const detail = async (of: { runId: string; decisionId: string }) =>
+        await ask(reviewer, "decision", {
+          runId: of.runId,
+          decisionId: of.decisionId,
+        });
+      expect({
+        listed: z
+          .array(
+            z.object({
+              run: z.object({ runId: z.string() }),
+              wait: z.object({ taskId: z.string() }),
+            })
+          )
+          .parse(listed)
+          .map(({ run, wait }) => ({ runId: run.runId, taskId: wait.taskId })),
+        looped: z.object({ key: z.string() }).parse(await detail(looped)).key,
+        unencoded: await detail(unencoded),
+        part: await detail(part),
+      }).toStrictEqual({
+        listed: [{ runId: looped.runId, taskId: "ask" }],
+        looped: "approval",
+        unencoded: "workflow.decision_unavailable",
+        part: "workflow.decision_unavailable",
       });
     });
 
@@ -1712,7 +1735,7 @@ describe(
       }).toStrictEqual({ count: 61, eachDecides: true });
     });
 
-    it("seal the events a screen sends, and the listen tasks waiting on them as typed waits", async () => {
+    it("seal the events a screen sends, and the event waits on them as typed waits", async () => {
       const fixture = await eventApp();
       const release = await seal(fixture);
       const references = await sealedText(release, generatedPaths.api);

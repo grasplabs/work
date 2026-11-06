@@ -72,14 +72,19 @@ const line: ProviderReply = {
 };
 
 /**
- * A workflow of a builder's that asks its model, running `tasks` if
- * given; the provider failing as `shows` says until `provider.working`,
- * then answering `answer`, counting what it was asked.
+ * A workflow of a builder's that asks its model, running `tasks` and
+ * ending with `status` if given; the provider failing as `shows` says
+ * until `provider.working`, then answering `answer`, counting what it was
+ * asked.
  */
 const heldWorkflow = async (
   provider: { working: boolean; asked: number },
   shows: ProviderTrouble,
-  { tasks, answer = line }: { tasks?: unknown[]; answer?: ProviderReply } = {}
+  {
+    tasks,
+    status,
+    answer = line,
+  }: { tasks?: unknown[]; status?: unknown; answer?: ProviderReply } = {}
 ) => {
   const admin = await signedIn("admin");
   const builder = await signedIn("builder");
@@ -90,7 +95,13 @@ const heldWorkflow = async (
     },
     { models: [askedModel] }
   );
-  const { id } = await askingWorkflow(admin, builder, tasks);
+  const { id } = await askingWorkflow(
+    admin,
+    builder,
+    tasks,
+    askedModel,
+    status
+  );
   return { admin, builder, fake, id };
 };
 
@@ -151,13 +162,13 @@ describe(
               },
               tasks: [
                 {
-                  guard: {
-                    try: [askTask],
-                    catch: { do: [{ rest: { wait: "P1D" } }] },
-                  },
+                  id: "guard",
+                  type: "try",
+                  try: [askTask],
+                  catch: { do: [{ id: "rest", type: "wait", for: "1 day" }] },
                 },
-                { greet: { set: { status: "rested" } } },
               ],
+              status: "rested",
             }
           );
           const runId = await startedBy(builder, id);

@@ -1,5 +1,6 @@
+import { encodeAsset } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { createD1Database } from "../src/cloudflare/accounts.ts";
@@ -7,11 +8,13 @@ import { cloudflareApi } from "../src/cloudflare/api.ts";
 import {
   applyD1Migrations,
   queryD1,
+  uploadTargetAssets,
   uploadTargetScript,
 } from "../src/cloudflare/workers.ts";
 import type {
   AssetFile,
   ScriptTarget,
+  WorkerModule,
   WorkerUpload,
 } from "../src/cloudflare/workers.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
@@ -22,11 +25,26 @@ const api = cloudflareApi({ token, retryDelayMs: 0 });
 
 const encoder = new TextEncoder();
 
-/** A release's core Worker: one module, one binding, tagged `releaseId`. */
-const release = (
-  releaseId: string,
-  assets?: readonly AssetFile[]
-): WorkerUpload => ({
+/** A module `name` of `type` holding `content`. */
+const workerModule = (
+  name: string,
+  type: string,
+  content: string
+): WorkerModule => {
+  const bytes = encoder.encode(content);
+  return {
+    name,
+    type,
+    size: bytes.byteLength,
+    stream: async () => await Promise.resolve(new Blob([bytes]).stream()),
+  };
+};
+
+/**
+ * A release's core Worker: one module, one binding, tagged `releaseId`,
+ * serving the static files uploaded under `assetsJwt`, if any.
+ */
+const release = (releaseId: string, assetsJwt?: string): WorkerUpload => ({
   releaseId,
   metadata: {
     main_module: "index.js",
@@ -34,26 +52,69 @@ const release = (
     bindings: [
       { type: "plain_text", name: "PLATFORM_CHANGE", text: releaseId },
     ],
-    ...(assets === undefined
+    ...(assetsJwt === undefined
       ? {}
       : { assets: { config: { run_worker_first: true } } }),
   },
   modules: [
-    {
-      name: "index.js",
-      type: "application/javascript+module",
-      content: `export default { fetch: () => new Response("${releaseId}") };`,
-    },
-    { name: "skills/SKILL.md", type: "text/plain", content: "# Skill" },
+    workerModule(
+      "index.js",
+      "application/javascript+module",
+      `export default { fetch: () => new Response("${releaseId}") };`
+    ),
+    workerModule("skills/SKILL.md", "text/plain", "# Skill"),
   ],
-  ...(assets === undefined ? {} : { assets }),
+  ...(assetsJwt === undefined ? {} : { assetsJwt }),
 });
 
-const file = (path: string, content: string): AssetFile => ({
-  path,
-  content: encoder.encode(content),
-  type: "text/plain",
-});
+/** Release `releaseId` deployed to `target`: its static files `files`, then its script. */
+const deploy = async (
+  target: ScriptTarget,
+  releaseId: string,
+  files: readonly AssetFile[]
+): Promise<void> => {
+  const assetsJwt = await uploadTargetAssets(api, target, files);
+  await uploadTargetScript(api, target, release(releaseId, assetsJwt));
+};
+
+/** A static file at `path` holding `content`, of type `type`. */
+const file = async (
+  path: string,
+  content: string,
+  type = "text/plain"
+): Promise<AssetFile> => {
+  const bytes = encoder.encode(content);
+  const { key, base64 } = await encodeAsset(bytes, path);
+  return {
+    path,
+    key,
+    size: bytes.length,
+    type,
+    readBase64: async () => await Promise.resolve(base64),
+  };
+};
+
+const mebibyte = 1024 * 1024;
+
+/** Static file `index` of `size` bytes, made only as it's read. */
+const sized = async (index: number, size: number): Promise<AssetFile> => {
+  const path = `/chunk-${index}.wasm`;
+  const bytes = () => new Uint8Array(size).fill(index);
+  const { key } = await encodeAsset(bytes(), path);
+  return {
+    path,
+    key,
+    size,
+    type: "application/wasm",
+    readBase64: async () => {
+      const { base64 } = await encodeAsset(bytes(), path);
+      return base64;
+    },
+  };
+};
+
+/** Base64's padding, at the end. */
+const padding = /=*$/u;
 
 /**
  * A version's assets metadata: its config, and whether its token came from
@@ -90,27 +151,26 @@ const database = async (accountId: string, name: string) =>
 describe("static assets", () => {
   it("uploads only the files the account lacks, and names them in each upload", async () => {
     const account = namespaced();
-    const files = [
+    const files = await Promise.all([
       file("/index.html", "<!doctype html>"),
       file("/app.js", "console.log(1)"),
       file("/app.css", "body{}"),
-    ];
-    await uploadTargetScript(api, core(account.id), release("26.01.1", files));
+    ]);
+    await deploy(core(account.id), "26.01.1", files);
     const firstUploads = cloudflare.calls.filter(({ path }) =>
       path.endsWith("/workers/assets/upload")
     );
-    await uploadTargetScript(
-      api,
-      core(account.id),
-      release("26.01.2", [...files, file("/new.js", "1")])
-    );
+    await deploy(core(account.id), "26.01.2", [
+      ...files,
+      await file("/new.js", "1"),
+    ]);
     const allUploads = cloudflare.calls.filter(({ path }) =>
       path.endsWith("/workers/assets/upload")
     );
 
-    // Three files in buckets of two, then only the new one.
-    expect(firstUploads).toHaveLength(2);
-    expect(allUploads).toHaveLength(3);
+    // Three small files in one request, then only the new one.
+    expect(firstUploads).toHaveLength(1);
+    expect(allUploads).toHaveLength(2);
     expect(account.assets.size).toBe(4);
     for (const { headers } of allUploads) {
       expect(headers.get("authorization")).not.toBe(`Bearer ${token}`);
@@ -127,10 +187,10 @@ describe("static assets", () => {
 
   it("names each file by the key the release manifest gives it (Wrangler's shape and extension rule, with SHA-256) bound to its type, dot-files included", async () => {
     const account = namespaced();
-    await uploadTargetScript(
-      api,
+    await deploy(
       core(account.id),
-      release("26.01.1", [
+      "26.01.1",
+      await Promise.all([
         file("/index.html", "<html></html>"),
         file("/.hidden", "x"),
         file("/.well-known/security.txt", "x"),
@@ -181,21 +241,12 @@ describe("static assets", () => {
 
   it("uploads a file the account holds again when its type changes, and the account serves it with the new one", async () => {
     const account = namespaced();
-    const wasm = (type: string): AssetFile => ({
-      path: "/_compiler/v1/esbuild.wasm",
-      content: encoder.encode("\0asm"),
-      type,
-    });
-    await uploadTargetScript(
-      api,
-      core(account.id),
-      release("26.01.1", [wasm("application/octet-stream")])
-    );
-    await uploadTargetScript(
-      api,
-      core(account.id),
-      release("26.01.2", [wasm("application/wasm")])
-    );
+    const wasm = async (type: string): Promise<AssetFile> =>
+      await file("/_compiler/v1/esbuild.wasm", "\0asm", type);
+    await deploy(core(account.id), "26.01.1", [
+      await wasm("application/octet-stream"),
+    ]);
+    await deploy(core(account.id), "26.01.2", [await wasm("application/wasm")]);
 
     const uploads = cloudflare.calls.filter(({ path }) =>
       path.endsWith("/workers/assets/upload")
@@ -212,11 +263,84 @@ describe("static assets", () => {
     expect(account.assets.get(served?.hash ?? "")).toBe("application/wasm");
   });
 
+  it("uploads a first deploy's files within its deadline, small ones sharing up to 8 MiB a request, three at a time, a larger one alone", async () => {
+    const account = namespaced();
+    // Thirty files of 1 MiB and two of 9 MiB, each made only as it's read.
+    const files = await Promise.all([
+      ...Array.from(
+        { length: 30 },
+        async (_, index) => await sized(index, mebibyte)
+      ),
+      sized(30, 9 * mebibyte),
+      sized(31, 9 * mebibyte),
+    ]);
+    // Each upload answered after 200 ms: one file a request, one at a
+    // time, would take 6.4 s.
+    const latencyMs = 200;
+    const active = new Set<{ files: number; raw: number; alongside: number }>();
+    const requests: { files: number; raw: number; alongside: number }[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      if (!new URL(request.url).pathname.endsWith("/workers/assets/upload")) {
+        return await cloudflare.fetch(request);
+      }
+      const sent = { files: 0, raw: 0, alongside: 0 };
+      active.add(sent);
+      requests.push(sent);
+      for (const each of active) {
+        each.alongside = Math.max(each.alongside, active.size);
+      }
+      try {
+        const form = await request.clone().formData();
+        const texts = await Promise.all(
+          [...form.values()].map(async (part) =>
+            part instanceof Blob ? await part.text() : part
+          )
+        );
+        sent.files = texts.length;
+        for (const text of texts) {
+          sent.raw +=
+            (text.length / 4) * 3 - (padding.exec(text)?.[0].length ?? 0);
+        }
+        await scheduler.wait(latencyMs);
+        return await cloudflare.fetch(request);
+      } finally {
+        active.delete(sent);
+      }
+    });
+
+    await uploadTargetAssets(api, core(account.id), files, {
+      signal: AbortSignal.timeout(4000),
+    });
+
+    const budget = 8 * mebibyte;
+    expect({
+      stored: account.assets.size,
+      files: requests
+        .map(({ files: count }) => count)
+        .toSorted((a, b) => a - b),
+      alongside: Math.max(...requests.map(({ alongside }) => alongside)),
+      shared: requests
+        .filter(({ files: count }) => count > 1)
+        .every(({ raw }) => raw <= budget),
+      large: requests
+        .filter(({ raw }) => raw > budget)
+        .map(({ alongside }) => alongside),
+    }).toStrictEqual({
+      stored: 32,
+      // Eight 1 MiB files a request, then each 9 MiB file on its own.
+      files: [1, 1, 6, 8, 8, 8],
+      alongside: 3,
+      shared: true,
+      large: [1, 1],
+    });
+  });
+
   it("names files the account already holds by the session's token", async () => {
     const account = namespaced();
-    const files = [file("/index.html", "<!doctype html>")];
-    await uploadTargetScript(api, core(account.id), release("26.01.1", files));
-    await uploadTargetScript(api, core(account.id), release("26.01.2", files));
+    const files = [await file("/index.html", "<!doctype html>")];
+    await deploy(core(account.id), "26.01.1", files);
+    await deploy(core(account.id), "26.01.2", files);
     const uploads = cloudflare.calls.filter(({ path }) =>
       path.endsWith("/workers/assets/upload")
     );
@@ -230,21 +354,24 @@ describe("static assets", () => {
 });
 
 describe("uploads that fail part way", () => {
-  it("uploads asset buckets three at a time, retrying one after a server error", async () => {
+  it("retries a static files upload after a server error", async () => {
     const account = namespaced();
-    const files = Array.from({ length: 15 }, (_, index) =>
-      file(`/file-${index}.js`, `export default ${index};`)
+    const files = await Promise.all(
+      Array.from(
+        { length: 15 },
+        async (_, index) =>
+          await file(`/file-${index}.js`, `export default ${index};`)
+      )
     );
-    // The session, then the first bucket's upload fails once.
+    // The session, then the files' upload fails once.
     cloudflare.failCall(2, 500);
-    await uploadTargetScript(api, core(account.id), release("26.01.1", files));
+    await deploy(core(account.id), "26.01.1", files);
     const uploads = cloudflare.calls.filter(({ path }) =>
       path.endsWith("/workers/assets/upload")
     );
-    // Eight buckets of two, one sent twice.
-    expect(uploads).toHaveLength(9);
+    // Fifteen small files in one request, sent twice.
+    expect(uploads).toHaveLength(2);
     expect(account.assets.size).toBe(15);
-    expect(cloudflare.peakConcurrency()).toBe(3);
   });
 
   it("retries a script upload after a server error, unless it migrates Durable Objects", async () => {

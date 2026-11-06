@@ -8,6 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { commitFiles } from "../src/apps.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { racingDb } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { auditedDuring, outcome, signedInApi } from "./sign-in.ts";
@@ -75,9 +76,11 @@ const storedUnchecked = async (
     .run();
 };
 
+/** The App's definition, and the config and schema generated from it. */
+const defined = appDefinition({ name: "Invoice desk" });
+
 const first = {
-  "schema.ts":
-    'import { defineSchema } from "@grasp-os/sdk";\n\nexport default defineSchema({});\n',
+  ...defined,
   "screens/inbox.tsx": "export default () => <p>Inbox</p>;\n",
   "AGENTS.md": "# Invoice desk — facturen, 請求書 🧾\n",
 };
@@ -100,12 +103,12 @@ describe("App code", { timeout: 60_000 }, () => {
     });
 
     expect({ v1, v2 }).toMatchObject({
-      v1: { version: 1, parent: null, files: 3, author: userId },
-      v2: { version: 2, parent: 1, files: 3, author: userId },
+      v1: { version: 1, parent: null, files: 5, author: userId },
+      v2: { version: 2, parent: 1, files: 5, author: userId },
     });
     await expect(apps.files.read(app.id, 1)).resolves.toStrictEqual(first);
     await expect(apps.files.read(app.id, 2)).resolves.toStrictEqual({
-      "schema.ts": first["schema.ts"],
+      ...defined,
       "screens/inbox.tsx": "export default () => <p>Invoices</p>;\n",
       "components/row.tsx": "export const Row = () => null;\n",
     });
@@ -142,7 +145,7 @@ describe("App code", { timeout: 60_000 }, () => {
     const afterFirst = await apps.files.read(app.id);
     await commit(apps, app.id, {
       "AGENTS.md": "# Second\n",
-      "schema.ts": null,
+      "screens/inbox.tsx": null,
     });
 
     expect({
@@ -153,23 +156,67 @@ describe("App code", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       none: {},
       afterFirst: first,
-      latest: {
-        "screens/inbox.tsx": first["screens/inbox.tsx"],
-        "AGENTS.md": "# Second\n",
-      },
+      latest: { ...defined, "AGENTS.md": "# Second\n" },
       one: first,
     });
-    // What is already there, and deleting what isn't, change nothing.
+    // What is already there, deleting what isn't, and deleting the
+    // schema its definition generates back, change nothing.
     await expect(
       Promise.all([
         outcome(commit(apps, app.id, { "AGENTS.md": "# Second\n" })),
-        outcome(commit(apps, app.id, { "schema.ts": null })),
+        outcome(commit(apps, app.id, { "screens/inbox.tsx": null })),
+        outcome(commit(apps, app.id, { "server/schema.ts": null })),
       ])
     ).resolves.toStrictEqual([
       "app.nothing_to_commit",
       "app.nothing_to_commit",
+      "app.nothing_to_commit",
     ]);
     await expect(apps.versions.list(app.id)).resolves.toHaveLength(2);
+  });
+
+  it("gives an App a definition with its first version, and keeps its config and schema as the definition generates them", async () => {
+    const { apps } = await appsApi("builder");
+    const app = await newApp(apps);
+    // Pages alone: the first version gets an empty definition, named as
+    // the App is, and the config and schema generated from it.
+    await commit(apps, app.id, {
+      "screens/inbox.tsx": "export default () => null;\n",
+    });
+    const pagesOnly = await apps.files.read(app.id);
+    // A config written by hand is generated over, whatever it held.
+    await commit(apps, app.id, {
+      "grasp.config.ts": 'export default { name: "Mine" };\n',
+      "AGENTS.md": "# Mine\n",
+    });
+    const handwritten = await apps.files.read(app.id);
+    const other = await newApp(apps);
+    expect({
+      pagesOnly,
+      config: handwritten["grasp.config.ts"],
+      // A config or schema with no definition, a definition that isn't
+      // one, or one deleted: refused, nothing of the commit kept.
+      withoutDefinition: await outcome(
+        commit(apps, other.id, {
+          "grasp.config.ts": defined["grasp.config.ts"] ?? "",
+        })
+      ),
+      invalid: await outcome(
+        commit(apps, app.id, { "definition.json": '{ "name": 1 }' })
+      ),
+      deleted: await outcome(commit(apps, app.id, { "definition.json": null })),
+      versions: await apps.versions.list(app.id),
+    }).toMatchObject({
+      pagesOnly: {
+        ...defined,
+        "screens/inbox.tsx": "export default () => null;\n",
+      },
+      config: defined["grasp.config.ts"],
+      withoutDefinition: "app.definition_invalid",
+      invalid: "app.definition_invalid",
+      deleted: "app.definition_invalid",
+      versions: [{ version: 2 }, { version: 1 }],
+    });
   });
 
   it("fails loudly when a version's files are missing or damaged", async () => {
@@ -426,6 +473,7 @@ describe("App code", { timeout: 60_000 }, () => {
   });
 
   it("audits every commit and version change, by identifiers only", async () => {
+    const aHash: unknown = expect.any(String);
     const { apps, userId } = await appsApi("admin");
     const actor = { type: "person", userId };
     let tree = "";
@@ -474,7 +522,7 @@ describe("App code", { timeout: 60_000 }, () => {
           version: 1,
           parent: null,
           tree,
-          files: 3,
+          files: 5,
         },
       },
       {
@@ -500,6 +548,27 @@ describe("App code", { timeout: 60_000 }, () => {
       ...[
         ["frozen", "checking"],
         ["checking", "building"],
+      ].map(([from, to]) => ({
+        by: actor,
+        action: "app.candidate.moved",
+        on: target,
+        detail: { candidate, version: 1, attempt: 1, from, to },
+      })),
+      // Its server code, the config and schema its definition generates,
+      // sealed as it builds.
+      {
+        by: actor,
+        action: "app.release.sealed",
+        on: target,
+        detail: {
+          version: 1,
+          contractHash: aHash,
+          manifestHash: aHash,
+          schemaHash: aHash,
+          verificationReportHash: aHash,
+        },
+      },
+      ...[
         ["building", "verifying"],
         ["verifying", "verified"],
       ].map(([from, to]) => ({
@@ -572,11 +641,17 @@ describe("App code", { timeout: 60_000 }, () => {
     expect(refusedPaths).toStrictEqual(paths.map(() => "app.invalid"));
 
     const tooLong = "x".repeat(appLimits.fileLength + 1);
-    const nearlyFull = "x".repeat(appLimits.fileLength);
+    // The App's definition counts too: its first version gets one.
+    const room = appLimits.totalLength - Object.values(defined).join("").length;
     const full = Object.fromEntries(
       Array.from(
-        { length: appLimits.totalLength / appLimits.fileLength },
-        (_, index) => [`components/part-${index}.ts`, nearlyFull]
+        { length: Math.ceil(room / appLimits.fileLength) },
+        (_, index) => [
+          `components/part-${index}.ts`,
+          "x".repeat(
+            Math.min(appLimits.fileLength, room - index * appLimits.fileLength)
+          ),
+        ]
       )
     );
     // Exactly an App's limit is within it.
@@ -606,18 +681,17 @@ describe("App code", { timeout: 60_000 }, () => {
     const { apps, userId } = await appsApi("builder");
     const app = await newApp(apps);
     // More files than an App may have now: committed when the limits were
-    // higher.
-    const count = appLimits.files + 2;
-    await storedUnchecked(
-      app.id,
-      userId,
-      Object.fromEntries(
+    // higher, its definition among them.
+    const count = appLimits.files + 2 - Object.keys(defined).length;
+    await storedUnchecked(app.id, userId, {
+      ...defined,
+      ...Object.fromEntries(
         Array.from({ length: count }, (_, index) => [
           `components/part-${index}.ts`,
           "x",
         ])
-      )
-    );
+      ),
+    });
 
     // One after another: each is over the same version.
     const steps: [string, Record<string, string | null>][] = [

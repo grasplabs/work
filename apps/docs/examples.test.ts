@@ -15,7 +15,7 @@ import {
   generateModules,
   inspectApp,
   readAppManifest,
-  registerFunctions,
+  registerApp,
   serverModuleSource,
   symbolicModules,
 } from "@grasp-os/sdk/host";
@@ -112,6 +112,7 @@ const write = (dir: string, files: Files): void => {
 /** Whether `file` is one of the App's server modules, as the host reads it. */
 const isServerModule = (file: string): boolean =>
   file.startsWith("server/") &&
+  file !== "server/schema.ts" &&
   !file.startsWith("server/_generated/") &&
   !file.startsWith("server/migrations/") &&
   file.endsWith(".ts");
@@ -128,7 +129,12 @@ const exportsOf = (module: unknown): Record<string, unknown> =>
  * its references generated from the manifest that gives.
  */
 const generated = async (dir: string, files: Files): Promise<Files> => {
-  const app = exportsOf(await import(path.join(dir, "app.ts")));
+  const config = exportsOf(await import(path.join(dir, "grasp.config.ts")));
+  const schema = exportsOf(await import(path.join(dir, "server/schema.ts")));
+  const screens =
+    "screens.ts" in files
+      ? exportsOf(await import(path.join(dir, "screens.ts")))
+      : {};
   // Each by its path under server/, without `.ts`, as the host's entry
   // registers them.
   const modules = Object.fromEntries(
@@ -141,11 +147,18 @@ const generated = async (dir: string, files: Files): Promise<Files> => {
         ])
     )
   );
-  // SAFETY: registerFunctions checks at run time that it was given an
-  // App that `app` registered, as the host relies on.
+  // SAFETY: registerApp checks at run time that it was given a config
+  // `defineApp` made and a schema `defineSchema` made, as the host's
+  // entry relies on.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const registered = app.default as Parameters<typeof registerFunctions>[0];
-  const { manifest } = inspectApp(registerFunctions(registered, modules));
+  const parts = {
+    config: config.default,
+    schema: schema.default,
+    screens: screens.default,
+    modules,
+    migrations: [],
+  } as Parameters<typeof registerApp>[0];
+  const { manifest } = inspectApp(registerApp(parts));
   return await generateModules(readAppManifest(JSON.stringify(manifest)), {
     resourceId: "docs",
     resourceVersion: 1,

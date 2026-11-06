@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { connectErrors } from "@grasp-os/shared/connect";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -12,6 +11,7 @@ import { loadRelease } from "../src/app-releases.ts";
 import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
 import { httpContract, httpReadContract } from "../src/release-contracts.ts";
 import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { requestGranted } from "./apps.ts";
 import {
   httpApiInsideOrigin,
@@ -40,17 +40,23 @@ const secret = "the-billing-api-test-credential";
 
 /** An App whose actions read and create invoices at the billing API. */
 const billingFiles = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ notes: defineTable({ title: v.string() }) });
-`,
-  "server/billing.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Invoices",
+    tables: {
+      notes: {
+        fields: { title: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+    permissions: [
+      'permission.connection("billing", {\n  contract: "http.request@1",\n  actions: ["get", "send"],\n})',
+    ],
+  }),
+  "server/billing.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const billing = permission.connection("billing", {
-  contract: "http.request@1",
-  actions: ["get", "send"],
-});
+export const billing = permissions.billing;
 
 export const open = action({
   args: {},
@@ -92,18 +98,6 @@ export const stray = action({
       return String(Reflect.get(Object(error), "code"));
     }
   },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { billing } from "./server/billing.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Invoices",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
-  permissions: { connections: [billing] },
 });
 `,
 });
@@ -382,22 +376,23 @@ describe("the chat and an outside API", () => {
 /** A JSON workflow creating an invoice for `who` through binding `api`. */
 const invoicingTasks = [
   {
-    create: {
-      call: "grasp.connector",
-      with: {
-        binding: "api",
-        operation: "send",
-        arguments: {
-          method: "POST",
-          path: "/v1/invoices",
-          headers: { "content-type": "application/json" },
-          body: "${ {who: $workflow.input.who} | tostring }",
-        },
-      },
-      output: { as: '${ {status: (.status | tostring) + " " + .body} }' },
+    id: "create",
+    type: "do",
+    binding: "api",
+    operation: "send",
+    arguments: {
+      method: "POST",
+      path: "/v1/invoices",
+      headers: { "content-type": "application/json" },
+      body: { $expr: `'{"who":"' + input.who + '"}'` },
     },
   },
 ];
+
+/** What the workflow running `invoicingTasks` ends with: the API's answer. */
+const invoicedStatus = {
+  $expr: 'steps.create.output.status + " " + steps.create.output.body',
+};
 
 describe("a JSON workflow calling an outside API", () => {
   it("binds the release's HTTP contract to a connection an admin approved, and sends through connect", async () => {
@@ -412,9 +407,10 @@ describe("a JSON workflow calling an outside API", () => {
       methods: ["GET", "POST"],
       credential: { kind: "header", header: "x-api-key", secret },
     });
-    const workflow = await publishedWorkflow(builder, (name) =>
-      definitionOf(name, invoicingTasks, {
+    const workflow = await publishedWorkflow(builder, () =>
+      definitionOf(invoicingTasks, {
         bindings: { api: { kind: "connector", contract: httpContract } },
+        status: invoicedStatus,
       })
     );
     const requested = await builder.api.permissions.request({
@@ -464,15 +460,11 @@ describe("a JSON workflow calling an outside API", () => {
 /** A JSON workflow listing invoices through binding `api`. */
 const listingTasks = [
   {
-    list: {
-      call: "grasp.connector",
-      with: {
-        binding: "api",
-        operation: "get",
-        arguments: { path: "/v1/invoices" },
-      },
-      output: { as: "${ {status: (.status | tostring)} }" },
-    },
+    id: "list",
+    type: "do",
+    binding: "api",
+    operation: "get",
+    arguments: { path: "/v1/invoices" },
   },
 ];
 
@@ -491,8 +483,8 @@ describe("a JSON workflow's HTTP contract", () => {
     });
     /** Workflow `tasks` with `api` bound to `contract`, granted reads. */
     const granted = async (tasks: unknown[], contract: string) => {
-      const workflow = await publishedWorkflow(builder, (name) =>
-        definitionOf(name, tasks, {
+      const workflow = await publishedWorkflow(builder, () =>
+        definitionOf(tasks, {
           bindings: { api: { kind: "connector", contract } },
         })
       );

@@ -432,7 +432,7 @@ export const screenTypeImportError = (
   if (specifier === screenReferences.specifier) {
     return files.has(screenReferences.path)
       ? undefined
-      : `"${specifier}" holds the references the host generates from the App's server code (app.ts, schema.ts, server/), which this App doesn't have yet.`;
+      : `"${specifier}" holds the references the host generates from the App's server code (grasp.config.ts, server/), which this App doesn't have yet.`;
   }
   return specifier === "lucide-react" || kit.imports.includes(specifier)
     ? undefined
@@ -497,7 +497,7 @@ export const importError = (
   if (specifier === screenReferences.specifier) {
     return files.has(screenReferences.path)
       ? undefined
-      : `"${specifier}" holds the references the host generates from the App's server code (app.ts, schema.ts, server/), which this App doesn't have yet.`;
+      : `"${specifier}" holds the references the host generates from the App's server code (grasp.config.ts, server/), which this App doesn't have yet.`;
   }
   if (specifier === "lucide-react") {
     return iconError(names, kit);
@@ -677,22 +677,19 @@ export const sdkImports = [
 ] as const;
 
 /**
- * The SDK modules the code the host generates from a JSON workflow
- * imports, and nothing else: an Open Workflow definition's
- * (`@grasp-os/sdk/open-workflow`) and a grasp-workflow/1 document's
- * (`@grasp-os/sdk/workflow`, `@grasp-os/workflow-schema`'s generator).
+ * The SDK module the code the host generates from a JSON workflow
+ * (grasp-workflow/1, @grasp-os/workflow-schema) imports,
+ * `@grasp-os/sdk/workflow`, and nothing else, not even the testing module
+ * beside it.
  */
-export const openWorkflowSdkImports = [
-  "@grasp-os/sdk/open-workflow",
-  "@grasp-os/sdk/workflow",
-] as const;
+export const generatedWorkflowSdkImports = ["@grasp-os/sdk/workflow"] as const;
 
-/** Generated workflow code imports only `openWorkflowSdkImports`. */
+/** Generated workflow code imports only `generatedWorkflowSdkImports`. */
 export const generatedWorkflowCode: CodeKind = {
   name: "Generated workflow",
   folder: ".grasp/",
   imports: new Map(
-    openWorkflowSdkImports.map((specifier) => [
+    generatedWorkflowSdkImports.map((specifier) => [
       specifier,
       kitModuleName(specifier),
     ])

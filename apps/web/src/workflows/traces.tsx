@@ -32,7 +32,6 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { ActivityLine, activityKey } from "./activity-bar.tsx";
 import type { Names } from "./activity-bar.tsx";
-import { followedTrace } from "./followed-trace.ts";
 import { ItemTest } from "./item-test.tsx";
 import { ListedCount } from "./listed-count.tsx";
 import { OpenRun } from "./resource-runs.tsx";
@@ -145,22 +144,16 @@ const RunTraceDetail = ({
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    // Its doors are read once: the run's version, so its diagram, stays.
-    let drawn: WorkflowRunTrace["diagram"] | undefined;
     const follow = async (): Promise<void> => {
       try {
         const read = await core.withSession(
           async (session) =>
-            await session.workflowResources.runTrace(workflow, runId, {
-              doors: drawn === undefined,
-            })
+            await session.workflowResources.runTrace(workflow, runId)
         );
         if (stopped) {
           return;
         }
-        const followed = followedTrace(read, drawn);
-        drawn = followed.diagram;
-        setTrace(followed);
+        setTrace(read);
         setFailure(undefined);
         told(followedState(read));
         if (!settled(read)) {

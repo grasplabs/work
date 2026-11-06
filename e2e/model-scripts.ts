@@ -10,6 +10,7 @@
  */
 import { z } from "zod";
 
+import { withoutDefinition } from "../apps/core/test/app-definitions.ts";
 import type { Answer } from "../apps/core/test/provider-streams.ts";
 import { contactsApp } from "./contacts-app.ts";
 import { invoiceApproval } from "./invoice-approval.ts";
@@ -82,15 +83,27 @@ const writesTally = (
   outputTokens: 40,
 });
 
-/** The SDK's `app`, as a search of Grasp's reference finds it (core's agent-tools.ts). */
-const sdkApp = /(?<found>@grasp-os\/sdk\/src\/app\.ts:\d+:export const app =)/u;
+/** The SDK's `defineApp`, as a search of Grasp's reference finds it (core's agent-tools.ts). */
+const sdkApp =
+  /(?<found>@grasp-os\/sdk\/src\/app\.ts:\d+:export const defineApp =)/u;
+
+/** A table the agent adds with `addTable`, every member reading and writing it. */
+const sharedTable = (
+  app: string,
+  name: string,
+  fields: Record<string, string>
+): Record<string, unknown> => ({
+  app,
+  name,
+  fields,
+  access: { read: "appMembers", write: "appMembers" },
+});
+
+/** `files` as the agent writes them: never the definition, its config or its schema. */
+const codeOf = withoutDefinition;
 
 /** The workflow open beside a chat, as its first message names it (web's draw-in-chat.ts). */
 const besideWorkflow = /\(ID (?<found>[^)\s]+)\) is open beside this chat/u;
-
-/** That workflow's name, as the same message names it. */
-const besideWorkflowName =
-  /Workflow (?<found>\S+) \(ID [^)\s]+\) is open beside/u;
 
 /** What the agent says once it wrote the contact list (`buildsApp`). */
 export const appReady = "Your contact list is ready to try in the preview.";
@@ -134,7 +147,7 @@ export const modelScripts = {
             name: "writeFile",
             arguments: {
               app: readIn(said, ownApp),
-              files: tallyFiles("in the preview"),
+              files: codeOf(tallyFiles("in the preview")),
             },
           },
         ],
@@ -195,18 +208,26 @@ export const modelScripts = {
       "A contact list for the sales team: each contact's name, added from its screen.",
     replies: [
       calls("findsapp1", "searchFiles", {
-        text: "export const app =",
+        text: "export const defineApp =",
         path: "@grasp-os/sdk/src/app.ts",
       }),
-      // Only once the reference answered with how `app` is declared: a
-      // search that failed or found nothing ends the script.
+      // Only once the reference answered with how `defineApp` is declared:
+      // a search that failed or found nothing ends the script.
       (said) => {
         readIn(said, sdkApp);
-        return calls("writesap1", "writeFile", {
-          app: readIn(said, ownApp),
-          files: contactsApp,
-        });
+        return calls(
+          "definesap1",
+          "addTable",
+          sharedTable(readIn(said, ownApp), "contacts", {
+            name: "v.string().max(200)",
+          })
+        );
       },
+      (said) =>
+        calls("writesap1", "writeFile", {
+          app: readIn(said, ownApp),
+          files: codeOf(contactsApp),
+        }),
       says(appReady),
     ],
   },
@@ -222,7 +243,7 @@ export const modelScripts = {
         calls("editswf01", "editWorkflow", {
           workflow: readIn(said, besideWorkflow),
           expectedRevision: 0,
-          source: invoiceApproval(readIn(said, besideWorkflowName)),
+          source: invoiceApproval(),
           modules: {},
         }),
       says(approvalDrawn),
@@ -236,10 +257,16 @@ export const modelScripts = {
     opener: "Build a tally, and get it working.",
     replies: [
       (said) =>
+        calls(
+          "definesbr1",
+          "addTable",
+          sharedTable(readIn(said, ownApp), "tally", { added: "v.boolean()" })
+        ),
+      (said) =>
         calls("writesbr1", "writeFile", {
           app: readIn(said, ownApp),
           files: {
-            ...tallyFiles("in the preview"),
+            ...codeOf(tallyFiles("in the preview")),
             "screens/tally.tsx": "export default function Tally( {",
           },
         }),

@@ -41,6 +41,12 @@ const nestedList = (depth: number): unknown => {
   return value;
 };
 
+/** The codes of `document`'s problems, or "ok". */
+const codesOf = (document: unknown): unknown => {
+  const result = checkWorkflow(document);
+  return result.ok ? "ok" : result.problems.map(({ code }) => code);
+};
+
 /** `everyStep` with its top-level steps changed by `change`. */
 const withSteps = (change: (steps: unknown[]) => unknown[]) => {
   const document = everyStep();
@@ -65,6 +71,23 @@ const send = (to: unknown) => ({
   operation: "mail.send",
   arguments: { to },
 });
+
+/** A mail asking for a reply to `replyTo`, then the wait for it. */
+const asking = (replyTo: string) =>
+  withEventWaits(
+    {
+      id: "ask",
+      type: "do",
+      binding: "mail",
+      operation: "mail.send",
+      arguments: {
+        to: { $expr: "input.who" },
+        subject: "Hi",
+        replyTo: { $expr: replyTo },
+      },
+    },
+    eventWait()
+  );
 
 describe("checking a workflow", () => {
   it("accepts every step kind of the format", () => {
@@ -512,6 +535,23 @@ describe("checking a workflow", () => {
     });
   });
 
+  it("lets `inbox.<alias>` read only a declared event binding's reply address", () => {
+    const at = "/steps/5/arguments/replyTo/$expr";
+    expect({
+      ok: codesAt(asking("inbox.replies")),
+      optional: codesAt(asking('inbox.replies ?? "nobody@acme.test"')),
+      connector: codesAt(asking("inbox.mail")),
+      undeclared: codesAt(asking("inbox.nope")),
+      whole: codesAt(asking("inbox")),
+    }).toStrictEqual({
+      ok: "ok",
+      optional: "ok",
+      connector: { [at]: "workflow.unreadable" },
+      undeclared: { [at]: "workflow.unreadable" },
+      whole: { [at]: "workflow.unreadable" },
+    });
+  });
+
   it("lets `item` be read only in a loop's items, and their steps only there", () => {
     expect({
       ok: problemsAt(withLoops()),
@@ -825,5 +865,59 @@ describe("checking a workflow", () => {
       steps: [nested],
     });
     expect(result.ok).toBeFalsy();
+  });
+
+  it("refuses a raise passing its error off as the host's", () => {
+    const raise = (error: unknown) =>
+      withSteps((steps) => [...steps, { id: "fail", type: "raise", error }]);
+    expect({
+      hostKind: codesOf(
+        raise({
+          type: "https://grasp.work/schemas/grasp-workflow/1/errors/timeout",
+          status: 408,
+        })
+      ),
+      unauthorized: codesOf(raise({ type: "urn:acme:error:no", status: 401 })),
+      forbidden: codesOf(raise({ type: "urn:acme:error:no", status: 403 })),
+      own: codesOf(raise({ type: "urn:acme:error:rejected", status: 422 })),
+    }).toStrictEqual({
+      hostKind: ["workflow.reserved_error_type"],
+      unauthorized: ["workflow.reserved_error_status"],
+      forbidden: ["workflow.reserved_error_status"],
+      own: "ok",
+    });
+  });
+
+  it("answers what a caller relies on: input, output and each parameter, its default in it", () => {
+    const result = checkWorkflow({
+      $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
+      params: {
+        limit: {
+          kind: "money",
+          label: "Limit",
+          currency: "EUR",
+          sensitive: false,
+          default: 500,
+        },
+        token: { kind: "text", label: "Token" },
+      },
+      steps: [{ id: "pause", type: "wait", for: "1 hour" }],
+    });
+    if (!result.ok) {
+      throw new Error(JSON.stringify(result.problems));
+    }
+    const { input, output, params } = result.workflow.contract;
+    const limit = params.get("limit");
+    expect({
+      input: input.kind,
+      output: output.kind,
+      limit: [limit?.presence, limit?.defaultValue],
+      token: params.get("token")?.presence,
+    }).toStrictEqual({
+      input: "object",
+      output: "null",
+      limit: ["default", 500],
+      token: "required",
+    });
   });
 });

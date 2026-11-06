@@ -16,14 +16,8 @@ import { runParamsSchema } from "./engine.ts";
 import type { InternalWorkflow, RunPin } from "./engine.ts";
 import { runFixtureWorkflow } from "./fixture-runs.ts";
 import type { AiCalls, HostHooks, RunStep } from "./host.ts";
-import type {
-  ActionModelCalls,
-  ScopeFences,
-  TriedOnceMarks,
-} from "./resource-host.ts";
 import { runResourceWorkflow } from "./resource-runs.ts";
-import { childRunsOf } from "./run-children.ts";
-import type { SentCalls } from "./sealed-run.ts";
+import type { ActionModelCalls, SentCalls } from "./sealed-run.ts";
 
 // What every run executes (run-object.ts): each time the engine activates
 // a run, at its start and on every wake or recovery, the dispatcher loads
@@ -92,11 +86,7 @@ const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
  * now (run-object.ts).
  */
 export interface RunMemory {
-  /** What it keeps of its JSON workflow's tried-once attempts (resource-host.ts). */
-  triedOnce?: TriedOnceMarks;
-  /** The settled scopes of its JSON workflow's items and branches (resource-host.ts). */
-  fences?: ScopeFences;
-  /** The model calls its JSON workflow and its actions made (resource-host.ts, sealed-run.ts). */
+  /** The model calls its JSON workflow and its actions made (sealed-run.ts). */
   modelCalls?: ActionModelCalls;
   /** Its sealed build's calls tried once that went out (sealed-run.ts). */
   sentCalls?: SentCalls;
@@ -154,10 +144,7 @@ export const runPinned = async (
   }
   if (pin.type === "resource") {
     // An independent workflow's sealed build: its input is its receipt's.
-    return await runResourceWorkflow(env, pin, event.instanceId, step, {
-      ...memory,
-      children: childRunsOf(env),
-    });
+    return await runResourceWorkflow(env, pin, event.instanceId, step, memory);
   }
   if (pin.type === "candidate") {
     // A test run of a draft checkpoint: its input is its row's.

@@ -1,13 +1,12 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { kitModuleName } from "@grasp-os/compiler";
 import { v } from "@grasp-os/sdk";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { decode } from "@grasp-os/workerflow/codec";
 import type { EventMatch } from "@grasp-os/workerflow/contracts";
 import { namedError } from "@grasp-os/workerflow/errors";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -46,7 +45,7 @@ import type {
   HostedSealedRun,
   SealedRunMemory,
 } from "../src/workflows/sealed-run.ts";
-import { endLiveResourceRuns } from "./json-workflow-apps.ts";
+import { endLiveResourceRuns, objectSchema } from "./json-workflow-apps.ts";
 import { engineOfTest } from "./run-host.ts";
 import { admittedFreely, liveStatus, runObject } from "./runs.ts";
 import { unique } from "./sign-in.ts";
@@ -60,9 +59,7 @@ import { unique } from "./sign-in.ts";
 // - an event the isolate made up: the wait's outcome is the host's, from
 //   the engine's own record of what it took; a task's own step recorded
 //   as a plain step, or an event wait the build doesn't seal (another
-//   task's, a listen of another strategy than `any`, one by an event's
-//   attributes),
-//   is refused as tampering;
+//   task's, or one of no step at all), is refused as tampering;
 // - an event for another run, through another binding, or of a type the
 //   task doesn't name: the host waits on the run's own inbox, for the
 //   engine's types of its sealed binding and types only, whatever the
@@ -106,29 +103,22 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
 const completed = "grasp.job.completed";
 const failed = "grasp.job.failed";
 
-/** How long each listen waits, as sealed: five minutes. */
+/** How long each event wait waits, as sealed: five minutes. */
 const timeoutMs = 300_000;
 
-/** A listen task `id` through `binding` of `to`, five minutes at most. */
-const listen = (id: string, to: unknown, binding = "jobEvents") => ({
-  [id]: {
-    listen: { to, read: "data" },
-    timeout: { after: { minutes: 5 } },
-    metadata: { grasp: { binding } },
-  },
+/** An event wait `id` through `binding` for `type`, five minutes at most. */
+const listen = (
+  id: string,
+  type: string | string[],
+  binding = "jobEvents"
+) => ({
+  id,
+  type: "wait",
+  event: { from: binding, type },
+  timeout: "5 minutes",
 });
 
 /**
@@ -136,10 +126,8 @@ const listen = (id: string, to: unknown, binding = "jobEvents") => ({
  * event waits `await-job` (a job's completion or failure through
  * `jobEvents`), `await-again` (its completion), `await-guarded` (its
  * completion, in a try whose catch takes anything) and `await-other` (a
- * completion through `otherEvents`), and listens the run host doesn't
- * run: `one`, one for all of its filters, one by an event's subject.
- * Its bindings `jobEvents` and `otherEvents` are of one job event
- * contract, each approved.
+ * completion through `otherEvents`). Its bindings `jobEvents` and
+ * `otherEvents` are of one job event contract, each approved.
  */
 const eventWorkflow = async () => {
   const admin = await person("admin");
@@ -160,56 +148,24 @@ const eventWorkflow = async () => {
   );
   await publishWorkflowVersion(env, admin, workflow.id, {
     definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: {
-              jobEvents: { kind: "event", contract },
-              otherEvents: { kind: "event", contract },
-            },
-          },
-        },
+      $schema: workflowSchemaUrl,
+      input: objectSchema({ jobId: { type: "string" } }),
+      bindings: {
+        jobEvents: { kind: "event", contract },
+        otherEvents: { kind: "event", contract },
       },
-      input: { schema: objectSchema({ jobId: { type: "string" } }) },
-      output: { schema: objectSchema({}) },
-      do: [
-        { linger: { wait: "PT1H" } },
-        listen("await-job", {
-          any: [{ with: { type: completed } }, { with: { type: failed } }],
-        }),
-        listen("await-again", { any: [{ with: { type: completed } }] }),
-        listen("await-one", { one: { with: { type: completed } } }),
-        listen("await-both", {
-          all: [{ with: { type: completed } }, { with: { type: failed } }],
-        }),
-        listen("await-subject", {
-          one: {
-            with: { type: completed, subject: "${ $workflow.input.jobId }" },
-          },
-        }),
+      steps: [
+        { id: "linger", type: "wait", for: "1 hour" },
+        listen("await-job", [completed, failed]),
+        listen("await-again", completed),
         {
-          guarded: {
-            try: [
-              listen("await-guarded", {
-                any: [{ with: { type: completed } }],
-              }),
-            ],
-            // Takes any error a catch may take.
-            catch: {},
-          },
+          id: "guarded",
+          type: "try",
+          try: [listen("await-guarded", completed)],
+          // Takes any error a catch may take.
+          catch: {},
         },
-        listen(
-          "await-other",
-          { any: [{ with: { type: completed } }] },
-          "otherEvents"
-        ),
+        listen("await-other", completed, "otherEvents"),
       ],
     }),
     basedOn: null,
@@ -710,16 +666,12 @@ describe(
         itsEnter: await run(
           `return await step.listen("await-job", { key: "enter", description: "Its event" });`
         ),
-        forOne: await run(`return ${wait("await-one")};`),
-        forAll: await run(`return ${wait("await-both")};`),
-        bySubject: await run(`return ${wait("await-subject")};`),
+        noStep: await run(`return ${wait("await-none")};`),
       }).toStrictEqual({
         recorded: refused,
         notAWait: refused,
         itsEnter: refused,
-        forOne: refused,
-        forAll: refused,
-        bySubject: refused,
+        noStep: refused,
       });
       // None of them asked the engine for an event.
       expect(asked).toStrictEqual([]);

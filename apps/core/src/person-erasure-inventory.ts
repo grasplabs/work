@@ -262,6 +262,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.admin_commands": noPerson,
   "core.brain_team_group_saves": noPerson,
   "core.brain_team_groups": noPerson,
+  // Never written; GRA-1589 drops it.
   "core.run_evidence_holds": noPerson,
   "core.stephen_request_proposals": noPerson,
   "core.stephen_request_questions": {

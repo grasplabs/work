@@ -1,3 +1,5 @@
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
+
 /**
  * A contact list, as an App's chat writes one into its draft (the fake
  * model's `buildsApp`, e2e/model-scripts.ts): spec 8's layout, a table of
@@ -5,12 +7,15 @@
  * screen that adds a contact by name and lists them live.
  */
 export const contactsApp: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  contacts: defineTable({ name: v.string().max(200) }),
-});
-`,
+  ...appDefinition({
+    name: "Contacts",
+    tables: {
+      contacts: {
+        fields: { name: "v.string().max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/contacts.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
@@ -29,15 +34,10 @@ export const add = mutation({
   handler: async (ctx, args) => await ctx.db.insert("contacts", args),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
 
-export default app({
-  name: "Contacts",
-  schema,
-  access: { tables: { contacts: { read: "appMembers", write: "appMembers" } } },
+  "screens.ts": `export default {
   screens: [{ name: "contacts", path: "/", source: "screens/contacts.tsx" }],
-});
+};
 `,
   "screens/contacts.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";

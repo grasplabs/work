@@ -4,7 +4,13 @@
  * against the manifest again as it's read, so a deploy runs exactly the
  * bytes CI built even if the bucket changed since the import.
  */
-import { releaseManifestSchema, sha256OfBytes } from "@grasp-os/shared/release";
+import { toHex } from "@grasp-os/shared/encoding";
+import {
+  assetKey,
+  encodeAsset,
+  releaseManifestSchema,
+  sha256OfBytes,
+} from "@grasp-os/shared/release";
 import type { Bytes, ReleaseManifest } from "@grasp-os/shared/release";
 import { eq } from "drizzle-orm";
 
@@ -35,47 +41,105 @@ export interface BlobRef {
   r2Key: string;
 }
 
+/** A blob in R2 whose bytes aren't what the manifest says. */
+const mismatch = (file: Omit<BlobRef, "sha256">, what: string): DeployError =>
+  new DeployError(
+    "release_blob_mismatch",
+    `${file.r2Key} (${file.name}) ${what}`
+  );
+
 /**
- * The bytes of the blob `file` names, read from `store` and checked
- * against the manifest: its size before its body is read, then its bytes
- * with `matches` (its SHA-256, or a static file's content key).
+ * The blob `file` names, in `store`, its size checked against the
+ * manifest before its body is read.
  */
-export const readChecked = async (
+const openSized = async (
   store: ReleaseStore,
-  file: Omit<BlobRef, "sha256">,
-  matches: (bytes: Bytes) => Promise<boolean>
-): Promise<Bytes> => {
+  file: Omit<BlobRef, "sha256">
+): Promise<R2ObjectBody> => {
   const object = await store.get(file.r2Key);
   if (object === null) {
-    throw new DeployError(
-      "release_blob_mismatch",
-      `${file.r2Key} (${file.name}) is missing from the release`
-    );
+    throw mismatch(file, "is missing from the release");
   }
   if (object.size !== file.size) {
     await object.body.cancel();
-    throw new DeployError(
-      "release_blob_mismatch",
-      `${file.r2Key} (${file.name}) doesn't match its size`
-    );
+    throw mismatch(file, "doesn't match its size");
   }
-  const bytes = new Uint8Array(await object.arrayBuffer());
-  if (!(await matches(bytes))) {
-    throw new DeployError(
-      "release_blob_mismatch",
-      `${file.r2Key} (${file.name}) doesn't match its hash`
-    );
+  return object;
+};
+
+/** The bytes of the blob `file` names, read whole, its size checked. */
+const readSized = async (
+  store: ReleaseStore,
+  file: Omit<BlobRef, "sha256">
+): Promise<Bytes> => {
+  const object = await openSized(store, file);
+  return new Uint8Array(await object.arrayBuffer());
+};
+
+/**
+ * A module's bytes as they're read from `store`, checked by size, and by
+ * SHA-256 as they pass: the last chunk is held back until the hash
+ * matches, so bytes that aren't what the manifest says never go out
+ * whole; the stream errors instead.
+ */
+export const streamBlob = async (
+  store: ReleaseStore,
+  file: BlobRef
+): Promise<ReadableStream<Uint8Array>> => {
+  const { body } = await openSized(store, file);
+  const digest = new crypto.DigestStream("SHA-256");
+  const hashing = digest.getWriter();
+  let held: Uint8Array | undefined;
+  return body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform: async (chunk, controller) => {
+        await hashing.write(chunk);
+        if (held !== undefined) {
+          controller.enqueue(held);
+        }
+        held = chunk;
+      },
+      flush: async (controller) => {
+        await hashing.close();
+        if (toHex(new Uint8Array(await digest.digest)) !== file.sha256) {
+          throw mismatch(file, "doesn't match its hash");
+        }
+        if (held !== undefined) {
+          controller.enqueue(held);
+        }
+      },
+    })
+  );
+};
+
+/** A migration's bytes, checked by size and SHA-256. */
+export const readBlob = async (
+  store: ReleaseStore,
+  file: BlobRef
+): Promise<Bytes> => {
+  const bytes = await readSized(store, file);
+  if ((await sha256OfBytes(bytes)) !== file.sha256) {
+    throw mismatch(file, "doesn't match its hash");
   }
   return bytes;
 };
 
-/** A module's or a migration's bytes, checked as `readChecked` does, by SHA-256. */
-export const readBlob = async (
+/**
+ * A static file's contents as base64 (`encodeAsset`), the assets upload's
+ * body, read from `store` and checked by size and by its content key
+ * `key`: encoded once, for both.
+ */
+export const readAssetBase64 = async (
   store: ReleaseStore,
-  file: BlobRef
-): Promise<Bytes> =>
-  await readChecked(
-    store,
-    file,
-    async (bytes) => (await sha256OfBytes(bytes)) === file.sha256
+  file: { path: string; key: string; size: number }
+): Promise<Bytes> => {
+  const ref = { name: file.path, size: file.size, r2Key: assetKey(file.key) };
+  const { key, base64 } = await encodeAsset(
+    await readSized(store, ref),
+    file.path
   );
+  if (key !== file.key) {
+    throw mismatch(ref, "doesn't match its hash");
+  }
+  return base64;
+};

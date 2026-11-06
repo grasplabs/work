@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { computePackagesFile, packageModuleName } from "@grasp-os/compiler";
 import { v } from "@grasp-os/sdk";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
@@ -11,7 +10,7 @@ import type { Json } from "@grasp-os/shared/json";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -39,22 +38,15 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import type { RunStep } from "../src/workflows/host.ts";
-import { ResourceRunHost } from "../src/workflows/resource-host.ts";
-import type { TriedOnceMarks } from "../src/workflows/resource-host.ts";
-import {
-  resourceRunFor,
-  terminateResourceRun,
-} from "../src/workflows/resource-runs.ts";
-import type { StepError } from "../src/workflows/sealed-isolate.ts";
+import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import {
   requirePackagesAdmitted,
   sealPackages,
 } from "../src/workflows/sealed-packages.ts";
+import { endLiveResourceRuns, objectSchema } from "./json-workflow-apps.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { noise, publish } from "./npm.ts";
 import { racingDb } from "./racing-db.ts";
-import { admittedFreely } from "./runs.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { auditedDuring, outcome, refusal, unique } from "./sign-in.ts";
 
@@ -103,90 +95,62 @@ const approver = async (): Promise<Identity> => {
   return admin;
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
 /**
- * A definition of `name` that calls `total` on [1, 2, 3] and answers its
- * result as the status; with `linger`, it waits that long first.
+ * A grasp-workflow/1 document on input `{ who }` running `steps` through
+ * `bindings`, ending with `{ status }`, its status `status`'s value.
  */
-const definitionOf = (name: string, linger?: string): string =>
+const documentOf = (
+  bindings: Record<string, unknown>,
+  steps: unknown[],
+  status: string
+): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: {
-            total: { kind: "compute", contract: "local:code/total.ts#total" },
-          },
-        },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: { $expr: status } },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      ...(linger === undefined ? [] : [{ linger: { wait: linger } }]),
-      {
-        add: {
-          call: "grasp.compute",
-          with: { binding: "total", arguments: "${ [1, 2, 3] }" },
-        },
-      },
-      { answer: { set: { status: "${ tostring }" } } },
-    ],
+    bindings,
+    steps,
   });
 
 /**
- * A definition of `name` whose action `doubled` answers `pkg`'s `double`
- * of 6, after `linger`.
+ * A definition that calls `total` on [1, 2, 3] and answers its result as
+ * the status; with `linger`, it waits that long first.
  */
-const actionDefinitionOf = (name: string, linger: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: {
-            doubled: {
-              kind: "operation",
-              contract: "local:code/doubled.ts#doubled",
-            },
-          },
-        },
-      },
-    },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      { linger: { wait: linger } },
-      {
-        doubled: {
-          call: "grasp.operation",
-          with: { binding: "doubled", arguments: { value: 6 } },
-        },
-      },
-      { answer: { set: { status: "${ .status }" } } },
+const definitionOf = (linger?: string): string =>
+  documentOf(
+    { total: { kind: "compute", contract: "local:code/total.ts#total" } },
+    [
+      ...(linger === undefined
+        ? []
+        : [{ id: "linger", type: "wait", for: linger }]),
+      { id: "add", type: "do", binding: "total", arguments: [1, 2, 3] },
     ],
-  });
+    '"" + steps.add.output'
+  );
+
+/**
+ * A definition whose action `doubled` answers `pkg`'s `double` of 6,
+ * after `linger`.
+ */
+const actionDefinitionOf = (linger: string): string =>
+  documentOf(
+    {
+      doubled: { kind: "action", contract: "local:code/doubled.ts#doubled" },
+    },
+    [
+      { id: "linger", type: "wait", for: linger },
+      {
+        id: "doubled",
+        type: "do",
+        binding: "doubled",
+        arguments: { value: 6 },
+      },
+    ],
+    "steps.doubled.output.status"
+  );
 
 /** An action answering `pkg`'s `double` of its value, using nothing. */
 const actionUsing = (
@@ -271,45 +235,25 @@ const granted = async (
 };
 
 /**
- * A definition of `name` whose action `notify` sends mail through its
- * `mail` binding, a connector of catalog contract `mailKey`.
+ * A definition whose action `notify` sends mail through its `mail`
+ * binding, a connector of catalog contract `mailKey`.
  */
-const mailingDefinitionOf = (name: string, mailKey: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: {
-            notify: {
-              kind: "operation",
-              contract: "local:code/notify.ts#notify",
-            },
-            mail: { kind: "connector", contract: mailKey },
-          },
-        },
-      },
+const mailingDefinitionOf = (mailKey: string): string =>
+  documentOf(
+    {
+      notify: { kind: "action", contract: "local:code/notify.ts#notify" },
+      mail: { kind: "connector", contract: mailKey },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
+    [
       {
-        notify: {
-          call: "grasp.operation",
-          with: {
-            binding: "notify",
-            arguments: { to: "${ $workflow.input.who }" },
-          },
-        },
+        id: "notify",
+        type: "do",
+        binding: "notify",
+        arguments: { to: { $expr: "input.who" } },
       },
     ],
-  });
+    "steps.notify.output.status"
+  );
 
 /** An action sending two mails, their subjects `pkg`'s `double` of 1 and 2. */
 const mailingUsing = (
@@ -418,7 +362,7 @@ const publishedWith = async (
     builder,
     workflow.id,
     {
-      definition: definitionOf(workflow.name, linger),
+      definition: definitionOf(linger),
       basedOn: null,
       modules: { "code/total.ts": moduleUsing(pkg) },
       packages: { graphHash },
@@ -464,192 +408,6 @@ const outcomesOf = (events: AuditEvent[], actions: readonly string[]) =>
       failureCode: detail.failureCode ?? null,
     }));
 
-/** Marks of tried-once attempts as a run's object keeps them, in memory. */
-const keptMarks = (): TriedOnceMarks => {
-  const unstarted = new Set<string>();
-  const failures = new Map<string, StepError>();
-  return {
-    markUnstarted: (key, attempt) => {
-      unstarted.add(`${attempt}:${key}`);
-    },
-    markStarted: (key, attempt) => {
-      unstarted.delete(`${attempt}:${key}`);
-    },
-    unstarted: (key, attempt) => unstarted.has(`${attempt}:${key}`),
-    keepFailure: (key, attempt, error) => {
-      failures.set(`${attempt}:${key}`, error);
-    },
-    failureOf: (key, attempt) => failures.get(`${attempt}:${key}`),
-  };
-};
-
-/**
- * Core's database with every read of the dependency policy failing, as D1
- * can for a moment: the package check can't answer.
- */
-const policyUnreadable = (): D1Database =>
-  new Proxy(env.DB, {
-    get: (target, property) => {
-      const value: unknown = Reflect.get(target, property);
-      if (property === "prepare") {
-        return (query: string) => {
-          if (query.includes("dependency_policy")) {
-            throw new Error("D1 is unavailable for a moment.");
-          }
-          return target.prepare(query);
-        };
-      }
-      return typeof value === "function"
-        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
-        : value;
-    },
-  });
-
-/**
- * A host of one activation of run `runId` of version 1 of workflow `id`
- * for `by`, on `runEnv`, as the engine gives its steps: each under a key
- * of `runKey`'s and the step's, at the attempt `attempts` says (the
- * first unless given), what each failed with heard in `failed`.
- */
-const activationOf = async (
-  by: Identity,
-  id: string,
-  {
-    runId,
-    runKey,
-    marks,
-    failed,
-    runEnv = env,
-    attempts = {},
-    activationFuel,
-    parks = false,
-  }: {
-    runId: string;
-    runKey: string;
-    marks: TriedOnceMarks;
-    /** What each attempt failed with, as the engine heard it: its name and code. */
-    failed: unknown[];
-    runEnv?: Env;
-    attempts?: Record<string, number>;
-    /** The activation's fuel, if not the host's own. */
-    activationFuel?: number;
-    /**
-     * Whether a step whose attempt fails as it may be tried again is
-     * parked, as the engine parks it: its call never settles.
-     */
-    parks?: boolean;
-  }
-): Promise<ResourceRunHost> => {
-  const manifest = await env.DB.prepare(
-    "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
-  )
-    .bind(id)
-    .first<{ hash: string }>();
-  const build = await loadWorkflowBuild(env, id, 1, manifest?.hash ?? "");
-  const step: RunStep = {
-    do: async (name, _config, fn) => {
-      try {
-        return await fn({
-          attempt: attempts[name] ?? 1,
-          idempotencyKey: `key:${runKey}:${name}`,
-        });
-      } catch (error) {
-        const code: unknown =
-          error instanceof Error ? Reflect.get(error, "code") : undefined;
-        failed.push({
-          name: error instanceof Error ? error.name : "unknown",
-          code: code ?? null,
-        });
-        if (
-          parks &&
-          error instanceof Error &&
-          error.name !== "NonRetryableError"
-        ) {
-          // oxlint-disable-next-line promise/avoid-new -- a parked step's call never settles
-          return await new Promise<never>(() => {
-            // Never settles.
-          });
-        }
-        throw error;
-      }
-    },
-    sleep: async () => {
-      await Promise.resolve();
-    },
-    sleepUntil: async () => {
-      await Promise.resolve();
-    },
-    waitForEvent: async () => await Promise.reject(new Error("No waits here")),
-    waitForMatch: async () => await Promise.reject(new Error("No waits here")),
-  };
-  return new ResourceRunHost(
-    runEnv,
-    step,
-    {
-      runId,
-      workflowId: id,
-      version: 1,
-      principal: by.userId,
-      input: { who: "Ada" },
-      params: {},
-      createdAt: Date.now(),
-      build,
-      calling: {
-        runId,
-        rootRunId: runId,
-        accountRunId: runId,
-        workflowId: id,
-        version: 1,
-        principal: by.userId,
-        invoker: { type: "person", id: by.userId, appVersion: null },
-        bindings: new Map(),
-        restricted: false,
-      },
-      maxModelCalls: 1,
-    },
-    {
-      leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
-      tampered: () => {},
-      admitAttempt: admittedFreely,
-      triedOnce: marks,
-      ...(activationFuel === undefined ? {} : { activationFuel }),
-    }
-  );
-};
-
-/** What a step captures: Ada's input, and no context. */
-const adaData = { input: { input: { who: "Ada" }, context: {} } };
-
-/** The runs `actionRunWith` started, each ended after its test. */
-const heldRuns: { by: Acting; workflowId: string; runId: string }[] = [];
-
-/**
- * A workflow of a new builder's whose action `doubled` imports an approved
- * package, its version published and a run of it held asleep before the
- * action: what an activation of that run is made with.
- */
-const actionRunWith = async () => {
-  const admin = await approver();
-  const pkg = await doubling();
-  const { builder, workflow, request } = await workflowWith(pkg);
-  await approve(admin, request);
-  await publishWorkflowVersion(
-    env,
-    builder,
-    workflow.id,
-    {
-      definition: actionDefinitionOf(workflow.name, "PT1H"),
-      basedOn: null,
-      modules: { "code/doubled.ts": actionUsing(pkg) },
-      packages: { graphHash: request.graphHash },
-    },
-    sealPackages
-  );
-  const runId = await started(builder, workflow.id);
-  heldRuns.push({ by: builder, workflowId: workflow.id, runId });
-  return { admin, builder, workflow, request, runId };
-};
-
 /**
  * A run of a workflow of a new builder's whose action, importing an
  * approved package, sends two mails, the first held at the mail server
@@ -672,7 +430,7 @@ const mailedThroughEnding = async (ending: "retired" | "revoked") => {
     builder,
     workflow.id,
     {
-      definition: mailingDefinitionOf(workflow.name, mailKey),
+      definition: mailingDefinitionOf(mailKey),
       basedOn: null,
       modules: { "code/notify.ts": mailingUsing(pkg) },
       packages: { graphHash: request.graphHash },
@@ -723,17 +481,8 @@ const mailedThroughEnding = async (ending: "retired" | "revoked") => {
 };
 
 describe("a workflow's modules importing approved packages", () => {
-  // A run held asleep for an hour would go on in the engine after its
-  // test, whatever the test made of it.
-  afterEach(async () => {
-    const held = heldRuns.splice(0);
-    await Promise.all(
-      held.map(
-        async ({ by, workflowId, runId }) =>
-          await terminateResourceRun(env, by, workflowId, runId)
-      )
-    );
-  });
+  // A run still asleep would go on in the engine after its test.
+  afterEach(endLiveResourceRuns);
 
   it("seals the approved package into the version and runs it", async () => {
     const admin = await approver();
@@ -782,7 +531,7 @@ describe("a workflow's modules importing approved packages", () => {
           builder,
           workflow.id,
           {
-            definition: definitionOf(workflow.name),
+            definition: definitionOf(),
             basedOn: null,
             modules: { "code/total.ts": moduleUsing(pkg) },
             ...(packages === undefined ? {} : { packages }),
@@ -909,7 +658,7 @@ describe("a workflow's modules importing approved packages", () => {
     const { builder, workflow, request } = await workflowWith(pkg);
     await approve(admin, request);
     // It waits a few seconds before its calculation: revoked meanwhile.
-    await publishedWith(builder, workflow, pkg, request.graphHash, "PT3S");
+    await publishedWith(builder, workflow, pkg, request.graphHash, "3 seconds");
     const runId = await started(builder, workflow.id);
 
     let run: Awaited<ReturnType<typeof ended>> | undefined;
@@ -1001,14 +750,27 @@ describe("a workflow's modules importing approved packages", () => {
     });
     await approve(admin, next);
 
+    // The same document and modules on another graph: a version of its
+    // own, never the first one answered again.
+    const republished = await publishWorkflowVersion(
+      env,
+      builder,
+      workflow.id,
+      {
+        definition: definitionOf(),
+        basedOn: 1,
+        modules: { "code/total.ts": moduleUsing(pkg) },
+        packages: { graphHash: next.graphHash },
+      },
+      sealPackages
+    );
+
     expect({
       otherGraph: next.graphHash !== request.graphHash,
-      republished: await outcome(
-        publishedWith(builder, workflow, pkg, next.graphHash)
-      ),
+      republished: republished.version,
     }).toStrictEqual({
       otherGraph: true,
-      republished: "workflow.version_exists",
+      republished: 2,
     });
   });
 
@@ -1022,7 +784,7 @@ describe("a workflow's modules importing approved packages", () => {
       builder,
       workflow.id,
       {
-        definition: actionDefinitionOf(workflow.name, "PT3S"),
+        definition: actionDefinitionOf("3 seconds"),
         basedOn: null,
         modules: { "code/doubled.ts": actionUsing(pkg) },
         packages: { graphHash: request.graphHash },
@@ -1347,7 +1109,7 @@ describe("a workflow's modules importing approved packages", () => {
         builder,
         workflow.id,
         {
-          definition: definitionOf(workflow.name),
+          definition: definitionOf(),
           basedOn: null,
           modules: { "code/total.ts": moduleUsing(pkg) },
           packages: { graphHash: request.graphHash },
@@ -1491,119 +1253,5 @@ describe("a workflow's modules importing approved packages", () => {
         message.includes("can't be imported here")
       ),
     }).toStrictEqual({ code: "workflow.modules_invalid", importRefused: true });
-  });
-
-  it("tries an action again, as never started, while its package check can't answer", async () => {
-    const { builder, workflow, runId } = await actionRunWith();
-    const runKey = unique();
-    const marks = keptMarks();
-    const failed: unknown[] = [];
-    const ran: string[] = [];
-    const doubled = async (host: ResourceRunHost, label: string) =>
-      await host.do("task:doubled", adaData, async (attempt) => {
-        ran.push(label);
-        const now = await attempt.call({ input: { who: "Ada" } });
-        return now.ok
-          ? { ok: true as const, value: { output: now.value } }
-          : { ok: false as const, error: now.error };
-      });
-
-    const first = await doubled(
-      await activationOf(builder, workflow.id, {
-        runId,
-        runKey,
-        marks,
-        failed,
-        runEnv: { ...env, DB: policyUnreadable() },
-      }),
-      "first attempt"
-    );
-    // The step's retry, in the next activation, the policy readable again.
-    const retried = await doubled(
-      await activationOf(builder, workflow.id, {
-        runId,
-        runKey,
-        marks,
-        failed,
-        attempts: { "task:doubled": 2 },
-      }),
-      "retry"
-    );
-
-    expect({
-      first: first.ok,
-      failed,
-      retried,
-      ran,
-    }).toStrictEqual({
-      first: false,
-      // Retryable, as an attempt that never started: never a refusal.
-      failed: [{ name: "Error", code: null }],
-      retried: { ok: true, value: { output: { status: "12" } } },
-      // The action ran once, in the retry.
-      ran: ["retry"],
-    });
-  });
-
-  it("ends an action refused for its revoked packages as a step error the engine never tries again", async () => {
-    const { admin, builder, workflow, request, runId } = await actionRunWith();
-    await end(admin, request, "revoked");
-    const failed: unknown[] = [];
-    const ran: string[] = [];
-
-    const host = await activationOf(builder, workflow.id, {
-      runId,
-      runKey: unique(),
-      marks: keptMarks(),
-      failed,
-    });
-    const settled = await host.do("task:doubled", adaData, async () => {
-      ran.push("action");
-      return await Promise.resolve({ ok: true, value: { output: null } });
-    });
-
-    expect({ ok: settled.ok, failed, ran }).toStrictEqual({
-      ok: false,
-      failed: [
-        { name: "NonRetryableError", code: "workflow.packages_revoked" },
-      ],
-      ran: [],
-    });
-  });
-
-  it("gives an action's share of the activation's fuel back when its package check fails", async () => {
-    const { builder, workflow, runId } = await actionRunWith();
-    const failed: unknown[] = [];
-    const ran: string[] = [];
-    // Fuel for one attempt: the action's, while its check runs.
-    const host = await activationOf(builder, workflow.id, {
-      runId,
-      runKey: unique(),
-      marks: keptMarks(),
-      failed,
-      runEnv: { ...env, DB: policyUnreadable() },
-      activationFuel: 2 ** 27,
-      parks: true,
-    });
-    // Its check can't answer: tried again, the engine parks the step.
-    void host.do("task:doubled", adaData, async () => {
-      ran.push("action");
-      return await Promise.resolve({ ok: true, value: { output: null } });
-    });
-    await vi.waitFor(() => {
-      expect(failed).toHaveLength(1);
-    });
-    // The next step of the same activation (one of a branch still out):
-    // funded only if its share came back.
-    await host.do("task:answer", adaData, async () => {
-      ran.push("answer");
-      return await Promise.resolve({ ok: true, value: { output: null } });
-    });
-
-    expect({ failed: failed[0], ran }).toStrictEqual({
-      failed: { name: "Error", code: null },
-      // Run, not cut off as a CPU stop for want of fuel.
-      ran: ["answer"],
-    });
   });
 });

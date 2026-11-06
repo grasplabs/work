@@ -457,15 +457,12 @@ const tagged = (tag: string, withTag: boolean): string =>
           withTag
             ? { ...noteFields, tag: v.id("tags").default(tagId(tag)) }
             : noteFields
-        ),
-        tags: defineTable({ name: v.string() }),
-      }),
-      {
-        tables: {
-          notes: { read: "appMembers", write: "appMembers" },
-          tags: { read: "owner", write: "owner" },
-        },
-      }
+        ).access({ read: "appMembers", write: "appMembers" }),
+        tags: defineTable({ name: v.string() }).access({
+          read: "owner",
+          write: "owner",
+        }),
+      })
     )
   );
 
@@ -525,9 +522,10 @@ describe("an older release", () => {
     const indexed = manifestText(
       schemaManifest(
         defineSchema({
-          notes: defineTable(noteFields).index("by_title", ["title"]),
-        }),
-        { tables: { notes: { read: "appMembers", write: "appMembers" } } }
+          notes: defineTable(noteFields)
+            .index("by_title", ["title"])
+            .access({ read: "appMembers", write: "appMembers" }),
+        })
       )
     );
     const store = await newStore();

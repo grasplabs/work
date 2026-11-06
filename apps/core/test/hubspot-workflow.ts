@@ -5,7 +5,7 @@ import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { composioConsentText } from "@grasp-os/shared/connect";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 
 import { requireResourceRole } from "../src/permission-resources.ts";
@@ -17,6 +17,7 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import type { Idp } from "./idp.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
 import { openRpc, routed, signedInWithRole, unique } from "./sign-in.ts";
 
 /** An admin, signed in, with their `connections` and `workflows` APIs and who they are to core. */
@@ -71,17 +72,6 @@ export const connectHubspot = async (by: Admin): Promise<string> => {
   return hubspot.id;
 };
 
-/** A workflow's input or output schema: an object of `properties`. */
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
 /** The descriptor of an object with no fields, and of null. */
 const emptyObject = {
   descriptorVersion: 1,
@@ -124,35 +114,20 @@ export const crmWorkflow = async (by: Admin, connectionId: string) => {
   });
   await publishWorkflowVersion(env, by.identity, workflow.id, {
     definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: { ...binding("crm"), ...binding("mail") },
-          },
-        },
+      $schema: workflowSchemaUrl,
+      input: objectSchema({}),
+      output: {
+        schema: objectSchema({ status: { type: "string" } }),
+        value: { status: "done" },
       },
-      input: { schema: objectSchema({}) },
-      output: { schema: objectSchema({ status: { type: "string" } }) },
-      do: [
-        ...["crm", "mail"].map((alias) => ({
-          [alias]: {
-            call: "grasp.connector",
-            with: {
-              binding: alias,
-              operation: "HUBSPOT_LIST_CONTACTS",
-              arguments: {},
-            },
-          },
-        })),
-        { finish: { set: { status: "done" } } },
-      ],
+      bindings: { ...binding("crm"), ...binding("mail") },
+      steps: ["crm", "mail"].map((alias) => ({
+        id: alias,
+        type: "do",
+        binding: alias,
+        operation: "HUBSPOT_LIST_CONTACTS",
+        arguments: {},
+      })),
     }),
     basedOn: null,
   });

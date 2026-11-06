@@ -4,19 +4,37 @@
  * workers.dev route, reading what is live, and applying D1 migrations.
  */
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { encodeAsset } from "@grasp-os/shared/release";
+import { mapConcurrently } from "@grasp-os/shared/release";
 import { z } from "zod";
 
 import { isNotFound } from "./api.ts";
-import type { CloudflareApi } from "./api.ts";
+import type { ApiCall, CloudflareApi } from "./api.ts";
+
+/*
+ * A release's files are read as its upload sends them, never all at once:
+ * core's are over 100 MB (its modules, and its static files as the
+ * base64 the assets upload takes), and a Worker, a Workflow step's run
+ * included, is stopped past 128 MB of memory, which its isolate may share
+ * with other requests. So a static file is read only when the account
+ * lacks it, one file per request, and the modules stream into the
+ * script's upload one after another: it holds a chunk at a time, whatever
+ * the release's size. FormData can't do that (its files are Blobs, held
+ * whole, and workerd builds the whole body again to send it), so the
+ * uploads' forms are written as the HTML standard encodes
+ * multipart/form-data, their length known up front (`FixedLengthStream`),
+ * as a form's is.
+ */
 
 /** One module of a Worker, as its bundle holds it. */
 export interface WorkerModule {
   /** Its path in the bundle, such as `index.js`. */
   name: string;
-  content: string | Uint8Array<ArrayBuffer>;
   /** Such as `application/javascript+module`, `text/plain` or `application/wasm`. */
   type: string;
+  /** Its size in bytes. */
+  size: number;
+  /** Its `size` bytes, streamed as the upload sends them. */
+  stream: () => Promise<ReadableStream<Uint8Array>>;
 }
 
 /**
@@ -33,9 +51,17 @@ export type WorkerMetadata = Record<string, unknown> & {
 export interface AssetFile {
   /** Its URL path, such as `/index.html`. */
   path: string;
-  content: Uint8Array<ArrayBuffer>;
+  /** Its content key (`encodeAsset`), as the release manifest names it. */
+  key: string;
+  /** Its size in bytes. */
+  size: number;
   /** Its content type, such as `text/html`. */
   type: string;
+  /**
+   * Its contents as base64 (`encodeAsset`), checked against `key`: read
+   * only when the account lacks the file.
+   */
+  readBase64: () => Promise<Uint8Array<ArrayBuffer>>;
 }
 
 /** What one Worker of a release is uploaded as. */
@@ -44,8 +70,11 @@ export interface WorkerUpload {
   releaseId: string;
   metadata: WorkerMetadata;
   modules: readonly WorkerModule[];
-  /** Its static files, if it serves any. */
-  assets?: readonly AssetFile[];
+  /**
+   * The token its static files went up under (`uploadTargetAssets`), if
+   * it serves any.
+   */
+  assetsJwt?: string;
 }
 
 const uploadSessionSchema = z.object({
@@ -55,21 +84,17 @@ const uploadSessionSchema = z.object({
 });
 const uploadedSchema = z.object({ jwt: z.string().nullish() }).nullish();
 
-/** Most asset buckets uploaded at once. */
-const assetUploadConcurrency = 3;
+/** Where a placed client's script is: a dispatch namespace in an account. */
+export interface ScriptTarget {
+  accountId: string;
+  scriptName: string;
+  /** The Workers for Platforms dispatch namespace. */
+  namespace: string;
+}
 
-/** Runs `task` on each of `items`, at most `limit` at a time, in order of results. */
-const inBatches = async <T, R>(
-  items: readonly T[],
-  limit: number,
-  task: (item: T) => Promise<R>
-): Promise<R[]> => {
-  if (items.length === 0) {
-    return [];
-  }
-  const batch = await Promise.all(items.slice(0, limit).map(task));
-  return [...batch, ...(await inBatches(items.slice(limit), limit, task))];
-};
+/** The API path of the script `target` names. */
+const targetPath = ({ accountId, scriptName, namespace }: ScriptTarget) =>
+  `/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${scriptName}`;
 
 /**
  * The key a file goes up under: its content key (`encodeAsset`) and its
@@ -80,40 +105,214 @@ const typedAssetKey = async (key: string, type: string): Promise<string> => {
   return hash.slice(0, 32);
 };
 
+/** One file of an upload's form: `size` bytes of `type`, read as it goes out. */
+interface FormPart {
+  name: string;
+  type: string;
+  size: number;
+  read: () => Promise<ReadableStream<Uint8Array> | Uint8Array>;
+}
+
+const encoder = new TextEncoder();
+const lineBreak = encoder.encode("\r\n");
+
+/** `name` quoted in a part's header, escaped as the HTML standard does. */
+const quoted = (name: string): string =>
+  `"${name.replaceAll("\n", "%0A").replaceAll("\r", "%0D").replaceAll('"', "%22")}"`;
+
 /**
- * Uploads the files the script at `scriptAt` serves that the account
- * doesn't hold yet, and returns the token its upload's metadata names them
- * by (`assets.jwt`). The script is an account's own, or one in a Workers
- * for Platforms dispatch namespace, whose upload session is opened under
- * its own path and whose files go to the account's upload.
+ * Writes `part`'s contents to `writer` as they're read. A part that can't
+ * be read aborts `failed` with why, so the call stops with it rather than
+ * being retried as if its answer were lost; a write that fails, because
+ * the request ended, doesn't.
  */
-const uploadAssetsAt = async (
-  api: CloudflareApi,
-  accountId: string,
-  scriptAt: string,
-  files: readonly AssetFile[]
-): Promise<string> => {
-  const encoded = await Promise.all(
-    files.map(async (file) => {
-      // Encoded once for its key and its body, and named by the key the
-      // release manifest gives it (Wrangler's shape and extension rule,
-      // with SHA-256) bound to its type: the account keeps a file it holds
-      // under its key with the type it was first uploaded with, so a file
-      // whose type changes must go up again under a new key.
-      const { key, base64 } = await encodeAsset(file.content, file.path);
-      return { ...file, base64, hash: await typedAssetKey(key, file.type) };
+const writePart = async (
+  writer: WritableStreamDefaultWriter<Uint8Array>,
+  part: FormPart,
+  failed: AbortController
+): Promise<void> => {
+  let contents: ReadableStream<Uint8Array> | Uint8Array;
+  try {
+    contents = await part.read();
+  } catch (error) {
+    failed.abort(error);
+    throw error;
+  }
+  if (contents instanceof Uint8Array) {
+    await writer.write(contents);
+    return;
+  }
+  await contents.pipeTo(
+    new WritableStream({
+      write: async (chunk) => {
+        await writer.write(chunk);
+      },
+      // Called when the part's stream errors, not when a write fails.
+      abort: (reason) => {
+        failed.abort(reason);
+      },
     })
+  );
+};
+
+/**
+ * `parts` as a multipart form, each read as the request sends it. Not
+ * form-data-encoder (4.1.0): it splits a chunk over 64 KiB from the start
+ * of its whole buffer, ignoring `byteOffset`, so it would send a stream's
+ * view into a larger buffer as other bytes, silently and after our check.
+ * `sent` is called once its last byte has gone out.
+ */
+const formBody = (
+  boundary: string,
+  parts: readonly FormPart[],
+  failed: AbortController,
+  sent?: () => void
+): ReadableStream<Uint8Array> => {
+  const headed = parts.map((part) => ({
+    part,
+    head: encoder.encode(
+      `--${boundary}\r\nContent-Disposition: form-data; name=${quoted(part.name)}; filename=${quoted(part.name)}\r\nContent-Type: ${part.type}\r\n\r\n`
+    ),
+  }));
+  const tail = encoder.encode(`--${boundary}--\r\n`);
+  const { readable, writable } = new FixedLengthStream(
+    headed.reduce(
+      (length, { part, head }) =>
+        length + head.byteLength + part.size + lineBreak.byteLength,
+      tail.byteLength
+    )
+  );
+  const writer = writable.getWriter();
+  const write = async (): Promise<void> => {
+    try {
+      for (const { part, head } of headed) {
+        // oxlint-disable-next-line no-await-in-loop -- one part at a time, in order
+        await writer.write(head);
+        // oxlint-disable-next-line no-await-in-loop -- one part at a time, in order
+        await writePart(writer, part, failed);
+        // oxlint-disable-next-line no-await-in-loop -- one part at a time, in order
+        await writer.write(lineBreak);
+      }
+      await writer.write(tail);
+      await writer.close();
+      sent?.();
+    } catch (error) {
+      await writer.abort(error);
+    }
+  };
+  // Written as the request reads it.
+  void write();
+  return readable;
+};
+
+/**
+ * The result of `call` sending `parts` as its multipart form, made again
+ * for each attempt. A part that can't be read stops it with why. `sent`
+ * is called once an attempt's whole form has gone out.
+ */
+const callWithForm = async <T>(
+  api: CloudflareApi,
+  call: ApiCall,
+  parts: readonly FormPart[],
+  schema: z.ZodType<T>,
+  sent?: () => void
+): Promise<T> => {
+  const boundary = crypto.randomUUID();
+  const failed = new AbortController();
+  return await api.call(
+    {
+      ...call,
+      headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+      body: () => formBody(boundary, parts, failed, sent),
+      signal:
+        call.signal === undefined
+          ? failed.signal
+          : AbortSignal.any([call.signal, failed.signal]),
+    },
+    schema
+  );
+};
+
+/** The length of the base64 of `size` bytes. */
+const base64Length = (size: number): number => Math.ceil(size / 3) * 4;
+
+/**
+ * Raw bytes of static files one assets upload carries. A file over it goes
+ * alone, after the rest, with nothing else on its way.
+ */
+const assetRequestBytes = 8 * 1024 * 1024;
+
+/** Assets uploads on their way at once, as Wrangler sends them. */
+const assetRequestsAtOnce = 3;
+
+/** A static file with the key it goes up under (`typedAssetKey`). */
+interface KeyedAsset {
+  file: AssetFile;
+  hash: string;
+}
+
+/**
+ * `files` in requests of up to `assetRequestBytes` raw, in order, and
+ * apart from them each file over it.
+ */
+const assetRequests = (
+  files: readonly KeyedAsset[]
+): { shared: KeyedAsset[][]; alone: KeyedAsset[] } => {
+  const shared: KeyedAsset[][] = [];
+  const alone: KeyedAsset[] = [];
+  let bytes = 0;
+  for (const named of files) {
+    const { size } = named.file;
+    const last = shared.at(-1);
+    if (size > assetRequestBytes) {
+      alone.push(named);
+    } else if (last === undefined || bytes + size > assetRequestBytes) {
+      shared.push([named]);
+      bytes = size;
+    } else {
+      last.push(named);
+      bytes += size;
+    }
+  }
+  return { shared, alone };
+};
+
+/**
+ * Uploads the static files `files` the script `target` names serves that
+ * the account doesn't hold yet, and returns the token its upload names
+ * them by (`WorkerUpload.assetsJwt`). They change nothing a script runs
+ * until an upload names them, so they go before it, not as part of it:
+ * the upload session is opened under the script's own path, and the files
+ * go to the account's upload. Every call goes with `options` (`ApiCall`'s
+ * `signal` and `beforeSend`).
+ */
+export const uploadTargetAssets = async (
+  api: CloudflareApi,
+  target: ScriptTarget,
+  files: readonly AssetFile[],
+  options: Pick<ApiCall, "signal" | "beforeSend"> = {}
+): Promise<string> => {
+  const { accountId } = target;
+  const scriptAt = targetPath(target);
+  // Named by the key the release manifest gives each file (Wrangler's
+  // shape and extension rule, with SHA-256) bound to its type: the account
+  // keeps a file it holds under its key with the type it was first
+  // uploaded with, so a file whose type changes must go up again under a
+  // new key. A file is read, and its key checked, only if it goes up.
+  const named = await Promise.all(
+    files.map(async (file) => ({
+      file,
+      hash: await typedAssetKey(file.key, file.type),
+    }))
   );
   const session = await api.call(
     {
+      ...options,
       method: "POST",
       path: `${scriptAt}/assets-upload-session`,
       json: {
         manifest: Object.fromEntries(
-          encoded.map(({ path, hash, content }) => [
-            path,
-            { hash, size: content.byteLength },
-          ])
+          named.map(({ file, hash }) => [file.path, { hash, size: file.size }])
         ),
       },
     },
@@ -124,45 +323,57 @@ const uploadAssetsAt = async (
     // The account holds every file: the session's token completes it.
     return session.jwt;
   }
-  const byHash = new Map(encoded.map((file) => [file.hash, file]));
-  const uploads = await inBatches(
-    buckets,
-    assetUploadConcurrency,
-    async (bucket) => {
-      const form = new FormData();
-      for (const hash of bucket) {
-        // A hash it asks for that isn't ours goes unanswered, and the
-        // upload then ends without a completion token.
-        const file = byHash.get(hash);
-        if (file !== undefined) {
-          form.set(hash, new File([file.base64], hash, { type: file.type }));
-        }
-      }
-      return await api.call(
-        {
-          method: "POST",
-          path: `/accounts/${accountId}/workers/assets/upload`,
-          query: { base64: "true" },
-          body: form,
-          bearer: session.jwt,
-          // Files are named by their content's hash: sending a bucket again
-          // stores the same files.
-          idempotent: true,
-        },
-        uploadedSchema
-      );
+  const byHash = new Map(named.map(({ file, hash }) => [hash, file]));
+  // A hash asked for that isn't ours goes unanswered, and the upload then
+  // ends without a completion token.
+  const missing = buckets.flat().flatMap((hash) => {
+    const file = byHash.get(hash);
+    return file === undefined ? [] : [{ file, hash }];
+  });
+  // Grouped by our own byte count rather than the session's buckets, whose
+  // size isn't documented: one could hold tens of MB of base64. A request
+  // reads its files one at a time as it goes out, so three on their way
+  // hold at most three files of up to `assetRequestBytes`, and a larger
+  // one goes with nothing else. The upload that completes the set answers
+  // with the token.
+  let completion: string | undefined;
+  const send = async (request: readonly KeyedAsset[]): Promise<void> => {
+    const uploaded = await callWithForm(
+      api,
+      {
+        ...options,
+        method: "POST",
+        path: `/accounts/${accountId}/workers/assets/upload`,
+        query: { base64: "true" },
+        bearer: session.jwt,
+        // Files are named by their content's hash: sending them again
+        // stores the same files.
+        idempotent: true,
+      },
+      request.map(({ file, hash }) => ({
+        name: hash,
+        type: file.type,
+        size: base64Length(file.size),
+        read: file.readBase64,
+      })),
+      uploadedSchema
+    );
+    if (typeof uploaded?.jwt === "string") {
+      completion = uploaded.jwt;
     }
-  );
-  // The upload that completes the set answers with the completion token.
-  const completion = uploads.find(
-    (uploaded) => typeof uploaded?.jwt === "string"
-  );
-  if (typeof completion?.jwt !== "string") {
+  };
+  const { shared, alone } = assetRequests(missing);
+  await mapConcurrently(shared, assetRequestsAtOnce, send);
+  for (const file of alone) {
+    // oxlint-disable-next-line no-await-in-loop -- one large file in memory at a time
+    await send([file]);
+  }
+  if (completion === undefined) {
     throw new TypeError(
       "The assets upload finished without a completion token"
     );
   }
-  return completion.jwt;
+  return completion;
 };
 
 /** One of a Worker's deployments, as Cloudflare names its versions. */
@@ -191,44 +402,43 @@ const keptBindings = ["secret_text", "secret_key"];
  * The upload's form: the metadata, then each module under its name. It
  * keeps the latest version's secrets.
  */
-const uploadForm = async (
-  api: CloudflareApi,
-  accountId: string,
-  path: string,
-  { releaseId, metadata, modules, assets }: WorkerUpload
-): Promise<FormData> => {
-  const assetsJwt =
-    assets === undefined
-      ? undefined
-      : await uploadAssetsAt(api, accountId, path, assets);
+const uploadForm = ({
+  releaseId,
+  metadata,
+  modules,
+  assetsJwt,
+}: WorkerUpload): FormPart[] => {
   const bindings: unknown[] = Array.isArray(metadata.bindings)
     ? metadata.bindings
     : [];
-  const form = new FormData();
-  form.set(
-    "metadata",
-    new Blob(
-      [
-        JSON.stringify({
-          ...metadata,
-          bindings,
-          keep_bindings: keptBindings,
-          ...(assetsJwt === undefined
-            ? {}
-            : { assets: { ...metadata.assets, jwt: assetsJwt } }),
-          annotations: {
-            "workers/tag": releaseId,
-            "workers/message": `Release ${releaseId}`,
-          },
-        }),
-      ],
-      { type: "application/json" }
-    )
+  const json = encoder.encode(
+    JSON.stringify({
+      ...metadata,
+      bindings,
+      keep_bindings: keptBindings,
+      ...(assetsJwt === undefined
+        ? {}
+        : { assets: { ...metadata.assets, jwt: assetsJwt } }),
+      annotations: {
+        "workers/tag": releaseId,
+        "workers/message": `Release ${releaseId}`,
+      },
+    })
   );
-  for (const { name, content, type } of modules) {
-    form.set(name, new File([content], name, { type }));
-  }
-  return form;
+  return [
+    {
+      name: "metadata",
+      type: "application/json",
+      size: json.byteLength,
+      read: async () => await Promise.resolve(json),
+    },
+    ...modules.map(({ name, type, size, stream }) => ({
+      name,
+      type,
+      size,
+      read: stream,
+    })),
+  ];
 };
 
 const serviceSchema = z.object({
@@ -394,18 +604,6 @@ export const applyD1Migrations = async (
  * on a real account is GRA-430's.
  */
 
-/** Where a placed client's script is: a dispatch namespace in an account. */
-export interface ScriptTarget {
-  accountId: string;
-  scriptName: string;
-  /** The Workers for Platforms dispatch namespace. */
-  namespace: string;
-}
-
-/** The API path of the script `target` names. */
-const targetPath = ({ accountId, scriptName, namespace }: ScriptTarget) =>
-  `/accounts/${accountId}/workers/dispatch/namespaces/${namespace}/scripts/${scriptName}`;
-
 /**
  * Deletes the script `target` names with what it binds of its own (its
  * Durable Object namespaces and their data: `force`). One that's gone
@@ -435,24 +633,26 @@ export const deleteTargetScript = async (
  * Object migration isn't retried after a server error or no answer: if it
  * went through, its migration ran, and sending it again would be refused
  * on the migration's tag. The caller reads the script's migration tag to
- * find out.
+ * find out. `sent` is called once the script's whole upload has gone out:
+ * until then, Cloudflare can't have taken it.
  */
 export const uploadTargetScript = async (
   api: CloudflareApi,
   target: ScriptTarget,
   upload: WorkerUpload,
-  { signal }: { signal?: AbortSignal } = {}
+  { signal, sent }: { signal?: AbortSignal; sent?: () => void } = {}
 ): Promise<void> => {
-  const path = targetPath(target);
-  await api.call(
+  await callWithForm(
+    api,
     {
       method: "PUT",
-      path,
-      body: await uploadForm(api, target.accountId, path, upload),
+      path: targetPath(target),
       idempotent: upload.metadata.migrations === undefined,
       ...(signal === undefined ? {} : { signal }),
     },
-    z.unknown()
+    uploadForm(upload),
+    z.unknown(),
+    sent
   );
 };
 

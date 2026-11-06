@@ -2,6 +2,8 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
+
 /**
  * The App the screen tests run, of spec 8's layout: notes that update live
  * for everyone the App is shared with, a button that fails, an answer that
@@ -9,11 +11,6 @@ import type { Server } from "node:http";
  * of its frame it can think of, each aimed at `attacker`. Every call runs
  * its sealed release.
  */
-
-const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ notes: defineTable({ note: v.string().min(1).max(200) }) });
-`;
 
 const operations = `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
@@ -50,15 +47,9 @@ export const platformShaped = query({
 });
 `;
 
-const registration = `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
+const screens = `export default {
   screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
-});
+};
 `;
 
 const screenCode = (
@@ -223,9 +214,18 @@ export default function Notes() {
 
 /** The App's files, with every attempt aimed at `attacker`. */
 export const screenAppFiles = (attacker: string): Record<string, string> => ({
-  "schema.ts": schema,
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: { note: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": operations,
-  "app.ts": registration,
+
+  "screens.ts": screens,
   "screens/notes.tsx": screenCode(attacker),
 });
 

@@ -1,5 +1,4 @@
 import type { LoadedBuild } from "../workflow-builds.ts";
-import { generatedForRunHost } from "./sealed-run.ts";
 
 // The engine steps a run of a sealed build runs on the run host
 // (sealed-run.ts), as what reads its journal (its waits, run-waits.ts; its
@@ -47,15 +46,9 @@ export interface SealedStep {
 const engineStep =
   /^(?<task>[a-z][a-z0-9]*(?:-[a-z0-9]+)*):(?<kind>[a-z]+)(?:%40(?<items>(?:0|[1-9]\d*)(?:%2F(?:0|[1-9]\d*))*))?(?<part>#[a-z]+(?:-[a-z]+)*)?$/u;
 
-/**
- * The tasks of `build` by ID, as their steps' names place them; undefined
- * for a build not generated for the run host, whose steps are named
- * otherwise (resource-host.ts) until GRA-1366 removes it.
- */
-export const sealedStepsOf = (build: LoadedBuild): SealedSteps | undefined =>
-  generatedForRunHost(build)
-    ? new Map(build.tasks.map((task) => [task.id, task]))
-    : undefined;
+/** The tasks of `build` by ID, as their steps' names place them. */
+export const sealedStepsOf = (build: LoadedBuild): SealedSteps =>
+  new Map(build.tasks.map((task) => [task.id, task]));
 
 /**
  * Engine step `name` as `steps`, its run's build's tasks, place it: a

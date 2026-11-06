@@ -163,9 +163,6 @@ export const useWaitChecks = (): void => {
         rating?: number;
       }>();
     }
-    if (wait.kind === "child") {
-      expectTypeOf(wait.child).toEqualTypeOf<RunHandle>();
-    }
     if (wait.kind === "blocked") {
       expectTypeOf(wait.reason).toEqualTypeOf<
         "policy" | "quota" | "uncertain"

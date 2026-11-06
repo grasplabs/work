@@ -396,8 +396,7 @@ export type EventDataOf<Reference> =
 
 /**
  * A wait the engine holds a run at on its own (spec 10.4.5, 10.7.2): a
- * timer, a child run, or a hold of the platform's that no one answers
- * from an App. Each grants nothing of what it names.
+ * timer, or a hold of the platform's that no one answers from an App. Each grants nothing of what it names.
  */
 export type WorkflowEngineWait<Key extends string = string> =
   | (WaitFields<Key> & {
@@ -405,11 +404,6 @@ export type WorkflowEngineWait<Key extends string = string> =
       /** A sleep the workflow asked for, or a retry's backoff. */
       readonly purpose: "sleep" | "retry";
       readonly deadline: number;
-    })
-  | (WaitFields<Key> & {
-      readonly kind: "child";
-      /** The child run: no watch, control or output of it comes with it. */
-      readonly child: RunHandle;
     })
   | (WaitFields<Key> & {
       readonly kind: "blocked";
@@ -534,7 +528,7 @@ export type WorkflowDecisionWait<
 
 /**
  * A wait a run is held at now (spec 10.4.5, 10.7.2): a timer, an event,
- * a person's decision, a child run, or a hold of the platform's. A
+ * a person's decision, or a hold of the platform's. A
  * generated workflow reference narrows it to the waits that workflow
  * declares (`WorkflowWaitOf`).
  */

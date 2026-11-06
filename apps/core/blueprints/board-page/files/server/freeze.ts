@@ -1,7 +1,7 @@
 import { AppError } from "@grasp-os/sdk";
 import type { Infer } from "@grasp-os/sdk";
 
-import { figuresMax, hoursMax, signalsMax, titleMax } from "../schema.ts";
+import { figuresMax, hoursMax, signalsMax, titleMax } from "../values.ts";
 import type { mapFigure } from "../values.ts";
 
 // What a snapshot freezes when the board page takes it: each workflow of

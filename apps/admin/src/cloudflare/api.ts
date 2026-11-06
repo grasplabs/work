@@ -94,8 +94,11 @@ export interface ApiCall {
   headers?: Record<string, string>;
   /** Sent as JSON. */
   json?: unknown;
-  /** Sent as is: multipart form data, for uploads. */
-  body?: FormData;
+  /**
+   * Sent as is, with its type in `headers`: an upload's multipart form.
+   * Made again for each attempt, since a stream is read once.
+   */
+  body?: () => ReadableStream<Uint8Array>;
   /**
    * The bearer token for a call that takes another one than the account's:
    * an assets upload session's. Kept out of errors like the account's.
@@ -234,7 +237,7 @@ export const cloudflareApi = ({
     }
     const headers = new Headers(call.headers);
     headers.set("authorization", `Bearer ${call.bearer ?? token}`);
-    let body: BodyInit | undefined = call.body;
+    let body: BodyInit | undefined = call.body?.();
     if (call.json !== undefined) {
       headers.set("content-type", "application/json");
       body = JSON.stringify(call.json);

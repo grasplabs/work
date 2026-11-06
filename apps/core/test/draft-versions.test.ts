@@ -5,6 +5,7 @@ import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
 
+import { appDefinition } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -43,12 +44,15 @@ export default Desk;
 
 /** An App of spec 8's layout whose one screen says `marker` and reads its notes. */
 const deskFiles = (marker: string): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }),
-});
-`,
+  ...appDefinition({
+    name: "Desk",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
@@ -61,15 +65,10 @@ export const titles = query({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
 
-export default app({
-  name: "Desk",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
+  "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-});
+};
 `,
   "screens/desk.tsx": desk(marker),
 });

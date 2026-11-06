@@ -125,11 +125,7 @@ const Apps = ({ apps }: { apps: WorkflowApps }) => {
           <AppLogo logo={null} name={alias} size="sm" />
           <span className="flex min-w-0 flex-1 flex-col">
             <code className="truncate font-medium">{alias}</code>
-            {contractId === null ? null : (
-              <span className="text-muted-foreground truncate">
-                {contractId}
-              </span>
-            )}
+            <span className="text-muted-foreground truncate">{contractId}</span>
           </span>
           <Badge variant="outline">
             <Trans>Not connected</Trans>
@@ -307,10 +303,7 @@ const Approved = ({
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  // Its catalog bindings: whichever other workflow a binding names is
-  // hidden from all but its builders, so known by kind alone.
-  const catalog = declared.filter(({ kind }) => kind !== "workflow");
-  if (catalog.length === 0) {
+  if (declared.length === 0) {
     return (
       <Quiet>
         <Trans>Version {version} declares no binding to approve.</Trans>
@@ -337,7 +330,7 @@ const Approved = ({
         aria-label={t`Bindings of version ${version}`}
         className="flex flex-col gap-2"
       >
-        {catalog.map(({ alias, kind, contractId, fingerprint }) => {
+        {declared.map(({ alias, kind, contractId, fingerprint }) => {
           // Served as a start serves it: approved for this version's own
           // declaration of the alias (its contract's fingerprint, as the
           // key itself is shown to its builders alone).

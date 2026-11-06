@@ -6,7 +6,7 @@ import {
   cancelRepairAfterMs,
   repairResourceTerminations,
 } from "../src/workflows/resource-runs.ts";
-import { triedOnceIn } from "../src/workflows/run-object.ts";
+import { sentCallsIn } from "../src/workflows/run-object.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -36,8 +36,8 @@ import {
 // outlive what it should:
 //
 // - What core keeps in the object beside the engine's journal (the
-//   attempts of steps tried once that never ran, and what one that ran
-//   failed with) outliving the run: it goes with the run's purge, only
+//   attempts that sent a call tried once, and what one failed with)
+//   outliving the run: it goes with the run's purge, only
 //   the start's tombstone left, so nothing of a removed run is read again.
 // - A screen's cancel lost on the way to the engine (the engine refusing
 //   the stop): its receipt stays admitted, never shown as done, and is
@@ -83,31 +83,29 @@ const receiptOf = async (run: string) =>
 describe("an independent workflow's run object", { timeout: 60_000 }, () => {
   afterEach(endLiveResourceRuns);
 
-  it("keeps which tried-once attempts never ran and what one that ran failed with, and drops them with the run's purge", async () => {
+  it("keeps which attempts sent a call tried once and what one failed with, and drops them with the run's purge", async () => {
     const builder = await signedIn("builder");
-    const { id } = await publishedWorkflow(builder, greetingTasks("PT1H"));
+    const { id } = await publishedWorkflow(builder, greetingTasks("1 hour"));
     const run = await startedBy(builder, id);
-    await sleeping(run, "task:hold");
+    await sleeping(run, "hold:task");
 
     const kept = await runInDurableObject(runObject(run), (_object, state) => {
-      const marks = triedOnceIn(state.storage.sql);
-      marks.markUnstarted("key:greet", 1);
+      const marks = sentCallsIn(state.storage.sql);
+      marks.markSent("key:greet", 1);
       marks.keepFailure("key:greet", 2, {
         name: "Error",
         message: "The provider refused it.",
         code: "model.unavailable",
       });
       // A mark and a failure of one attempt both stay.
-      marks.markUnstarted("key:greet", 3);
+      marks.markSent("key:greet", 3);
       marks.keepFailure("key:greet", 3, { name: "Error", message: "Late" });
       return {
-        unstarted: [1, 2, 3, 4].map((attempt) =>
-          marks.unstarted("key:greet", attempt)
-        ),
+        sent: [1, 2, 3, 4].map((attempt) => marks.sent("key:greet", attempt)),
         failures: [1, 2, 3].map((attempt) =>
           marks.failureOf("key:greet", attempt)
         ),
-        otherStep: marks.unstarted("key:other", 1),
+        otherStep: marks.sent("key:other", 1),
       };
     });
     await builder.api.workflowResources.terminateRun(id, run);
@@ -121,15 +119,15 @@ describe("an independent workflow's run object", { timeout: 60_000 }, () => {
     const afterPurge = await runInDurableObject(
       runObject(run),
       (_object, state) => {
-        const marks = triedOnceIn(state.storage.sql);
-        marks.markUnstarted("key:greet", 1);
-        return marks.unstarted("key:greet", 1);
+        const marks = sentCallsIn(state.storage.sql);
+        marks.markSent("key:greet", 1);
+        return marks.sent("key:greet", 1);
       }
     );
 
     expect({ kept, afterPurge, left: await leftIn(run) }).toStrictEqual({
       kept: {
-        unstarted: [true, false, true, false],
+        sent: [true, false, true, false],
         failures: [
           undefined,
           {
@@ -148,14 +146,14 @@ describe("an independent workflow's run object", { timeout: 60_000 }, () => {
 
   it("finishes a screen's cancel the engine refused to stop, once asked again or at the next repair, audited once", async () => {
     const { builder, app, workflow, reference } = await boundApp({
-      hold: "PT1H",
+      hold: "1 hour",
     });
     const lease = await screenOf(builder, app);
     const runIn = async () => {
       const { runId } = startedOf(
         await called(builder, app, lease, startCommand(reference))
       );
-      await sleeping(runId, "task:hold");
+      await sleeping(runId, "hold:task");
       return runId;
     };
     const cancelled = async (runId: string) =>

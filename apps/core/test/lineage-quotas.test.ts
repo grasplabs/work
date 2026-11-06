@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { admitAttempt, admitChild } from "../src/workflows/quotas.ts";
+import { admitAttempt, admitInLineage } from "../src/workflows/quotas.ts";
 import { mockIdp } from "./idp.ts";
 import {
   endedRun,
@@ -15,7 +15,7 @@ import {
   startedBy,
 } from "./json-workflow-apps.ts";
 import { withQuotas } from "./quota-limits.ts";
-import { runObject } from "./runs.ts";
+import { liveStatus, runObject } from "./runs.ts";
 import { outcome } from "./sign-in.ts";
 
 // A run lineage's quotas: how deep its runs nest, how many runs it starts,
@@ -24,9 +24,9 @@ import { outcome } from "./sign-in.ts";
 // (`TEST_QUOTA_LIMITS`, which a test lowers to reach them) and counted
 // durably on the lineage of an independent JSON workflow's run. Runs, the
 // engine and core's database are real; the admissions a run's
-// activations ask for, and the child runs a run's tasks start, are asked
+// activations ask for, and the runs started in a run's lineage, are asked
 // for here as core asks for them (quotas.ts `admitAttempt` and
-// `admitChild`), so races and limits changed between them are reached.
+// `admitInLineage`), so races and limits changed between them are reached.
 //
 // Covered elsewhere for JSON runs, and so not tried here:
 // - A step tried at most as its attempts that ran allow, and failed once
@@ -36,8 +36,6 @@ import { outcome } from "./sign-in.ts";
 // - An attempt the Loader cut off retried in a fresh activation:
 //   workflow-resource-runs' "admits nothing of an attempt it cuts off…"
 //   and "cuts off an attempt the activation's expression fuel can't fund…".
-// - Levels and descendant runs as a parent's tasks start children:
-//   workflow-children's "stop at the lineage's levels and descendant runs…".
 // - A run's own step limit: workflow-calls' "lowers the host's step limit,
 //   never raises it".
 // - A task's own timeout: workflow-calls' "ends an attempt that runs past
@@ -130,19 +128,19 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     const result = await withQuotas(
       { workflowNestingLevels: 3, workflowDescendantRuns: 5 },
       async () => {
-        const child = await outcome(admitChild(env, parentAt(run, 0)));
-        const grandchild = await outcome(admitChild(env, parentAt(run, 1)));
+        const child = await outcome(admitInLineage(env, parentAt(run, 0)));
+        const grandchild = await outcome(admitInLineage(env, parentAt(run, 1)));
         // A fourth level: refused, taking no slot.
-        const tooDeep = await limitOf(admitChild(env, parentAt(run, 2)));
+        const tooDeep = await limitOf(admitInLineage(env, parentAt(run, 2)));
         // Six more under the root at once: three slots are left.
         const racing = await Promise.all(
           Array.from(
             { length: 6 },
-            async () => await outcome(admitChild(env, parentAt(run, 0)))
+            async () => await outcome(admitInLineage(env, parentAt(run, 0)))
           )
         );
         // Under the child too: the slots are the root's, whoever starts.
-        const underChild = await limitOf(admitChild(env, parentAt(run, 1)));
+        const underChild = await limitOf(admitInLineage(env, parentAt(run, 1)));
         return {
           child,
           grandchild,
@@ -176,7 +174,8 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
 
   it("admit a lineage's next child by the quota limits as they are then, counting on from what the lineage already started", async () => {
     const { run, end } = await liveLineage(await signedIn("builder"));
-    const start = async () => await outcome(admitChild(env, parentAt(run, 0)));
+    const start = async () =>
+      await outcome(admitInLineage(env, parentAt(run, 0)));
 
     const atTwo = await withQuotas({ workflowDescendantRuns: 2 }, async () => [
       await start(),
@@ -322,7 +321,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
 
   it("wait out a lineage whose active time an attempt under way holds, then run the step", async () => {
     const builder = await signedIn("builder");
-    const { id } = await publishedWorkflow(builder, greetingTasks("PT3S"));
+    const { id } = await publishedWorkflow(builder, greetingTasks("3 seconds"));
     // The run another attempt in the lineage is of, as a child's would be.
     const other = await liveLineage(builder);
 
@@ -330,10 +329,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
       const runId = await startedBy(builder, id);
       // Its wait entered, as the engine journaled it.
       await vi.waitFor(async () => {
-        const trace = await builder.api.workflowResources.runTrace(id, runId, {
-          doors: false,
-        });
-        expect(trace.steps.length).toBeGreaterThan(0);
+        await expect(liveStatus(runId)).resolves.toBe("waiting");
       }, settles);
       // Another attempt in the lineage, holding six and a half seconds,
       // more than the lineage's six: the greeting after the wait finds it

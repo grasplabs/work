@@ -291,11 +291,60 @@ export interface ReleaseInfo {
   packages: Record<string, string>;
 }
 
+const mebibytes = (bytes: number): string =>
+  `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+
+/**
+ * What one release may carry to a client, with headroom, so a build that
+ * outgrows it fails in CI rather than on a client's deploy days later
+ * (apps/admin/src/cloudflare/workers.ts):
+ * - A Worker's modules, all together, raw: the deploy sends them in one
+ *   upload, which Cloudflare takes up to 64 MiB uncompressed; 48 MiB
+ *   leaves a quarter of that as headroom. The deploy streams them into the
+ *   upload, so they don't bound its memory. The 1 s startup limit isn't
+ *   a size: Cloudflare checks it on every upload.
+ * - A static file: Cloudflare takes 25 MiB at most. The deploy sends one
+ *   this large on its own, holding it read and as base64, so this bounds
+ *   its memory too.
+ * Static files in total aren't bounded here: the deploy reads each only
+ * as its request goes out, three requests at a time.
+ */
+export const releaseBudget = {
+  workerModules: 48 * 1024 * 1024,
+  staticFile: 20 * 1024 * 1024,
+} as const;
+
+/** Throws when a Worker's build carries more than `releaseBudget` allows. */
+const checkBudget = (build: WorkerBuild): void => {
+  const over: string[] = [];
+  const modules = build.modules.reduce((total, { size }) => total + size, 0);
+  if (modules > releaseBudget.workerModules) {
+    over.push(
+      `its modules are ${mebibytes(modules)} (budget ${mebibytes(releaseBudget.workerModules)})`
+    );
+  }
+  for (const [file, { size }] of Object.entries(build.assets?.manifest ?? {})) {
+    if (size > releaseBudget.staticFile) {
+      over.push(
+        `static file ${file} is ${mebibytes(size)} (budget ${mebibytes(releaseBudget.staticFile)})`
+      );
+    }
+  }
+  if (over.length > 0) {
+    throw new Error(
+      `${build.key} is over the release budget: ${over.join("; ")}`
+    );
+  }
+};
+
 /** Assembles the manifest from each Worker's build. */
 export const generateManifest = (
   info: ReleaseInfo,
   workers: WorkerBuild[]
 ): ReleaseManifest => {
+  for (const build of workers) {
+    checkBudget(build);
+  }
   const dates = new Set(workers.map((w) => w.config.compatibility_date));
   const [compatibilityDate] = dates;
   if (compatibilityDate === undefined || dates.size > 1) {

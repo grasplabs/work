@@ -2,7 +2,6 @@ import {
   AppError,
   paginationOptionsValidator,
   paginationResultValidator,
-  permission,
   v,
 } from "@grasp-os/sdk";
 import {
@@ -13,6 +12,7 @@ import {
   query,
 } from "@server/_generated/server";
 
+import { permissions } from "../grasp.config.ts";
 import {
   decisionMax,
   figureFields,
@@ -20,8 +20,7 @@ import {
   maturityMax,
   narrativeMax,
   signalFields,
-} from "../schema.ts";
-import { mapFigures } from "../values.ts";
+} from "../values.ts";
 import { requireBuilder } from "./access.ts";
 import { freeze, windowDays } from "./freeze.ts";
 import type { MapFigure } from "./freeze.ts";
@@ -36,13 +35,9 @@ import type { MapFigure } from "./freeze.ts";
 // snapshot is never seen with part of them. What it froze, only `take`
 // writes; `write` changes the narrative and the decision alone.
 
-/** The workflow map, as the page reads its numbers. */
-export const map = permission.app("map", {
-  functions: { "figures.list": mapFigures },
-});
-
-/** The platform's counts of runs and improvement signals. */
-export const grasp = permission.grasp();
+// The workflow map, as the page reads its numbers, and the platform's
+// counts of runs and improvement signals.
+const { map, grasp } = permissions;
 
 /** Workflows one page of the map holds: as many as it gives. */
 const mapPage = 50;

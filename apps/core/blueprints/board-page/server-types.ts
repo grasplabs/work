@@ -14,7 +14,7 @@ import type {
   Use,
 } from "@grasp-os/sdk/server";
 
-import schema from "./files/schema.ts";
+import schema from "./files/server/schema.ts";
 
 export type { CallerCtx } from "@grasp-os/sdk/server";
 

@@ -1,8 +1,9 @@
 import type { Json } from "@grasp-os/shared/json";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import type { SealedCall } from "@grasp-os/workflow-schema/sealed";
 
-import type { LoadedModules, SealedCall } from "../workflow-builds.ts";
+import type { LoadedModules } from "../workflow-builds.ts";
 import { runCompute } from "../workflow-modules.ts";
 import { requireShape } from "./resource-calls.ts";
 

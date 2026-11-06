@@ -5,12 +5,14 @@ sidebar:
   order: 1
 ---
 
-An App is a folder of TypeScript files. Grasp reads them, checks them and runs them; you never deploy anything yourself.
+An App is a folder of files. Grasp reads them, checks them and runs them; you never deploy anything yourself.
 
 ```text
-app.ts              The App: its name, schema, access and Pages
-schema.ts           Its tables
+definition.json     What the App is: its name, tables, access and permissions
+grasp.config.ts     The App's config, generated from definition.json
+server/schema.ts    Its tables, generated from definition.json
 server/             Its server functions, one module or more
+screens.ts          Its Pages: each one's name, route and file
 screens/            Its Pages, one React component each
 tests/              Its tests
 server/_generated/  What Grasp generates from the App; never edited
@@ -18,22 +20,44 @@ server/_generated/  What Grasp generates from the App; never edited
 
 This guide builds a Tasks App: a list of tasks people add and complete.
 
+## The definition
+
+`definition.json` is what the App is, as data: its name, its tables and their fields, indexes and access, and the permissions it needs. Every table and field has an ID of its own, so renaming one never loses what refers to it.
+
+You don't write it by hand. Grasp changes it with its definition tools, in a chat or on the App's page: `addTable`, `addField`, `changeField`, `renameField`, `setAccess`, `addIndex` and `addPermission`. Each change is checked whole, and Grasp tells you what it does to the records the App already holds.
+
+From the definition, Grasp generates two files you read but never edit: `grasp.config.ts` and `server/schema.ts`. Every version of the App holds them exactly as its definition generates them.
+
 ## The schema
 
-`schema.ts` declares the App's tables. Every field has a type, from `v`:
+`server/schema.ts` declares the App's tables, generated from the definition. Every field has a type, from `v`, and each table says who may read and write it:
 
-```ts schema.ts
+```ts server/schema.ts
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
   tasks: defineTable({
     title: v.string().trim().min(1).max(200),
     done: v.boolean().default(false),
-  }).index("by_done", ["done", "_createdAt"]),
+  })
+    .index("by_done", ["done", "_createdAt"])
+    .access({ read: "appMembers", write: "appMembers" }),
 });
 ```
 
-Grasp adds the fields every record has: `_id`, `_ownerId`, `_rev`, `_createdAt` and `_updatedAt`. [Data](/guides/data) covers tables, indexes and access in full.
+`appMembers` is everyone with a role in the App, its builders included, so they all read and write tasks here. Grasp adds the fields every record has: `_id`, `_ownerId`, `_rev`, `_createdAt` and `_updatedAt`. [Data](/guides/data) covers tables, indexes and access in full.
+
+## The config
+
+`grasp.config.ts` is the App's name and the permissions it needs, generated from the definition too:
+
+```ts grasp.config.ts
+import { defineApp } from "@grasp-os/sdk";
+
+export default defineApp({
+  name: "Tasks",
+});
+```
 
 ## Server functions
 
@@ -125,26 +149,15 @@ const Tasks = () => {
 export default Tasks;
 ```
 
-## The App
+## The Pages
 
-`app.ts` ties it together: the App's name, its schema, who may read and write each table, and its Pages:
+`screens.ts` lists the App's Pages, each with a name, a route and its file:
 
-```ts app.ts
-import { app } from "@grasp-os/sdk";
-
-import schema from "./schema.ts";
-
-export default app({
-  name: "Tasks",
-  schema,
-  access: {
-    tables: { tasks: { read: "appMembers", write: "appMembers" } },
-  },
+```ts screens.ts
+export default {
   screens: [{ name: "tasks", path: "/", source: "screens/tasks.tsx" }],
-});
+};
 ```
-
-Pages are listed under `screens`, each with a name, a route and its file. `appMembers` is everyone with a role in the App, its builders included, so they all read and write tasks here.
 
 ## What Grasp generates
 

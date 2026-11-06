@@ -1,10 +1,9 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { generatedPath } from "@grasp-os/open-workflow/generate";
+import { generatedWorkflowEntry } from "@grasp-os/compiler";
 import { readAppManifest } from "@grasp-os/sdk/host";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
@@ -25,6 +24,7 @@ import {
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { sealPackages } from "../src/workflows/sealed-packages.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { published as publishedApp } from "./apps.ts";
 import { publish } from "./npm.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
@@ -39,28 +39,38 @@ const workflowShape = `v.object({ who: v.string() })`;
 
 /** An App that declares three workflows and a model, with a store. */
 const files = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  requests: defineTable({ who: v.string() }),
-});
-`,
-  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Requests",
+    tables: {
+      requests: {
+        fields: { who: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      "permission.ai({ maxOutputTokens: 100 })",
+      `permission.workflow("followUp", {
+  input: ${workflowShape},
+  output: v.object({ status: v.string() }),
+})`,
+      `permission.workflow("remind", {
+  input: ${workflowShape},
+  output: v.object({ status: v.string() }),
+})`,
+      `permission.workflow("later", {
+  input: ${workflowShape},
+  output: v.object({ status: v.string() }),
+})`,
+    ],
+  }),
+  "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const followUp = permission.workflow("followUp", {
-  input: ${workflowShape},
-  output: v.object({ status: v.string() }),
-});
-export const remind = permission.workflow("remind", {
-  input: ${workflowShape},
-  output: v.object({ status: v.string() }),
-});
-export const later = permission.workflow("later", {
-  input: ${workflowShape},
-  output: v.object({ status: v.string() }),
-});
-export const writer = permission.ai({ maxOutputTokens: 100 });
+export const followUp = permissions.followUp;
+export const remind = permissions.remind;
+export const later = permissions.later;
+export const writer = permissions.ai;
 
 export const kickOff = action({
   args: { who: v.string() },
@@ -72,89 +82,51 @@ export const kickOff = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { followUp, later, remind, writer } from "./server/requests.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
-  permissions: { ai: writer, workflows: [followUp, remind, later] },
-});
-`,
 });
 
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
 /** A greeting workflow's definition, with `params` as its parameters. */
-const definitionOf = (name: string, params: Record<string, unknown>): string =>
+const definitionOf = (params: Record<string, unknown>): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params, bindings: {} },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: "done" },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [{ greet: { set: { status: "done" } } }],
+    params,
+    steps: [],
   });
 
 /** A workflow `by` created and published `params` to, as version 1. */
 const published = async (by: Acting, params: Record<string, unknown>) => {
   const workflow = await createWorkflowResource(env, by, `greet-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(workflow.name, params),
+    definition: definitionOf(params),
     basedOn: null,
   });
   return workflow;
 };
 
-/** A definition of `name` that answers `total` of [1, 2, 3] as its status. */
-const computingDefinitionOf = (name: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: {
-            total: { kind: "compute", contract: "local:code/total.ts#total" },
-          },
-        },
-      },
-    },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      {
-        add: {
-          call: "grasp.compute",
-          with: { binding: "total", arguments: "${ [1, 2, 3] }" },
-        },
-      },
-      { answer: { set: { status: "${ tostring }" } } },
-    ],
-  });
+/** A definition that totals [1, 2, 3] with its own module. */
+const computingDefinition = JSON.stringify({
+  $schema: workflowSchemaUrl,
+  input: objectSchema({ who: { type: "string" } }),
+  output: {
+    schema: objectSchema({ status: { type: "string" } }),
+    value: { status: "counted" },
+  },
+  bindings: {
+    total: { kind: "compute", contract: "local:code/total.ts#total" },
+  },
+  steps: [{ id: "add", type: "do", binding: "total", arguments: [1, 2, 3] }],
+});
 
 /** A calculation doubling the sum with `pkg`'s `double`. */
 const moduleUsing = (
@@ -223,7 +195,7 @@ const appSealingPackage = async (license: string) => {
     owner,
     workflow.id,
     {
-      definition: computingDefinitionOf(workflow.name),
+      definition: computingDefinition,
       basedOn: null,
       modules: { "code/total.ts": moduleUsing(pkg) },
       packages: { graphHash },
@@ -240,25 +212,6 @@ const appSealingPackage = async (license: string) => {
   return { owner, app, admin, pkg, workflow, graphHash };
 };
 
-/** A workflow definition's parameters, as far as these tests read them. */
-const paramsSchema = z.object({
-  document: z.object({
-    metadata: z.object({
-      grasp: z.object({
-        params: z.record(
-          z.string(),
-          z.looseObject({
-            default: z.unknown().optional(),
-            schema: z.looseObject({
-              properties: z.record(z.string(), z.unknown()).optional(),
-            }),
-          })
-        ),
-      }),
-    }),
-  }),
-});
-
 /** A refusal's code and details, as these tests read them. */
 const refusedSchema = z.object({ code: z.string(), details: z.unknown() });
 
@@ -266,40 +219,13 @@ const refusedSchema = z.object({ code: z.string(), details: z.unknown() });
 const keys = (value: object): string[] => Object.keys(value).toSorted();
 
 describe("exporting an App's definition", { timeout: 120_000 }, () => {
-  it("packages the sealed release and each version it binds once, with only what its allow-list names and no sensitive default or bound", async () => {
+  it("packages the sealed release and each version it binds once, as generated code with only what its allow-list names", async () => {
     const fixture = await appWith(files(), "Requests");
     const { owner, app, store } = fixture;
-    const apiKey = `api-key-${unique()}`;
-    const region = `region-${unique()}`;
-    // Long enough that no hash in the package holds it by chance.
-    const floor =
-      1_000_000_000_000 + Math.floor(Math.random() * 1_000_000_000_000);
     const workflow = await published(owner, {
-      retries: {
-        schema: { type: "integer", minimum: floor },
-        label: "Retries",
-        required: true,
-        sensitive: true,
-      },
-      apiKey: {
-        schema: { type: "string" },
-        label: "API key",
-        default: apiKey,
-        sensitive: true,
-      },
-      settings: {
-        schema: {
-          type: "object",
-          properties: { region: { type: "string", default: region } },
-          required: [],
-          additionalProperties: false,
-        },
-        label: "Settings",
-        required: true,
-        sensitive: true,
-      },
+      apiKey: { kind: "text", label: "API key" },
       pageSize: {
-        schema: { type: "number" },
+        kind: "number",
         label: "Page size",
         default: 25,
         sensitive: false,
@@ -372,23 +298,15 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
         "server/_generated/server.ts",
       ],
       store: ["alias", "operationManifestHash", "schemaHash", "schemaVersion"],
-      workflow: [
-        "bindings",
-        "files",
-        "packages",
-        "provenance",
-        "withheldConstraints",
-        "withheldDefaults",
-        "workflows",
-      ],
+      workflow: ["bindings", "files", "packages", "provenance"],
       workflowProvenance: [
         "buildHash",
         "definitionHash",
-        "evaluatorHash",
         "manifestHash",
         "profile",
       ],
-      workflowFiles: [generatedPath, "workflow.json"].toSorted(),
+      // The code alone: the definition stays with the version.
+      workflowFiles: [generatedWorkflowEntry],
       workflowPackages: null,
     });
     // The source, and the registration the seal read from it, which the
@@ -411,7 +329,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       contracts: exported.app.workflowContracts,
       packaged: keys(exported.workflows),
       unresolved: exported.unresolved,
-      nested: { workflows: entry.workflows, bindings: entry.bindings },
+      workflowBindings: entry.bindings,
     }).toStrictEqual({
       version: 1,
       manifestHash: release.manifestHash,
@@ -424,62 +342,30 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
         remind: { events: {}, listens: {}, decisions: {} },
       },
       packaged: [key],
-      unresolved: [{ at: "app", alias: "later", reason: "unbound" }],
-      nested: { workflows: {}, bindings: {} },
+      unresolved: [{ alias: "later", reason: "unbound" }],
+      workflowBindings: {},
     });
 
-    // Sensitive defaults are withheld, the parameter required instead; a
-    // default that isn't sensitive is kept.
-    const { params } = paramsSchema.parse(
-      JSON.parse(entry.files["workflow.json"] ?? "{}")
-    ).document.metadata.grasp;
     const text = JSON.stringify(exported);
-    // Nor any hash over the definition as published, against which a
-    // holder could test guesses at what was withheld.
     const asPublished = await env.DB.prepare(
       "SELECT definition_json_hash, manifest_hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
     )
       .bind(workflow.id)
       .first<{ definition_json_hash: string; manifest_hash: string }>();
     expect({
-      withheld: entry.withheldDefaults.toSorted(),
-      constraints: entry.withheldConstraints,
-      retries: params.retries?.schema,
-      apiKey: params.apiKey,
-      region: params.settings?.schema.properties?.region,
-      pageSize: params.pageSize?.default,
-      secrets: [
-        apiKey,
-        region,
-        String(floor),
-        asPublished?.definition_json_hash ?? "unpublished",
-        asPublished?.manifest_hash ?? "unpublished",
-      ].filter((secret) => text.includes(secret)),
       hashes: {
         manifest: entry.provenance.manifestHash,
-        build: entry.provenance.buildHash,
-        definition:
-          entry.provenance.definitionHash ===
-          (await sha256Hex(entry.files["workflow.json"] ?? "")),
+        definition: entry.provenance.definitionHash,
       },
       // No row of this deployment anywhere in the package.
       ids: [store, workflow.id, owner.userId, app].filter((id) =>
         text.includes(id)
       ),
     }).toStrictEqual({
-      withheld: ["apiKey", "settings"],
-      constraints: ["retries"],
-      retries: { type: "integer" },
-      apiKey: {
-        schema: { type: "string" },
-        label: "API key",
-        required: true,
-        sensitive: true,
+      hashes: {
+        manifest: asPublished?.manifest_hash,
+        definition: asPublished?.definition_json_hash,
       },
-      region: { type: "string" },
-      pageSize: 25,
-      secrets: [],
-      hashes: { manifest: null, build: null, definition: true },
       ids: [],
     });
 
@@ -496,7 +382,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     ]);
   });
 
-  it("lists a workflow its exporter doesn't build, and those whose sensitive parameter pins or bounds its value, without their definitions", async () => {
+  it("lists a workflow its exporter doesn't build, without its code", async () => {
     const fixture = await appWith(files(), "Requests");
     const { owner, app } = fixture;
     const bob = await person("builder");
@@ -506,39 +392,9 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       id: owner.userId,
       role: "user",
     });
-    const tier = `tier-${unique()}`;
-    const pinning = await published(owner, {
-      tier: {
-        schema: { type: "string", enum: [tier, "standard"] },
-        label: "Tier",
-        required: true,
-        sensitive: true,
-      },
-    });
-    // Long enough that no hash in the package holds it by chance.
-    const bound =
-      1_000_000_000_000 + Math.floor(Math.random() * 1_000_000_000_000);
-    const bounding = await published(owner, {
-      port: {
-        schema: { type: "number", minimum: bound, maximum: bound },
-        label: "Port",
-        required: true,
-        sensitive: true,
-      },
-    });
     await bindWorkflowToApp(env, owner, theirs.id, {
       app,
       alias: "followUp",
-      version: 1,
-    });
-    await bindWorkflowToApp(env, owner, bounding.id, {
-      app,
-      alias: "later",
-      version: 1,
-    });
-    await bindWorkflowToApp(env, owner, pinning.id, {
-      app,
-      alias: "remind",
       version: 1,
     });
     await seal(fixture);
@@ -557,15 +413,12 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       contracts: {},
       packaged: {},
       unresolved: [
-        { at: "app", alias: "followUp", reason: "forbidden" },
-        { at: "app", alias: "later", reason: "sensitive_constraint" },
-        { at: "app", alias: "remind", reason: "sensitive_constraint" },
+        { alias: "followUp", reason: "forbidden" },
+        { alias: "later", reason: "unbound" },
+        { alias: "remind", reason: "unbound" },
       ],
     });
-    const text = JSON.stringify(exported);
-    expect(
-      [tier, theirs.name, String(bound)].filter((value) => text.includes(value))
-    ).toStrictEqual([]);
+    expect(JSON.stringify(exported)).not.toContain(theirs.name);
   });
 
   it("carries a version's approved packages, which publish again only once the graph is approved for the workflow publishing them", async () => {
@@ -580,17 +433,11 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       throw new Error("The version's packages weren't exported");
     }
 
-    // Elsewhere, as an import would: another builder's workflow publishes
-    // the exported definition and modules, under its own name.
+    // Elsewhere: another builder's workflow publishes the same definition
+    // with the exported modules.
     const builder = await person("builder");
     const copy = await createWorkflowResource(env, builder, `p-${unique()}`);
-    const original = z
-      .looseObject({ document: z.looseObject({}) })
-      .parse(JSON.parse(entry.files["workflow.json"] ?? "{}"));
-    const definition = JSON.stringify({
-      ...original,
-      document: { ...original.document, name: copy.name },
-    });
+    const definition = computingDefinition;
     const modules = Object.fromEntries(
       Object.entries(entry.files).filter(([file]) => file.startsWith("code/"))
     );
@@ -672,7 +519,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     const leaky = await appWith(
       {
         ...files(),
-        "app.ts": `// Deploy with ${token}\n${files()["app.ts"] ?? ""}`,
+        "server/requests.ts": `// Deploy with ${token}\n${files()["server/requests.ts"] ?? ""}`,
       },
       "Requests"
     );
@@ -700,7 +547,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       withinBudget: "ok",
       secret: {
         code: "version.export_secret_found",
-        details: { path: "app/app.ts" },
+        details: { path: "app/server/requests.ts" },
       },
       echoed: false,
     });

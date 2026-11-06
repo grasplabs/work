@@ -1,6 +1,5 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -73,31 +72,18 @@ const connectOwn = async (person: Person): Promise<string> => {
 const mailFields = { id: { type: "string" }, subject: { type: "string" } };
 
 /** The inbox workflow: it hands back the mail's ID and subject it started with. */
-const inboxOf = (name: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
+const inbox = JSON.stringify({
+  $schema: workflowSchemaUrl,
+  input: objectSchema(mailFields),
+  output: {
+    schema: objectSchema(mailFields),
+    value: {
+      id: { $expr: "input.id" },
+      subject: { $expr: "input.subject" },
     },
-    input: { schema: objectSchema(mailFields) },
-    output: { schema: objectSchema(mailFields) },
-    do: [
-      {
-        read: {
-          set: {
-            id: "${ $workflow.input.id }",
-            subject: "${ $workflow.input.subject }",
-          },
-        },
-      },
-    ],
-  });
+  },
+  steps: [],
+});
 
 /**
  * A builder's inbox workflow, started by their connector trigger on new
@@ -107,7 +93,7 @@ const inboxOf = (name: string): string =>
 const listening = async () => {
   const builder = await signedIn("builder");
   const connection = await connectOwn(builder);
-  const workflow = await publishedWorkflow(builder, inboxOf);
+  const workflow = await publishedWorkflow(builder, () => inbox);
   const trigger = await builder.api.workflowResources.triggers.create({
     kind: "connector",
     workflowId: workflow.id,

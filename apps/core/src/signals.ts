@@ -120,7 +120,7 @@ const resourceUnended: (typeof workflowResourceRuns.$inferSelect)["status"][] =
 
 /**
  * A decision's run, as the signals name it: an App's workflow, or an
- * independent workflow (a JSON workflow's `grasp.decision`), of no App
+ * independent workflow (a JSON workflow's decision step), of no App
  * (`app_id` empty) and by its name, as its decisions' page names it.
  * Decisions of a run that is gone have none: they're skipped.
  */
@@ -132,7 +132,6 @@ const decisionRun = {
   workflowId: sql<
     string | null
   >`coalesce(${workflowRuns.workflowId}, ${workflowResources.name})`,
-  independent: sql<number>`${workflowDecisions.resourceRunId} IS NOT NULL`,
 };
 
 /** One signal as it is stored: `app_id` and `workflow_id` empty for none. */
@@ -172,19 +171,6 @@ const dollars = (amount: number): number => Math.round(amount * 1e6) / 1e6;
  */
 const stepName = (step: string | null): string =>
   /^[A-Za-z][\w-]{0,63}(?=$|[:#])/u.exec(step ?? "")?.[0] ?? "";
-
-/** The task of an independent run's decision step: `task:<id>`, or in a loop `task:<id>@…`. */
-const independentTask = /^task:(?<task>[A-Za-z][\w-]{0,63})(?=$|@)/u;
-
-/**
- * A decision's step as a signal names it: an App's step (`stepName`), or
- * the task of an independent run's decision (`task:<id>`, `task:<id>@…`
- * in a loop), whatever item of a loop it was.
- */
-const decisionStep = (row: { step: string; independent: number }): string =>
-  row.independent === 1
-    ? (independentTask.exec(row.step)?.groups?.task ?? "")
-    : stepName(row.step);
 
 /** The entries of `counts`, most first, then by name. */
 const mostFirst = (counts: ReadonlyMap<string, number>) =>
@@ -351,7 +337,7 @@ const waitingSignals = async (
         group.oldest.push({
           decision: row.id,
           run: runIdSchema.parse(row.runId),
-          step: decisionStep(row),
+          step: stepName(row.step),
           openedAt: row.openedAt.toISOString(),
         });
       }
@@ -587,7 +573,7 @@ const correctionSignals = async (
       ) {
         return;
       }
-      const step = decisionStep(row);
+      const step = stepName(row.step);
       const key = JSON.stringify([row.appId, workflowId, step]);
       const group = groups.get(key) ?? {
         appId: row.appId,

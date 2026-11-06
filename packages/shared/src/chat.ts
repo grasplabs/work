@@ -383,6 +383,21 @@ export interface ChatCode {
 }
 
 /**
+ * The agent's tools that change an App's definition (core's
+ * agent-tools.ts), as their calls name them: the thread says of each that
+ * it changed the App's definition.
+ */
+export const definitionToolNames = [
+  "addTable",
+  "addField",
+  "changeField",
+  "renameField",
+  "setAccess",
+  "addIndex",
+  "addPermission",
+] as const;
+
+/**
  * A call of one of the agent's tools made for what it does most (core's
  * agent-tools.ts: `writeFile`, `searchBrain`, …), which the thread shows as
  * one line saying what it did, where a code step shows its code. Its

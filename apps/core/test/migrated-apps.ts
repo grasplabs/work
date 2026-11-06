@@ -7,6 +7,7 @@ import { env } from "cloudflare:workers";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { commit } from "./pending-stores.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
@@ -17,38 +18,39 @@ import { newRecordId } from "./store-schemas.ts";
 
 const placeholder = "0".repeat(64);
 
-export const v1Schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export const noteFields = { title: v.string().min(1).max(200) };
-
-export default defineSchema({ notes: defineTable(noteFields) });
-`;
-
-export const v2Schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+/**
+ * The Notes App's definition with notes of `fields`, which its values.ts
+ * exports as `noteFields` for its migrations.
+ */
+export const notesOfFields = (
+  fields: Readonly<Record<string, string>>
+): Record<string, string> => ({
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: { fields, access: { read: "owner", write: "owner" } },
+    },
+  }),
+  "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const noteFields = {
-  title: v.string().min(1).max(200),
-  category: v.enum(["launch", "general"]),
+${Object.entries(fields)
+  .map(([name, type]) => `  ${name}: ${type},`)
+  .join("\n")}
 };
-
-export default defineSchema({ notes: defineTable(noteFields) });
-`;
-
-/** The App's registration, with the migration when it has one. */
-export const appFile = (
-  migrated: boolean
-): string => `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-${migrated ? 'import derive from "./server/migrations/derive-category.ts";' : ""}
-
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
-  migrations: [${migrated ? "derive" : ""}],
+`,
 });
-`;
+
+const title = "v.string().min(1).max(200)";
+
+/** Notes of a title. */
+export const v1Files = notesOfFields({ title });
+
+/** Notes of a title and a category. */
+export const v2Files = notesOfFields({
+  title,
+  category: 'v.enum(["launch", "general"])',
+});
 
 /** A fixture `deriving` passes: a launch note gets the launch category. */
 export const passingFixtures = `[
@@ -63,7 +65,7 @@ export const migrationFile = (
   handler: string,
   fixtures = passingFixtures
 ): string => `import { migration, v } from "@grasp-os/sdk";
-import { noteFields } from "../../schema.ts";
+import { noteFields } from "../../values.ts";
 
 export default migration({
   name: "derive-category",
@@ -88,16 +90,15 @@ export const migratedFiles = (
   toSchema: string,
   handler: string,
   fixtures = passingFixtures,
-  schema = v2Schema
+  schema = v2Files
 ): Record<string, string> => ({
-  "schema.ts": schema,
+  ...schema,
   "server/migrations/derive-category.ts": migrationFile(
     fromSchema,
     toSchema,
     handler,
     fixtures
   ),
-  "app.ts": appFile(true),
 });
 
 /** The code and details of what `work` threw. */
@@ -158,25 +159,21 @@ export const migrated = async (
     firstCurrent = false,
     fixtures = passingFixtures,
     owner,
-    start = v1Schema,
-    next = v2Schema,
+    start = v1Files,
+    next = v2Files,
   }: {
     extra?: Record<string, string>;
     firstCurrent?: boolean;
     fixtures?: string;
     /** Who creates the App and writes its notes: a new builder unless given. */
     owner?: Identity;
-    /** The schema the notes start under: `v1Schema` unless given. */
-    start?: string;
-    /** The schema the migration migrates to: `v2Schema` unless given. */
-    next?: string;
+    /** The files the notes start under: `v1Files` unless given. */
+    start?: Record<string, string>;
+    /** The files the migration migrates to: `v2Files` unless given. */
+    next?: Record<string, string>;
   } = {}
 ) => {
-  const fixture: Fixture = await appWith(
-    { "schema.ts": start, "app.ts": appFile(false) },
-    "Notes",
-    owner
-  );
+  const fixture: Fixture = await appWith(start, "Notes", owner);
   const first = await seal(fixture);
   if (firstCurrent) {
     await setCurrentVersion(env, fixture.owner, fixture.app, 1);

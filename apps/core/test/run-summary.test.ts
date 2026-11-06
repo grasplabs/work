@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { expectedMessageOf } from "@grasp-os/shared/errors";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -112,7 +111,7 @@ const none = {
 describe("a JSON workflow run's snapshot", { timeout: 120_000 }, () => {
   it("says where a run is, what it waits for and when it started and ended, its sleep kept while paused, each change at a newer revision", async () => {
     const { builder, app, workflow, reference } = await boundApp({
-      hold: "PT1H",
+      hold: "1 hour",
     });
     const lease = await screenOf(builder, app);
     const { runId } = startedOf(
@@ -199,15 +198,11 @@ describe("a JSON workflow run's snapshot", { timeout: 120_000 }, () => {
 
   it("says why a failed run failed past its retention as the run itself does, in the platform's words, never what it read", async () => {
     const { builder, app, workflow, reference } = await boundApp({
-      // Fails on its input, which it reads: "Ada" isn't a number.
-      definition: (name) =>
-        definitionOf(name, [
-          {
-            greet: {
-              set: { status: "${ $workflow.input.who | tonumber | tostring }" },
-            },
-          },
-        ]),
+      // Fails on its input, which it reads: a name has no 10,000th letter.
+      definition: () =>
+        definitionOf([], {
+          status: { $expr: 'input.who.split("")[9999].toUpperCase()' },
+        }),
     });
     const lease = await screenOf(builder, app);
     const { runId } = startedOf(

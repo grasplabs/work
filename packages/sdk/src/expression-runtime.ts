@@ -27,6 +27,7 @@
  */
 
 import type { Json } from "@grasp-os/shared/json";
+import { expressionFailed } from "@grasp-os/shared/workflows";
 
 // Captured as this module loads, and called only with `Reflect.apply` and
 // an explicit receiver (`callMethod`), so unbound by design.
@@ -103,7 +104,7 @@ const maxNameInMessage = 64;
  */
 export class ExpressionFailedError extends TypeError {
   override readonly name = "ExpressionFailedError";
-  readonly code = "expression.failed";
+  readonly code = expressionFailed;
 }
 
 /** `name`, as the expression wrote it, short enough for a message. */

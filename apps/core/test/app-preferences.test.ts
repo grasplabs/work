@@ -27,6 +27,7 @@ import { appMembers } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { preferencesWatch } from "../src/store-host.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
 import { appWith, failure, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
@@ -53,20 +54,21 @@ const filesWith = (
     title = "v.string()",
   }: { withNotes?: boolean; title?: string } = {}
 ): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema(${withNotes ? `{ notes: defineTable({ title: ${title} }) }` : "{}"});
-`,
-  "app.ts": `import { app, v } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Desk",
-  schema,
-  access: { tables: ${withNotes ? '{ notes: { read: "owner", write: "owner" } }' : "{}"} },
+  ...appDefinition({
+    name: "Desk",
+    tables: withNotes
+      ? {
+          notes: {
+            fields: { title },
+            access: { read: "owner", write: "owner" },
+          },
+        }
+      : {},
+    ...(preferences === "" ? {} : { preferences }),
+  }),
+  "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  ${preferences === "" ? "" : `preferences: ${preferences},`}
-});
+};
 `,
   "screens/desk.tsx": `export default function Desk() {
   return <main>Desk</main>;

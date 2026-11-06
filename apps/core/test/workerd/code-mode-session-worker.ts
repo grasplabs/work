@@ -3,8 +3,8 @@ import {
   kitModuleName,
   serverEntryPath,
 } from "@grasp-os/compiler";
-import { app, defineSchema, defineTable, v } from "@grasp-os/sdk";
-import { inspectApp, registerFunctions } from "@grasp-os/sdk/host";
+import { defineApp, defineSchema, defineTable, v } from "@grasp-os/sdk";
+import { inspectApp, registerApp } from "@grasp-os/sdk/host";
 import { serverModule } from "@grasp-os/sdk/server";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
@@ -32,17 +32,18 @@ interface StandInEnv {
 
 // An App with one action, its code the isolate's: as core runs a sealed
 // release's functions (app-functions.ts), here with a runner of its own.
-const schema = defineSchema({ notes: defineTable({ title: v.string() }) });
+const schema = defineSchema({
+  notes: defineTable({ title: v.string() }).access({
+    read: "owner",
+    write: "owner",
+  }),
+});
 const { action } = serverModule(schema);
 const { manifest } = inspectApp(
-  registerFunctions(
-    app({
-      name: "Jobs",
-      schema,
-      access: { tables: { notes: { read: "owner", write: "owner" } } },
-      screens: [],
-    }),
-    {
+  registerApp({
+    config: defineApp({ name: "Jobs" }),
+    schema,
+    modules: {
       jobs: {
         echo: action({
           args: { n: v.number() },
@@ -50,8 +51,9 @@ const { manifest } = inspectApp(
           handler: (_ctx, args) => args,
         }),
       },
-    }
-  )
+    },
+    migrations: [],
+  })
 );
 const release = {
   modules: {

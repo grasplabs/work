@@ -65,7 +65,7 @@ const build = (dir: string): string => {
 };
 
 const schema = {
-  "schema.ts":
+  "server/schema.ts":
     'import { defineSchema } from "@grasp-os/sdk";\n\nexport default defineSchema({});\n',
 };
 
@@ -120,7 +120,8 @@ describe("the built-in blueprints' build", () => {
   });
 
   it("embeds the workflows a built-in ships, their definitions' text, and the contracts they bind", () => {
-    const definition = '{"document":{"name":"greeter"}}';
+    const definition =
+      '{"$schema":"https://grasp.work/schemas/grasp-workflow/1.json","steps":[]}';
     const contract = { key: "fixture/greeter", kind: "model" };
     const out = build(
       fixture(
@@ -244,7 +245,7 @@ describe("the built-in blueprints' build", () => {
     [
       "a file over an App's limit",
       "large",
-      { "schema.ts": "x".repeat(appLimits.fileLength + 1) },
+      { "server/schema.ts": "x".repeat(appLimits.fileLength + 1) },
       "files/",
     ],
     [

@@ -439,7 +439,6 @@ const waitSchema = v.union(
     kind: v.literal("decision"),
     canRespond: v.boolean(),
   }),
-  v.object({ ...waitFields, kind: v.literal("child"), child: runHandleSchema }),
   v.object({
     ...waitFields,
     kind: v.literal("blocked"),

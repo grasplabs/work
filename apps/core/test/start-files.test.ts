@@ -14,7 +14,7 @@ import {
   screenLeaseHeader,
   screenPersonHeader,
 } from "@grasp-os/shared/screens";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -38,6 +38,7 @@ import { resultOf, runOf } from "../src/workflows/resource-runs.ts";
 import { copyIntoRun, sweepRunFiles } from "../src/workflows/run-files.ts";
 import { handFiles } from "../src/workflows/start-files.ts";
 import type { StartFile } from "../src/workflows/start-files.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { appWith, seal } from "./sealed-apps.ts";
@@ -52,20 +53,38 @@ import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const files = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string() }),
-});
-`,
-  "server/review.ts": `import { permission, v } from "@grasp-os/sdk";
+/**
+ * The Reviews App: its files permission of `operations`, its `review`
+ * workflow taking a `doc` of type `doc`, and the `workflows` beside it.
+ */
+const files = ({
+  operations = '["upload", "read", "delete"]',
+  doc = "v.file()",
+  workflows = [],
+}: {
+  operations?: string;
+  doc?: string;
+  workflows?: readonly string[];
+} = {}): Record<string, string> => ({
+  ...appDefinition({
+    name: "Reviews",
+    tables: {
+      notes: {
+        fields: { title: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      `permission.files({ operations: ${operations} })`,
+      `permission.workflow("review", { input: v.object({ doc: ${doc} }), output: v.object({ status: v.string() }) })`,
+      ...workflows,
+    ],
+  }),
+  "server/review.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const review = permission.workflow("review", {
-  input: v.object({ doc: v.file() }),
-  output: v.object({ status: v.string() }),
-});
+export const review = permissions.review;
 
 /** Starts the review now, with the file the screen names. */
 export const startReview = action({
@@ -87,21 +106,10 @@ export const stageReview = mutation({
   },
 });
 `,
-  "app.ts": `import { app, permission } from "@grasp-os/sdk";
-import { review } from "./server/review.ts";
-import schema from "./schema.ts";
 
-export const attachments = permission.files({
-  operations: ["upload", "read", "delete"],
-});
-
-export default app({
-  name: "Reviews",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
+  "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  permissions: { files: attachments, workflows: [review] },
-});
+};
 `,
   "screens/desk.tsx": `export default function Desk() {
   return <main>Reviews</main>;
@@ -110,45 +118,25 @@ export default app({
 });
 
 /** A workflow taking a file, whose run says which file it was handed. */
-const definitionOf = (name: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
+const definition = JSON.stringify({
+  $schema: workflowSchemaUrl,
+  input: {
+    type: "object",
+    properties: { doc: { type: "object", "x-grasp-value": { kind: "file" } } },
+    required: ["doc"],
+    additionalProperties: false,
+  },
+  output: {
+    schema: {
+      type: "object",
+      properties: { status: { type: "string" } },
+      required: ["status"],
+      additionalProperties: false,
     },
-    input: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: {
-            doc: { type: "object", "x-grasp-value": { kind: "file" } },
-          },
-          required: ["doc"],
-          additionalProperties: false,
-        },
-      },
-    },
-    output: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: { status: { type: "string" } },
-          required: ["status"],
-          additionalProperties: false,
-        },
-      },
-    },
-    // oxlint-disable-next-line no-template-curly-in-string -- a workflow expression
-    do: [{ say: { set: { status: "${ $workflow.input.doc.id }" } } }],
-  });
+    value: { status: { $expr: "input.doc.id" } },
+  },
+  steps: [],
+});
 
 /** Someone signed in, and as core's own calls take them. */
 const signedIn = async (role: Role) => {
@@ -180,7 +168,7 @@ const reviewsApp = async () => {
     `review-${unique()}`
   );
   await publishWorkflowVersion(env, builder.acting, workflow.id, {
-    definition: definitionOf(workflow.name),
+    definition,
     basedOn: null,
   });
   const fixture = await appWith(files(), "Reviews", builder.acting);
@@ -608,7 +596,7 @@ describe(
             fields: { doc: { ...field, kind: "file" } },
           },
           JSON.stringify({ doc: { id: file.id } }),
-          { runId, workflowId, runs: true },
+          { runId, workflowId },
           {
             // Readable as it is copied, hidden by the time it is read again.
             read: async () => {
@@ -660,7 +648,6 @@ describe(
           {
             runId: crypto.randomUUID(),
             workflowId: crypto.randomUUID(),
-            runs: true,
           },
           {
             // Nothing is a file to read: a text is handed as it is, and an
@@ -889,17 +876,7 @@ describe(
         fixture.app,
         1
       );
-      const withoutRead = Object.fromEntries(
-        Object.entries(files()).map(([path, text]) => [
-          path,
-          path === "app.ts"
-            ? text.replace(
-                'operations: ["upload", "read", "delete"]',
-                'operations: ["upload", "delete"]'
-              )
-            : text,
-        ])
-      );
+      const withoutRead = files({ operations: '["upload", "delete"]' });
       const { version } = await fixture.builder.api.apps.files.commit(
         fixture.app,
         withoutRead,
@@ -920,17 +897,7 @@ describe(
       const fixture = await reviewsApp();
       // The same `{ id }` reaches the bound workflow, which takes it as a
       // file: copied all the same (`handFiles`).
-      const aliased = Object.fromEntries(
-        Object.entries(files()).map(([path, text]) => [
-          path,
-          path === "server/review.ts"
-            ? text.replace(
-                "input: v.object({ doc: v.file() })",
-                "input: v.object({ doc: v.object({ id: v.string() }) })"
-              )
-            : text,
-        ])
-      );
+      const aliased = files({ doc: "v.object({ id: v.string() })" });
       const { version } = await fixture.builder.api.apps.files.commit(
         fixture.app,
         aliased,
@@ -949,41 +916,13 @@ describe(
       // 120 more workflows, none of them taking a file, beside `review`,
       // declared as a plain object, whose bound workflow takes one.
       const extras = Array.from({ length: 120 }, (_, at) => `extra${at}`);
-      const many = Object.fromEntries(
-        Object.entries(files()).map(([path, text]) => {
-          if (path === "server/review.ts") {
-            return [
-              path,
-              text.replace(
-                "input: v.object({ doc: v.file() })",
-                "input: v.object({ doc: v.object({ id: v.string() }) })"
-              ),
-            ];
-          }
-          if (path === "app.ts") {
-            return [
-              path,
-              text
-                .replace(
-                  'import schema from "./schema.ts";',
-                  'import schema from "./schema.ts";\nimport * as extra from "./server/extra.ts";'
-                )
-                .replace(
-                  "permissions: { files: attachments, workflows: [review] },",
-                  "permissions: { files: attachments, workflows: [review, ...Object.values(extra)] },"
-                ),
-            ];
-          }
-          return [path, text];
-        })
-      );
-      many["server/extra.ts"] = [
-        'import { permission, v } from "@grasp-os/sdk";',
-        ...extras.map(
+      const many = files({
+        doc: "v.object({ id: v.string() })",
+        workflows: extras.map(
           (name) =>
-            `export const ${name} = permission.workflow("${name}", { input: v.object({ note: v.string() }), output: v.null() });`
+            `permission.workflow("${name}", { input: v.object({ note: v.string() }), output: v.null() })`
         ),
-      ].join("\n");
+      });
       const { version } = await fixture.builder.api.apps.files.commit(
         fixture.app,
         many,

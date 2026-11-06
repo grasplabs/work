@@ -1,8 +1,8 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page, Route } from "@playwright/test";
 
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -22,38 +22,25 @@ test.use({ trace: "retain-on-failure" });
 const live = { timeout: 30_000 };
 
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
 /**
  * A workflow that holds for an hour, then greets: a run stays running
  * until someone cancels it.
  */
-const definitionOf = (name: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      { hold: { wait: "PT1H" } },
-      { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
-    ],
-  });
+const definition = JSON.stringify({
+  $schema: workflowSchemaUrl,
+  input: objectSchema({ who: { type: "string" } }),
+  output: {
+    schema: objectSchema({ status: { type: "string" } }),
+    value: { status: { $expr: '"Hello, " + input.who' } },
+  },
+  steps: [{ id: "hold", type: "wait", for: "1 hour" }],
+});
 
 /**
  * The App: it declares the `followUp` workflow, and its screen drives the
@@ -61,28 +48,27 @@ const definitionOf = (name: string): string =>
  * hook's fields it reads.
  */
 const appFiles = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Requests",
+    tables: {
+      requests: {
+        fields: { who: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/requests.ts": `import { v } from "@grasp-os/sdk";
+import { permissions } from "../grasp.config.ts";
 
-export default defineSchema({ requests: defineTable({ who: v.string() }) });
+export const followUp = permissions.followUp;
 `,
-  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
 
-export const followUp = permission.workflow("followUp", {
-  input: v.object({ who: v.string().trim().min(1) }),
-  output: v.object({ status: v.string() }),
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { followUp } from "./server/requests.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
+  "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  permissions: { workflows: [followUp] },
-});
+};
 `,
   "screens/desk.tsx": `import { useWorkflow } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
@@ -145,7 +131,7 @@ const boundApp = async (
       `follow-up-${crypto.randomUUID().slice(0, 8)}`
     );
     await builds.api.workflowResources.publish(workflow.id, {
-      definition: definitionOf(workflow.name),
+      definition,
       basedOn: null,
     });
     await builds.api.workflowResources.bindToApp(workflow.id, {

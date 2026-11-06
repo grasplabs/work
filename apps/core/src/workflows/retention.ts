@@ -14,16 +14,14 @@ import type { SQL, SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { auditedBatch, outboxedWhere } from "../audit-outbox.ts";
+import { auditedBatch } from "../audit-outbox.ts";
 import { eraseRunCaptures } from "../brain-capture.ts";
 import {
   workflowResourceParams,
-  workflowEmittedEvents,
   workflowStartReceipts,
   runLineageChildren,
   runBrainEvidence,
   runChatSources,
-  runEvidenceHolds,
   resourceRunMailCalls,
   runMailCalls,
   runMailStampClaims,
@@ -332,18 +330,6 @@ const pruneReceipts = async (
 /** Most start receipts, and parameter revisions, one clock run empties. */
 export const startDetailsPerSweep = 500;
 
-/**
- * That no run holding run `run`'s evidence keeps its own details at
- * `before` (`runEvidenceHolds`), as SQL: a parent that took its output
- * checks that evidence before each of its releases (resource-reads.ts),
- * and a parent may outlive its child's retention by far.
- */
-const unheldBy = (run: SQL, before: Date): SQL =>
-  sql`NOT EXISTS (SELECT 1 FROM ${runEvidenceHolds} AS hold
-    JOIN workflow_resource_runs AS holder ON holder.id = hold.run_id
-    WHERE hold.held_run_id = ${run}
-      AND (holder.ended_at IS NULL OR holder.ended_at >= ${before.getTime()}))`;
-
 /** A start receipt the sweep found due (`dueStarts`). */
 interface DueStart {
   id: string;
@@ -361,10 +347,7 @@ interface DueStart {
  * admitted before `before`, and its run, if it admitted one, ended
  * before it too: a run that hasn't ended loads its input and parameters
  * from its receipt on every activation (resource-runs.ts), and once it
- * ended its retention counts from its end, as an App run's does. Nor
- * while a run holding its evidence keeps its own: a parent that took its
- * output checks its evidence before each release (resource-reads.ts), and
- * a parent may outlive its child's retention by far.
+ * ended its retention counts from its end, as an App run's does.
  */
 const dueStarts = async (
   db: DrizzleD1Database,
@@ -389,8 +372,7 @@ const dueStarts = async (
         lt(receipts.createdAt, before),
         after &&
           sql`(${receipts.createdAt}, ${receipts.id}) > (${after.createdAt}, ${after.id})`,
-        or(isNull(runs.id), lt(runs.endedAt, before)),
-        unheldBy(sql`${receipts.id}`, before)
+        or(isNull(runs.id), lt(runs.endedAt, before))
       )
     )
     .orderBy(asc(receipts.createdAt), asc(receipts.id))
@@ -416,12 +398,10 @@ const startDetailsRemoved = async (
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const receipts = workflowStartReceipts;
-  // As one bound value, within D1's bound parameters however many. Held
-  // again as the batch runs: a hold that landed since the read keeps its
-  // run's details (`unheldBy`), whatever this sweep read.
+  // As one bound value, within D1's bound parameters however many.
   const due = sql`(SELECT due.value FROM json_each(${JSON.stringify(
     dueRows.map(({ id }) => id)
-  )}) AS due WHERE ${unheldBy(sql`due.value`, before)})`;
+  )}) AS due)`;
   // What connect still holds of their runs goes first, as an App run's
   // does (`removedElsewhere`): a run that ended while a side effect of it
   // was held leaves the action, with its exact input, until its person
@@ -437,25 +417,6 @@ const startDetailsRemoved = async (
   if (heldOf.length > 0) {
     await env.CONNECT.dropForEndedRuns({ runs: heldOf });
   }
-  // The events of those runs still undelivered, which this closes
-  // undelivered: each audited as it is closed (`expiredEvents`).
-  const expiring =
-    dueRows.length === 0
-      ? []
-      : await db
-          .select({
-            id: workflowEmittedEvents.id,
-            runId: workflowEmittedEvents.runId,
-            type: workflowEmittedEvents.type,
-          })
-          .from(workflowEmittedEvents)
-          .where(
-            and(
-              inArray(workflowEmittedEvents.runId, due),
-              isNull(workflowEmittedEvents.deliveredAt),
-              isNull(workflowEmittedEvents.detailsRemovedAt)
-            )
-          );
   await auditedBatch(env, db, [
     // A start's run has its receipt's ID (resource-runs.ts).
     ...attemptsPruned(db, due, now),
@@ -481,8 +442,6 @@ const startDetailsRemoved = async (
     runFilesRemoved(db, due),
     // What its recalls cited (resource-reads.ts): no new call of its to gate.
     db.delete(runBrainEvidence).where(inArray(runBrainEvidence.runId, due)),
-    // And whose evidence it held: no release of its left to check.
-    db.delete(runEvidenceHolds).where(inArray(runEvidenceHolds.runId, due)),
     // And what the chat that had it started had read (workflow-starts.ts).
     db.delete(runChatSources).where(inArray(runChatSources.runId, due)),
     // And its inboxes (run-inboxes.ts): a reply from now on is to an
@@ -495,43 +454,6 @@ const startDetailsRemoved = async (
       .update(workflowDecisions)
       .set({ description: "", payload: null, input: null })
       .where(inArray(workflowDecisions.resourceRunId, due)),
-    // What its `emit` tasks sent goes with its details too: the event's
-    // envelope stays, its subject and data don't (emitted-events.ts). One
-    // still undelivered then is closed undelivered, as expired with its
-    // details, never delivered later without its data: its
-    // `delivered_at` set with `details_removed_at` says which it was.
-    // Each such is audited as it is, never lost without a record: before
-    // the change, while it still is undelivered, so once however many
-    // sweeps race.
-    ...expiring.map((event) =>
-      outboxedWhere(
-        db,
-        {
-          actor: { type: "system" },
-          action: "workflow.event.expired",
-          target: { type: "workflow_run", id: event.runId },
-          detail: { event: event.id, type: event.type, delivered: false },
-        },
-        sql`EXISTS (SELECT 1 FROM ${workflowEmittedEvents}
-          WHERE ${workflowEmittedEvents.id} = ${event.id}
-            AND ${workflowEmittedEvents.deliveredAt} IS NULL
-            AND ${workflowEmittedEvents.detailsRemovedAt} IS NULL)`
-      )
-    ),
-    db
-      .update(workflowEmittedEvents)
-      .set({
-        subject: null,
-        data: null,
-        detailsRemovedAt: now,
-        deliveredAt: sql`COALESCE(${workflowEmittedEvents.deliveredAt}, ${now.getTime()})`,
-      })
-      .where(
-        and(
-          inArray(workflowEmittedEvents.runId, due),
-          isNull(workflowEmittedEvents.detailsRemovedAt)
-        )
-      ),
     db
       .update(receipts)
       .set({ input: null, params: null, detailsRemovedAt: now })
