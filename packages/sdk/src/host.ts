@@ -63,6 +63,7 @@ export {
   holdsId,
   planSchemaChange,
   schemaCovered,
+  tablesRenamed,
   withDefaultsFilled,
 } from "./schema-plan.ts";
 export type {
@@ -73,6 +74,7 @@ export type {
   PlannedField,
   PlannedIndex,
   PlannedRename,
+  PlannedTableRename,
   PlanRefusal,
   PlanRefusalReason,
   RefusedPlan,

@@ -8,6 +8,7 @@ import {
   readSchemaManifest,
   schemaCovered,
   schemaFromDescriptor,
+  tablesRenamed,
   SchemaDefinitionError,
   schemaHash as hashOf,
 } from "@grasp-os/sdk/host";
@@ -22,6 +23,7 @@ import type {
   SchemaIds,
   PlannedChanges,
   SchemaManifest,
+  PlannedTableRename,
 } from "@grasp-os/sdk/host";
 import { appDataImportLimits } from "@grasp-os/shared/app-data";
 import type { RecordChangePage } from "@grasp-os/shared/app-data";
@@ -870,6 +872,7 @@ const planRecord = (
       answerOf(answer, from),
     ]),
     renames: plan.renames.map(({ table, from, to }) => [table, from, to]),
+    renamedTables: plan.renamedTables.map(({ from, to }) => [from, to]),
     ruleChanges: [...plan.ruleChanges],
     activates: plan.activates,
   });
@@ -901,6 +904,12 @@ interface ContractChange {
   readonly ids: string;
   /** The IDs of the contract's names after the change (`AcceptedPlan.ids`). */
   readonly contractIds: SchemaIds;
+  /**
+   * The tables the schema renames (sdk schema-plan.ts, `tablesRenamed`):
+   * each keeps its table ID, and takes its new name only as the release
+   * is made current (`#renameTables`), so none is made under it now.
+   */
+  readonly renamedTables: readonly PlannedTableRename[];
   /**
    * The defaulted fields the change adds to tables the contract has: to
    * fill in first, wherever those tables hold records (`fillMissing`).
@@ -1352,14 +1361,17 @@ const filledInWithin = (
 /** The IDs of the schema's tables, and of every table the store holds. */
 const definedTables = (
   names: readonly string[],
-  all: readonly { name: string; tableId: string }[]
+  all: readonly { name: string; tableId: string }[],
+  renamedFrom: ReadonlyMap<string, string> = new Map()
 ): Pick<DefinedTables, "tables" | "storeTables"> => {
-  const schemaTables = new Set(names);
+  const byName = new Map(all.map(({ name, tableId }) => [name, tableId]));
   return {
+    // A table the schema renames, by its new name: the one it renames.
     tables: Object.fromEntries(
-      all
-        .filter(({ name }) => schemaTables.has(name))
-        .map(({ name, tableId }) => [name, tableId])
+      names.flatMap((name) => {
+        const tableId = byName.get(renamedFrom.get(name) ?? name);
+        return tableId === undefined ? [] : [[name, tableId]];
+      })
     ),
     storeTables: Object.fromEntries(
       all.map(({ name, tableId }) => [name, tableId])
@@ -1896,6 +1908,13 @@ export class StoreHost {
         identified
       );
       const known = new Map(before.map(({ name, tableId }) => [name, tableId]));
+      // A table renamed keeps its ID (`#renameTables`).
+      for (const { from, to } of change.renamedTables) {
+        const tableId = known.get(from);
+        if (tableId !== undefined) {
+          known.set(to, tableId);
+        }
+      }
       const planned = Object.fromEntries(
         names.map((name) => [name, known.get(name) ?? crypto.randomUUID()])
       );
@@ -2068,6 +2087,7 @@ export class StoreHost {
     const baseHash = base?.hash ?? null;
     const baseManifest = base?.manifest ?? null;
     const storedHash = stored ?? "";
+    const renamedTables = this.#tablesRenamed(baseManifest, target, ids);
     // Applied for this consumer already: its receipt is the answer, after
     // the checks above, and nothing is planned or written again, so a
     // retry never moves the contract (nor the indexes it lists) under a
@@ -2093,6 +2113,7 @@ export class StoreHost {
         answers: answersText,
         ids: idsText,
         contractIds: {},
+        renamedTables,
       };
     }
     const { plan, migrated } = this.#acceptedPlan(baseManifest, target, {
@@ -2141,6 +2162,7 @@ export class StoreHost {
         answers: answersText,
         ids: idsText,
         contractIds: plan.ids,
+        renamedTables,
       };
     }
     if (plan.changed && pending !== null) {
@@ -2168,6 +2190,7 @@ export class StoreHost {
         answers: answersText,
         ids: idsText,
         contractIds: plan.ids,
+        renamedTables,
       };
     }
     const contractText = manifestText(plan.contract);
@@ -2196,6 +2219,7 @@ export class StoreHost {
       answers: answersText,
       ids: idsText,
       contractIds: plan.ids,
+      renamedTables,
     };
   }
 
@@ -2666,6 +2690,20 @@ export class StoreHost {
       .run();
   }
 
+  /**
+   * The tables `target` (its IDs `ids`) renames from `contract`'s (sdk
+   * schema-plan.ts): none for a store holding nothing.
+   */
+  #tablesRenamed(
+    contract: SchemaManifest | null,
+    target: SchemaManifest,
+    ids: SchemaIds
+  ): PlannedTableRename[] {
+    return contract === null
+      ? []
+      : tablesRenamed(contract, target, this.#idsOf(contract, ids));
+  }
+
   /** The IDs a plan of a schema whose IDs are `ids` onto `contract` takes. */
   #idsOf(
     contract: SchemaManifest | null,
@@ -2773,7 +2811,10 @@ export class StoreHost {
       this.#requireNoRecords();
     }
     const now = Date.now();
-    for (const name of names) {
+    const renamedTo = new Map(
+      change.renamedTables.map(({ from, to }) => [to, from])
+    );
+    for (const name of names.filter((named) => !renamedTo.has(named))) {
       const existing = this.#db
         .select({ name: tables.name })
         .from(tables)
@@ -2802,10 +2843,10 @@ export class StoreHost {
     if (all.length > storeMaxTables) {
       throw dataErrors.create("data.too_many_tables");
     }
-    this.#markSensitive(readSchemaManifest(text).manifest);
+    this.#markSensitive(readSchemaManifest(text).manifest, renamedTo);
     if (change.replay) {
       return {
-        ...definedTables(names, all),
+        ...definedTables(names, all, renamedTo),
         contract: this.#receive(schemaHash, change, now),
       };
     }
@@ -2818,7 +2859,7 @@ export class StoreHost {
       this.#takeChange(change, schemaHash, all, now);
     }
     return {
-      ...definedTables(names, all),
+      ...definedTables(names, all, renamedTo),
       contract: this.#receive(schemaHash, change, now),
     };
   }
@@ -4103,12 +4144,16 @@ export class StoreHost {
    * Marks the tables `manifest` declares sensitive as the store's sensitive
    * tables, for good, inside `#defineIn`'s transaction: the values their
    * history kept before are cleared in the same transaction, so a table
-   * declared sensitive late keeps none of them.
+   * declared sensitive late keeps none of them. A table the schema renames
+   * (`renamedFrom`, by its new name) is marked under the name it has now.
    */
-  #markSensitive(manifest: SchemaManifest): void {
-    const declared = Object.keys(manifest.tables).filter((table) =>
-      declaredSensitive(manifest, table)
-    );
+  #markSensitive(
+    manifest: SchemaManifest,
+    renamedFrom: ReadonlyMap<string, string> = new Map()
+  ): void {
+    const declared = Object.keys(manifest.tables)
+      .filter((table) => declaredSensitive(manifest, table))
+      .map((table) => renamedFrom.get(table) ?? table);
     if (declared.length === 0) {
       return;
     }
@@ -6605,6 +6650,7 @@ export class StoreHost {
    */
   #applyIn(step: CheckedStep, schemaHash: string, contractHash: string): void {
     const now = Date.now();
+    const renamed = this.#renameTables(step.plan.renamedTables);
     const tableIds = new Map(
       this.#tableRows().map(({ name, tableId }) => [name, tableId])
     );
@@ -6639,7 +6685,43 @@ export class StoreHost {
       const tableId = tableIds.get(table);
       return tableId === undefined ? [] : [tableId];
     });
-    this.#rewrote(new Set([...run.changedTables, ...ruled]));
+    this.#rewrote(new Set([...run.changedTables, ...ruled, ...renamed]));
+  }
+
+  /**
+   * Gives each table `renamed` renames its new name, in `#applyIn`'s
+   * transaction: its records, indexes, search index and references are
+   * all kept by its table ID, so only its name moves (and the fields the
+   * store reserved on it). Refused (`data.table_conflict`) when the store
+   * holds a table under the new name already: one a release sealed but
+   * never made current made there. The IDs of the tables renamed.
+   */
+  #renameTables(renamed: readonly PlannedTableRename[]): string[] {
+    return renamed.flatMap(({ from, to }) => {
+      const taken = this.#db
+        .select({ name: tables.name })
+        .from(tables)
+        .where(eq(tables.nameKey, to.toLowerCase()))
+        .get();
+      if (taken !== undefined) {
+        throw dataErrors.create("data.table_conflict", {
+          table: to,
+          existing: taken.name,
+        });
+      }
+      const moved = this.#db
+        .update(tables)
+        .set({ name: to, nameKey: to.toLowerCase() })
+        .where(eq(tables.name, from))
+        .returning({ tableId: tables.tableId })
+        .all();
+      this.#db
+        .update(reservedFields)
+        .set({ tableName: to })
+        .where(eq(reservedFields.tableName, from))
+        .run();
+      return moved.map(({ tableId }) => tableId);
+    });
   }
 
   /**

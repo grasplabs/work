@@ -225,7 +225,7 @@ const answersWithDiagnostics =
 
 /** What the file tools say of the files the definition tools write. */
 const generatedNote =
-  "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code generated from it: change them with the definition tools (addTable, addField, changeField, renameField, setAccess, addIndex, addPermission), never by writing them.";
+  "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code generated from it: change them with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission), never by writing them.";
 
 /** What the definition tools say of what they answer with (`env.build.define`). */
 const definitionAnswer =
@@ -729,6 +729,26 @@ const definitions = (known: Set<string>, assets: Fetcher) => [
     ),
     run: async (scope, { app, ...input }) =>
       await define(scope, app, { op: "renameField", ...input }),
+  }),
+  tool({
+    name: "renameTable",
+    label: "Rename a table",
+    api: "build",
+    description: `Renames a table: it keeps its ID, so its records, indexes, row rules and every field that refers to it (\`v.id\`) follow it, the table taking the new name as the version is made current. Code that names the table (\`ctx.db.query("…")\`) changes with it. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        table: tableParameter,
+        name: Type.String({
+          minLength: 1,
+          maxLength: 64,
+          description: "Its new name.",
+        }),
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "renameTable", ...input }),
   }),
   tool({
     name: "setAccess",

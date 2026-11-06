@@ -1796,7 +1796,7 @@ build: {
   /**
    * Changes the App's definition in the draft, as the chat's definition
    * tools do (\`addTable\`, \`addField\`, \`changeField\`,
-   * \`renameField\`, \`setAccess\`, \`addIndex\`, \`addPermission\`:
+   * \`renameField\`, \`renameTable\`, \`setAccess\`, \`addIndex\`, \`addPermission\`:
    * \`operation\` is \`{ op, ...that tool's input but app }\`), and writes
    * grasp.config.ts and server/schema.ts from it. \`ok: false\` with the
    * problem saves nothing; otherwise the \`plan\` of what it does to the
@@ -1810,6 +1810,7 @@ build: {
           accepted: boolean;
           addedTables: string[];
           addedFields: { table: string; field: string }[];
+          renamedTables: { from: string; to: string }[];
           renamedFields: { table: string; from: string; to: string }[];
           widenedFields: { table: string; field: string }[];
           checks: { table: string; field: string; answered: boolean }[];

@@ -11,7 +11,7 @@ Each App has a store of its own. Its definition declares its tables and who may 
 
 A table is a set of fields, each typed with `v`. Every record also has the fields Grasp keeps for it: `_id`, `_ownerId` (who inserted it), `_rev` (its revision, raised by every write), `_createdAt` and `_updatedAt`.
 
-Tables live in the App's definition. Grasp adds and changes them with its definition tools: `addTable` adds a table, `addField` a field, `changeField` gives a field another type, `renameField` renames one (its ID stays, so its indexes, its rules and the values records hold follow it) and `addIndex` adds an index or the table's search index. A field's type is written as code writes it, such as `v.string().max(200)`. Each change answers what it does to the records the App already holds: a field they lack, for instance, takes a default or an answer to fill it in.
+Tables live in the App's definition. Grasp adds and changes them with its definition tools: `addTable` adds a table, `addField` a field, `changeField` gives a field another type, `renameField` renames one (its ID stays, so its indexes, its rules and the values records hold follow it), `renameTable` renames a table (its records, and every field referring to it, follow it) and `addIndex` adds an index or the table's search index. A field's type is written as code writes it, such as `v.string().max(200)`. Each change answers what it does to the records the App already holds: a field they lack, for instance, takes a default or an answer to fill it in.
 
 From the definition, Grasp generates `server/schema.ts`:
 

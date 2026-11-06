@@ -182,6 +182,8 @@ export interface DefinitionPlan {
   accepted: boolean;
   addedTables: string[];
   addedFields: PlanField[];
+  /** Tables renamed: each keeps its records under its new name. */
+  renamedTables: { from: string; to: string }[];
   /** Fields renamed: every record's value moves from the old name to the new. */
   renamedFields: { table: string; from: string; to: string }[];
   /** Fields every record still fits: nothing to check. */
@@ -218,6 +220,7 @@ export const storePlanSchema = z.object({
   renames: z.array(
     z.object({ table: z.string(), from: z.string(), to: z.string() })
   ),
+  renamedTables: z.array(z.object({ from: z.string(), to: z.string() })),
   widenedFields: z.array(plannedField),
   checks: z.array(plannedField.extend({ answer: z.unknown() })),
   retainedFields: z.array(plannedField),
@@ -278,6 +281,7 @@ export const definitionPlan = (
           )
       )
     ),
+    renamedTables: plan.renamedTables.map(({ from, to }) => ({ from, to })),
     renamedFields: plan.renames.map(({ table, from, to }) => ({
       table,
       from,
@@ -364,6 +368,7 @@ export const definitionOperationSchema: z.ZodType<DefinitionOperation> =
       field: text,
       name: text,
     }),
+    z.strictObject({ op: z.literal("renameTable"), table: text, name: text }),
     z.strictObject({
       op: z.literal("setAccess"),
       table: text,

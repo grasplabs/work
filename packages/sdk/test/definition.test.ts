@@ -79,6 +79,45 @@ describe("operations", () => {
     expect(schemaSource(after)).toContain('.index("by_title", ["name"])');
   });
 
+  test("rename a table by its ID, every field that refers to it following", () => {
+    const before = defined(
+      {
+        op: "addTable",
+        name: "tasks",
+        fields: { title: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+      {
+        op: "addTable",
+        name: "notes",
+        fields: { task: 'v.id("tasks")', tasks: 'v.array(v.id("tasks"))' },
+        access: { read: "appMembers", write: "appMembers" },
+      }
+    );
+
+    const after = applyOperation(before, {
+      op: "renameTable",
+      table: "tasks",
+      name: "todos",
+    });
+
+    expect(after.tables.map(({ id, name }) => [id, name])).toStrictEqual(
+      before.tables.map(({ id, name }) => [
+        id,
+        name === "tasks" ? "todos" : name,
+      ])
+    );
+    expect(schemaSource(after)).toContain('task: v.id("todos")');
+    expect(schemaSource(after)).toContain('tasks: v.array(v.id("todos"))');
+    expect(() =>
+      applyOperation(before, {
+        op: "renameTable",
+        table: "tasks",
+        name: "Notes",
+      })
+    ).toThrow(/differs from it only in case/u);
+  });
+
   test("refuse what code couldn't declare, changing nothing", () => {
     const before = tasks();
     const refusals: [DefinitionOperation, RegExp][] = [

@@ -869,6 +869,63 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     ).toMatchObject({ title: "Plan", displayName: "Ace" });
   });
 
+  it("renames a table its records follow: planned as a rename from what the store holds, and read under the new name once current", async () => {
+    const { builder, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
+        const renamed = await env.build.define(app.id, { op: "renameTable", table: "notes", name: "memos" });
+        return renamed.ok && { renamed: renamed.plan.renamedTables, added: renamed.plan.addedTables };
+      };`),
+      says("Renamed."),
+    ]);
+    const person = await builder.api.whoami();
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
+    await release(builder, app, notesFiles);
+    const id = valueOf(
+      await calledAs(
+        person,
+        app,
+        { name: "notes.create", kind: "mutation" },
+        { title: "Plan" }
+      )
+    );
+    await grant();
+
+    await chat.ask("Call the notes memos");
+    // The next version, its definition renaming the table and its code
+    // naming it so.
+    const renamedFiles = {
+      ...redefined(notesFiles, (definition) => ({
+        ...definition,
+        tables: definition.tables.map((table) =>
+          table.name === "notes" ? { ...table, name: "memos" } : table
+        ),
+      })),
+      "server/notes.ts": (notesFiles["server/notes.ts"] ?? "").replaceAll(
+        '"notes"',
+        '"memos"'
+      ),
+    };
+    await release(builder, app, renamedFiles);
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    expect({
+      planned: returned(result?.text),
+      note: valueOf(
+        await calledAs(
+          person,
+          app,
+          { name: "notes.get", kind: "query" },
+          { id }
+        )
+      ),
+    }).toMatchObject({
+      planned: { renamed: [{ from: "notes", to: "memos" }], added: [] },
+      note: { _id: id, title: "Plan" },
+    });
+  });
+
   it("keeps a field's values past a version that renamed it and never ran", async () => {
     const builder = await signedInApi(idp, "builder");
     const person = await builder.api.whoami();

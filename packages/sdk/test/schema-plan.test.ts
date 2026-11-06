@@ -100,6 +100,27 @@ const notesIds = (fields: Record<string, string>) => ({
   notes: { id: "t1", fields },
 });
 
+/** `manifest`, whose one table is `notes`, with that table named `name`. */
+const tableNamed = (manifest: SchemaManifest, name: string): SchemaManifest =>
+  readSchemaManifest(
+    JSON.stringify({ ...manifest, tables: { [name]: manifest.tables.notes } })
+  ).manifest;
+
+/** Two tables of titles, named `first` and `second`. */
+const notesAndMemos = (first: string, second: string): SchemaManifest =>
+  manifestOf(
+    defineSchema({
+      [first]: defineTable({ title: v.string() }),
+      [second]: defineTable({ title: v.string() }),
+    }),
+    {
+      tables: {
+        [first]: { read: "owner", write: "owner" },
+        [second]: { read: "owner", write: "owner" },
+      },
+    }
+  );
+
 /** The plan's contract, or a failed test. */
 const contractOf = (plan: SchemaPlan): SchemaManifest => {
   if (!plan.accepted) {
@@ -696,7 +717,85 @@ describe("a change the store checks every record for", () => {
     ]);
   });
 
-  test("a name the contract holds for another field or table is refused, as is a table renamed", () => {
+  test("a table renamed by its ID keeps its records under its new name, its fields' changes planned as any table's", () => {
+    const before = notes({ ...noteFields, body: v.string() });
+    const after = tableNamed(
+      notes({
+        ...noteFields,
+        text: v.string(),
+        extra: v.string().optional(),
+      }),
+      "memos"
+    );
+    const plan = planSchemaChange(before, after, {
+      ids: {
+        contract: notesIds({ title: "f1", body: "f2" }),
+        target: {
+          memos: { id: "t1", fields: { title: "f1", text: "f2", extra: "f3" } },
+        },
+      },
+    });
+
+    expect(plan).toMatchObject({
+      accepted: true,
+      activates: true,
+      renamedTables: [{ from: "notes", to: "memos" }],
+      renames: [{ table: "memos", from: "body", to: "text" }],
+      addedTables: [],
+      retainedTables: [],
+    });
+    expect(Object.keys(contractOf(plan).tables)).toStrictEqual(["memos"]);
+    // A version that still names the old table no longer fits.
+    expect(schemaCovered(contractOf(plan), before)).toBeFalsy();
+    expect(schemaCovered(contractOf(plan), after)).toBeTruthy();
+  });
+
+  test("a reference follows a table renamed, and a rollback renames it back", () => {
+    const referring = (table: "notes" | "memos") =>
+      manifestOf(
+        defineSchema({
+          [table]: defineTable({ title: v.string() }),
+          tags: defineTable({ name: v.string(), note: v.id(table) }),
+        }),
+        {
+          tables: {
+            [table]: { read: "owner", write: "owner" },
+            tags: { read: "owner", write: "owner" },
+          },
+        }
+      );
+    const tagIds = { id: "t2", fields: { name: "f3", note: "f4" } };
+    const notesSide = {
+      notes: { id: "t1", fields: { title: "f1" } },
+      tags: tagIds,
+    };
+    const memosSide = {
+      memos: { id: "t1", fields: { title: "f1" } },
+      tags: tagIds,
+    };
+
+    const renamed = planSchemaChange(referring("notes"), referring("memos"), {
+      ids: { contract: notesSide, target: memosSide },
+    });
+    const back = planSchemaChange(contractOf(renamed), referring("notes"), {
+      ids: { contract: memosSide, target: notesSide },
+    });
+
+    // The reference isn't a change of what the tags hold.
+    expect(renamed).toMatchObject({
+      accepted: true,
+      renamedTables: [{ from: "notes", to: "memos" }],
+      checks: [],
+      widenedFields: [],
+    });
+    expect(back).toMatchObject({
+      accepted: true,
+      renamedTables: [{ from: "memos", to: "notes" }],
+    });
+    expect(contractOf(back)).toStrictEqual(referring("notes"));
+  });
+
+  test("a name the contract holds for another field or table is refused", () => {
     const before = notes({ ...noteFields, body: v.string() });
     // `body` is another field now, the first one renamed to `text`.
     const reused = notes({ ...noteFields, body: v.string(), text: v.string() });
@@ -718,21 +817,25 @@ describe("a change the store checks every record for", () => {
         })
       )
     ).toStrictEqual([{ table: "notes", reason: "id_changed" }]);
-    const memos = schemaManifest(
-      defineSchema({ memos: defineTable({ ...noteFields, body: v.string() }) })
-    );
+    // The notes renamed to `memos`, a name the contract holds for another
+    // table.
+    const both = notesAndMemos("notes", "memos");
     expect(
       refusedOf(
-        planSchemaChange(before, memos, {
+        planSchemaChange(both, notesAndMemos("memos", "archive"), {
           ids: {
-            contract: notesIds({ title: "f1", body: "f2" }),
+            contract: {
+              notes: { id: "t1", fields: { title: "f1" } },
+              memos: { id: "t2", fields: { title: "f2" } },
+            },
             target: {
-              memos: { id: "t1", fields: { title: "f1", body: "f2" } },
+              memos: { id: "t1", fields: { title: "f1" } },
+              archive: { id: "t2", fields: { title: "f2" } },
             },
           },
         })
       )
-    ).toStrictEqual([{ table: "memos", reason: "table_renamed" }]);
+    ).toStrictEqual([{ table: "memos", reason: "id_changed" }]);
   });
 });
 
