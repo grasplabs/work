@@ -4,6 +4,7 @@ import type { BusinessProcess } from "./business-processes.ts";
 import { connectorContractIdSchema } from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { chatIdSchema, identifierSchema, workspaceIdSchema } from "./ids.ts";
+import type { Json } from "./json.ts";
 import {
   storeOperationPathMaxLength,
   storeOperationPathPattern,
@@ -202,6 +203,12 @@ export const workflowResourceErrors = defineErrorFamily({
     "Those parameter values aren't ones the workflow's current version accepts.",
   "workflow.params_conflict":
     "Someone changed the parameters since you read them. Read them again, then retry.",
+  "workflow.state_invalid":
+    "That isn't state a step may keep: name each value with letters, digits and underscores, starting with a letter, and keep each value JSON.",
+  "workflow.state_restricted":
+    "A run in restricted mode keeps no state for later runs: what it read stays with it, so the step that set it failed.",
+  "workflow.state_too_large":
+    "The workflow's state would pass 64 KB, so the step that set it failed. Keep less in it, or reset it from the workflow's page.",
   "workflow.app_binding_invalid":
     "That isn't a workflow version this App can bind.",
   "workflow.app_binding_unavailable": "This App has no such workflow binding.",
@@ -635,6 +642,30 @@ export interface WorkflowParamSetting {
 export interface WorkflowParams {
   revision: number;
   params: WorkflowParamSetting[];
+}
+
+/** The most a workflow's state takes in all, in bytes: 64 KiB. */
+export const workflowStateMaxBytes = 64 * 1024;
+
+/** A key of a workflow's state, as an expression reads it (`state.<key>`). */
+export const workflowStateKeySchema = z
+  .string()
+  .regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
+
+/** One value a workflow keeps between its runs. */
+export interface WorkflowStateEntry {
+  key: string;
+  value: Json;
+  /** The run whose step set it last. */
+  runId: string;
+  updatedAt: string;
+}
+
+/** What a workflow keeps between its runs, by key. */
+export interface WorkflowState {
+  entries: WorkflowStateEntry[];
+  /** What it takes now, of `workflowStateMaxBytes`. */
+  bytes: number;
 }
 
 /** An App's binding of an exact version of a workflow, by an alias of the App's. */
@@ -1403,6 +1434,10 @@ export interface WorkflowResourcesApi {
   params: (id: string) => Promise<WorkflowParams>;
   /** Sets parameter values, revision-checked; for builders. */
   setParams: (id: string, input: unknown) => Promise<WorkflowParams>;
+  /** What it keeps between its runs, for its builders and admins. */
+  state: (id: string) => Promise<WorkflowState>;
+  /** Empties what it keeps between its runs; for builders and admins, audited. */
+  resetState: (id: string) => Promise<WorkflowState>;
   /** Its active approvals, each named, for anyone with a role. */
   bindings: (id: string) => Promise<ListedWorkflowBindingApproval[]>;
   /** Approves a binding; for the organization's admins. */

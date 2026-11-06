@@ -33,7 +33,6 @@
     "@grasp-os/chat": "workspace:*",
     "@grasp-os/compiler": "workspace:*",
     "@grasp-os/connector-kit": "workspace:*",
-    "@grasp-os/open-workflow": "workspace:*",
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/workerflow": "workspace:*",

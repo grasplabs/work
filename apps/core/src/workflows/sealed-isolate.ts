@@ -240,7 +240,7 @@ import definition from ${JSON.stringify(module)};
 ${settling}
 
 export class Run extends WorkerEntrypoint {
-  async run(host, { runId, inbox, params, input, connections }) {
+  async run(host, { runId, inbox, params, input, state, connections }) {
     return await settled(async () => {
       if (typeof definition?.run !== "function") {
         throw new Error(${JSON.stringify(refusal)});
@@ -249,6 +249,7 @@ export class Run extends WorkerEntrypoint {
         runId,
         inbox: Object.freeze({ ...inbox }),
         params,
+        state,
         env: bindings(connections),
         do: async (name, options, fn, retry) => unwrapped(await host.do(name, options, async (attempt) => await inAttempt(attempt, async () => await settled(fn)), ...(typeof retry === "function" ? [async (error) => await settled(async () => await retry(error))] : []))),
         sleep: async (name, milliseconds) => unwrapped(await host.sleep(name, milliseconds)),

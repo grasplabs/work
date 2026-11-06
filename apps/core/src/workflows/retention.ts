@@ -33,9 +33,11 @@ import {
   workflowDecisions,
   workflowResourceRuns,
   workflowRuns,
+  workflowStateWrites,
 } from "../db/core/schema.ts";
 import { runEngine, runRetentionDays } from "./engine.ts";
 import { runFilesRemoved } from "./run-files.ts";
+import { orphanedSnapshotsRemoved } from "./state-snapshots.ts";
 
 // Retention of workflow runs. A run reads what its person may read (a
 // message, a chat's transcript, a record) and keeps it: as its input, in
@@ -447,6 +449,12 @@ const startDetailsRemoved = async (
     // And its inboxes (run-inboxes.ts): a reply from now on is to an
     // address nobody has.
     db.delete(runInboxes).where(inArray(runInboxes.runId, due)),
+    // And the receipts of what its steps kept between the workflow's runs
+    // (workflow-state.ts): they only keep a replay from writing twice, and
+    // no step of a run this long ended replays. What it wrote stays.
+    db
+      .delete(workflowStateWrites)
+      .where(inArray(workflowStateWrites.runId, due)),
     // What its decisions asked, about what, and what was answered
     // (GRA-941), as an App run's go with its details (`marked`): who
     // answered, when and how stay.
@@ -456,7 +464,12 @@ const startDetailsRemoved = async (
       .where(inArray(workflowDecisions.resourceRunId, due)),
     db
       .update(receipts)
-      .set({ input: null, params: null, detailsRemovedAt: now })
+      .set({
+        input: null,
+        params: null,
+        stateHash: null,
+        detailsRemovedAt: now,
+      })
       // Another sweep may have marked some meanwhile: marked once.
       .where(and(inArray(receipts.id, due), isNull(receipts.detailsRemovedAt))),
   ]);
@@ -529,6 +542,8 @@ export const sweepWorkflowStartDetails = async (
     after = page.at(-1);
   }
   await paramValuesRemoved(db, before, now);
+  // The snapshots no start or test run names any more.
+  await orphanedSnapshotsRemoved(db);
 };
 
 /** A run to sweep, as the sweep reads it. */

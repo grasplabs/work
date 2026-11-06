@@ -270,7 +270,15 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   },
   "core.stephen_request_topics": noPerson,
   "core.workflow_ai_waits": noPerson,
+  // Nothing writes it since GRA-1552; dropped in GRA-1613.
   "core.workflow_stores": noPerson,
+  "core.workflow_state": {
+    company: "what a workflow keeps between its runs, as their outputs (D3)",
+  },
+  "core.workflow_state_writes": noPerson,
+  "core.workflow_state_snapshots": {
+    company: "what a workflow kept between its runs, as its runs froze it (D3)",
+  },
   "core.workflow_item_tests": {
     company: "a workflow's test runs, by whom they ran as (D3)",
   },

@@ -1326,14 +1326,15 @@ export const businessStoreVersions = sqliteTable(
 
 /**
  * The one canonical owner of a store's schema and operations (spec 40.8),
- * claimed once and kept for good: retention deletes releases and their
- * bindings, never this. So a store its owner stopped using never comes to
- * serve another owner, which would read what the first left behind. The
- * owner is an App (`appId`), claimed by the first seal that binds the
- * store, or an independent workflow (`workflowId`, GRA-682), claimed when
- * an admin activates a version that declares it: exactly one of the two.
- * A workflow's store has no App, so nothing that looks a store's App up
- * ever finds one for it.
+ * the App whose first seal binds the store, claimed once and kept for
+ * good: retention deletes releases and their bindings, never this. So a
+ * store its App stopped using never comes to serve another App, which
+ * would read what the first left behind.
+ *
+ * Workflows own no stores any more (GRA-1552): `workflowId` and the stores
+ * it names, soft-deleted (migration `workflow_stores_removed`), stay only
+ * until an older core no longer reads them (GRA-1613). Nothing writes a
+ * workflow's claim, and a row without an App owns nothing.
  */
 export const sdkStoreOwners = sqliteTable(
   "sdk_store_owners",
@@ -1352,13 +1353,9 @@ export const sdkStoreOwners = sqliteTable(
 );
 
 /**
- * The stores a standalone workflow declares (GRA-682,
- * workflow-stores.ts), by the name its definition gives each: created
- * when a version declaring it is published, in one batch with its
- * `business_stores` row and its `sdk_store_owners` claim, so a
- * publication run again finds the store it made, never a second one.
- * Kept for good, as the claim is: deleting the workflow never deletes its
- * stores (spec 40.8).
+ * The stores workflows declared before workflows stopped owning stores
+ * (GRA-1552). Nothing reads or writes it; it stays only until an older
+ * core no longer reads it (GRA-1613).
  */
 export const workflowStores = sqliteTable(
   "workflow_stores",
@@ -3949,6 +3946,15 @@ export const workflowStartReceipts = sqliteTable(
      * it, had read restricted data. Its run is restricted for good.
      */
     restricted: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * What the workflow kept between its runs as the start was admitted,
+     * read once and frozen: the hash of its snapshot
+     * (`workflowStateSnapshots`), which every activation of its run reads
+     * (`$state`); null for a start that admits no run, and once retention
+     * removed its details. Last, as the admitting statement writes every
+     * column in order.
+     */
+    stateHash: text("state_hash"),
   },
   (table) => [
     uniqueIndex("workflow_start_receipts_key").on(
@@ -3966,6 +3972,10 @@ export const workflowStartReceipts = sqliteTable(
     index("workflow_start_receipts_due_idx")
       .on(table.createdAt, table.id)
       .where(sql`${table.detailsRemovedAt} IS NULL`),
+    // The receipts that still hold a snapshot (workflows/state-snapshots.ts).
+    index("workflow_start_receipts_state_idx")
+      .on(table.stateHash)
+      .where(sql`${table.stateHash} IS NOT NULL`),
   ]
 );
 
@@ -4505,6 +4515,65 @@ export const workflowResourceParams = sqliteTable(
 );
 
 /**
+ * What each independent workflow keeps between its runs (src/workflow-state.ts):
+ * a value by key, canonical JSON, written by the run whose step set it
+ * last. A run reads it once as it starts; at most `workflowStateMaxBytes`
+ * per workflow in all. Deleted with its workflow.
+ */
+export const workflowState = sqliteTable(
+  "workflow_state",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    key: text().notNull(),
+    value: text().notNull(),
+    runId: text("run_id").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.workflowResourceId, table.key] })]
+);
+
+/**
+ * Each step that wrote a workflow's state (src/workflow-state.ts), by its
+ * idempotency key: written in the batch of the write, so a step replayed
+ * or tried again never writes twice. `bytes` is the workflow's state in
+ * all once it landed, which may not pass the cap: the batch fails else.
+ * `writeId` tells the batch's own receipt from one an earlier one wrote.
+ * Removed with its run's details (workflows/retention.ts), once no step of
+ * the run can replay.
+ */
+export const workflowStateWrites = sqliteTable(
+  "workflow_state_writes",
+  {
+    stepKey: text("step_key").primaryKey(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    runId: text("run_id").notNull(),
+    writeId: text("write_id").notNull(),
+    bytes: integer().notNull(),
+    writtenAt: timestamp("written_at").notNull(),
+  },
+  (table) => [
+    index("workflow_state_writes_workflow_idx").on(table.workflowResourceId),
+  ]
+);
+
+/**
+ * What workflows kept between their runs as runs started
+ * (src/workflows/state-snapshots.ts): each snapshot once, by the SHA-256
+ * of its canonical JSON, which the starts' receipts and test runs that
+ * froze it name. Removed once none does (workflows/retention.ts). Names
+ * no person: the company's, as the state it copies.
+ */
+export const workflowStateSnapshots = sqliteTable("workflow_state_snapshots", {
+  hash: text().primaryKey(),
+  body: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
  * The draft of each independent workflow's next definition, as its
  * builders edit it (src/workflow-drafts.ts): one row per accepted edit,
  * `revision` counting them from 1. An edit names the revision it read and
@@ -4681,6 +4750,12 @@ export const workflowCandidateRuns = sqliteTable(
     principalId: text("principal_id").notNull(),
     input: text().notNull(),
     params: text().notNull(),
+    /**
+     * What its workflow kept between its runs as it started: the hash of
+     * its snapshot (`workflowStateSnapshots`), frozen for every
+     * activation. A test run writes none back.
+     */
+    stateHash: text("state_hash"),
     fixtures: text().notNull(),
     status: text({
       enum: ["starting", "running", "completed", "failed", "cancelled"],
@@ -4709,6 +4784,8 @@ export const workflowCandidateRuns = sqliteTable(
     uniqueIndex("workflow_candidate_runs_reservation_idx").on(
       table.reservation
     ),
+    // The test runs that hold a snapshot (workflows/state-snapshots.ts).
+    index("workflow_candidate_runs_state_idx").on(table.stateHash),
   ]
 );
 

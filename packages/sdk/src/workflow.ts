@@ -114,6 +114,17 @@ export type {
  */
 const { freeze } = Object;
 
+/** `value` frozen all the way down: JSON a run reads and never changes. */
+const frozenJson = <Value extends Json | undefined>(value: Value): Value => {
+  if (typeof value === "object" && value !== null) {
+    for (const item of Object.values(value)) {
+      frozenJson(item);
+    }
+    freeze(value);
+  }
+  return value;
+};
+
 const workflowErrorCodes = [
   "workflow.invalid_definition",
   "workflow.invalid_step_call",
@@ -625,6 +636,13 @@ export interface WorkflowContext<P extends Params, Input> {
   runId: RunId;
   input: Input;
   params: ParamValues<P>;
+  /**
+   * What the workflow kept between its runs, by key, as this run's start
+   * found it: the same in every execution of the run, whatever later runs
+   * write meanwhile, and frozen. A step sets it only as its definition
+   * seals, once it succeeded.
+   */
+  state: Readonly<Record<string, Json>>;
   /**
    * Where outsiders send this run's events, by the alias of an event
    * binding whose contract takes them from outside: for replies to the
@@ -1239,6 +1257,7 @@ export const workflow = <
         // schema of its kind, which is what ParamValues<P> describes.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         params: Object.freeze(params) as ParamValues<P>,
+        state: frozenJson(engine.state),
         // The host builds the run's bindings from its permissions; a
         // binding the run doesn't have when it calls fails then
         // (`permission.denied`).

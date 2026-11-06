@@ -30,7 +30,7 @@ import {
 import { modelSettings } from "./models.ts";
 import { requireMemberAdmin } from "./permissions.ts";
 import { latestTemplateVersions } from "./resource-templates.ts";
-import { grantedStore, servedIn, storeGrantFor } from "./store-operations.ts";
+import { servedIn, storeGrantFor } from "./store-operations.ts";
 import {
   approvalOf,
   approvalServing,
@@ -40,7 +40,6 @@ import {
 import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import type { PinnedBinding } from "./workflow-resources.ts";
-import { workflowStoreServer } from "./workflow-store-host.ts";
 import { ingressOf } from "./workflows/run-inboxes.ts";
 
 // The bindings that wait on an admin (`workflowResources.pendingBindings`,
@@ -223,9 +222,8 @@ const connectorTargets = async (env: Env, id: string): Promise<Offered[]> => {
 
 /**
  * The public queries and mutations, by path, that store permission
- * `permissionId` of workflow `id` lists and its store serves now: an
- * App's store as its owner's current release serves it, or a workflow's
- * as its owner's current version does. Read once for all its paths.
+ * `permissionId` of workflow `id` lists and its store serves now, as its
+ * App's current release serves it. Read once for all its paths.
  */
 const servedOperations = async (
   env: Env,
@@ -239,26 +237,14 @@ const servedOperations = async (
     permissionId,
   } as const;
   const grant = await storeGrantFor(env, consumer);
-  if (grant !== undefined) {
-    return paths.flatMap((path) => {
-      const served = servedIn(grant.release, path);
-      return served === undefined || !grant.actions.includes(path)
-        ? []
-        : [{ path, operation: served.operation }];
-    });
-  }
-  const storeId = await grantedStore(env, consumer, paths);
-  const server =
-    storeId === undefined ? undefined : await workflowStoreServer(env, storeId);
-  // A workflow calls its own store as itself, never through a binding.
-  if (server === undefined || server.workflowId === id) {
+  if (grant === undefined) {
     return [];
   }
   return paths.flatMap((path) => {
-    const served = server.store.operations.get(path)?.manifest;
-    return served === undefined || server.store.fingerprints[path] === undefined
+    const served = servedIn(grant.release, path);
+    return served === undefined || !grant.actions.includes(path)
       ? []
-      : [{ path, operation: served }];
+      : [{ path, operation: served.operation }];
   });
 };
 

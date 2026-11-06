@@ -92,6 +92,8 @@ import {
   workflowResourceProcesses,
   workflowResources,
   workflowResourceVersions,
+  workflowState,
+  workflowStateWrites,
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { withdrawnWithWorkflow } from "./dependencies/pending.ts";
@@ -1952,8 +1954,6 @@ const bindingKey = (binding: PinnedBinding): string =>
  * (data-stores.ts). Staff may still publish a version that binds the same.
  * Binding nothing is a change too, when the current version binds
  * something: dropping what a client chose is theirs to decide as well.
- * Its stores too: staff never declare one (workflow-stores.ts), so a
- * current version that binds a store is one staff can't replace.
  */
 const requireStaffKeepsBindings = async (
   env: Env,
@@ -1970,22 +1970,7 @@ const requireStaffKeepsBindings = async (
       ? []
       : (versions.get(workflow.currentVersion) ?? []);
   const kept = new Set(current.map(bindingKey));
-  const [store] =
-    workflow.currentVersion === null
-      ? []
-      : await drizzle(env.DB)
-          .select({ alias: sdkResourceBindings.alias })
-          .from(sdkResourceBindings)
-          .where(
-            and(
-              eq(sdkResourceBindings.resourceId, workflow.id),
-              eq(sdkResourceBindings.resourceVersion, workflow.currentVersion),
-              eq(sdkResourceBindings.kind, "store")
-            )
-          )
-          .limit(1);
   if (
-    store !== undefined ||
     current.length !== bindings.length ||
     !bindings.every((binding) => kept.has(bindingKey(binding)))
   ) {
@@ -2928,16 +2913,15 @@ const deletedOnce = async (
           FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
       )
     ),
-    // Its versions bind its stores no more (GRA-682): none of them runs
-    // again, nothing running was left (`boundSql`), so an admin may delete
-    // a store it declared. The stores and their records stay: deleting a
-    // workflow never deletes them (spec 40.8).
-    db.delete(sdkResourceBindings).where(
-      and(
-        eq(sdkResourceBindings.kind, "store"),
-        sql`${sdkResourceBindings.resourceId} IN (SELECT id
-          FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
-      )
+    // What it kept between its runs (workflow-state.ts): no run of it
+    // reads or writes it again.
+    db.delete(workflowState).where(
+      sql`${workflowState.workflowResourceId} IN (SELECT id
+        FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
+    ),
+    db.delete(workflowStateWrites).where(
+      sql`${workflowStateWrites.workflowResourceId} IN (SELECT id
+        FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`
     ),
   ]);
   return deleted.length > 0;

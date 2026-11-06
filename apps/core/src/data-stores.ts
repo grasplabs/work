@@ -6,6 +6,7 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   canBuild,
   isAdmin,
@@ -30,7 +31,17 @@ import type {
   StoredRecord,
   StoreMigration,
 } from "@grasp-os/shared/stores";
-import { and, asc, eq, exists, isNull, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  exists,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -135,10 +146,13 @@ import type {
 //   the mark alone, and only the batch that marks the row stores it, so it
 //   is stored once whichever runs first; a store marked in its object is
 //   refused even while its inventory row lags.
-// - A workflow's store managed around its workflow (GRA-682): only the
-//   organization's admins manage it as a store, and it is never shared or
-//   unshared as one (`data.store_managed_by_workflow`); its schema is its
-//   workflow's versions', applied only as one is published.
+// - A store a workflow declared before workflows stopped owning stores
+//   (GRA-1552) read, shared or kept: nothing reaches it any more (its
+//   grants, bindings and approvals went in migration
+//   `workflow_stores_removed`), nobody manages it (`managedBy`), and the
+//   clock closes it as a deletion does (`closeFormerWorkflowStores`):
+//   audited as `store.deleted` by the system, its records purged by its
+//   object's alarm. Until GRA-1613 drops what names them.
 // - A deleted store comes back: its ID is never minted again (random), its
 //   object keeps its deletion mark after purging its records, and its
 //   inventory row keeps `deleted_at`.
@@ -296,14 +310,84 @@ export const createStore = async (env: Env, by: Acting): Promise<StoreId> => {
   return id;
 };
 
-/** Whether a workflow owns store `id` (`sdk_store_owners`, GRA-682). */
-const workflowOwned = async (env: Env, id: StoreId): Promise<boolean> => {
-  const row = await drizzle(env.DB)
-    .select({ workflowId: sdkStoreOwners.workflowId })
+/**
+ * Whether a workflow declared store `id` before workflows stopped owning
+ * stores (GRA-1552): it is closing (`closeFormerWorkflowStores`).
+ */
+const formerWorkflowStore = async (env: Env, id: StoreId): Promise<boolean> =>
+  (await drizzle(env.DB)
+    .select({ id: sdkStoreOwners.storeId })
     .from(sdkStoreOwners)
-    .where(eq(sdkStoreOwners.storeId, id))
-    .get();
-  return row?.workflowId !== null && row?.workflowId !== undefined;
+    .where(
+      and(eq(sdkStoreOwners.storeId, id), isNotNull(sdkStoreOwners.workflowId))
+    )
+    .get()) !== undefined;
+
+/** How many former workflow stores one clock run closes. */
+const formerStoresPerRun = 50;
+
+/** Who holds a former workflow store's closing mark: the clock's close. */
+const formerStoresCloser = "former-workflow-stores";
+
+/**
+ * Closes the stores workflows declared before they stopped owning stores
+ * (GRA-1552), on the clock, on every deployment: each object marked
+ * deleted by the system, then its inventory row and `store.deleted` event
+ * in one batch, which the object's alarm runs again before it purges the
+ * records (store-deletion.ts). Closing a closed store changes nothing, so
+ * a run that stopped half-way is finished by the next; one a receipt
+ * still holds (`data.store_in_use`, an older core's run on it) waits for
+ * the next run. Each run takes the ones it tried longest ago first, by
+ * the closing mark each try sets (`closingAt`, which no other deletion
+ * of these sets: nobody manages them), so stores refused again and again
+ * never keep the rest waiting. Removed with the columns that name these
+ * stores (GRA-1613).
+ */
+export const closeFormerWorkflowStores = async (
+  env: Env,
+  /** How many it tries this run. */
+  limit = formerStoresPerRun
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const stores = await db
+    .select({ id: businessStores.id })
+    .from(businessStores)
+    .innerJoin(sdkStoreOwners, eq(sdkStoreOwners.storeId, businessStores.id))
+    .where(
+      and(
+        isNotNull(sdkStoreOwners.workflowId),
+        isNull(businessStores.deletedAt)
+      )
+    )
+    // Never tried first (no mark), then the oldest try.
+    .orderBy(asc(businessStores.closingAt), asc(businessStores.id))
+    .limit(limit);
+  for (const { id } of stores) {
+    const store = storeIdSchema.parse(id);
+    try {
+      // This try, marked first: whatever comes of it, the next run takes
+      // the others first.
+      // oxlint-disable-next-line no-await-in-loop -- one store after another
+      await db
+        .update(businessStores)
+        .set({ closingAt: new Date(), closingOwner: formerStoresCloser })
+        .where(eq(businessStores.id, store));
+      // oxlint-disable-next-line no-await-in-loop -- one store after another
+      const mark = await inJurisdiction(env, env.DATA_STORES)
+        .getByName(store)
+        .close(store, { type: "system" });
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await recordStoreDeleted(env, store, mark);
+    } catch (error) {
+      // Tried again on the next run; one that fails never holds up the rest.
+      if (dataErrors.codeOf(error) !== "data.store_in_use") {
+        log.error("store.former_workflow_close_failed", {
+          store,
+          ...errorFields(error),
+        });
+      }
+    }
+  }
 };
 
 /** The App a default store serves: whose roles decide who manages it. */
@@ -378,34 +462,14 @@ const managedBy = async (
   id: StoreId;
   owner: string;
   defaultOf?: DefaultStoreApp;
-  workflowOwned?: true;
 }> => {
   const parsed = storeIdSchema.safeParse(id);
   if (!parsed.success || !canBuild(by.role)) {
     throw dataErrors.create("data.store_unavailable");
   }
   const db = drizzle(env.DB);
-  // A workflow's store (GRA-682, workflow-stores.ts): its versions decide
-  // its schema, and only the organization's admins manage it as a store,
-  // never its creator as such, nor anyone it might be shared with.
-  if (await workflowOwned(env, parsed.data)) {
-    if (!isAdmin(by.role)) {
-      throw dataErrors.create("data.store_unavailable");
-    }
-    const live = await db
-      .select({ owner: businessStores.ownerId })
-      .from(businessStores)
-      .where(
-        and(
-          eq(businessStores.id, parsed.data),
-          isNull(businessStores.deletedAt)
-        )
-      )
-      .get();
-    if (live === undefined) {
-      throw dataErrors.create("data.store_unavailable");
-    }
-    return { id: parsed.data, owner: live.owner, workflowOwned: true };
+  if (await formerWorkflowStore(env, parsed.data)) {
+    throw dataErrors.create("data.store_unavailable");
   }
   const app = await defaultStoreApp(env, parsed.data);
   // A removed App's default store has no builders left: the
@@ -468,15 +532,9 @@ const managedBy = async (
  * Refuses (`data.store_managed_by_app`) to share or unshare an App's
  * default store as a store: whom it serves follows the App's membership.
  */
-const requireSharableStore = (store: {
-  defaultOf?: DefaultStoreApp;
-  workflowOwned?: true;
-}): void => {
+const requireSharableStore = (store: { defaultOf?: DefaultStoreApp }): void => {
   if (store.defaultOf !== undefined) {
     throw dataErrors.create("data.store_managed_by_app");
-  }
-  if (store.workflowOwned === true) {
-    throw dataErrors.create("data.store_managed_by_workflow");
   }
 };
 

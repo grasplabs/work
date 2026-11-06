@@ -56,6 +56,7 @@ import { isPaused } from "./workflow-lifecycle.ts";
 import { frozenParams } from "./workflow-params.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import { workflowRoleSql } from "./workflow-roles.ts";
+import { workflowStateOf } from "./workflow-state.ts";
 import {
   packagesHoldSql,
   manifestPackagesSchema,
@@ -70,6 +71,8 @@ import { startFilesDropped } from "./workflows/run-files.ts";
 import { inboxesAdmitted } from "./workflows/run-inboxes.ts";
 import { handFiles } from "./workflows/start-files.ts";
 import type { StartFiles } from "./workflows/start-files.ts";
+import { snapshotFrom, snapshotStored } from "./workflows/state-snapshots.ts";
+import type { StateSnapshot } from "./workflows/state-snapshots.ts";
 
 // Starting an independent workflow (platform specification 13.2, 15.1, 24):
 // who may, for whom, and on which exact version. Every start is admitted
@@ -205,6 +208,21 @@ export interface TriggerCause {
 }
 
 /**
+ * What workflow `id` keeps between its runs, read once as a start that
+ * admits a run (`buildHash`) is decided and frozen with it, for its run
+ * alone: a write landing after this is the next start's to read. Null for
+ * a start that admits no run.
+ */
+const frozenState = async (
+  env: Env,
+  id: string,
+  buildHash: string | null
+): Promise<StateSnapshot | null> =>
+  buildHash === null
+    ? null
+    : await snapshotFrom(await workflowStateOf(env, id));
+
+/**
  * A new start the host decided on: what it freezes, and what admitting it
  * requires to still hold.
  */
@@ -227,6 +245,12 @@ export interface StartAuthorization {
   paramsRevision: number;
   /** The bindings it froze (canonical JSON). */
   bindings: string;
+  /**
+   * What the workflow kept between its runs as it was decided
+   * (workflows/state-snapshots.ts), which its run reads in every
+   * activation; null for a start that admits no run.
+   */
+  state: StateSnapshot | null;
   /**
    * Whether it starts in restricted mode (`restrictedStart`): its run is
    * restricted for good.
@@ -1279,6 +1303,7 @@ export const decideWorkflowStart = async (
   // revision in force, and what serves each binding.
   const params = await frozenParams(env, id, version, configRevision);
   const bindings = await frozenBindings(env, id, version);
+  const state = await frozenState(env, id, buildHash);
   // Read again as the admitting statement runs: the workflow live at the
   // same policy generation and parameter revision, the same version and
   // manifest, everything its bindings need, and the invoker's own rule.
@@ -1346,6 +1371,7 @@ export const decideWorkflowStart = async (
       params,
       paramsRevision: configRevision,
       bindings: bindings.text,
+      state,
       restricted,
       buildHash,
       actor: rule.actor,
@@ -1368,6 +1394,17 @@ const underRunLimit = (authorization: StartAuthorization): SQL =>
         WHERE live.workflow_resource_id = ${authorization.workflowId}
           AND live.principal_id = ${authorization.principal}
           AND live.status IN ('starting', 'running', 'paused')) < ${maxLiveRunsPerPrincipal})`;
+
+/** The hash of the snapshot `authorization` froze, if any. */
+const stateHashOf = ({ state }: StartAuthorization): string | null =>
+  state?.hash ?? null;
+
+/** The statement storing the snapshot `authorization` froze, if any. */
+const snapshotFor = (
+  db: DrizzleD1Database,
+  { state }: StartAuthorization,
+  at: Date
+) => (state === null ? [] : [snapshotStored(db, state, at)]);
 
 /**
  * The statements that claim the account a run `authorization` admits is
@@ -1448,6 +1485,7 @@ export const admitWorkflowStart = async (
     createdAt.getTime(),
     null,
     authorization.restricted ? 1 : 0,
+    stateHashOf(authorization),
   ].map((value) => (value === null ? sql`NULL` : sql`${value}`));
   const detail = {
     ...noted,
@@ -1479,6 +1517,8 @@ export const admitWorkflowStart = async (
           packaged: sql<number>`(${authorization.packages})`.as("packaged"),
         })
         .from(sql`(SELECT 1)`),
+      // Its run's snapshot, before the receipt that names it.
+      ...snapshotFor(db, authorization, createdAt),
       db
         .insert(workflowStartReceipts)
         .select(

@@ -128,6 +128,12 @@ export interface WorkflowEngine {
    * (see `WorkflowContext.inbox`). Only a sealed build's run host has it.
    */
   readonly inbox?: Readonly<Record<string, string>>;
+  /**
+   * What the workflow kept between its runs, by key, as the run's start
+   * froze it: the same in every execution of the run, whatever later
+   * runs write meanwhile.
+   */
+  readonly state: Readonly<Record<string, Json>>;
   /** The run's bindings, built for this execution of it (see `WorkflowEnv`). */
   readonly env: WorkflowEnv;
   /**

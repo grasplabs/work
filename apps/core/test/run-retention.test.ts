@@ -1,5 +1,6 @@
 import { v } from "@grasp-os/sdk";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -18,6 +19,7 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import { workflowStateOf, writeWorkflowState } from "../src/workflow-state.ts";
 import {
   startDetailsPerSweep,
   sweepRunDetails,
@@ -540,5 +542,130 @@ describe("JSON run retention", { timeout: 60_000 }, () => {
       first: starts.slice(startDetailsPerSweep),
       second: [],
     });
+  });
+});
+
+/** The hash of the snapshot run `runId`'s receipt names. */
+const hashOf = async (runId: string): Promise<string | null> => {
+  const row = await env.DB.prepare(
+    "SELECT state_hash AS hash FROM workflow_start_receipts WHERE id = ?"
+  )
+    .bind(runId)
+    .first<{ hash: string | null }>();
+  return row?.hash ?? null;
+};
+
+describe("the snapshots of a workflow's state its runs froze", () => {
+  afterEach(endLiveResourceRuns);
+
+  it("drops a run's state write receipts with its details, once no step of it can replay, and keeps what it wrote", async () => {
+    const builder = await signedIn("builder");
+    const { id } = await publishedWorkflow(builder, greetingTasks());
+    const writer = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'person', ?, ?, ?, 1, 'manifest', ?, 0, 'input', ?)"
+      ).bind(
+        writer,
+        builder.acting.userId,
+        unique(),
+        id,
+        builder.acting.userId,
+        Date.now()
+      ),
+      env.DB.prepare(
+        "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, 'manifest', 'build', ?, 'running', ?)"
+      ).bind(writer, id, builder.acting.userId, Date.now()),
+    ]);
+    await writeWorkflowState(
+      env,
+      writer,
+      stepIdempotencyKey(writer, "a:task"),
+      { seen: "Ada" }
+    );
+    await env.DB.prepare(
+      "UPDATE workflow_resource_runs SET status = 'completed', ended_at = ? WHERE id = ?"
+    )
+      .bind(Date.now(), writer)
+      .run();
+    const receipts = async (): Promise<number | undefined> => {
+      const row = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM workflow_state_writes WHERE run_id = ?"
+      )
+        .bind(writer)
+        .first<{ n: number }>();
+      return row?.n;
+    };
+    const before = await receipts();
+    const later = daysOn(1);
+    await sweepWorkflowStartDetails(env, later, later);
+    expect({
+      before,
+      after: await receipts(),
+      state: await workflowStateOf(env, id),
+    }).toStrictEqual({ before: 1, after: 0, state: { seen: "Ada" } });
+  });
+
+  it("stores a snapshot once for the starts that froze it, and removes it once retention reached every one of them", async () => {
+    const builder = await signedIn("builder");
+    const { id } = await publishedWorkflow(builder, greetingTasks());
+    // Something only this workflow keeps, written by a run of its own.
+    const writer = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input_hash, created_at) VALUES (?, 'person', ?, ?, ?, 1, 'manifest', ?, 0, 'input', ?)"
+      ).bind(
+        writer,
+        builder.acting.userId,
+        unique(),
+        id,
+        builder.acting.userId,
+        Date.now()
+      ),
+      env.DB.prepare(
+        "INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at) VALUES (?, ?, 1, 'manifest', 'build', ?, 'running', ?)"
+      ).bind(writer, id, builder.acting.userId, Date.now()),
+    ]);
+    await writeWorkflowState(
+      env,
+      writer,
+      stepIdempotencyKey(writer, "a:task"),
+      { seen: unique() }
+    );
+    await env.DB.prepare(
+      "UPDATE workflow_resource_runs SET status = 'completed', ended_at = ? WHERE id = ?"
+    )
+      .bind(Date.now(), writer)
+      .run();
+    const first = await startedBy(builder, id);
+    const { endedAt } = await endedRun(builder, id, first);
+    // A moment past the first run's end, before the second starts.
+    const between = new Date(Date.parse(endedAt ?? "") + 1);
+    await vi.waitFor(() => {
+      expect(Date.now()).toBeGreaterThan(between.getTime());
+    });
+    const second = await startedBy(builder, id);
+    await endedRun(builder, id, second);
+    const shared = (await hashOf(first)) ?? "";
+    const stored = async (): Promise<number | undefined> => {
+      const row = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM workflow_state_snapshots WHERE hash = ?"
+      )
+        .bind(shared)
+        .first<{ n: number }>();
+      return row?.n;
+    };
+    const sameHash = (await hashOf(second)) === shared;
+    const both = await stored();
+    await sweepWorkflowStartDetails(env, between, between);
+    const oneLeft = await stored();
+    const later = daysOn(1);
+    await sweepWorkflowStartDetails(env, later, later);
+    expect({
+      sameHash,
+      both,
+      oneLeft,
+      none: await stored(),
+    }).toStrictEqual({ sameHash: true, both: 1, oneLeft: 1, none: 0 });
   });
 });

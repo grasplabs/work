@@ -22,6 +22,7 @@ import { sweepChannelSignals } from "./channels/signals.ts";
 import { sweepStephenRequests } from "./channels/stephen-requests.ts";
 import { drainAuditOutboxesNoticing } from "./connector-source-notices.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
+import { closeFormerWorkflowStores } from "./data-stores.ts";
 import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
@@ -208,6 +209,15 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: deleteExpiredEmail,
   },
   { name: "guests.sweep", period: "quarterHour", run: sweepGuestChats },
+  // The stores workflows declared before they stopped owning stores,
+  // closed as a deletion would (data-stores.ts; until GRA-1613).
+  {
+    name: "stores.former_workflow",
+    period: "quarterHour",
+    run: async (env) => {
+      await closeFormerWorkflowStores(env);
+    },
+  },
   { name: "visitors.sweep", period: "quarterHour", run: sweepAppVisitors },
   // Connector triggers' holds and tombstones of events long settled or no
   // longer coming (src/workflows/connector-triggers.ts).
