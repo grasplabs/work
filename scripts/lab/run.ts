@@ -14,6 +14,9 @@
  *
  * Commands:
  *   keys                     checks the answer keys
+ *   import-hidden <checkout> brings the hidden test set over from a
+ *                            checkout of grasplabs/prototype into
+ *                            LAB_HIDDEN, showing only how big each key is
  *   practice <key>           makes a practice company of a key, and lets its
  *                            lead talk (--locale en|nl|de|fr|es)
  *   card <person>            a role card with its link, for whoever plays it
@@ -76,6 +79,7 @@ import { interviewLocaleSchema } from "@grasp-os/shared/onboarding";
 
 import { defaultClimb, startClimb } from "./climb.ts";
 import { linksOf, openCore, spentLine } from "./core.ts";
+import { importHidden } from "./keys/import-hidden.ts";
 import { hiddenKeyIds, isHidden, keyOf, openKeys } from "./keys/index.ts";
 import { problemsIn } from "./keys/types.ts";
 import type { AnswerKey } from "./keys/types.ts";
@@ -296,6 +300,15 @@ const roundArgs = (): RoundArgs => ({
 
 const commands: Readonly<Record<string, () => Promise<void> | void>> = {
   keys: checkKeys,
+  "import-hidden": async () => {
+    const [prototype] = rest;
+    if (prototype === undefined) {
+      throw new LabStopError(
+        "Where is the prototype checked out? `vp run lab import-hidden ~/prototype`"
+      );
+    }
+    await importHidden(prototype, log);
+  },
   practice: startPractice,
   card: showCard,
   simulate: playRest,
