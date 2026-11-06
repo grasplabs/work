@@ -1,0 +1,4 @@
+{
+  "name": "Approvals",
+  "description": "People ask for something with an amount and a reason; the App's builders approve or reject it with a note, and whoever asked is told. Each person sees their own requests, and builders see all of them."
+}
