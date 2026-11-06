@@ -51,9 +51,39 @@ permissions:
   contents: read
 
 jobs:
+  # From CI only (a push to main): deploys only main's head. A rerun of an
+  # older push keeps that push's commit, and deploying it would roll the
+  # platform back under newer releases; it skips the deploy instead and
+  # succeeds, so its publish-release runs as before. Main's head, not
+  # "not older than what's deployed": the newest push deploys anyway, and
+  # nothing records what's deployed. A run by hand deploys whatever commit
+  # of main it was started on, on purpose.
+  head:
+    name: head
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      current: ${{ steps.head.outputs.current }}
+    steps:
+      - id: head
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$head" = "$GITHUB_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Not deploying $GITHUB_SHA: main's head is $head now, which deploys the platform itself"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   deploy-platform:
     name: deploy-platform
-    if: github.ref == 'refs/heads/main'
+    needs: head
+    # Head is skipped on a run by hand, so its output is empty there.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.head.result != 'failure' && needs.head.outputs.current != 'false' }}
     # One deploy per stage at a time, by hand or from CI: a newer one
     # replaces one still waiting, and never cancels one that's deploying.
     # On the job, not the workflow, so CI's call doesn't wait on CI's own
