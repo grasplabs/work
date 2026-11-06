@@ -196,18 +196,23 @@ interface Snapshot {
    * what each subscription is sent by, whatever revision the push names.
    */
   readonly seq: number;
-  /** The SHA-256 of the result read's canonical JSON (`digestOf`). */
-  readonly digest: string;
-  /** Whether it pushes the value read, not a refusal in its place. */
-  readonly value: boolean;
 }
 
 /**
- * What a result is compared by with the one pushed last: equal results
- * have equal canonical JSON, so equal digests.
+ * What a push showed, without the result itself, which a connection
+ * needn't hold once every subscription has it: what a read again is
+ * compared with, and numbered as when it found the same.
  */
-const digestOf = async (result: Result): Promise<string> =>
-  await sha256Hex(canonicalText(result));
+interface Shown {
+  readonly roles: string;
+  readonly seq: number;
+  /** The revision the push named. */
+  readonly revision: number;
+  /** The SHA-256 of the result read's canonical JSON (`digestOf`). */
+  readonly digest: string;
+  /** Whether it pushed the value read, not a refusal in its place. */
+  readonly value: boolean;
+}
 
 /**
  * The roles `by` reads App `app`'s tables with (`operationRoles`), and
@@ -287,12 +292,12 @@ interface Evaluation {
    */
   carried: number;
   /**
-   * Its latest push, kept while that is what it shows: a read again that
-   * finds the same result under the same roles (or, for a value carrying
-   * its own revision, that revision) only offers it again, to
-   * subscriptions that haven't had it yet, never pushing it twice.
+   * What its latest push showed: a read again that finds the same result
+   * under the same roles (or, for a value carrying its own revision, that
+   * revision) only offers it again, to subscriptions that haven't had it
+   * yet, never pushing it twice.
    */
-  shown: Snapshot | undefined;
+  shown: Shown | undefined;
   /** The latest result, while a subscription still needs it. */
   latest: Snapshot | undefined;
   /** Its watch in the store, and what that watch read, once made. */
@@ -512,6 +517,33 @@ const refusalResult = (error: unknown): Result => ({
   ok: false,
   error: refusalOf(error, crypto.randomUUID()),
 });
+
+/**
+ * The push of `result` named `revision`, and its size: a refusal in its
+ * place past the answer bound.
+ */
+const pushOf = (
+  result: Result,
+  revision: number
+): { readonly push: QuerySnapshotPush; readonly bytes: number } => {
+  const push: QuerySnapshotPush = { revision, result };
+  const bytes = jsonBytes(push, pageLimits.answerBytes + 1);
+  if (bytes <= pageLimits.answerBytes) {
+    return { push, bytes };
+  }
+  const refusal: QuerySnapshotPush = {
+    revision,
+    result: refusalResult(pageErrors.create("page.answer_too_large")),
+  };
+  return { push: refusal, bytes: jsonBytes(refusal, pageLimits.answerBytes) };
+};
+
+/**
+ * What a result is compared by with the one pushed last: equal results
+ * have equal canonical JSON, so equal digests.
+ */
+const digestOf = async (result: Result): Promise<string> =>
+  await sha256Hex(canonicalText(result));
 
 /** Whether every subscription of `evaluation` has its latest result. */
 const allHaveLatest = (evaluation: Evaluation): boolean =>
@@ -1277,9 +1309,18 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         : shown.digest === digest);
     if (same) {
       // Nothing new, but whoever hasn't had it yet gets it, a subscription
-      // waiting for a read begun after it (a Load More's) included.
-      const again: Snapshot = { ...shown, read: evaluation.reads };
-      evaluation.shown = again;
+      // waiting for a read begun after it (a Load More's) included: as the
+      // push still held for one, or else as this read, numbered as shown.
+      const held = evaluation.latest;
+      const again: Snapshot =
+        held?.seq === shown.seq
+          ? { ...held, read: evaluation.reads }
+          : {
+              ...pushOf(result, shown.revision),
+              roles,
+              read: evaluation.reads,
+              seq: shown.seq,
+            };
       evaluation.latest = again;
       for (const listener of evaluation.listeners) {
         this.#offer(evaluation, listener, again);
@@ -1303,26 +1344,22 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         evaluation.carried > 0 ? evaluation.carried : evaluation.revision + 1;
     }
     evaluation.revision += 1;
-    let push: QuerySnapshotPush = { revision: named, result };
-    let bytes = jsonBytes(push, pageLimits.answerBytes + 1);
-    if (bytes > pageLimits.answerBytes) {
-      push = {
-        revision: named,
-        result: refusalResult(pageErrors.create("page.answer_too_large")),
-      };
-      bytes = jsonBytes(push, pageLimits.answerBytes);
-    }
+    const { push, bytes } = pushOf(result, named);
     const snapshot: Snapshot = {
       push,
       bytes,
       roles,
       read: evaluation.reads,
       seq: evaluation.revision,
+    };
+    evaluation.latest = snapshot;
+    evaluation.shown = {
+      roles,
+      seq: snapshot.seq,
+      revision: named,
       digest,
       value: result.ok && push.result === result,
     };
-    evaluation.latest = snapshot;
-    evaluation.shown = snapshot;
     evaluation.roles = roles;
     for (const listener of evaluation.listeners) {
       this.#offer(evaluation, listener, snapshot);
@@ -1401,7 +1438,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         if (evaluation.latest === snapshot) {
           evaluation.latest = undefined;
         }
-        if (evaluation.shown === snapshot) {
+        if (evaluation.shown?.seq === snapshot.seq) {
           evaluation.shown = undefined;
         }
         // Not sent: the read again may carry the same revision, and still

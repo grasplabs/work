@@ -10,7 +10,7 @@ import { z } from "zod";
 import { definedWith } from "./app-definitions.ts";
 import { pastAccessRecheck } from "./apps.ts";
 import { apiOf, referenceTo } from "./notes-client-app.ts";
-import type { Push } from "./page-client.ts";
+import type { Opened, Push } from "./page-client.ts";
 import {
   mockSessionIdp,
   personApi,
@@ -759,6 +759,41 @@ const teamSecrets = async () => {
   return { opened, member, sales, support, lease, secrets, tell };
 };
 
+/**
+ * Waits for core to next move a live query's watch in the opened App's
+ * store on to what it read again (`QuerySubscriptions.#keepWatched`),
+ * which it does once that read is over. Answers the wait, called after
+ * whatever should set off the read.
+ */
+const nextRewatch = async (opened: Opened): Promise<() => Promise<void>> => {
+  // A flag, not a promise: a promise settled in the store's object can't
+  // be awaited from the test's.
+  const seen = { rewatched: false };
+  await runInDurableObject(storeObjectOf(opened), (instance) => {
+    // SAFETY: a store's object's prototype holds its methods.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const methods = Object.getPrototypeOf(instance) as Record<string, unknown>;
+    const original = methods.rewatch;
+    if (typeof original !== "function") {
+      throw new TypeError("A store's object moves its watches on");
+    }
+    methods.rewatch = function rewatch(
+      this: unknown,
+      ...args: unknown[]
+    ): unknown {
+      methods.rewatch = original;
+      seen.rewatched = true;
+      const moved: unknown = Reflect.apply(original, this, args);
+      return moved;
+    };
+  });
+  return async () => {
+    await eventually(() => {
+      expect(seen.rewatched).toBeTruthy();
+    });
+  };
+};
+
 describe("live queries and a person's teams", { timeout: 180_000 }, () => {
   it("pushes nothing at all for a row the person's teams don't read, and once for one they do", async () => {
     const { opened, member, sales, support, lease, secrets, tell } =
@@ -773,12 +808,14 @@ describe("live queries and a person's teams", { timeout: 180_000 }, () => {
       expect(received).toHaveLength(1);
     });
 
-    // Support's secret first, read again on its own, then Sales': once
-    // Sales' is pushed, every read after Support's write has been. A push
-    // of the same result would tell the person the table was written.
+    // Support's secret first, read again on its own: core moves its watch
+    // on only once a read writes didn't tear is over, so Sales' write,
+    // made after that, is never gathered into the same read. A push of
+    // the same result would tell the person the table was written.
+    const readAgain = await nextRewatch(opened);
     const { client } = clientFor(opened);
     await client.mutation(tell, { text: "Support only", team: support });
-    await scheduler.wait(1000);
+    await readAgain();
     await client.mutation(tell, { text: "Sales news", team: sales });
     await eventually(() => {
       expect(received).toHaveLength(2);
