@@ -3578,6 +3578,12 @@ export const workflowResourceVersions = sqliteTable(
     definition: text().notNull(),
     definitionJsonHash: text("definition_json_hash").notNull(),
     profileVersion: text("profile_version").notNull(),
+    /**
+     * Nothing reads it: expressions are compiled into the build. Kept, and
+     * written empty, until the follow-up GRA-1605 drops it, so a core
+     * still serving during a rollout keeps working (expand, then contract).
+     */
+    evaluatorHash: text("evaluator_hash").notNull(),
     contract: text().notNull(),
     contractHash: text("contract_hash").notNull(),
     manifest: text().notNull(),

@@ -1815,6 +1815,10 @@ const writeVersion = async (
         definition,
         definitionJsonHash: definitionHash,
         profileVersion: definitionFormat,
+        // The column is NOT NULL with no default, and a core still serving
+        // during a rollout writes it, so it stays until GRA-1605 drops it:
+        // empty, since no evaluator is pinned.
+        evaluatorHash: "",
         contract: contractText,
         contractHash,
         manifest,
