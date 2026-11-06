@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { createD1Database } from "../src/cloudflare/accounts.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
+import { D1MigrationError } from "../src/cloudflare/d1-migration-error.ts";
 import {
   applyD1Migrations,
   queryD1,
@@ -624,7 +625,10 @@ describe("D1 migrations", () => {
           sql: `CREATE TABLE ${broken} (id TEXT);`,
         },
       ])
-    ).rejects.toMatchObject({ status: 400, codes: [7500] });
+    ).rejects.toMatchObject({
+      migration: `${broken}_0000.sql`,
+      cause: { status: 400, codes: [7500] },
+    });
 
     const [recorded] = await queryD1(
       api,
@@ -633,5 +637,57 @@ describe("D1 migrations", () => {
       `SELECT name FROM d1_migrations WHERE name LIKE '${broken}%';`
     );
     expect(recorded).toStrictEqual([]);
+  });
+
+  it("names the migration D1 refuses in the middle of a query, and a retry goes on from it", async () => {
+    const account = cloudflare.addAccount();
+    const { uuid } = await database(account.id, "grasp-os-core");
+    const prefix = `b_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+    const named = (index: number, sql: string) => ({
+      name: `${prefix}_${String(index).padStart(4, "0")}.sql`,
+      sql,
+    });
+    const fixed = named(1, `CREATE TABLE ${prefix}_1 (id TEXT);`);
+    const sent = [
+      named(0, `CREATE TABLE ${prefix}_0 (id TEXT);`),
+      // Refused: one query carries all three, and D1 says only that the
+      // query failed.
+      { ...fixed, sql: "CREATE TABLE oops (" },
+      named(2, `CREATE TABLE ${prefix}_2 (id TEXT);`),
+    ];
+    const recordedNow = async (): Promise<unknown[]> => {
+      const [rows = []] = await queryD1(
+        api,
+        account.id,
+        uuid,
+        `SELECT name FROM d1_migrations WHERE name LIKE '${prefix}%' ORDER BY id;`
+      );
+      return rows.map(({ name }) => name);
+    };
+
+    const refused = await applyD1Migrations(api, account.id, uuid, sent).then(
+      () => null,
+      (error: unknown) => error
+    );
+    const afterRefusal = await recordedNow();
+    // The release fixed: the retry applies what's left, from the one refused.
+    const retried = await applyD1Migrations(api, account.id, uuid, [
+      sent[0] ?? fixed,
+      fixed,
+      sent[2] ?? fixed,
+    ]);
+
+    expect({
+      refused:
+        refused instanceof D1MigrationError ? refused.migration : refused,
+      afterRefusal,
+      retried,
+      recorded: await recordedNow(),
+    }).toStrictEqual({
+      refused: fixed.name,
+      afterRefusal: [sent[0]?.name],
+      retried: [fixed.name, sent[2]?.name],
+      recorded: sent.map(({ name }) => name),
+    });
   });
 });
