@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 
 import {
   assetKey,
@@ -308,8 +309,9 @@ const mebibytes = (bytes: number): string =>
  *   leaves a quarter of that as headroom. The deploy streams them into the
  *   upload, so they don't bound its memory. The 1 s startup limit isn't
  *   a size: Cloudflare checks it on every upload.
- * - Its source maps, all together, raw: Cloudflare counts them apart from
- *   the modules, up to 60 MiB; 45 MiB leaves a quarter as headroom.
+ * - Its source maps, all together: Cloudflare counts them apart from the
+ *   modules, up to 60 MiB raw and 15 MiB gzipped; 45 MiB and 11 MiB leave
+ *   about a quarter of each as headroom.
  * - A static file: Cloudflare takes 25 MiB at most. The deploy sends one
  *   this large on its own, holding it read and as base64, so this bounds
  *   its memory too.
@@ -319,6 +321,7 @@ const mebibytes = (bytes: number): string =>
 export const releaseBudget = {
   workerModules: 48 * 1024 * 1024,
   sourceMaps: 45 * 1024 * 1024,
+  sourceMapsGzipped: 11 * 1024 * 1024,
   staticFile: 20 * 1024 * 1024,
 } as const;
 
@@ -327,9 +330,11 @@ const checkBudget = (build: WorkerBuild): void => {
   const over: string[] = [];
   let modules = 0;
   let sourceMaps = 0;
-  for (const { type, size } of build.modules) {
+  let sourceMapsGzipped = 0;
+  for (const { type, size, bytes } of build.modules) {
     if (type === "sourcemap") {
       sourceMaps += size;
+      sourceMapsGzipped += gzipSync(bytes).byteLength;
     } else {
       modules += size;
     }
@@ -342,6 +347,11 @@ const checkBudget = (build: WorkerBuild): void => {
   if (sourceMaps > releaseBudget.sourceMaps) {
     over.push(
       `its source maps are ${mebibytes(sourceMaps)} (budget ${mebibytes(releaseBudget.sourceMaps)})`
+    );
+  }
+  if (sourceMapsGzipped > releaseBudget.sourceMapsGzipped) {
+    over.push(
+      `its source maps are ${mebibytes(sourceMapsGzipped)} gzipped (budget ${mebibytes(releaseBudget.sourceMapsGzipped)})`
     );
   }
   for (const [file, { size }] of Object.entries(build.assets?.manifest ?? {})) {

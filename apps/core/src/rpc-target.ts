@@ -4,6 +4,7 @@ import { heldPool, rpcCopyNodeBounds } from "@grasp-os/shared/rpc-accounting";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 
 import { noteCall } from "./call-context.ts";
+import { rpcParamNames } from "./rpc-param-names.gen.ts";
 
 /**
  * The longest message a browser's connection to core takes, in UTF-16 code
@@ -66,6 +67,8 @@ export const isolateRpcHeld = heldPool(56 * 1024 * 1024);
  */
 export const CoreRpcTarget = boundedRpcTarget(
   { depth: rpcArgumentDepth, size: browserMessageSize },
-  // Each call noted, for what its method asks on its way (staff-audit.ts).
-  noteCall
+  // Each call noted, for what its method asks on its way (staff-audit.ts),
+  // with the names its method gives its parameters, generated from their
+  // source (build-rpc-params.ts): the bundle's own are minified.
+  { hook: noteCall, params: rpcParamNames }
 );
