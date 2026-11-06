@@ -66,6 +66,23 @@ export type Expression = ValueRecord & { readonly $expr: string };
 export const inboxRoot = "inbox";
 
 /**
+ * The roots an expression reads besides `input`, `steps`, `params` and
+ * `run`: the one list both the format's check (check.ts, which says where
+ * each is in scope) and the compiler's typed check (expression-scope.ts,
+ * which types each) read, so neither knows a root the other doesn't.
+ * `inbox` and `state` are in scope everywhere, `error` in a catch, `item`
+ * in a loop's items, and `output` in a step's `state`.
+ */
+export const expressionRoots = [
+  inboxRoot,
+  "state",
+  "error",
+  "item",
+  "output",
+] as const;
+export type ExpressionRoot = (typeof expressionRoots)[number];
+
+/**
  * A value a step passes: JSON, any part of which may be an expression. A
  * string is always text, never interpolated.
  */

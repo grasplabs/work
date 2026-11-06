@@ -5,6 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
+import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import {
   editWorkflowDraft,
   editWorkflowStep,
@@ -19,6 +20,7 @@ import {
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import { allEvents } from "./audit-events.ts";
+import { person as identityOf } from "./sealed-run-harness.ts";
 import { outcome, unique } from "./sign-in.ts";
 
 // A workflow's draft (workflow-drafts.ts), from its threat model: two
@@ -374,9 +376,14 @@ describe("a workflow's draft", () => {
     );
   });
 
-  it("keeps an expression that reads what the schemas don't declare, or compares a number with a string, with its problem at its pointer, and never publishes it", async () => {
+  it("keeps an expression that reads what the schemas don't declare, or compares a number with a string, with its problem at its pointer, and never publishes it, `state` and `output` read as typed", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
+    const model = `summary-${unique()}`;
+    await publishCatalogContract(env, await identityOf("admin"), {
+      key: model,
+      kind: "model",
+    });
     const typed = (status: string, refuse: string) =>
       JSON.stringify({
         $schema: workflowSchemaUrl,
@@ -388,7 +395,23 @@ describe("a workflow's draft", () => {
           schema: objectSchema({ status: { type: "string" } }),
           value: { status: { $expr: status } },
         },
+        bindings: { summary: { kind: "model", contract: model } },
+        // What it keeps between runs, read as `state`, typed by its schema.
+        state: { count: { type: "number" }, line: { type: "string" } },
         steps: [
+          {
+            id: "greet",
+            type: "agent",
+            binding: "summary",
+            instructions: "Greet them.",
+            input: { who: { $expr: "input.who" } },
+            output: objectSchema({ line: { type: "string" } }),
+            // `output` in its state: the answer, as it keeps it.
+            state: {
+              count: { $expr: "(state.count ?? 0) + 1" },
+              line: { $expr: "output.line" },
+            },
+          },
           {
             id: "refuse",
             type: "raise",
@@ -397,13 +420,17 @@ describe("a workflow's draft", () => {
           },
         ],
       });
-    const good = typed('"Hello, " + input.who', "input.count > 3");
+    const good = typed(
+      '"Hello, " + input.who + (state.line ?? "")',
+      "input.count > (state.count ?? 3)"
+    );
     const passed = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 0,
       source: good,
       modules: {},
     });
-    const mistyped = typed("input.missing.x", 'input.count === "many"');
+    // A state key reads its schema's type: a number is no string.
+    const mistyped = typed("input.missing.x", 'state.count === "many"');
     const kept = await editWorkflowDraft(env, ada, workflow.id, {
       expectedRevision: 1,
       source: mistyped,
@@ -431,7 +458,7 @@ describe("a workflow's draft", () => {
       problems: [
         {
           code: "expression.type",
-          pointer: "/steps/0/if/$expr",
+          pointer: "/steps/1/if/$expr",
           at: "(TS2367, line 1, column 1)",
         },
         {

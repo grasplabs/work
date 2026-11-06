@@ -3,7 +3,7 @@ import { valueTypeOf } from "@grasp-os/sdk/host";
 
 import type { CheckedWorkflow } from "./check.ts";
 import { eachStep } from "./format.ts";
-import type { Step } from "./format.ts";
+import type { ExpressionRoot, Step } from "./format.ts";
 
 // What a checked document's expressions read, as TypeScript types, for
 // the compiler's typed check (@grasp-os/compiler's `expressionTypeCheck`):
@@ -12,7 +12,9 @@ import type { Step } from "./format.ts";
 // source by the pointer of its `{ $expr }`. The checks of check.ts come
 // first: what this reads is a document that passed them, so every read of
 // a step that may not have run, or of a root out of its place (`error`
-// outside a catch, `item` outside a loop), is already refused there.
+// outside a catch, `item` outside a loop, `output` outside a step's
+// `state`), is already refused there. Its roots are the format's
+// (`expressionRoots`), each typed here.
 //
 // A step whose output the document doesn't type (a decision's, a wait's, a
 // call of the workflow's own modules) is `any`: the check passes what
@@ -66,6 +68,29 @@ const at = (document: unknown, pointer: string): unknown => {
 };
 
 /**
+ * The type of each of the format's roots (`expressionRoots`) in
+ * `checked`: a type of every one, so the compiler's check knows each root
+ * the format's check lets an expression read. A state key reads its declared schema's type, or `undefined`
+ * where no run kept it, or kept a value that no longer fits. A loop's
+ * `item` and a step's own `output` are `any`: one scope types every
+ * expression, wherever it stands.
+ */
+const rootTypes = (
+  checked: CheckedWorkflow
+): Readonly<Record<ExpressionRoot, string>> => ({
+  inbox: "{ readonly [alias: string]: string | undefined }",
+  state: `{ ${[...checked.state]
+    .map(
+      ([key, descriptor]) =>
+        `readonly ${JSON.stringify(key)}?: ${typeOf(descriptor)};`
+    )
+    .join(" ")} }`,
+  error: caughtErrorType,
+  item: untyped,
+  output: untyped,
+});
+
+/**
  * What `checked`'s expressions read, typed, and their sources. A `do`
  * step's output is `output(step)`'s, its call's contract's (a connector
  * operation's, a catalog operation's), when it has one; an `agent` step's
@@ -102,7 +127,7 @@ export const expressionTypeRequest = (
         ])
       ),
       run: runType,
-      roots: { error: caughtErrorType, item: untyped },
+      roots: rootTypes(checked),
     },
     expressions,
   };

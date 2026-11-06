@@ -20,6 +20,7 @@ import type { JsonValue, SchemaProblem } from "./data-schema.ts";
 import {
   durationMs,
   errorTypeBase,
+  expressionRoots,
   formatLimits,
   inboxRoot,
   isPlain,
@@ -30,6 +31,7 @@ import {
 import type {
   Binding,
   Duration,
+  ExpressionRoot,
   Json,
   Param,
   StateWrites,
@@ -621,14 +623,15 @@ const checkExpressionAt = (
     );
     return;
   }
+  const inScope: Readonly<Record<ExpressionRoot, boolean>> = {
+    inbox: true,
+    state: true,
+    error: place.error,
+    item: place.item,
+    output: place.output,
+  };
   const checked = checkExpression(expression.$expr, {
-    roots: [
-      inboxRoot,
-      "state",
-      ...(place.error ? (["error"] as const) : []),
-      ...(place.item ? (["item"] as const) : []),
-      ...(place.output ? (["output"] as const) : []),
-    ],
+    roots: expressionRoots.filter((root) => inScope[root]),
   });
   if (!checked.ok) {
     for (const { code, message, fix } of checked.errors) {
