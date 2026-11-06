@@ -297,7 +297,7 @@ export type Note = NonNullable<ReturnOf<typeof api.notes.get>>;
  * One note, edited with explicit Save: the draft keeps the revision it
  * started from, and a save someone else's overtook keeps the draft until
  * the person chooses to load the latest version, or to re-apply their
- * changes on it. The draft outlives the editor and a refresh of the page.
+ * changes on it.
  */
 export function NoteEditor({ note }: { note: Note }) {
   const form = useForm(api.notes.update, {

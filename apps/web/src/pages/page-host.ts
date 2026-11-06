@@ -24,14 +24,6 @@ import { RpcStub } from "capnweb";
 import type { CoreConnection, SessionEnded } from "../core-connection.ts";
 import { wait as pauseFor, reconnectDelay } from "../core.ts";
 import type { PendingConfirmation } from "../decision-confirmation.tsx";
-import {
-  appDrafts,
-  clearDrafts,
-  lostAccess,
-  shutAppDrafts,
-  stopDrafts,
-} from "./form-drafts.ts";
-import type { AppDrafts } from "./form-drafts.ts";
 import { frameActs } from "./frame-acts.ts";
 import {
   inTime,
@@ -613,16 +605,14 @@ const appTarget = (
   refused: (reason: Refused) => void,
   hold: FrameHold,
   confirm: ConfirmDecision,
-  drafts: AppDrafts,
   opening: PageOpening,
   acted: () => boolean
 ): FrameTarget => {
   const { app, version, lease } = bundle;
   // Core's refusal pushed to what the page follows, after it started:
-  // one of the person or the App drops the drafts; one of the build is
-  // core's to confirm to the page, which then stops the frame.
+  // one of the build is core's to confirm to the page, which then stops
+  // the frame.
   const sawRefusal = (error: unknown): void => {
-    drafts.refused(error);
     if (refusedForBuild(error)) {
       void checkDeliveryNow(hold, refused);
     }
@@ -633,10 +623,6 @@ const appTarget = (
     try {
       return await hold.use(run);
     } catch (error) {
-      // Whose drafts the frame reads and writes: core refusing the person
-      // or the App on any of the page's calls drops them, whatever the
-      // frame does.
-      drafts.refused(error);
       if (refusedForBuild(error)) {
         // The frame gets the refusal as it is; whether to stop it is
         // core's answer to the page.
@@ -661,7 +647,6 @@ const appTarget = (
     try {
       return await hold.asPerson(send);
     } catch (error) {
-      drafts.refused(error);
       if (refusedForBuild(error)) {
         void checkDeliveryNow(hold, refused);
       }
@@ -746,31 +731,6 @@ const appTarget = (
             forCore(seeingRefusals(onSnapshot, sawRefusal))
           )
       ),
-    // Handed over only while core still hands the frame's build the App's
-    // data, and the person their access: drafts are that data too.
-    drafts: async () => {
-      try {
-        const delivery = await hold.use(
-          async (frame) => await frame.delivery()
-        );
-        if (delivery !== "open") {
-          refused(delivery);
-          return {};
-        }
-      } catch (error) {
-        // Refused the person or the App: none, and none kept. Anything
-        // else (core out of reach) hands over nothing either, the drafts
-        // kept for when the check answers.
-        if (lostAccess(error)) {
-          drafts.refused(error);
-          return {};
-        }
-        throw error;
-      }
-      return await drafts.drafts();
-    },
-    saveDraft: drafts.save,
-    clearDrafts: drafts.clear,
     location: opening.location.current,
     // A new entry of the page's history only for the person's own act in
     // the frame (frame-acts.ts), one act one entry: an App that moves on
@@ -1132,14 +1092,6 @@ export const previewTarget = (
         },
       };
     },
-    // A preview reads no real data, so it keeps no drafts of it.
-    drafts: async () => await Promise.resolve({}),
-    saveDraft: () => {
-      // Nothing to keep.
-    },
-    clearDrafts: () => {
-      // Nothing kept.
-    },
     // Where the preview is, kept by the page beside the chat, never in its
     // address: the preview isn't the App's own page.
     location: location.current,
@@ -1443,10 +1395,6 @@ const runFrame = <Bundle extends FrameCode>(
 /**
  * What the page runs for the pages of `app`, for one frame: its bridge
  * reaches the App (`appTarget`), and the page checks on it while it runs.
- * Whose drafts the frame reads and writes is the person signed in, as
- * core says, never the frame. Core refusing the person or the App drops
- * them and keeps no more for the frame, whatever it does: on any of the
- * page's calls, streaming ones too, and at the page's own checks.
  */
 export const appPage = (
   app: string,
@@ -1455,42 +1403,10 @@ export const appPage = (
   opening: PageOpening
 ): Omit<FrameSource<PageBundle>, "join"> => ({
   openMs: pageLimits.openMs,
-  open: async (session) => {
-    try {
-      return await session.pages.open(app);
-    } catch (error) {
-      // Refused the person or the App, not only its pages (none
-      // found): its drafts were read under access gone.
-      if (lostAccess(error)) {
-        shutAppDrafts(app);
-      }
-      throw error;
-    }
-  },
+  open: async (session) => await session.pages.open(app),
   connect: (link, bundle, refused, cleanups, acted = () => false) => {
     const hold = holdFrame(link, bundle);
-    const drafts = appDrafts(app, async () => {
-      const session = await hold.session();
-      const { userId } = await session.whoami();
-      return userId;
-    });
-    // Stopping the frame for access closes its drafts first, so a save
-    // still waiting to know who is signed in can't keep one afterwards.
-    const closing = (reason: Refused): void => {
-      drafts.close();
-      refused(reason);
-    };
-    // What the frame's drafts gathered is written when the page goes away
-    // (a refresh, a closed tab). When the frame stops, however it stops,
-    // they are written as far as who is signed in is known, and nothing
-    // more is kept for it: a save still waiting to know is lost.
-    const flush = (): void => {
-      drafts.flush();
-    };
-    addEventListener("pagehide", flush);
     cleanups.push(() => {
-      removeEventListener("pagehide", flush);
-      drafts.stop();
       hold.close();
     });
     // A request of core's own channels (files, links), as the page sends
@@ -1506,15 +1422,15 @@ export const appPage = (
       });
       const refusal = await fileRefusal(response);
       if (refusal === "principal-changed") {
-        closing("principal-changed");
+        refused("principal-changed");
       }
       if (refusal === "build") {
-        void checkDeliveryNow(hold, closing);
+        void checkDeliveryNow(hold, refused);
       }
       return response;
     };
     return {
-      target: appTarget(bundle, closing, hold, confirm, drafts, opening, acted),
+      target: appTarget(bundle, refused, hold, confirm, opening, acted),
       // Core's file channel, under the page's lease, with the person's
       // session: a plain request of the page's own origin, naming the
       // person the frame is for. One core refuses as someone else's, or
@@ -1552,7 +1468,7 @@ export const appPage = (
           ) {
             try {
               // oxlint-disable-next-line no-await-in-loop -- one ask at a time
-              await checkDelivery(hold, closing);
+              await checkDelivery(hold, refused);
               return;
             } catch {
               // oxlint-disable-next-line no-await-in-loop -- one ask at a time
@@ -1565,7 +1481,6 @@ export const appPage = (
             const error = Object.assign(new Error(push.error.message), {
               code: push.error.code,
             });
-            drafts.refused(error);
             // The person lost the App (it was unshared, or is gone): the
             // page stops, its frame emptied, as its calls would be
             // refused from now on, and whatever holds it (the shell's
@@ -1600,16 +1515,6 @@ export const appPage = (
 });
 
 /**
- * Why a page was stopped that means its drafts were read under access
- * now gone: its build's release, or its lease. A refusal to open it is looked at by
- * its code (`appPage`), as a page not found isn't the App.
- */
-const dropsDrafts: ReadonlySet<FailureReason> = new Set([
-  "unreviewed",
-  "revoked",
-]);
-
-/**
  * Runs the pages of `app` in `frame`, and follows its App's current
  * version, and whether its build still gets the App's data (`runFrame`).
  */
@@ -1622,36 +1527,16 @@ export const runPage = (
   confirm: ConfirmDecision,
   confirmLink: ConfirmLink,
   opening: PageOpening
-): (() => void) => {
-  // A page refused or stopped for access (the person's, or its build's)
-  // takes the person's drafts of its App with it; a session that ended,
-  // as the frame's link found out first, every draft (form-drafts.ts).
-  const stateOf = (state: PageState): void => {
-    if (state.status === "signed-out") {
-      stopDrafts();
-    } else if (
-      state.status === "failed" &&
-      state.reason === "principal-changed"
-    ) {
-      // Every draft was the person before's. The next page, opened for
-      // the person now, keeps theirs.
-      clearDrafts();
-    } else if (state.status === "failed" && dropsDrafts.has(state.reason)) {
-      // Every running page of the App stops keeping drafts too.
-      shutAppDrafts(app);
-    }
-    onState(state);
-  };
-  return runFrame(
+): (() => void) =>
+  runFrame(
     frame,
     {
       ...appPage(app, confirm, confirmLink, opening),
       join: (onEnded) => tabLink(core, onEnded),
     },
-    stateOf,
+    onState,
     onOpened
   );
-};
 
 /**
  * The newest revision of a chat's draft as the page hears of it, for the

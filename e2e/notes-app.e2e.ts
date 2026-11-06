@@ -398,20 +398,7 @@ test("a list loads five notes at a time and keeps the loaded notes current acros
   ]);
 });
 
-/** Waits until the page keeps a draft holding `text` for the tab (sessionStorage). */
-const draftKept = async (page: Page, text: string): Promise<void> => {
-  await page.waitForFunction(
-    (wanted) =>
-      Object.keys(sessionStorage).some(
-        (key) =>
-          key.startsWith("grasp.form-drafts:") &&
-          (sessionStorage.getItem(key) ?? "").includes(wanted)
-      ),
-    text
-  );
-};
-
-test("a draft survives a newer note, a stale save and a refresh, and is re-applied on the latest version", async ({
+test("a draft survives a newer note, and is re-applied on the latest version", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("notesDrafts");
@@ -424,9 +411,9 @@ test("a draft survives a newer note, a stale save and a refresh, and is re-appli
   await expect(list.getByText("Plan", { exact: true })).toBeVisible();
 
   // I start editing the title; someone else saves a new body meanwhile.
-  let appPage = await openNotes(mine, app);
+  const appPage = await openNotes(mine, app);
   await appPage.getByRole("button", { name: "Edit Plan" }).click();
-  let editor = appPage.getByRole("form", { name: "Edit note" });
+  const editor = appPage.getByRole("form", { name: "Edit note" });
   await editor.getByLabel("Title").fill("My plan");
 
   await theirs.getByRole("button", { name: "Edit Plan" }).click();
@@ -437,7 +424,7 @@ test("a draft survives a newer note, a stale save and a refresh, and is re-appli
 
   // The newer note arrives: my draft stays as it was, and I see what
   // changed beside what I changed.
-  let changes = editor.getByRole("status").filter({
+  const changes = editor.getByRole("status").filter({
     hasText: "This changed since you started editing",
   });
   await expect(changes).toContainText("Latest version: Their body");
@@ -457,83 +444,6 @@ test("a draft survives a newer note, a stale save and a refresh, and is re-appli
   await editor.getByRole("button", { name: "Save changes" }).click();
   await expect(list.getByText("My plan", { exact: true })).toBeVisible();
   await expect(changes).toHaveCount(0);
-
-  // An unsaved draft, then a refresh of the page: the draft comes back
-  // when the note is opened again.
-  await editor.getByLabel("Title").fill("Unsaved title");
-  await draftKept(mine, "Unsaved title");
-  // Someone else saves again before the refresh, on my saved note.
-  await expect(other.getByLabel("Title")).toHaveValue("My plan");
-  await other.getByLabel("Body").fill("Their second body");
-  await other.getByRole("button", { name: "Save changes" }).click();
-  await expect(changes).toContainText("Latest version: Their second body");
-  await mine.reload();
-  appPage = await openNotes(mine, app);
-  await appPage.getByRole("button", { name: "Edit My plan" }).click();
-  editor = appPage.getByRole("form", { name: "Edit note" });
-  changes = editor.getByRole("status").filter({
-    hasText: "This changed since you started editing",
-  });
-  await expect(editor.getByLabel("Title")).toHaveValue("Unsaved title");
-  await expect(editor.getByLabel("Body")).toHaveValue("Their body");
-
-  // The restored draft still carries the revision it started from, older
-  // than the note's, so my save is refused as stale and the draft stays,
-  // until I re-apply it on the latest version.
-  await expect(changes).toContainText("Latest version: Their second body");
-  await editor.getByRole("button", { name: "Save changes" }).click();
-  await expect(editor.getByRole("alert")).toContainText("changed since");
-  await expect(editor.getByLabel("Title")).toHaveValue("Unsaved title");
-  await changes
-    .getByRole("button", { name: "Re-apply my changes to the latest version" })
-    .click();
-  await editor.getByRole("button", { name: "Save changes" }).click();
-  await expect(list.getByText("Unsaved title", { exact: true })).toBeVisible();
-  // The note as saved, read afresh: my title on their second body.
-  const reread = await openNotes(theirPage, app);
-  await reread.getByRole("button", { name: "Edit Unsaved title" }).click();
-  const saved = reread.getByRole("form", { name: "Edit note" });
-  await expect(saved.getByLabel("Title")).toHaveValue("Unsaved title");
-  await expect(saved.getByLabel("Body")).toHaveValue("Their second body");
-
-  // An unsaved draft, then my session ends in another tab: the next load
-  // of this tab, as a browser restoring it would, finds no draft kept.
-  await editor.getByLabel("Body").fill("Left behind");
-  await draftKept(mine, "Left behind");
-  const elsewhere = await mine.context().newPage();
-  await elsewhere.goto("/");
-  const signedOut = await elsewhere.evaluate(async () => {
-    const response = await fetch("/api/auth/sign-out", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    });
-    return response.ok;
-  });
-  expect(signedOut).toBeTruthy();
-  await mine.reload();
-  await mine.waitForFunction(
-    () =>
-      !Object.keys(sessionStorage).some((key) =>
-        key.startsWith("grasp.form-drafts:")
-      )
-  );
-
-  // A tab the browser restored with my own drafts in it, signed out: the
-  // page drops them as soon as it learns nobody is signed in, with no
-  // page open to do it.
-  const restoredKey = `grasp.form-drafts:${encodeURIComponent(builder.userId)}:${encodeURIComponent(app)}`;
-  await mine.evaluate((key) => {
-    sessionStorage.setItem(
-      key,
-      JSON.stringify({ n1: { text: "Restored", at: Date.now() } })
-    );
-  }, restoredKey);
-  await mine.goto("/");
-  await mine.waitForFunction(
-    (key) => sessionStorage.getItem(key) === null,
-    restoredKey
-  );
 });
 
 test("a page's frame speaks the page's language", async ({ pageOf }) => {
