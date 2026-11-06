@@ -38,6 +38,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, person, seal, sweptAway } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
@@ -58,14 +59,23 @@ const crmFiles = (
   listReturns = "v.array(v.string())",
   revision = 1
 ): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  contacts: defineTable({ name: v.string() }),
-  notes: defineTable({ text: v.string() }),
-  secrets: defineTable({ text: v.string() }),
-});
-`,
+  ...appDefinition({
+    name: "CRM",
+    tables: {
+      contacts: {
+        fields: { name: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+      notes: {
+        fields: { text: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+      secrets: {
+        fields: { text: "v.string()" },
+        access: { read: "appBuilders", write: "appBuilders" },
+      },
+    },
+  }),
   "server/contacts.ts": `// Revision ${revision}.
 import { v } from "@grasp-os/sdk";
 import { action, internalQuery, mutation, query } from "@server/_generated/server";
@@ -133,41 +143,14 @@ export const list = query({
   handler: async (ctx) => (await ctx.db.query("secrets").take(100)).map(({ text }) => text),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "CRM",
-  schema,
-  access: {
-    tables: {
-      contacts: { read: "appMembers", write: "appMembers" },
-      notes: { read: "owner", write: "owner" },
-      secrets: { read: "appBuilders", write: "appBuilders" },
-    },
-  },
-  screens: [],
-});
-`,
 });
 
 /** The CRM without tables: nothing to store, so no store binding. */
 const tablelessFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
-export default defineSchema({});
-`,
+  ...appDefinition({ name: "CRM", tables: {} }),
   "server/hello.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-export default app({
-  name: "CRM",
-  schema,
-  access: {},
-  screens: [],
-});
 `,
 };
 
@@ -176,22 +159,15 @@ export default app({
  * it (`storeOperationFor`): nothing of its own reaches it.
  */
 const deskFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  marks: defineTable({ label: v.string() }),
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Desk",
-  schema,
-  access: { tables: { marks: { read: "owner", write: "owner" } } },
-  screens: [],
-});
-`,
+  ...appDefinition({
+    name: "Desk",
+    tables: {
+      marks: {
+        fields: { label: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+  }),
 };
 
 /** What the audit log recorded of `consumer`'s refused calls: path and why. */
@@ -1242,14 +1218,28 @@ describe("a JSON workflow's run calling a store's public operation", () => {
 
 /** A CRM whose leads its people read and change by team and by assignee. */
 const leadsCrmFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  leads: defineTable({ name: v.string(), team: v.string(), assignee: v.person().optional() }).access({
-    read: [rows.team("team"), rows.person("assignee")],
+  ...appDefinition({
+    name: "Leads",
+    tables: {
+      leads: {
+        fields: {
+          name: "v.string()",
+          team: "v.string()",
+          assignee: "v.person().optional()",
+        },
+        access: {
+          read: "appMembers",
+          write: "appMembers",
+          rows: {
+            read: [
+              { kind: "team", field: "team" },
+              { kind: "person", field: "assignee" },
+            ],
+          },
+        },
+      },
+    },
   }),
-});
-`,
   "server/leads.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
@@ -1268,37 +1258,22 @@ export const list = query({
   handler: async (ctx) => (await ctx.db.query("leads").take(100)).map(({ name }) => name).toSorted(),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Leads",
-  schema,
-  access: { tables: { leads: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
-});
-`,
 };
 
 /** An App that reads and adds the CRM's leads through its public functions (`permission.app`). */
 const leadsDeskFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
-
-export default defineSchema({});
-`,
-  "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Desk",
+    tables: {},
+    permissions: [
+      'permission.app("crm", {\n  functions: {\n    "leads.list": { kind: "query", args: {}, returns: v.array(v.string()) },\n    "leads.add": {\n      kind: "mutation",\n      args: { name: v.string(), team: v.string(), assignee: v.string().optional() },\n      returns: v.null(),\n    },\n  },\n})',
+    ],
+  }),
+  "server/desk.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const crm = permission.app("crm", {
-  functions: {
-    "leads.list": { kind: "query", args: {}, returns: v.array(v.string()) },
-    "leads.add": {
-      kind: "mutation",
-      args: { name: v.string(), team: v.string(), assignee: v.string().optional() },
-      returns: v.null(),
-    },
-  },
-});
+export const crm = permissions.crm;
 
 /** What a call answered, as JSON, or the code it failed with. */
 const attempt = async (work: () => Promise<unknown>): Promise<string> => {
@@ -1321,18 +1296,6 @@ export const add = action({
   returns: v.string(),
   uses: [crm],
   handler: async (ctx, args) => await attempt(() => ctx.apps.crm.call("leads.add", args)),
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { crm } from "./server/desk.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Desk",
-  schema,
-  access: { tables: {} },
-  screens: [],
-  permissions: { apps: [crm] },
 });
 `,
 };
@@ -1469,13 +1432,27 @@ describe("a store's public operations and its tables' row rules", () => {
  * everyone with a role in it does, by role rules on member tables.
  */
 const rolesCrmFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  plans: defineTable({ text: v.string() }).access({ read: [rows.role("builder")] }),
-  memos: defineTable({ text: v.string() }).access({ read: [rows.role("user")] }),
-});
-`,
+  ...appDefinition({
+    name: "Roles CRM",
+    tables: {
+      plans: {
+        fields: { text: "v.string()" },
+        access: {
+          read: "appMembers",
+          write: "appMembers",
+          rows: { read: [{ kind: "role", role: "builder" }] },
+        },
+      },
+      memos: {
+        fields: { text: "v.string()" },
+        access: {
+          read: "appMembers",
+          write: "appMembers",
+          rows: { read: [{ kind: "role", role: "user" }] },
+        },
+      },
+    },
+  }),
   "server/crm.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
@@ -1522,41 +1499,22 @@ export const forBuilders = query({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Roles CRM",
-  schema,
-  access: {
-    tables: {
-      plans: { read: "appMembers", write: "appMembers" },
-      memos: { read: "appMembers", write: "appMembers" },
-    },
-  },
-  screens: [],
-});
-`,
 };
 
 /** An App that reads and adds the CRM's plans and memos through its public functions (`permission.app`). */
 const rolesDeskFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
-
-export default defineSchema({});
-`,
-  "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Desk",
+    tables: {},
+    permissions: [
+      'permission.app("crm", {\n  functions: {\n    "crm.plans": { kind: "query", args: {}, returns: v.array(v.string()) },\n    "crm.memos": { kind: "query", args: {}, returns: v.array(v.string()) },\n    "crm.addPlan": { kind: "mutation", args: { text: v.string() }, returns: v.null() },\n    "crm.addMemo": { kind: "mutation", args: { text: v.string() }, returns: v.null() },\n    "crm.forBuilders": { kind: "query", args: {}, returns: v.boolean() },\n  },\n})',
+    ],
+  }),
+  "server/desk.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const crm = permission.app("crm", {
-  functions: {
-    "crm.plans": { kind: "query", args: {}, returns: v.array(v.string()) },
-    "crm.memos": { kind: "query", args: {}, returns: v.array(v.string()) },
-    "crm.addPlan": { kind: "mutation", args: { text: v.string() }, returns: v.null() },
-    "crm.addMemo": { kind: "mutation", args: { text: v.string() }, returns: v.null() },
-    "crm.forBuilders": { kind: "query", args: {}, returns: v.boolean() },
-  },
-});
+export const crm = permissions.crm;
 
 /** What a call answered, as JSON, or the code it failed with. */
 const attempt = async (work: () => Promise<unknown>): Promise<string> => {
@@ -1609,18 +1567,6 @@ export const forBuilders = action({
       return \`error:\${String(Reflect.get(details, "code"))}\`;
     }
   },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { crm } from "./server/desk.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Desk",
-  schema,
-  access: { tables: {} },
-  screens: [],
-  permissions: { apps: [crm] },
 });
 `,
 };

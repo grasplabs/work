@@ -25,6 +25,7 @@ import {
   openFixtureStore,
   openStore,
 } from "../src/data-stores.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { person } from "./sealed-apps.ts";
 
 // An App's tests (`appTest`, spec 28.2), as core runs them whenever a
@@ -37,15 +38,25 @@ import { person } from "./sealed-apps.ts";
 // fixture stores.
 
 const appFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }),
-  mottos: defineTable({ text: v.string().min(1).max(200) }),
-});
-`,
-  "server/notes.ts": `import { AppError, permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "owner", write: "owner" },
+      },
+      mottos: {
+        fields: { text: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appBuilders" },
+      },
+    },
+    permissions: [
+      'permission.brain({\n  operations: ["search"],\n  collections: ["handbook"],\n})',
+    ],
+  }),
+  "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { action, internalQuery, mutation, query } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
@@ -79,10 +90,7 @@ export const setMotto = mutation({
   handler: async (ctx, args) => await ctx.db.insert("mottos", args),
 });
 
-export const help = permission.brain({
-  operations: ["search"],
-  collections: ["handbook"],
-});
+export const help = permissions.brain;
 
 export const searchHelp = action({
   args: { text: v.string().min(1) },
@@ -97,23 +105,7 @@ export const count = internalQuery({
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).length,
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { help } from "./server/notes.ts";
-import schema from "./schema.ts";
 
-export default app({
-  name: "Notes",
-  schema,
-  access: {
-    tables: {
-      notes: { read: "owner", write: "owner" },
-      mottos: { read: "appMembers", write: "appBuilders" },
-    },
-  },
-  screens: [],
-  permissions: { brain: help },
-});
-`,
   "tests/fixtures/notes.json": JSON.stringify({
     principals: {
       "note-owner": { role: "user" },
@@ -319,14 +311,19 @@ describe("an App's tests", { timeout: 180_000 }, () => {
 
   it("give each principal the teams its fixture names, as a table's team rules read them", async () => {
     const built = await appWith({
-      "schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  deals: defineTable({ title: v.string(), team: v.string() }).access({
-    read: [rows.team("team")],
-  }),
-});
-`,
+      ...appDefinition({
+        name: "Deals",
+        tables: {
+          deals: {
+            fields: { title: "v.string()", team: "v.string()" },
+            access: {
+              read: "appMembers",
+              write: "appMembers",
+              rows: { read: [{ kind: "team", field: "team" }] },
+            },
+          },
+        },
+      }),
       "server/deals.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
@@ -343,16 +340,7 @@ export const titles = query({
     (await ctx.db.query("deals").take(100)).map((deal) => deal.title),
 });
 `,
-      "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
 
-export default app({
-  name: "Deals",
-  schema,
-  access: { tables: { deals: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
-});
-`,
       "tests/fixtures/deals.json": JSON.stringify({
         principals: {
           seller: { role: "user", teams: ["sales"] },

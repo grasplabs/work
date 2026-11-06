@@ -31,14 +31,10 @@ type Person = Awaited<ReturnType<typeof personApi>>;
  */
 const surfacedFiles = (): Record<string, string> => ({
   ...notesFiles,
-  "app.ts": (notesFiles["app.ts"] ?? "")
-    .replace(
-      'import { app } from "@grasp-os/sdk";',
-      'import { app, v } from "@grasp-os/sdk";'
-    )
-    .replace(
-      "  screens: [],",
-      `  screens: [
+  "screens.ts": `import { v } from "@grasp-os/sdk";
+
+export default {
+  screens: [
     { name: "notes", path: "/", source: "screens/notes.tsx" },
     {
       name: "note",
@@ -52,8 +48,9 @@ const surfacedFiles = (): Record<string, string> => ({
     { name: "settings", kind: "settings", screen: "notes", title: "Settings", input: v.object({}) },
     { name: "beside", kind: "panel", screen: "note", title: "Note", input: v.object({ id: v.string().max(8) }) },
     { name: "shared", kind: "deepLink", screen: "note", title: "Shared note", input: v.object({ id: v.string() }) },
-  ],`
-    ),
+  ],
+};
+`,
   "screens/note.tsx": `import type { ScreenProps } from "@grasp-os/sdk/react";
 import type { screens } from "@server/_generated/api";
 

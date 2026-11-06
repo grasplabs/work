@@ -32,6 +32,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 
@@ -43,19 +44,23 @@ import { unique } from "./sign-in.ts";
 // this is the same path from the release's own code.
 
 const files = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  requests: defineTable({ who: v.string() }),
-});
-`,
-  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Requests",
+    tables: {
+      requests: {
+        fields: { who: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const followUp = permission.workflow("followUp", {
-  input: v.object({ who: v.string().trim().min(1) }),
-  output: v.object({ status: v.string() }),
-});
+export const followUp = permissions.followUp;
 
 export const submit = mutation({
   args: { who: v.string() },
@@ -77,18 +82,6 @@ export const kickOff = action({
   }),
   uses: [followUp],
   handler: async (ctx, args) => await ctx.workflows.followUp.start({ who: args.who }),
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { followUp } from "./server/requests.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
-  permissions: { workflows: [followUp] },
 });
 `,
 });
@@ -1205,7 +1198,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       app,
       {
         ...files(),
-        "app.ts": `${files()["app.ts"] ?? ""}// Sealed again.\n`,
+        "server/requests.ts": `${files()["server/requests.ts"] ?? ""}// Sealed again.\n`,
       },
       "Seal again"
     );

@@ -20,6 +20,7 @@ import {
 } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { deliveryOf, standingOf } from "../src/screen-delivery.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { deepFiles, fieldDepth } from "./deep-records.ts";
 import { appWith, artifactKey, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
@@ -32,16 +33,25 @@ import type { Fixture } from "./sealed-apps.ts";
 // caller's for another.
 
 const notesFiles = (label = "Notes"): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: label,
+    tables: {
+      notes: {
+        fields: {
+          title: "v.string().trim().min(1).max(200)",
+          body: 'v.string().max(100_000).default("")',
+        },
+        access: { read: "owner", write: "owner" },
+        indexes: { by_updated: ["_updatedAt"] },
+      },
+    },
+  }),
+  "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),
   body: v.string().max(100_000).default(""),
 };
-
-export default defineSchema({
-  notes: defineTable(noteFields).index("by_updated", ["_updatedAt"]),
-});
 `,
   "server/notes.ts": `import {
   AppError,
@@ -51,7 +61,7 @@ export default defineSchema({
 } from "@grasp-os/sdk";
 import { internal } from "@server/_generated/internal";
 import { action, doc, internalQuery, mutation, query } from "@server/_generated/server";
-import { noteFields } from "../schema.ts";
+import { noteFields } from "../values.ts";
 
 export const list = query({
   args: { pagination: paginationOptionsValidator },
@@ -290,16 +300,6 @@ export const recover = action({
       throw error;
     }
   },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: ${JSON.stringify(label)},
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
 });
 `,
 });
@@ -885,10 +885,15 @@ describe("what a function answers", { timeout: 120_000 }, () => {
  * limit; one that returns nothing answers null.
  */
 const undeclaredReturnFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ notes: defineTable({ title: v.string() }) });
-`,
+  ...appDefinition({
+    name: "Greetings",
+    tables: {
+      notes: {
+        fields: { title: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+  }),
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
@@ -918,16 +923,6 @@ export const notJson = query({ args: {}, handler: () => Number.NaN });
 export const nothing = mutation({ args: {}, handler: async () => {} });
 
 export const flood = query({ args: {}, handler: () => "x".repeat(2 * 1024 * 1024) });
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Greetings",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
-});
 `,
 };
 
@@ -1112,13 +1107,13 @@ describe("the SDK a release runs with", { timeout: 120_000 }, () => {
   it("needs nothing of its runner but what its protocol pins", async () => {
     const notes = await sealedNotes();
     // A runner exporting only runFunction, manifestOfApp and
-    // registerFunctions, as any SDK sealed under protocol 3 does: the
+    // registerApp, as any SDK sealed under protocol 3 does: the
     // host brings the rest itself.
     await rewriteSdk(notes, "sdk/@grasp-os~sdk~runner.js", (text) => {
       const pinned = exportsOnly(text, [
         "runFunction",
         "manifestOfApp",
-        "registerFunctions",
+        "registerApp",
       ]);
       if (!finalExports.test(pinned)) {
         throw new Error("The runner has no export list to rewrite");

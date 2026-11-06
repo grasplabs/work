@@ -11,6 +11,7 @@ import { loadRelease } from "../src/app-releases.ts";
 import { builtins, fingerprintOf, thisRelease } from "../src/builtins.ts";
 import { httpContract, httpReadContract } from "../src/release-contracts.ts";
 import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { requestGranted } from "./apps.ts";
 import {
   httpApiInsideOrigin,
@@ -39,17 +40,23 @@ const secret = "the-billing-api-test-credential";
 
 /** An App whose actions read and create invoices at the billing API. */
 const billingFiles = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ notes: defineTable({ title: v.string() }) });
-`,
-  "server/billing.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Invoices",
+    tables: {
+      notes: {
+        fields: { title: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+    permissions: [
+      'permission.connection("billing", {\n  contract: "http.request@1",\n  actions: ["get", "send"],\n})',
+    ],
+  }),
+  "server/billing.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const billing = permission.connection("billing", {
-  contract: "http.request@1",
-  actions: ["get", "send"],
-});
+export const billing = permissions.billing;
 
 export const open = action({
   args: {},
@@ -91,18 +98,6 @@ export const stray = action({
       return String(Reflect.get(Object(error), "code"));
     }
   },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { billing } from "./server/billing.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Invoices",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
-  permissions: { connections: [billing] },
 });
 `,
 });

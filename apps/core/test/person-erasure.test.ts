@@ -23,6 +23,7 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
@@ -416,20 +417,15 @@ const envOf = (instance: object): object => {
 const appWithPreferences = async () => {
   const fixture = await appWith(
     {
-      "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+      ...appDefinition({
+        name: "Desk",
+        preferences: { theme: 'v.enum(["light", "dark"]).default("light")' },
+        tables: {},
+      }),
 
-export default defineSchema({});
-`,
-      "app.ts": `import { app, v } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Desk",
-  schema,
-  access: { tables: {} },
+      "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  preferences: v.object({ theme: v.enum(["light", "dark"]).default("light") }),
-});
+};
 `,
       "screens/desk.tsx": `export default function Desk() {
   return <main>Desk</main>;

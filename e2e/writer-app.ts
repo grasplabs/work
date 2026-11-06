@@ -1,16 +1,11 @@
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
+
 /**
  * A Writer App whose one screen follows a streaming action (spec 10.7.6)
  * through `useStream`: a draft written a word at a time, each word a
  * whole progress snapshot, then its result; a run the person can cancel,
  * and an outline to switch to.
  */
-
-const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  drafts: defineTable({ text: v.string().max(2000) }),
-});
-`;
 
 const operations = `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
@@ -44,15 +39,9 @@ export const outline = action({
 });
 `;
 
-const registration = `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Writer",
-  schema,
-  access: { tables: { drafts: { read: "owner", write: "owner" } } },
+const screens = `export default {
   screens: [{ name: "writer", path: "/", source: "screens/writer.tsx" }],
-});
+};
 `;
 
 const screen = `import { useStream } from "@grasp-os/sdk/react";
@@ -111,8 +100,17 @@ export default function Writer() {
 
 /** The Writer App's files. */
 export const writerAppFiles = (): Record<string, string> => ({
-  "schema.ts": schema,
+  ...appDefinition({
+    name: "Writer",
+    tables: {
+      drafts: {
+        fields: { text: "v.string().max(2000)" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+  }),
   "server/writer.ts": operations,
-  "app.ts": registration,
+
+  "screens.ts": screens,
   "screens/writer.tsx": screen,
 });

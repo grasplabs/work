@@ -213,12 +213,12 @@ const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
   const { t } = useLingui();
   const paths = Object.keys(files);
   const tree = treeOf(paths);
-  // The one asked for while this version has it, else its app.ts, else
+  // The one asked for while this version has it, else its config, else
   // the tree's first.
   const file =
     asked !== undefined && Object.hasOwn(files, asked)
       ? asked
-      : (paths.find((path) => path === "app.ts") ?? firstIn(tree));
+      : (paths.find((path) => path === "grasp.config.ts") ?? firstIn(tree));
   if (file === undefined) {
     return (
       <EditorFrame>

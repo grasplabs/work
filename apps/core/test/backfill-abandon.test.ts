@@ -198,6 +198,23 @@ const runAlarm = async (store: OpenStore): Promise<void> => {
 const categoryAs = (descriptor: Parameters<typeof notes>[0]["category"]) =>
   notes({ ...noteFields, category: descriptor });
 
+/** Notes of `fields` beside a people table, both shared, as manifest text. */
+const withPeople = (fields: Parameters<typeof notes>[0]) =>
+  manifestText(
+    schemaManifest(
+      defineSchema({
+        notes: defineTable(fields).access({
+          read: "appMembers",
+          write: "appMembers",
+        }),
+        people: defineTable({ name: v.string().min(1) }).access({
+          read: "appMembers",
+          write: "appMembers",
+        }),
+      })
+    )
+  );
+
 describe("abandoning a failed backfill", () => {
   it("keeps the contract and the records, and the store takes schema changes again", async () => {
     const { app, store, first, target, odd, failure } = await failedStore();
@@ -600,22 +617,6 @@ describe("abandoning a failed backfill", () => {
 
   it("reads back a reserved reference, so later schema changes still apply", async () => {
     const app = appIdSchema.parse(crypto.randomUUID());
-    const access = {
-      tables: {
-        notes: { read: "appMembers", write: "appMembers" },
-        people: { read: "appMembers", write: "appMembers" },
-      },
-    } as const;
-    const withPeople = (fields: Parameters<typeof notes>[0]) =>
-      manifestText(
-        schemaManifest(
-          defineSchema({
-            notes: defineTable(fields),
-            people: defineTable({ name: v.string().min(1) }),
-          }),
-          access
-        )
-      );
     const store = await newStore();
     const first = await store.defineTables(
       withPeople(noteFields),

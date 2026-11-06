@@ -4,13 +4,13 @@ import {
   serverEntryPath,
 } from "@grasp-os/compiler";
 import {
-  app as registerApp,
+  defineApp,
   defineSchema,
   defineTable,
   migration,
   v,
 } from "@grasp-os/sdk";
-import { inspectApp, registerFunctions } from "@grasp-os/sdk/host";
+import { inspectApp, registerApp } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 
 import { inspected } from "../../src/app-inspection.ts";
@@ -105,10 +105,11 @@ const transforms: Record<string, string> = {
 const notesManifest = (() => {
   const fields = { title: v.string(), category: v.string() };
   const registered = registerApp({
-    name: "Notes",
-    schema: defineSchema({ notes: defineTable(fields) }),
-    access: { tables: { notes: { read: "owner", write: "owner" } } },
-    screens: [],
+    config: defineApp({ name: "Notes" }),
+    schema: defineSchema({
+      notes: defineTable(fields).access({ read: "owner", write: "owner" }),
+    }),
+    modules: {},
     migrations: [
       migration({
         name: "m",
@@ -124,10 +125,10 @@ const notesManifest = (() => {
       }),
     ],
   });
-  return inspectApp(registerFunctions(registered, {})).manifest;
+  return inspectApp(registered).manifest;
 })();
 
-/** A release of Notes whose `app.ts` is `source`, as `transformBatch` reads it. */
+/** A release of Notes whose migration is `source`, as `transformBatch` reads it. */
 const releaseOf = (source: string): TransformRelease => ({
   app: notesManifest,
   modules: { [appModuleName(serverEntryPath)]: source },

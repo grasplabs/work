@@ -47,6 +47,7 @@ import {
   reviewScreenDecision,
 } from "../src/workflows/screen-decisions.ts";
 import { repairWakes } from "../src/workflows/wakes.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   resumed,
@@ -80,19 +81,23 @@ export default function Desk() {
 `;
 
 const files = (screen = screenOf("approval")): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  invoices: defineTable({ amount: v.number() }),
-});
-`,
-  "server/invoices.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Invoices",
+    tables: {
+      invoices: {
+        fields: { amount: "v.number()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("review", {\n  input: v.object({ amount: v.number() }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/invoices.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const review = permission.workflow("review", {
-  input: v.object({ amount: v.number() }),
-  output: v.object({ status: v.string() }),
-});
+export const review = permissions.review;
 
 export const count = query({
   args: {},
@@ -100,18 +105,7 @@ export const count = query({
   handler: async (ctx) => (await ctx.db.query("invoices").collect()).length,
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { review } from "./server/invoices.ts";
-import schema from "./schema.ts";
 
-export default app({
-  name: "Invoices",
-  schema,
-  access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
-  permissions: { workflows: [review] },
-});
-`,
   "screens/desk.tsx": screen,
 });
 

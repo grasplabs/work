@@ -16,32 +16,35 @@ import { signedInApi, unique } from "./sign-in.ts";
 // An App's own chat building the App from nothing, as a model that knows
 // only what the chat gives it would: it reads how an App is written in
 // Grasp's reference (the SDK's sources the check type-checks against, and
-// a built-in blueprint as a working example), writes a board, and repairs
-// it by what the check and a call of the draft say. What could go wrong:
-// the reference isn't there to read, so the model guesses the shapes; a
-// check or a call answers only that something failed, never where or why;
-// and an App that should pass never gets a draft with its screen.
+// a built-in blueprint as a working example), defines the board's table
+// with the definition tools, writes its code, and repairs it by what the
+// tools, the check and a call of the draft say. What could go wrong: the
+// reference isn't there to read, so the model guesses the shapes; the
+// generated config is written by hand, past the definition; a tool, a
+// check or a call answers only that something failed, never where or
+// why; and an App that should pass never gets a draft with its screen.
 
 const idp = mockIdp();
 
-/** The board's store: cards, each in one of four columns. */
-const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export const columns = ["todo", "doing", "review", "done"] as const;
-
-export default defineSchema({
-  cards: defineTable({
-    title: v.string().trim().min(1).max(200),
-    column: v.enum(columns),
-  }).index("by_column", ["column"]),
-});
+/** The board's values: the columns a card may be in. */
+const values = `export const columns = ["todo", "doing", "review", "done"] as const;
 `;
+
+/** The board's table, as `addTable` takes it: cards, each in one column. */
+const cards = {
+  name: "cards",
+  fields: {
+    title: "v.string().trim().min(1).max(200)",
+    column: 'v.enum(["todo", "doing", "review", "done"])',
+  },
+  access: { read: "appMembers", write: "appMembers" },
+};
 
 /** The board's operations: list the cards, add one, move one on. */
 const operations = `import { v } from "@grasp-os/sdk";
 import { doc, mutation, query } from "@server/_generated/server";
 
-import { columns } from "../schema.ts";
+import { columns } from "../values.ts";
 
 export const list = query({
   args: {},
@@ -75,17 +78,16 @@ export const move = mutation({
 });
 `;
 
-/** The board's registration, as the SDK's `app` takes it. */
-const registration = `import { app } from "@grasp-os/sdk";
-
-import schema from "./schema.ts";
-
-export default app({
-  name: "Board",
-  schema,
-  access: { tables: { cards: { read: "appMembers", write: "appMembers" } } },
+/** The board's screens. */
+const screens = `export default {
   screens: [{ name: "board", path: "/", source: "screens/board.tsx" }],
-});
+};
+`;
+
+/** A config written by hand, as a model that guessed would write it. */
+const handwritten = `import { defineApp } from "@grasp-os/sdk";
+
+export default defineApp({ name: "Board" });
 `;
 
 /** The board's one screen: four columns of cards. */
@@ -161,15 +163,6 @@ const Board = () => {
 export default Board;
 `;
 
-/**
- * The board as a model that guessed would write it: who may use the
- * table as one word, not `read` and `write`.
- */
-const guessed = registration.replace(
-  '{ cards: { read: "appMembers", write: "appMembers" } }',
-  '{ cards: "appMembers" }'
-);
-
 /** The board's operations with a type error on their line 16. */
 const mistyped = operations.replace('column: "todo" }', 'column: "later" }');
 
@@ -194,49 +187,45 @@ const checking = (app: string) => `export default async (self, env) => {
   };
 };`;
 
-/** What `checking` returned for a draft that fails. */
-const guessSchema = z.object({
-  passed: z.boolean(),
-  server: z.string(),
-  diagnostics: z.array(
-    z.object({
-      file: z.string().nullable(),
-      line: z.number().nullable(),
-      message: z.string(),
-    })
-  ),
-  called: z.object({ ok: z.boolean(), code: z.string(), message: z.string() }),
-});
-
 /** What a code step returned, as JSON. */
 const returned = (text: string | undefined): unknown =>
   z.unknown().parse(JSON.parse(text?.replace("Returned:\n", "") ?? "null"));
 
 describe("an App's chat building its App", { timeout: 180_000 }, () => {
-  it("reads the SDK and a working App, hears exactly what a guess got wrong, and drafts a board that passes", async () => {
+  it("reads the SDK and a working App, defines the board's table with the tools, hears exactly what a guess got wrong, and drafts a board that passes", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await builder.api.apps.create({ name: `Board ${unique()}` });
-    const files = {
-      "schema.ts": schema,
-      "server/cards.ts": operations,
-      "app.ts": guessed,
+    const code = {
+      "values.ts": values,
+      "server/cards.ts": mistyped,
+      "screens.ts": screens,
       "screens/board.tsx": screen,
     };
     const { stub } = await personalChatsOf(
       builder.userId,
-      toolStep("readFile", { path: "@grasp-os/sdk/src/app.ts", toLine: 400 }),
-      toolStep("readFile", { path: "blueprints/board-page/app.ts" }),
-      toolStep("searchFiles", {
-        text: "interface TableAccess",
-        path: "@grasp-os/sdk",
+      toolStep("readFile", {
+        path: "@grasp-os/sdk/src/server.ts",
+        toLine: 400,
       }),
+      toolStep("readFile", { path: "blueprints/board-page/definition.json" }),
       toolStep("readFile", { path: "@grasp-os/sdk/src/nothing.ts" }),
-      toolStep("writeFile", { app: app.id, files }),
-      codeStep(checking(app.id)),
       toolStep("writeFile", {
         app: app.id,
-        files: { "app.ts": registration, "server/cards.ts": mistyped },
+        files: { "grasp.config.ts": handwritten },
       }),
+      toolStep("addTable", {
+        app: app.id,
+        ...cards,
+        fields: { ...cards.fields, column: "v.enumerate(columns)" },
+      }),
+      toolStep("addTable", { app: app.id, ...cards }),
+      toolStep("addIndex", {
+        app: app.id,
+        table: "cards",
+        name: "by_column",
+        fields: ["column"],
+      }),
+      toolStep("writeFile", { app: app.id, files: code }),
       codeStep(calling(app.id)),
       toolStep("writeFile", {
         app: app.id,
@@ -252,52 +241,39 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       model,
     });
 
-    const tools = await toolResults(stub, chat.id);
-    const [sdk, blueprint, search, missing] = tools;
-    const [guess, typed, fixed] = await codeResults(stub, chat.id);
+    const [sdk, blueprint, missing, handwrittenConfig, guess, added, indexed] =
+      await toolResults(stub, chat.id);
+    const [typed, fixed] = await codeResults(stub, chat.id);
     const drafts = await builder.api.chats.drafts(chat.id);
     expect({
-      sdk: sdk?.text.includes("export interface AppDefinition<"),
-      blueprint: blueprint?.text.includes("export default app({"),
-      search: search?.text.includes("@grasp-os/sdk/src/schema-manifest.ts:"),
+      sdk: sdk?.text.includes("export type FunctionKind"),
+      blueprint: blueprint?.text.includes('"name": "snapshots"'),
       missing: {
         isError: missing?.isError,
-        names: missing?.text.includes("@grasp-os/sdk/src/app.ts"),
+        start: missing?.text.includes("blueprints/board-page/definition.json"),
       },
+      // The generated config is never written by hand: the refusal names
+      // the tools.
+      handwritten: {
+        isError: handwrittenConfig?.isError,
+        tools: handwrittenConfig?.text.includes("addTable"),
+      },
+      // A type that isn't one: the problem in words, nothing saved.
+      guess: {
+        ok: guess?.text.includes('"ok":false'),
+        says: guess?.text.includes("enumerate"),
+      },
+      // Then the table, and what it does to the App's records.
+      added: added?.text.includes('"addedTables":["cards"]'),
+      indexed: indexed?.text.includes('"ok":true'),
     }).toStrictEqual({
       sdk: true,
       blueprint: true,
-      search: true,
-      missing: { isError: true, names: true },
-    });
-    // What the SDK refused the registration with, ending each answer:
-    // nothing of its stack, which names only the SDK's bundled modules.
-    const refused =
-      "Table `cards`'s access is `read` and `write`, each `owner`, `appMembers`, `appBuilders` or `none`.";
-    const failed = guessSchema.parse(returned(guess?.text));
-    expect({
-      passed: failed.passed,
-      server: failed.server,
-      diagnostics: failed.diagnostics.map(({ file, line, message }) => ({
-        file,
-        line,
-        refused: message.endsWith(refused),
-      })),
-      called: {
-        ok: failed.called.ok,
-        code: failed.called.code,
-        refused: failed.called.message.endsWith(refused),
-      },
-    }).toStrictEqual({
-      passed: false,
-      server: "failed",
-      // Where its registration threw, the call of app(), and the type
-      // error that says why, together.
-      diagnostics: [
-        { file: "app.ts", line: 5, refused: true },
-        { file: "app.ts", line: 8, refused: false },
-      ],
-      called: { ok: false, code: "version.inspection_failed", refused: true },
+      missing: { isError: true, start: true },
+      handwritten: { isError: true, tools: true },
+      guess: { ok: true, says: true },
+      added: true,
+      indexed: true,
     });
     // A type error, as the seal's build names it: its file and line.
     const typeError = z
@@ -322,10 +298,13 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       {
         app: app.id,
         changed: [
-          "app.ts",
-          "schema.ts",
+          "definition.json",
+          "grasp.config.ts",
+          "screens.ts",
           "screens/board.tsx",
           "server/cards.ts",
+          "server/schema.ts",
+          "values.ts",
         ],
       },
     ]);

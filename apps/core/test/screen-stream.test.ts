@@ -27,6 +27,7 @@ import type { FunctionRequest } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { published as publishedApp } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { referenceTo } from "./notes-client-app.ts";
@@ -46,12 +47,16 @@ import { callAuth, routed, signedInApi } from "./sign-in.ts";
 const idp = mockIdp();
 
 const files: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(500) }).index("by_updated", ["_updatedAt"]),
-});
-`,
+  ...appDefinition({
+    name: "Writer",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(500)" },
+        access: { read: "owner", write: "owner" },
+        indexes: { by_updated: ["_updatedAt"] },
+      },
+    },
+  }),
   "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
 import { action, doc, mutation, query } from "@server/_generated/server";
 
@@ -173,16 +178,7 @@ export const huge = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
 
-export default app({
-  name: "Writer",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
-});
-`,
   "screens/writer.tsx": `import { useStream } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 
@@ -1253,7 +1249,7 @@ const endOf = async (frames: ReadableStream<Uint8Array>): Promise<string> => {
 const published = async (opened: Opened): Promise<Release> => {
   const changed = {
     ...files,
-    "app.ts": `${files["app.ts"] ?? ""}\n// The second version.\n`,
+    "server/notes.ts": `${files["server/notes.ts"] ?? ""}\n// The second version.\n`,
   };
   const { version } = await opened.builderApi.api.apps.files.commit(
     opened.app,

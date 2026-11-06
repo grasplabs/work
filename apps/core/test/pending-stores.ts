@@ -29,9 +29,14 @@ export const noteFields = { title: v.string().min(1).max(200) };
 /** A notes schema of `fields`, read and written by the App's members. */
 export const notes = (fields: ValueShape): string =>
   manifestText(
-    schemaManifest(defineSchema({ notes: defineTable(fields) }), {
-      tables: { notes: { read: "appMembers", write: "appMembers" } },
-    })
+    schemaManifest(
+      defineSchema({
+        notes: defineTable(fields).access({
+          read: "appMembers",
+          write: "appMembers",
+        }),
+      })
+    )
   );
 
 export const v1 = notes(noteFields);

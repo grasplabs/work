@@ -36,6 +36,8 @@ import {
 } from "../src/resource-bindings.ts";
 import { publishTemplate } from "../src/resource-templates.ts";
 import { isRestricted } from "../src/restricted.ts";
+import { appDefinition } from "./app-definitions.ts";
+import type { AppSpec } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProviderFor } from "./model-provider.ts";
@@ -58,17 +60,25 @@ const chosenModel = "mistral/mistral-large-latest";
  * An App whose actions ask its `ai` for text and for values, each within
  * `maxOutputTokens`.
  */
+/** The notes each of these Apps keeps, each its owner's. */
+const notesTable = {
+  notes: {
+    fields: { title: "v.string()" },
+    access: { read: "owner", write: "owner" },
+  },
+} satisfies AppSpec["tables"];
+
 const modelFiles = (maxOutputTokens = 300): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string() }),
-});
-`,
-  "server/assist.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Assistant",
+    tables: notesTable,
+    permissions: [`permission.ai({ maxOutputTokens: ${maxOutputTokens} })`],
+  }),
+  "server/assist.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const ai = permission.ai({ maxOutputTokens: ${maxOutputTokens} });
+export const ai = permissions.ai;
 
 export const label = action({
   args: { text: v.string().min(1) },
@@ -153,18 +163,6 @@ export const attempt = action({
       ].map(String).join("|");
     }
   },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { ai } from "./server/assist.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Assistant",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
-  permissions: { ai },
 });
 `,
 });
@@ -302,14 +300,19 @@ const writerApproval = (sealed: Sealed) => ({
 
 /** An App whose actions search and read two of the Brain's collections. */
 const knowledgeFiles = (): Record<string, string> => ({
-  "schema.ts": modelFiles()["schema.ts"] ?? "",
-  "server/help.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Help",
+    tables: notesTable,
+    permissions: [
+      'permission.brain({ operations: ["search", "read"], collections: ["handbook", "salaries"] })',
+      "permission.ai({ maxOutputTokens: 300 })",
+    ],
+  }),
+  "server/help.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const brain = permission.brain({
-  operations: ["search", "read"],
-  collections: ["handbook", "salaries"],
-});
+export const brain = permissions.brain;
 
 export const find = action({
   args: { text: v.string().min(1) },
@@ -325,7 +328,7 @@ export const open = action({
   handler: async (ctx, args) => await ctx.brain.read({ id: args.id }),
 });
 
-export const ai = permission.ai({ maxOutputTokens: 300 });
+export const ai = permissions.ai;
 
 /** Reads a document, then has the model summarize it. */
 export const summarize = action({
@@ -336,18 +339,6 @@ export const summarize = action({
     const document = await ctx.brain.read({ id: args.id });
     return await ctx.ai.generate({ prompt: document.text });
   },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { ai, brain } from "./server/help.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Help",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
-  permissions: { brain, ai },
 });
 `,
 });
@@ -1455,18 +1446,29 @@ const deskFiles = ({
   collections?: readonly string[];
   sneak?: boolean;
 } = {}): Record<string, string> => ({
-  "schema.ts": modelFiles()["schema.ts"] ?? "",
-  "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Desk",
+    tables: notesTable,
+    permissions: [
+      ...(withWriter
+        ? [`permission.ai({ maxOutputTokens: ${maxOutputTokens} })`]
+        : []),
+      ...(withBrain
+        ? [
+            `permission.brain({ operations: ["search"], collections: ${JSON.stringify(collections)} })`,
+          ]
+        : []),
+    ],
+  }),
+  "server/desk.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+${withWriter || withBrain ? 'import { permissions } from "../grasp.config.ts";' : ""}
 
-${withWriter ? `export const ai = permission.ai({ maxOutputTokens: ${maxOutputTokens} });` : ""}
+${withWriter ? "export const ai = permissions.ai;" : ""}
 
 ${
   withBrain
-    ? `export const brain = permission.brain({
-  operations: ["search"],
-  collections: ${JSON.stringify(collections)},
-});
+    ? `export const brain = permissions.brain;
 
 export const find = action({
   args: { text: v.string().min(1) },
@@ -1500,18 +1502,6 @@ ${
 });`
     : ""
 }
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-${withWriter || withBrain ? `import { ${[...(withWriter ? ["ai"] : []), ...(withBrain ? ["brain"] : [])].join(", ")} } from "./server/desk.ts";` : ""}
-import schema from "./schema.ts";
-
-export default app({
-  name: "Desk",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
-  permissions: { ${[...(withWriter ? ["ai"] : []), ...(withBrain ? ["brain"] : [])].join(", ")} },
-});
 `,
 });
 

@@ -133,7 +133,7 @@ import type {
 //   of its own.
 // - A function's access is widened past its declaration: every read and
 //   staged write is checked against the verbs inspection gave the
-//   function (its kind and `operationAccess`, narrowing only), and the
+//   function (its kind and its `tables`, narrowing only), and the
 //   store checks every read and commit against the pinned schema's own
 //   access for the caller's roles, so neither check alone decides.
 // - A mutation writes what its schema doesn't allow: every staged write is

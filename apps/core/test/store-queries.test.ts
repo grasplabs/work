@@ -15,7 +15,7 @@ import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { StoreHost } from "../src/store-host.ts";
-import { memberRoles, newRecordId } from "./store-schemas.ts";
+import { accessedManifest, memberRoles, newRecordId } from "./store-schemas.ts";
 
 // Reads of a business store through core's way in and the store's Durable
 // Object: what `ctx.db` (sdk/src/database.ts) asks, as the store answers
@@ -58,7 +58,7 @@ const notesSchema = (read: AccessMode) => {
   return {
     schema,
     text: manifestText(
-      schemaManifest(schema, {
+      accessedManifest(schema, {
         tables: {
           // Written by its owner when nobody may read it, so it has
           // records a read must still be refused.
@@ -399,8 +399,12 @@ describe("what a descriptor names", () => {
     await fixture.store.defineTables(
       manifestText(
         schemaManifest(
-          defineSchema({ secrets: defineTable({ value: v.string() }) }),
-          { tables: { secrets: { read: "appMembers", write: "appMembers" } } }
+          defineSchema({
+            secrets: defineTable({ value: v.string() }).access({
+              read: "appMembers",
+              write: "appMembers",
+            }),
+          })
         )
       )
     );
@@ -590,9 +594,14 @@ describe("bounds", () => {
 /** A notes schema of `fields`, read by the App's members. */
 const memberNotes = (fields: Parameters<typeof defineTable>[0]): string =>
   manifestText(
-    schemaManifest(defineSchema({ notes: defineTable(fields) }), {
-      tables: { notes: { read: "appMembers", write: "appMembers" } },
-    })
+    schemaManifest(
+      defineSchema({
+        notes: defineTable(fields).access({
+          read: "appMembers",
+          write: "appMembers",
+        }),
+      })
+    )
   );
 
 describe("pinned schemas", () => {

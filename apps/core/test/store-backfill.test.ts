@@ -394,15 +394,12 @@ describe("a seal of a defaulted reference", () => {
           notes: defineTable({
             ...noteFields,
             tag: v.id("tags").nullable().default(null),
+          }).access({ read: "appMembers", write: "appMembers" }),
+          tags: defineTable({ name: v.string() }).access({
+            read: "appMembers",
+            write: "appMembers",
           }),
-          tags: defineTable({ name: v.string() }),
-        }),
-        {
-          tables: {
-            notes: { read: "appMembers", write: "appMembers" },
-            tags: { read: "appMembers", write: "appMembers" },
-          },
-        }
+        })
       )
     );
 

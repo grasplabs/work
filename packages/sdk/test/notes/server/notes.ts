@@ -5,7 +5,6 @@ import {
   v,
 } from "@grasp-os/sdk";
 
-import { noteFields } from "../schema.ts";
 import { internal } from "./_generated/internal.ts";
 import {
   doc,
@@ -14,6 +13,7 @@ import {
   query,
   action,
 } from "./_generated/server.ts";
+import { noteFields } from "./schema.ts";
 
 export const list = query({
   args: { pagination: paginationOptionsValidator },
@@ -89,6 +89,7 @@ export const count = internalQuery({
 });
 
 export const setSummary = mutation({
+  tables: { notes: { read: true, update: true } },
   args: {
     id: v.id("notes"),
     expectedRevision: v.number().integer().min(1),

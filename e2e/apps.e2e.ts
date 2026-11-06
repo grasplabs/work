@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -10,11 +11,6 @@ import { origin } from "./stack.ts";
 // open it, and use its page with live data from its App's functions; its
 // workflows and who opens it are in its settings. Only the people core
 // opens Apps to see them.
-
-const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ clicks: defineTable({ at: v.number() }) });
-`;
 
 const operations = `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
@@ -32,18 +28,10 @@ export const addOne = mutation({
 });
 `;
 
-/** The counter's registration, its one screen `screen`. */
-const registration = (
-  screen: string
-): string => `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Counter",
-  schema,
-  access: { tables: { clicks: { read: "appMembers", write: "appMembers" } } },
+/** The counter's screens: its one screen `screen`. */
+const screensOf = (screen: string): string => `export default {
   screens: [{ name: "${screen}", path: "/", source: "screens/${screen}.tsx" }],
-});
+};
 `;
 
 const screen = `import { useMutation, useQuery } from "@grasp-os/sdk/react";
@@ -65,9 +53,18 @@ export default function Counter() {
 
 /** The counter App's code: its schema, functions and one screen, `name`. */
 const counterApp = (name = "counter"): Record<string, string> => ({
-  "schema.ts": schema,
+  ...appDefinition({
+    name: "Counter",
+    tables: {
+      clicks: {
+        fields: { at: "v.number()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/counter.ts": operations,
-  "app.ts": registration(name),
+
+  "screens.ts": screensOf(name),
   [`screens/${name}.tsx`]: screen,
 });
 
@@ -128,10 +125,10 @@ test.beforeAll(async () => {
   app = await newApp(builder, name);
 });
 
-/** An App's registration with two screens, `home` and `counter`, of the counter's code. */
+/** An App with two screens, `home` and `counter`, of the counter's code. */
 const twoScreens = (): Record<string, string> => ({
   ...counterApp(),
-  "app.ts": registration("counter").replace(
+  "screens.ts": screensOf("counter").replace(
     'screens: [{ name: "counter"',
     'screens: [{ name: "home", path: "/home", source: "screens/home.tsx" }, { name: "counter"'
   ),

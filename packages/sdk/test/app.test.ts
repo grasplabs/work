@@ -2,18 +2,24 @@ import { canonicalText } from "@grasp-os/shared/json";
 import { describe, expect, test } from "vite-plus/test";
 
 import { databaseWriter } from "../src/database.ts";
-import { inspectApp, readAppManifest, registerFunctions } from "../src/host.ts";
+import { inspectApp, readAppManifest, registerApp } from "../src/host.ts";
 import type { ServerModules } from "../src/host.ts";
-import { AppError, app, permission } from "../src/index.ts";
-import type { AppDefinition, WorkflowEventReference } from "../src/index.ts";
+import { AppError, defineApp, permission } from "../src/index.ts";
+import type {
+  AppConfig,
+  ScreenDefinition,
+  SurfaceDefinition,
+  WorkflowEventReference,
+} from "../src/index.ts";
 import { readPermissionDeclaration } from "../src/permissions.ts";
 import { runFunction } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
 
-// How an App registers itself and the server functions its modules under
-// `server/` export, and what inspection makes of them (spec 7.1, 7.4,
-// 7.5): pure checks of a declaration, so unit tests.
+// How an App registers itself from its parts (its config, schema and
+// screens, and the server functions its modules under `server/` export),
+// and what inspection makes of them (spec 7.1, 7.4, 7.5): pure checks of
+// a declaration, so unit tests.
 // That the host enforces the result is tested through the host
 // (apps/core/test/operations.test.ts).
 
@@ -22,8 +28,8 @@ const schema = defineSchema({
     title: v.string(),
     rank: v.number().optional(),
     body: v.string().default(""),
-  }),
-  people: defineTable({ name: v.string() }),
+  }).access({ read: "appMembers", write: "owner" }),
+  people: defineTable({ name: v.string() }).access({ read: "appMembers" }),
 });
 
 const server = serverModule(schema);
@@ -49,14 +55,23 @@ const secret = server.internalQuery({
   handler: () => null,
 });
 
-type Registration = AppDefinition<(typeof schema)["tables"]>;
+/** Notes' config and screens, as one registration to vary. */
+interface Registration extends AppConfig {
+  readonly screens?: readonly ScreenDefinition[];
+  readonly surfaces?: readonly SurfaceDefinition[];
+}
 
 // SAFETY: deliberately ill-typed views, for declarations the types refuse.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-const looseApp = app as (definition: unknown) => unknown;
+const looseDefineApp = defineApp as (
+  config: unknown
+) => ReturnType<typeof defineApp>;
 // SAFETY: as above.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
 const looseQuery = server.query as (declaration: unknown) => unknown;
+// SAFETY: as above.
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+const looseMutation = server.mutation as (declaration: unknown) => unknown;
 // SAFETY: as above.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
 const looseAction = server.action as (declaration: unknown) => unknown;
@@ -69,20 +84,24 @@ const LooseAppError = AppError as new (
 ) => AppError;
 
 /** The Notes registration. */
-const registration: Registration = {
-  name: "Notes",
-  schema,
-  access: {
-    tables: {
-      notes: { read: "appMembers", write: "owner" },
-      people: { read: "appMembers" },
-    },
-  },
-  screens: [],
-};
+const registration: Registration = { name: "Notes" };
 
 /** Notes' server modules: `server/notes.ts`. */
 const notesModules: ServerModules = { notes: { list, create, send } };
+
+/** Registers `config`, `screens` and `modules` as the host's entry does. */
+const registerParts = (
+  config: ReturnType<typeof defineApp>,
+  { screens, surfaces }: Partial<Registration>,
+  modules: ServerModules
+) =>
+  registerApp({
+    config,
+    schema,
+    screens: { screens: screens ?? [], surfaces: surfaces ?? [] },
+    modules,
+    migrations: [],
+  });
 
 /**
  * Notes, with `changes` to its registration, and its functions from
@@ -91,15 +110,23 @@ const notesModules: ServerModules = { notes: { list, create, send } };
 const notes = (
   changes: Partial<Registration> = {},
   modules: ServerModules = notesModules
-) => registerFunctions(app({ ...registration, ...changes }), modules);
+) => {
+  const {
+    screens: _screens,
+    surfaces: _surfaces,
+    ...config
+  } = {
+    ...registration,
+    ...changes,
+  };
+  return registerParts(defineApp(config), changes, modules);
+};
 
 /** Registers Notes, and its functions, with `changes` the types refuse. */
 const looseNotes = (changes: object) =>
-  registerFunctions(
-    // SAFETY: `looseApp` answers what `app` does; `registerFunctions`
-    // refuses anything else at run time.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    looseApp({ ...registration, ...changes }) as ReturnType<typeof app>,
+  registerParts(
+    looseDefineApp({ ...registration, ...changes }),
+    {},
     notesModules
   );
 
@@ -139,20 +166,14 @@ const eventOf = (workflow: string): WorkflowEventReference => ({
 });
 
 describe("access", () => {
-  test("a table or mode the App doesn't declare is none", () => {
-    const { manifest } = inspectApp(
-      notes({ access: { tables: { notes: { read: "owner" } } } })
-    );
-    expect(manifest.schema.tables.notes?.access).toStrictEqual({
-      read: "owner",
-      write: "none",
-    });
+  test("a table without its own access is none, and a mode it leaves out too", () => {
+    const { manifest } = inspectApp(notes());
     expect(manifest.schema.tables.people?.access).toStrictEqual({
-      read: "none",
+      read: "appMembers",
       write: "none",
     });
     expect(manifest.operations["notes.create"]?.tables.people).toStrictEqual({
-      read: false,
+      read: true,
       insert: false,
       update: false,
       delete: false,
@@ -182,79 +203,89 @@ describe("access", () => {
     });
   });
 
-  test("an override narrows, and a verb or table it leaves out is denied", () => {
+  test("a function's tables narrow, and a verb or table they leave out is denied", () => {
+    const narrowed = server.mutation({
+      tables: { notes: { insert: true } },
+      args: {},
+      returns: v.null(),
+      handler: () => null,
+    });
     const { manifest } = inspectApp(
-      notes({
-        operationAccess: {
-          "notes.create": { tables: { notes: { insert: true } } },
-        },
-      })
+      notes({}, { notes: { list, create: narrowed, send } })
     );
     expect(manifest.operations["notes.create"]?.tables).toStrictEqual({
       notes: { read: false, insert: true, update: false, delete: false },
       people: { read: false, insert: false, update: false, delete: false },
     });
-    // Functions without one keep the App's scope.
+    // Functions without them keep their tables' access.
     expect(manifest.operations["notes.list"]?.tables.notes?.read).toBeTruthy();
+    // And so does the manifest read back.
+    expect(
+      canonicalText(readAppManifest(JSON.stringify(manifest)))
+    ).toStrictEqual(canonicalText(manifest));
   });
 
   test.each([
     [
-      "a verb the App's mode doesn't allow",
-      { "notes.create": { tables: { people: { insert: true } } } },
-      "widens access",
-    ],
-    [
-      "a read the App's mode doesn't allow",
-      {
-        "notes.list": { tables: { notes: { read: true }, people: {} } },
-        "notes.create": { tables: { people: { read: true, delete: true } } },
-      },
+      "a verb the table's access doesn't allow",
+      "mutation",
+      { people: { insert: true } },
       "widens access",
     ],
     [
       "a query writing",
-      { "notes.list": { tables: { notes: { read: true, insert: true } } } },
+      "query",
+      { notes: { read: true, insert: true } },
       "a query only reads",
     ],
+  ] as const)("tables with %s are refused", (_case, kind, tables, message) => {
+    const declared = (kind === "query" ? looseQuery : looseMutation)({
+      tables,
+      args: {},
+      returns: v.null(),
+      handler: () => null,
+    });
+    expect(refusal(() => notes({}, { notes: { list, declared } }))).toContain(
+      message
+    );
+  });
+
+  test.each([
     [
       "an action at all",
-      { "notes.send": { tables: { notes: { read: false } } } },
-      "an action has no tables",
-    ],
-    [
-      "an unknown path",
-      { "notes.missing": { tables: {} } },
-      "no server module exports",
-    ],
-    [
-      "a path no module could export",
-      { secret: { tables: {} } },
-      "no server module exports",
+      "action",
+      { notes: { read: false } },
+      "An action has no tables",
     ],
     [
       "an unknown table",
-      { "notes.create": { tables: { invoices: { read: false } } } },
+      "mutation",
+      { invoices: { read: false } },
       "doesn't have",
     ],
     [
       "an unknown verb",
-      { "notes.create": { tables: { notes: { upsert: false } } } },
-      "has no verb",
+      "mutation",
+      { notes: { upsert: false } },
+      "to booleans",
     ],
     [
       "a verb that isn't a boolean",
-      { "notes.create": { tables: { notes: { insert: "yes" } } } },
-      "is a boolean",
+      "mutation",
+      { notes: { insert: "yes" } },
+      "to booleans",
     ],
-    [
-      "a key besides tables",
-      { "notes.create": { tables: {}, admin: true } },
-      "is `{ tables }`",
-    ],
-  ])("an override with %s is refused", (_case, operationAccess, message) => {
-    expect(refusal(() => looseNotes({ operationAccess }))).toContain(message);
-  });
+  ] as const)(
+    "tables with %s are refused as declared",
+    (_case, kind, tables, message) => {
+      const declare = kind === "action" ? looseAction : looseMutation;
+      expect(
+        refusal(() =>
+          declare({ tables, args: {}, returns: v.null(), handler: () => null })
+        )
+      ).toContain(message);
+    }
+  );
 });
 
 describe("permissions", () => {
@@ -527,9 +558,9 @@ describe("paths", () => {
     }).toStrictEqual({ reads: 1, kind: "query", runs: list });
   });
 
-  test("an App inspected without its server functions is refused", () => {
-    expect(refusal(() => inspectApp(app(registration)))).toContain(
-      "registerFunctions"
+  test("a config inspected without the rest of its App is refused", () => {
+    expect(refusal(() => inspectApp(defineApp(registration)))).toContain(
+      "registerApp"
     );
   });
 

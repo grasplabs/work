@@ -390,9 +390,11 @@ test("an App's own chat writes its screen and server code, and its workspace pre
       "screens",
       "tally.tsx",
       "server",
-      "tally.ts",
-      "app.ts",
       "schema.ts",
+      "tally.ts",
+      "definition.json",
+      "grasp.config.ts",
+      "screens.ts",
     ]);
     await files.getByRole("button", { name: "tally.tsx" }).click();
     const code = page.getByRole("region", {

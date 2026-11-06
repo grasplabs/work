@@ -708,7 +708,10 @@ describe("an App's files", { timeout: 120_000 }, () => {
     // The same files under a second version.
     const { version } = await builder.api.apps.files.commit(
       app,
-      { ...files, "app.ts": `${files["app.ts"] ?? ""}\n// The second.\n` },
+      {
+        ...files,
+        "server/notes.ts": `${files["server/notes.ts"] ?? ""}\n// The second.\n`,
+      },
       "Second"
     );
     await builder.api.apps.versions.setCurrent(app, version);

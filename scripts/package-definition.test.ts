@@ -15,11 +15,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import {
-  inspectApp,
-  registerFunctions,
-  symbolicModules,
-} from "@grasp-os/sdk/host";
+import { inspectApp, symbolicModules } from "@grasp-os/sdk/host";
 import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
 import {
   definitionPackageFormatVersion,
@@ -52,8 +48,7 @@ import {
 import { ultraciteOf } from "../packages/compiler/src/ultracite.ts";
 import { ultraciteConfig } from "../packages/compiler/ultracite-config.ts";
 import { notesWorkflows } from "../packages/sdk/test/notes-workflows.ts";
-import notes from "../packages/sdk/test/notes/app.ts";
-import * as notesFunctions from "../packages/sdk/test/notes/server/notes.ts";
+import notes from "../packages/sdk/test/notes/.grasp/app.ts";
 import {
   packageProject,
   PackagingError,
@@ -89,10 +84,12 @@ export default Notes;
 /** The Notes fixture's source, as an App version's tree holds it. */
 const notesFiles = (): Record<string, string> => ({
   ...Object.fromEntries(
-    ["app.ts", "schema.ts", "server/notes.ts"].map((file) => [
-      file,
-      readFileSync(path.join(notesDir, file), "utf-8"),
-    ])
+    [
+      "grasp.config.ts",
+      "screens.ts",
+      "server/schema.ts",
+      "server/notes.ts",
+    ].map((file) => [file, readFileSync(path.join(notesDir, file), "utf-8")])
   ),
   "server/confirmations.ts": confirmations,
   "screens/notes.tsx": notesScreen,
@@ -155,9 +152,7 @@ const definitionOf = (
       generated: {},
     },
     files,
-    manifest: canonicalText(
-      inspectApp(registerFunctions(notes, { notes: notesFunctions })).manifest
-    ),
+    manifest: canonicalText(inspectApp(notes).manifest),
     store: null,
     bindings: {},
     workflows: {
@@ -629,7 +624,8 @@ describe(
         vendorTests: written.filter(
           (file) => file.startsWith("vendor/") && /\.test|\/test\//u.test(file)
         ),
-        sameSource: read("app/app.ts") === notesFiles()["app.ts"],
+        sameSource:
+          read("app/grasp.config.ts") === notesFiles()["grasp.config.ts"],
         sealedContracts: read("app/server/_generated/api.ts").includes(
           "notes.archive.confirmed"
         ),
@@ -663,8 +659,8 @@ describe(
       }).toStrictEqual({
         app: [
           "app/.grasp/contracts.json",
-          "app/app.ts",
-          "app/schema.ts",
+          "app/grasp.config.ts",
+          "app/screens.ts",
           "app/screens/notes.tsx",
           "app/server/_generated/api.ts",
           "app/server/_generated/dataModel.ts",
@@ -672,6 +668,7 @@ describe(
           "app/server/_generated/server.ts",
           "app/server/confirmations.ts",
           "app/server/notes.ts",
+          "app/server/schema.ts",
           "app/tsconfig.screens.json",
           "app/tsconfig.server.json",
         ],
@@ -959,9 +956,9 @@ describe(
         "C:/Windows/win.ini",
         "server\\notes.ts",
         "server//notes.ts",
-        "./app.ts",
+        "./grasp.config.ts",
         "nul\0.ts",
-        "APP.ts",
+        "GRASP.config.ts",
         "ſerver/notes.ts",
         "server/_generated/server.ts",
         "CON.ts",

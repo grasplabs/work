@@ -1,7 +1,8 @@
-import { AppError, permission, v } from "@grasp-os/sdk";
+import { AppError, v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 
-import { notesMax, shortTextMax, sourceFields } from "../schema.ts";
+import { permissions } from "../grasp.config.ts";
+import { notesMax, shortTextMax, sourceFields } from "../values.ts";
 import { reviewer } from "./drafts.ts";
 
 // Stakeholder chats: the intake invites someone on the team who isn't a
@@ -19,9 +20,7 @@ import { reviewer } from "./drafts.ts";
 // revokes a chat. The workflow reads no chat itself: only what the screen
 // read here and gave it.
 
-export const guests = permission.guests({
-  operations: ["invite", "list", "read", "revoke"],
-});
+const { guests } = permissions;
 
 /** The skill a stakeholder's chat follows. */
 export const interviewSkill = "interview-a-stakeholder";

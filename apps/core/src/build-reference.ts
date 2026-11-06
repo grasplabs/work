@@ -12,8 +12,9 @@ import { referenceFiles } from "@grasp-os/compiler";
 const blueprintsFolder = "blueprints/";
 
 /**
- * The reference, by path: `@grasp-os/sdk/src/app.ts`,
- * `@grasp-os/ui/src/components/card.tsx`, `blueprints/board-page/app.ts`.
+ * The reference, by path: `@grasp-os/sdk/src/server.ts`,
+ * `@grasp-os/ui/src/components/card.tsx`,
+ * `blueprints/board-page/definition.json`.
  * The platform's own text, never anyone's data.
  */
 export const buildReference = async (

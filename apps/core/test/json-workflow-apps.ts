@@ -21,6 +21,7 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { signedInSession } from "../src/auth/identity.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { grantReviewed, release } from "./apps.ts";
 import type { Idp } from "./idp.ts";
 import { liveStatus, runObject } from "./runs.ts";
@@ -320,30 +321,25 @@ export const endLiveResourceRuns = async (): Promise<void> => {
 
 /** The App every bound workflow here is bound to: one screen, one alias. */
 const boundAppFiles = (alias: string): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Requests",
+    tables: {
+      requests: {
+        fields: { who: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      `permission.workflow(${JSON.stringify(alias)}, { input: v.object({ who: v.string().trim().min(1) }), output: v.object({ status: v.string() }) })`,
+    ],
+  }),
+  "server/requests.ts": `import { permissions } from "../grasp.config.ts";
 
-export default defineSchema({
-  requests: defineTable({ who: v.string() }),
-});
+export const ${alias} = permissions.${alias};
 `,
-  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
-
-export const ${alias} = permission.workflow(${JSON.stringify(alias)}, {
-  input: v.object({ who: v.string().trim().min(1) }),
-  output: v.object({ status: v.string() }),
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { ${alias} } from "./server/requests.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
+  "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  permissions: { workflows: [${alias}] },
-});
+};
 `,
   "screens/desk.tsx": `export default function Desk() {
   return <main>Requests</main>;

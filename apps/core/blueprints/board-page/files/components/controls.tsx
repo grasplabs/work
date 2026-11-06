@@ -24,10 +24,10 @@ import { whilePending } from "./pending";
 import { settle } from "./snapshot";
 import type { Snapshot } from "./snapshot";
 
-/** Longest the decision a snapshot asks for is (schema.ts). */
+/** Longest the decision a snapshot asks for is (values.ts). */
 const decisionMax = 1000;
 
-/** Longest a snapshot's narrative is (schema.ts). */
+/** Longest a snapshot's narrative is (values.ts). */
 const narrativeMax = 30_000;
 
 const levels = Array.from({ length: maturityLevels + 1 }, (_, level) => ({

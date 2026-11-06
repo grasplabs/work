@@ -28,6 +28,7 @@ import {
   unpinRelease,
 } from "../src/release-retention.ts";
 import { hostedRelease } from "../src/release-runner.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   appWith,
@@ -45,9 +46,15 @@ import type { Fixture } from "./sealed-apps.ts";
 // and that a seal and a sweep can't delete what the other relies on.
 
 const files = (label: string): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-export default defineSchema({ notes: defineTable({ title: v.string() }) });
-`,
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: { title: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+  }),
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 export const label = query({
@@ -69,15 +76,6 @@ export const touchTwice = action({
     await ctx.runMutation(touch, {});
     return null;
   },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
 });
 `,
 });

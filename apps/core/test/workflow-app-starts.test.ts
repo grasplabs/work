@@ -1,6 +1,6 @@
 import {
   AppError,
-  app as registerApp,
+  defineApp,
   defineSchema,
   defineTable,
   permission,
@@ -9,7 +9,7 @@ import {
 import {
   inspectApp,
   manifestText,
-  registerFunctions,
+  registerApp,
   schemaHash,
 } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
@@ -92,7 +92,12 @@ import { outcome, unique } from "./sign-in.ts";
 // a real business store, its real outbox and the real start path; a
 // "rogue" runner stands for App code talking to its channel directly.
 
-const schema = defineSchema({ requests: defineTable({ title: v.string() }) });
+const schema = defineSchema({
+  requests: defineTable({ title: v.string() }).access({
+    read: "appMembers",
+    write: "appMembers",
+  }),
+});
 
 const { query, mutation, action } = serverModule(schema);
 
@@ -257,17 +262,13 @@ const plainMutation = mutation({
   handler: () => "plain",
 });
 
-const startsApp = registerFunctions(
-  registerApp({
+const startsApp = registerApp({
+  config: defineApp({
     name: "Requests",
-    schema,
-    access: {
-      tables: { requests: { read: "appMembers", write: "appMembers" } },
-    },
-    screens: [],
     permissions: { workflows: [followUp] },
   }),
-  {
+  schema,
+  modules: {
     requests: {
       list,
       submit,
@@ -281,8 +282,9 @@ const startsApp = registerFunctions(
       plainAction,
       plainMutation,
     },
-  }
-);
+  },
+  migrations: [],
+});
 
 const { manifest } = inspectApp(startsApp);
 

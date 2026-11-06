@@ -38,6 +38,7 @@ import { resultOf, runOf } from "../src/workflows/resource-runs.ts";
 import { copyIntoRun, sweepRunFiles } from "../src/workflows/run-files.ts";
 import { handFiles } from "../src/workflows/start-files.ts";
 import type { StartFile } from "../src/workflows/start-files.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { appWith, seal } from "./sealed-apps.ts";
@@ -52,20 +53,38 @@ import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-const files = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string() }),
-});
-`,
-  "server/review.ts": `import { permission, v } from "@grasp-os/sdk";
+/**
+ * The Reviews App: its files permission of `operations`, its `review`
+ * workflow taking a `doc` of type `doc`, and the `workflows` beside it.
+ */
+const files = ({
+  operations = '["upload", "read", "delete"]',
+  doc = "v.file()",
+  workflows = [],
+}: {
+  operations?: string;
+  doc?: string;
+  workflows?: readonly string[];
+} = {}): Record<string, string> => ({
+  ...appDefinition({
+    name: "Reviews",
+    tables: {
+      notes: {
+        fields: { title: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      `permission.files({ operations: ${operations} })`,
+      `permission.workflow("review", { input: v.object({ doc: ${doc} }), output: v.object({ status: v.string() }) })`,
+      ...workflows,
+    ],
+  }),
+  "server/review.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const review = permission.workflow("review", {
-  input: v.object({ doc: v.file() }),
-  output: v.object({ status: v.string() }),
-});
+export const review = permissions.review;
 
 /** Starts the review now, with the file the screen names. */
 export const startReview = action({
@@ -87,21 +106,10 @@ export const stageReview = mutation({
   },
 });
 `,
-  "app.ts": `import { app, permission } from "@grasp-os/sdk";
-import { review } from "./server/review.ts";
-import schema from "./schema.ts";
 
-export const attachments = permission.files({
-  operations: ["upload", "read", "delete"],
-});
-
-export default app({
-  name: "Reviews",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
+  "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-  permissions: { files: attachments, workflows: [review] },
-});
+};
 `,
   "screens/desk.tsx": `export default function Desk() {
   return <main>Reviews</main>;
@@ -868,17 +876,7 @@ describe(
         fixture.app,
         1
       );
-      const withoutRead = Object.fromEntries(
-        Object.entries(files()).map(([path, text]) => [
-          path,
-          path === "app.ts"
-            ? text.replace(
-                'operations: ["upload", "read", "delete"]',
-                'operations: ["upload", "delete"]'
-              )
-            : text,
-        ])
-      );
+      const withoutRead = files({ operations: '["upload", "delete"]' });
       const { version } = await fixture.builder.api.apps.files.commit(
         fixture.app,
         withoutRead,
@@ -899,17 +897,7 @@ describe(
       const fixture = await reviewsApp();
       // The same `{ id }` reaches the bound workflow, which takes it as a
       // file: copied all the same (`handFiles`).
-      const aliased = Object.fromEntries(
-        Object.entries(files()).map(([path, text]) => [
-          path,
-          path === "server/review.ts"
-            ? text.replace(
-                "input: v.object({ doc: v.file() })",
-                "input: v.object({ doc: v.object({ id: v.string() }) })"
-              )
-            : text,
-        ])
-      );
+      const aliased = files({ doc: "v.object({ id: v.string() })" });
       const { version } = await fixture.builder.api.apps.files.commit(
         fixture.app,
         aliased,
@@ -928,41 +916,13 @@ describe(
       // 120 more workflows, none of them taking a file, beside `review`,
       // declared as a plain object, whose bound workflow takes one.
       const extras = Array.from({ length: 120 }, (_, at) => `extra${at}`);
-      const many = Object.fromEntries(
-        Object.entries(files()).map(([path, text]) => {
-          if (path === "server/review.ts") {
-            return [
-              path,
-              text.replace(
-                "input: v.object({ doc: v.file() })",
-                "input: v.object({ doc: v.object({ id: v.string() }) })"
-              ),
-            ];
-          }
-          if (path === "app.ts") {
-            return [
-              path,
-              text
-                .replace(
-                  'import schema from "./schema.ts";',
-                  'import schema from "./schema.ts";\nimport * as extra from "./server/extra.ts";'
-                )
-                .replace(
-                  "permissions: { files: attachments, workflows: [review] },",
-                  "permissions: { files: attachments, workflows: [review, ...Object.values(extra)] },"
-                ),
-            ];
-          }
-          return [path, text];
-        })
-      );
-      many["server/extra.ts"] = [
-        'import { permission, v } from "@grasp-os/sdk";',
-        ...extras.map(
+      const many = files({
+        doc: "v.object({ id: v.string() })",
+        workflows: extras.map(
           (name) =>
-            `export const ${name} = permission.workflow("${name}", { input: v.object({ note: v.string() }), output: v.null() });`
+            `permission.workflow("${name}", { input: v.object({ note: v.string() }), output: v.null() })`
         ),
-      ].join("\n");
+      });
       const { version } = await fixture.builder.api.apps.files.commit(
         fixture.app,
         many,

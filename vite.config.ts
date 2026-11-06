@@ -17,8 +17,14 @@ const generated = [
   "scripts/release/testdata/**",
   // Third-party files vendored byte for byte, pinned by their hashes.
   "packages/*/vendor/**",
-  // What the host generates for an App, byte for byte (spec 8).
+  // What the host generates for an App, byte for byte (spec 8), and the
+  // config and schema an App's definition generates (the SDK's
+  // definition-source.ts), which its commits must equal.
   "**/.grasp/**",
+  "apps/core/blueprints/*/files/grasp.config.ts",
+  "apps/core/blueprints/*/files/server/schema.ts",
+  "apps/core/test/fixtures/blueprints/*/files/grasp.config.ts",
+  "apps/core/test/fixtures/blueprints/*/files/server/schema.ts",
   // The SDK's connector catalog, from the release's connectors
   // (apps/core/build-connector-catalog.ts).
   "packages/sdk/src/connector-catalog.gen.ts",

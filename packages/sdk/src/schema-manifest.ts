@@ -12,11 +12,11 @@ import {
   tablesOf,
 } from "./schema.ts";
 import type {
+  AccessModes,
   AnyTable,
   RowRules,
   SchemaDefinition,
   SchemaDefinitionCode,
-  TableState,
 } from "./schema.ts";
 import { descriptorVersion, isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
@@ -56,38 +56,8 @@ export const manifestVersion = 1;
  */
 export const manifestMaxBytes = 1024 * 1024;
 
-/**
- * Who a table's records reach, for reading or for writing: only their
- * owner, the App's members, its builders, or nobody.
- */
-export type AccessMode = "owner" | "appMembers" | "appBuilders" | "none";
-
-const accessModes: ReadonlySet<unknown> = new Set<AccessMode>([
-  "owner",
-  "appMembers",
-  "appBuilders",
-  "none",
-]);
-
-/** A table's access, as an App declares it: a mode left out is `none`. */
-export interface TableAccess {
-  readonly read?: AccessMode;
-  readonly write?: AccessMode;
-}
-
-/**
- * The access an App (or a store) declares for a schema's tables, as
- * `app.access` holds it: a table left out is `none` both ways.
- */
-export interface SchemaAccess {
-  readonly tables?: Readonly<Record<string, TableAccess>>;
-}
-
 /** A table's access as a manifest holds it: both modes, explicit. */
-export interface ManifestAccess {
-  readonly read: AccessMode;
-  readonly write: AccessMode;
-}
+export type ManifestAccess = AccessModes;
 
 /** An index as a manifest holds it: its fields, in order. */
 export interface ManifestIndex {
@@ -165,12 +135,6 @@ const mapOf = <Value>(
   return map;
 };
 
-/** A value of a map, only if the map has it as its own: never its prototype's. */
-const ownValue = (
-  map: Readonly<Record<string, unknown>>,
-  key: string
-): unknown => (Object.hasOwn(map, key) ? map[key] : undefined);
-
 /**
  * A name a manifest gave, as a message may quote it: only once it is a
  * valid name, so a refusal never repeats an unbounded piece of what was
@@ -180,96 +144,6 @@ const quoted = (name: string, what: string): string =>
   name.length <= schemaLimits.nameLength && storeNamePattern.test(name)
     ? `${what} \`${name}\``
     : `${what} with an invalid name`;
-
-const isAccessMode = (value: unknown): value is AccessMode =>
-  accessModes.has(value);
-
-/** One table's declared access, both modes explicit. */
-const tableAccessOf = (table: string, declared: unknown): ManifestAccess => {
-  if (declared === undefined) {
-    return { read: "none", write: "none" };
-  }
-  const known =
-    isPlainObject(declared) &&
-    Object.keys(declared).every((key) => key === "read" || key === "write");
-  // Only a mode left out is `none`; any other value, `null` included, must
-  // be a mode. A manifest read back always has both (`readTable`), so there
-  // nothing is filled in.
-  const modeOf = (key: "read" | "write"): unknown => {
-    const mode = known ? ownValue(declared, key) : null;
-    return mode === undefined ? "none" : mode;
-  };
-  const read = modeOf("read");
-  const write = modeOf("write");
-  if (!(isAccessMode(read) && isAccessMode(write))) {
-    return refuse(
-      "schema.invalid_access",
-      `${quoted(table, "Table")}'s access is \`read\` and \`write\`, each \`owner\`, \`appMembers\`, \`appBuilders\` or \`none\`.`
-    );
-  }
-  return { read, write };
-};
-
-/** The declared access of each of `tables`, checked against them. */
-const accessOf = (
-  tables: Readonly<Record<string, TableState>>,
-  access: unknown
-): Record<string, ManifestAccess> => {
-  const declared = isPlainObject(access) ? access.tables : undefined;
-  const isShaped =
-    isPlainObject(access) &&
-    Object.keys(access).every((key) => key === "tables") &&
-    (declared === undefined || isPlainObject(declared));
-  if (!isShaped) {
-    return refuse(
-      "schema.invalid_access",
-      "Access is `{ tables }`, a map of table names to their access."
-    );
-  }
-  const byTable = isPlainObject(declared) ? declared : {};
-  for (const table of Object.keys(byTable)) {
-    if (!Object.hasOwn(tables, table)) {
-      refuse(
-        "schema.unknown_table",
-        `Access names a table the schema doesn't have: ${quoted(table, "table")}.`
-      );
-    }
-  }
-  return mapOf(
-    Object.keys(tables).map((table) => [
-      table,
-      tableAccessOf(table, ownValue(byTable, table)),
-    ])
-  );
-};
-
-/**
- * Refuses row rules for a direction whose access mode they don't narrow:
- * rules choose rows among those a mode lets someone reach, so they need a
- * mode that reaches every row of the table (`appMembers` or
- * `appBuilders`). `owner` already narrows to one person's rows, and a
- * rule that widened it would leave two places saying who reads a row;
- * `rows.owner()` says it among the rules instead. `none` reaches no row,
- * so rules for it would say who reaches rows that nobody reaches.
- */
-const checkRulesFit = (
-  table: string,
-  access: ManifestAccess,
-  rules: RowRules | undefined
-): void => {
-  for (const direction of ["read", "write"] as const) {
-    const mode = access[direction];
-    if (
-      rules?.[direction] !== undefined &&
-      (mode === "owner" || mode === "none")
-    ) {
-      refuse(
-        "schema.invalid_rules",
-        `${quoted(table, "Table")} has row rules for ${direction === "read" ? "reading" : "writing"}, which choose among the rows its ${direction} access reaches, so that access is \`appMembers\` or \`appBuilders\` (\`rows.owner()\` among the rules says \`owner\`).`
-      );
-    }
-  }
-};
 
 /**
  * A manifest's canonical text: the same for the same schema and access,
@@ -284,30 +158,22 @@ export const manifestText = (manifest: SchemaManifest): string => {
   return canonicalJson(json);
 };
 
+/** A table's access where it declares none: nobody, both ways. */
+const noAccess: ManifestAccess = Object.freeze({ read: "none", write: "none" });
+
 /**
- * The canonical manifest of `schema`, made with `defineSchema`, with the
- * access declared for its tables (`app.access`, or a store's own): every
- * table's access explicit, `none` where none was declared. Throws
- * `SchemaDefinitionError` for access that names a table the schema hasn't,
- * or a mode that doesn't exist.
+ * The canonical manifest of `schema`, made with `defineSchema`: every
+ * table's access explicit (`.access`), `none` where it declares none.
  */
-export const schemaManifest = (
-  schema: SchemaDefinition,
-  access: SchemaAccess = {}
-): SchemaManifest => {
+export const schemaManifest = (schema: SchemaDefinition): SchemaManifest => {
   const tables = tablesOf(schema);
-  const accesses = accessOf(tables, access);
   const manifest: SchemaManifest = {
     manifestVersion,
     descriptorVersion,
     managedFields,
     tables: mapOf(
       Object.entries(tables).map(([name, table]) => {
-        // Every table has its own entry: `accessOf` made one for each.
-        const tableAccess = (Object.hasOwn(accesses, name)
-          ? accesses[name]
-          : undefined) ?? { read: "none", write: "none" };
-        checkRulesFit(name, tableAccess, table.rules);
+        const tableAccess = table.access ?? noAccess;
         return [
           name,
           {
@@ -356,7 +222,7 @@ interface ReadTable extends AnyTable {
   readonly index: (name: string, fields: readonly unknown[]) => ReadTable;
   readonly searchIndex: (fields: readonly unknown[]) => ReadTable;
   readonly sensitive: () => ReadTable;
-  readonly access: (rules: unknown) => ReadTable;
+  readonly access: (access: unknown) => ReadTable;
 }
 
 // SAFETY: `defineTable` and a table's `index` check at run time all that
@@ -392,10 +258,7 @@ const isTableShaped = (input: unknown): input is Record<string, unknown> => {
 };
 
 /** One table of a manifest of unknown origin, declared again from it. */
-const readTable = (
-  name: string,
-  input: unknown
-): { table: AnyTable; access: ManifestAccess } => {
+const readTable = (name: string, input: unknown): AnyTable => {
   const ruled = isPlainObject(input) && Object.hasOwn(input, "rules");
   if (!isTableShaped(input)) {
     return invalid(
@@ -452,17 +315,12 @@ const readTable = (
     }
     table = table.searchIndex(searchIndex.fields);
   }
-  if (ruled) {
-    // Declared as an author would: `.access` checks them whole.
-    table = table.access(rules);
-  }
   if (!hasExactly(access, ["read", "write"])) {
     return invalid(`${quoted(name, "Table")}'s access is \`{ read, write }\`.`);
   }
-  return {
-    table: input.sensitive === true ? table.sensitive() : table,
-    access: tableAccessOf(name, access),
-  };
+  // Declared as an author would: `.access` checks the modes and the rules.
+  table = table.access({ ...access, ...(ruled ? { rows: rules } : {}) });
+  return input.sensitive === true ? table.sensitive() : table;
 };
 
 /** What a manifest read back declares: its schema, and its manifest. */
@@ -535,14 +393,13 @@ export const readSchemaManifest = (text: string): ReadManifest => {
       `A schema has at most ${schemaLimits.tables} tables.`
     );
   }
-  const read = Object.entries(tables).map(
-    ([name, table]) => [name, readTable(name, table)] as const
-  );
   const schema = defineSchema(
-    mapOf(read.map(([name, { table }]) => [name, table]))
+    mapOf(
+      Object.entries(tables).map(([name, table]) => [
+        name,
+        readTable(name, table),
+      ])
+    )
   );
-  const manifest = schemaManifest(schema, {
-    tables: mapOf(read.map(([name, { access }]) => [name, access])),
-  });
-  return { schema, manifest };
+  return { schema, manifest: schemaManifest(schema) };
 };

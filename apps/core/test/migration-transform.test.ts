@@ -1,7 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { activateVersion } from "../src/app-activation.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles } from "../src/apps.ts";
 import {
@@ -15,7 +14,9 @@ import {
 import type { TransformRow } from "../src/migration-transform.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
 import { reviewVersion } from "../src/version-review.ts";
-import { appWith, failure, seal } from "./sealed-apps.ts";
+import { appDefinition } from "./app-definitions.ts";
+import type { TableSpec } from "./app-definitions.ts";
+import { appWith, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
 // An App's explicit migrations (spec 17.2), sealed with its release and
@@ -72,52 +73,50 @@ const tableOf = (name: string): string => name.replaceAll("-", "_");
 const tablesOf = (names: readonly string[]): string[] =>
   names.length === 0 ? ["notes"] : names.map((name) => tableOf(name));
 
-/** The schema of `names`' tables, each with `fields`. */
-const schemaOf = (names: readonly string[], fields: string): string =>
-  `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+/** `fields` as the App's values.ts exports them, as `name`, for its migrations. */
+const valuesOf = (
+  name: string,
+  fields: Readonly<Record<string, string>>
+): string => `import { v } from "@grasp-os/sdk";
 
-export const noteFields = {
-${fields}
+export const ${name} = {
+${Object.entries(fields)
+  .map(([field, type]) => `  ${field}: ${type},`)
+  .join("\n")}
+};
+`;
+
+/** The definition of `names`' tables, each with `fields`, and the fields as values.ts exports them. */
+const schemaOf = (
+  names: readonly string[],
+  fields: Readonly<Record<string, string>>
+): Record<string, string> => ({
+  ...appDefinition({
+    name: "Notes",
+    tables: Object.fromEntries(
+      tablesOf(names).map((table) => [
+        table,
+        { fields, access: { read: "owner", write: "owner" } },
+      ])
+    ),
+  }),
+  "values.ts": valuesOf("noteFields", fields),
+});
+
+const baseFields = {
+  title: "v.string().trim().min(1).max(200)",
+  body: 'v.string().max(100_000).default("")',
 };
 
-export default defineSchema({
-${tablesOf(names)
-  .map((table) => `  ${table}: defineTable(noteFields),`)
-  .join("\n")}
-});
-`;
-
-const baseFields = `  title: v.string().trim().min(1).max(200),
-  body: v.string().max(100_000).default(""),`;
-
 /** The fields of a note after the migration: a category, required. */
-const migratedFields = `${baseFields}
-  category: v.enum(["launch", "general"]),`;
-
-/** The App's registration, with `names`' migrations from `server/migrations/`. */
-const appOf = (names: readonly string[], registered: boolean): string => {
-  const access = tablesOf(names)
-    .map((table) => `${table}: { read: "owner", write: "owner" }`)
-    .join(", ");
-  return `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-${registered ? names.map((name, index) => `import m${index} from "./server/migrations/${name}.ts";`).join("\n") : ""}
-
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { ${access} } },
-  screens: [],
-  migrations: [${registered ? names.map((_name, index) => `m${index}`).join(", ") : ""}],
-});
-`;
+const migratedFields = {
+  ...baseFields,
+  category: 'v.enum(["launch", "general"])',
 };
 
 /** Notes before the migrations of `names`: no category yet. */
-const baseFiles = (names: readonly string[]): Record<string, string> => ({
-  "schema.ts": schemaOf(names, baseFields),
-  "app.ts": appOf(names, false),
-});
+const baseFiles = (names: readonly string[]): Record<string, string> =>
+  schemaOf(names, baseFields);
 
 /** Notes, with `migrations` (file name to source) registered in order. */
 const notesFiles = (
@@ -125,14 +124,13 @@ const notesFiles = (
 ): Record<string, string> => {
   const names = Object.keys(migrations);
   return {
-    "schema.ts": schemaOf(names, migratedFields),
+    ...schemaOf(names, migratedFields),
     ...Object.fromEntries(
       Object.entries(migrations).map(([name, source]) => [
         `server/migrations/${name}.ts`,
         source,
       ])
     ),
-    "app.ts": appOf(names, true),
   };
 };
 
@@ -148,7 +146,7 @@ const migrationSource = (
     fixtures = '[{ row: { title: "Fixture" } }]',
   } = {}
 ): string => `import { migration, v } from "@grasp-os/sdk";
-import { noteFields } from "../../schema.ts";
+import { noteFields } from "../../values.ts";
 ${prelude}
 export default migration({
   name: ${JSON.stringify(name)},
@@ -469,118 +467,6 @@ describe("an explicit migration", { timeout: 120_000 }, () => {
     expect(review.migrations).toHaveLength(Object.keys(handlers).length);
   });
 
-  it("is listed in the review when declared inline in app.ts", async () => {
-    const inline = notesFiles({});
-    inline["app.ts"] = `import { app, migration, v } from "@grasp-os/sdk";
-import schema, { noteFields } from "./schema.ts";
-
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
-  migrations: [
-    migration({
-      name: "inline-category",
-      fromSchema: ${JSON.stringify("f".repeat(64))},
-      toSchema: ${JSON.stringify(placeholder)},
-      table: "notes",
-      output: v.object(noteFields),
-      fixtures: [{ row: { title: "Fixture" } }],
-      handler: (ctx, row) => ({ ...row, category: "general" }),
-    }),
-  ],
-});
-`;
-    const fixture = await appWith(inline);
-    const review = await reviewVersion(env, fixture.owner, fixture.app, 1);
-
-    expect(review.migrations).toStrictEqual([
-      {
-        name: "inline-category",
-        table: "notes",
-        change: "added",
-        fixtures: 1,
-        // Not sealed yet: its fixtures haven't run.
-        fixturesPassed: null,
-      },
-    ]);
-  });
-
-  it("is listed in the review when a version only registers a migration file the current one had", async () => {
-    const source = migrationSource(
-      "derive-category",
-      handlers["derive-category"],
-      {
-        input: inputs["derive-category"],
-      }
-    );
-    const unregistered = {
-      ...notesFiles({ "derive-category": source }),
-      "app.ts": appOf(["derive-category"], false),
-    };
-    const fixture = await appWith(unregistered);
-    await activateVersion(env, fixture.owner, fixture.app, 1);
-    const { version } = await commitFiles(
-      env,
-      fixture.owner,
-      fixture.app,
-      notesFiles({ "derive-category": source }),
-      "Register"
-    );
-    const review = await reviewVersion(
-      env,
-      fixture.owner,
-      fixture.app,
-      version
-    );
-
-    expect(review.files.map(({ path }) => path)).toStrictEqual(["app.ts"]);
-    expect(review.migrations).toStrictEqual([
-      {
-        name: "derive-category",
-        table: "derive_category",
-        change: "added",
-        fixtures: 1,
-        fixturesPassed: null,
-      },
-    ]);
-  });
-
-  it.each([
-    [
-      "built from server code",
-      {
-        "server/helpers.ts": "export const label = 'general';\n",
-        "server/migrations/derive-category.ts": migrationSource(
-          "derive-category",
-          "(ctx, row) => ({ ...row, category: label })",
-          { prelude: 'import { label } from "../server/helpers.ts";' }
-        ),
-      },
-      "version.build_failed",
-    ],
-    [
-      "that reaches the network while its code loads",
-      {
-        "server/migrations/derive-category.ts": migrationSource(
-          "derive-category",
-          "(ctx, row) => row",
-          { prelude: 'await fetch("https://example.com");' }
-        ),
-      },
-      "version.inspection_failed",
-    ],
-  ])("is refused at the seal when %s", async (_case, changes, code) => {
-    const fixture = await appWith({
-      ...notesFiles({ "derive-category": "" }),
-      ...changes,
-    });
-    await expect(failure(async () => await seal(fixture))).resolves.toBe(code);
-  });
-});
-
-describe("transforming a batch", { timeout: 120_000 }, () => {
   it("derives each record's fields, keeping what the target doesn't declare", async () => {
     await expect(run("derive-category")).resolves.toStrictEqual({
       ok: true,
@@ -789,48 +675,53 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
   });
 });
 
+/** Who reads and writes the table of salary migration `name` (see below). */
+const salaryAccess = (name: string): TableSpec["access"] => {
+  if (name.startsWith("none-")) {
+    return { read: "none", write: "appMembers" };
+  }
+  if (name.startsWith("open-")) {
+    return { read: "appMembers", write: "appMembers" };
+  }
+  return {
+    read: "appMembers",
+    write: "appMembers",
+    rows: {
+      read: [
+        { kind: "person", field: "employee" },
+        { kind: "team", field: "team" },
+      ],
+    },
+  };
+};
+
 /**
  * Salaries read by the person each names and the team it is for, each
  * migration's table its own, with `fields`; an `open-` or `none-`
- * migration's table has no rules (`salariesApp` sets who reads it).
+ * migration's table has no rules: an `open-` one's members read it, and
+ * no one reads a `none-` one's.
  */
-const salariesSchema = (names: readonly string[], fields: string): string =>
-  `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
-
-export const salaryFields = {
-${fields}
-};
-
-export default defineSchema({
-${names
-  .map((name) =>
-    name.startsWith("open-") || name.startsWith("none-")
-      ? `  ${tableOf(name)}: defineTable(salaryFields),`
-      : `  ${tableOf(name)}: defineTable(salaryFields).access({ read: [rows.person("employee"), rows.team("team")] }),`
-  )
-  .join("\n")}
+const salariesSchema = (
+  names: readonly string[],
+  fields: Readonly<Record<string, string>>
+): Record<string, string> => ({
+  ...appDefinition({
+    name: "Notes",
+    tables: Object.fromEntries(
+      names.map((name) => [
+        tableOf(name),
+        { fields, access: salaryAccess(name) },
+      ])
+    ),
+  }),
+  "values.ts": valuesOf("salaryFields", fields),
 });
-`;
 
-const salaryBase = `  employee: v.person(),
-  team: v.string(),
-  amount: v.number(),`;
-
-/**
- * The App registering `names`' migrations, when `registered`: every table
- * read and changed by its members, but a `none-` migration's, which no one
- * reads.
- */
-const salariesApp = (names: readonly string[], registered: boolean): string =>
-  appOf(names, registered)
-    .replaceAll(
-      /(?<table>none_\w+): \{ read: "owner", write: "owner" \}/gu,
-      '$<table>: { read: "none", write: "appMembers" }'
-    )
-    .replaceAll(
-      '{ read: "owner", write: "owner" }',
-      '{ read: "appMembers", write: "appMembers" }'
-    );
+const salaryBase = {
+  employee: "v.person()",
+  team: "v.string()",
+  amount: "v.number()",
+};
 
 /** Module state of each salary migration: the row before, while a call lasts. */
 const salaryPrelude = "let previous: number | undefined;";
@@ -905,10 +796,10 @@ const sealedSalaries = async () =>
     (fromSchema, toSchema) => {
       const names = Object.keys(salaryHandlers);
       return {
-        "schema.ts": salariesSchema(
-          names,
-          `${salaryBase}\n  band: v.enum(["low", "high"]),`
-        ),
+        ...salariesSchema(names, {
+          ...salaryBase,
+          band: 'v.enum(["low", "high"])',
+        }),
         ...Object.fromEntries(
           Object.entries(salaryHandlers).map(([name, handler]) => [
             `server/migrations/${name}.ts`,
@@ -923,13 +814,9 @@ const sealedSalaries = async () =>
             }).replaceAll("noteFields", "salaryFields"),
           ])
         ),
-        "app.ts": salariesApp(names, true),
       };
     },
-    {
-      "schema.ts": salariesSchema(Object.keys(salaryHandlers), salaryBase),
-      "app.ts": salariesApp(Object.keys(salaryHandlers), false),
-    }
+    salariesSchema(Object.keys(salaryHandlers), salaryBase)
   ));
 
 /** A salary record of `employee` in `team`. */

@@ -21,12 +21,14 @@ import {
   transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
+import { appDefinition, definedWith, redefined } from "./app-definitions.ts";
 import { published, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { notesFiles } from "./notes-client-app.ts";
+import { defineNotes, notesCode, notesFiles } from "./notes-client-app.ts";
+import { calledAs } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
 import { stoppingUltracite } from "./ultracite-stops.ts";
 
@@ -54,6 +56,9 @@ const rates = (at: number): string =>
   `var rate${at} = ${at}\nexport const total${at} = (n: number) => { return n*rate${at} }\n`;
 
 const appName = "Invoice desk";
+
+/** The Ledger's definition, which its first version got: empty, as it has pages alone. */
+const ledgerDefinition = appDefinition({ name: "Ledger" });
 
 /** A screen whose button is restyled, which @shadcn/lint refuses. */
 const restyled = `import { Button } from "@grasp-os/ui/components/button";
@@ -316,13 +321,18 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       base: 1,
       revision: 1,
       changed: ["notes.md"],
-      files: { "AGENTS.md": "# Ledger\n", "notes.md": "the agent's" },
+      files: {
+        ...ledgerDefinition,
+        "AGENTS.md": "# Ledger\n",
+        "notes.md": "the agent's",
+      },
     });
     expect(returned(after?.text)).toStrictEqual({
       notes: "the agent's",
       builder: null,
     });
     await expect(builder.api.apps.files.read(existing)).resolves.toStrictEqual({
+      ...ledgerDefinition,
       "AGENTS.md": "# Ledger\n",
       "notes.md": "the builder's",
       "builder.md": "mine",
@@ -415,17 +425,19 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("reports server code that throws as it registers as one error at its line, not one per screen", async () => {
-    const throwing = (notesFiles["app.ts"] ?? "").replace(
-      "\nexport default app({",
-      'if (schema !== undefined) throw new Error("No notes today");\nexport default app({'
+    const operations = notesCode["server/notes.ts"] ?? "";
+    const throwing = operations.replace(
+      "\nexport const list = query({",
+      '\nif (globalThis.Object === Object) throw new Error("No notes today");\nexport const list = query({'
     );
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        const written = await env.build.write(app.id, ${JSON.stringify({ ...notesFiles, "app.ts": throwing })});
+        ${defineNotes}
+        const written = await env.build.write(app.id, ${JSON.stringify({ ...notesCode, "server/notes.ts": throwing })});
         const proposal = await env.build.propose(app.id, "Notes");
-        // Then an operations file that doesn't parse, its registration fixed.
-        const unparsed = await env.build.write(app.id, ${JSON.stringify({ "app.ts": notesFiles["app.ts"], "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}\nexport const broken = query({ args: {` })});
+        // Then an operations file that doesn't parse, the throw gone.
+        const unparsed = await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": `${operations}\nexport const broken = query({ args: {` })});
         return {
           errors: written.errors,
           diagnostics: written.diagnostics.map(({ file, line, rule, severity, message }) => ({ file, line, rule, severity, says: message.includes("No notes today") })),
@@ -440,14 +452,12 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await chat.ask("Build a notes App");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual({
+    // Where the throw is: its file, whatever line the tidied write puts it on.
+    expect(returned(result?.text)).toMatchObject({
       errors: 1,
       diagnostics: [
         {
-          // Where the throw is once the write is tidied: its imports
-          // grouped, a line apart.
-          file: "app.ts",
-          line: 6,
+          file: "server/notes.ts",
           rule: "server",
           severity: "error",
           says: true,
@@ -485,7 +495,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // Never inspected before, so no kept registration serves it.
     const files = {
       ...notesFiles,
-      "app.ts": `${notesFiles["app.ts"] ?? ""}// ${crypto.randomUUID()}\n`,
+      "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}// ${crypto.randomUUID()}\n`,
     };
     await chat.stub.saveDraft(
       chatId,
@@ -573,6 +583,281 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       `${appName}2`,
       appErrors.create("app.creates_exhausted").message,
     ]);
+  });
+
+  it("changes a definition whose table holds records only as the records can follow, says what each change does to them, and records each change", async () => {
+    // Version 1: the Notes App, current, with a note in its store, and an
+    // answer its definition kept for a category it no longer has.
+    const { builder, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
+        const definition = async () => JSON.parse((await env.build.files(app.id)).files["definition.json"]);
+        const steps = {};
+        // A field the released version has holds the note's value under
+        // its name: refused, saying what to do instead.
+        steps.released = await env.build.define(app.id, { op: "renameField", table: "notes", field: "title", name: "heading" });
+        // A field the note lacks: checked against it, answered or not.
+        const unanswered = await env.build.define(app.id, { op: "addField", table: "notes", name: "category", type: "v.string()" });
+        steps.unanswered = unanswered.ok && unanswered.plan.checks;
+        const answered = await env.build.define(app.id, { op: "changeField", table: "notes", field: "category", type: "v.string()", answer: "general" });
+        steps.answered = answered.ok && answered.plan.checks;
+        // An answer belongs to the version it is committed with: the
+        // draft starts with none of the released version's, and keeps its
+        // own through a rename of its field, which this draft added.
+        steps.answers = (await definition()).answers.length;
+        const renamed = await env.build.define(app.id, { op: "renameField", table: "notes", field: "category", name: "topic" });
+        steps.renamed = renamed.ok && renamed.plan.checks;
+        steps.afterRename = (await definition()).answers.length;
+        const sensitive = await env.build.define(app.id, { op: "setAccess", table: "notes", access: { read: "owner", write: "owner" }, sensitive: true });
+        steps.sensitive = sensitive.ok && sensitive.plan.sensitiveTables;
+        return steps;
+      };`),
+      says("Defined."),
+    ]);
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
+    await release(
+      builder,
+      app,
+      redefined(notesFiles, (definition) => ({
+        ...definition,
+        answers: [
+          {
+            table: definition.tables[0]?.id ?? "",
+            field: definition.tables[0]?.fields[0]?.id ?? "",
+            value: "Untitled",
+          },
+        ],
+      }))
+    );
+    await calledAs(
+      await builder.api.whoami(),
+      app,
+      { name: "notes.create", kind: "mutation" },
+      { title: "Plan" }
+    );
+    await grant();
+
+    await chat.ask("Give the notes a category");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    const steps = z
+      .object({
+        released: z.object({ ok: z.literal(false), problem: z.string() }),
+      })
+      .loose()
+      .parse(returned(result?.text));
+    const events = await allEvents();
+    const defined = events.filter(
+      ({ action, detail }) =>
+        action === "agent.call" &&
+        detail.chat === chat.chat.id &&
+        detail.method === "build.define"
+    );
+    expect({
+      ...steps,
+      released: steps.released.problem.includes(
+        "Only a field this draft added renames"
+      ),
+      audited: defined.map(({ detail }) => [detail.op, detail.table]),
+    }).toStrictEqual({
+      released: true,
+      unanswered: [{ table: "notes", field: "category", answered: false }],
+      answered: [{ table: "notes", field: "category", answered: true }],
+      answers: 1,
+      renamed: [{ table: "notes", field: "topic", answered: true }],
+      afterRename: 1,
+      sensitive: ["notes"],
+      audited: [
+        ["renameField", "notes"],
+        ["addField", "notes"],
+        ["changeField", "notes"],
+        ["renameField", "notes"],
+        ["setAccess", "notes"],
+      ],
+    });
+  });
+
+  it("saves a new App's first write with the definition it gets, so its draft reads and previews whole", async () => {
+    const { chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled.replace(' className="rounded-full"', "") })});
+        const draft = await env.build.files(app.id);
+        return { changed: written.changed.toSorted(), files: Object.keys(draft.files).toSorted() };
+      };`),
+      says("Written."),
+    ]);
+    await grant();
+
+    await chat.ask("Build a desk");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    const files = [
+      "definition.json",
+      "grasp.config.ts",
+      "screens/desk.tsx",
+      "server/schema.ts",
+    ];
+    expect(returned(result?.text)).toStrictEqual({ changed: files, files });
+  });
+
+  it("plans a definition change from the version people use, and asks again for an answer a skipped version had", async () => {
+    const { builder, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
+        const indexed = await env.build.define(app.id, { op: "addIndex", table: "notes", name: "by_title", fields: ["title"] });
+        const answered = await env.build.define(app.id, { op: "changeField", table: "notes", field: "category", type: "v.string()", answer: "general" });
+        const definition = JSON.parse((await env.build.files(app.id)).files["definition.json"]);
+        return { indexed: indexed.ok && indexed.plan.checks, answered: answered.ok && answered.plan.checks, answers: definition.answers.length };
+      };`),
+      says("Indexed."),
+    ]);
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
+    // Version 1 runs; version 2 adds a category its notes lack, answered,
+    // and isn't current yet.
+    await release(builder, app, notesFiles);
+    await builder.api.apps.files.commit(
+      app,
+      definedWith(notesFiles, {
+        op: "addField",
+        table: "notes",
+        name: "category",
+        type: "v.string()",
+        answer: "general",
+      }),
+      "Categories"
+    );
+    await grant();
+
+    await chat.ask("Index the notes by title");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    // Released from version 1, the notes still lack the category: the
+    // plan of that move checks them for it, unanswered, as version 2's
+    // answer was version 2's; answered again, it is the draft's own.
+    expect(returned(result?.text)).toStrictEqual({
+      indexed: [{ table: "notes", field: "category", answered: false }],
+      answered: [{ table: "notes", field: "category", answered: true }],
+      answers: 1,
+    });
+  });
+
+  it("renames no field a version that ran had, after a rollback to one without it too", async () => {
+    const { builder, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
+        return await env.build.define(app.id, { op: "renameField", table: "notes", field: "nickname", name: "displayName" });
+      };`),
+      says("Renamed."),
+    ]);
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
+    // Version 2 ran with a nickname, which people may have filled in;
+    // then the App was rolled back to version 1, which has none.
+    await release(builder, app, notesFiles);
+    await release(
+      builder,
+      app,
+      definedWith(notesFiles, {
+        op: "addField",
+        table: "notes",
+        name: "nickname",
+        type: "v.string().optional()",
+      })
+    );
+    await builder.api.apps.versions.setCurrent(app, 1);
+    await grant();
+
+    await chat.ask("Call the nickname a display name");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    const refused = z
+      .object({ ok: z.literal(false), problem: z.string() })
+      .parse(returned(result?.text));
+    expect(refused.problem).toContain("`notes.nickname` is in a version");
+  });
+
+  it("keeps a draft's answer for a field whose type the version people use doesn't have yet, whatever that version answered", async () => {
+    const { builder, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
+        const changed = await env.build.define(app.id, { op: "changeField", table: "notes", field: "category", type: 'v.string().default("general")', answer: "general" });
+        const indexed = await env.build.define(app.id, { op: "addIndex", table: "notes", name: "by_title", fields: ["title"] });
+        const definition = JSON.parse((await env.build.files(app.id)).files["definition.json"]);
+        return { changed: changed.ok, checks: indexed.ok && indexed.plan.checks, answers: definition.answers.map(({ value }) => value) };
+      };`),
+      says("Changed."),
+    ]);
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
+    // The version people use: a category that may be null, answered null.
+    await release(
+      builder,
+      app,
+      definedWith(notesFiles, {
+        op: "addField",
+        table: "notes",
+        name: "category",
+        type: "v.string().nullable().default(null)",
+        answer: null,
+      })
+    );
+    await grant();
+
+    await chat.ask("Make the category required");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    // The draft's own answer stays through a later change: the notes
+    // holding null need it to fit the category that can't be null.
+    expect(returned(result?.text)).toStrictEqual({
+      changed: true,
+      checks: [{ table: "notes", field: "category", answered: true }],
+      answers: ["general"],
+    });
+  });
+
+  it("refuses a commit that renames a field a version has, as the definition tools do", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
+    const nicknamed = definedWith(notesFiles, {
+      op: "addField",
+      table: "notes",
+      name: "nickname",
+      type: "v.string().optional()",
+    });
+    await release(builder, app, nicknamed);
+    // Its definition.json written by hand, as an export or a builder
+    // would: the field's ID kept, its name changed.
+    const renamed = redefined(nicknamed, (definition) => ({
+      ...definition,
+      tables: definition.tables.map((table) => ({
+        ...table,
+        fields: table.fields.map((field) =>
+          field.name === "nickname" ? { ...field, name: "displayName" } : field
+        ),
+      })),
+    }));
+
+    const refused: unknown = await builder.api.apps.files
+      .commit(app, renamed, "Rename")
+      .then(
+        () => null,
+        (error: unknown) => error
+      );
+
+    const { code, details } = z
+      .object({
+        code: z.string(),
+        details: z.object({ issues: z.array(z.string()) }),
+      })
+      .parse(refused);
+    expect(code).toBe("app.definition_invalid");
+    expect(details.issues.join(" ")).toContain(
+      "`notes.nickname` is in a version of the App"
+    );
   });
 
   it("keeps no change that leaves a file as the base has it", async () => {
@@ -1361,7 +1646,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const late =
       "The build didn't finish in time. It runs again when this is first used.";
     expect(returned(result?.text)).toStrictEqual({
-      written: { errors: 0, notChecked: { screens: late } },
+      written: { errors: 0, notChecked: { screens: late, server: late } },
       proposal: {
         version: null,
         passed: false,
@@ -1407,7 +1692,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // Calls an internal operation by its reference, typed as the seal's
     // generated references type it from the draft's own operations: what
     // it answers is typed, and a wrong call fails.
-    const operations = `${(notesFiles["server/notes.ts"] ?? "").replace(
+    const operations = `${(notesCode["server/notes.ts"] ?? "").replace(
       "import { action, doc, mutation, query }",
       'import { internal } from "@server/_generated/internal";\nimport { action, doc, internalQuery, mutation, query }'
     )}
@@ -1431,14 +1716,15 @@ export const titles = action({
       "const notes = await ctx.runQuery(internal.notes.listAll, {});\n    return notes.map((note) => note.title);",
       "return await ctx.runQuery(internal.notes.missing, {});"
     );
-    const sound = { ...notesFiles, "server/notes.ts": operations };
+    const sound = { ...notesCode, "server/notes.ts": operations };
     const mistyped = operations.replace(
-      'import { noteFields } from "../schema.ts";',
-      'import { noteFields } from "../schema.ts";\n\nexport const total: number = "seven";'
+      'import { noteFields } from "../values.ts";',
+      'import { noteFields } from "../values.ts";\n\nexport const total: number = "seven";'
     );
     const { person, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        ${defineNotes}
         // What each write says of the server code (its screens apart).
         const server = (written) => ({ errors: written.errors, diagnostics: written.diagnostics.filter(({ file }) => !file?.startsWith("screens/")).map(({ file, rule }) => ({ file, rule })) });
         const wrongCall = server(await env.build.write(app.id, ${JSON.stringify({ ...sound, "server/notes.ts": wrongCall })}));
@@ -1446,8 +1732,7 @@ export const titles = action({
         const mistyped = server(await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": mistyped })}));
         const proposal = await env.build.propose(app.id, "Notes");
         const leftover = server(await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": operations, "app/server.ts": "export const leftover = 1;\n", "app/exports.json": "{}" })}));
-        const unregistered = server(await env.build.write(app.id, ${JSON.stringify({ "app/server.ts": null, "app/exports.json": null, "app.ts": null })}));
-        return { wrongCall, sound, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover, unregistered };
+        return { wrongCall, sound, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover };
       };`),
       says("Checked."),
     ]);
@@ -1470,7 +1755,6 @@ export const titles = action({
       leftover: {
         diagnostics: [layout("app/exports.json"), layout("app/server.ts")],
       },
-      unregistered: { diagnostics: [layout(null)] },
     });
     const app = await createdApp(person.api);
     await expect(person.api.apps.versions.list(app.id)).resolves.toStrictEqual(
@@ -1482,20 +1766,21 @@ export const titles = action({
     // An unused name is a lint finding, never a type error: mid-edit, the
     // draft still builds and its preview still runs.
     const unused = {
-      ...notesFiles,
-      "server/notes.ts": (notesFiles["server/notes.ts"] ?? "").replace(
-        'import { noteFields } from "../schema.ts";',
-        'import { noteFields } from "../schema.ts";\nimport { internal } from "@server/_generated/internal";'
+      ...notesCode,
+      "server/notes.ts": (notesCode["server/notes.ts"] ?? "").replace(
+        'import { noteFields } from "../values.ts";',
+        'import { noteFields } from "../values.ts";\nimport { internal } from "@server/_generated/internal";'
       ),
-      "screens/notes.tsx": `import { Badge } from "@grasp-os/ui/components/badge";\n${notesFiles["screens/notes.tsx"] ?? ""}`,
+      "screens/notes.tsx": `import { Badge } from "@grasp-os/ui/components/badge";\n${notesCode["screens/notes.tsx"] ?? ""}`,
     };
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        ${defineNotes}
         const written = await env.build.write(app.id, ${JSON.stringify(unused)});
         const called = await env.build.call(app.id, "notes.echo", { word: "hi" });
         const refused = await env.build.propose(app.id, "Notes");
-        const fixed = await env.build.write(app.id, ${JSON.stringify(notesFiles)});
+        const fixed = await env.build.write(app.id, ${JSON.stringify(notesCode)});
         const proposed = await env.build.propose(app.id, "Notes");
         const statuses = ({ check }) => ({ passed: check.passed, screens: check.screens.status, server: check.server.status, lint: check.lint.status });
         return {
@@ -1697,6 +1982,7 @@ export const titles = action({
     await expect(
       builder.api.apps.files.read(existing, 3)
     ).resolves.toStrictEqual({
+      ...ledgerDefinition,
       "AGENTS.md": "# Ledger\n\nWith notes.\n",
       "board.md": "the builder's",
       "notes.md": "the agent's",

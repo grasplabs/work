@@ -6,7 +6,7 @@ import {
 import { query } from "@server/_generated/server";
 import type { Doc, QueryCtx } from "@server/_generated/server";
 
-import { appLink, shortTextMax, workflowStates } from "../schema.ts";
+import { appLink, shortTextMax, workflowStates } from "../values.ts";
 import { teamsMax } from "./teams.ts";
 
 // The map's numbers, for another App to read (the board page, through an

@@ -5,6 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createFromBlueprint } from "../src/app-blueprints.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { outlook, release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -51,12 +52,15 @@ const personApi = async (role: Role): Promise<Person> =>
  * would show to whoever has a role in it.
  */
 const notesCode = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ text: v.string().min(1).max(200) }),
-});
-`,
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: { text: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
@@ -70,16 +74,6 @@ export const list = query({
   args: {},
   returns: v.array(v.string()),
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.text),
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
 });
 `,
 };

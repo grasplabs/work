@@ -5,13 +5,17 @@ sidebar:
   order: 3
 ---
 
-Each App has a store of its own. You declare its tables in `schema.ts`, say who may read and write each in `app.ts`, and read and write records from server functions through `ctx.db`.
+Each App has a store of its own. Its definition declares its tables and who may read and write each, Grasp generates `server/schema.ts` from it, and you read and write records from server functions through `ctx.db`.
 
 ## Tables and fields
 
 A table is a set of fields, each typed with `v`. Every record also has the fields Grasp keeps for it: `_id`, `_ownerId` (who inserted it), `_rev` (its revision, raised by every write), `_createdAt` and `_updatedAt`.
 
-```ts schema.ts
+Tables live in the App's definition. Grasp adds and changes them with its definition tools: `addTable` adds a table, `addField` a field, `changeField` gives a field another type, `renameField` renames one (its ID stays, so its indexes and rules follow it) and `addIndex` adds an index or the table's search index. A field's type is written as code writes it, such as `v.string().max(200)`. Each change answers what it does to the records the App already holds: a field they lack, for instance, takes a default or an answer to fill it in.
+
+From the definition, Grasp generates `server/schema.ts`:
+
+```ts server/schema.ts
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
@@ -20,18 +24,24 @@ export default defineSchema({
     done: v.boolean().default(false),
     due: v.timestamp().nullable().default(null),
     project: v.id("projects").nullable().default(null),
-  }).index("by_done", ["done", "_createdAt"]),
+  })
+    .index("by_done", ["done", "_createdAt"])
+    .access({ read: "appMembers", write: "appMembers" }),
   projects: defineTable({
     name: v.string().trim().min(1).max(100),
-  }).searchIndex(["name"]),
+  })
+    .searchIndex(["name"])
+    .access({ read: "appMembers", write: "appBuilders" }),
 });
 ```
 
 `v` has the types you'd expect (`string`, `number`, `boolean`, `literal`, `enum`, `array`, `object`, `record`, `union`, `null`) and some that mean something to Grasp: `id` for a record of a table, `timestamp`, `duration`, `money`, `person`, `file` and `schedule`. Constraints such as `.min()`, `.max()` and `.trim()` are checked on every write, `.nullable()` allows `null`, and `.default()` fills in a value a write leaves out.
 
+To share constants with your server code, such as a field's type, put them in a module of your own (`values.ts`, say): the generated schema is never edited.
+
 ## Who may read and write
 
-`app.ts` declares, per table, who may read it and who may write it:
+`setAccess` declares, per table, who may read it and who may write it, and the schema's `.access()` holds it:
 
 | Mode          | Who                                              |
 | ------------- | ------------------------------------------------ |
@@ -40,23 +50,7 @@ export default defineSchema({
 | `appBuilders` | the App's builders; an admin is one on every App |
 | `none`        | nobody; a mode left out is `none`                |
 
-```ts app.ts
-import { app } from "@grasp-os/sdk";
-
-import schema from "./schema.ts";
-
-export default app({
-  name: "Tasks",
-  schema,
-  access: {
-    tables: {
-      tasks: { read: "appMembers", write: "appMembers" },
-      projects: { read: "appMembers", write: "appBuilders" },
-    },
-  },
-  screens: [{ name: "tasks", path: "/", source: "screens/tasks.tsx" }],
-});
-```
+Row rules narrow a table its members read to the rows that name them: the person a field holds, a team, or the record's owner. A table can also be declared sensitive: its change history keeps no values, every read of it is recorded, and it stays sensitive.
 
 The store checks this on every read and write, whatever the function asks. A record someone may not see is missing to them: `get` returns `null`, and queries leave it out.
 

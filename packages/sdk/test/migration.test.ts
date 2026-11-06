@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vite-plus/test";
 
-import { inspectApp, readAppManifest, registerFunctions } from "../src/host.ts";
-import { app, migration } from "../src/index.ts";
+import { inspectApp, readAppManifest, registerApp } from "../src/host.ts";
+import { defineApp, migration } from "../src/index.ts";
 import { runMigration } from "../src/runner.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
 
@@ -20,7 +20,9 @@ const noteFields = {
   category: v.string().default("general"),
 };
 
-const schema = defineSchema({ notes: defineTable(noteFields) });
+const schema = defineSchema({
+  notes: defineTable(noteFields).access({ read: "owner", write: "owner" }),
+});
 
 const deriveCategory = migration({
   name: "derive-note-category",
@@ -46,18 +48,12 @@ const deriveCategory = migration({
 
 /** Notes registered with `migrations`, and no server functions. */
 const notes = (migrations: readonly unknown[]): unknown =>
-  registerFunctions(
-    // SAFETY: deliberately loose, for registrations the types refuse.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    (app as (definition: unknown) => ReturnType<typeof app>)({
-      name: "Notes",
-      schema,
-      access: { tables: { notes: { read: "owner", write: "owner" } } },
-      screens: [],
-      migrations,
-    }),
-    {}
-  );
+  registerApp({
+    config: defineApp({ name: "Notes" }),
+    schema,
+    modules: {},
+    migrations,
+  });
 
 // SAFETY: deliberately loose, for declarations the types refuse.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY

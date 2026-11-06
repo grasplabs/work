@@ -383,8 +383,7 @@ export const reviewVersion = async (
     server !== null ||
       fileChanges.some(
         ({ name }) =>
-          name === "app.ts" ||
-          name === "schema.ts" ||
+          name === "grasp.config.ts" ||
           name === "values.ts" ||
           name.startsWith("server/")
       )

@@ -17,6 +17,7 @@ import { AppDataRpc } from "../src/app-data.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { identify } from "../src/auth/identity.ts";
+import { appDefinition, withSensitive } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
@@ -42,20 +43,26 @@ import { signedInApi } from "./sign-in.ts";
 const idp = mockSessionIdp();
 
 const files: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  salaries: defineTable({ person: v.string(), amount: v.number() })
-    .index("by_person", ["person"])
-    .searchIndex(["person"])
-    .sensitive(),
-  notes: defineTable({
-    text: v.string(),
-    salary: v.id("salaries").optional(),
-    payslips: v.array(v.id("salaries")).optional(),
+  ...appDefinition({
+    name: "Payroll",
+    tables: {
+      salaries: {
+        fields: { person: "v.string()", amount: "v.number()" },
+        searchIndex: ["person"],
+        sensitive: true,
+        access: { read: "appMembers", write: "appMembers" },
+        indexes: { by_person: ["person"] },
+      },
+      notes: {
+        fields: {
+          text: "v.string()",
+          salary: 'v.id("salaries").optional()',
+          payslips: 'v.array(v.id("salaries")).optional()',
+        },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
   }),
-});
-`,
   "server/pay.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
@@ -191,21 +198,7 @@ export const byPerson = query({
     (await ctx.db.query("salaries").group({ by: ["person"] })).length,
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
 
-export default app({
-  name: "Payroll",
-  schema,
-  access: {
-    tables: {
-      salaries: { read: "appMembers", write: "appMembers" },
-      notes: { read: "appMembers", write: "appMembers" },
-    },
-  },
-  screens: [],
-});
-`,
   "screens/pay.tsx": `export default function Pay() {
   return <p>Pay</p>;
 }
@@ -781,13 +774,7 @@ describe("reads of a sensitive table", { timeout: 120_000 }, () => {
 
 describe("a live query of a sensitive table", { timeout: 120_000 }, () => {
   it("is recorded on every push, not only the first", async () => {
-    const opened = await openedApp({
-      ...notesFiles,
-      "schema.ts": (notesFiles["schema.ts"] ?? "").replace(
-        '.index("by_updated", ["_updatedAt"])',
-        '.index("by_updated", ["_updatedAt"]).sensitive()'
-      ),
-    });
+    const opened = await openedApp(withSensitive(notesFiles, "notes"));
     const api = apiOf(opened.release);
     const client = new GraspClient(pageTransport(opened, opened.screens));
     const after = await logHead();

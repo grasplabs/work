@@ -1,10 +1,10 @@
-import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/sdk";
 
 // The workflow map's store: its teams, its workflows as they run now
 // (drawn) or as they should (designed), and every version of each, kept
 // as each save and link commits it, so a designed workflow is set beside
 // the version of it last drawn. Everyone who may open the App reads it;
-// only its builders (an admin is one on every App) change it (app.ts).
+// only its builders (an admin is one on every App) change it (its tables' access).
 
 /** Largest number a step has: times a week, minutes or people. */
 export const stepNumberMax = 10_000;
@@ -85,29 +85,3 @@ export const editedFields = {
     .nullable(),
   notes: v.string().max(notesMax),
 };
-
-/** A workflow as it is kept: what is edited, and what only the map sets. */
-const workflowFields = {
-  ...editedFields,
-  // Its version: one more with each save and link.
-  version: v.number().integer().min(1),
-  // For a designed one, the version of it last drawn: set by `save` alone.
-  drawnVersion: v.number().integer().min(1).nullable(),
-  // Once built, the App workflow that runs it: set by `link` alone.
-  app: appLink.nullable(),
-};
-
-export default defineSchema({
-  teams: defineTable({
-    title: v.string().trim().min(1).max(shortTextMax),
-  }).index("by_title", ["title"]),
-  workflows: defineTable(workflowFields)
-    .index("by_title", ["title"])
-    // An order no save changes: another App reads every workflow a page
-    // at a time in it (server/figures.ts), so none moves between pages.
-    .index("by_created", ["_createdAt"]),
-  workflowVersions: defineTable({
-    ...workflowFields,
-    workflow: v.id("workflows"),
-  }).index("by_workflow", ["workflow", "version"]),
-});

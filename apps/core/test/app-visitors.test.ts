@@ -15,6 +15,7 @@ import { z } from "zod";
 
 import { appVisitorResponse, sweepAppVisitors } from "../src/app-visitors.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
@@ -65,12 +66,15 @@ const visitedApp = async (
 
 /** A Notes App's files: one function, one screen. */
 const notesFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }),
-});
-`,
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
@@ -80,16 +84,7 @@ export const titles = query({
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
 
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
-});
-`,
   "screens/notes.tsx": `export default function Notes() {
   return <p>Notes</p>;
 }
@@ -102,14 +97,10 @@ export default app({
  */
 const routedNotesFiles: Record<string, string> = {
   ...notesFiles,
-  "app.ts": (notesFiles["app.ts"] ?? "")
-    .replace(
-      'import { app } from "@grasp-os/sdk";',
-      'import { app, v } from "@grasp-os/sdk";'
-    )
-    .replace(
-      "  screens: [],",
-      `  screens: [
+  "screens.ts": `import { v } from "@grasp-os/sdk";
+
+export default {
+  screens: [
     {
       name: "detail",
       path: "/items/:id",
@@ -117,8 +108,9 @@ const routedNotesFiles: Record<string, string> = {
       input: v.object({ id: v.string() }),
     },
     { name: "home", path: "/", source: "screens/home.tsx" },
-  ],`
-    ),
+  ],
+};
+`,
   "screens/detail.tsx": `export default function Detail() {
   return <p>Detail</p>;
 }

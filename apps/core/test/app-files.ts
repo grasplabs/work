@@ -18,6 +18,7 @@ import { env } from "cloudflare:workers";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { StoreHost } from "../src/store-host.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { published as publishedApp } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import type { Idp } from "./idp.ts";
@@ -31,17 +32,29 @@ import { routed, signedInApi } from "./sign-in.ts";
 // side of it. Each file calls `appsOf(mockIdp())` once, for its people.
 
 export const files: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({
-    title: v.string().trim().min(1).max(200),
-    attachments: v.array(v.file()).max(20).default([]),
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: {
+          title: "v.string().trim().min(1).max(200)",
+          attachments: "v.array(v.file()).max(20).default([])",
+        },
+        access: { read: "appMembers", write: "owner" },
+      },
+      vault: {
+        fields: { file: "v.file()" },
+        access: { read: "appBuilders", write: "owner" },
+      },
+      board: {
+        fields: { file: "v.file().nullable().default(null)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.files({\n  operations: ["upload", "read", "attach", "delete"],\n})',
+    ],
   }),
-  vault: defineTable({ file: v.file() }),
-  board: defineTable({ file: v.file().nullable().default(null) }),
-});
-`,
   "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
 import { doc, mutation, query } from "@server/_generated/server";
 
@@ -161,26 +174,10 @@ export const unpin = mutation({
   },
 });
 `,
-  "app.ts": `import { app, permission } from "@grasp-os/sdk";
-import schema from "./schema.ts";
 
-export const files = permission.files({
-  operations: ["upload", "read", "attach", "delete"],
-});
-
-export default app({
-  name: "Notes",
-  schema,
-  access: {
-    tables: {
-      notes: { read: "appMembers", write: "owner" },
-      vault: { read: "appBuilders", write: "owner" },
-      board: { read: "appMembers", write: "appMembers" },
-    },
-  },
+  "screens.ts": `export default {
   screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
-  permissions: { files },
-});
+};
 `,
   "screens/notes.tsx": `import { useFile, useUpload } from "@grasp-os/sdk/react";
 import { permissions } from "@server/_generated/api";

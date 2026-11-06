@@ -2,7 +2,7 @@ import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 import type { SchemaDefinition, ValueShape } from "@grasp-os/sdk";
 import { databaseReader } from "@grasp-os/sdk/database";
 import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
-import type { SchemaAccess, SchemaAnswer } from "@grasp-os/sdk/host";
+import type { SchemaAnswer } from "@grasp-os/sdk/host";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { StoreFields } from "@grasp-os/shared/stores";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
@@ -13,8 +13,9 @@ import { z } from "zod";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { appDefinition } from "./app-definitions.ts";
+import type { TableSpec } from "./app-definitions.ts";
 import { racingDb } from "./apps.ts";
-import { v1Schema } from "./migrated-apps.ts";
 import {
   codeOf,
   commit,
@@ -28,7 +29,7 @@ import {
   objectOf,
 } from "./pending-stores.ts";
 import { appWith, failure, seal } from "./sealed-apps.ts";
-import { newRecordId } from "./store-schemas.ts";
+import { accessedManifest, newRecordId } from "./store-schemas.ts";
 
 // A schema change the store checks every record for before its contract
 // takes it (sdk schema-plan.ts `activates`; store-schema-changes.ts):
@@ -95,15 +96,15 @@ const tagged = (max: number, extra: ValueShape = {}) =>
   manifestText(
     schemaManifest(
       defineSchema({
-        notes: defineTable({ title: v.string().max(max), ...extra }),
-        tags: defineTable({ name: v.string().max(max) }),
-      }),
-      {
-        tables: {
-          notes: { read: "appMembers", write: "appMembers" },
-          tags: { read: "appMembers", write: "appMembers" },
-        },
-      }
+        notes: defineTable({ title: v.string().max(max), ...extra }).access({
+          read: "appMembers",
+          write: "appMembers",
+        }),
+        tags: defineTable({ name: v.string().max(max) }).access({
+          read: "appMembers",
+          write: "appMembers",
+        }),
+      })
     )
   );
 
@@ -209,6 +210,19 @@ describe("a narrowing every record fits", () => {
   });
 });
 
+/** Notes of `fields`, read and written by their owner only, as manifest text. */
+const ownedNotes = (fields: ValueShape) =>
+  manifestText(
+    schemaManifest(
+      defineSchema({
+        notes: defineTable(fields).access({
+          read: "owner",
+          write: "owner",
+        }),
+      })
+    )
+  );
+
 describe("a dry run", () => {
   it("refuses the seal with a question naming the records that don't fit, never their values", async () => {
     const secret = "Salary review for Grace: 120000";
@@ -241,16 +255,9 @@ describe("a dry run", () => {
   });
 
   it("tells nothing an owner's record holds to a builder who can't read it", async () => {
-    const ownerOnly: SchemaAccess = {
-      tables: { notes: { read: "owner", write: "owner" } },
-    };
-    const owned = (fields: ValueShape) =>
-      manifestText(
-        schemaManifest(defineSchema({ notes: defineTable(fields) }), ownerOnly)
-      );
     const store = await newStore();
     const first = await store.defineTables(
-      owned({ title: v.string() }),
+      ownedNotes({ title: v.string() }),
       consumer(1)
     );
     const hidden = await insert(
@@ -260,7 +267,7 @@ describe("a dry run", () => {
       "grace"
     );
     const refused = await refusalOf(
-      store.defineTables(owned({ title: v.string().email() }), consumer(2))
+      store.defineTables(ownedNotes({ title: v.string().email() }), consumer(2))
     );
     expect(refused).toMatchObject({
       code: "migration.required",
@@ -640,7 +647,7 @@ type NotesAccess = "owner" | "appMembers";
 /** `of`'s notes, read and written as `read` says. */
 const withAccess = (read: NotesAccess, of: SchemaDefinition = titleOnly) =>
   manifestText(
-    schemaManifest(of, {
+    accessedManifest(of, {
       tables: { notes: { read, write: read } },
     })
   );
@@ -804,37 +811,40 @@ describe("a changed access mode", () => {
   });
 });
 
-/** The Notes App's schema with titles of at most 100. */
-const shortTitles = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+/** The Notes App's definition, its notes of `fields`, read and written as `access` says. */
+const notesDefinition = (
+  noteFields: Readonly<Record<string, string>>,
+  access?: TableSpec["access"]
+): Record<string, string> =>
+  appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: noteFields,
+        ...(access === undefined ? {} : { access }),
+      },
+    },
+  });
 
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(100) }),
-});
-`;
+const title = "v.string().min(1).max(200)";
 
-/** The Notes App's schema with a category that defaults to general. */
-const categorised = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+/** The Notes App's first definition, each note its owner's. */
+const ownedV1 = notesDefinition({ title }, { read: "owner", write: "owner" });
 
-export default defineSchema({
-  notes: defineTable({
-    title: v.string().min(1).max(200),
-    category: v.string().default("general"),
-  }),
-});
-`;
+/** The Notes App with titles of at most 100. */
+const shortTitles = notesDefinition({ title: "v.string().min(1).max(100)" });
 
-/** The Notes App's registration, its notes shared as `read` says. */
-const notesApp = (read: NotesAccess) => `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+/** The Notes App with a category that defaults to general. */
+const categorised = notesDefinition(
+  { title, category: 'v.string().default("general")' },
+  { read: "owner", write: "owner" }
+);
 
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "${read}", write: "${read}" } } },
-  screens: [],
-  migrations: [],
-});
-`;
+/** The Notes App's first definition, its notes shared with every member. */
+const sharedV1 = notesDefinition(
+  { title },
+  { read: "appMembers", write: "appMembers" }
+);
 
 /**
  * The Notes App made current at version 1 with its notes the owner's,
@@ -842,23 +852,14 @@ export default app({
  * with every member.
  */
 const sharedNext = async () => {
-  const fixture = await appWith({
-    "schema.ts": v1Schema,
-    "app.ts": notesApp("owner"),
-  });
+  const fixture = await appWith(ownedV1);
   const first = await seal(fixture);
   await setCurrentVersion(env, fixture.owner, fixture.app, 1);
   const store = await openStore(env, fixture.store);
   const owned = first.manifest.schemaHash;
   await insert(store, owned, { title: "Ada's" }, "ada");
   await insert(store, owned, { title: "Grace's" }, "grace");
-  await commitFiles(
-    env,
-    fixture.owner,
-    fixture.app,
-    { "app.ts": notesApp("appMembers") },
-    "Shared notes"
-  );
+  await commitFiles(env, fixture.owner, fixture.app, sharedV1, "Shared notes");
   const second = await seal(fixture, 2);
   return {
     fixture,
@@ -1061,7 +1062,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       env,
       fixture.owner,
       fixture.app,
-      { "schema.ts": shortTitles },
+      shortTitles,
       "Shorter titles"
     );
     await seal(fixture, 3);
@@ -1127,7 +1128,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       env,
       fixture.owner,
       fixture.app,
-      { "schema.ts": shortTitles },
+      shortTitles,
       "Shorter titles"
     );
     await seal(fixture, 3);
@@ -1165,7 +1166,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       env,
       fixture.owner,
       fixture.app,
-      { "schema.ts": shortTitles },
+      shortTitles,
       "Shorter titles"
     );
     await seal(fixture, 3);
@@ -1197,7 +1198,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       env,
       fixture.owner,
       fixture.app,
-      { "schema.ts": categorised, "app.ts": notesApp("owner") },
+      categorised,
       "Categories"
     );
     // Version 3 adds a defaulted category the notes lack, under the rules
@@ -1228,10 +1229,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
   it("applies no rules for an activation refused as busy, so it never puts back the rules a winner tightened", async () => {
     // Version 1 shares the notes; version 2 makes them their owner's, and
     // version 3 narrows the titles.
-    const fixture = await appWith({
-      "schema.ts": v1Schema,
-      "app.ts": notesApp("appMembers"),
-    });
+    const fixture = await appWith(sharedV1);
     const first = await seal(fixture);
     await setCurrentVersion(env, fixture.owner, fixture.app, 1);
     const store = await openStore(env, fixture.store);
@@ -1242,7 +1240,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       env,
       fixture.owner,
       fixture.app,
-      { "app.ts": notesApp("owner") },
+      ownedV1,
       "Owner's notes"
     );
     await seal(fixture, 2);
@@ -1250,7 +1248,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       env,
       fixture.owner,
       fixture.app,
-      { "schema.ts": shortTitles },
+      shortTitles,
       "Shorter titles"
     );
     await seal(fixture, 3);
@@ -1307,10 +1305,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       'v.string().default("general")',
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one App after the other
-      const fixture = await appWith({
-        "schema.ts": v1Schema,
-        "app.ts": notesApp("owner"),
-      });
+      const fixture = await appWith(ownedV1);
       // oxlint-disable-next-line no-await-in-loop -- one App after the other
       const first = await seal(fixture);
       // oxlint-disable-next-line no-await-in-loop -- one App after the other
@@ -1327,15 +1322,10 @@ describe("making the release current", { timeout: 180_000 }, () => {
         env,
         fixture.owner,
         fixture.app,
-        {
-          "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200), category: ${category} }),
-});
-`,
-          "app.ts": notesApp("appMembers"),
-        },
+        notesDefinition(
+          { title, category },
+          { read: "appMembers", write: "appMembers" }
+        ),
         "Shared, with categories"
       );
       // oxlint-disable-next-line no-await-in-loop -- one App after the other

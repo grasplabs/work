@@ -1,3 +1,4 @@
+import { definitionToolNames } from "@grasp-os/shared/chat";
 import type {
   ChatCitation,
   ChatCode,
@@ -157,6 +158,9 @@ const fieldOf = (input: Record<string, unknown>, field: string): string => {
   return typeof value === "string" ? value : "…";
 };
 
+/** The tools that change an App's definition. */
+const definitionTools: ReadonlySet<string> = new Set(definitionToolNames);
+
 /** The paths of the files a call writes (`files`, by path), as far as they came. */
 const pathsOf = (input: Record<string, unknown>): string[] => {
   const { files } = input;
@@ -180,7 +184,7 @@ const useToolSummary = (): ((call: ChatToolCall, done: boolean) => string) => {
       ? t`${plural(count, { one: "Wrote # file", other: "Wrote # files" })}`
       : t`${plural(count, { one: "Writing # file", other: "Writing # files" })}`;
   };
-  return ({ tool, input }, done) => {
+  const lineOf = ({ tool, input }: ChatToolCall, done: boolean): string => {
     const name = fieldOf(input, "name");
     const path = fieldOf(input, "path");
     const text = fieldOf(input, "text");
@@ -228,6 +232,14 @@ const useToolSummary = (): ((call: ChatToolCall, done: boolean) => string) => {
         return done ? t`Used ${tool}` : t`Using ${tool}`;
       }
     }
+  };
+  return (call, done) => {
+    if (!definitionTools.has(call.tool)) {
+      return lineOf(call, done);
+    }
+    return done
+      ? t`Changed the App's definition`
+      : t`Changing the App's definition`;
   };
 };
 

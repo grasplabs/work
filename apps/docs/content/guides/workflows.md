@@ -11,21 +11,38 @@ An App doesn't contain workflows. It starts them, and follows their runs. This g
 
 ## Declaring the workflows an App starts
 
-An App declares each workflow it starts with `permission.workflow`: an alias, and the input and output it expects. Like every permission, it grants nothing yet. The App's builders bind the alias to a version of a workflow, and an admin grants the App permission to start it. Until both, every start fails.
+An App declares each workflow it starts as a permission in its definition, with `addPermission`: an alias, and the input and output it expects. Like every permission, it grants nothing yet. The App's builders bind the alias to a version of a workflow, and an admin grants the App permission to start it. Until both, every start fails.
+
+Grasp generates the permission into `grasp.config.ts`, which exports it as `permissions.<alias>`:
+
+```ts grasp.config.ts
+import { defineApp, permission, v } from "@grasp-os/sdk";
+
+export const permissions = {
+  review: permission.workflow("review", {
+    input: v.object({ task: v.id("tasks") }),
+    output: v.object({ approved: v.boolean() }),
+  }),
+};
+
+export default defineApp({
+  name: "Tasks",
+  permissions: { workflows: [permissions.review] },
+});
+```
+
+A function that starts it lists it in its `uses`:
 
 ```ts server/reviews.ts
-import { permission, v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/sdk";
 import { action, mutation } from "@server/_generated/server";
 
-export const review = permission.workflow("review", {
-  input: v.object({ task: v.id("tasks") }),
-  output: v.object({ approved: v.boolean() }),
-});
+import { permissions } from "../grasp.config.ts";
 
 export const finish = mutation({
   args: { id: v.id("tasks"), expectedRevision: v.number().integer().min(1) },
   returns: v.null(),
-  uses: [review],
+  uses: [permissions.review],
   handler: async (ctx, args) => {
     await ctx.db.patch(
       "tasks",
@@ -41,30 +58,11 @@ export const finish = mutation({
 export const reviewNow = action({
   args: { id: v.id("tasks") },
   returns: v.string(),
-  uses: [review],
+  uses: [permissions.review],
   handler: async (ctx, args) => {
     const run = await ctx.workflows.review.start({ task: args.id });
     return run.runId;
   },
-});
-```
-
-List the permission in `app.ts`:
-
-```ts app.ts
-import { app } from "@grasp-os/sdk";
-
-import schema from "./schema.ts";
-import { review } from "./server/reviews.ts";
-
-export default app({
-  name: "Tasks",
-  schema,
-  access: {
-    tables: { tasks: { read: "appMembers", write: "appMembers" } },
-  },
-  screens: [{ name: "tasks", path: "/", source: "screens/tasks.tsx" }],
-  permissions: { workflows: [review] },
 });
 ```
 

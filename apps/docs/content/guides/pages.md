@@ -9,19 +9,12 @@ A Page is what people see of your App: a React component in `screens/`, which Gr
 
 ## Declaring a Page
 
-Each Page is a file that exports its component as the default, listed in `app.ts` under `screens` with a name and a route:
+Each Page is a file that exports its component as the default, listed in `screens.ts` with a name and a route:
 
-```ts app.ts
-import { app, v } from "@grasp-os/sdk";
+```ts screens.ts
+import { v } from "@grasp-os/sdk";
 
-import schema from "./schema.ts";
-
-export default app({
-  name: "Tasks",
-  schema,
-  access: {
-    tables: { tasks: { read: "appMembers", write: "appMembers" } },
-  },
+export default {
   screens: [
     { name: "tasks", path: "/", source: "screens/tasks.tsx" },
     {
@@ -31,7 +24,7 @@ export default app({
       input: v.object({ id: v.id("tasks") }),
     },
   ],
-});
+};
 ```
 
 A route's parameters are the Page's `input`, typed by its schema.

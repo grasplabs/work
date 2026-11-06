@@ -24,6 +24,7 @@ import {
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import { sealPackages } from "../src/workflows/sealed-packages.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { published as publishedApp } from "./apps.ts";
 import { publish } from "./npm.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
@@ -38,28 +39,38 @@ const workflowShape = `v.object({ who: v.string() })`;
 
 /** An App that declares three workflows and a model, with a store. */
 const files = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  requests: defineTable({ who: v.string() }),
-});
-`,
-  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Requests",
+    tables: {
+      requests: {
+        fields: { who: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      "permission.ai({ maxOutputTokens: 100 })",
+      `permission.workflow("followUp", {
+  input: ${workflowShape},
+  output: v.object({ status: v.string() }),
+})`,
+      `permission.workflow("remind", {
+  input: ${workflowShape},
+  output: v.object({ status: v.string() }),
+})`,
+      `permission.workflow("later", {
+  input: ${workflowShape},
+  output: v.object({ status: v.string() }),
+})`,
+    ],
+  }),
+  "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const followUp = permission.workflow("followUp", {
-  input: ${workflowShape},
-  output: v.object({ status: v.string() }),
-});
-export const remind = permission.workflow("remind", {
-  input: ${workflowShape},
-  output: v.object({ status: v.string() }),
-});
-export const later = permission.workflow("later", {
-  input: ${workflowShape},
-  output: v.object({ status: v.string() }),
-});
-export const writer = permission.ai({ maxOutputTokens: 100 });
+export const followUp = permissions.followUp;
+export const remind = permissions.remind;
+export const later = permissions.later;
+export const writer = permissions.ai;
 
 export const kickOff = action({
   args: { who: v.string() },
@@ -69,18 +80,6 @@ export const kickOff = action({
     const started = await ctx.workflows.followUp.start({ who: args.who });
     return started.startId;
   },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { followUp, later, remind, writer } from "./server/requests.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
-  permissions: { ai: writer, workflows: [followUp, remind, later] },
 });
 `,
 });
@@ -520,7 +519,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     const leaky = await appWith(
       {
         ...files(),
-        "app.ts": `// Deploy with ${token}\n${files()["app.ts"] ?? ""}`,
+        "server/requests.ts": `// Deploy with ${token}\n${files()["server/requests.ts"] ?? ""}`,
       },
       "Requests"
     );
@@ -548,7 +547,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       withinBudget: "ok",
       secret: {
         code: "version.export_secret_found",
-        details: { path: "app/app.ts" },
+        details: { path: "app/server/requests.ts" },
       },
       echoed: false,
     });

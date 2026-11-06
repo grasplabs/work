@@ -1,7 +1,7 @@
 import { AppError, v } from "@grasp-os/sdk";
 import { doc, mutation, query } from "@server/_generated/server";
 
-import { shortTextMax } from "../schema.ts";
+import { shortTextMax } from "../values.ts";
 import { requireText } from "./text.ts";
 
 // The teams the map groups workflows by.

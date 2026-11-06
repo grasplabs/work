@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { openTestRun } from "./agent-chat.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { chatsOf, chatWithDraft, outcome, requestFor } from "./previews.ts";
@@ -31,20 +32,25 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 /** The App's notes, and streaming actions that write them. */
 const notesFiles = (marker: string): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }),
-});
-`,
-  "server/notes.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: ["permission.ai({ maxOutputTokens: 100 })"],
+  }),
+  "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
 // ${marker}
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const writer = permission.ai({ maxOutputTokens: 100 });
+export const writer = permissions.ai;
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
@@ -121,18 +127,6 @@ export const consult = action({
     await ctx.emit({ step: 1 });
     return await ctx.ai.generate({ prompt: "Hi" });
   },
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import { writer } from "./server/notes.ts";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
-  permissions: { ai: writer },
 });
 `,
 });

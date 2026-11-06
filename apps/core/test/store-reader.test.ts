@@ -1,7 +1,7 @@
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 import type { Id } from "@grasp-os/sdk";
 import { databaseReader } from "@grasp-os/sdk/database";
-import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
+import { manifestText } from "@grasp-os/sdk/host";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import { commitMaxGuards } from "@grasp-os/shared/stores";
 import type { Commit, StoreFields } from "@grasp-os/shared/stores";
@@ -14,7 +14,7 @@ import { queryMaxReruns } from "../src/call-limits.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { readConsistently, StoreReader } from "../src/store-reader.ts";
-import { memberRoles, newRecordId } from "./store-schemas.ts";
+import { accessedManifest, memberRoles, newRecordId } from "./store-schemas.ts";
 
 // A query operation's reads as one state of the store (spec 6.3), through
 // core's way into a store and its Durable Object: the host-side reader
@@ -46,7 +46,7 @@ const storeWithNotes = async (): Promise<Fixture> => {
   const store = await openStore(env, await createStore(env, builder));
   const { schemaHash } = await store.defineTables(
     manifestText(
-      schemaManifest(schema, {
+      accessedManifest(schema, {
         tables: {
           notes: { read: "appMembers", write: "appMembers" },
           people: { read: "appMembers", write: "appMembers" },

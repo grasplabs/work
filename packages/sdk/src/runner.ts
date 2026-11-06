@@ -393,12 +393,7 @@ export const runFunction = async (
   for (const [registeredPath, registeredFn] of inspection.functions) {
     paths.set(registeredFn, registeredPath);
   }
-  // SAFETY: `inspectApp` answers only for an App `app` registered, whose
-  // registration carries its schema.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const { schema } = registered as {
-    schema: Parameters<typeof databaseReader>[0];
-  };
+  const { schema } = inspection;
   const read = async (request: ReadRequest) => await channel.read(request);
   const caller =
     (kind: FunctionKind) => async (reference: unknown, callArgs: unknown) => {
@@ -770,4 +765,4 @@ export const runMigration = (
 // The host's entry for every App (`.grasp/app.ts`, from the compiler's
 // `serverEntrySource`) registers its server functions with this, beside
 // the runner the host's main modules call.
-export { registerFunctions } from "./app.ts";
+export { registerApp } from "./app.ts";

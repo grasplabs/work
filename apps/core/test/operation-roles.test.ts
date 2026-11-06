@@ -1,9 +1,5 @@
-import { app, defineSchema, defineTable, v } from "@grasp-os/sdk";
-import {
-  inspectApp,
-  manifestText,
-  registerFunctions,
-} from "@grasp-os/sdk/host";
+import { defineApp, defineSchema, defineTable, v } from "@grasp-os/sdk";
+import { inspectApp, manifestText, registerApp } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -31,8 +27,14 @@ import { published } from "./apps.ts";
 // their mutation runs.
 
 const schema = defineSchema({
-  shared: defineTable({ title: v.string() }),
-  staff: defineTable({ title: v.string() }),
+  shared: defineTable({ title: v.string() }).access({
+    read: "appMembers",
+    write: "appMembers",
+  }),
+  staff: defineTable({ title: v.string() }).access({
+    read: "appBuilders",
+    write: "appBuilders",
+  }),
 });
 
 const { mutation, query } = serverModule(schema);
@@ -72,20 +74,14 @@ const auditStaff = mutation({
   },
 });
 
-const teamApp = registerFunctions(
-  app({
-    name: "Team",
-    schema,
-    access: {
-      tables: {
-        shared: { read: "appMembers", write: "appMembers" },
-        staff: { read: "appBuilders", write: "appBuilders" },
-      },
-    },
-    screens: [],
-  }),
-  { team: { addShared, addStaff, countShared, countStaff, auditStaff } }
-);
+const teamApp = registerApp({
+  config: defineApp({ name: "Team" }),
+  schema,
+  modules: {
+    team: { addShared, addStaff, countShared, countStaff, auditStaff },
+  },
+  migrations: [],
+});
 
 const { manifest } = inspectApp(teamApp);
 

@@ -1,16 +1,12 @@
 import {
   AppError,
-  app,
+  defineApp,
   defineSchema,
   defineTable,
   permission,
   v,
 } from "@grasp-os/sdk";
-import {
-  inspectApp,
-  manifestText,
-  registerFunctions,
-} from "@grasp-os/sdk/host";
+import { inspectApp, manifestText, registerApp } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
@@ -49,6 +45,7 @@ import type {
   UseRefusal,
 } from "../src/operations.ts";
 import { hostedRelease } from "../src/release-runner.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 
@@ -60,7 +57,10 @@ import { appWith, seal } from "./sealed-apps.ts";
 // connectors, the model gateway): the only thing mocked.
 
 const schema = defineSchema({
-  notes: defineTable({ title: v.string().trim().min(1).max(200) }),
+  notes: defineTable({ title: v.string().trim().min(1).max(200) }).access({
+    read: "owner",
+    write: "owner",
+  }),
 });
 
 const { query, mutation, action, internalQuery, doc } = serverModule(schema);
@@ -104,6 +104,7 @@ const createAndCount = mutation({
 
 /** Narrowed to inserting: the queries it runs can't read for it. */
 const blindCount = mutation({
+  tables: { notes: { insert: true } },
   args: {},
   returns: v.number(),
   uses: [count],
@@ -564,15 +565,9 @@ const emitsAnyway = action({
   handler: (ctx) => ("emit" in ctx ? "emit" : "no emit"),
 });
 
-const notesApp = registerFunctions(
-  app({
+const notesApp = registerApp({
+  config: defineApp({
     name: "Notes",
-    schema,
-    access: { tables: { notes: { read: "owner", write: "owner" } } },
-    operationAccess: {
-      "notes.blindCount": { tables: { notes: { insert: true } } },
-    },
-    screens: [],
     permissions: {
       connections: [mail],
       ai,
@@ -581,7 +576,8 @@ const notesApp = registerFunctions(
       workflows: [followUp],
     },
   }),
-  {
+  schema,
+  modules: {
     notes: {
       get,
       create,
@@ -623,8 +619,9 @@ const notesApp = registerFunctions(
     },
     chain: { level0, level1, level2, level3, level4 },
     reads: { count, readMany, consistentPair },
-  }
-);
+  },
+  migrations: [],
+});
 
 const { manifest } = inspectApp(notesApp);
 
@@ -2417,22 +2414,19 @@ describe("evidence of a refused use", () => {
 
   it("is kept by core as app.use.refused, from a person's call", async () => {
     const fixture = await appWith({
-      "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-export default defineSchema({ notes: defineTable({ title: v.string() }) });
-`,
+      ...appDefinition({
+        name: "Notes",
+        tables: {
+          notes: {
+            fields: { title: "v.string()" },
+            access: { read: "owner", write: "owner" },
+          },
+        },
+      }),
       "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, query } from "@server/_generated/server";
 export const label = query({ args: {}, returns: v.string(), handler: () => "label" });
 export const probe = action({ args: {}, returns: v.null(), handler: async () => null });
-`,
-      "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
-});
 `,
     });
     const release = await seal(fixture);

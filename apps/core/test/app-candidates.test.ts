@@ -24,6 +24,7 @@ import { commitFiles, findApp, findVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, artifactKey, failure, person } from "./sealed-apps.ts";
@@ -39,10 +40,7 @@ import { appWith, artifactKey, failure, person } from "./sealed-apps.ts";
 
 /** An App of spec 8's layout answering `greeting`. */
 const helloFiles = (greeting = "hello"): Record<string, string> => ({
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
-
-export default defineSchema({});
-`,
+  ...appDefinition({ name: "Hello", tables: {} }),
   "server/hello.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
@@ -50,16 +48,6 @@ export const hello = query({
   args: {},
   returns: v.string(),
   handler: () => ${JSON.stringify(greeting)},
-});
-`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-
-export default app({
-  name: "Hello",
-  schema,
-  access: { tables: {} },
-  screens: [],
 });
 `,
 });
