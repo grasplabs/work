@@ -19,15 +19,13 @@ import {
 } from "@grasp-os/ui/components/toggle-group";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { CheckIcon, CopyIcon, MessageSquareIcon } from "lucide-react";
-import { Fragment, useEffect, useEffectEvent, useState } from "react";
+import { Fragment, useState } from "react";
 import type { ReactNode } from "react";
 
 import { useCopy } from "../copy.ts";
-import type { Session } from "../core.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { useCore } from "../use-core.ts";
 import {
   CodeDiff,
   CodeFile,
@@ -37,6 +35,7 @@ import {
   onlyFinalNewline,
 } from "./code-view.tsx";
 import type { DiffLayout } from "./code-view.tsx";
+import { useCoreRead } from "./use-core-read.ts";
 
 // An App's code in its workspace, for its builders (app-workspace.tsx's
 // Code view), as a code editor shows a project, read-only: the files of
@@ -357,46 +356,6 @@ const ChangesView = ({
       )}
     </EditorFrame>
   );
-};
-
-/**
- * What `read` read for `key`, read again whenever `key` changes; nothing
- * while it is read, unless an earlier read of the same `scope` landed:
- * that one stays until the new one does, so what is shown doesn't blink
- * away at each write.
- */
-const useCoreRead = <T,>(
-  key: string,
-  read: (session: Session) => Promise<T>,
-  scope?: string
-): Loaded<T> | undefined => {
-  const core = useCore();
-  const [held, setHeld] = useState<{
-    key: string;
-    scope: string | undefined;
-    loaded: Loaded<T>;
-  }>();
-  const onRead = useEffectEvent(
-    async (signal: AbortSignal): Promise<Loaded<T>> =>
-      await loadFromCore(core, read, signal)
-  );
-  useEffect(() => {
-    const left = new AbortController();
-    const load = async (): Promise<void> => {
-      const loaded = await onRead(left.signal);
-      if (!left.signal.aborted) {
-        setHeld({ key, scope, loaded });
-      }
-    };
-    void load();
-    return () => {
-      left.abort();
-    };
-  }, [key, scope]);
-  if (held?.key === key) {
-    return held.loaded;
-  }
-  return scope !== undefined && held?.scope === scope ? held.loaded : undefined;
 };
 
 /** A read not done: that it is being read, or why it failed. */

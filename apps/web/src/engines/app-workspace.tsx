@@ -76,6 +76,7 @@ import {
   useAppChatId,
 } from "./app-chat.tsx";
 import type { ChatBuilding } from "./app-code.tsx";
+import { AppDataModel } from "./app-data-model.tsx";
 import { AppData } from "./app-data.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { AppSettings, Read } from "./app-settings.tsx";
@@ -879,8 +880,8 @@ const PreviewArea = ({
 const readTables = async (session: Session, app: string) =>
   await session.apps.data.tables(app);
 
-/** The App's data, for its builders: its tables, one at a time. */
-const DataArea = ({ app }: { app: string }) => {
+/** The live App's tables, one at a time, and their records. */
+const LiveData = ({ app }: { app: string }) => {
   const read = useAppRead(app, readTables);
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -900,6 +901,33 @@ const DataArea = ({ app }: { app: string }) => {
   );
 };
 
+/** The workspace's chat, and where its draft of the App stands: what the Data view changes. */
+interface ModelChat {
+  chatId: string;
+  /** The draft's revision: 0 while the chat has none. */
+  revision: number;
+  /** Whether the chat's agent is at work, writing the draft still. */
+  running: boolean;
+}
+
+/**
+ * The App's data, for its builders: its data model, changed in the
+ * chat's draft (`modelChat`), each table with its records; without a
+ * chat to change it in (an archived App), its live tables' records.
+ */
+const DataArea = ({
+  app,
+  modelChat,
+}: {
+  app: string;
+  modelChat: ModelChat | undefined;
+}) =>
+  modelChat === undefined ? (
+    <LiveData app={app} />
+  ) : (
+    <AppDataModel app={app} {...modelChat} />
+  );
+
 /** What the main area holds besides the preview, which stays (hidden) so it doesn't load again. */
 const MainArea = ({
   app,
@@ -909,6 +937,7 @@ const MainArea = ({
   preview,
   storeChanges,
   building,
+  modelChat,
 }: {
   app: ViewedApp;
   view: WorkspaceView;
@@ -918,6 +947,8 @@ const MainArea = ({
   storeChanges: StoreChangesRead;
   /** The chat's draft the preview shows, which the code shows too. */
   building?: ChatBuilding;
+  /** The chat whose draft the Data view changes; none without one. */
+  modelChat?: ModelChat;
 }) => (
   <div className="flex h-full min-h-0 min-w-0 flex-col">
     <div
@@ -938,7 +969,11 @@ const MainArea = ({
         </Suspense>
       </div>
     ) : null}
-    {view === "data" ? <DataArea app={app.id} /> : null}
+    {view === "data" ? (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <DataArea app={app.id} modelChat={modelChat} />
+      </div>
+    ) : null}
     {view === "settings" ? (
       <AppSettings
         app={app}
@@ -1122,6 +1157,11 @@ const Building = ({
               chatId === undefined || draft === undefined
                 ? undefined
                 : { chatId, draft: draft.draft }
+            }
+            modelChat={
+              chatId === undefined
+                ? undefined
+                : { chatId, revision: draft?.draft.revision ?? 0, running }
             }
             identity={identity}
             storeChanges={storeChanges}

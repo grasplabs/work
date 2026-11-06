@@ -18,6 +18,13 @@ import {
   ComboboxList,
 } from "@grasp-os/ui/components/combobox";
 import {
+  FieldCode,
+  FieldTypeIcon,
+  FieldTypePicker,
+  ModelTableItem,
+  ModelTableList,
+} from "@grasp-os/ui/components/data-model";
+import {
   Field,
   FieldDescription,
   FieldGroup,
@@ -62,11 +69,17 @@ import {
 } from "@grasp-os/ui/components/toggle-group";
 import {
   BoldIcon,
+  CalendarIcon,
+  CircleDotIcon,
   CopyIcon,
+  HashIcon,
   ItalicIcon,
   SearchIcon,
+  Table2Icon,
+  TypeIcon,
   UnderlineIcon,
 } from "lucide-react";
+import { useState } from "react";
 
 const ButtonDemo = () => (
   <div className="flex flex-wrap gap-2">
@@ -258,12 +271,80 @@ const ToggleGroupDemo = () => (
   </div>
 );
 
+const fieldKinds = [
+  {
+    value: "text",
+    label: "Text",
+    description: "Words and sentences",
+    icon: <TypeIcon />,
+  },
+  {
+    value: "number",
+    label: "Number",
+    description: "Amounts and counts",
+    icon: <HashIcon />,
+  },
+  {
+    value: "date",
+    label: "Date",
+    description: "A day or a moment",
+    icon: <CalendarIcon />,
+  },
+  {
+    value: "choice",
+    label: "Choice",
+    description: "One of a list of options",
+    icon: <CircleDotIcon />,
+  },
+];
+
+const DataModelDemo = () => {
+  const [table, setTable] = useState("tasks");
+  const [kind, setKind] = useState("text");
+  const picked = fieldKinds.find(({ value }) => value === kind);
+  return (
+    <div className="flex flex-wrap items-start gap-6">
+      <nav aria-label="Tables" className="w-48">
+        <ModelTableList>
+          {["tasks", "projects"].map((name) => (
+            <ModelTableItem
+              active={table === name}
+              icon={<Table2Icon />}
+              key={name}
+              meta={name === "tasks" ? 4 : 2}
+              onClick={() => {
+                setTable(name);
+              }}
+            >
+              {name}
+            </ModelTableItem>
+          ))}
+        </ModelTableList>
+      </nav>
+      <div className="flex flex-col gap-3">
+        <FieldTypePicker
+          label="Type"
+          onValueChange={setKind}
+          options={fieldKinds}
+          value={kind}
+        />
+        <span className="flex items-center gap-2 text-sm">
+          <FieldTypeIcon>{picked?.icon}</FieldTypeIcon>
+          due
+          <FieldCode>v.timestamp().optional()</FieldCode>
+        </span>
+      </div>
+    </div>
+  );
+};
+
 export const formDemos = {
   button: ButtonDemo,
   "button-group": ButtonGroupDemo,
   calendar: CalendarDemo,
   checkbox: CheckboxDemo,
   combobox: ComboboxDemo,
+  "data-model": DataModelDemo,
   field: FieldDemo,
   input: InputDemo,
   "input-group": InputGroupDemo,

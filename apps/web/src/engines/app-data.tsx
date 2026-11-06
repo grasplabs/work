@@ -764,6 +764,35 @@ const TableData = ({
   );
 };
 
+/** One table's records, of the App's version `version`. */
+export const TableRecords = ({
+  app,
+  version,
+  table,
+}: {
+  app: string;
+  version: number;
+  table: AppDataTable;
+}) => (
+  <>
+    {table.sensitive ? (
+      <p className="text-muted-foreground">
+        <Trans>
+          This table is sensitive: its history keeps which fields changed, not
+          their values.
+        </Trans>
+      </p>
+    ) : null}
+    {/* Its own state for each App and table: nothing read of one is
+        shown, or kept, for another. */}
+    <TableData
+      app={app}
+      key={`${app}/${version}/${table.name}`}
+      table={table}
+      version={version}
+    />
+  </>
+);
 /** An App's tables, one picked at a time. */
 export const AppData = ({
   app,
@@ -818,22 +847,7 @@ export const AppData = ({
           ))}
         </SelectContent>
       </Select>
-      {table.sensitive ? (
-        <p className="text-muted-foreground">
-          <Trans>
-            This table is sensitive: its history keeps which fields changed, not
-            their values.
-          </Trans>
-        </p>
-      ) : null}
-      {/* Its own state for each App and table: nothing read of one
-          is shown, or kept, for another. */}
-      <TableData
-        app={app}
-        key={`${app}/${version}/${table.name}`}
-        table={table}
-        version={version}
-      />
+      <TableRecords app={app} table={table} version={version} />
     </div>
   );
 };
