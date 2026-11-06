@@ -539,6 +539,34 @@ describe("An App's Code", () => {
     );
   });
 
+  it("counts no line for an empty file added or deleted, and only the new ones for one filled", async () => {
+    await shown("builder", 1, {
+      1: { "filled.ts": "", "gone.ts": "" },
+      2: { "filled.ts": "export const filled = true;\n", "new.ts": "" },
+    });
+    await press(named("button", "Changes"));
+    await expect
+      .poll(() => changeShown("filled.ts"))
+      .toContain("export const filled = true;");
+    /** The lines a file's change shows removed and added, as `-n` and `+n`, but none. */
+    const counts = (path: string): string[] =>
+      (changeShown(path).match(/[-+]\d+/gu) ?? []).filter(
+        (count) => count.slice(1) !== "0"
+      );
+
+    expect({
+      files: changedFiles(),
+      filled: counts("filled.ts"),
+      added: counts("new.ts"),
+      deleted: counts("gone.ts"),
+    }).toStrictEqual({
+      files: ["filled.ts", "gone.ts", "new.ts"],
+      filled: ["+1"],
+      added: [],
+      deleted: [],
+    });
+  });
+
   it("says a change too large to show line by line is so, and opens its file in Files", async () => {
     await shown("builder", 1, largeVersions);
     await press(named("button", "Changes"));

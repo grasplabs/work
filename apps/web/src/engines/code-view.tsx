@@ -91,13 +91,14 @@ export const CodeFile = ({ path, text }: { path: string; text: string }) => (
 );
 
 /**
- * `text` ending in a newline. A diff of texts that all do never has the
+ * `text` ending in a newline, unless it is empty: an empty file has no
+ * line to end, and a newline would draw one. A diff of such texts never has the
  * library's "No newline at end of file" marker, which it draws in English
  * only; a change of the final newline alone is the page's to say
  * (`onlyFinalNewline`).
  */
 const ended = (text: string): string =>
-  text.endsWith("\n") ? text : `${text}\n`;
+  text === "" || text.endsWith("\n") ? text : `${text}\n`;
 
 /** The lines of `text`; its last newline ends a line, not starts one. */
 const lineCount = (text: string): number =>
