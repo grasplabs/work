@@ -457,18 +457,9 @@ describe("a client's settings", () => {
       ]);
     });
 
-    it("refuses while the admin doesn't know Grasp's staff, beyond seven days, or for a client it doesn't have", async () => {
+    it("opens without Grasp's staff known, and refuses beyond seven days, or for a client it doesn't have", async () => {
       const clientId = await recordClient();
       expect({
-        unknownStaff: await codeOf(
-          openStaffWindow(env, staff, { clientId, days: 1 })
-        ),
-        noOids: await codeOf(
-          openStaffWindow({ ...grasp, STAFF_ENTRA_OIDS: "" }, staff, {
-            clientId,
-            days: 1,
-          })
-        ),
         tooLong: await codeOf(
           openStaffWindow(grasp, staff, { clientId, days: 8 })
         ),
@@ -479,14 +470,17 @@ describe("a client's settings", () => {
           openStaffWindow(grasp, staff, { clientId: "nobody", days: 1 })
         ),
       }).toStrictEqual({
-        unknownStaff: "staff_window_unavailable",
-        noOids: "staff_window_unavailable",
         tooLong: "staff_window_invalid",
         none: "staff_window_invalid",
         unknownClient: "unknown_client",
       });
-      const row = await windowOf(clientId);
-      expect(row?.staffWindow).toBeNull();
+      const refused = await windowOf(clientId);
+      expect(refused?.staffWindow).toBeNull();
+      await openStaffWindow(env, staff, { clientId, days: 1 });
+      const opened = await windowOf(clientId);
+      expect(staffWindowOf(opened?.staffWindow ?? null)?.scope).toBe(
+        "onboarding"
+      );
     });
   });
 });

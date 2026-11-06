@@ -59,11 +59,7 @@ export const settingsErrorCodes = [
   "secret_invalid",
   /** A Teams bot that isn't one: an app id or tenant that isn't a GUID, or no expiry day. */
   "teams_bot_invalid",
-  /**
-   * A staff window can't be opened: the admin doesn't know Grasp's own
-   * staff (STAFF_ENTRA_TENANT_ID, STAFF_ENTRA_OIDS) or Entra app
-   * (ENTRA_CLIENT_ID), or the client has no sign-in for core to keep it in.
-   */
+  /** A staff window can't be opened: the client has no sign-in for core to keep it in. */
   "staff_window_unavailable",
   /** A staff window that isn't one: not 1 to 7 days, or another scope. */
   "staff_window_invalid",
@@ -473,8 +469,8 @@ const staffWindowAskSchema = z.object({
  * the window. Audited (`client.staff_window`, with when it opened and
  * until when) and marks the client, so its Setup says a change waits.
  * Opening again replaces the window. Refused (`staff_window_unavailable`)
- * while the admin doesn't know Grasp's staff or Entra app, or the client
- * has no sign-in, since core would have no `SIGN_IN` to keep it in.
+ * while the client has no sign-in, since core would have no `SIGN_IN` to
+ * keep it in.
  */
 export const openStaffWindow = async (
   env: Env,
@@ -489,13 +485,6 @@ export const openStaffWindow = async (
     throw new SettingsError(
       "staff_window_invalid",
       `A staff window is 1 to ${String(staffWindowMaxDays)} days`
-    );
-  }
-  const apps = signInApps(env);
-  if (apps.staff === undefined || apps.entraClientId === undefined) {
-    throw new SettingsError(
-      "staff_window_unavailable",
-      "Set STAFF_ENTRA_TENANT_ID and STAFF_ENTRA_OIDS (and ENTRA_CLIENT_ID) on the admin to open a staff window"
     );
   }
   const [client] = await db

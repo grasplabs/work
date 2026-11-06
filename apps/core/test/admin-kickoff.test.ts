@@ -339,6 +339,19 @@ describe("the kickoff from Grasp's admin", { timeout: 60_000 }, () => {
     });
   });
 
+  it("lets the admin in through an open window that names no staff sign-in", async () => {
+    const adminOnly = withSignIn({
+      staff: {
+        role: "admin",
+        scope: "onboarding",
+        opened: signInConfig.staff.opened,
+        until: signInConfig.staff.until,
+      },
+    });
+    const response = await asAdmin({ kind: "read" }, adminOnly);
+    expect(response.status).toBe(200);
+  });
+
   it("keeps nothing when the company ends Grasp's access while it is read", async () => {
     const before = await keptAt();
     const { api: admin } = await signedInApi(idp, "admin");

@@ -138,8 +138,9 @@ export interface SignInApps {
   /**
    * Grasp's own staff as core's `SIGN_IN.staff` names them: Grasp's Entra
    * tenant, the email domains its staff sign in with and the Entra object
-   * ids of the staff who may come in. Unset while the admin has none, and
-   * then no staff window can be opened (`staffWindowOf`).
+   * ids of the staff who may sign in to a client's site. Unset while the
+   * admin has none: a staff window then lets the admin act, and nobody
+   * sign in as staff.
    */
   staff?: GraspStaff;
 }
@@ -192,40 +193,36 @@ export const staffWindowOf = (value: string | null): StaffWindow | null => {
 
 /**
  * Core's `SIGN_IN.staff` for a client whose record keeps `staffWindow`:
- * Grasp's staff (`apps.staff`), in Grasp's own tenant, on the same Entra
- * app, as admins of what the window's scope reaches; undefined while no
- * window is kept. Throws through `incomplete` for a window the admin
- * can't name Grasp's staff or Entra app for, so no deploy drops it
- * unnoticed.
+ * while it is open, Grasp's admin may act in its core (its kickoff and
+ * commands, signed with the client's key), as admins of what the scope
+ * reaches. When the admin knows Grasp's staff (`apps.staff`) and Entra
+ * app, it also names them, so the listed staff can sign in to the
+ * client's site through Grasp's own tenant; without them nobody does.
+ * Undefined while no window is kept.
  */
 const staffSignInOf = (
   staffWindow: string | null,
-  apps: SignInApps,
-  incomplete: (why: string) => DeployError
+  apps: SignInApps
 ): SignInConfig["staff"] => {
   const opened = staffWindowOf(staffWindow);
   if (opened === null) {
     return undefined;
   }
-  if (apps.staff === undefined) {
-    throw incomplete(
-      "its staff window is open, but STAFF_ENTRA_TENANT_ID or STAFF_ENTRA_OIDS isn't set on the admin"
-    );
-  }
-  if (apps.entraClientId === undefined) {
-    throw incomplete(
-      "its staff window is open, but ENTRA_CLIENT_ID isn't set on the admin"
-    );
+  const window = {
+    role: "admin" as const,
+    scope: opened.scope,
+    opened: opened.opened,
+    until: opened.until,
+  };
+  if (apps.staff === undefined || apps.entraClientId === undefined) {
+    return window;
   }
   return {
     tenantId: apps.staff.tenantId,
     clientId: apps.entraClientId,
     domains: apps.staff.domains,
     oids: apps.staff.oids,
-    role: "admin",
-    scope: opened.scope,
-    opened: opened.opened,
-    until: opened.until,
+    ...window,
   };
 };
 
@@ -282,7 +279,7 @@ const signInOf = (
       `the OAuth relay serves clients under ${clientDomain(oauthRelay)}, not ${domain}`
     );
   }
-  const staff = staffSignInOf(staffWindow, apps, incomplete);
+  const staff = staffSignInOf(staffWindow, apps);
   const config = signInConfigSchema.safeParse({
     origin: `https://${clientId}.${domain}`,
     // Relay mode: the client's IdPs send people back through the stage's

@@ -204,8 +204,11 @@ export interface StaffWindowSetup {
   window: StaffWindow | null;
   /** Whether it is open now: kept, and not yet past its end. */
   open: boolean;
-  /** Whether the admin knows Grasp's staff and Entra app, so one can be opened. */
-  available: boolean;
+  /**
+   * Whether the admin knows Grasp's staff and Entra app, so the staff it
+   * lists can also sign in to the company's site while it is open.
+   */
+  staffSignIn: boolean;
 }
 
 /** Client `clientId`'s staff window, read now. */
@@ -223,7 +226,7 @@ const staffWindowSetupOf = async (
   return {
     window,
     open: window !== null && Date.parse(window.until) > Date.now(),
-    available: apps.staff !== undefined && apps.entraClientId !== undefined,
+    staffSignIn: apps.staff !== undefined && apps.entraClientId !== undefined,
   };
 };
 

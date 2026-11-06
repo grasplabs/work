@@ -91,15 +91,16 @@ export const checkClaims = (
     if (!staffWindowOpen(config, now)) {
       return "staff_window_closed";
     }
-    const refusal = checkEntra(
-      claims,
-      config.staff.tenantId,
-      config.staff.domains
-    );
+    const { tenantId, domains, oids } = config.staff;
+    if (tenantId === undefined || domains === undefined || oids === undefined) {
+      // A window for Grasp's admin alone: nobody signs in as staff.
+      return "staff_not_listed";
+    }
+    const refusal = checkEntra(claims, tenantId, domains);
     if (refusal) {
       return refusal;
     }
-    const listed = config.staff.oids.some(
+    const listed = oids.some(
       (oid) => oid.toLowerCase() === String(claims.oid).toLowerCase()
     );
     return listed ? undefined : "staff_not_listed";

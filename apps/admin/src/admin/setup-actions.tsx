@@ -322,7 +322,7 @@ export const StaffWindowChange = ({
 }) => {
   const { busy, failure, run } = useSettingsAction();
   const [days, setDays] = useState("7");
-  const { window, available } = setup;
+  const { window } = setup;
   return (
     <>
       <Facts
@@ -344,16 +344,10 @@ export const StaffWindowChange = ({
       />
       {canChange ? (
         <div className="flex flex-col gap-3 border-t px-5 py-4">
-          {available ? null : (
-            <p className="text-muted-foreground">
-              The admin doesn&rsquo;t know Grasp&rsquo;s staff yet: set
-              STAFF_ENTRA_TENANT_ID and STAFF_ENTRA_OIDS on it to open a window.
-            </p>
-          )}
           <div className="flex flex-wrap items-center gap-3">
             <NativeSelect
               aria-label="How long"
-              disabled={busy || !available}
+              disabled={busy}
               onChange={(event) => {
                 setDays(event.currentTarget.value);
               }}
@@ -366,7 +360,7 @@ export const StaffWindowChange = ({
               ))}
             </NativeSelect>
             <Button
-              disabled={busy || !available}
+              disabled={busy}
               onClick={() => {
                 void run(
                   async () =>

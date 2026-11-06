@@ -568,6 +568,31 @@ describe("Grasp staff access", () => {
     }
   });
 
+  it("offers and allows no staff sign-in through an open window that names no staff", async () => {
+    const now = Date.now();
+    const adminOnly = withSignIn({
+      staff: {
+        role: "admin",
+        scope: "onboarding",
+        opened: new Date(now - day).toISOString(),
+        until: new Date(now + day).toISOString(),
+      },
+    });
+    const { core } = await openRpc(undefined, { coreEnv: adminOnly });
+    try {
+      await expect(core.signInOptions()).resolves.not.toContainEqual({
+        providerId: "grasp-staff",
+        label: "Grasp staff",
+      });
+    } finally {
+      core[Symbol.dispose]();
+    }
+    const started = await startSignIn("grasp-staff", {
+      coreEnv: adminOnly,
+    }).catch((error: unknown) => error);
+    expect(started).toBeInstanceOf(Error);
+  });
+
   it("won't finish a staff sign-in once the window has closed", async () => {
     const started = await startSignIn("grasp-staff");
     const callback = idp.authorize(started.authorizationUrl, staffPerson());

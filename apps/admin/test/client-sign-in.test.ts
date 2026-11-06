@@ -8,7 +8,6 @@ import {
   signInProblem,
   signInSettingProblem,
 } from "../src/deploy/core-config.ts";
-import { DeployError } from "../src/deploy/errors.ts";
 
 const entra = {
   domains: ["acme.test", "acme-group.test"],
@@ -174,16 +173,21 @@ describe("a client's sign-in", () => {
       }).toStrictEqual({ none: undefined, tooLong: undefined });
     });
 
-    it("refuses to deploy a window the admin can't name Grasp's staff for", () => {
-      expect(() =>
-        derivedCoreConfig({
-          clientId: "acme",
-          signIn: record,
-          domain: "grasp.test",
-          apps: { entraClientId },
-          staffWindow: window,
-        })
-      ).toThrow(DeployError);
+    it("gives a window without Grasp's staff sign-in while the admin doesn't know Grasp's staff", () => {
+      const config = derivedCoreConfig({
+        clientId: "acme",
+        signIn: record,
+        domain: "grasp.test",
+        apps: { entraClientId },
+        staffWindow: window,
+      });
+      expect(signInConfigSchema.parse(config.SIGN_IN).staff).toStrictEqual({
+        role: "admin",
+        scope: "onboarding",
+        opened: "2026-11-06T09:00:00.000Z",
+        until: "2026-11-13T09:00:00.000Z",
+      });
+      expect(signInSettingProblem(config.SIGN_IN)).toBeNull();
     });
   });
 });

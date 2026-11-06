@@ -110,7 +110,7 @@ export const staffRole = async (
         eq(accounts.providerId, providerIds.staff)
       )
     );
-  const listed = config.staff.oids.some(
+  const listed = (config.staff.oids ?? []).some(
     (oid) => oid.toLowerCase() === account?.oid?.toLowerCase()
   );
   return listed ? config.staff.role : undefined;

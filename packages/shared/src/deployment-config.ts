@@ -75,18 +75,25 @@ export const signInConfigSchema = z
       .object({ hostedDomain: domainSchema, clientId: z.string().min(1) })
       .optional(),
     /**
-     * Grasp staff access, off unless the admin opens a window. Only the
-     * listed people (Entra object ids in Grasp's own tenant) sign in, get
+     * Grasp staff access, off unless the admin opens a window. While it is
+     * open, Grasp's admin may act here; and when it names Grasp's tenant,
+     * only the listed people (Entra object ids in that tenant) sign in, get
      * `role` without joining the organization, and lose access when `until`
      * passes. A window longer than {@link staffWindowMaxMs} is closed
      * (`staffWindowOpen`).
      */
     staff: z
       .object({
-        tenantId: z.guid(),
-        clientId: z.string().min(1),
-        domains: z.array(domainSchema).min(1),
-        oids: z.array(z.guid()).min(1),
+        /*
+         * Who may sign in as Grasp's staff, through Grasp's own Entra
+         * tenant: all four, or none. Without them the window still lets
+         * Grasp's admin act here (its kickoff and commands, signed with
+         * this company's key), but nobody signs in as staff.
+         */
+        tenantId: z.guid().optional(),
+        clientId: z.string().min(1).optional(),
+        domains: z.array(domainSchema).min(1).optional(),
+        oids: z.array(z.guid()).min(1).optional(),
         role: roleSchema,
         /**
          * What they reach: everything their role allows (`full`), or the
@@ -98,6 +105,19 @@ export const signInConfigSchema = z
         opened: z.iso.datetime({ offset: true }),
         until: z.iso.datetime({ offset: true }),
       })
+      .refine(
+        ({ tenantId, clientId, domains, oids }) =>
+          [tenantId, clientId, domains, oids].every(
+            (each) => each === undefined
+          ) ||
+          [tenantId, clientId, domains, oids].every(
+            (each) => each !== undefined
+          ),
+        {
+          message:
+            "Staff sign-in names Grasp's tenant, app, domains and staff, or none of them",
+        }
+      )
       .optional(),
   })
   .refine(({ entra, google }) => entra !== undefined || google !== undefined, {
