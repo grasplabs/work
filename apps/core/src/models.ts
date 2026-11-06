@@ -1486,6 +1486,7 @@ const record = async (
       status: failure?.status ?? status,
       errorType: failure?.errorType,
     }),
+    at: Date.now(),
     spend: call,
     ...(usage === undefined ? {} : { usage }),
     ...(health === undefined ? {} : { health }),
@@ -2782,6 +2783,7 @@ const recordSpeech = async (
       status,
       errorType,
     }),
+    at: Date.now(),
     spend: call,
     ...(answering === undefined
       ? {}
@@ -2990,6 +2992,7 @@ const listenThrough = async (
             cost,
             outcome,
           }),
+          at: Date.now(),
           spend: call,
           // A transcription model's input is the seconds it hears.
           usage: {

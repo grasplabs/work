@@ -16,7 +16,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-import { ofRemovedDatabase } from "./removed-databases.ts";
+import { ofRemovedDatabase, storageOf } from "./removed-databases.ts";
 import type { BranchView } from "./removed-databases.ts";
 
 const git = (...args: string[]): string =>
@@ -58,8 +58,53 @@ const base = git("merge-base", "origin/main", "HEAD").trim();
 const changedHere = (file: string): boolean =>
   git("diff", "--name-only", base, "--", file).trim() !== "";
 
+/** `file` as `ref` has it; none where it has no such file. */
+const fileAt = (ref: string, file: string): string | undefined => {
+  try {
+    return execFileSync("git", ["show", `${ref}:${file}`], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return undefined;
+  }
+};
+
+/** What every `wrangler.jsonc` deletes and applies at `ref`. */
+const storageAt = (ref: string, configs: readonly string[]) =>
+  configs.map((file) => storageOf(file, fileAt(ref, file)));
+
+/** The `wrangler.jsonc` files at main or at HEAD. */
+const wranglerConfigs = [
+  ...new Set(
+    [base, "HEAD"].flatMap((ref) =>
+      git("ls-tree", "-r", "--name-only", ref)
+        .split("\n")
+        .filter((file) => file.endsWith("wrangler.jsonc"))
+    )
+  ),
+];
+const storageAtBase = storageAt(base, wranglerConfigs);
+const storageAtHead = storageAt("HEAD", wranglerConfigs);
+const deletedBefore = new Set(
+  storageAtBase.flatMap(({ deletedClasses }) => deletedClasses)
+);
+const dirsNow = new Set(
+  storageAtHead.flatMap(({ migrationDirs }) => migrationDirs)
+);
+
 /** What HEAD and the branch's diff say of a database removed whole. */
 const branchView: BranchView = {
+  deletedClasses: new Set(
+    storageAtHead
+      .flatMap(({ deletedClasses }) => deletedClasses)
+      .filter((name) => !deletedBefore.has(name))
+  ),
+  removedMigrationDirs: new Set(
+    storageAtBase
+      .flatMap(({ migrationDirs }) => migrationDirs)
+      .filter((dir) => !dirsNow.has(dir))
+  ),
   deleted: new Set(
     git("diff", "--name-only", "--find-renames", "--diff-filter=D", base)
       .split("\n")

@@ -21,6 +21,7 @@ CREATE TABLE `model_usage` (
 );
 --> statement-breakpoint
 CREATE INDEX `model_usage_period_idx` ON `model_usage` (`period`,`credential`);--> statement-breakpoint
+CREATE INDEX `model_usage_created_idx` ON `model_usage` (`created_at`);--> statement-breakpoint
 CREATE INDEX `model_usage_workflow_idx` ON `model_usage` (`period`,`workflow_app_id`,`workflow_id`);--> statement-breakpoint
 CREATE INDEX `model_usage_binding_idx` ON `model_usage` (`period`,`binding_app_id`,`binding_alias`);--> statement-breakpoint
 CREATE TABLE `provider_health` (

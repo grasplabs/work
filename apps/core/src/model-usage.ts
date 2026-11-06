@@ -3,7 +3,7 @@ import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditEntry, AuditEvent } from "@grasp-os/shared/audit";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { waitUntil } from "cloudflare:workers";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
@@ -63,6 +63,8 @@ export interface ProviderNote {
 
 /** What the gateway records after one response. */
 export interface ResponseRecord {
+  /** When the response ended, in ms since the epoch: every try of its record says so. */
+  at: number;
   /** Its `model.call` audit event. */
   entry: AuditEntry;
   /** Whom and what its spend counts for. */
@@ -81,7 +83,9 @@ export type ProviderHealth = typeof providerHealth.$inferSelect;
  * worked or failed, and for a failure that shows something of the
  * provider, its class since the first failure of that class after the last
  * that worked. A failure that shows nothing (a refusal of the request
- * itself) leaves the class as it was.
+ * itself) leaves the class as it was. Only a note newer than what the
+ * provider's health says already is written: a record tried again, or one
+ * that landed late, never puts an older result over a newer one.
  */
 const healthNoted = (
   db: DrizzleD1Database,
@@ -89,6 +93,7 @@ const healthNoted = (
   now: number
 ) => {
   const target = [providerHealth.provider, providerHealth.credential];
+  const newer = sql`${now} > max(coalesce(${providerHealth.lastOkAt}, 0), coalesce(${providerHealth.lastFailedAt}, 0))`;
   if (failed === undefined) {
     return db
       .insert(providerHealth)
@@ -96,6 +101,7 @@ const healthNoted = (
       .onConflictDoUpdate({
         target,
         set: { lastOkAt: now, failingClass: null, failingSince: null },
+        setWhere: newer,
       });
   }
   const noted = {
@@ -123,6 +129,7 @@ const healthNoted = (
               failingClass: trouble,
               failingSince: sql`CASE WHEN ${providerHealth.failingClass} = ${trouble} THEN coalesce(${providerHealth.failingSince}, ${now}) ELSE ${now} END`,
             },
+      setWhere: newer,
     });
 };
 
@@ -130,10 +137,9 @@ const healthNoted = (
 const recordOnce = async (
   env: Env,
   db: DrizzleD1Database & { $client: D1Database },
-  { spend, usage, health }: Omit<ResponseRecord, "entry">,
+  { at, spend, usage, health }: Omit<ResponseRecord, "entry">,
   event: AuditEvent
 ): Promise<void> => {
-  const now = Date.now();
   await auditedBatch(env, db, [
     // Already stored (`recordResponse`): here so usage and its event are
     // kept together, once by the event's ID.
@@ -147,12 +153,12 @@ const recordOnce = async (
               ...usage,
               ...spendKeysOf(spend),
               feature: usage.feature ?? null,
-              period: spendMonth(env),
-              createdAt: new Date(now),
+              period: spendMonth(env, new Date(at)),
+              createdAt: new Date(at),
             })
             .onConflictDoNothing(),
         ]),
-    ...(health === undefined ? [] : [healthNoted(db, health, now)]),
+    ...(health === undefined ? [] : [healthNoted(db, health, at)]),
   ]);
 };
 
@@ -247,6 +253,38 @@ export const keyReplaced = async (
       and(
         eq(providerHealth.provider, provider),
         eq(providerHealth.credential, "organization")
+      )
+    );
+};
+
+/** How long a usage row is kept: past a year, so the overview shows 13 months. */
+export const usageKeptDays = 400;
+
+/** Most usage rows one sweep deletes; the rest wait for the next. */
+const usageSweptAtMost = 1000;
+
+/**
+ * Deletes usage rows older than {@link usageKeptDays}, at most
+ * {@link usageSweptAtMost} a run, oldest first, from the clock: the spend
+ * overview reads months, never older than a year back.
+ */
+export const sweepModelUsage = async (
+  env: Pick<Env, "DB">,
+  now: Date
+): Promise<void> => {
+  const before = new Date(now.getTime() - usageKeptDays * 24 * 60 * 60 * 1000);
+  const db = drizzle(env.DB);
+  await db
+    .delete(modelUsage)
+    .where(
+      inArray(
+        modelUsage.id,
+        db
+          .select({ id: modelUsage.id })
+          .from(modelUsage)
+          .where(lt(modelUsage.createdAt, before))
+          .orderBy(asc(modelUsage.createdAt))
+          .limit(usageSweptAtMost)
       )
     );
 };

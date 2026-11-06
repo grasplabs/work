@@ -3,9 +3,12 @@ import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { modelUsage } from "../src/db/core/schema.ts";
 import { monthSpend } from "../src/model-spend.ts";
+import { recordResponse } from "../src/model-usage.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { allEvents } from "./audit-events.ts";
@@ -17,9 +20,15 @@ import {
   jsonWorkflowAppsOf,
   startedBy,
 } from "./json-workflow-apps.ts";
+import { runQuarterHourTasks } from "./maintenance.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
-import { recordedUsage, spentMicros, usageRows } from "./model-usage.ts";
+import {
+  providerHealthRows,
+  recordedUsage,
+  spentMicros,
+  usageRows,
+} from "./model-usage.ts";
 import { plan } from "./platform-providers.ts";
 import { streamText } from "./provider-streams.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
@@ -560,6 +569,77 @@ describe("model spend", { timeout: 60_000 }, () => {
       events: events.filter(({ action }) => action === "model.call").length,
       rows: rows.length,
     }).toStrictEqual({ events: 1, rows: 1 });
+  });
+
+  it("never put an older result over a newer one in a provider's health, however late its record lands", async () => {
+    const named = `provider-${crypto.randomUUID()}`;
+    /** A response of `provider`'s that ended at `at`, failed or not, recorded now. */
+    const noted = async (at: number, failed: boolean) => {
+      await recordResponse(
+        env,
+        {
+          at,
+          entry: {
+            actor: { type: "system" },
+            action: "model.call",
+            detail: { purpose: "test.health" },
+          },
+          spend: { trigger: { type: "system" } },
+          health: {
+            provider: named,
+            credential: "organization",
+            ...(failed
+              ? {
+                  failed: { failure: "auth", status: 401, trouble: "refused" },
+                }
+              : {}),
+          },
+        },
+        { awaited: true }
+      );
+    };
+    const now = Date.now();
+
+    // A newer failure lands first; an older success, tried again, after it.
+    await noted(now, true);
+    await noted(now - 1000, false);
+    const rows = await providerHealthRows();
+
+    expect(rows.find((row) => row.provider === named)).toMatchObject({
+      lastOkAt: null,
+      lastFailedAt: now,
+      failingClass: "refused",
+    });
+  });
+
+  it("keep usage rows 400 days, then sweep them from the clock", async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const month = newMonth();
+    const now = Date.now();
+    /** A usage row of `month` written `days` ago. */
+    const rowOf = (days: number) => ({
+      id: crypto.randomUUID(),
+      period: month,
+      personId: null,
+      triggerType: "person",
+      model: mistral,
+      credential: "organization",
+      inputTokens: 1000,
+      outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cost: pricedMicros / 1_000_000,
+      estimated: false,
+      createdAt: new Date(now - days * day),
+    });
+    const [kept, gone] = [rowOf(399), rowOf(401)];
+    await drizzle(env.DB).insert(modelUsage).values(kept);
+    await drizzle(env.DB).insert(modelUsage).values(gone);
+
+    await runQuarterHourTasks({}, new Date(now));
+    const rows = await usageRows(month);
+
+    expect(rows.map(({ id }) => id)).toStrictEqual([kept.id]);
   });
 
   it("charge a Claude Sonnet 4.5 prompt past 200K tokens at Anthropic's long-context prices, as its audit event counts it", async () => {

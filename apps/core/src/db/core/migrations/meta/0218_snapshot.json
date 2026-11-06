@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ee1c2ba2-d960-4f00-80fb-02387345c8b8",
+  "id": "12f0cc3e-6927-4a27-85ef-d949959a1ebb",
   "prevId": "de03cf36-3210-4155-bc45-35f014bbd63c",
   "tables": {
     "access_revocations": {
@@ -6077,6 +6077,13 @@
           "columns": [
             "period",
             "credential"
+          ],
+          "isUnique": false
+        },
+        "model_usage_created_idx": {
+          "name": "model_usage_created_idx",
+          "columns": [
+            "created_at"
           ],
           "isUnique": false
         },

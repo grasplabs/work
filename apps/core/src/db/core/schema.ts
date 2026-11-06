@@ -5322,6 +5322,8 @@ export const modelUsage = sqliteTable(
   },
   (table) => [
     index("model_usage_period_idx").on(table.period, table.credential),
+    // The rows past their retention (`sweepModelUsage`).
+    index("model_usage_created_idx").on(table.createdAt),
     index("model_usage_workflow_idx").on(
       table.period,
       table.workflowAppId,
