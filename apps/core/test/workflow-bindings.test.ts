@@ -2,7 +2,6 @@ import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import {
   releaseFormatVersion,
   releaseManifestSchema,
-  sdkProtocolVersion,
 } from "@grasp-os/shared/app-releases";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
@@ -152,7 +151,6 @@ const sealed = async (app: string, version: number, revoked = false) => {
       schemaHash: hash,
       contractHash: hash,
       sdkVersion: "1.0.0",
-      sdkProtocolVersion,
       uiVersion: "1.0.0",
       compilerVersion: "1.0.0",
       dependencyLockHash: hash,

@@ -16,7 +16,6 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { inspectApp, symbolicModules } from "@grasp-os/sdk/host";
-import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
 import {
   definitionPackageFormatVersion,
   definitionPackageSchema,
@@ -146,7 +145,6 @@ const definitionOf = (
       schemaHash: hash("d"),
       dependencyLockHash: hash("e"),
       sdkVersion: "sdk-1",
-      sdkProtocolVersion,
       uiVersion: "ui-1",
       compilerVersion: "compiler-1",
       generated: {},
@@ -1820,7 +1818,7 @@ export const Off = () => (
       });
     });
 
-    it("refuses a directory that isn't empty, a package for another protocol, a key that isn't a workflow's, and dependencies with no lock", async () => {
+    it("refuses a directory that isn't empty, a key that isn't a workflow's, and dependencies with no lock", async () => {
       const used = scratch();
       writeFileSync(path.join(used.dir, "kept.txt"), "kept");
       const definition = definitionOf();
@@ -1830,21 +1828,6 @@ export const Off = () => (
       expect({
         nonEmpty: await refusalOf(packaged(definition, used.dir)),
         kept: readFileSync(path.join(used.dir, "kept.txt"), "utf-8"),
-        protocol: await refusalOf(
-          packaged(
-            {
-              ...definition,
-              app: {
-                ...definition.app,
-                provenance: {
-                  ...definition.app.provenance,
-                  sdkProtocolVersion: sdkProtocolVersion + 1,
-                },
-              },
-            },
-            scratch().out
-          )
-        ),
         key: await refusalOf(
           packaged(
             {
@@ -1874,7 +1857,6 @@ export const Off = () => (
       }).toStrictEqual({
         nonEmpty: "refused",
         kept: "kept",
-        protocol: "refused",
         key: "refused",
         unlocked: "refused",
         notAPackage: "refused",

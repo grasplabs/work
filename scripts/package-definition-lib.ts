@@ -27,10 +27,10 @@
  *   directory beside `--out`, each file created anew (`wx`), and renamed
  *   onto `--out` only while that is missing or an empty directory, never
  *   a link.
- * - The package isn't one the platform made, or for another SDK protocol:
- *   it is parsed with the strict package schema, its registration with
- *   the SDK's strict reader, and a protocol other than the checkout's is
- *   refused.
+ * - The package isn't one the platform made, or of another format: it is
+ *   parsed with the strict package schema and its registration with the
+ *   SDK's strict reader, and a format other than the checkout's is
+ *   refused by name.
  * - Packages are fetched that nothing pinned, or replace one the project
  *   pins, or the network is reached: nothing here makes a network call.
  *   Every package the project installs is pinned, exactly and with its
@@ -76,7 +76,6 @@ import {
   readAppManifest,
   readSealedWorkflows,
 } from "@grasp-os/sdk/host";
-import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
 import {
   definitionPackageFormatVersion,
   definitionPackageSchema,
@@ -397,10 +396,10 @@ export interface PackagingInput {
   readonly commit: string;
 }
 
-/** The package `definition`, of a protocol this checkout runs, or a refusal. */
 /** Just the format a package says it has, to refuse another one by name. */
 const formatSchema = z.object({ formatVersion: z.int() });
 
+/** The package `definition`, of the format this checkout reads, or a refusal. */
 const readDefinition = (definition: unknown): DefinitionPackage => {
   const format = formatSchema.safeParse(definition);
   if (
@@ -418,12 +417,6 @@ const readDefinition = (definition: unknown): DefinitionPackage => {
   const parsed = definitionPackageSchema.safeParse(definition);
   if (!parsed.success) {
     return refuse("The file isn't a definition package this checkout reads.");
-  }
-  const { sdkProtocolVersion: sealed } = parsed.data.app.provenance;
-  if (sealed !== sdkProtocolVersion) {
-    return refuse(
-      `The package was sealed for SDK protocol ${sealed}; this checkout's is ${sdkProtocolVersion}.`
-    );
   }
   return parsed.data;
 };

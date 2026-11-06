@@ -1,8 +1,5 @@
 import { compilerVersion, isAppLayout, isPageFile } from "@grasp-os/compiler";
-import {
-  sdkProtocolVersion,
-  versionErrors,
-} from "@grasp-os/shared/app-releases";
+import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors, openCandidateStates } from "@grasp-os/shared/apps";
 import type { App, CandidateState } from "@grasp-os/shared/apps";
 import { createAuditEvent } from "@grasp-os/shared/audit";
@@ -145,7 +142,6 @@ const rejectedCodes: ReadonlySet<string> = new Set([
   "version.format_unsupported",
   "version.manifest_corrupt",
   "version.mismatch",
-  "version.protocol_unsupported",
   "version.revoked",
   "version.store_bound_elsewhere",
 ]);
@@ -593,7 +589,7 @@ const sealedPagesOf = async (
  *   migrations, and the stores it binds;
  * - the tests the gates selected to run, each passing (`verifyVersion`);
  * - the App's authority as it was (`authorityOf`);
- * - the environment: compiler, SDK protocol and platform release;
+ * - the environment: compiler and platform release;
  * - whether the version it replaces could run again: its release not
  *   revoked and its store live (`releaseRunnable`), for one of spec 8's
  *   layout read back from storage as this one is, and its store not
@@ -655,11 +651,10 @@ const reportOf = async (
     authority: await authorityOf(env, row),
     environment: {
       compilerVersion,
-      sdkProtocolVersion,
       // Recorded as evidence of where it was verified, and not compared
       // when it is made current, by design: a platform release changes
       // under a candidate without changing what it was verified against.
-      // The compiler and SDK protocol are compared (`verifiedHere`).
+      // The compiler is compared (`verifiedHere`).
       platformRelease: env.CF_VERSION_METADATA?.id ?? null,
     },
     rollback:
@@ -796,7 +791,6 @@ export const runCandidate = async (
 const reportedSchema = z.object({
   environment: z.object({
     compilerVersion: z.string(),
-    sdkProtocolVersion: z.int(),
   }),
   release: z
     .object({
@@ -824,13 +818,12 @@ const reportedOf = async (
 };
 
 /**
- * Whether the verified candidate was verified by the compiler and SDK
- * protocol this release runs: a candidate verified by an earlier release
+ * Whether the verified candidate was verified by the compiler this
+ * release runs: a candidate verified by an earlier release
  * is checked again before it is made current, never trusted across it.
  */
 const verifiedHere = (reported: z.infer<typeof reportedSchema>): boolean =>
-  reported.environment.compilerVersion === compilerVersion &&
-  reported.environment.sdkProtocolVersion === sdkProtocolVersion;
+  reported.environment.compilerVersion === compilerVersion;
 
 /**
  * Refusals that the release `candidate` was verified on is no longer

@@ -1,5 +1,4 @@
 import { compilerVersion } from "@grasp-os/compiler";
-import { sdkProtocolVersion } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
@@ -233,7 +232,6 @@ describe(
         },
         environment: {
           compilerVersion,
-          sdkProtocolVersion,
           platformRelease: env.CF_VERSION_METADATA?.id ?? null,
         },
         rollback: { to: null, eligible: false },
@@ -667,7 +665,7 @@ export default appTest({
       // Verified by a compiler this release doesn't run.
       const earlier = crypto.randomUUID();
       const report = canonicalText({
-        environment: { compilerVersion: "0.0.0-earlier", sdkProtocolVersion },
+        environment: { compilerVersion: "0.0.0-earlier" },
       });
       const hash = await sha256Hex(report);
       await env.DB.batch([

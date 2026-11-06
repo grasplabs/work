@@ -18,12 +18,11 @@ import { catalogBindingKinds } from "./workflow-resources.ts";
 // for and approves them again before anything it publishes seals them.
 
 /**
- * The format of a definition package. 2 since a workflow version carries
- * the approved packages it seals (GRA-737): a format 1 package has no
- * room for them, so one of a version that sealed some would have lost
- * them without saying so, and is refused, to be exported again.
+ * The format of a definition package. A package of another format is
+ * refused, to be exported again, rather than read as this one: the
+ * schema is strict, so another format's shape would read as no package.
  */
-export const definitionPackageFormatVersion = 2;
+export const definitionPackageFormatVersion = 3;
 
 /** The most workflow versions one package holds. */
 export const definitionPackageMaxWorkflows = 64;
@@ -78,7 +77,6 @@ export const definitionPackageSchema = z.strictObject({
       schemaHash: sha256Schema,
       dependencyLockHash: sha256Schema,
       sdkVersion: z.string().min(1).max(128),
-      sdkProtocolVersion: z.int(),
       uiVersion: z.string().min(1).max(128),
       compilerVersion: z.string().min(1).max(128),
       /**

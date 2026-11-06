@@ -2,10 +2,7 @@ import { serverSdkModules } from "@grasp-os/compiler";
 import { definitionManifest } from "@grasp-os/sdk/definition";
 import { schemaHash } from "@grasp-os/sdk/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
-import {
-  releaseFormatVersion,
-  sdkProtocolVersion,
-} from "@grasp-os/shared/app-releases";
+import { releaseFormatVersion } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -212,7 +209,6 @@ describe("sealing a release", { timeout: 120_000 }, () => {
       resourceVersion: 1,
       sourceTreeHash: tree,
       schemaHash: schema,
-      sdkProtocolVersion,
       target: "app",
       bindings: [],
       artifactTrust: "unreviewed",
@@ -437,7 +433,6 @@ const recordEvidence = async (
     target: manifest.target ?? null,
     compilerVersion: manifest.compilerVersion ?? null,
     sdkVersion: manifest.sdkVersion ?? null,
-    sdkProtocolVersion: manifest.sdkProtocolVersion ?? null,
     uiVersion: manifest.uiVersion ?? null,
   };
   observed.checkedModules = await sha256Hex(
@@ -585,7 +580,10 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     const current = await pages();
     await rewrite(fixture.app, release, {
       manifest: (manifest) => {
+        // As the format before this one sealed: it still named an SDK
+        // protocol, which this format's strict reader would call corrupt.
         manifest.formatVersion = releaseFormatVersion - 1;
+        manifest.sdkProtocolVersion = 3;
       },
     });
     // Sealed for good: sealing the version again is refused the same way,
@@ -602,19 +600,6 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
       "version.format_unsupported",
     ]);
     expect(current).toBe("page.not_found");
-  });
-
-  it("is refused as another platform's when sealed for another protocol, not as tampering", async () => {
-    const fixture = await appWith(notesFiles());
-    const release = await seal(fixture);
-    await rewrite(fixture.app, release, {
-      manifest: (manifest) => {
-        manifest.sdkProtocolVersion = sdkProtocolVersion + 1;
-      },
-    });
-    await expect(
-      failure(async () => await loadRelease(env, fixture.app, 1))
-    ).resolves.toBe("version.protocol_unsupported");
   });
 
   it.each([
@@ -954,7 +939,6 @@ describe(
           target: "app",
           compilerVersion: manifest.compilerVersion,
           sdkVersion: manifest.sdkVersion,
-          sdkProtocolVersion,
           uiVersion: manifest.uiVersion,
         },
         manifest: await sha256Hex(

@@ -19,7 +19,6 @@ import { serverModule } from "@grasp-os/sdk/server";
 import {
   releaseFormatVersion,
   releaseManifestSchema,
-  sdkProtocolVersion,
 } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -281,7 +280,6 @@ const sealedManifest = async (app: string) => {
     schemaHash: zeros,
     contractHash: zeros,
     sdkVersion: "1.0.0",
-    sdkProtocolVersion,
     uiVersion: "1.0.0",
     compilerVersion: "1.0.0",
     dependencyLockHash: zeros,
