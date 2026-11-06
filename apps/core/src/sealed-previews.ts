@@ -573,7 +573,7 @@ export interface PreviewCallOptions {
 }
 
 /** Whether `error` says the draft's code doesn't seal, which a change of it fixes. */
-const sealFailure = (error: unknown): boolean =>
+const isDraftSealFailure = (error: unknown): boolean =>
   typeof error === "object" &&
   error !== null &&
   "code" in error &&
@@ -1240,7 +1240,7 @@ export class SealedPreviews {
       try {
         await running.release;
       } catch (error) {
-        if (sealFailure(error)) {
+        if (isDraftSealFailure(error)) {
           return resultOf(refusedResult(error));
         }
       }
@@ -1455,7 +1455,11 @@ export class SealedPreviews {
    * The preview of `draft`: the one running, while it runs the draft's
    * server code (a write of its screens alone changes none of it), or the
    * one sealing it; otherwise a new one, which takes the place of the one
-   * running once it seals (`#settle`).
+   * running once it seals (`#settle`). Only the draft's own server code
+   * now is ever sealed anew, or a version of the App's: a call that read
+   * an earlier revision of the draft, then waited while the draft moved
+   * on, is `app.preview_outdated`, never its code sealed again over what
+   * runs.
    */
   #runningFor(chatId: ChatId, app: AppId, draft: Draft): Running {
     const name = nameOf(chatId, app);
@@ -1469,6 +1473,9 @@ export class SealedPreviews {
     }
     const server = serverOf(draft);
     const kept = this.#serverSince.get(name);
+    if (draft.revision >= 0 && kept !== undefined && kept.server !== server) {
+      throw appErrors.create("app.preview_outdated");
+    }
     let since = kept?.server === server ? kept.since : draft.revision;
     // A version of the App (a negative revision) begins no server code of
     // the draft.
@@ -1532,7 +1539,7 @@ export class SealedPreviews {
     } catch (error) {
       if (this.#sealing.get(name) === running) {
         this.#sealing.delete(name);
-        if (sealFailure(error)) {
+        if (isDraftSealFailure(error)) {
           this.#unbuilt.set(name, running.server);
           this.#restore(chatId, app);
         }
@@ -1954,8 +1961,12 @@ export class SealedPreviews {
     if (sealing !== undefined && !runsServerOf(sealing, draft)) {
       this.#sealing.delete(name);
     }
+    // Only a write that changed the server code: one of screens alone
+    // leaves what runs as it was, in place of server code that doesn't
+    // seal too.
     const running = this.#running.get(name);
     if (
+      kept?.server !== server &&
       running !== undefined &&
       running.since !== Number.POSITIVE_INFINITY &&
       running.server !== server

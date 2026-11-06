@@ -4924,6 +4924,11 @@ export class Workspace extends DurableObject<Env> {
       await this.#sealedPreviews.release(id, app, served.draft);
       return { draft: served.draft };
     } catch (error) {
+      // The draft moved on while the call waited: out of date, as had it
+      // come later, and nothing is sealed again for it.
+      if (appErrors.codeOf(error) === "app.preview_outdated") {
+        throw error;
+      }
       try {
         const draft = await this.#inPlace(
           id,
