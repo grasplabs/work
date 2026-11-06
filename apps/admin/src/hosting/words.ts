@@ -59,9 +59,6 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "A Worker has cron triggers, which Workers for Platforms doesn't document for user Workers.",
   upload_unobserved:
     "A script isn't at the release's Durable Object migration after its upload.",
-  secrets_unobserved: "A script lacks a secret after it was delivered.",
-  secret_unrevoked:
-    "A script still has a secret it's no longer given after it was removed.",
   probe_unqualified:
     "There's no qualified way to probe core in a Workers for Platforms namespace yet, so its hostname stays unpublished.",
   probe_unanswered:
@@ -163,8 +160,6 @@ const failureCauses = {
   stage_unset: "staff",
   wfp_schedule_unqualified: "release",
   upload_unobserved: "retry",
-  secrets_unobserved: "retry",
-  secret_unrevoked: "retry",
   probe_unqualified: "staff",
   probe_unanswered: "retry",
   probe_identity_mismatch: "retry",

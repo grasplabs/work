@@ -290,7 +290,6 @@ describe("creating an organization", () => {
         "reserve",
         "storage",
         "install",
-        "sign_in",
         "reachable",
         "publish",
         "admins",
@@ -302,8 +301,10 @@ describe("creating an organization", () => {
         lines: [
           [`Reserving ${clientId}.grasp.test`, "done"],
           ["Creating its databases and file storage", "done"],
-          ["Installing Grasp", "done"],
-          ["Setting up sign-in with Google Workspace", "done"],
+          [
+            "Installing Grasp and setting up sign-in with Google Workspace",
+            "done",
+          ],
           [
             `Making sure ${clientId}.grasp.test is reachable and everything answers`,
             "done",

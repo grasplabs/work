@@ -134,16 +134,22 @@ export const workerAssets = (
  * What `worker` of `manifest` is uploaded as, `bindings` rendered already:
  * a placed client's, mapped onto its inventory (src/hosting/inventory.ts),
  * its mail locked (`lockMailSender`). Its metadata on the release's
- * compatibility date and flags, `vars` added as JSON bindings, and its
- * modules, each read from `store` and checked against the manifest as the
- * upload sends it. Its static files go up before it (`workerAssets`).
+ * compatibility date and flags, `vars` added as JSON bindings, `secrets`
+ * as secret bindings, and its modules, each read from `store` and checked
+ * against the manifest as the upload sends it. Its static files go up
+ * before it (`workerAssets`).
+ *
+ * The secrets go in the upload itself, as the API takes them: one version
+ * with all of them, and exactly them, so no version ever runs without one
+ * or with one it's no longer given.
  */
 export const renderedWorkerUpload = (
   store: ReleaseStore,
   manifest: ReleaseManifest,
   worker: WorkerEntry,
   bindings: readonly Record<string, unknown>[],
-  vars: Readonly<Record<string, unknown>>
+  vars: Readonly<Record<string, unknown>>,
+  secrets: readonly Secret[]
 ): WorkerUpload => {
   const modules = worker.modules.map((file): WorkerModule => ({
     name: file.name,
@@ -161,6 +167,11 @@ export const renderedWorkerUpload = (
         type: "json",
         name,
         json,
+      })),
+      ...secrets.map(({ name, value }) => ({
+        type: "secret_text",
+        name,
+        text: value,
       })),
     ],
     observability: worker.observability,
@@ -197,17 +208,6 @@ export const checkBindingNames = (
 
 const encoder = new TextEncoder();
 
-/** What goes into one Worker's upload, as `uploadFingerprint` takes it. */
-export interface UploadInputs {
-  manifest: ReleaseManifest;
-  worker: WorkerEntry;
-  databases: ReadonlyMap<string, string>;
-  vars: Readonly<Record<string, unknown>>;
-  secrets: readonly Secret[];
-  /** The address its mail is locked to (`renderBindings`). */
-  mailSender: string;
-}
-
 /** HMAC-SHA256 of `inputs`, as canonical JSON, under `key`: hex. */
 export const keyedHash = async (
   key: CryptoKey,
@@ -221,16 +221,6 @@ export const keyedHash = async (
   return toHex(new Uint8Array(mac));
 };
 
-/** `key` as an HMAC-SHA256 key, as it is. */
-const rawHmacKey = async (key: string): Promise<CryptoKey> =>
-  await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(key),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-
 /** What the key secrets fingerprints are made with is derived for. */
 const secretsFingerprintPurpose = "grasp-os console secrets fingerprint";
 
@@ -239,36 +229,6 @@ const sortedSecrets = (secrets: readonly Secret[]): [string, string][] =>
   secrets
     .map(({ name, value }): [string, string] => [name, value])
     .toSorted(([a], [b]) => (a < b ? -1 : 1));
-
-/**
- * A fingerprint of everything that goes into a Worker's upload: its
- * secrets' names and values (the previous keys included, when given), its
- * vars, its bindings as filled in for the account, its code, static files,
- * settings and pins. HMAC-SHA256 under `key` (`CLIENT_KEY`), so the
- * fingerprint stored with a recorded version tells nothing about the
- * secret values that went into it. A resumed deploy reuses a version only
- * while this is the same.
- */
-export const uploadFingerprint = async (
-  key: string,
-  { manifest, worker, databases, vars, secrets, mailSender }: UploadInputs
-): Promise<string> =>
-  await keyedHash(await rawHmacKey(key), {
-    compatibilityDate: manifest.compatibilityDate,
-    compatibilityFlags: worker.compatibilityFlags,
-    mainModule: worker.mainModule,
-    modules: worker.modules.map(({ name, type, sha256 }) => [
-      name,
-      type,
-      sha256,
-    ]),
-    assets: worker.assets ?? null,
-    observability: worker.observability,
-    durableObjectMigrations: worker.durableObjectMigrations,
-    bindings: renderBindings(worker, databases, mailSender),
-    vars,
-    secrets: sortedSecrets(secrets),
-  });
 
 /**
  * A fingerprint of `secrets` alone, names and values: HMAC-SHA256 under a

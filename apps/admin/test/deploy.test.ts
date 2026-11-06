@@ -20,7 +20,6 @@ import { adminWorkflow, adminWorkflows } from "../src/workflow-runs.ts";
 import type { ApiCall } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { releaseToEdge } from "./edge.ts";
-import { clientScripts } from "./grasp-account.ts";
 import { db, staff } from "./hosting.ts";
 import { livePlacedClient, placedRelease, scriptsOf } from "./placed.ts";
 import type { PlacedClient } from "./placed.ts";
@@ -842,13 +841,11 @@ describe("shared secrets as desired state", () => {
       held: false,
     },
     {
-      connect: "answers as an earlier version, its upload's",
+      connect: "answers as an earlier version",
       answering: "earlier" as const,
       held: true,
     },
     {
-      // What the probe recorded was an isolate of a version made before
-      // the run's last secret: a later read names the newest.
       connect: "names a newer version than its operation recorded",
       answering: "newer" as const,
       held: true,
@@ -879,25 +876,14 @@ describe("shared secrets as desired state", () => {
       // operation delivered the store's Composio key, as on record.
       expect(shared.connect).toHaveProperty("COMPOSIO_API_KEY");
 
-      const connect = await db
-        .select({ scriptName: clientWorkers.scriptName })
-        .from(clientWorkers)
-        .where(
-          and(
-            eq(clientWorkers.clientId, clientId),
-            eq(clientWorkers.worker, "connect")
-          )
-        )
-        .get();
-      const [first] =
-        clientScripts(internal.account).get(connect?.scriptName ?? "")
-          ?.versions ?? [];
+      // A version of connect's other than the one its operation recorded.
+      const earlier = "an-earlier-version";
       if (answering === "earlier") {
-        internal.core.connectAnswering = first?.id ?? null;
+        internal.core.connectAnswering = earlier;
       } else if (answering === "newer") {
         await db
           .update(clientWorkers)
-          .set({ versionId: first?.id ?? null })
+          .set({ versionId: earlier })
           .where(
             and(
               eq(clientWorkers.clientId, clientId),
