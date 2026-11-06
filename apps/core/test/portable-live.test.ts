@@ -620,22 +620,21 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
 
     const pushed = lapsed.got.length;
     await after(pastExpiry, async () => {
-      const fresh = await tokenFor(member.session, notes.app);
+      const fresh = await tokenFor(notes.builder.session, notes.app);
       const writer = portableClient(() => fresh);
       await writer.mutation(notes.api.create, { title: "Later" });
       await expect(closedWithin(lapsing.closed, 10_000)).resolves.toBe(
         tokenExpiredCloseCode
       );
-      // The renewed one goes on: the member's write had it read again.
+      // The renewed one goes on: it shows the builder's new note.
       await eventually(() => {
-        expect(renewed.got.length).toBeGreaterThan(1);
+        expect(titlesOf(renewed.got.at(-1))).toStrictEqual(["Later"]);
       });
     });
     expect({
       lapsed: lapsed.got.length,
-      renewed: titlesOf(renewed.got.at(-1)),
       stillOpen: await closedWithin(renewing.closed, 100),
-    }).toStrictEqual({ lapsed: pushed, renewed: [], stillOpen: "open" });
+    }).toStrictEqual({ lapsed: pushed, stillOpen: "open" });
   });
 
   it("refuses what is asked past its token's expiry, though its latest reading still holds and the expiry timer hasn't run", async () => {

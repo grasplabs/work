@@ -757,6 +757,16 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
         await scheduler.wait(3000);
       }
     );
+    // Every read of the window begins at its first page.
+    let reads = 0;
+    const restoreCount = await beforePageReads(
+      opened,
+      { times: Number.POSITIVE_INFINITY, which: "first" },
+      async () => {
+        reads += 1;
+        await Promise.resolve();
+      }
+    );
     try {
       const first = pageFollower();
       await opened.pages
@@ -771,11 +781,13 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       await eventually(() => {
         expect(second.received.length).toBeGreaterThan(0);
       });
-      expect({
-        first: first.received[0]?.revision,
-        second: second.received[0]?.revision,
-      }).toStrictEqual({ first: 1, second: 2 });
+      // Answered by a read of its own, though it found what the first did.
+      expect({ first: first.received.length, reads }).toStrictEqual({
+        first: 1,
+        reads: 2,
+      });
     } finally {
+      restoreCount();
       restore();
     }
   });
