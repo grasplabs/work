@@ -22,6 +22,7 @@ import m0019 from './0019_search_docs.sql';
 import m0020 from './0020_record_changes.sql';
 import m0021 from './0021_schema_answers.sql';
 import m0022 from './0022_rules_owed.sql';
+import m0023 from './0023_work_audience.sql';
 
   export default {
     journal,
@@ -48,7 +49,8 @@ m0018,
 m0019,
 m0020,
 m0021,
-m0022
+m0022,
+m0023
     }
   }
   

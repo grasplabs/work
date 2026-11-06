@@ -174,6 +174,7 @@ import {
   outputRefusal,
   pendingMigrationsSchema,
   queueWork,
+  recordAudience,
   scanPositionSchema,
   scanRangeIds,
 } from "./store-migrations.ts";
@@ -202,12 +203,13 @@ import type {
 } from "./store-queries.ts";
 import { recordReferences } from "./store-references.ts";
 import {
+  audienceKey,
   audienceOf,
   fieldsRead,
   ruleFieldsOf,
   ruleSql,
 } from "./store-rules.ts";
-import type { RuleCaller } from "./store-rules.ts";
+import type { Audience, RuleCaller } from "./store-rules.ts";
 import { runChange, tableStepsOf } from "./store-schema-changes.ts";
 import {
   dropSearches,
@@ -5549,9 +5551,10 @@ export class StoreHost {
       const written =
         fields !== null &&
         (base === undefined || storedText(fields) !== base.valueJson);
+      const audience = migrating?.tables.get(table);
       if (
         migrating !== null &&
-        migrating.tables.has(table) &&
+        audience !== undefined &&
         schemaHash !== migrating.schema &&
         written
       ) {
@@ -5559,7 +5562,13 @@ export class StoreHost {
           this.#db,
           migrating.target,
           tableId,
-          { recordId, ownerId: base?.ownerId ?? ownerId },
+          {
+            recordId,
+            audience: audienceKey(audience, {
+              owner: base?.ownerId ?? ownerId,
+              fields,
+            }),
+          },
           now
         );
         // A ready migration has work again: no longer ready, its run is
@@ -5770,7 +5779,13 @@ export class StoreHost {
               createdAt: row.cursorCreatedAt,
               recordId: row.cursorRecord,
             };
-      const scanned = nextScanBatch(this.#db, migrated, cursor);
+      const scanned = nextScanBatch(
+        this.#db,
+        pending.hash,
+        migrated,
+        cursor,
+        now
+      );
       if (scanned !== null) {
         return {
           state: "transform",
@@ -6638,7 +6653,16 @@ export class StoreHost {
           )
           .get();
         if (handed !== undefined) {
-          queueWork(this.#db, target, table.tableId, handed, now);
+          queueWork(
+            this.#db,
+            target,
+            table.tableId,
+            {
+              recordId: handed.recordId,
+              audience: recordAudience(table.audience, handed),
+            },
+            now
+          );
         }
       }
     }
@@ -6771,7 +6795,16 @@ export class StoreHost {
       } else {
         // Edited since it was read: transformed again from its new
         // revision, never overwritten with what the old one became.
-        queueWork(this.#db, pending.hash, table.tableId, record, now);
+        queueWork(
+          this.#db,
+          pending.hash,
+          table.tableId,
+          {
+            recordId: record.recordId,
+            audience: recordAudience(table.audience, record),
+          },
+          now
+        );
       }
     }
     return { writes, failure: null };
@@ -7884,16 +7917,27 @@ export class StoreHost {
   #migrating(): {
     target: string;
     schema: string;
-    tables: ReadonlySet<string>;
+    /** Each migrated table's audience (`audienceOf`), by name. */
+    tables: ReadonlyMap<string, Audience>;
   } | null {
     const pending = this.#pendingTarget();
     if (pending?.migrations === null || pending?.migrations === undefined) {
       return null;
     }
+    const { manifest } = pending;
     return {
       target: pending.hash,
       schema: pending.migrations.schema,
-      tables: new Set(pending.migrations.migrations.map(([table]) => table)),
+      tables: new Map(
+        pending.migrations.migrations.flatMap(([table]) => {
+          const declared = Object.hasOwn(manifest.tables, table)
+            ? manifest.tables[table]
+            : undefined;
+          return declared === undefined
+            ? []
+            : [[table, audienceOf(declared)] as const];
+        })
+      ),
     };
   }
 

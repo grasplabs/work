@@ -614,7 +614,6 @@ export const reviewedPersonColumns: Readonly<
   "dataStore.sdk_commit_writers": ["principal"],
   "dataStore.sdk_file_delete_keys": ["owner_id"],
   "dataStore.sdk_files": ["owner_id"],
-  "dataStore.sdk_migration_work": ["owner_id"],
   "dataStore.sdk_mutation_receipts": ["principal"],
   "dataStore.sdk_import_rows": ["principal"],
   "dataStore.sdk_preferences": ["person_id"],

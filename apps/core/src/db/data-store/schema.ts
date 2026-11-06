@@ -507,7 +507,8 @@ export const backfills = sqliteTable(
  * Records an explicit migration still has to transform once its scan is
  * through (store-migrations.ts): written in the transaction of a commit
  * that left a record of a migrated table not fitting the pending target,
- * or of a batch whose record changed since it was read. Its activation
+ * of a batch whose record changed since it was read, or of a scan batch
+ * that passed over a record of another audience. Its activation
  * waits until none is left; a record that fits by then is dropped.
  */
 export const migrationWork = sqliteTable(
@@ -516,18 +517,23 @@ export const migrationWork = sqliteTable(
     targetHash: text("target_hash").notNull(),
     tableId: text("table_id").notNull(),
     recordId: text("record_id").notNull(),
-    ownerId: text("owner_id").notNull(),
+    /**
+     * Who the record reached as it was queued (store-rules.ts,
+     * `audienceKey`): work is taken in its order, so a batch, which holds
+     * one audience's records only, stays full.
+     */
+    audience: text().notNull(),
     queuedAt: integer("queued_at").notNull(),
   },
   (table) => [
     primaryKey({
       columns: [table.targetHash, table.tableId, table.recordId],
     }),
-    // A batch's records: one table's, by owner then ID.
+    // A batch's records: one table's, by audience then ID.
     index("sdk_migration_work_batches").on(
       table.targetHash,
       table.tableId,
-      table.ownerId,
+      table.audience,
       table.recordId
     ),
   ]
