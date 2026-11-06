@@ -319,7 +319,7 @@ const needWords = (need: PlatformNeed): ReactNode => {
       <>
         {`${what}: `}
         <ErrorCode code={deploy.error} />
-        {" Retry it once what stopped it is fixed."}
+        {` ${operationErrorWords(deploy.error)} Retry it once what stopped it is fixed.`}
       </>
     );
   }

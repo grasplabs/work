@@ -55,6 +55,7 @@ import {
   startClientProvision,
   startClientRelease,
 } from "../src/hosting/operation.ts";
+import { provisioningProgress } from "../src/hosting/progress.ts";
 import { operationErrorWords } from "../src/hosting/words.ts";
 import { provisionPlacedClient } from "../src/hosting/workflow.ts";
 import { getProvisioning } from "../src/provision/queries.ts";
@@ -2862,7 +2863,7 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("migrates a client once when its attempt times out mid-migration and its retry runs", async () => {
+  it("migrates a client once when its attempt times out mid-migration and its retry runs, saying on Setup where the lost attempt stopped", async () => {
     const manifest = await importRelease();
     const account = graspAccount(cloudflare);
     const destinationId = await destination({ accountId: account.id });
@@ -2887,6 +2888,7 @@ describe("provisioning a placed client", () => {
         timingOut
       );
       await retry.read();
+      const whileRetrying = await provisioningProgress(env, clientId);
       // Both read the same migrations as still needed. The one that timed
       // out goes on first, while its retry still holds the client.
       first.release();
@@ -2910,9 +2912,14 @@ describe("provisioning a placed client", () => {
       expect({
         applies: applies.length,
         provisioned: await provisioned(account, clientId),
+        // What Setup says while it's tried again: where the lost one stopped.
+        noticeNamesStep: whileRetrying?.notice?.startsWith(
+          "A try stopped in its migrations step without recording why"
+        ),
       }).toMatchObject({
         applies: 3,
         provisioned: once(clientId),
+        noticeNamesStep: true,
       });
     } finally {
       first.release();

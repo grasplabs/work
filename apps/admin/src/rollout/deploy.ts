@@ -31,6 +31,7 @@ import { errorCode } from "../deploy/errors.ts";
 import { InventoryError } from "../hosting/inventory.ts";
 import {
   ProvisionOperationError,
+  lostAttemptOf,
   provisionOf,
   recordUnstarted,
   runClientProvision,
@@ -56,6 +57,33 @@ export type DeployParams = z.infer<typeof deployParamsSchema>;
 /** The code at the front of a stop's reason (`<code>: <words>`). */
 export const codeOf = (reason: string): string =>
   reason.split(":", 1)[0] ?? reason;
+
+/**
+ * What the engine fails a step with when its last attempt ended without
+ * an outcome of its own: cut off (its isolate killed) or timed out, as
+ * Cloudflare Workflows names them.
+ */
+const lostAttemptErrors: ReadonlySet<string> = new Set([
+  "WorkflowInternalError",
+  "WorkflowTimeoutError",
+]);
+
+/**
+ * The code run `runId`'s deploy of `clientId` failed with: for an
+ * attempt the engine cut off, the step the operation was left in
+ * (`lostAttemptOf`), not the engine's own words; otherwise the stop's.
+ */
+const failureCodeOf = async (
+  db: AdminDatabase,
+  { clientId, runId }: { clientId: string; runId: string },
+  error: unknown
+): Promise<string> => {
+  const lost =
+    error instanceof Error && lostAttemptErrors.has(error.name)
+      ? await lostAttemptOf(db, clientId, runId)
+      : null;
+  return lost ?? codeOf(stopReason(error));
+};
 
 /**
  * Records run `runId`'s deploy of client `clientId` ended, `error` null
@@ -216,7 +244,7 @@ export const deployRun = (env: Env): WorkflowDefinition => ({
       );
     } catch (error) {
       await step.do("record failure", quickStep, async () => {
-        await recordEnd(db, ending, codeOf(stopReason(error)));
+        await recordEnd(db, ending, await failureCodeOf(db, ending, error));
       });
       throw error;
     }

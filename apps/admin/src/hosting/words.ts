@@ -86,6 +86,8 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "It failed its probe once live, so it was rolled back to the release before on its own: look at the release before releasing it again.",
   release_behind_migration:
     "That release lacks a Durable Object migration the client's scripts ran, which they never go back past: pick a later release.",
+  attempt_lost:
+    "A try stopped without recording why: Cloudflare ended the admin's run, most often past its memory or CPU limit. Look at the admin's Workers Logs from then for the outcome.",
 };
 
 /**
@@ -111,6 +113,9 @@ const knownWords: Readonly<Record<string, string>> = {
 /** What a secret missing from Secrets Store is recorded as, before its name. */
 const storeSecretMissing = /^store_secret_missing: (?<name>\w+)$/u;
 
+/** What a lost attempt is recorded as, before the step it reached (`attemptLostCode`). */
+const attemptLost = /^attempt_lost: (?<step>\w+)$/u;
+
 /**
  * Why an operation stopped, by the code it recorded: its own, the
  * inventory's, or a deploy's (a Cloudflare answer, a deploy's refusal).
@@ -123,6 +128,10 @@ export const operationErrorWords = (code: string): string => {
   const secret = storeSecretMissing.exec(code)?.groups?.name;
   if (secret !== undefined) {
     return `Secrets Store has no ${secret}, so nothing was started: add it (Deploy platform copies the store's secrets from 1Password), then resume.`;
+  }
+  const step = attemptLost.exec(code)?.groups?.step;
+  if (step !== undefined) {
+    return `A try stopped in its ${step} step without recording why: Cloudflare ended the admin's run, most often past its memory or CPU limit. Look at the admin's Workers Logs from then for the outcome.`;
   }
   return code.startsWith("cloudflare_")
     ? "Cloudflare refused a call: its status and error codes are in the code."
@@ -169,6 +178,7 @@ const failureCauses = {
   rollback_past_migration: "staff",
   release_behind_migration: "release",
   release_rolled_back: "release",
+  attempt_lost: "retry",
   // The inventory's.
   destination_unknown: "staff",
   placement_changed: "staff",
@@ -222,7 +232,9 @@ const cloudflareStatus = /^cloudflare_(?<status>\d{3})/u;
  * from Secrets Store and an admin with no client domain.
  */
 export const failureCause = (code: string): FailureCause => {
-  const known = causesByCode.get(code);
+  const known = causesByCode.get(
+    attemptLost.test(code) ? "attempt_lost" : code
+  );
   if (known !== undefined) {
     return known;
   }

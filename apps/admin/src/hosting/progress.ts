@@ -11,15 +11,22 @@
  * has the steps of its install connecting instead, which arrive with
  * GRA-1291: until then they wait, and say so.
  */
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
+import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
-import { clientRuns, clients } from "../db/schema.ts";
+import type { AdminDatabase } from "../db/act.ts";
+import { auditEvents, clientRuns, clients } from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
 import { clientSignInSchema } from "../deploy/core-config.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 import { needsAttentionOf } from "./attention.ts";
-import { provisionOf, provisionSteps } from "./operation.ts";
+import {
+  attemptLostAction,
+  attemptLostCode,
+  provisionOf,
+  provisionSteps,
+} from "./operation.ts";
 import type { ProvisionStep } from "./operation.ts";
 import { clientHostingOf } from "./organization.ts";
 import type { Jurisdiction } from "./organization.ts";
@@ -254,11 +261,14 @@ const cloudLineStates = (
   });
 };
 
-/** Whether client `clientId`'s provisioning run goes, and is on a later attempt. */
+/**
+ * Whether client `clientId`'s provisioning run goes, and, when it's on a
+ * later attempt, its id (`retryingRun`).
+ */
 const runOf = async (
   env: Env,
   clientId: string
-): Promise<{ going: boolean; retrying: boolean }> => {
+): Promise<{ going: boolean; retryingRun: string | null }> => {
   const run = await currentRun(env, clientId);
   const going =
     run !== null && run.kind === "provision_placed" && !hasEnded(run.status);
@@ -272,7 +282,60 @@ const runOf = async (
       )
     )
     .get();
-  return { going, retrying: going && (claim?.attempt ?? 0) > 1 };
+  const retrying = going && (claim?.attempt ?? 0) > 1;
+  return { going, retryingRun: retrying ? (run?.runId ?? null) : null };
+};
+
+const lostDetailSchema = z.object({
+  run: z.string(),
+  step: z.enum(provisionSteps),
+});
+
+/**
+ * Why run `runId` of client `clientId` is trying again, when an attempt
+ * of it was lost (`provision.attempt_lost`, src/hosting/operation.ts): in
+ * words, with the step it reached; null when none of its was.
+ */
+const lostAttemptNotice = async (
+  db: AdminDatabase,
+  clientId: string,
+  runId: string
+): Promise<string | null> => {
+  const [event] = await db
+    .select({ detail: auditEvents.detail })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.clientId, clientId),
+        eq(auditEvents.action, attemptLostAction)
+      )
+    )
+    .orderBy(desc(auditEvents.at))
+    .limit(1);
+  const detail = lostDetailSchema.safeParse(JSON.parse(event?.detail ?? "{}"));
+  return detail.success && detail.data.run === runId
+    ? operationErrorWords(attemptLostCode(detail.data.step))
+    : null;
+};
+
+/**
+ * Why it waits, in a sentence: the code it stopped with, or, while it's
+ * tried again (`retryingRun`), why an attempt of that run was lost.
+ */
+const noticeOf = async (
+  db: AdminDatabase,
+  clientId: string,
+  {
+    stoppedWith,
+    retryingRun,
+  }: { stoppedWith: string | null; retryingRun: string | null }
+): Promise<string | null> => {
+  if (stoppedWith !== null) {
+    return operationErrorWords(stoppedWith);
+  }
+  return retryingRun === null
+    ? null
+    : await lostAttemptNotice(db, clientId, retryingRun);
 };
 
 /** Where it all stands, from what its lines say. */
@@ -324,7 +387,7 @@ export const provisioningProgress = async (
   if (hosting === "on_prem") {
     return onPremProgress(hostname, client.createdAt, admins);
   }
-  const { going, retrying } = await runOf(env, clientId);
+  const { going, retryingRun } = await runOf(env, clientId);
   const attention = await needsAttentionOf(db, clientId);
   const context: LineContext = {
     hostname: hostname ?? clientId,
@@ -335,7 +398,12 @@ export const provisioningProgress = async (
   const states =
     operation === undefined
       ? cloudLines.map((): LineState => "waiting")
-      : cloudLineStates(operation, going, retrying, attention !== null);
+      : cloudLineStates(
+          operation,
+          going,
+          retryingRun !== null,
+          attention !== null
+        );
   const lines: ProgressLine[] = cloudLines.map((line, at) => ({
     id: line.id,
     label: line.label(context),
@@ -358,10 +426,10 @@ export const provisioningProgress = async (
     hostname,
     lines,
     state: overallState(ready, stopped, operation === undefined && !going),
-    notice:
-      stopped && typeof operation?.error === "string"
-        ? operationErrorWords(operation.error)
-        : null,
+    notice: await noticeOf(db, clientId, {
+      stoppedWith: stopped ? (operation?.error ?? null) : null,
+      retryingRun,
+    }),
     code: operation?.error ?? null,
     startedAt: client.createdAt,
     readyAt: ready ? (operation?.updatedAt ?? null) : null,

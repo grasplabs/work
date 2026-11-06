@@ -216,6 +216,12 @@ export const provisionOperationErrorCodes = [
    * release before on its own: its deploy counts as failed.
    */
   "release_rolled_back",
+  /**
+   * An attempt ended at a step without recording how: its isolate was
+   * killed (past its memory or CPU limit) or it timed out. Recorded with
+   * the step (`attemptLostCode`).
+   */
+  "attempt_lost",
 ] as const;
 
 export type ProvisionOperationErrorCode =
@@ -254,6 +260,22 @@ export const provisionSteps = [
   "route",
 ] as const;
 export type ProvisionStep = (typeof provisionSteps)[number];
+
+/**
+ * The step an operation left running stopped in: the one after the last
+ * it finished (`step`, null before the first).
+ */
+export const stepReached = (step: string | null): ProvisionStep => {
+  const steps: readonly (string | null)[] = provisionSteps;
+  return provisionSteps[steps.indexOf(step) + 1] ?? "route";
+};
+
+/** What a lost attempt is recorded as: its code and the step it reached. */
+export const attemptLostCode = (step: ProvisionStep): string =>
+  `attempt_lost: ${step}`;
+
+/** What an attempt that finds the one before it lost audits. */
+export const attemptLostAction = "provision.attempt_lost";
 
 /** What an operation works with: a deploy's context, without its runner. */
 export interface ProvisionContext {
@@ -2440,6 +2462,64 @@ export const recordUnstarted = async (
   await recordFailure(db, { operation, held }, "validated", code);
 };
 
+/**
+ * Notes, audited and logged, that the attempt before `held`'s ended
+ * without recording how, and the step it reached. An attempt records its
+ * failure on the operation (`recordFailure`) or finishes it, so one that
+ * finds the operation still running after an earlier attempt of its run
+ * was cut off where nothing of ours ran again: its isolate killed (past
+ * its memory or CPU limit), or timed out. Workerflow only says "internal
+ * workflows error"; this says where.
+ */
+const noteLostAttempt = async (
+  db: AdminDatabase,
+  operation: Operation,
+  held: HeldClient
+): Promise<void> => {
+  if ((held.attempt ?? 1) <= 1 || operation.status !== "running") {
+    return;
+  }
+  const step = stepReached(operation.step);
+  const detail = {
+    operation: operation.id,
+    run: held.runId,
+    attempt: held.attempt === undefined ? 0 : held.attempt - 1,
+    step,
+  };
+  log.error(attemptLostAction, { clientId: held.clientId, ...detail });
+  await actIfChanged(
+    db,
+    "system",
+    db
+      .update(clientProvisions)
+      .set({ updatedAt: new Date() })
+      .where(and(eq(clientProvisions.id, operation.id), stillHolds(held))),
+    {
+      action: attemptLostAction,
+      clientId: held.clientId,
+      target: operation.releaseId,
+      detail,
+    }
+  );
+};
+
+/**
+ * Why client `clientId`'s run failed when nothing of the operation
+ * recorded it: its last attempt lost at the step it reached
+ * (`attemptLostCode`), while the operation is still running as that run
+ * left it; null when the operation recorded its own end.
+ */
+export const lostAttemptOf = async (
+  db: AdminDatabase,
+  clientId: string,
+  runId: string
+): Promise<string | null> => {
+  const operation = await provisionOf(db, clientId);
+  return operation?.status === "running" && operation.runId === runId
+    ? attemptLostCode(stepReached(operation.step))
+    : null;
+};
+
 /** Where a run of the operation stopped, recorded, and what stopped it. */
 interface Stopped {
   operation: Operation;
@@ -2465,6 +2545,7 @@ const runOperation = async (
   if (operation.status === "done") {
     return undefined;
   }
+  await noteLostAttempt(db, operation, held);
   let step: ProvisionStep = "validated";
   try {
     // Before anything is read or asked of Cloudflare: an admin whose
