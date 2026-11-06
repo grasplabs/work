@@ -470,15 +470,9 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     ]);
     const id = chatIdSchema.parse(chatId);
     // The side panel has the draft open, and its page works.
-    await stub.saveDraft(
-      id,
-      app,
-      1,
-      desk(true),
-      [],
-      0,
-      { runId: await openTestRun(stub, id) }
-    );
+    await stub.saveDraft(id, app, 1, desk(true), [], 0, {
+      runId: await openTestRun(stub, id),
+    });
     await previewAt(builder, chatId, 1);
     const reported = async (kind: "warning" | "console", message: string) => {
       await builder.api.chats.previewReport(chatId, app, 1, "/", {
