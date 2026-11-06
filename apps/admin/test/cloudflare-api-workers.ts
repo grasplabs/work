@@ -60,15 +60,9 @@ const bindingsSchema = z
   .array(z.object({ type: z.string(), name: z.string() }).loose())
   .default([]);
 
-/**
- * The secrets an upload's version runs with: the latest version's, only if
- * it keeps them (`keep_bindings`), then the ones its bindings set.
- */
-const secretsOf = (script: ScriptState, { metadata }: UploadState) => {
-  const kept = z.array(z.string()).default([]).parse(metadata.keep_bindings);
-  const secrets = new Map(
-    kept.includes("secret_text") ? script.versions.at(-1)?.secrets : []
-  );
+/** The secrets an upload's version runs with: the ones its bindings set. */
+const secretsOf = ({ metadata }: UploadState) => {
+  const secrets = new Map<string, string>();
   for (const binding of bindingsSchema.parse(metadata.bindings)) {
     if (binding.type === "secret_text") {
       secrets.set(
@@ -282,7 +276,7 @@ const putScript = async (
     script.migrationTag = migrations.new_tag;
   }
   scripts.set(name, script);
-  const version = newVersion(script, upload, secretsOf(script, upload));
+  const version = newVersion(script, upload, secretsOf(upload));
   deploy(script, [{ version_id: version.id, percentage: 100 }], {});
   return envelope({ id: name });
 };

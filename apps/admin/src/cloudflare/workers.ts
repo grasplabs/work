@@ -754,6 +754,8 @@ export const uploadTargetScript = async (
       method: "PUT",
       path: targetPath(target),
       idempotent: upload.metadata.migrations === undefined,
+      // Its metadata holds the script's secrets.
+      carriesSecrets: true,
       ...(signal === undefined ? {} : { signal }),
     },
     uploadForm(upload),

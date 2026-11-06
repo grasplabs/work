@@ -336,6 +336,28 @@ const laggingUploads = (stale: number): Map<string, number> => {
   return answeredStale;
 };
 
+/** The names of the secrets recorded as removed from client `clientId`'s scripts. */
+const revokedNamesOf = async (clientId: string): Promise<string[]> => {
+  const recorded = await db
+    .select({ detail: auditEvents.detail })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.clientId, clientId),
+        eq(auditEvents.action, "provision.secret_revoked")
+      )
+    );
+  return recorded
+    .map(
+      ({ detail }) =>
+        z
+          .object({ script: z.string(), name: z.string() })
+          .loose()
+          .parse(JSON.parse(detail ?? "{}")).name
+    )
+    .toSorted((x, y) => x.localeCompare(y));
+};
+
 /** Runs the operation expecting it to fail, its logged failure kept out of the output, and returns the error. */
 const failing = async (
   held: HeldClient,
@@ -2445,26 +2467,7 @@ describe("provisioning a placed client", () => {
       new Map<string, string>();
     onCore().set("STRAY_A", "a-value");
     onCore().set("STRAY_B", "b-value");
-    const revokedNames = async (): Promise<string[]> => {
-      const recorded = await db
-        .select({ detail: auditEvents.detail })
-        .from(auditEvents)
-        .where(
-          and(
-            eq(auditEvents.clientId, clientId),
-            eq(auditEvents.action, "provision.secret_revoked")
-          )
-        );
-      return recorded
-        .map(
-          ({ detail }) =>
-            z
-              .object({ script: z.string(), name: z.string() })
-              .loose()
-              .parse(JSON.parse(detail ?? "{}")).name
-        )
-        .toSorted((x, y) => x.localeCompare(y));
-    };
+    const revokedNames = async () => await revokedNamesOf(clientId);
 
     // Core's upload is refused: its script keeps what it held.
     cloudflare.failNext(isUpload(core), 400);
@@ -2485,6 +2488,85 @@ describe("provisioning a placed client", () => {
       whileRefused: { recorded: [], strays: ["STRAY_A", "STRAY_B"] },
       recorded: ["STRAY_A", "STRAY_B"],
       strays: [],
+    });
+  });
+
+  it("records the secrets an upload dropped when its run dies after it landed, on the next run", async () => {
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
+    await expect(failing(held, unbound)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+    const { core } = await scriptsOf(clientId);
+    const onCore = (): Map<string, string> =>
+      account.namespaces.get(namespace)?.get(core)?.versions.at(-1)?.secrets ??
+      new Map<string, string>();
+    onCore().set("STRAY_KEY", "stray-value");
+
+    // Core's upload lands, without the stray; its run dies reading it back.
+    let reads = 0;
+    cloudflare.failNext((call) => {
+      if (call.method === "GET" && call.path.endsWith(`/scripts/${core}`)) {
+        reads += 1;
+      }
+      return reads === 2;
+    }, 400);
+    await expect(failing(held)).resolves.toBeDefined();
+    const afterDeath = {
+      onCore: onCore().has("STRAY_KEY"),
+      recorded: await revokedNamesOf(clientId),
+    };
+    await expect(failing(held, unbound)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+
+    expect({
+      afterDeath,
+      recorded: await revokedNamesOf(clientId),
+    }).toStrictEqual({
+      afterDeath: { onCore: false, recorded: [] },
+      recorded: ["STRAY_KEY"],
+    });
+  });
+
+  it("keeps what Cloudflare's answer to a refused upload says out of its error, as it may quote the upload's secrets", async () => {
+    const manifest = await importRelease();
+    const { clientId, held } = await setUp(manifest);
+    const quoted = "the-value-it-was-sent";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      if (request.method === "PUT" && request.url.endsWith("-core")) {
+        return Response.json(
+          {
+            success: false,
+            errors: [{ code: 10_021, message: `binding text ${quoted}` }],
+            messages: [],
+            result: null,
+          },
+          { status: 400 }
+        );
+      }
+      return await cloudflare.fetch(input, init);
+    });
+
+    const error = await failing(held);
+    const operation = await operationOf(clientId);
+    const recorded = JSON.stringify([
+      await db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.clientId, clientId)),
+      operation,
+    ]);
+
+    expect({
+      code: operation?.error,
+      inError: error instanceof Error && error.message.includes(quoted),
+      inRecords: recorded.includes(quoted),
+    }).toStrictEqual({
+      code: "cloudflare_400_10021",
+      inError: false,
+      inRecords: false,
     });
   });
 

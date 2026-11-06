@@ -98,7 +98,11 @@ import {
   uploadTargetAssets,
   uploadTargetScript,
 } from "../cloudflare/workers.ts";
-import type { ScriptTarget, Secret } from "../cloudflare/workers.ts";
+import type {
+  ScriptTarget,
+  Secret,
+  WorkerUpload,
+} from "../cloudflare/workers.ts";
 import { actIfChanged } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
 import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
@@ -351,6 +355,14 @@ const progressSchema = z.object({
    * shared secret reached the client (src/rollout/shared-secrets.ts).
    */
   shared: z.record(z.string(), z.record(z.string(), z.string())).default({}),
+  /**
+   * Each Worker's secrets its next upload no longer gives, by name: noted
+   * before the upload is sent, recorded as revoked (`recordRevoked`) and
+   * cleared once an upload is observed. A run that dies between, the
+   * upload landed, leaves them here for the next run's, which reads the
+   * script without them.
+   */
+  revoking: z.record(z.string(), z.array(z.string())).default({}),
   /**
    * Each Worker in a namespace whose version this run is about to change
    * with an upload, by app: the version recorded live before it, which the
@@ -1705,19 +1717,16 @@ const migrate = async (
 const uploadFingerprintPurpose = "grasp-os console placed upload fingerprint";
 
 /**
- * Records each secret `present` names that isn't among `given` as removed
- * from `target`'s script, gone with the upload that no longer gives it,
- * by name only, while `held` holds the client (`provision.secret_revoked`).
- * Returns their names.
+ * Records each secret of `removed` as removed from `target`'s script,
+ * gone with the upload that no longer gives it, by name only, while
+ * `held` holds the client (`provision.secret_revoked`).
  */
 const recordRevoked = async (
   db: AdminDatabase,
   { operation, held }: Loaded,
   target: ScriptTarget,
-  present: ReadonlySet<string>,
-  given: ReadonlySet<string>
-): Promise<string[]> => {
-  const removed = [...present].filter((name) => !given.has(name));
+  removed: readonly string[]
+): Promise<void> => {
   for (const name of removed) {
     // oxlint-disable-next-line no-await-in-loop -- a few at most
     const recorded = await actIfChanged(
@@ -1744,7 +1753,6 @@ const recordRevoked = async (
       await assertHolds(db, held);
     }
   }
-  return removed;
 };
 
 /**
@@ -1805,6 +1813,104 @@ const holdsExactly = (
   present: ReadonlySet<string>
 ): boolean =>
   given.size === present.size && [...given].every((name) => present.has(name));
+
+/**
+ * Records `revoked`, the secrets an observed upload of Worker `app`
+ * dropped (`recordRevoked`), and clears them from `progress`'s
+ * `revoking`, which the caller records.
+ */
+const recordDropped = async (
+  db: AdminDatabase,
+  loaded: Loaded,
+  progress: Progress,
+  {
+    app,
+    target,
+    revoked,
+  }: { app: App; target: ScriptTarget; revoked: readonly string[] }
+): Promise<void> => {
+  await recordRevoked(db, loaded, target, revoked);
+  const { [app]: _recorded, ...revoking } = progress.revoking;
+  progress.revoking = revoking;
+};
+
+/**
+ * Sends Worker `app`'s `upload` to `target` and observes it: its static
+ * files first, then, with the secrets it drops (`revoked`) noted in
+ * `progress` (`revoking`), the script itself, marked (`sendHolding`) and
+ * counted as run (`uploadCountedAsRun`); then read back at its release's
+ * last Durable Object migration, which it returns (null for none).
+ */
+const sendUpload = async (
+  context: ProvisionContext,
+  loaded: Loaded,
+  progress: Progress,
+  {
+    app,
+    worker,
+    target,
+    upload,
+    revoked,
+  }: {
+    app: App;
+    worker: WorkerEntry;
+    target: ScriptTarget;
+    upload: WorkerUpload;
+    revoked: readonly string[];
+  }
+): Promise<string | null> => {
+  const { api, db, store } = context;
+  const lastTag = worker.durableObjectMigrations.at(-1)?.tag;
+  // Its static files first, with a deadline of their own: they're named
+  // by their content and change nothing a script runs until its upload
+  // names them, so they need no mark (`sendHolding`) and don't spend the
+  // upload's. Each request checks this attempt still holds the client.
+  const assets = workerAssets(store, worker);
+  const assetsJwt =
+    assets === undefined
+      ? undefined
+      : await uploadTargetAssets(api, target, assets, {
+          signal: AbortSignal.timeout(
+            context.sendTimeoutMs ?? defaultSendTimeoutMs
+          ),
+          beforeSend: async () => {
+            await assertHolds(db, loaded.held);
+          },
+        });
+  await noteSuperseded(db, loaded, progress, app);
+  if (revoked.length > 0) {
+    progress.revoking = { ...progress.revoking, [app]: [...revoked] };
+    await recordProgress(db, loaded, progress);
+  }
+  await uploadCountedAsRun(
+    db,
+    loaded,
+    progress,
+    { app, history: worker.durableObjectMigrations },
+    async (sent) => {
+      await sendHolding(context, loaded, async (signal) => {
+        await uploadTargetScript(
+          api,
+          target,
+          { ...upload, ...(assetsJwt === undefined ? {} : { assetsJwt }) },
+          { signal, sent }
+        );
+      });
+    }
+  );
+  const after = await observed(
+    context,
+    async () => await targetMigrationState(api, target),
+    (state) => state.exists && state.migrationTag === lastTag
+  );
+  if (!after.exists || after.migrationTag !== lastTag) {
+    throw new ProvisionOperationError(
+      "upload_unobserved",
+      `${target.scriptName} isn't at migration ${lastTag ?? "none"} after its upload`
+    );
+  }
+  return after.migrationTag ?? null;
+};
 
 /**
  * Steps 4 and 5 for Worker `app`: rendered onto the client's inventory and
@@ -1870,7 +1976,11 @@ const upload = async (
     before.exists &&
     before.migrationTag === lastTag &&
     holdsExactly(given, present);
-  let revoked: string[] = [];
+  // What it holds that it's no longer given, and what an earlier run's
+  // upload dropped but didn't record (`revoking`).
+  const revoked = [
+    ...new Set([...(progress.revoking[app] ?? []), ...present]),
+  ].filter((name) => !given.has(name));
   if (before.exists) {
     // What it was observed at, whatever this upload does next.
     await recordMigrated(
@@ -1896,67 +2006,33 @@ const upload = async (
       vars,
       secrets
     );
-    // Its static files first, with a deadline of their own: they're named
-    // by their content and change nothing a script runs until its upload
-    // names them, so they need no mark (`sendHolding`) and don't spend the
-    // upload's. Each request checks this attempt still holds the client.
-    const assets = workerAssets(store, worker);
-    const assetsJwt =
-      assets === undefined
-        ? undefined
-        : await uploadTargetAssets(api, target, assets, {
-            signal: AbortSignal.timeout(
-              context.sendTimeoutMs ?? defaultSendTimeoutMs
-            ),
-            beforeSend: async () => {
-              await assertHolds(db, held);
-            },
-          });
-    await noteSuperseded(db, loaded, progress, app);
-    await uploadCountedAsRun(
-      db,
-      loaded,
-      progress,
-      { app, history: worker.durableObjectMigrations },
-      async (sent) => {
-        await sendHolding(context, loaded, async (signal) => {
-          await uploadTargetScript(
-            api,
-            target,
-            {
-              ...prepared,
-              metadata: {
-                ...prepared.metadata,
-                ...(migrations === undefined ? {} : { migrations }),
-              },
-              ...(assetsJwt === undefined ? {} : { assetsJwt }),
-            },
-            { signal, sent }
-          );
-        });
-      }
-    );
-    const after = await observed(
-      context,
-      async () => await targetMigrationState(api, target),
-      (state) => state.exists && state.migrationTag === lastTag
-    );
-    if (!after.exists || after.migrationTag !== lastTag) {
-      throw new ProvisionOperationError(
-        "upload_unobserved",
-        `${target.scriptName} isn't at migration ${lastTag ?? "none"} after its upload`
-      );
-    }
-    revoked = await recordRevoked(db, loaded, target, present, given);
+    const migrated = await sendUpload(context, loaded, progress, {
+      app,
+      worker,
+      target,
+      upload: {
+        ...prepared,
+        metadata: {
+          ...prepared.metadata,
+          ...(migrations === undefined ? {} : { migrations }),
+        },
+      },
+      revoked,
+    });
+    await recordDropped(db, loaded, progress, { app, target, revoked });
     await recordProgress(db, loaded, {
       ...progress,
       uploads: { ...progress.uploads, [app]: fingerprint },
-      migrated: { ...progress.migrated, [app]: after.migrationTag ?? null },
+      migrated: { ...progress.migrated, [app]: migrated },
       shared: {
         ...progress.shared,
         [app]: await sharedSecretPrints(context.secrets, app),
       },
     });
+  } else if (revoked.length > 0) {
+    // An earlier run's upload dropped them and is observed already.
+    await recordDropped(db, loaded, progress, { app, target, revoked });
+    await recordProgress(db, loaded, progress);
   }
   if (app === "core") {
     // Core live with the settings as this run read them: what's pending is
