@@ -28,8 +28,9 @@ import type { Draft } from "./workspace.ts";
 // version: the draft keeps those writes, and its every state the person
 // saw stays one they can restore. Nothing has to notice a turn's end,
 // which a restart may skip. A turn's writes amend its version only while
-// it is the newest: after a restore, the turn's next write is a version
-// of its own, numbered after it. Numbered in the order they landed.
+// it is the newest and nothing else changed the draft since: after a
+// restore, discard or proposal, the turn's next write is a version of its
+// own, numbered after it. Numbered in the order they landed.
 // Hashed synchronously (node:crypto, which workerd has), as the Workspace
 // object's transactions are. Only the Workspace object calls these.
 // Versions are the chat's, as its draft is: deleted with the chat.
@@ -69,8 +70,10 @@ export class DraftVersions {
 
   /**
    * Keeps `draft`, the chat's draft of `appId` as a write just left it:
-   * as the version of the turn that wrote it, while that is the newest,
-   * else as the next version. Called inside the transaction of the write.
+   * as the version of the turn that wrote it, while that is the newest and
+   * nothing else changed the draft since, else as the next version. Called
+   * inside the transaction of the write, which made `draft.revision` the
+   * one after the revision it read.
    */
   keep(
     chatId: ChatId,
@@ -81,8 +84,14 @@ export class DraftVersions {
   ): ChatDraftVersion {
     const latest = this.#latest(chatId, appId);
     const turnId = "turnId" in by ? by.turnId : null;
+    // Only over the revision just before this write: a restore, discard
+    // or proposal since moved the draft on without amending, and the
+    // turn's version from before it stays one to restore.
     const amends =
-      latest !== undefined && turnId !== null && latest.turnId === turnId;
+      latest !== undefined &&
+      turnId !== null &&
+      latest.turnId === turnId &&
+      latest.revision + 1 === draft.revision;
     const number = amends ? latest.number : (latest?.number ?? 0) + 1;
     const hashes: Record<string, string | null> = {};
     for (const [path, content] of Object.entries(draft.changes)) {
@@ -281,14 +290,15 @@ export class DraftVersions {
       .run();
   }
 
-  /** The chat's latest version of `appId`'s draft: its number and turn. */
+  /** The chat's latest version of `appId`'s draft: its number, revision and turn. */
   #latest(
     chatId: ChatId,
     appId: string
-  ): { number: number; turnId: string | null } | undefined {
+  ): { number: number; revision: number; turnId: string | null } | undefined {
     return this.#db
       .select({
         number: chatDraftVersions.number,
+        revision: chatDraftVersions.revision,
         turnId: chatDraftVersions.turnId,
       })
       .from(chatDraftVersions)

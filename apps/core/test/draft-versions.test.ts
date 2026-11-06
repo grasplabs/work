@@ -163,6 +163,22 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
     await write("turn-5", { "src/routes/index.tsx": desk("Six") });
     const versions = await chats.draftVersions(chatId, app);
     const [draft] = await chats.drafts(chatId);
+    // A discard while a turn writes: what it wrote before stays a version
+    // to restore, and its next write is a version of its own.
+    await write("turn-6", { "src/routes/index.tsx": desk("Seven") });
+    const sevenPreview = await chats.preview(chatId, app);
+    await chats.discardDraft(chatId, app);
+    revision += 1;
+    await write("turn-6", { "src/routes/index.tsx": desk("Eight") });
+    // A turn that writes what an earlier version holds, then writes over
+    // it: the earlier version still reads it.
+    await write("turn-7", { "src/routes/index.tsx": desk("Two") });
+    await write("turn-7", { "src/routes/index.tsx": desk("Nine") });
+    const afterDiscard = await numbers();
+    const sevenVersionPreview = await chats.preview(chatId, app, 7);
+    const firstPreviewAfter = await chats.preview(chatId, app, 1);
+    await chats.restoreDraftVersion(chatId, app, 7);
+    const restoredSeven = await chats.preview(chatId, app);
 
     expect({
       first: {
@@ -180,6 +196,10 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       restoredIsFirst: restoredPreview.artifact === firstPreview.artifact,
       kept: versions.at(-1),
       draftAtNewest: draft?.revision === versions[0]?.revision,
+      afterDiscard,
+      discardedKept: sevenVersionPreview.artifact === sevenPreview.artifact,
+      restoredSeven: restoredSeven.artifact === sevenPreview.artifact,
+      earlierHeld: firstPreviewAfter.artifact === firstPreview.artifact,
     }).toStrictEqual({
       first: { number: 1, revision: 3, byAgent: true, previewIsDraft: true },
       afterFirst: {
@@ -194,6 +214,10 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       restoredIsFirst: true,
       kept: first,
       draftAtNewest: true,
+      afterDiscard: [9, 8, 7, 6, 5, 4, 3, 2, 1],
+      discardedKept: true,
+      restoredSeven: true,
+      earlierHeld: true,
     });
   });
 
