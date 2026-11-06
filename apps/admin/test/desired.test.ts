@@ -133,8 +133,8 @@ describe("a channel's plan", () => {
     expect(planChannel(waiting(40), releases, 0, false).start).toHaveLength(
       parallelDeploys
     );
-    expect(planChannel(waiting(40), releases, 20, false).start).toHaveLength(
-      parallelDeploys - 20
+    expect(planChannel(waiting(40), releases, 3, false).start).toHaveLength(
+      parallelDeploys - 3
     );
     expect(
       planChannel(waiting(40), releases, parallelDeploys, false).start

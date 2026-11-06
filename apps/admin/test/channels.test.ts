@@ -2,6 +2,8 @@ import { env } from "cloudflare:workers";
 import { and, eq, inArray } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { rolloutNeedLine, rolloutNeeds } from "../src/admin/views.ts";
+import { clientGrid } from "../src/clients/grid.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import {
   auditEvents,
@@ -52,7 +54,7 @@ import { useStoreSecrets } from "./secrets-store.ts";
 // - a new client started on a release its channel doesn't have, or on
 //   none while its channel has none;
 // - two ticks at once deploying one client twice, or more than
-//   `parallelDeploys` clients between them;
+//   `parallelDeploys` clients between them, or across channels;
 // - a failure that lands mid-tick, missed by the rest of the tick;
 // - clients another runner has taking the channel's slots for good.
 
@@ -126,6 +128,16 @@ const startedOf = async (clientIds: readonly string[]): Promise<number> =>
       eq(auditEvents.action, "deploy.start")
     )
   );
+
+/** Why the reconciler couldn't act on `channel` at its last tick; null when it could. */
+const stoppedByOf = async (channel: Channel): Promise<string | null> => {
+  const row = await db
+    .select({ stoppedBy: channels.stoppedBy })
+    .from(channels)
+    .where(eq(channels.id, channel))
+    .get();
+  return row?.stoppedBy ?? null;
+};
 
 /** How many deploys of client `clientId` started, as the audit log keeps them. */
 const deploysStarted = async (clientId: string): Promise<number> =>
@@ -525,6 +537,91 @@ describe("release channels", () => {
     expect({ whileHeld, started: await startedOf(waiting) }).toStrictEqual({
       whileHeld: 0,
       started: parallelDeploys,
+    });
+  });
+
+  it("starts at most parallelDeploys across every channel, as they share one rate limit", async () => {
+    const release = await placedRelease("feat(core): two channels at once");
+    const edge = await waitingClients("edge", "e-edge", parallelDeploys);
+    const beta = await waitingClients("beta", "f-beta", parallelDeploys);
+    await promoteTo("beta", release);
+
+    await reconcile(env);
+
+    await expect(startedOf([...edge, ...beta])).resolves.toBe(parallelDeploys);
+  });
+
+  it("stops only a channel it can't read, deploying the others, says so at each of its organizations, and goes on once it reads it again", async () => {
+    const release = await placedRelease("feat(core): one channel unread");
+    const edge = await waitingClients("edge", "g-edge", 2);
+    const beta = await waitingClients("beta", "h-beta", 2);
+    await promoteTo("beta", release);
+    // Every read of Beta's clients fails, as a query D1 refuses would.
+    const unreadable = new Proxy(env.DB, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property !== "prepare" || typeof value !== "function") {
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        }
+        return (query: string) => {
+          const statement = target.prepare(query);
+          return new Proxy(statement, {
+            get: (prepared, member) => {
+              const method: unknown = Reflect.get(prepared, member);
+              if (member !== "bind" || typeof method !== "function") {
+                return typeof method === "function"
+                  ? (...args: unknown[]): unknown =>
+                      Reflect.apply(method, prepared, args)
+                  : method;
+              }
+              return (...params: unknown[]): unknown => {
+                if (
+                  query.includes("client_placements") &&
+                  params.includes("beta")
+                ) {
+                  throw new Error("D1 refused the read");
+                }
+                return Reflect.apply(method, prepared, params);
+              };
+            },
+          });
+        };
+      },
+    });
+    const betaNeeds = async () => {
+      const grid = await clientGrid(env);
+      return grid
+        .filter(({ id }) => beta.includes(id))
+        .map((row) => rolloutNeeds(row).map(rolloutNeedLine));
+    };
+
+    await reconcile({ ...env, DB: unreadable });
+    const whileUnread = {
+      edge: await startedOf(edge),
+      beta: await startedOf(beta),
+      stoppedBy: await stoppedByOf("beta"),
+      needs: await betaNeeds(),
+    };
+    await reconcile(env);
+
+    expect({
+      whileUnread,
+      beta: await startedOf(beta),
+      stoppedBy: await stoppedByOf("beta"),
+    }).toStrictEqual({
+      whileUnread: {
+        edge: edge.length,
+        beta: 0,
+        stoppedBy: "unexpected",
+        needs: beta.map(() => [
+          "Nothing deploys on its channel, Beta: the reconciler can't act on it (unexpected).",
+        ]),
+      },
+      beta: beta.length,
+      stoppedBy: null,
     });
   });
 

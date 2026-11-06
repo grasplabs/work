@@ -102,6 +102,13 @@ export const channels = sqliteTable("channels", {
     .notNull()
     .references(() => releases.id),
   updatedAt: timestamp("updated_at").notNull(),
+  /**
+   * Why the reconciler couldn't act on the channel at its last tick (an
+   * error code), so no deploy starts on it; null once a tick acts on it
+   * again (src/rollout/reconciler.ts). Shown in "Needs Grasp today" at
+   * each of its organizations.
+   */
+  stoppedBy: text("stopped_by"),
 });
 
 /**

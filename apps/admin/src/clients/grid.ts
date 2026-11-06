@@ -21,6 +21,7 @@ import { z } from "zod";
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
 import {
+  channels,
   clientDeploys,
   clientProvisions,
   clients,
@@ -121,11 +122,14 @@ export interface GridRow {
    * Where its rollout stands: its deploy that failed and nobody retried
    * yet (src/rollout/deploy.ts, `deploy.fail`), and how many imported
    * releases it is behind the one it should run (its pin, or its
-   * channel's), counted from the oldest any of its Workers runs.
+   * channel's), counted from the oldest any of its Workers runs, and why
+   * the reconciler couldn't act on its channel at its last tick, if it
+   * couldn't (src/rollout/reconciler.ts).
    */
   rollout: {
     failed: { releaseId: string; error: string | null } | null;
     behind: number;
+    channelStopped: string | null;
   };
 }
 
@@ -269,6 +273,20 @@ const failedDeploys = async (
   );
 };
 
+/** Why the reconciler couldn't act on each channel at its last tick, by channel. */
+const stoppedChannels = async (
+  db: AdminDatabase
+): Promise<Map<Channel, string>> => {
+  const rows = await db
+    .select({ id: channels.id, stoppedBy: channels.stoppedBy })
+    .from(channels);
+  return new Map(
+    rows.flatMap(({ id, stoppedBy: why }): [Channel, string][] =>
+      why === null ? [] : [[id, why]]
+    )
+  );
+};
+
 /** Where client `row`'s rollout stands (`GridRow["rollout"]`). */
 const rolloutOf = async (
   db: AdminDatabase,
@@ -276,10 +294,12 @@ const rolloutOf = async (
     running: readonly string[];
   },
   failed: ReadonlyMap<string, GridRow["rollout"]["failed"]>,
-  targets: ChannelReleases
+  targets: ChannelReleases,
+  stopped: ReadonlyMap<Channel, string>
 ): Promise<GridRow["rollout"]> => ({
   failed: failed.get(row.id) ?? null,
   behind: await releasesBehind(db, row.running, targetOf(row, targets)),
+  channelStopped: stopped.get(row.channel) ?? null,
 });
 
 /**
@@ -542,17 +562,24 @@ const setupOf = async (
 export const clientGrid = async (env: Env): Promise<GridRow[]> => {
   const domain = clientDomain(env);
   const db = adminDatabase(env.DB);
-  const [recorded, failed, targets] = await Promise.all([
+  const [recorded, failed, targets, stopped] = await Promise.all([
     recordedClients(db),
     failedDeploys(db),
     channelReleases(db),
+    stoppedChannels(db),
   ]);
   return await Promise.all(
     recorded.map(async ({ running, ...row }) => ({
       ...row,
       hostname: domain === null ? null : `${row.id}.${domain}`,
       setup: await setupOf(env, db, row),
-      rollout: await rolloutOf(db, { ...row, running }, failed, targets),
+      rollout: await rolloutOf(
+        db,
+        { ...row, running },
+        failed,
+        targets,
+        stopped
+      ),
     }))
   );
 };

@@ -198,7 +198,7 @@ const pointChannel = async (
       db
         .insert(channels)
         .select(
-          sql`SELECT ${channel}, ${releaseId}, ${now.getTime()} WHERE ${bundleKept(releaseId)}`
+          sql`SELECT ${channel}, ${releaseId}, ${now.getTime()}, NULL WHERE ${bundleKept(releaseId)}`
         )
         .onConflictDoNothing(),
       event

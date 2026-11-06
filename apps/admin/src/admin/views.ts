@@ -14,6 +14,8 @@ import type { Need } from "@grasp-os/shared/admin/onboarding-admin";
 import type { Billing } from "../billing/billing.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
+import type { Channel } from "../db/schema.ts";
+import { channelWords } from "../rollout/channel-words.ts";
 import { formatDate } from "./words.ts";
 
 /** One organization: the client as the admin reads it, and its view when its core answered. */
@@ -131,12 +133,14 @@ export const releasesBehindAllowed = 2;
 
 /**
  * What a live client's own platform needs of Grasp, from what the admin
- * recorded, its core answering or not: its deploy failed and nobody
- * retried it, or it fell behind its release. Both are acted on from its
- * Setup, where its deploy is retried. They come before anything its core
- * says: Grasp fixes nothing there while it can't deploy.
+ * recorded, its core answering or not: the reconciler can't act on its
+ * channel, its deploy failed and nobody retried it, or it fell behind its
+ * release. Each is acted on from its Setup, where its deploy is retried.
+ * They come before anything its core says: Grasp fixes nothing there
+ * while it can't deploy.
  */
 export type RolloutNeed =
+  | { kind: "channel_stopped"; channel: Channel; error: string }
   | { kind: "deploy_failed"; releaseId: string; error: string | null }
   | { kind: "behind"; releases: number };
 
@@ -145,8 +149,15 @@ export const rolloutNeeds = (client: GridRow): RolloutNeed[] => {
   if (client.status !== "active") {
     return [];
   }
-  const { failed, behind } = client.rollout;
+  const { failed, behind, channelStopped } = client.rollout;
   const needs: RolloutNeed[] = [];
+  if (channelStopped !== null) {
+    needs.push({
+      kind: "channel_stopped",
+      channel: client.channel,
+      error: channelStopped,
+    });
+  }
   if (failed !== null) {
     needs.push({ kind: "deploy_failed", ...failed });
   }
@@ -160,6 +171,9 @@ export const rolloutNeeds = (client: GridRow): RolloutNeed[] => {
 export const rolloutNeedLine = (need: RolloutNeed): string => {
   if (need.kind === "behind") {
     return `It runs ${need.releases} releases behind the one it should. Look at its Setup.`;
+  }
+  if (need.kind === "channel_stopped") {
+    return `Nothing deploys on its channel, ${channelWords[need.channel]}: the reconciler can't act on it (${need.error}).`;
   }
   const why = need.error === null ? "" : ` (${need.error})`;
   return `Its deploy of ${need.releaseId} failed${why}. Retry it on its Setup once what stopped it is fixed.`;
