@@ -388,7 +388,7 @@ const currentState = (
 describe("an organization's progress, read from its records", () => {
   useStoreSecrets({ deployer: token });
 
-  it("reads an operation left running by a run that's gone as tried again, and as needing a look once Grasp gives up", async () => {
+  it("reads an operation left running by a run that's gone as failed where it stopped, never as tried again, and as needing a person once Grasp gives up", async () => {
     const clientId = await recorded("running");
 
     const tried = await provisioningProgress(env, clientId);
@@ -402,7 +402,7 @@ describe("an organization's progress, read from its records", () => {
       tried: [tried?.state, currentState(tried)],
       givenUp: [givenUp?.state, currentState(givenUp)],
     }).toStrictEqual({
-      tried: ["working", "retrying"],
+      tried: ["needs_attention", "failed"],
       givenUp: ["needs_attention", "needs_attention"],
     });
   });

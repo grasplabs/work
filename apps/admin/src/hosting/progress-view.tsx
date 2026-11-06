@@ -12,6 +12,7 @@ import {
   CollapsibleTrigger,
 } from "@grasp-os/ui/components/collapsible";
 import { Spinner } from "@grasp-os/ui/components/spinner";
+import type { ReactNode } from "react";
 
 import { Section } from "../admin/section.tsx";
 import type {
@@ -25,6 +26,7 @@ const stateWords: Readonly<Record<LineState, string>> = {
   doing: "Doing",
   done: "Done",
   retrying: "Trying again",
+  failed: "Failed",
   needs_attention: "Needs attention",
 };
 
@@ -45,6 +47,7 @@ const badgeVariants: Readonly<
   doing: "outline",
   done: "passed",
   retrying: "outline",
+  failed: "destructive",
   needs_attention: "destructive",
 };
 
@@ -91,7 +94,7 @@ const headline = (progress: ProvisioningProgress, now: Date): string => {
     return `Ready: open ${host}`;
   }
   if (progress.state === "needs_attention") {
-    return "Setting it up needs a look";
+    return "Stopped: it needs a look";
   }
   if (progress.state === "waiting") {
     return progress.hosting === "on_prem"
@@ -101,10 +104,16 @@ const headline = (progress: ProvisioningProgress, now: Date): string => {
   return `Setting up ${host} (${durationOf(progress.startedAt, now)} so far)`;
 };
 
+/**
+ * Its progress; `children`, what staff do about it once it stopped (its
+ * Retry), shown beside why.
+ */
 export const ProvisioningProgressView = ({
   progress,
+  children,
 }: {
   progress: ProvisioningProgress;
+  children?: ReactNode;
 }) => {
   const now = new Date();
   return (
@@ -118,6 +127,7 @@ export const ProvisioningProgressView = ({
       title={headline(progress, now)}
     >
       <div className="flex flex-col gap-3 border-t px-5 py-4">
+        {progress.state === "needs_attention" ? children : null}
         {progress.state === "ready" && progress.hostname !== null ? (
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Button

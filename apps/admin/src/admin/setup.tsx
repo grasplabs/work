@@ -778,6 +778,28 @@ const NeedAction = ({
   }
 };
 
+/**
+ * What staff do about its operation once it stopped, beside why: Retry its
+ * failed deploy, or resume its setting up; nothing while neither is
+ * theirs to do (a deploy the reconciler starts again by itself).
+ */
+const StoppedAction = ({
+  clientId,
+  needs,
+  setup,
+}: {
+  clientId: string;
+  needs: PlatformNeed[];
+  setup: ClientSetup;
+}) => {
+  if (needs.some(({ kind }) => kind === "deploy")) {
+    return <RetryDeploy clientId={clientId} />;
+  }
+  return setup.provisioning.client?.status === "provisioning" ? (
+    <RetryNow clientId={clientId} />
+  ) : null;
+};
+
 /** How long a company's progress stays on its Setup once it is ready. */
 const readyShownMs = 24 * 60 * 60 * 1000;
 
@@ -933,7 +955,9 @@ const Status = ({
   <>
     <Header clientId={clientId} needs={needs} setup={setup} />
     {progress !== null && showsProgress(progress) ? (
-      <ProvisioningProgressView progress={progress} />
+      <ProvisioningProgressView progress={progress}>
+        <StoppedAction clientId={clientId} needs={needs} setup={setup} />
+      </ProvisioningProgressView>
     ) : null}
     {needs.length > 0 ? (
       <Section description="The most pressing first." title="What needs a look">
