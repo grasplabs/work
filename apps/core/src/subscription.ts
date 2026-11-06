@@ -1,4 +1,5 @@
 import type { SubscriptionApi } from "@grasp-os/shared/screens";
+import { waitUntil } from "cloudflare:workers";
 
 import { CoreRpcTarget } from "./rpc-target.ts";
 
@@ -26,7 +27,15 @@ export class Subscription extends CoreRpcTarget implements SubscriptionApi {
     await this.#release();
   }
 
+  /**
+   * The page let go of it, or its connection closed (a reload, a tab
+   * shut), which disposes everything the connection held. The release
+   * reaches the object that pushes, so the object frees its slot: on a
+   * closed connection the request ends with the socket and would cancel
+   * the call on its way, leaving the object a callback nobody hears until
+   * a person's every page is refused (`agent.too_many_watches`).
+   */
   [Symbol.dispose](): void {
-    void this.release();
+    waitUntil(this.release());
   }
 }

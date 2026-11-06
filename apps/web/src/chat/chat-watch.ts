@@ -15,10 +15,11 @@ export interface FollowedChat {
   view: ChatView;
   failure: string | undefined;
   /**
-   * Whether core refused to follow it (gone, or not the person's), not
-   * merely out of reach: only once following stopped.
+   * Whether core has no such chat for the person (deleted, or not
+   * theirs), not merely out of reach or refusing for now: only once
+   * following stopped.
    */
-  refused?: boolean;
+  gone?: boolean;
 }
 
 interface Watch {
@@ -71,8 +72,8 @@ const subscribe = (
           view: applyUpdate(started.state.view, update),
         });
       },
-      (failure, refused) => {
-        changed(started, { ...started.state, failure, refused });
+      (failure, gone) => {
+        changed(started, { ...started.state, failure, gone });
       }
     );
     watch = started;
