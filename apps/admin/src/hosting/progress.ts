@@ -11,15 +11,28 @@
  * has the steps of its install connecting instead, which arrive with
  * GRA-1291: until then they wait, and say so.
  */
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
+import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
-import { clientRuns, clients } from "../db/schema.ts";
+import type { AdminDatabase } from "../db/act.ts";
+import {
+  auditEvents,
+  clientDeploys,
+  clientRuns,
+  clients,
+} from "../db/schema.ts";
 import { clientDomain } from "../deploy/context.ts";
 import { clientSignInSchema } from "../deploy/core-config.ts";
 import { currentRun, hasEnded } from "../runners.ts";
 import { needsAttentionOf } from "./attention.ts";
-import { provisionOf, provisionSteps } from "./operation.ts";
+import {
+  attemptLostAction,
+  attemptLostCode,
+  provisionOf,
+  provisionSteps,
+  stepReached,
+} from "./operation.ts";
 import type { ProvisionStep } from "./operation.ts";
 import { clientHostingOf } from "./organization.ts";
 import type { Jurisdiction } from "./organization.ts";
@@ -31,6 +44,7 @@ export type LineState =
   | "doing"
   | "done"
   | "retrying"
+  | "failed"
   | "needs_attention";
 
 export interface ProgressLine {
@@ -220,9 +234,10 @@ const stepIndex = (step: string | null): number =>
 /**
  * Where each of the operation's lines stands: done up to the last step
  * it finished; the next being done while a run goes (tried again once
- * its run is on a later attempt). Once it stopped, being tried again, as
- * the admin resumes it by itself (src/hosting/reconcile.ts), unless the
- * admin gave up and asked a person to look (`needsAttention`).
+ * its run is on a later attempt). Once it stopped, with no run going,
+ * failed there: nothing is being tried, whatever resumes it later (the
+ * admin by itself, src/hosting/reconcile.ts, or staff's Retry); or
+ * needing a person once the admin gave up (`needsAttention`).
  */
 const cloudLineStates = (
   operation: { status: "running" | "failed" | "done"; step: string | null },
@@ -248,31 +263,118 @@ const cloudLineStates = (
     // Stopped: failed, or left running by a run that has ended or is gone
     // (a done operation has every line done above).
     if (!going) {
-      return needsAttention ? "needs_attention" : "retrying";
+      return needsAttention ? "needs_attention" : "failed";
     }
     return retrying ? "retrying" : "doing";
   });
 };
 
-/** Whether client `clientId`'s provisioning run goes, and is on a later attempt. */
+/**
+ * Whether a run holds client `clientId` and goes: its provisioning, a
+ * deploy or an apply, whichever runs its operation now; and, when it's on
+ * a later attempt, its id (`retryingRun`).
+ */
 const runOf = async (
   env: Env,
   clientId: string
-): Promise<{ going: boolean; retrying: boolean }> => {
+): Promise<{ going: boolean; retryingRun: string | null }> => {
   const run = await currentRun(env, clientId);
-  const going =
-    run !== null && run.kind === "provision_placed" && !hasEnded(run.status);
+  if (run === null || hasEnded(run.status)) {
+    return { going: false, retryingRun: null };
+  }
   const claim = await adminDatabase(env.DB)
     .select({ attempt: clientRuns.attempt })
     .from(clientRuns)
     .where(
+      and(eq(clientRuns.clientId, clientId), eq(clientRuns.runId, run.runId))
+    )
+    .get();
+  return {
+    going: true,
+    retryingRun: (claim?.attempt ?? 0) > 1 ? run.runId : null,
+  };
+};
+
+/**
+ * Why client `clientId`'s operation stopped, as a code: what it recorded;
+ * else the deploy that ran it, once that failed (`deploy.fail`; another
+ * run's, such as an earlier deploy's before an apply, says nothing of
+ * it); else its last attempt lost at the step it reached
+ * (`attemptLostCode`), as one whose run ended with it still running was.
+ */
+const stopCodeOf = async (
+  db: AdminDatabase,
+  clientId: string,
+  operation: { error: string | null; step: string | null; runId: string | null }
+): Promise<string> => {
+  if (operation.error !== null) {
+    return operation.error;
+  }
+  const deploy = await db
+    .select({ error: clientDeploys.error })
+    .from(clientDeploys)
+    .where(
       and(
-        eq(clientRuns.clientId, clientId),
-        eq(clientRuns.kind, "provision_placed")
+        eq(clientDeploys.clientId, clientId),
+        eq(clientDeploys.status, "failed"),
+        eq(clientDeploys.runId, operation.runId ?? "")
       )
     )
     .get();
-  return { going, retrying: going && (claim?.attempt ?? 0) > 1 };
+  return deploy?.error ?? attemptLostCode(stepReached(operation.step));
+};
+
+const lostDetailSchema = z.object({
+  run: z.string(),
+  // Any name, as recorded: a release may since have dropped the step.
+  step: z.string(),
+});
+
+/**
+ * Why run `runId` of client `clientId` is trying again, when an attempt
+ * of it was lost (`provision.attempt_lost`, src/hosting/operation.ts): in
+ * words, with the step it reached; null when none of its was.
+ */
+const lostAttemptNotice = async (
+  db: AdminDatabase,
+  clientId: string,
+  runId: string
+): Promise<string | null> => {
+  const [event] = await db
+    .select({ detail: auditEvents.detail })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.clientId, clientId),
+        eq(auditEvents.action, attemptLostAction)
+      )
+    )
+    .orderBy(desc(auditEvents.at))
+    .limit(1);
+  const detail = lostDetailSchema.safeParse(JSON.parse(event?.detail ?? "{}"));
+  return detail.success && detail.data.run === runId
+    ? operationErrorWords(attemptLostCode(detail.data.step))
+    : null;
+};
+
+/**
+ * Why it waits, in a sentence: the code it stopped with, or, while it's
+ * tried again (`retryingRun`), why an attempt of that run was lost.
+ */
+const noticeOf = async (
+  db: AdminDatabase,
+  clientId: string,
+  {
+    stoppedWith,
+    retryingRun,
+  }: { stoppedWith: string | null; retryingRun: string | null }
+): Promise<string | null> => {
+  if (stoppedWith !== null) {
+    return operationErrorWords(stoppedWith);
+  }
+  return retryingRun === null
+    ? null
+    : await lostAttemptNotice(db, clientId, retryingRun);
 };
 
 /** Where it all stands, from what its lines say. */
@@ -324,7 +426,7 @@ export const provisioningProgress = async (
   if (hosting === "on_prem") {
     return onPremProgress(hostname, client.createdAt, admins);
   }
-  const { going, retrying } = await runOf(env, clientId);
+  const { going, retryingRun } = await runOf(env, clientId);
   const attention = await needsAttentionOf(db, clientId);
   const context: LineContext = {
     hostname: hostname ?? clientId,
@@ -335,7 +437,12 @@ export const provisioningProgress = async (
   const states =
     operation === undefined
       ? cloudLines.map((): LineState => "waiting")
-      : cloudLineStates(operation, going, retrying, attention !== null);
+      : cloudLineStates(
+          operation,
+          going,
+          retryingRun !== null,
+          attention !== null
+        );
   const lines: ProgressLine[] = cloudLines.map((line, at) => ({
     id: line.id,
     label: line.label(context),
@@ -352,19 +459,27 @@ export const provisioningProgress = async (
         `${email} becomes an admin on first signing in at ${hostname ?? clientId}`
     ),
   });
-  const stopped = lines.some(({ state }) => state === "needs_attention");
+  const stopped = lines.some(
+    ({ state }) => state === "failed" || state === "needs_attention"
+  );
+  const code =
+    stopped && operation !== undefined
+      ? await stopCodeOf(db, clientId, operation)
+      : null;
   return {
     hosting: "grasp_cloud",
     hostname,
     lines,
-    state: overallState(ready, stopped, operation === undefined && !going),
-    notice:
-      stopped && typeof operation?.error === "string"
-        ? operationErrorWords(operation.error)
-        : null,
-    code: operation?.error ?? null,
+    // A live client whose release stopped isn't ready: it runs the one before.
+    state: overallState(
+      ready && !stopped,
+      stopped,
+      operation === undefined && !going
+    ),
+    notice: await noticeOf(db, clientId, { stoppedWith: code, retryingRun }),
+    code,
     startedAt: client.createdAt,
-    readyAt: ready ? (operation?.updatedAt ?? null) : null,
+    readyAt: ready && !stopped ? (operation?.updatedAt ?? null) : null,
     admins,
   };
 };

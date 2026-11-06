@@ -216,6 +216,12 @@ export const provisionOperationErrorCodes = [
    * release before on its own: its deploy counts as failed.
    */
   "release_rolled_back",
+  /**
+   * An attempt ended at a step without recording how: its isolate was
+   * killed (past its memory or CPU limit) or it timed out. Recorded with
+   * the step (`attemptLostCode`).
+   */
+  "attempt_lost",
 ] as const;
 
 export type ProvisionOperationErrorCode =
@@ -254,6 +260,28 @@ export const provisionSteps = [
   "route",
 ] as const;
 export type ProvisionStep = (typeof provisionSteps)[number];
+
+/**
+ * The step an operation left running stopped in: the one after the last
+ * it finished (`step`, null before the first). A recorded step this
+ * release doesn't have (records are never rewritten) is named as it was
+ * recorded: where it stopped can't be told past it.
+ */
+export const stepReached = (step: string | null): string => {
+  const steps: readonly (string | null)[] = provisionSteps;
+  const done = steps.indexOf(step);
+  if (step !== null && done === -1) {
+    return step;
+  }
+  return provisionSteps[done + 1] ?? "route";
+};
+
+/** What a lost attempt is recorded as: its code and the step it reached. */
+export const attemptLostCode = (step: string): string =>
+  `attempt_lost: ${step}`;
+
+/** What an attempt that finds the one before it lost audits. */
+export const attemptLostAction = "provision.attempt_lost";
 
 /** What an operation works with: a deploy's context, without its runner. */
 export interface ProvisionContext {
@@ -578,6 +606,7 @@ const switchProvisionRelease = async (
         releaseId,
         status: "running",
         error: null,
+        runId: held.runId,
         startedBy: actorName(actor),
         updatedAt: new Date(),
       })
@@ -629,7 +658,7 @@ export const startClientProvision = async (
     db
       .insert(clientProvisions)
       .select(
-        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, NULL, 1, 'release', ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
+        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, ${held.runId}, NULL, 1, 'release', ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
       )
       .onConflictDoNothing(),
     {
@@ -857,6 +886,10 @@ export const startClientRelease = async (
         status: "running",
         step: null,
         error: null,
+        // The run it's started for, from the start: a run whose every
+        // attempt is lost before its first step is still its own
+        // (`lostAttemptOf`).
+        runId: held.runId,
         // A change of its own, counted.
         change: operation.change + 1,
         what: target === operation.releaseId ? (what ?? "settings") : "release",
@@ -2440,6 +2473,64 @@ export const recordUnstarted = async (
   await recordFailure(db, { operation, held }, "validated", code);
 };
 
+/**
+ * Notes, audited and logged, that the attempt before `held`'s ended
+ * without recording how, and the step it reached. An attempt records its
+ * failure on the operation (`recordFailure`) or finishes it, so one that
+ * finds the operation still running after an earlier attempt of its run
+ * was cut off where nothing of ours ran again: its isolate killed (past
+ * its memory or CPU limit), or timed out. Workerflow only says "internal
+ * workflows error"; this says where.
+ */
+const noteLostAttempt = async (
+  db: AdminDatabase,
+  operation: Operation,
+  held: HeldClient
+): Promise<void> => {
+  if ((held.attempt ?? 1) <= 1 || operation.status !== "running") {
+    return;
+  }
+  const step = stepReached(operation.step);
+  const detail = {
+    operation: operation.id,
+    run: held.runId,
+    attempt: held.attempt === undefined ? 0 : held.attempt - 1,
+    step,
+  };
+  log.error(attemptLostAction, { clientId: held.clientId, ...detail });
+  await actIfChanged(
+    db,
+    "system",
+    db
+      .update(clientProvisions)
+      .set({ updatedAt: new Date() })
+      .where(and(eq(clientProvisions.id, operation.id), stillHolds(held))),
+    {
+      action: attemptLostAction,
+      clientId: held.clientId,
+      target: operation.releaseId,
+      detail,
+    }
+  );
+};
+
+/**
+ * Why client `clientId`'s run failed when nothing of the operation
+ * recorded it: its last attempt lost at the step it reached
+ * (`attemptLostCode`), while the operation is still running as that run
+ * left it; null when the operation recorded its own end.
+ */
+export const lostAttemptOf = async (
+  db: AdminDatabase,
+  clientId: string,
+  runId: string
+): Promise<string | null> => {
+  const operation = await provisionOf(db, clientId);
+  return operation?.status === "running" && operation.runId === runId
+    ? attemptLostCode(stepReached(operation.step))
+    : null;
+};
+
 /** Where a run of the operation stopped, recorded, and what stopped it. */
 interface Stopped {
   operation: Operation;
@@ -2616,6 +2707,13 @@ export const runClientProvision = async (
   held: HeldClient,
   { rollBackOnProbe = true }: { rollBackOnProbe?: boolean } = {}
 ): Promise<void> => {
+  // Here, as the attempt enters, and not in `runOperation`: a rollback
+  // that this attempt starts runs the operation again as the same attempt,
+  // from a start of its own, with nothing of it lost.
+  const entered = await provisionOf(context.db, held.clientId);
+  if (entered !== undefined) {
+    await noteLostAttempt(context.db, entered, held);
+  }
   const stopped = await runOperation(context, held);
   if (stopped === undefined) {
     return;

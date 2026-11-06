@@ -118,7 +118,7 @@ describe("the company pages, in the admin", () => {
     });
   });
 
-  it("says a stopped provisioning is being tried again, and that it needs a look once Grasp gives up, with why and Retry now", async () => {
+  it("says a stopped provisioning failed where it stopped, not that it's tried again, with why and Retry now, and still once Grasp gives up", async () => {
     const releaseId = await importedRelease("feat(core): stops");
     const client = await recordClient();
     const now = new Date();
@@ -134,7 +134,7 @@ describe("the company pages, in the admin", () => {
       updatedAt: now,
     });
 
-    const retrying = await setupOf(client.id);
+    const stoppedPage = await setupOf(client.id);
     // Grasp's automatic retries give up: a person is asked to look.
     await markNeedsAttention(db, client.id, await episodeOf(db, client.id), {
       reason: "needs_person",
@@ -143,18 +143,144 @@ describe("the company pages, in the admin", () => {
     const { html } = await setupOf(client.id);
 
     expect({
-      retrying: [
-        retrying.html.includes("Trying again"),
-        retrying.html.includes("Setting it up needs a look"),
+      stopped: [
+        stoppedPage.html.includes("Trying again"),
+        stoppedPage.html.includes("Stopped: it needs a look"),
+        stoppedPage.html.includes(">Failed<"),
       ],
-      stopped: html.includes("Setting it up needs a look"),
+      givenUp: html.includes("Stopped: it needs a look"),
       code: html.includes("probe_unanswered"),
       resume: sectionOf(html, "Hosting").includes("Retry now"),
     }).toStrictEqual({
-      retrying: [true, false],
-      stopped: true,
+      stopped: [false, true, true],
+      givenUp: true,
       code: true,
       resume: true,
+    });
+  });
+
+  it("names a stopped operation's last step as recorded when this release has no such step, and still shows its Setup", async () => {
+    const release = await importedRelease("feat(core): dropped a step");
+    const client = await recordClient("active", release);
+    const now = new Date();
+    // Recorded by a release that had a step this one doesn't: records are
+    // never rewritten.
+    await db.insert(clientProvisions).values({
+      id: crypto.randomUUID(),
+      clientId: client.id,
+      releaseId: release,
+      status: "running",
+      step: "ignition",
+      runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+      startedBy: "system",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const { status, html } = await setupOf(client.id);
+
+    expect({
+      status,
+      named: html.includes(
+        "A try stopped in its ignition step without recording why"
+      ),
+    }).toStrictEqual({ status: 200, named: true });
+  });
+
+  it("says why a later run stopped by its own losses, not by an earlier deploy's failure", async () => {
+    const release = await importedRelease("feat(core): failed, then applied");
+    const client = await recordClient("active", release);
+    const now = new Date();
+    // An earlier deploy failed with its own code; then an apply ran the
+    // operation, and its every attempt was lost after the migrations.
+    await db.insert(clientDeploys).values({
+      clientId: client.id,
+      releaseId: release,
+      runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+      status: "failed",
+      error: "cloudflare_400_10000",
+      startedAt: now,
+      endedAt: now,
+    });
+    await db.insert(clientProvisions).values({
+      id: crypto.randomUUID(),
+      clientId: client.id,
+      releaseId: release,
+      status: "running",
+      step: "migrations",
+      runId: `${client.id}-apply`,
+      startedBy: "system",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const { html } = await setupOf(client.id);
+
+    expect({
+      own: html.includes(
+        "A try stopped in its connect step without recording why"
+      ),
+      earlier: html
+        .slice(0, html.indexOf('aria-label="Steps"'))
+        .includes("cloudflare_400_10000"),
+    }).toStrictEqual({ own: true, earlier: false });
+  });
+
+  it("says a live organization's deploy that stopped failed at the step it reached, with why and Retry beside it, never that it's still installing", async () => {
+    const before = await importedRelease("feat(core): runs");
+    const release = await importedRelease("feat(core): stopped deploying");
+    const client = await recordClient("active", release);
+    const now = new Date();
+    const runId = `deploy-${crypto.randomUUID().slice(0, 8)}`;
+    // Its deploy's every attempt was lost after its migrations: the
+    // operation is left running, its run ended and the client released.
+    await db.insert(clientProvisions).values({
+      id: crypto.randomUUID(),
+      clientId: client.id,
+      releaseId: release,
+      previousReleaseId: before,
+      status: "running",
+      step: "migrations",
+      runId,
+      startedBy: "system",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(clientDeploys).values({
+      clientId: client.id,
+      releaseId: release,
+      runId,
+      status: "failed",
+      error: "attempt_lost: connect",
+      startedAt: now,
+      endedAt: now,
+    });
+
+    const { html } = await setupOf(client.id);
+    const steps = html.slice(html.indexOf('aria-label="Steps"'));
+    const install = steps.slice(
+      steps.indexOf("Installing Grasp") - 400,
+      steps.indexOf("Installing Grasp")
+    );
+
+    expect({
+      trying: html.includes("Trying again"),
+      ready: html.includes("Ready: open"),
+      headline: html.includes("Stopped: it needs a look"),
+      installFailed: install.includes(">Failed<"),
+      why: html.includes(
+        "A try stopped in its connect step without recording why"
+      ),
+      retry: html
+        .slice(0, html.indexOf('aria-label="Steps"'))
+        .includes(">Retry<"),
+    }).toStrictEqual({
+      trying: false,
+      ready: false,
+      headline: true,
+      installFailed: true,
+      why: true,
+      retry: true,
     });
   });
 

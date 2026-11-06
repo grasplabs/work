@@ -239,6 +239,56 @@ export const holdBatchOf = async (
   };
 };
 
+/** Reads of a run's Secrets Store secret held until released (`holdSecretReadsOf`). */
+export interface HeldReads {
+  /** Once the run has read it `count` times, each held. */
+  reached: (count: number) => Promise<void>;
+  /** Lets every held read, and every later one, through. */
+  release: () => void;
+}
+
+/**
+ * Has every read of Secrets Store secret `name` by the run in `stub` hang
+ * until released: the run's attempt stays where it reads it, as one whose
+ * isolate died there. Set up before the run starts.
+ */
+export const holdSecretReadsOf = async (
+  stub: RunStub,
+  name: "CLIENT_KEY"
+): Promise<HeldReads> => {
+  const released = Promise.withResolvers<unknown>();
+  let reads = 0;
+  await runInDurableObject(stub, (object) => {
+    if (!hasEnv(object)) {
+      throw new TypeError("The run's object keeps no env");
+    }
+    const secret = object.env[name];
+    object.env = {
+      ...object.env,
+      [name]: {
+        get: async () => {
+          reads += 1;
+          await released.promise;
+          return await secret.get();
+        },
+      },
+    };
+  });
+  return {
+    // Polled from the test, as `holdBatchOf`'s write is.
+    reached: async (count) => {
+      await vi.waitFor(() => {
+        if (reads < count) {
+          throw new Error(`The run read ${name} ${reads} times`);
+        }
+      }, waitFor);
+    },
+    release: () => {
+      released.resolve(true);
+    },
+  };
+};
+
 /** `holdBatchOf` for the run's first batch, whatever it wrote. */
 export const holdFirstBatchOf = async (stub: RunStub): Promise<LostWrite> =>
   await holdBatchOf(stub, async () => await Promise.resolve(true));

@@ -29,11 +29,12 @@ import {
   ended,
   followAdminRuns,
   holdBatchOf,
+  holdSecretReadsOf,
   reached,
   startsOf,
   timeOutAttempt,
 } from "./runs.ts";
-import type { LostWrite } from "./runs.ts";
+import type { HeldReads, LostWrite } from "./runs.ts";
 import {
   emptyStoreSecret,
   setStoreSecret,
@@ -47,6 +48,8 @@ import {
 // - a client deployed while another runner (an apply, provisioning) has it;
 // - an attempt that timed out, or lost its step's result, acting twice or
 //   counted failed;
+// - an attempt killed mid-step (its isolate past its memory limit) failing
+//   the deploy with the engine's words, not the step it stopped in;
 // - a deploy whose run was terminated left deploying for good;
 // - a change in Secrets Store (a value changed, put back, added or
 //   removed) never reaching a client, or reaching it again and again;
@@ -358,6 +361,192 @@ describe("a client's deploy", () => {
       releases: on(release),
       runner: null,
     });
+  });
+
+  it("records the step each attempt killed mid-step reached, and fails the deploy there once none is left, not with the engine's words", async () => {
+    const before = await placedRelease("feat(core): before");
+    const client = await live(before);
+    const release = await placedRelease("feat(core): too big to upload");
+    const { core } = await scriptsOf(client.clientId);
+    // Each attempt is held in core's step, once it read core's script:
+    // there its isolate dies, as one past its memory limit does.
+    const coreRead = (call: ApiCall) =>
+      call.method === "GET" && call.path.endsWith(`/scripts/${core}`);
+    const attempts = [
+      heldAfter(coreRead),
+      heldAfter(coreRead),
+      heldAfter(coreRead),
+    ];
+    const takeovers: Promise<void>[] = [];
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await using runs = followRuns();
+    try {
+      await releaseToEdge(env, [release]);
+      await runs.tick();
+      const runId = await runs.latest();
+      for (const attempt of attempts) {
+        // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
+        await attempt.read();
+        // Another activation takes the run over: the engine finds the
+        // attempt ended without an outcome, as after its isolate died.
+        // It settles only once the retry it starts is done, so it isn't
+        // waited for here.
+        takeovers.push(deliverAlarm(adminWorkflows.deploy, runId));
+      }
+      const run = await ended(adminWorkflows.deploy, runId);
+      const lost = await db
+        .select({ detail: auditEvents.detail })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.clientId, client.clientId),
+            eq(auditEvents.action, "provision.attempt_lost")
+          )
+        );
+
+      expect({
+        status: run.status,
+        deploy: await deployOf(client.clientId),
+        lost: lost.map(({ detail }) =>
+          z
+            .object({ attempt: z.number(), step: z.string() })
+            .parse(JSON.parse(detail ?? "{}"))
+        ),
+        releases: await releasesOf(client.clientId),
+      }).toStrictEqual({
+        status: "errored",
+        deploy: {
+          releaseId: release,
+          status: "failed",
+          error: "attempt_lost: core",
+        },
+        lost: [
+          { attempt: 1, step: "core" },
+          { attempt: 2, step: "core" },
+        ],
+        releases: { connect: release, core: before },
+      });
+    } finally {
+      for (const attempt of attempts) {
+        attempt.release();
+      }
+      await Promise.allSettled(takeovers);
+      errors.mockRestore();
+    }
+  });
+
+  it("records only the lost attempt when its retry fails its probe and rolls back, never the rollback as another loss", async () => {
+    const before = await placedRelease("feat(core): before");
+    await releaseToEdge(env, [before]);
+    const client = await live(before);
+    const release = await placedRelease("feat(core): lost, then broken");
+    const { core } = await scriptsOf(client.clientId);
+    // The first attempt dies in core's step; its retry goes live and fails
+    // its probe, and its rollback finds core answering as it should again.
+    const first = heldAfter(
+      (call: ApiCall) =>
+        call.method === "GET" && call.path.endsWith(`/scripts/${core}`)
+    );
+    const isConnectUpload = (call: { method: string; path: string }) =>
+      call.method === "PUT" &&
+      call.path.startsWith(`/accounts/${client.account.id}/`) &&
+      call.path.endsWith("-connect");
+    client.core.coreProbe = { asClient: "someone-else" };
+    // oxlint-disable require-await -- the fake waits on these; nothing to wait for
+    cloudflare.beforeAnswering(isConnectUpload, async () => {
+      cloudflare.beforeAnswering(isConnectUpload, async () => {
+        delete client.core.coreProbe;
+      });
+    });
+    // oxlint-enable require-await
+    const takeovers: Promise<void>[] = [];
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await using runs = followRuns();
+    try {
+      await releaseToEdge(env, [release]);
+      await runs.tick();
+      const runId = await runs.latest();
+      await first.read();
+      takeovers.push(deliverAlarm(adminWorkflows.deploy, runId));
+      await ended(adminWorkflows.deploy, runId);
+      const lost = await db
+        .select({ detail: auditEvents.detail })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.clientId, client.clientId),
+            eq(auditEvents.action, "provision.attempt_lost")
+          )
+        );
+
+      expect({
+        deploy: await deployOf(client.clientId),
+        lost: lost.map(({ detail }) =>
+          z
+            .object({ attempt: z.number(), step: z.string() })
+            .parse(JSON.parse(detail ?? "{}"))
+        ),
+        releases: await releasesOf(client.clientId),
+      }).toStrictEqual({
+        deploy: {
+          releaseId: release,
+          status: "failed",
+          error: "release_rolled_back",
+        },
+        lost: [{ attempt: 1, step: "core" }],
+        releases: on(before),
+      });
+    } finally {
+      first.release();
+      await Promise.allSettled(takeovers);
+      errors.mockRestore();
+    }
+  });
+
+  it("fails a deploy whose every attempt is killed before its first step there, as the operation it started is its own", async () => {
+    const before = await placedRelease("feat(core): before");
+    const client = await live(before);
+    const release = await placedRelease("feat(core): lost before validating");
+    // Each attempt is held reading its secrets, before its operation's
+    // first step: there its isolate dies.
+    let reads: HeldReads | undefined;
+    using deploys = startsOf(adminWorkflows.deploy, async (stub) => {
+      reads = await holdSecretReadsOf(stub, "CLIENT_KEY");
+    });
+    const takeovers: Promise<void>[] = [];
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await releaseToEdge(env, [release]);
+      await reconcile(env);
+      const [runId] = deploys.started;
+      if (runId === undefined || reads === undefined) {
+        throw new Error("The deploy's run wasn't started");
+      }
+      for (const attempt of [1, 2, 3]) {
+        // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
+        await reads.reached(attempt);
+        takeovers.push(deliverAlarm(adminWorkflows.deploy, runId));
+      }
+      const run = await ended(adminWorkflows.deploy, runId);
+
+      expect({
+        status: run.status,
+        deploy: await deployOf(client.clientId),
+        releases: await releasesOf(client.clientId),
+      }).toStrictEqual({
+        status: "errored",
+        deploy: {
+          releaseId: release,
+          status: "failed",
+          error: "attempt_lost: validated",
+        },
+        releases: on(before),
+      });
+    } finally {
+      reads?.release();
+      await Promise.allSettled(takeovers);
+      errors.mockRestore();
+    }
   });
 
   it("counts a deploy done when its attempt loses the step's result after the operation completed", async () => {

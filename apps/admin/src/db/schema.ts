@@ -553,7 +553,7 @@ export const clientProvisions = sqliteTable("client_provisions", {
    * of a secret.
    */
   progress: text(),
-  /** The runner that last recorded a step: a run (src/runners.ts). */
+  /** The runner it was started for, then the one that last recorded a step: a run (src/runners.ts). */
   runId: text("run_id"),
   /**
    * The calls to the client's Workers still on their way, by sender (a
