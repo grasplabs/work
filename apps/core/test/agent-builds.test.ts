@@ -655,7 +655,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     );
     expect({
       ...steps,
-      released: steps.released.problem.includes("released version"),
+      released: steps.released.problem.includes(
+        "Only a field this draft added renames"
+      ),
       audited: defined.map(({ detail }) => [detail.op, detail.table]),
     }).toStrictEqual({
       released: true,
@@ -737,6 +739,41 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       checks: [{ table: "notes", field: "category", answered: true }],
       answers: 1,
     });
+  });
+
+  it("renames no field a version that ran had, after a rollback to one without it too", async () => {
+    const { builder, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
+        return await env.build.define(app.id, { op: "renameField", table: "notes", field: "nickname", name: "displayName" });
+      };`),
+      says("Renamed."),
+    ]);
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
+    // Version 2 ran with a nickname, which people may have filled in;
+    // then the App was rolled back to version 1, which has none.
+    await release(builder, app, notesFiles);
+    await release(
+      builder,
+      app,
+      definedWith(notesFiles, {
+        op: "addField",
+        table: "notes",
+        name: "nickname",
+        type: "v.string().optional()",
+      })
+    );
+    await builder.api.apps.versions.setCurrent(app, 1);
+    await grant();
+
+    await chat.ask("Call the nickname a display name");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    const refused = z
+      .object({ ok: z.literal(false), problem: z.string() })
+      .parse(returned(result?.text));
+    expect(refused.problem).toContain("`notes.nickname` is in a version");
   });
 
   it("keeps no change that leaves a file as the base has it", async () => {

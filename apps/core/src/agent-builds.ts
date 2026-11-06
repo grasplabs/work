@@ -1141,7 +1141,19 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           };
         }
         const before = base.has(definitionPath) ? released.definition : null;
-        const refused = renameRefusal(parsed, current.definition, before);
+        // The commit the draft starts from, which may have run and been
+        // rolled back from: its fields may hold values too.
+        const started = definitionIn(
+          await draftFiles(this.env, found.id, {
+            base: draft.base,
+            changes: {},
+          }),
+          found.name
+        );
+        const refused = renameRefusal(parsed, current.definition, [
+          before,
+          "definition" in started ? started.definition : null,
+        ]);
         if (refused !== undefined) {
           return { ok: false, problem: refused };
         }

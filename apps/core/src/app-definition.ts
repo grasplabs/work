@@ -112,26 +112,31 @@ export const withDefinitionCode = (
 };
 
 /**
- * Why `operation` can't rename the field it names, or undefined: a field
- * the released definition (`before`) has already holds values in the
- * App's records, which stay under its old name until a rename can carry
- * them by its stable ID (GRA-1602). A field this draft added holds none.
+ * Why `operation` can't rename the field it names, or undefined. Only a
+ * field this draft added renames: one the App's versions had (`held`:
+ * the current one, and the commit the draft starts from, which may have
+ * run and been rolled back from) may hold values in the App's records,
+ * which stay under its old name until a rename can carry them by its
+ * stable ID (GRA-1602).
  */
 export const renameRefusal = (
   operation: DefinitionOperation,
   definition: AppDefinition,
-  before: AppDefinition | null
+  held: readonly (AppDefinition | null)[]
 ): string | undefined => {
   if (operation.op !== "renameField") {
     return undefined;
   }
   const table = definition.tables.find(({ name }) => name === operation.table);
   const field = table?.fields.find(({ name }) => name === operation.field);
-  const released = before?.tables
-    .find(({ id }) => id === table?.id)
-    ?.fields.some(({ id }) => id === field?.id);
-  return released === true
-    ? `\`${operation.table}.${operation.field}\` is in the App's released version, and its records hold values under that name, which a rename doesn't carry yet. Keep its name, or add a field with the new name and copy the values with a migration in server/migrations/.`
+  const versioned = held.some(
+    (version) =>
+      version?.tables
+        .find(({ id }) => id === table?.id)
+        ?.fields.some(({ id }) => id === field?.id) === true
+  );
+  return versioned
+    ? `\`${operation.table}.${operation.field}\` is in a version of the App, and its records may hold values under that name, which a rename doesn't carry yet. Only a field this draft added renames. Keep its name, or add a field with the new name and copy the values with a migration in server/migrations/.`
     : undefined;
 };
 

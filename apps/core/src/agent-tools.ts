@@ -709,7 +709,7 @@ const definitions = (known: Set<string>, assets: Fetcher) => [
     name: "renameField",
     label: "Rename a field",
     api: "build",
-    description: `Renames a field this draft added: it keeps its ID, so its indexes and row rules follow it. A field the App's released version has can't be renamed yet, as its records hold their values under that name: the answer says what to do instead. ${definitionAnswer}`,
+    description: `Renames a field this draft added: it keeps its ID, so its indexes and row rules follow it. A field any version of the App has can't be renamed yet, as its records may hold values under that name: the answer says what to do instead. ${definitionAnswer}`,
     parameters: Type.Object(
       {
         app: appParameter,
