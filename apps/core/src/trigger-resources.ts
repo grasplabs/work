@@ -14,7 +14,6 @@ import {
   connectorTriggerConfigSchema,
   emailTriggerConfigSchema,
   scheduleTriggerConfigSchema,
-  systemTriggerConfigSchema,
   webhookTriggerConfigSchema,
   workflowTriggerCreateSchema,
 } from "@grasp-os/shared/workflow-triggers";
@@ -139,7 +138,6 @@ import {
 
 /** What a trigger version keeps of its configuration, by kind. */
 interface KindFields {
-  eventContract: string | null;
   eventType: string | null;
   scheduleCron: string | null;
   scheduleTimeZone: string | null;
@@ -150,7 +148,6 @@ interface KindFields {
 }
 
 const noKindFields: KindFields = {
-  eventContract: null,
   eventType: null,
   scheduleCron: null,
   scheduleTimeZone: null,
@@ -234,8 +231,7 @@ const connectorFieldsOf = async (
 
 /**
  * What a trigger of `kind` with `config` keeps in its version, checked
- * (`workflow.resource_invalid`): a system trigger's event, a schedule
- * trigger's schedule and input, accepted by version `version` of workflow
+ * (`workflow.resource_invalid`): a schedule trigger's schedule and input, accepted by version `version` of workflow
  * `workflowId`, a connector trigger's connection, event and mapping, for
  * `principal`; nothing for any other kind.
  */
@@ -265,18 +261,6 @@ const kindFieldsOf = async (
       config
     );
     return noKindFields;
-  }
-  if (kind === "system") {
-    const { event } = workflowResourceErrors.parse(
-      "workflow.resource_invalid",
-      systemTriggerConfigSchema,
-      config
-    );
-    return {
-      ...noKindFields,
-      eventContract: event.contract,
-      eventType: event.type,
-    };
   }
   if (kind !== "schedule") {
     return noKindFields;
@@ -687,8 +671,6 @@ export const updateTriggerVersion = async (
       principalBinding: trigger.principal,
       createdAt: new Date(),
       // Its configuration stays, as its hash does: only the version moves.
-      eventContract: sql`(SELECT event_contract FROM trigger_resource_versions
-        WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
       eventType: sql`(SELECT event_type FROM trigger_resource_versions
         WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
       connectionId: sql`(SELECT connection_id FROM trigger_resource_versions
@@ -954,7 +936,6 @@ interface TriggerRow {
   emailAddress: string | null;
   webhookToken: string | null;
   webhookSecretRevokedAt: Date | null;
-  eventContract: string | null;
   eventType: string | null;
   scheduleCron: string | null;
   scheduleTimeZone: string | null;
@@ -967,12 +948,6 @@ interface TriggerRow {
   start: string | null;
   events: string | null;
 }
-
-/** A system trigger's configuration, if its version keeps one. */
-const systemConfigOf = (row: TriggerRow): Json | null =>
-  row.eventContract === null || row.eventType === null
-    ? null
-    : { event: { contract: row.eventContract, type: row.eventType } };
 
 /** A schedule trigger's configuration, if its version keeps one. */
 const scheduleConfigOf = (row: TriggerRow): Json | null =>
@@ -1016,9 +991,6 @@ const configOf = (row: TriggerRow): Json | null => {
     return row.inputMapping === null
       ? null
       : { input: keptJson(row.inputMapping) };
-  }
-  if (row.kind === "system") {
-    return systemConfigOf(row);
   }
   if (row.kind === "schedule") {
     return scheduleConfigOf(row);
@@ -1125,7 +1097,6 @@ const triggersWhere = async (
       emailAddress: triggerResources.emailAddress,
       webhookToken: triggerResources.webhookToken,
       webhookSecretRevokedAt: triggerResources.webhookSecretRevokedAt,
-      eventContract: triggerResourceVersions.eventContract,
       eventType: triggerResourceVersions.eventType,
       scheduleCron: triggerResourceVersions.scheduleCron,
       scheduleTimeZone: triggerResourceVersions.scheduleTimeZone,

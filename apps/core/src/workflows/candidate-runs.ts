@@ -19,7 +19,7 @@ import type {
   WorkflowRunStatus,
 } from "@grasp-os/shared/workflow-resources";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
-import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
+import { definitionFormat } from "@grasp-os/workflow-schema/format";
 import {
   and,
   eq,
@@ -61,7 +61,6 @@ import { runEngine } from "./engine.ts";
 import type { PinnedCandidateRun } from "./engine.ts";
 import { modelCallLimitOf } from "./host.ts";
 import type { RunStep } from "./host.ts";
-import type { HostedResourceRun } from "./resource-host.ts";
 import { tracedSteps } from "./resource-run-trace.ts";
 import {
   engineResultOf,
@@ -70,6 +69,7 @@ import {
 } from "./resource-runs.ts";
 import type { HostedActivation, ResourceRunMemory } from "./resource-runs.ts";
 import type { EngineStatus } from "./runs.ts";
+import type { HostedResourceRun } from "./sealed-run.ts";
 
 // Test runs of a workflow's draft checkpoint, never published (GRA-815,
 // spec 13.10 and 22.7): a builder runs the exact checkpoint they checked,
@@ -257,7 +257,6 @@ const requireUnderLimits = async (
 
 /** What a test run's manifest seals beside its build. */
 const candidateManifestSchema = z.object({
-  evaluatorHash: z.string(),
   contract: z.object({ input: z.json(), output: z.json() }),
   bindings: z.array(
     z.object({
@@ -328,9 +327,6 @@ export const startCandidateRun = async (
     checkpoint.source,
     checkpoint.modules
   );
-  if (!built.compiled.build.executable) {
-    throw workflowResourceErrors.create("workflow.candidate_unexecutable");
-  }
   const inputText = acceptedInput(JSON.stringify(built.contract.input), given);
   const paramsText = candidateParams(built.contract, params);
   const runId = crypto.randomUUID();
@@ -342,10 +338,8 @@ export const startCandidateRun = async (
     draftRevision: revision,
     namespace: workflowNamespace,
     name: workflow.name,
-    definitionVersion: built.checked.identity.version,
-    profile: built.checked.profile,
+    profile: definitionFormat,
     definitionHash: built.definitionHash,
-    evaluatorHash: jqProvenance.sha256,
     contract: built.contract,
     // What each binding was checked against, by catalog contract: every
     // answer the run is given is checked against it (`makeCall`).
@@ -408,13 +402,11 @@ export const startCandidateRun = async (
       }),
     ]);
   } catch (error) {
-    await releaseBuild(
-      env,
-      { id: reservation, version: 1 },
-      built.compiled
-    ).catch((releaseError: unknown) => {
-      log.warn("workflow.build_release_failed", errorFields(releaseError));
-    });
+    await releaseBuild(env, { id: reservation, version: 1 }).catch(
+      (releaseError: unknown) => {
+        log.warn("workflow.build_release_failed", errorFields(releaseError));
+      }
+    );
     if (notNullFailed(error, "workflow_candidate_runs.workflow_resource_id")) {
       if ((await liveWorkflow(env, workflow.id)) === undefined) {
         throw workflowResourceErrors.create("workflow.resource_unavailable");
@@ -483,10 +475,6 @@ const loadedCandidateRun = async (
     throw workflowResourceErrors.create("workflow.resource_unavailable");
   }
   const sealed = candidateManifestSchema.parse(JSON.parse(row.manifest));
-  // As a version's: only under the evaluator it was compiled with.
-  if (sealed.evaluatorHash !== jqProvenance.sha256) {
-    throw workflowResourceErrors.create("workflow.evaluator_changed");
-  }
   const build = await loadCandidateBuild(env, pin.workflow, row, pin.manifest);
   if (build.hash !== row.buildHash) {
     throw workflowResourceErrors.create("workflow.version_corrupt");
@@ -532,10 +520,7 @@ const loadedCandidateRun = async (
           ])
         ),
       },
-      maxModelCalls: Math.min(
-        modelCalls,
-        build.limits.maxModelCalls ?? modelCalls
-      ),
+      maxModelCalls: modelCalls,
       // A test run waits only briefly: one waiting longer fails.
       maxSleepMs: maxCandidateWaitMs,
     },

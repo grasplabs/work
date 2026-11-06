@@ -8,6 +8,7 @@ import { passedBound } from "@grasp-os/shared/value-bounds";
 import { knowledgeUseOperations } from "@grasp-os/shared/workflow-modules";
 import type { SealedUse } from "@grasp-os/shared/workflow-modules";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import type { SealedCall } from "@grasp-os/workflow-schema/sealed";
 import { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
@@ -19,7 +20,7 @@ import {
   SandboxUnavailableError,
   sessionHost,
 } from "../sandboxed.ts";
-import type { LoadedModules, SealedCall } from "../workflow-builds.ts";
+import type { LoadedModules } from "../workflow-builds.ts";
 import {
   actionMain,
   actionMainModule,
@@ -50,8 +51,8 @@ import { filesCallOperations } from "./run-files.ts";
 //   and counts as one of its lineage's host calls.
 // - Effects without a record. Each call leaves its own receipts, under an
 //   idempotency key of its own: its step's, with its ordinal in the
-//   attempt. An action's step is tried once (resource-host.ts), and a
-//   replay answers its record and calls nothing.
+//   attempt. An action's step is tried once (sealed-run.ts,
+//   `triedOnceCalls`), and a replay answers its record and calls nothing.
 // - Escaping its step. Calls are bounded in number per attempt
 //   (`maxActionCalls`), and refused once the attempt is over (its
 //   deadline, the run's lease): the capability dies with the call.
@@ -70,7 +71,7 @@ import { filesCallOperations } from "./run-files.ts";
 // - A revoked package acting on (GRA-700). An action's module may import
 //   the approved packages its version seals (GRA-665), admitted as its
 //   attempt begins; each of its calls admits them again before it is made
-//   (resource-host.ts, `#action`), so a graph revoked mid-attempt makes no
+//   (sealed-run.ts, `#action`), so a graph revoked mid-attempt makes no
 //   call more.
 // - Doing more with the run's own files than its files uses name
 //   (GRA-724): only the operations a use declares, on files of its own
@@ -82,7 +83,7 @@ import { filesCallOperations } from "./run-files.ts";
 //   sealed output shape, never one the action makes up, and the host
 //   counts each against the run's `maxModelCalls` before it goes out, in
 //   the run object's own storage, so a replay or a failed attempt still
-//   counts it (resource-host.ts, `#reserveModelCall`).
+//   counts it (sealed-run.ts, `#reserveModelCall`).
 
 /** The most resource calls one attempt of an action makes. */
 export const maxActionCalls = 32;
@@ -141,7 +142,7 @@ const filesRequestSchema = z.strictObject({
 /** What an action asks of a template binding: nothing; the version is pinned. */
 const templateRequestSchema = z.strictObject({});
 
-/** What the host does for an action's resource calls (resource-host.ts). */
+/** What the host does for an action's resource calls (sealed-run.ts, `#action`). */
 export interface ActionEffects {
   /**
    * Makes `call`, the action's `ordinal`th of its attempt (from 1), as one

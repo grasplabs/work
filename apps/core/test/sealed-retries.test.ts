@@ -1,6 +1,6 @@
+import type { SealedTask } from "@grasp-os/workflow-schema/sealed";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { SealedTask } from "../src/workflow-builds.ts";
 import { retryDecided } from "../src/workflows/sealed-run.ts";
 
 // What a sealed run's retry decides of the isolate's choice (sealed-run.ts,
@@ -16,14 +16,12 @@ const tryOf = (id: string, catcher: Try["catch"]): Try => ({
   pointer: `/do/0/${id}`,
   steps: ["catch"],
   scope: [],
-  branches: [],
-  schemas: {},
   kind: "try",
   catch: catcher,
 });
 
 const caught = {
-  type: "https://open-workflow-specification.org/spec/1.0.0/errors/runtime",
+  type: "https://grasp.work/schemas/grasp-workflow/1/errors/runtime",
   status: 500,
   instance: "/do/0/outer/try/0/inner/try/0/fetch",
   title: "Something went wrong.",
@@ -37,8 +35,6 @@ const retrying = (
   variable: "error",
   retry: { attempts: 5, delayMs: 1000, backoff, ...more },
 });
-
-const now = (): number => Date.now();
 
 /** The choice of `by`'s catch, retrying or not. */
 const by = (id: string, retry = true) => ({ by: id, retry });
@@ -66,47 +62,36 @@ const conditional = (catcher: Try["catch"]): Try["catch"] => ({
 });
 
 describe("a sealed run's retry decision", () => {
-  it("backs off as its policy grows, each round, jitter within its range", () => {
+  it("backs off as its policy grows, each round", () => {
     const delays = (backoff: "constant" | "linear" | "exponential") =>
       [1, 2, 3].map(
         (round) =>
-          retryDecided(
-            [tryOf("t", retrying(backoff, { jitter: { fromMs: 5, toMs: 5 } }))],
-            caught,
-            round,
-            by("t"),
-            now()
-          ).delayMs
+          retryDecided([tryOf("t", retrying(backoff))], caught, round, by("t"))
+            .delayMs
       );
     expect({
       constant: delays("constant"),
       linear: delays("linear"),
       exponential: delays("exponential"),
     }).toStrictEqual({
-      constant: [1005, 1005, 1005],
-      linear: [1005, 2005, 3005],
-      exponential: [1005, 2005, 4005],
+      constant: [1000, 1000, 1000],
+      linear: [1000, 2000, 3000],
+      exponential: [1000, 2000, 4000],
     });
   });
 
-  it("retries no more once its rounds, its duration or a year are spent", () => {
-    const decide = (catcher: Try["catch"], round: number, since = now()) =>
-      retryDecided([tryOf("t", catcher)], caught, round, by("t"), since).retry;
+  it("retries no more once its rounds or a year are spent", () => {
+    const decide = (catcher: Try["catch"], round: number) =>
+      retryDecided([tryOf("t", catcher)], caught, round, by("t")).retry;
     expect({
       lastRound: decide(retrying("constant", { attempts: 3 }), 3),
-      pastDuration: decide(
-        retrying("constant", { limitMs: 60_000 }),
-        1,
-        now() - 60_000
-      ),
       pastAYear: decide(
         retrying("exponential", { delayMs: 200 * 86_400_000 }),
         2
       ),
-      within: decide(retrying("constant", { limitMs: 60_000 }), 1),
+      within: decide(retrying("constant", { attempts: 3 }), 2),
     }).toStrictEqual({
       lastRound: false,
-      pastDuration: false,
       pastAYear: false,
       within: true,
     });
@@ -122,7 +107,7 @@ describe("a sealed run's retry decision", () => {
     const outer = tryOf("outer", retrying("constant"));
     const tries = [inner, middle, outer];
     const decide = (choice?: unknown, around: readonly Try[] = tries) =>
-      retryDecided(around, caught, 1, choice, now()).retry;
+      retryDecided(around, caught, 1, choice).retry;
     expect({
       innerOrOuter: [decide(by("inner")), decide(by("outer"))],
       notRetrying: decide(by("inner", false)),

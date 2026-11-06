@@ -481,8 +481,12 @@ const typeOf = (
     : nullable;
 };
 
-/** The type of a whole value: `typeOf`, with its own presence. */
-const valueTypeOf = (descriptor: ValueDescriptor, mode: Mode): string =>
+/**
+ * The TypeScript type of a whole value `descriptor` accepts, as a caller
+ * passes it (`input`) or as it normalizes (`output`): `typeOf`, with its
+ * own presence.
+ */
+export const valueTypeOf = (descriptor: ValueDescriptor, mode: Mode): string =>
   typeOf(descriptor, mode, true);
 
 /** A tree of entries, by the segments of their dotted paths. */

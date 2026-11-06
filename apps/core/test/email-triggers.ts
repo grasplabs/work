@@ -1,12 +1,11 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import {
   triggerIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { InputMapping } from "@grasp-os/shared/workflow-triggers";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import {
   createExecutionContext,
   waitOnExecutionContext,
@@ -207,47 +206,32 @@ export const attachment = {
   additionalProperties: false,
 };
 
-/** A workflow taking a message's `subject`, and what else its trigger maps. */
-export const definitionOf = (name: string, version = "1.0.0"): string =>
+/** The JSON Schema of an object of `properties`, each required. */
+export const objectOf = (properties: Record<string, unknown>) => ({
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
+});
+
+/**
+ * A workflow taking a message's `subject`, and what else its trigger
+ * maps, and ending with its subject: `subject`, if given, says how.
+ */
+export const definitionOf = (subject = "input.subject"): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: {
-            subject: { type: "string" },
-            from: { type: "string" },
-            stored: stringOrNull,
-            attachments: { type: "array", items: attachment },
-          },
-          required: ["subject", "from", "stored", "attachments"],
-          additionalProperties: false,
-        },
-      },
-    },
+    $schema: workflowSchemaUrl,
+    input: objectOf({
+      subject: { type: "string" },
+      from: { type: "string" },
+      stored: stringOrNull,
+      attachments: { type: "array", items: attachment },
+    }),
     output: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: { subject: { type: "string" } },
-          required: ["subject"],
-          additionalProperties: false,
-        },
-      },
+      schema: objectOf({ subject: { type: "string" } }),
+      value: { subject: { $expr: subject } },
     },
-    do: [{ finish: { set: { subject: "${ $workflow.input.subject }" } } }],
+    steps: [],
   });
 
 export const mapping = {
@@ -306,7 +290,7 @@ export interface Starting {
 export const emailTriggerFor = async (
   builder: Person,
   {
-    definition = definitionOf,
+    definition = () => definitionOf(),
     modules,
     files,
     input = mapping,
@@ -396,41 +380,15 @@ const messageFields = {
 };
 
 /** A workflow taking what `messageFields` says of a message. */
-const messageDefinitionOf = (name: string): string =>
+const messageDefinitionOf = (): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: messageFields,
-          required: Object.keys(messageFields),
-          additionalProperties: false,
-        },
-      },
-    },
+    $schema: workflowSchemaUrl,
+    input: objectOf(messageFields),
     output: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: { subject: { type: "string" } },
-          required: ["subject"],
-          additionalProperties: false,
-        },
-      },
+      schema: objectOf({ subject: { type: "string" } }),
+      value: { subject: { $expr: "input.subject" } },
     },
-    do: [{ finish: { set: { subject: "${ $workflow.input.subject }" } } }],
+    steps: [],
   });
 
 /**

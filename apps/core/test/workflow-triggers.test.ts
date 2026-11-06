@@ -1,11 +1,10 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import {
   triggerEventsRequest,
   triggerStartRequest,
 } from "@grasp-os/shared/workflow-triggers";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -15,6 +14,7 @@ import {
 } from "../src/workflows/connector-events.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
 import {
   openRpc,
   outcome,
@@ -40,45 +40,41 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
-/** Version `version` of workflow `name`, taking and handing back a `report`. */
-const definitionOf = (name: string, version: string): string =>
+/**
+ * Version `version` of a workflow taking and handing back a `report`: a
+ * step that never runs carries `version` as its title, so each version's
+ * document differs.
+ */
+const definitionOf = (version: string): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ report: { type: "string" } }),
+    output: {
+      schema: objectSchema({ report: { type: "string" } }),
+      value: { report: { $expr: "input.report" } },
     },
-    input: { schema: objectSchema({ report: { type: "string" } }) },
-    output: { schema: objectSchema({ report: { type: "string" } }) },
-    do: [{ finish: { set: { report: "${ $workflow.input.report }" } } }],
+    steps: [
+      {
+        id: "mark",
+        title: `Version ${version}`,
+        type: "raise",
+        if: { $expr: "false" },
+        error: { type: "urn:grasp:error:never", status: 422 },
+      },
+    ],
   });
 
 /** A workflow `builder` owns, with two published versions. */
 const reporting = async (builder: Person): Promise<string> => {
-  const { id, name } = await builder.api.workflowResources.create(
+  const { id } = await builder.api.workflowResources.create(
     `report-${unique()}`
   );
   await builder.api.workflowResources.publish(id, {
-    definition: definitionOf(name, "1.0.0"),
+    definition: definitionOf("1"),
     basedOn: null,
   });
   await builder.api.workflowResources.publish(id, {
-    definition: definitionOf(name, "1.1.0"),
+    definition: definitionOf("1.1"),
     basedOn: 1,
   });
   return id;

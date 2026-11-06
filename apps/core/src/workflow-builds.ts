@@ -1,41 +1,41 @@
 import {
   appModuleName,
   compilerVersion,
-  openWorkflowEntry,
+  generatedWorkflowEntry,
   packageModulePrefix,
   workflowSdkModules,
 } from "@grasp-os/compiler";
-import {
-  generatedPath,
-  generateWorkflow,
-  generatorVersion,
-  taskAtLine,
-} from "@grasp-os/open-workflow/generate";
-import { profileLimits } from "@grasp-os/open-workflow/limits";
-import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { releaseArtifactSchema } from "@grasp-os/shared/app-releases";
 import type { ReleaseArtifact } from "@grasp-os/shared/app-releases";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
-import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { packageLimits } from "@grasp-os/shared/packages";
-import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import {
   actionUsesSchema,
   workflowModuleLimits,
-  workflowModulePattern,
 } from "@grasp-os/shared/workflow-modules";
 import {
-  openWorkflowProtocol,
-  workflowEventTypeSchema,
+  generatedWorkflowProtocol,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowVersionBuild } from "@grasp-os/shared/workflow-resources";
+import type { CheckedWorkflow } from "@grasp-os/workflow-schema/check";
+import {
+  generateWorkflow,
+  generatorVersion,
+  taskAtLine,
+} from "@grasp-os/workflow-schema/generate";
+import { sealedTableSchema } from "@grasp-os/workflow-schema/sealed";
+import type {
+  SealedExpression,
+  SealedTable,
+  SealedTask,
+} from "@grasp-os/workflow-schema/sealed";
 import { and, eq, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/d1";
@@ -47,14 +47,15 @@ import {
   workflowResourceVersions,
 } from "./db/core/schema.ts";
 import { releaseReservations } from "./release-retention.ts";
-import { buildOpenWorkflow, withinBuildWait } from "./screens.ts";
+import { buildGeneratedWorkflow, withinBuildWait } from "./screens.ts";
 import { sealedUse } from "./workflow-modules.ts";
 import type { ComputeContract, CompiledModules } from "./workflow-modules.ts";
 import { manifestPackagesSchema } from "./workflows/package-seal.ts";
 
 // What a JSON workflow's version runs (platform specification 13.1, 19.1):
-// its definition, validated at publication, lowered into SDK TypeScript
-// (@grasp-os/open-workflow's generate.ts), type-checked and compiled into
+// its definition, checked at publication, translated into TypeScript on
+// `@grasp-os/sdk/workflow` (@grasp-os/workflow-schema's generate.ts),
+// type-checked and compiled into
 // JavaScript by the App compiler, as App code is, and sealed with the
 // version: the original JSON, the generated code, the compiled module, the
 // expression table it names its expressions from, a source map and the SDK
@@ -80,15 +81,19 @@ import { manifestPackagesSchema } from "./workflows/package-seal.ts";
 //   was compiled against are sealed with it and loaded from the seal, never
 //   from what the host serves now; a build for a protocol this host
 //   doesn't speak is refused as such (`workflow.protocol_unsupported`).
+// - A table holding what the run host has no rule for. The sealed table
+//   loads only as the generator writes it (@grasp-os/workflow-schema's
+//   sealed.ts, `sealedTableSchema`); anything else is
+//   `workflow.version_corrupt`.
 // - Bytes a sealed version names deleted by retention. They are reserved
 //   for the version (`sdk_release_artifacts`) before they are stored, the
 //   version row is written only while every reservation stands, and the
 //   retention sweep never takes a reservation of a workflow version
 //   (release-retention.ts): versions are never deleted.
 // - Injection through the definition into code, and code reaching past
-//   the SDK: closed by the generator (literals only, expressions by
-//   number) and the compiler (generated code may import the open-workflow
-//   SDK alone); see generate.ts.
+//   the SDK: closed by the generator (literals only, expressions printed
+//   from their checked syntax tree) and the compiler (generated code may
+//   import `@grasp-os/sdk/workflow` alone); see generate.ts.
 // - A load whose request is cancelled mid-read (workerd never settles it)
 //   holds every later load of that version in the isolate, or a load that
 //   failed or ran on past its time is served as verified: loads of one
@@ -124,468 +129,40 @@ const computeArtifact = "compute.json";
  * The generated module's flat name, as the compiler names it and core's
  * run module imports it.
  */
-export const generatedModule = appModuleName(openWorkflowEntry);
+export const generatedModule = appModuleName(generatedWorkflowEntry);
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 
-/** Most constructs a non-executable build names (generate.ts's cap). */
-const maxUnsupported = 20;
-
-/** A version's build, as its manifest seals it. */
-export const sealedBuildSchema = z.discriminatedUnion("executable", [
-  z.strictObject({
-    executable: z.literal(true),
-    generator: z.string().min(1).max(64),
-    protocol: z.int().positive(),
-    compilerVersion: z.string().min(1).max(128),
-    /** The executable identity: see `identityOf`. */
-    hash: sha256Schema,
-    artifacts: z.array(releaseArtifactSchema).min(1).max(256),
-  }),
-  z.strictObject({
-    executable: z.literal(false),
-    unsupported: z
-      .array(
-        z.strictObject({
-          pointer: z.string().max(sealedBuildLimits.pointerLength),
-          taskId: z.string().max(64).nullable(),
-          feature: z.string().max(128),
-        })
-      )
-      .min(1)
-      .max(maxUnsupported),
-  }),
-]);
+/**
+ * A version's build, as its manifest seals it: every definition that
+ * passes generates (`generateWorkflow`), so every version has one.
+ */
+export const sealedBuildSchema = z.strictObject({
+  generator: z.string().min(1).max(64),
+  protocol: z.int().positive(),
+  compilerVersion: z.string().min(1).max(128),
+  /** The executable identity: see `identityOf`. */
+  hash: sha256Schema,
+  artifacts: z.array(releaseArtifactSchema).min(1).max(256),
+});
 
 export type SealedBuild = z.infer<typeof sealedBuildSchema>;
 
-/** A task's schema descriptor, as sealed: the SDK's native validator reads it. */
-const descriptorSchema = z.json();
-
-/** A task's ID, as the profile has it (and the SDK's step names). */
-const sealedTaskIdSchema = z
-  .string()
-  .max(64)
-  .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u);
-
-/**
- * The most scopes one inside another a task runs in: `for` and `fork`
- * tasks around it (spec 18, eight levels).
- */
-export const maxTaskScopes = 8;
-
-const taskBase = {
-  id: z.string().min(1).max(64),
-  pointer: z.string().max(sealedBuildLimits.pointerLength),
-  /** Its durable steps besides a wait's sleep (generate.ts, `TaskStep`). */
-  steps: z.array(z.enum(["task", "enter", "leave", "item", "catch"])).max(4),
-  /**
-   * The `for` and `fork` tasks around it, outermost first: each of its
-   * steps runs in an item, or a branch, of each (generate.ts,
-   * `GeneratedTask.scope`).
-   */
-  scope: z.array(sealedTaskIdSchema).max(maxTaskScopes),
-  /**
-   * Beside `scope`: for each `fork` around it, the branch it is in, and
-   * null for each `for` (generate.ts, `GeneratedTask.branches`). The host
-   * runs its steps only in that branch of each fork.
-   */
-  branches: z.array(z.int().min(0).max(63).nullable()).max(maxTaskScopes),
-  /** The descriptors of its input, output and export schemas. */
-  schemas: z.strictObject({
-    input: descriptorSchema.optional(),
-    output: descriptorSchema.optional(),
-    export: descriptorSchema.optional(),
-  }),
-  /** The most an attempt of its steps may take, from its `timeout`. */
-  timeoutMs: z.int().positive().optional(),
-};
-
-/**
- * A value the host builds at call time (generate.ts, `CallTemplate`): a
- * literal, a sealed expression's slot, a sensitive parameter as a binding
- * argument, or an object (its entries, in order) or array of those.
- */
-export type SealedTemplate =
-  | { literal: Json }
-  | { slot: number }
-  | { param: string }
-  | { object: [string, SealedTemplate][] }
-  | { array: SealedTemplate[] };
-
-const templateSchema: z.ZodType<SealedTemplate> = z.lazy(() =>
-  z.union([
-    z.strictObject({ literal: z.json() }),
-    z.strictObject({ slot: z.int().min(0) }),
-    z.strictObject({ param: z.string().min(1).max(64) }),
-    z.strictObject({
-      object: z
-        .array(
-          z.tuple([
-            z.string().max(sealedBuildLimits.templateKeyLength),
-            templateSchema,
-          ])
-        )
-        .max(sealedBuildLimits.templateItems),
-    }),
-    z.strictObject({
-      array: z.array(templateSchema).max(sealedBuildLimits.templateItems),
-    }),
-  ])
-);
-
-const aliasSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
-
-/** A call task's named call, as the build seals it (generate.ts). */
-const sealedCallSchema = z.discriminatedUnion("name", [
-  z.strictObject({ name: z.literal("grasp.now") }),
-  z.strictObject({ name: z.literal("grasp.random") }),
-  z.strictObject({
-    name: z.literal("grasp.operation"),
-    binding: aliasSchema,
-    arguments: templateSchema,
-  }),
-  z.strictObject({
-    name: z.literal("grasp.connector"),
-    binding: aliasSchema,
-    operation: z.string().min(1).max(256),
-    arguments: templateSchema,
-  }),
-  z.strictObject({
-    name: z.literal("grasp.model"),
-    binding: aliasSchema,
-    instructions: templateSchema,
-    input: templateSchema,
-    outputSchema: descriptorSchema,
-    model: templateSchema.optional(),
-    maxOutputTokens: templateSchema.optional(),
-  }),
-  z.strictObject({
-    name: z.literal("grasp.sleepUntil"),
-    timestamp: templateSchema,
-  }),
-  z.strictObject({
-    name: z.literal("grasp.decision"),
-    binding: aliasSchema,
-    recipients: templateSchema,
-    prompt: templateSchema,
-    input: templateSchema,
-    // How long it takes answers, from its task's timeout (generate.ts).
-    timeoutMs: z.int().positive().optional(),
-    // How long after asking it asks once more, if nobody answered.
-    remindAfterMs: z.int().positive().optional(),
-    // The workflow's own action that tells the people it asks, as the
-    // generator sealed it: run by the host, never by the isolate.
-    ask: z
-      .strictObject({
-        binding: aliasSchema,
-        module: z.string().regex(workflowModulePattern).max(256),
-        export: z
-          .string()
-          .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/u)
-          .max(256),
-      })
-      .optional(),
-  }),
-  z.strictObject({
-    name: z.literal("grasp.compute"),
-    binding: aliasSchema,
-    // The workflow's own module and export its binding names, as the
-    // generator sealed them (generate.ts).
-    module: z.string().regex(workflowModulePattern).max(256),
-    export: z
-      .string()
-      .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/u)
-      .max(256),
-    arguments: templateSchema,
-  }),
-  z.strictObject({
-    name: z.literal("grasp.emit"),
-    binding: aliasSchema,
-    type: workflowEventTypeSchema,
-    subject: templateSchema.optional(),
-    dataschema: z
-      .string()
-      .max(1024)
-      .refine((text) => {
-        const url = URL.canParse(text) ? new URL(text) : undefined;
-        return url?.protocol === "http:" || url?.protocol === "https:";
-      })
-      .optional(),
-    data: templateSchema,
-  }),
-  z.strictObject({
-    name: z.literal("grasp.action"),
-    binding: aliasSchema,
-    // One of the workflow's own actions, as the generator sealed it.
-    module: z.string().regex(workflowModulePattern).max(256),
-    export: z
-      .string()
-      .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/u)
-      .max(256),
-    arguments: templateSchema,
-  }),
-]);
-
-export type SealedCall = z.infer<typeof sealedCallSchema>;
-
-/**
- * A listen task's events, as the build seals them (generate.ts,
- * `GeneratedListen`): its event binding, its strategy, what of each event
- * it reads, and its filters, each a type and the CloudEvents attributes it
- * requires (by CloudEvents' rule for names), each a template the host
- * builds in the task's enter step, and its correlations.
- */
-const sealedListenSchema = z.strictObject({
-  binding: aliasSchema,
-  strategy: z.enum(["one", "any", "all"]),
-  // How resource-host.ts answers its events, until GRA-1366 removes it:
-  // every build it runs (the generator before the run host's) has it. The
-  // run host never reads it (sealed-run.ts, `isEventWait`), so a build
-  // generated for it leaves it out.
-  read: z.enum(["data", "envelope"]).optional(),
-  filters: z
-    .array(
-      z.strictObject({
-        type: workflowEventTypeSchema,
-        attributes: z
-          .array(
-            z.tuple([z.string().regex(/^[a-z0-9]{1,20}$/u), templateSchema])
-          )
-          .max(16),
-        // Each correlation by name, and the inbox attribute it correlates
-        // on (generate.ts, `GeneratedCorrelation`): never an expression.
-        correlate: z
-          .array(
-            z.strictObject({
-              name: z
-                .string()
-                .min(1)
-                .max(profileLimits.maxCorrelationNameLength),
-              attribute: z.enum(["id", "source", "subject", "datacontenttype"]),
-            })
-          )
-          .min(1)
-          .max(profileLimits.maxCorrelations)
-          .optional(),
-      })
-    )
-    .min(1)
-    .max(sealedBuildLimits.eventTypes),
-});
-
-/** A raise task's error, literal (generate.ts, `RaisedError`). */
-const raisedErrorSchema = z.strictObject({
-  type: z.string().min(1).max(2048),
-  status: z.int().min(400).max(599),
-  title: z.string().max(2000).optional(),
-  detail: z.string().max(2000).optional(),
-});
-
-/** A try task's catch (generate.ts, `GeneratedCatch`). */
-const sealedCatchSchema = z.strictObject({
-  variable: z.string().min(1).max(64),
-  errors: z
-    .strictObject({
-      type: z.string().max(2048).optional(),
-      status: z.int().optional(),
-      title: z.string().max(2000).optional(),
-      detail: z.string().max(2000).optional(),
-      instance: z.string().max(sealedBuildLimits.pointerLength).optional(),
-    })
-    .optional(),
-  when: z.int().min(0).optional(),
-  exceptWhen: z.int().min(0).optional(),
-  /** Its retry policy (generate.ts, `GeneratedRetry`), in milliseconds. */
-  retry: z
-    .strictObject({
-      attempts: z.int().min(1).max(5),
-      delayMs: z.int().min(0),
-      backoff: z.enum(["constant", "linear", "exponential"]),
-      jitter: z
-        .strictObject({ fromMs: z.int().min(0), toMs: z.int().min(0) })
-        .optional(),
-      limitMs: z.int().min(0).optional(),
-      attemptMs: z.int().positive().optional(),
-      when: z.int().min(0).optional(),
-      exceptWhen: z.int().min(0).optional(),
-    })
-    .optional(),
-});
-
-/** One task the generated module runs, as the host checks its steps. */
-const sealedTaskSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    ...taskBase,
-    kind: z.literal("raise"),
-    error: raisedErrorSchema,
-  }),
-  z.strictObject({
-    ...taskBase,
-    kind: z.literal("try"),
-    catch: sealedCatchSchema,
-  }),
-  z.strictObject({ ...taskBase, kind: z.literal("set") }),
-  z.strictObject({ ...taskBase, kind: z.literal("switch") }),
-  z.strictObject({ ...taskBase, kind: z.literal("do") }),
-  z.strictObject({
-    ...taskBase,
-    kind: z.literal("fork"),
-    /**
-     * Its branches (generate.ts, `GeneratedTask.fork`): how many, each a
-     * scope of its own, and whether they race.
-     */
-    fork: z.strictObject({
-      branches: z.int().min(1).max(64),
-      compete: z.boolean(),
-      /** How many branches run at once (`metadata.grasp.concurrency`). */
-      concurrency: z.int().min(1).max(8),
-    }),
-    // Its input.from, of the slots its module evaluates (generate.ts).
-    inputFrom: templateSchema.optional(),
-  }),
-  z.strictObject({
-    ...taskBase,
-    kind: z.literal("for"),
-    /**
-     * Its loop (generate.ts, `GeneratedTask.loop`): the collection its
-     * enter step resolves, its items' variables, and the slot of its
-     * `while`, which each item's `item` step evaluates.
-     */
-    loop: z.strictObject({
-      in: templateSchema,
-      /** The slot of its items' keys, made on the recorded items. */
-      keys: z.int().min(0).optional(),
-      each: z.string().min(1).max(64),
-      at: z.string().min(1).max(64),
-      while: z.int().min(0).optional(),
-      /** How many items run at once (`metadata.grasp.concurrency`). */
-      concurrency: z.int().min(1).max(8),
-    }),
-    // Its input.from, of the slots its module evaluates (generate.ts).
-    inputFrom: templateSchema.optional(),
-  }),
-  z
-    .strictObject({
-      ...taskBase,
-      kind: z.literal("wait"),
-      /** How long it waits, as its statement says, for a literal duration. */
-      milliseconds: z.int().positive().optional(),
-      /** Its duration's expression, which its enter step resolves. */
-      duration: templateSchema.optional(),
-      // Its input.from, of the slots its module evaluates (generate.ts).
-      inputFrom: templateSchema.optional(),
-    })
-    .refine(
-      ({ milliseconds, duration }) =>
-        (milliseconds === undefined) !== (duration === undefined)
-    ),
-  z.strictObject({
-    ...taskBase,
-    kind: z.literal("call"),
-    call: sealedCallSchema,
-    // Its input.from, output.as and export.as, of the slots its module
-    // evaluates (generate.ts).
-    inputFrom: templateSchema.optional(),
-    outputAs: templateSchema.optional(),
-    exportAs: templateSchema.optional(),
-  }),
-  z.strictObject({
-    ...taskBase,
-    kind: z.literal("run"),
-    // Its child: the workflow binding it starts, and its input's template.
-    run: z.strictObject({ binding: aliasSchema, input: templateSchema }),
-    inputFrom: templateSchema.optional(),
-    outputAs: templateSchema.optional(),
-    exportAs: templateSchema.optional(),
-  }),
-  z.strictObject({
-    ...taskBase,
-    kind: z.literal("listen"),
-    // Its timeout is its deadline: a listen never waits without one.
-    timeoutMs: z.int().positive(),
-    listen: sealedListenSchema,
-    inputFrom: templateSchema.optional(),
-    outputAs: templateSchema.optional(),
-    exportAs: templateSchema.optional(),
-  }),
-]);
-
-/** A workflow's own limits (`document.metadata.grasp.limits`). */
-const workflowLimitsSchema = z.strictObject({
-  maxSteps: z.int().positive().optional(),
-  maxModelCalls: z.int().positive().optional(),
-});
-
-/** One expression of the sealed table. */
-const sealedExpressionSchema = z.strictObject({
-  slot: z.int().min(0),
-  pointer: z.string().max(sealedBuildLimits.pointerLength),
-  /** Its task; null for the workflow's own input.from and output.as. */
-  taskId: z.string().min(1).max(64).nullable(),
-  stage: z.enum([
-    "workflowInputFrom",
-    "taskIf",
-    "taskInputFrom",
-    "taskDefinition",
-    "taskOutputAs",
-    "taskExportAs",
-    "workflowOutputAs",
-    "loopKeys",
-  ]),
-  /** What it must answer: a condition a boolean (generate.ts). */
-  result: z.enum(["boolean", "duration", "json"]),
-  source: z.string().max(sealedBuildLimits.expressionLength),
-  /** The variables of the loops around its task, outermost first. */
-  loopVariables: z.array(z.string().min(1).max(64)).max(2 * maxTaskScopes),
-  /** The caught errors it may read, innermost last (generate.ts). */
-  caught: z
-    .array(
-      z.strictObject({
-        variable: z.string().min(1).max(64),
-        taskId: z.string().min(1).max(64),
-      })
-    )
-    .max(16)
-    .optional(),
-});
-
-export const tasksFileSchema = z.strictObject({
-  tasks: z.array(sealedTaskSchema).max(sealedBuildLimits.tasks),
-  expressions: z
-    .array(sealedExpressionSchema)
-    .max(sealedBuildLimits.expressions),
-  /** Whether the workflow has its own input.from and output.as steps. */
-  workflow: z.strictObject({ input: z.boolean(), output: z.boolean() }),
-  /** The parameters expressions may read: those not sensitive. */
-  params: z.array(z.string().min(1).max(64)).max(64),
-  /** The workflow's own limits, which only lower the host's ceilings. */
-  limits: workflowLimitsSchema,
-});
-
-export type SealedTask = z.infer<typeof sealedTaskSchema>;
-export type WorkflowLimits = z.infer<typeof workflowLimitsSchema>;
-export type SealedExpression = z.infer<typeof sealedExpressionSchema>;
-
 /**
  * The tasks `compiled` seals (`tasks.json`), read from its own bytes before
- * anything is stored: none for a build that isn't executable, which never
- * runs a task. For a review of the version a publication answers.
+ * anything is stored. For a review of the version a publication answers.
  */
 export const compiledTasksOf = (
   compiled: CompiledBuild
 ): readonly SealedTask[] => {
   const { build } = compiled;
-  if (!build.executable) {
-    return [];
-  }
   const entry = build.artifacts.find(({ path }) => path === tasksArtifact);
   const bytes =
     entry === undefined ? undefined : compiled.bytes.get(entry.sha256);
   if (bytes === undefined) {
     throw new Error("A compiled build holds no tasks.json");
   }
-  return tasksFileSchema.parse(JSON.parse(new TextDecoder().decode(bytes)))
+  return sealedTableSchema.parse(JSON.parse(new TextDecoder().decode(bytes)))
     .tasks;
 };
 
@@ -621,19 +198,20 @@ const encoder = new TextEncoder();
 /** A version's build as compiled for publication: its seal and its bytes. */
 export interface CompiledBuild {
   readonly build: SealedBuild;
-  /** Each artifact's bytes, by its SHA-256; none for a build that isn't executable. */
+  /** Each artifact's bytes, by its SHA-256. */
   readonly bytes: ReadonlyMap<string, Uint8Array>;
 }
 
 /**
  * Compiles `checked` (published as `definition`, its exact text) into a
- * build: generated, built in the compiler's isolate and hashed, nothing
- * stored yet. A definition with constructs the generator doesn't lower
- * makes a build that isn't executable, naming them. Generated code that
- * doesn't build is the platform's fault, never the definition's: it is
- * logged and refused (`workflow.build_failed`), and nothing is published.
- * The workflow's own compute modules (`compiled`, workflow-modules.ts),
- * already built and inspected, are sealed with it.
+ * build of workflow `whose`: generated (@grasp-os/workflow-schema's
+ * generate.ts), built in the compiler's isolate and hashed, nothing stored
+ * yet. Every checked document generates: the format has nothing the
+ * generator doesn't lower. Generated code that doesn't build is the
+ * platform's fault, never the definition's: it is logged and refused
+ * (`workflow.build_failed`), and nothing is published. The workflow's own
+ * compute modules (`compiled`, workflow-modules.ts), already built and
+ * inspected, are sealed with it.
  */
 export const compileWorkflow = async (
   env: Env,
@@ -643,34 +221,24 @@ export const compileWorkflow = async (
   whose: string,
   compiled?: CompiledModules
 ): Promise<CompiledBuild> => {
-  const generated = generateWorkflow(checked);
-  if (!generated.ok) {
-    return {
-      build: {
-        executable: false,
-        unsupported: generated.unsupported.map((construct) => ({
-          pointer: construct.pointer,
-          taskId: construct.taskId ?? null,
-          feature: construct.feature,
-        })),
-      },
-      bytes: new Map(),
-    };
-  }
+  // Named alike for every workflow: the code carries nothing of this
+  // deployment (an export packages it), and one document is one program,
+  // one build identity, whichever workflow publishes it.
+  const generated = generateWorkflow(checked, "workflow");
   // A build that runs past the build wait, or whose isolate gave up (its
   // CPU on a large module, or any stop of the sandbox host's: CPU, memory,
   // a crash, its deadline, never cached, screens.ts), is the platform's to
   // finish, never the definition's fault: the publication is refused as
   // one to try again (`workflow.build_slow`), and a late build runs on and
   // is cached for it.
-  let built: Awaited<ReturnType<typeof buildOpenWorkflow>> | "late";
+  let built: Awaited<ReturnType<typeof buildGeneratedWorkflow>> | "late";
   try {
     built = await withinBuildWait(
       env,
       async () =>
-        await buildOpenWorkflow(
+        await buildGeneratedWorkflow(
           env,
-          { [openWorkflowEntry]: generated.source },
+          { [generatedWorkflowEntry]: generated.source },
           whose
         )
     );
@@ -687,7 +255,7 @@ export const compileWorkflow = async (
   }
   if (!built.ok) {
     const [first] = built.diagnostics;
-    // In the definition's terms: the task whose generated code the first
+    // In the definition's terms: the step whose generated code the first
     // diagnostic is in, by its JSON Pointer and ID.
     const task =
       first?.line === undefined
@@ -708,98 +276,30 @@ export const compileWorkflow = async (
   const sdk = await workflowSdkModules(env.ASSETS);
   const texts = new Map<string, string>([
     [definitionArtifact, definition],
-    [generatedPath, generated.source],
+    [generatedWorkflowEntry, generated.source],
     [
       tasksArtifact,
-      canonicalJson({
-        tasks: generated.tasks.map(
-          ({
-            id,
-            kind,
-            pointer,
-            milliseconds,
-            duration,
-            call,
-            listen,
-            run,
-            error,
-            catch: handler,
-            inputFrom,
-            outputAs,
-            exportAs,
-            timeoutMs,
-            steps,
-            schemas,
-            scope,
-            branches,
-            loop,
-            fork,
-          }) => ({
-            id,
-            kind,
-            pointer,
-            steps,
-            scope: [...scope],
-            branches: [...branches],
-            ...(loop === undefined
-              ? {}
-              : { loop: z.json().parse(structuredClone(loop)) }),
-            ...(fork === undefined ? {} : { fork: { ...fork } }),
-            // The SDK's descriptors and the templates, as the plain JSON
-            // they are.
-            schemas: z.json().parse(structuredClone(schemas)),
-            ...(milliseconds === undefined ? {} : { milliseconds }),
-            ...(duration === undefined
-              ? {}
-              : { duration: z.json().parse(structuredClone(duration)) }),
-            ...(call === undefined
-              ? {}
-              : { call: z.json().parse(structuredClone(call)) }),
-            ...(listen === undefined
-              ? {}
-              : { listen: z.json().parse(structuredClone(listen)) }),
-            ...(run === undefined
-              ? {}
-              : { run: z.json().parse(structuredClone(run)) }),
-            ...(error === undefined
-              ? {}
-              : { error: z.json().parse(structuredClone(error)) }),
-            ...(handler === undefined
-              ? {}
-              : { catch: z.json().parse(structuredClone(handler)) }),
-            ...(inputFrom === undefined
-              ? {}
-              : { inputFrom: z.json().parse(structuredClone(inputFrom)) }),
-            ...(outputAs === undefined
-              ? {}
-              : { outputAs: z.json().parse(structuredClone(outputAs)) }),
-            ...(exportAs === undefined
-              ? {}
-              : { exportAs: z.json().parse(structuredClone(exportAs)) }),
-            ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      // The table as the plain JSON it is, read back by `sealedTableSchema`.
+      canonicalJson(
+        z.json().parse(
+          structuredClone({
+            tasks: generated.tasks,
+            expressions: generated.expressions,
+            workflow: generated.workflow,
+            params: generated.params,
           })
-        ),
-        expressions: generated.expressions.map((expression) =>
-          z.json().parse(
-            structuredClone({
-              ...expression,
-              loopVariables: [...expression.loopVariables],
-            })
-          )
-        ),
-        workflow: { ...generated.workflow },
-        params: [...generated.params],
-        limits: { ...generated.limits },
-      }),
+        )
+      ),
     ],
     [
       sourceMapArtifact,
       canonicalJson({
-        generated: generatedPath,
-        tasks: generated.tasks.map(({ id, pointer, line }) => ({
-          id,
+        generated: generatedWorkflowEntry,
+        tasks: generated.spans.map(({ taskId, pointer, from, to }) => ({
+          id: taskId,
           pointer,
-          line,
+          from,
+          to,
         })),
       }),
     ],
@@ -843,12 +343,12 @@ export const compileWorkflow = async (
   }
   const identity = {
     generator: generatorVersion,
-    protocol: openWorkflowProtocol,
+    protocol: generatedWorkflowProtocol,
     compilerVersion,
     artifacts,
   };
   return {
-    build: { executable: true, ...identity, hash: await identityOf(identity) },
+    build: { ...identity, hash: await identityOf(identity) },
     bytes,
   };
 };
@@ -864,9 +364,6 @@ export const storeBuild = async (
   key: { id: string; version: number },
   compiled: CompiledBuild
 ): Promise<void> => {
-  if (!compiled.build.executable) {
-    return;
-  }
   await reserveArtifacts(
     env,
     { app: key.id, version: key.version },
@@ -939,12 +436,8 @@ export const adoptReservations = (
  */
 export const releaseBuild = async (
   env: Env,
-  key: { id: string; version: number },
-  compiled: CompiledBuild
+  key: { id: string; version: number }
 ): Promise<void> => {
-  if (!compiled.build.executable) {
-    return;
-  }
   const reserved = sdkReleaseArtifacts;
   await releaseReservations(
     env,
@@ -953,38 +446,47 @@ export const releaseBuild = async (
 };
 
 /** What a version's answer says of its build (`WorkflowVersionBuild`). */
-export const buildSummary = (build: SealedBuild): WorkflowVersionBuild =>
-  build.executable
-    ? { executable: true, hash: build.hash }
-    : {
-        executable: false,
-        unsupported: build.unsupported.map((construct) => ({ ...construct })),
-      };
+export const buildSummary = (build: SealedBuild): WorkflowVersionBuild => ({
+  hash: build.hash,
+});
 
 /** Where a version's manifest holds its build. */
 const manifestBuildSchema = z.object({ build: sealedBuildSchema });
 
-/** The build a version's manifest text seals. */
-export const buildOf = (manifest: string): SealedBuild =>
-  manifestBuildSchema.parse(JSON.parse(manifest)).build;
+/** What a manifest says of its build's protocol, before anything else. */
+const manifestProtocolSchema = z.object({
+  build: z.object({ protocol: z.unknown() }),
+});
+
+/**
+ * The build a version's manifest text seals. A version built for another
+ * protocol is `workflow.protocol_unsupported`, read before the build's
+ * shape: its manifest may seal what this host no longer reads, and is to
+ * be published again, never taken for one that was changed.
+ */
+export const buildOf = (manifest: string): SealedBuild => {
+  const parsed: unknown = JSON.parse(manifest);
+  const protocol =
+    manifestProtocolSchema.safeParse(parsed).data?.build.protocol;
+  if (protocol !== generatedWorkflowProtocol) {
+    throw workflowResourceErrors.create("workflow.protocol_unsupported");
+  }
+  return manifestBuildSchema.parse(parsed).build;
+};
 
 /** A version's executable build, loaded and verified, as a run runs it. */
 export interface LoadedBuild {
   readonly hash: string;
-  /** The generator that made it (`generatorVersion` then). */
-  readonly generator: string;
   /** The compiled generated module, by flat name. */
   readonly modules: Readonly<Record<string, string>>;
   /** The SDK modules it was compiled against, by flat name. */
   readonly sdk: Readonly<Record<string, string>>;
   readonly tasks: readonly SealedTask[];
   readonly expressions: readonly SealedExpression[];
-  /** Whether the workflow has its own input.from and output.as steps. */
-  readonly workflow: { readonly input: boolean; readonly output: boolean };
-  /** The parameters expressions may read: those not sensitive. */
+  /** Whether the workflow has an output, evaluated in `workflow:output`. */
+  readonly workflow: SealedTable["workflow"];
+  /** The parameters its code reads: those not sensitive. */
   readonly params: readonly string[];
-  /** The workflow's own limits, which only lower the host's ceilings. */
-  readonly limits: WorkflowLimits;
   /** The generated TypeScript, for export. */
   readonly source: string;
   /** The workflow's own compute modules (workflow-modules.ts). */
@@ -1178,8 +680,7 @@ const reviewedTasksMax = 1024;
  * read from its `tasks.json` alone, hash-checked against the manifest
  * (`manifest`, which the caller has checked against `manifestHash`),
  * never by loading the whole build, so a listing of many versions reads
- * one small file for each, and none twice. None for a build that isn't
- * executable, which runs none.
+ * one small file for each, and none twice.
  */
 export const reviewedTasksOf = async (
   env: Env,
@@ -1196,11 +697,11 @@ export const reviewedTasksOf = async (
   let build: SealedBuild;
   try {
     build = buildOf(manifest);
-  } catch {
+  } catch (error) {
+    if (isExpectedError(error)) {
+      throw error;
+    }
     throw corrupt(id, version, "build");
-  }
-  if (!build.executable) {
-    return [];
   }
   const entry = build.artifacts.find(({ path }) => path === tasksArtifact);
   const text = entry === undefined ? undefined : await artifactText(env, entry);
@@ -1209,7 +710,7 @@ export const reviewedTasksOf = async (
     tasks =
       text === undefined
         ? undefined
-        : tasksFileSchema.safeParse(JSON.parse(text)).data?.tasks;
+        : sealedTableSchema.safeParse(JSON.parse(text)).data?.tasks;
   } catch {
     // Sealed bytes that aren't JSON: corrupt, as ones of the wrong shape.
     tasks = undefined;
@@ -1254,9 +755,7 @@ const buildArtifactReadMs = 100;
  * or less where tests set `WORKFLOW_BUILD_READ_MS`.
  */
 const buildReadMs = (env: Env, build: SealedBuild): number => {
-  // One that isn't executable reads nothing: it is refused before.
-  const artifacts = build.executable ? build.artifacts.length : 0;
-  const bound = buildReadBaseMs + artifacts * buildArtifactReadMs;
+  const bound = buildReadBaseMs + build.artifacts.length * buildArtifactReadMs;
   const set = Number(env.WORKFLOW_BUILD_READ_MS);
   return Number.isInteger(set) && set > 0 && set < bound ? set : bound;
 };
@@ -1267,12 +766,6 @@ const verifiedBuild = async (
   version: number,
   build: SealedBuild
 ): Promise<Omit<LoadedBuild, "packages">> => {
-  if (!build.executable) {
-    throw corrupt(id, version, "not executable");
-  }
-  if (build.protocol !== openWorkflowProtocol) {
-    throw workflowResourceErrors.create("workflow.protocol_unsupported");
-  }
   if ((await identityOf(build)) !== build.hash) {
     throw corrupt(id, version, "identity");
   }
@@ -1303,14 +796,14 @@ const verifiedBuild = async (
       computeText = text;
     } else if (entry.path === tasksArtifact) {
       tasksText = text;
-    } else if (entry.path === generatedPath) {
+    } else if (entry.path === generatedWorkflowEntry) {
       source = text;
     }
   }
   const tasks =
     tasksText === undefined
       ? undefined
-      : tasksFileSchema.safeParse(JSON.parse(tasksText)).data;
+      : sealedTableSchema.safeParse(JSON.parse(tasksText)).data;
   if (
     tasks === undefined ||
     source === undefined ||
@@ -1326,15 +819,6 @@ const verifiedBuild = async (
   // Every calculation a task calls is one the seal holds, of a module it
   // compiled: checked once here, so a run never looks one up in vain.
   const callsSealed = tasks.tasks.every((task) => {
-    // A decision's ask is an action's, as an action task's call is.
-    if (task.kind === "call" && task.call.name === "grasp.decision") {
-      const { ask } = task.call;
-      return (
-        ask === undefined ||
-        compute?.contracts.get(`${ask.module}#${ask.export}`)?.kind ===
-          "operation"
-      );
-    }
     if (
       task.kind !== "call" ||
       (task.call.name !== "grasp.compute" && task.call.name !== "grasp.action")
@@ -1358,13 +842,11 @@ const verifiedBuild = async (
   // caller changes what another runs.
   return Object.freeze({
     hash: build.hash,
-    generator: build.generator,
     modules: Object.freeze(modules),
     sdk: Object.freeze(sdk),
     tasks: Object.freeze(tasks.tasks.map((task) => Object.freeze(task))),
     workflow: Object.freeze(tasks.workflow),
     params: Object.freeze(tasks.params),
-    limits: Object.freeze(tasks.limits),
     expressions: Object.freeze(
       tasks.expressions.map((expression) => Object.freeze(expression))
     ),
@@ -1394,7 +876,10 @@ const loadSealedBuild = async (
   try {
     build = buildOf(row.manifest);
     ({ packages } = manifestPackagesSchema.parse(JSON.parse(row.manifest)));
-  } catch {
+  } catch (error) {
+    if (isExpectedError(error)) {
+      throw error;
+    }
     throw corrupt(id, version, "build");
   }
   return await sharedRun(verifying, hash, buildReadMs(env, build), async () => {
@@ -1428,8 +913,7 @@ const loadSealedBuild = async (
  * The executable build of version `version` of workflow `id`, verified:
  * its manifest against its hash and, with `pinned`, the manifest hash a
  * start froze; then every artifact against its entry, and the build's
- * identity against them (`workflow.version_corrupt` otherwise, and for a
- * version that isn't executable, which nothing should load).
+ * identity against them (`workflow.version_corrupt` otherwise).
  */
 export const loadWorkflowBuild = async (
   env: Env,

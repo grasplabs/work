@@ -1,5 +1,4 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -12,22 +11,13 @@ import {
 import { startWorkflow } from "../../src/workflow-starts.ts";
 import { callCompute } from "../../src/workflows/resource-compute.ts";
 import { resourceRunFor } from "../../src/workflows/resource-runs.ts";
+import { objectSchema } from "../json-workflow-apps.ts";
 import { unique } from "../sign-in.ts";
 
 // A JSON workflow's compute module on-prem: the calculation runs on the
 // sandbox host, as App inspection does (workflow-modules.ts), where the
 // supervisor kills a call that runs past its deadline; plain workerd
 // enforces no CPU limit of its own.
-
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
 
 const builder = async (): Promise<Acting> => {
   const userId = crypto.randomUUID();
@@ -59,43 +49,26 @@ export const count = compute({
 });
 `;
 
-/** A definition of `name` calling `count` on [1, 2, 3], answering it as its status. */
-const definitionOf = (name: string): string =>
+/** A definition calling `count` on [1, 2, 3], answering it as its status. */
+const definitionOf = (): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: {
-            count: { kind: "compute", contract: "local:code/count.ts#count" },
-          },
-        },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: { $expr: '"" + steps.add.output' } },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      {
-        add: {
-          call: "grasp.compute",
-          with: { binding: "count", arguments: "${ [1, 2, 3] }" },
-        },
-      },
-      { answer: { set: { status: "${ tostring }" } } },
-    ],
+    bindings: {
+      count: { kind: "compute", contract: "local:code/count.ts#count" },
+    },
+    steps: [{ id: "add", type: "do", binding: "count", arguments: [1, 2, 3] }],
   });
 
 /** Publishes and runs a workflow calling `count` of `module`: how it ended. */
 const ran = async (by: Acting, module: string) => {
   const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(workflow.name),
+    definition: definitionOf(),
     basedOn: null,
     modules: { "code/count.ts": module },
   });
@@ -146,7 +119,7 @@ describe("a JSON workflow's compute module on-prem", () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
     await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(workflow.name),
+      definition: definitionOf(),
       basedOn: null,
       modules: { "code/count.ts": moduleRunning("for (;;) { items.length; }") },
     });

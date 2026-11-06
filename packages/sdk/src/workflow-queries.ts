@@ -132,7 +132,7 @@ const historyRow = (workflow: BoundWorkflow): AnySchema => {
       ...historyFields,
       kind: v.literal("wait"),
       waitId: idText,
-      waitKind: v.enum(["timer", "event", "decision", "child", "blocked"]),
+      waitKind: v.enum(["timer", "event", "decision", "blocked"]),
       state: v.enum(["opened", "closed"]),
       deadline: v.timestamp().nullable(),
     }),

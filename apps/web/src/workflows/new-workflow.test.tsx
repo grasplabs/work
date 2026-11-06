@@ -65,18 +65,22 @@ const untouched: WorkflowDraft = {
 /** The draft once the chat's agent saved its first step, which passes. */
 const drawn: WorkflowDraft = {
   revision: 1,
-  source: JSON.stringify({ do: [{ "receive-invoice": { set: {} } }] }),
+  source: JSON.stringify({
+    steps: [{ id: "receive-invoice", type: "wait", for: "1 minute" }],
+  }),
   modules: {},
   problems: [],
   checkpoint: {
     revision: 1,
-    source: JSON.stringify({ do: [{ "receive-invoice": { set: {} } }] }),
+    source: JSON.stringify({
+      steps: [{ id: "receive-invoice", type: "wait", for: "1 minute" }],
+    }),
     diagram: {
       tasks: [
         {
           id: "receive-invoice",
-          pointer: "/do/0/receive-invoice",
-          kind: "set",
+          pointer: "/steps/0",
+          kind: "wait",
           label: null,
           detail: null,
           guarded: false,

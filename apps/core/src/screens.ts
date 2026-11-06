@@ -14,7 +14,8 @@ import {
   computeModuleErrors,
   computePackagesFile,
   moduleRecordOf,
-  openWorkflowErrors,
+  expressionTypeCheck,
+  generatedWorkflowErrors,
   screenIncrementKeys,
   screenRefusals,
   screenSources,
@@ -27,16 +28,19 @@ import type {
   Diagnostic,
   InspectTarget,
   ComputeModulesBuild,
+  ExpressionScopeTypes,
+  ExpressionTypeCheck,
   IncrementalBuild,
   Increments,
-  OpenWorkflowBuild,
+  GeneratedWorkflowBuild,
+  TypedExpression,
   ScreenBuild,
   Unchecked,
 } from "@grasp-os/compiler";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   screenErrors,
@@ -131,8 +135,8 @@ const limitsOf = (kind: string): ((files: AppFiles) => Diagnostic[]) => {
     return appCodeLimitErrors;
   }
   // A JSON workflow's generated module: one file, held to its own bound.
-  if (kind === "open-workflow") {
-    return openWorkflowErrors;
+  if (kind === "generated-workflow") {
+    return generatedWorkflowErrors;
   }
   // A JSON workflow's compute modules: held to their own bounds, the list
   // of approved packages core names beside them apart (`computePackagesFile`).
@@ -195,7 +199,7 @@ const compilerCalls = {
   app: ["inspect", "app"],
   "app-check": ["build", "app"],
   "app-tests": ["build", "app-tests"],
-  "open-workflow": ["build", "open-workflow"],
+  "generated-workflow": ["build", "generated-workflow"],
   compute: ["build", "compute"],
 } as const satisfies Record<
   string,
@@ -322,7 +326,7 @@ const compiled = async (
     // as a build to try again (`workflow.build_slow`).
     if (
       !(error instanceof PlatformBoundError) ||
-      kind === "open-workflow" ||
+      kind === "generated-workflow" ||
       (kind === "compute" && !error.own)
     ) {
       throw error;
@@ -602,6 +606,9 @@ const buildSweepBatch = 500;
 /** The prefix inspected manifests are cached under (app-inspection.ts). */
 export const inspectionsPrefix = "inspections/";
 
+/** The prefix a JSON workflow's expression checks are cached under (`checkWorkflowExpressions`). */
+const expressionChecksPrefix = "expression-checks/";
+
 /**
  * The prefix each kind of build is cached under, inspected manifests, what
  * screens builds keep of each file (module-cache.ts), and the bad bytes
@@ -618,6 +625,13 @@ const buildPrefixes = [
   // writing it. Remove once every deployment has run that release for 30
   // days (expand, then contract).
   "screen-checks/",
+  // A sweep's state is the index of the prefix it is in: a new prefix
+  // goes last, so no sweep part way through one resumes in another.
+  expressionChecksPrefix,
+  // The generated module's builds, under the build kind's name before it
+  // was `generated-workflow`: nothing writes it now. Remove with
+  // `screen-checks/`, for the same reason.
+  "open-workflow-builds/",
 ];
 
 const buildSweepSchema = z.object({
@@ -988,19 +1002,90 @@ export const buildAppTests = async (
  * others: the same generated module builds the same with the same
  * compiler, so identical definitions share one build.
  */
-export const buildOpenWorkflow = async (
+export const buildGeneratedWorkflow = async (
   env: BuildEnv,
   files: AppFiles,
   /** Whose build it is: the independent workflow's ID. */
   whose: string
-): Promise<OpenWorkflowBuild> =>
-  await cachedBuild<OpenWorkflowBuild>(
+): Promise<GeneratedWorkflowBuild> =>
+  await cachedBuild<GeneratedWorkflowBuild>(
     env,
-    "open-workflow",
+    "generated-workflow",
     files,
     (all) => all,
     whose
   );
+
+/**
+ * Type-checks a JSON workflow's expressions against the types of what
+ * they read (`scope`, which core writes from the workflow's schemas): one
+ * run of the type checker's isolate (the compiler's `expressionTypeCheck`
+ * builds it and reads its diagnostics), none when every expression failed
+ * the subset already. Its diagnostics are cached in R2 like a build, by
+ * the module checked: the same expressions in the same scope check the
+ * same with the same release, so a draft's edit that changes none of them
+ * checks nothing again.
+ */
+export const checkWorkflowExpressions = async (
+  env: BuildEnv,
+  scope: ExpressionScopeTypes,
+  expressions: Record<string, TypedExpression>,
+  /** Whose check it is: the independent workflow's ID. */
+  whose: string
+): Promise<ExpressionTypeCheck> => {
+  const { request, checked } = expressionTypeCheck(scope, expressions);
+  if (request === undefined) {
+    return checked([]);
+  }
+  const runner = platformRunner(env, whose);
+  // The whole request, its compiler options too, which are core's
+  // (expression-types.ts lives in core's bundle, not the compiler's).
+  const cacheKey = `${expressionChecksPrefix}${keySchema}/${compilerVersion}/${await sha256Hex(canonicalText(request))}.json`;
+  const leaseMs = runner.callMs("type-checker") + leaseSlackMs;
+  const { text } = await sharedThroughCache(
+    `${whose}\n${cacheKey}`,
+    leaseMs * 2,
+    async (given) =>
+      await throughKeptCache(
+        env,
+        cacheKey,
+        leaseMs,
+        async () => {
+          const diagnostics = await runner.run("type-checker", "check", [
+            request,
+          ]);
+          if (!Array.isArray(diagnostics)) {
+            throw new TypeError(
+              "The type checker answered something else than diagnostics."
+            );
+          }
+          // A check that couldn't run (tsrs failed, its answer unread) is
+          // no verdict on the expressions: thrown, never cached, for the
+          // publication to be tried again (workflow-resources.ts).
+          const stop: unknown = diagnostics.find(
+            (diagnostic: unknown) =>
+              typeof diagnostic === "object" &&
+              diagnostic !== null &&
+              "rule" in diagnostic &&
+              diagnostic.rule === "check"
+          );
+          if (stop !== undefined) {
+            throw new Error(
+              "The type checker couldn't check the expressions.",
+              {
+                cause: stop,
+              }
+            );
+          }
+          return { text: JSON.stringify(diagnostics), cache: true };
+        },
+        given
+      )
+  );
+  // SAFETY: the checker's answer, as core stored it under its receipt.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return checked(JSON.parse(text) as Diagnostic[]);
+};
 
 /**
  * Builds a JSON workflow's compute modules (`code/<file>.ts`,

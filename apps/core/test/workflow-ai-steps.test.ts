@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -44,39 +43,38 @@ import { fakeProviderFor } from "./model-provider.ts";
 const idp = mockIdp();
 const { signedIn } = jsonWorkflowAppsOf(idp);
 
-/** A model task reading a total and who sent it, an email address. */
+/** A model step reading a total and who sent it, an email address. */
 const readTasks = [
   {
-    read: {
-      call: "grasp.model",
-      with: {
-        binding: "reader",
-        instructions: "Read the total in cents, and who sent it.",
-        input: { text: "Total 12.34 EUR" },
-        outputSchema: objectSchema({
-          total: { type: "integer" },
-          from: { type: "string", format: "email" },
-        }),
-      },
-      export: { as: "${ {read: .} }" },
-    },
-  },
-  {
-    report: {
-      set: {
-        status:
-          '${ ($context.read.total | tostring) + " " + $context.read.from }',
-      },
-    },
+    id: "read",
+    type: "agent",
+    binding: "reader",
+    instructions: "Read the total in cents, and who sent it.",
+    input: { text: "Total 12.34 EUR" },
+    output: objectSchema({
+      total: { type: "integer" },
+      from: { type: "string", format: "email" },
+    }),
   },
 ];
+
+/** What the workflow reading `readTasks` ends with. */
+const readStatus = {
+  $expr: '"" + steps.read.output.total + " " + steps.read.output.from',
+};
 
 describe("a JSON workflow's model task", { timeout: 60_000 }, () => {
   it("takes a model's answer only as it matches the task's schema, its email format included, asking once", async () => {
     const admin = await signedIn("admin");
     const builder = await signedIn("builder");
     await fakeProviderFor([askedModel]);
-    const { id } = await askingWorkflow(admin, builder, readTasks);
+    const { id } = await askingWorkflow(
+      admin,
+      builder,
+      readTasks,
+      askedModel,
+      readStatus
+    );
     /** A run whose model answers `text`, as it ended, and how often it was asked. */
     const runAnswered = async (text: string) => {
       const provider = await fakeProviderFor([askedModel], {
@@ -117,38 +115,30 @@ describe("a JSON workflow's model task", { timeout: 60_000 }, () => {
  */
 const checkedTasks = [
   {
-    draft: {
-      call: "grasp.model",
-      with: {
-        binding: "writer",
-        instructions: "Write a one-line greeting for them.",
-        input: { who: "${ $workflow.input.who }" },
-        outputSchema: objectSchema({ line: { type: "string" } }),
-      },
-      export: { as: "${ {line: .line} }" },
-    },
+    id: "draft",
+    type: "agent",
+    binding: "writer",
+    instructions: "Write a one-line greeting for them.",
+    input: { who: { $expr: "input.who" } },
+    output: objectSchema({ line: { type: "string" } }),
   },
   {
-    check: {
-      call: "grasp.decision",
-      with: {
-        binding: "check",
-        recipients: ["role:admin"],
-        prompt: "Send this greeting?",
-        input: '${ {draft: {line: $context.line, tags: ["greeting"]}} }',
-      },
-      export: { as: "${ $context + {check: .} }" },
-    },
-  },
-  {
-    report: {
-      set: {
-        status:
-          '${ if $context.check.approved then $context.line + " / " + $context.check.value.comment else "declined" end }',
-      },
+    id: "check",
+    type: "decision",
+    binding: "check",
+    recipients: ["role:admin"],
+    prompt: "Send this greeting?",
+    input: {
+      draft: { line: { $expr: "steps.draft.output.line" }, tags: ["greeting"] },
     },
   },
 ];
+
+/** The greeting with the check's comment, or `declined`. */
+const checkedStatus = {
+  $expr:
+    'steps.check.output.approved ? steps.draft.output.line + " / " + steps.check.output.payload.comment : "declined"',
+};
 
 describe("the release's general contracts", { timeout: 60_000 }, () => {
   it("let a fresh deployment's JSON workflow ask a model and wait for a person's approval, each approved by an admin", async () => {
@@ -157,8 +147,9 @@ describe("the release's general contracts", { timeout: 60_000 }, () => {
     // A fresh deployment: nothing in the catalog but what the release installs.
     await builtins(env).ensureInstalled(await fingerprintOf(thisRelease));
     const catalog = await builder.api.workflowResources.catalog();
-    const workflow = await publishedWorkflow(builder, (name) =>
-      definitionOf(name, checkedTasks, {
+    const workflow = await publishedWorkflow(builder, () =>
+      definitionOf(checkedTasks, {
+        status: checkedStatus,
         bindings: {
           writer: { kind: "model", contract: modelStepContract },
           check: { kind: "decision", contract: approvalContract },

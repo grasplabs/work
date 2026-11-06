@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { WorkflowRunTrace } from "@grasp-os/shared/workflow-diagrams";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -11,7 +10,7 @@ import {
   endLiveResourceRuns,
   greetingTasks,
   jsonWorkflowAppsOf,
-  objectSchema,
+  passing,
   publishedWorkflow,
   runOnce,
   settles,
@@ -43,7 +42,7 @@ const traceOf = async (
   id: string,
   runId: string
 ): Promise<WorkflowRunTrace> =>
-  await person.api.workflowResources.runTrace(id, runId, { doors: false });
+  await person.api.workflowResources.runTrace(id, runId);
 
 /** A trace's steps: each one's task, state and failure's code. */
 const told = ({ steps }: WorkflowRunTrace) =>
@@ -56,8 +55,8 @@ describe("a JSON workflow run's history", () => {
 
   it("tells a wait as waiting while the run sleeps, and as reached, with its end, once it slept", async () => {
     const builder = await signedIn("builder");
-    const sleeping = await publishedWorkflow(builder, greetingTasks("PT1H"));
-    const slept = await publishedWorkflow(builder, greetingTasks("PT1S"));
+    const sleeping = await publishedWorkflow(builder, greetingTasks("1 hour"));
+    const slept = await publishedWorkflow(builder, greetingTasks("1 second"));
     const sleepingRun = await startedBy(builder, sleeping.id);
     const sleptRun = await startedBy(builder, slept.id);
     await runOnce(
@@ -94,17 +93,14 @@ describe("a JSON workflow run's history", () => {
   it("tells a failure only by a code the platform defines, and nothing the run read or made", async () => {
     const builder = await signedIn("builder");
     const secret = `secret-${crypto.randomUUID()}`;
-    // Greets with the input, then exports it where a number belongs.
+    // Greets with the input, then fails on it.
     const workflow = await publishedWorkflow(builder, [
-      { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
+      passing("greet"),
       {
-        mark: {
-          set: "${ . }",
-          export: {
-            as: "${ {count: $workflow.input.who} }",
-            schema: objectSchema({ count: { type: "integer" } }),
-          },
-        },
+        id: "mark",
+        type: "raise",
+        if: { $expr: 'input.who.startsWith("secret-")' },
+        error: { type: "urn:grasp:error:marked", status: 422 },
       },
     ]);
     const runId = await startedBy(builder, workflow.id, {
@@ -115,7 +111,7 @@ describe("a JSON workflow run's history", () => {
 
     expect({ status: run.status, steps: told(trace) }).toStrictEqual({
       status: "failed",
-      steps: ["greet reached -", "mark failed workflow.task_data_invalid"],
+      steps: ["greet reached -", "mark failed workflow.raised"],
     });
     expect(JSON.stringify(trace)).not.toContain(secret);
   });
@@ -153,9 +149,9 @@ describe("a JSON workflow run's history", () => {
   it("leaves out an event the engine can't read back, and tells the rest as it was", async () => {
     const builder = await signedIn("builder");
     const workflow = await publishedWorkflow(builder, [
-      { first: { set: { status: "first" } } },
-      { second: { set: { status: "second" } } },
-      { third: { set: { status: "third" } } },
+      passing("first"),
+      passing("second"),
+      passing("third"),
     ]);
     const runId = await startedBy(builder, workflow.id);
     await endedRun(builder, workflow.id, runId);
@@ -163,7 +159,7 @@ describe("a JSON workflow run's history", () => {
     // The start of `second` as nothing the engine knows how to read.
     await runInDurableObject(runObjectOf(env, runId), (_, state) => {
       state.storage.sql.exec(
-        "UPDATE history SET type = 'not-an-event' WHERE type = 'step_started' AND ordinal = (SELECT ordinal FROM steps WHERE name = 'task:second')"
+        "UPDATE history SET type = 'not-an-event' WHERE type = 'step_started' AND ordinal = (SELECT ordinal FROM steps WHERE name = 'second:task')"
       );
     });
 

@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import {
   agentIdSchema,
   appIdSchema,
@@ -10,7 +9,6 @@ import type {
 } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -54,6 +52,7 @@ import type {
 } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
+import { greetingOf } from "./json-workflow-apps.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
@@ -120,76 +119,6 @@ const leaves = async (who: Person): Promise<void> => {
     .run();
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
-/** A greeting workflow's definition at `version`. */
-const definitionOf = (name: string, version = "1.0.0"): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [{ finish: { set: { status: "done" } } }],
-  });
-
-/** A definition of workflow `name` that runs workflow `child` at 1.0.0. */
-const binderOf = (name: string, child: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: {
-            child: {
-              kind: "workflow",
-              contract: `${workflowNamespace}/${child}/1.0.0`,
-            },
-          },
-        },
-      },
-    },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      {
-        child: {
-          run: {
-            workflow: {
-              namespace: workflowNamespace,
-              name: child,
-              version: "1.0.0",
-              input: { who: "${ $workflow.input.who }" },
-            },
-          },
-          metadata: { grasp: { binding: "child" } },
-        },
-      },
-      { finish: { set: { status: "done" } } },
-    ],
-  });
-
 /** A workflow `owner` created, published at version 1 (and 2, if asked). */
 const workflowOf = async (owner: Person, versions = 1) => {
   const workflow = await createWorkflowResource(
@@ -200,7 +129,7 @@ const workflowOf = async (owner: Person, versions = 1) => {
   for (let version = 1; version <= versions; version += 1) {
     // oxlint-disable-next-line no-await-in-loop -- each builds on the one before
     await publishWorkflowVersion(env, owner, workflow.id, {
-      definition: definitionOf(workflow.name, `${version}.0.0`),
+      definition: greetingOf(undefined, `Version ${version}`),
       basedOn: version === 1 ? null : version - 1,
     });
   }
@@ -300,13 +229,13 @@ const appOwnedBy = async (owner: Person): Promise<string> => {
   return id;
 };
 
-/** A system trigger `by` creates for version 1 of workflow `id`. */
-const systemTrigger = async (by: Person, id: string) =>
+/** A webhook trigger `by` creates for version 1 of workflow `id`. */
+const webhookTrigger = async (by: Person, id: string) =>
   await createTriggerResource(env, by, {
-    kind: "system",
+    kind: "webhook",
     workflowId: id,
     version: 1,
-    config: { event: { contract: "notes", type: "note.created" } },
+    config: {},
   });
 
 /** Version `version` of App `app`, approved (1), unapproved (0) or from before approvals (null). */
@@ -917,10 +846,10 @@ describe("a trigger starting a workflow", () => {
       role: "builder",
     });
     const trigger = await createTriggerResource(env, bob, {
-      kind: "system",
+      kind: "webhook",
       workflowId: workflow.id,
       version: 1,
-      config: { event: { contract: "notes", type: "note.created" } },
+      config: {},
     });
     const tries = {
       adminMoves: await outcome(
@@ -988,10 +917,10 @@ describe("a trigger starting a workflow", () => {
       role: "builder",
     });
     const trigger = await createTriggerResource(env, bob, {
-      kind: "system",
+      kind: "webhook",
       workflowId: workflow.id,
       version: 1,
-      config: { event: { contract: "notes", type: "note.created" } },
+      config: {},
     });
     await granted(
       bob,
@@ -1017,8 +946,6 @@ describe("a trigger starting a workflow", () => {
       bound: {
         code: "workflow.resource_bound",
         details: {
-          binders: [],
-          hidden: 0,
           triggers: { ids: [trigger.id], hidden: 0 },
         },
       },
@@ -1041,10 +968,10 @@ describe("a trigger starting a workflow", () => {
     ) => {
       const workflow = await workflowOf(ada);
       const trigger = await createTriggerResource(env, ada, {
-        kind: "system",
+        kind: "webhook",
         workflowId: workflow.id,
         version: 1,
-        config: { event: { contract: "notes", type: "note.created" } },
+        config: {},
       });
       await granted(
         ada,
@@ -1175,25 +1102,11 @@ describe("a trigger starting a workflow", () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
-    // Sixteen workflows that run it, and twenty triggers that start it.
-    const binders = await Promise.all(
-      Array.from({ length: 16 }, async () => {
-        const binder = await createWorkflowResource(
-          env,
-          ada,
-          `binder-${unique()}`
-        );
-        await publishWorkflowVersion(env, ada, binder.id, {
-          definition: binderOf(binder.name, workflow.name),
-          basedOn: null,
-        });
-        return binder.id;
-      })
-    );
-    const many = 20;
+    // More triggers that start it than one audit event names.
+    const many = 36;
     const triggers = await Promise.all(
       Array.from({ length: many }, async () => {
-        const trigger = await systemTrigger(ada, workflow.id);
+        const trigger = await webhookTrigger(ada, workflow.id);
         await granted(
           ada,
           admin,
@@ -1209,21 +1122,21 @@ describe("a trigger starting a workflow", () => {
         action === "workflow.delete_refused" && target?.id === workflow.id
     );
     const named = Object.entries(refused?.detail ?? {}).filter(([field]) =>
-      /^(?:binder|trigger)\d+$/u.test(field)
+      /^trigger\d+$/u.test(field)
     );
     expect({
       bound,
-      counted: [refused?.detail.binders, refused?.detail.triggers],
+      counted: refused?.detail.triggers,
       fields: Object.keys(refused?.detail ?? {}).length,
       named: named.every(([, id]) =>
-        [...binders, ...triggers].includes(String(id))
+        triggers.some((trigger) => trigger === String(id))
       ),
     }).toMatchObject({
       bound: {
         code: "workflow.resource_bound",
         details: { triggers: { ids: triggers.toSorted() } },
       },
-      counted: [16, many],
+      counted: many,
       fields: 32,
       named: true,
     });
@@ -1238,22 +1151,22 @@ describe("a trigger starting a workflow", () => {
       id: reader.userId,
       role: "user",
     });
-    const byReader = await outcome(systemTrigger(reader, workflow.id));
+    const byReader = await outcome(webhookTrigger(reader, workflow.id));
     env.TEST_QUOTA_LIMITS = {
       ...configuredLimits,
       triggerResourcesPerPerson: 1,
     };
     let limited: string;
     try {
-      await systemTrigger(ada, workflow.id);
-      limited = await outcome(systemTrigger(ada, workflow.id));
+      await webhookTrigger(ada, workflow.id);
+      limited = await outcome(webhookTrigger(ada, workflow.id));
     } finally {
       env.TEST_QUOTA_LIMITS = configuredLimits;
     }
     // A creation racing the workflow's deletion lands nothing.
     const other = await workflowOf(ada);
     const [created, deleted] = await Promise.all([
-      outcome(systemTrigger(ada, other.id)),
+      outcome(webhookTrigger(ada, other.id)),
       outcome(deleteWorkflowResource(env, ada, other.id)),
     ]);
     const pinning = await env.DB.prepare(
@@ -1283,10 +1196,10 @@ describe("permissions of independent resources", () => {
     const bob = await person("builder");
     const workflow = await workflowOf(ada);
     const trigger = await createTriggerResource(env, ada, {
-      kind: "system",
+      kind: "webhook",
       workflowId: workflow.id,
       version: 1,
-      config: { event: { contract: "notes", type: "note.created" } },
+      config: {},
     });
     const subject = { type: "workflow", workflowId: workflow.id } as const;
     const ask = async (by: Person, permission: PermissionRequest) =>
@@ -1481,10 +1394,10 @@ describe("what code and triggers may learn and name", () => {
     });
     const store = await createStore(env, ada);
     const trigger = await createTriggerResource(env, ada, {
-      kind: "system",
+      kind: "webhook",
       workflowId: theirs.id,
       version: 1,
-      config: { event: { contract: "notes", type: "note.created" } },
+      config: {},
     });
     const ask = async (by: Person, permission: PermissionRequest) =>
       await outcome(requestPermission(env, by, permission, rolesOf(by)));

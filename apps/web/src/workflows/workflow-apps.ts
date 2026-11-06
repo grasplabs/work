@@ -15,8 +15,8 @@ import type { Integration } from "../connections/integrations.ts";
 /** A connector binding of the current version no approval serves yet. */
 export interface UnconnectedApp {
   alias: string;
-  /** The catalog contract key it names, when the reader may see it. */
-  contractId: string | null;
+  /** The catalog contract key it names. */
+  contractId: string;
 }
 
 export interface WorkflowApps {

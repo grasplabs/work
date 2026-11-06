@@ -31,10 +31,10 @@ import type { BuiltDecision, DecisionAnswer } from "./resource-decisions.ts";
 // The decisions a run an App's test started waits for (`workflowTest`,
 // fixture-runs.ts): its `grasp.decision` calls, asked of the test's own
 // fixture principals, which answer them through `t.as(name).respond`. The
-// run waits for one as any run waits for its decision (resource-host.ts,
-// `#awaitDecision`; host.ts, `waitForDecision`, through
-// `RunKind.decisionsKept`); only who is asked, and where the decision is
-// kept, are the test's. Threat model, and how each is closed:
+// run waits for one as any run waits for its decision (host.ts,
+// `waitForDecision`, through `RunKind.decisionsKept`); only who is asked,
+// and where the decision is kept, are the test's. Threat model, and how
+// each is closed:
 //
 // - A test's decision reaching a person of the organization: it is kept in
 //   `app_test_decisions` alone, never in `workflow_decisions`, so no inbox,
@@ -299,7 +299,7 @@ export const takeFixtureDecision = async (
 /** A task's ID, as a workflow names it. */
 const taskIdSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,127}$/u);
 
-/** The most loops a task's step names around it (resource-host.ts). */
+/** The most loops a task's step names around it: the format's nesting. */
 const maxLoopDepth = 8;
 
 /** An answer as a test principal gives it (`respond`). */
@@ -313,8 +313,8 @@ const answerSchema = z.strictObject({
 
 /**
  * How often a test's run looks at the decision it waits for, besides its
- * wake, in ms (resource-host.ts, `#awaitDecision`): an answer whose wake
- * was lost is taken within this long.
+ * wake, in ms (`DecisionsKept.lookMs`): an answer whose wake was lost is
+ * taken within this long.
  */
 export const fixtureDecisionLookMs = 1000;
 
@@ -332,17 +332,11 @@ const goesOn = (
 
 /**
  * The item of each loop around the step named `step`, outermost first, as
- * its name scopes it (`task:<id>@<loop>.<index>/…`): none outside a loop.
+ * its decoded name scopes it (`<task>:task@<i>/<j>`): none outside a loop.
  */
 const itemOf = (step: string): string => {
   const at = step.indexOf("@");
-  return at === -1
-    ? ""
-    : step
-        .slice(at + 1)
-        .split("/")
-        .map((segment) => segment.slice(segment.lastIndexOf(".") + 1))
-        .join("/");
+  return at === -1 ? "" : step.slice(at + 1);
 };
 
 /**

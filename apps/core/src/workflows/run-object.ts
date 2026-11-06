@@ -16,80 +16,17 @@ import { pinOf } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
 import type { AiCalls } from "./host.ts";
 import { sharesReleased } from "./quotas.ts";
-import type {
-  ActionModelCalls,
-  ScopeFences,
-  TriedOnceMarks,
-} from "./resource-host.ts";
 import { projectResourceRun, settleResourceControls } from "./resource-runs.ts";
 import { completeCancel, projectStatus } from "./runs.ts";
 import type { EngineStatus } from "./runs.ts";
 import type { StepError } from "./sealed-isolate.ts";
-import type { SentCalls } from "./sealed-run.ts";
-
-/**
- * Where a run keeps the attempts of its steps tried once (resource-host.ts,
- * `TriedOnceMarks`): a table of its object's SQLite beside the engine's
- * journal, dropped with it by the engine's removal of the run. Only the
- * host writes it, never the run's code.
- */
-const triedOnceTable = "grasp_tried_once";
+import type { ActionModelCalls, SentCalls } from "./sealed-run.ts";
 
 /** Whether the run's own table is there: a run removed keeps nothing. */
 const runIsThere = (sql: SqlStorage): boolean =>
   sql
     .exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run'")
     .toArray().length > 0;
-
-/** Whether the table of tried-once attempts is there yet. */
-const hasTriedOnce = (sql: SqlStorage): boolean =>
-  sql
-    .exec(
-      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-      triedOnceTable
-    )
-    .toArray().length > 0;
-
-/** One row of `triedOnceTable`, as the host reads it. */
-const triedOnceRow = (
-  sql: SqlStorage,
-  key: string,
-  attempt: number
-): { unstarted: number; failure: string | null } | undefined => {
-  if (!hasTriedOnce(sql)) {
-    return undefined;
-  }
-  const [row] = sql
-    .exec<{ unstarted: number; failure: string | null }>(
-      `SELECT unstarted, failure FROM ${triedOnceTable} WHERE key = ? AND attempt = ?`,
-      key,
-      attempt
-    )
-    .toArray();
-  return row;
-};
-
-/** Writes an attempt's row, while the run is there. */
-const writeTriedOnce = (
-  sql: SqlStorage,
-  key: string,
-  attempt: number,
-  values: { unstarted?: 1; failure?: string }
-): void => {
-  if (!runIsThere(sql)) {
-    return;
-  }
-  sql.exec(
-    `CREATE TABLE IF NOT EXISTS ${triedOnceTable} (key TEXT NOT NULL, attempt INTEGER NOT NULL, unstarted INTEGER NOT NULL DEFAULT 0, failure TEXT, PRIMARY KEY (key, attempt))`
-  );
-  sql.exec(
-    `INSERT INTO ${triedOnceTable} (key, attempt, unstarted, failure) VALUES (?, ?, ?, ?) ON CONFLICT (key, attempt) DO UPDATE SET unstarted = max(unstarted, excluded.unstarted), failure = coalesce(excluded.failure, failure)`,
-    key,
-    attempt,
-    values.unstarted ?? 0,
-    values.failure ?? null
-  );
-};
 
 /** A kept failure, as the host kept it: a step's error, or nothing. */
 const keptFailureSchema = z.object({
@@ -111,107 +48,10 @@ const keptFailureOf = (failure: string): StepError | undefined => {
 };
 
 /**
- * The settled scopes of the run's items and branches (resource-host.ts,
- * `ScopeFences`): a table of its object's SQLite beside the engine's
- * journal, dropped with it, one row a scope of the run's current
- * execution, so a restarted run settles its scopes anew. Only the host
- * writes it, never the run's code.
- */
-const fencesTable = "grasp_scope_fences";
-
-/** The run's current execution, as the engine keeps it. */
-const executionOf = (sql: SqlStorage): string | undefined => {
-  if (!runIsThere(sql)) {
-    return undefined;
-  }
-  const [row] = sql
-    .exec<{ execution: string }>("SELECT execution_uid AS execution FROM run")
-    .toArray();
-  return row?.execution;
-};
-
-/** Whether the table of settled scopes is there yet. */
-const hasFences = (sql: SqlStorage): boolean =>
-  sql
-    .exec(
-      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-      fencesTable
-    )
-    .toArray().length > 0;
-
-/** The branch scope `place` of `execution` settled on, if it did. */
-const fenceOf = (
-  sql: SqlStorage,
-  execution: string,
-  place: string
-): number | undefined => {
-  if (!hasFences(sql)) {
-    return undefined;
-  }
-  const [row] = sql
-    .exec<{ branch: number }>(
-      `SELECT branch FROM ${fencesTable} WHERE execution = ? AND place = ?`,
-      execution,
-      place
-    )
-    .toArray();
-  return row?.branch;
-};
-
-/** The run's settled scopes, kept with it (`fencesTable`). */
-export const fencesIn = (sql: SqlStorage): ScopeFences => ({
-  settle: (place, branch) => {
-    const execution = executionOf(sql);
-    if (execution === undefined) {
-      return branch;
-    }
-    sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${fencesTable} (execution TEXT NOT NULL, place TEXT NOT NULL, branch INTEGER NOT NULL, PRIMARY KEY (execution, place))`
-    );
-    // The first writer's: a scope settles once, whoever asks again.
-    sql.exec(
-      `INSERT OR IGNORE INTO ${fencesTable} (execution, place, branch) VALUES (?, ?, ?)`,
-      execution,
-      place,
-      branch
-    );
-    return fenceOf(sql, execution, place) ?? branch;
-  },
-  settled: (place) => {
-    const execution = executionOf(sql);
-    return execution === undefined ? undefined : fenceOf(sql, execution, place);
-  },
-});
-
-/** The run's tried-once attempts, kept with it (`triedOnceTable`). */
-export const triedOnceIn = (sql: SqlStorage): TriedOnceMarks => ({
-  markUnstarted: (key, attempt) => {
-    writeTriedOnce(sql, key, attempt, { unstarted: 1 });
-  },
-  markStarted: (key, attempt) => {
-    if (hasTriedOnce(sql)) {
-      sql.exec(
-        `UPDATE ${triedOnceTable} SET unstarted = 0 WHERE key = ? AND attempt = ?`,
-        key,
-        attempt
-      );
-    }
-  },
-  unstarted: (key, attempt) => triedOnceRow(sql, key, attempt)?.unstarted === 1,
-  keepFailure: (key, attempt, error) => {
-    writeTriedOnce(sql, key, attempt, { failure: JSON.stringify(error) });
-  },
-  failureOf: (key, attempt) => {
-    const failure = triedOnceRow(sql, key, attempt)?.failure ?? null;
-    return failure === null ? undefined : keptFailureOf(failure);
-  },
-});
-
-/**
  * Where a sealed build's run keeps the attempts of its steps that sent a
  * call tried once, and what each failed with (sealed-run.ts, `SentCalls`):
  * a table of its object's SQLite beside the engine's journal, dropped with
- * it as `triedOnceTable` is. Only the host writes it, never the run's
+ * it by the engine's removal of the run. Only the host writes it, never the run's
  * code. Marked before the call goes out: the object's output gate holds
  * the call until the write is durable, so an activation that dies after
  * the call left, and every one after it, finds the mark.
@@ -293,10 +133,10 @@ export const sentCallsIn = (sql: SqlStorage): SentCalls => ({
 });
 
 /**
- * Where a run keeps the model calls its JSON workflow's actions made
- * (resource-host.ts, `ActionModelCalls`; GRA-700): a table of its object's
- * SQLite beside the engine's journal, dropped with it as `triedOnceTable`
- * is. Only the host writes it, never the run's code. Written before the
+ * Where a run keeps the model calls it and its actions made
+ * (sealed-run.ts, `ActionModelCalls`; GRA-700): a table of its object's
+ * SQLite beside the engine's journal, dropped with it by the engine's
+ * removal of the run. Only the host writes it, never the run's code. Written before the
  * call goes out: the object's output gate holds the call until the write
  * is durable, so a call made always counts.
  */
@@ -335,7 +175,7 @@ export const modelCallsIn = (sql: SqlStorage): ActionModelCalls => ({
 /**
  * Where a run's object keeps that the run was cancelled (`markCancelled`):
  * a table of its SQLite beside the engine's journal, which the engine's
- * removal of the run drops with it, as `triedOnceTable`.
+ * removal of the run drops with it.
  */
 const cancelTable = "grasp_run_cancelled";
 
@@ -467,8 +307,6 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           return null;
         }
         return await runPinned(this.env, pin, event, step, {
-          triedOnce: triedOnceIn(this.ctx.storage.sql),
-          fences: fencesIn(this.ctx.storage.sql),
           modelCalls: modelCallsIn(this.ctx.storage.sql),
           sentCalls: sentCallsIn(this.ctx.storage.sql),
           aiCalls: this.#aiCalls,

@@ -1,31 +1,19 @@
 {
   "name": "@grasp-os/open-workflow",
   "private": true,
-  "description": "The grasp-open-workflow/1 profile: checks a workflow.json against the restricted Open Workflow 1.0.3 profile before anything compiles or runs it",
+  "description": "The stores a published Open Workflow definition declares, read back from its sealed text",
   "license": "AGPL-3.0-only",
   "type": "module",
   "sideEffects": false,
   "exports": {
-    "./calls": "./src/calls.ts",
-    "./data-schema": "./src/data-schema.ts",
-    "./catalog": "./src/catalog.ts",
-    "./diagnostics": "./src/diagnostics.ts",
-    "./diagram": "./src/diagram.ts",
-    "./generate": "./src/generate.ts",
-    "./limits": "./src/limits.ts",
-    "./provenance": "./src/provenance.ts",
-    "./stores": "./src/stores.ts",
-    "./validate": "./src/validate.ts"
+    "./stores": "./src/stores.ts"
   },
   "dependencies": {
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
-    "@grasp-os/workflow-expressions": "workspace:*"
+    "@grasp-os/workflow-schema": "workspace:*"
   },
   "devDependencies": {
-    "@cfworker/json-schema": "catalog:",
-    "@cloudflare/vitest-pool-workers": "catalog:",
-    "@cloudflare/workers-types": "catalog:",
-    "yaml": "catalog:"
+    "@cloudflare/workers-types": "catalog:"
   }
 }

@@ -1,15 +1,14 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import {
   triggerIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import {
   triggerStartBinding,
   workflowWebhookHeaders,
 } from "@grasp-os/shared/workflow-triggers";
 import { workflowWebhookPath } from "@grasp-os/shared/workflow-webhook-path";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { Webhook } from "standardwebhooks";
 import { describe, expect, it } from "vite-plus/test";
@@ -18,6 +17,7 @@ import { grantPermission, listPermissions } from "../src/permissions.ts";
 import { triggeredRunsPerHour } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
 import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
 
 // Independent workflows' webhook triggers (workflows/webhook-triggers.ts),
@@ -58,44 +58,18 @@ const admin = async (): Promise<Identity> => {
 };
 
 /** A workflow taking an invoice's number and amount, answering the number. */
-const definitionOf = (name: string): string =>
+const definitionOf = (): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
-    },
-    input: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: {
-            invoice: { type: "string" },
-            amount: { type: "integer" },
-          },
-          required: ["invoice", "amount"],
-          additionalProperties: false,
-        },
-      },
-    },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({
+      invoice: { type: "string" },
+      amount: { type: "integer" },
+    }),
     output: {
-      schema: {
-        format: "json",
-        document: {
-          type: "object",
-          properties: { invoice: { type: "string" } },
-          required: ["invoice"],
-          additionalProperties: false,
-        },
-      },
+      schema: objectSchema({ invoice: { type: "string" } }),
+      value: { invoice: { $expr: "input.invoice" } },
     },
-    do: [{ finish: { set: { invoice: "${ $workflow.input.invoice }" } } }],
+    steps: [],
   });
 
 /**
@@ -110,7 +84,7 @@ const webhookTrigger = async ({ grant = true } = {}) => {
     `hook-${unique()}`
   );
   await builder.api.workflowResources.publish(id, {
-    definition: definitionOf(name),
+    definition: definitionOf(),
     basedOn: null,
   });
   const trigger = await builder.api.workflowResources.triggers.create({

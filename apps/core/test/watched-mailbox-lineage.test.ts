@@ -1,5 +1,4 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -185,57 +184,36 @@ const echoInput = {
  * same subject, and returns the event's ID, and the stamp its input was
  * handed, if any (`unstamped` otherwise).
  */
-const echoOf =
-  (key: string, from: string, to: string) =>
-  (name: string): string =>
-    JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name,
-        version: "1.0.0",
-        title: name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: { mail: { kind: "connector", contract: key } },
-          },
+const echoOf = (key: string, from: string, to: string) => (): string =>
+  JSON.stringify({
+    $schema: workflowSchemaUrl,
+    input: objectSchema(echoInput),
+    output: {
+      schema: objectSchema({
+        id: { type: "string" },
+        stamp: { type: "string" },
+      }),
+      value: {
+        id: { $expr: "input.id" },
+        stamp: { $expr: "input.stamp" },
+      },
+    },
+    bindings: { mail: { kind: "connector", contract: key } },
+    steps: [
+      {
+        id: "send",
+        type: "do",
+        binding: "mail",
+        operation: "mail.send",
+        arguments: {
+          mailbox: from,
+          to: [to],
+          subject: { $expr: "input.subject" },
+          body: "Again.",
         },
       },
-      input: { schema: objectSchema(echoInput) },
-      output: {
-        schema: objectSchema({
-          id: { type: "string" },
-          stamp: { type: "string" },
-        }),
-      },
-      do: [
-        {
-          send: {
-            call: "grasp.connector",
-            with: {
-              binding: "mail",
-              operation: "mail.send",
-              arguments: {
-                mailbox: from,
-                to: [to],
-                subject: "${ $workflow.input.subject }",
-                body: "Again.",
-              },
-            },
-          },
-        },
-        {
-          finish: {
-            set: {
-              id: "${ $workflow.input.id }",
-              stamp: "${ $workflow.input.stamp }",
-            },
-          },
-        },
-      ],
-    });
+    ],
+  });
 
 /**
  * A connector trigger of `admin`'s starting `workflow` on mail received
@@ -450,19 +428,19 @@ const arrive = async (
 const lineageSchema = z.array(
   z.object({
     id: z.string(),
-    parent: z.string().nullable(),
+
     root: z.string().nullable(),
     depth: z.number(),
   })
 );
 
 /**
- * The workflow's runs as they started, each with the run it started
- * under and its lineage's root, as core keeps them.
+ * The workflow's runs as they started, each with its lineage's root
+ * and its depth under it, as core keeps them.
  */
 const startedRuns = async (workflow: string) => {
   const { results } = await env.DB.prepare(
-    "SELECT run.id, run.parent_run_id AS parent, run.root_run_id AS root, run.depth FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE run.workflow_resource_id = ? ORDER BY receipt.created_at, run.depth"
+    "SELECT run.id, run.root_run_id AS root, run.depth FROM workflow_resource_runs AS run JOIN workflow_start_receipts AS receipt ON receipt.id = run.id WHERE run.workflow_resource_id = ? ORDER BY receipt.created_at, run.depth"
   )
     .bind(workflow)
     .all();

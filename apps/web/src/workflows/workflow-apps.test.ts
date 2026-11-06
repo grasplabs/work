@@ -50,8 +50,6 @@ const binding = (
 ): WorkflowVersionBinding => ({
   alias,
   kind,
-  resourceId: null,
-  resourceVersion: null,
   contractId: `crm/${alias}`,
   fingerprint: "f",
 });

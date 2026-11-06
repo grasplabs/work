@@ -37,7 +37,6 @@ export const kindLabels = {
   connector: msg`Connection trigger`,
   email: msg`Email trigger`,
   webhook: msg`Webhook trigger`,
-  system: msg`Event trigger`,
 } as const satisfies Record<TriggerKind, MessageDescriptor>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -64,10 +63,7 @@ export const summaryOf = ({
     kind,
     schedule:
       cron === undefined || timeZone === undefined ? null : { cron, timeZone },
-    event:
-      (kind === "system"
-        ? textAt(config, "event", "type")
-        : textAt(config, "event")) ?? null,
+    event: textAt(config, "event") ?? null,
     connection:
       connectionId === undefined
         ? null
@@ -111,10 +107,6 @@ export const triggerDescription = (
     }
     const localPart = address;
     return i18n._(msg`When an email arrives for ${localPart}`);
-  }
-  if (kind === "system") {
-    const type = summary.event ?? "";
-    return i18n._(msg`When the event ${type} is sent`);
   }
   return i18n._(msg`When its webhook is called`);
 };

@@ -1,9 +1,8 @@
 import { v } from "@grasp-os/sdk";
 import { appIdSchema } from "@grasp-os/shared/ids";
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -84,34 +83,33 @@ export default app({
 });
 
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
-/** A greeting workflow's definition: it waits an hour, then greets. */
-const definitionOf = (name: string): string =>
+/** A definition of `steps`, input `{ who }`, output `{ status }`. */
+const documentOf = (
+  steps: unknown[],
+  status: unknown,
+  bindings: Record<string, unknown> = {}
+): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
-      { hold: { wait: "PT1H" } },
-      { greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } } },
-    ],
+    bindings,
+    steps,
+  });
+
+/** A greeting workflow's definition: it waits an hour, then greets. */
+const definitionOf = (): string =>
+  documentOf([{ id: "hold", type: "wait", for: "1 hour" }], {
+    $expr: '"Hello, " + input.who',
   });
 
 /** Someone signed in, and as core's own calls take them. */
@@ -201,7 +199,7 @@ const followingRuns = async (
     `greet-${unique()}`
   );
   await publishWorkflowVersion(env, builder.acting, workflow.id, {
-    definition: definitionOf(workflow.name),
+    definition: definitionOf(),
     basedOn: null,
   });
   const fixture = await appWith(files(), "Requests", builder.acting);
@@ -284,40 +282,22 @@ const showing = async (
   );
 };
 
-/** A workflow asking decision `contract` as `approval`, in its task `ask`. */
-const decidingDefinitionOf = (name: string, contract: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: { approval: { kind: "decision", contract } },
-        },
-      },
-    },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
+/** A workflow asking decision `contract` as `approval`, in its step `ask`. */
+const decidingDefinitionOf = (contract: string): string =>
+  documentOf(
+    [
       {
-        ask: {
-          call: "grasp.decision",
-          with: {
-            binding: "approval",
-            recipients: ["role:admin"],
-            prompt: "Approve this request?",
-            input: { who: "${ $workflow.input.who }" },
-          },
-        },
+        id: "ask",
+        type: "decision",
+        binding: "approval",
+        recipients: ["role:admin"],
+        prompt: "Approve this request?",
+        input: { who: { $expr: "input.who" } },
       },
-      { greet: { set: { status: "done" } } },
     ],
-  });
+    "done",
+    { approval: { kind: "decision", contract } }
+  );
 
 const decisionsPageSchema = z.object({
   items: z.array(z.object({ wait: z.object({ id: z.string() }) })),
@@ -449,7 +429,7 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
       `decide-${unique()}`
     );
     await publishWorkflowVersion(env, builder.acting, workflow.id, {
-      definition: decidingDefinitionOf(workflow.name, key),
+      definition: decidingDefinitionOf(key),
       basedOn: null,
     });
     const fixture = await appWith(files(), "Requests", builder.acting);
@@ -525,7 +505,7 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
       version: 1,
     } as const;
     const { decision } = await openDecision(env, run, {
-      step: "task:ask",
+      step: "ask:task",
       from: "role:admin",
       description: "Approve this request?",
       timeout: 3_600_000,
@@ -555,7 +535,7 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
       `decide-${unique()}`
     );
     await publishWorkflowVersion(env, builder.acting, workflow.id, {
-      definition: decidingDefinitionOf(workflow.name, key),
+      definition: decidingDefinitionOf(key),
       basedOn: null,
     });
     const fixture = await appWith(files(), "Requests", builder.acting);
@@ -642,7 +622,7 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
       version: 1,
     } as const;
     const { decision } = await openDecision(env, run, {
-      step: "task:ask",
+      step: "ask:task",
       from: `team:${team}`,
       description: "Approve this request?",
       timeout: 3_600_000,

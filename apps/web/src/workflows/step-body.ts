@@ -1,7 +1,7 @@
-// A step's body as the definition text holds it, for changing that one
-// step from the canvas: core's `editStep` replaces the body of the task at
-// a diagram's pointer (`DiagramTask.pointer`), keeping its ID, and this
-// reads the body it replaces from the same text the diagram was drawn
+// A step's fields as the definition text holds them, for changing that one
+// step from the canvas: core's `editStep` replaces the fields of the step
+// at a diagram's pointer (`DiagramTask.pointer`), keeping its ID, and this
+// reads the fields it replaces from the same text the diagram was drawn
 // from. Only own keys and array indexes are walked, as core walks them.
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -20,11 +20,11 @@ const childOf = (value: unknown, token: string): unknown => {
 };
 
 /**
- * The body of the task at JSON Pointer `pointer` (RFC 6901) in definition
- * text `source`: the value of the task's single key, its ID. Undefined
- * when the text isn't JSON or names no such task there.
+ * The fields of the step at JSON Pointer `pointer` (RFC 6901) in
+ * grasp-workflow/1 text `source`, its `id` aside: what a change of it
+ * sends. Undefined when the text isn't JSON or names no step there.
  */
-export const stepBodyAt = (
+export const stepFieldsAt = (
   source: string,
   pointer: string
 ): Record<string, unknown> | undefined => {
@@ -41,41 +41,16 @@ export const stepBodyAt = (
     .slice(1)
     .split("/")
     .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
-  const id = tokens.pop();
+  // A step is an item of a list of steps: its last token is an index.
+  if (!indexPattern.test(tokens.at(-1) ?? "")) {
+    return undefined;
+  }
   for (const token of tokens) {
     value = childOf(value, token);
   }
-  if (
-    id === undefined ||
-    !isObject(value) ||
-    Object.keys(value).length !== 1 ||
-    !Object.hasOwn(value, id)
-  ) {
+  if (!isObject(value) || typeof value.id !== "string") {
     return undefined;
   }
-  const body = value[id];
-  return isObject(body) ? body : undefined;
-};
-
-/**
- * The title definition text `source` gives its workflow (`document.title`),
- * trimmed: what its page heads it with, over its name. Undefined when the
- * text isn't JSON or sets no title.
- */
-export const definitionTitle = (
-  source: string | undefined
-): string | undefined => {
-  if (source === undefined) {
-    return undefined;
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(source);
-  } catch {
-    return undefined;
-  }
-  const title = childOf(childOf(value, "document"), "title");
-  return typeof title === "string" && title.trim() !== ""
-    ? title.trim()
-    : undefined;
+  const { id: _id, ...fields } = value;
+  return fields;
 };

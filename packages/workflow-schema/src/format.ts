@@ -11,8 +11,7 @@ import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
 // (generate.ts). schema.ts defines it; check.ts checks it.
 //
 // A step kind joins the format as its SDK call joins the run host: a new
-// `type` in the union, nothing else changing (decision, forEach and event
-// waits came so; fork, race and child runs come so).
+// `type` in the union, nothing else changing.
 
 /**
  * The format's published JSON Schema, by its versioned URL: every document
@@ -21,6 +20,17 @@ import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
  */
 export const workflowSchemaUrl =
   "https://grasp.work/schemas/grasp-workflow/1.json";
+
+/** The format's name and version, as a published version records it. */
+export const definitionFormat = "grasp-workflow/1";
+
+/**
+ * Where the host's own error kinds are (`<errorTypeBase>timeout`, say), as
+ * a catch's `errors.type` names them. A raise never names one: an error of
+ * these kinds is always the host's.
+ */
+export const errorTypeBase =
+  "https://grasp.work/schemas/grasp-workflow/1/errors/";
 
 /** JSON, as the format's values hold it. */
 export type Json =
@@ -336,6 +346,8 @@ export interface WorkflowDocument {
  * bounded besides by what a sealed build holds (`sealedBuildLimits`).
  */
 export const formatLimits = {
+  /** The document as text, in UTF-8 bytes. */
+  bytes: 1024 * 1024,
   /** Steps in all, at every level. */
   steps: 200,
   /** Lists one inside another (`then`, `try`, `catch.do`, a loop's `do`). */
@@ -416,3 +428,58 @@ export const aliasPattern = "^[A-Za-z][A-Za-z0-9_]{0,63}$";
  * (`workflowModulePattern`), then an export's name.
  */
 export const localContractPattern = `^local:(${workflowModulePattern.source.slice(1, -1)})#([A-Za-z_$][A-Za-z0-9_$]*)$`;
+
+/**
+ * The lists of steps a step of each type may hold, each by the path it is
+ * under: an `if`'s `then` and `else`, a `try`'s `try` and its catch's
+ * `catch/do`, a `forEach`'s `do`. The one list of them, for every tool
+ * that walks or edits a document's steps.
+ */
+export const stepListPaths: Readonly<Record<StepType, readonly string[]>> = {
+  do: [],
+  agent: [],
+  wait: [],
+  if: ["then", "else"],
+  try: ["try", "catch/do"],
+  raise: [],
+  decision: [],
+  forEach: ["do"],
+};
+
+/** The steps `step` holds under list path `path`, if it holds that list. */
+const stepListAt = (step: Step, path: string): readonly Step[] | undefined => {
+  if (step.type === "if") {
+    return path === "then" ? step.then : step.else;
+  }
+  if (step.type === "try") {
+    return path === "try" ? step.try : step.catch.do;
+  }
+  if (step.type === "forEach") {
+    return step.do;
+  }
+  return undefined;
+};
+
+/** The lists of steps `step` holds, each by its path (`stepListPaths`). */
+export const stepListsOf = (
+  step: Step
+): readonly { readonly path: string; readonly steps: readonly Step[] }[] =>
+  stepListPaths[step.type].flatMap((path) => {
+    const steps = stepListAt(step, path);
+    return steps === undefined ? [] : [{ path, steps }];
+  });
+
+/** Every step of `steps`, in order, nested ones included, with its pointer. */
+export const eachStep = (
+  steps: readonly Step[],
+  pointer = "/steps"
+): { readonly step: Step; readonly pointer: string }[] =>
+  steps.flatMap((step, index) => {
+    const at = `${pointer}/${index}`;
+    return [
+      { step, pointer: at },
+      ...stepListsOf(step).flatMap((list) =>
+        eachStep(list.steps, `${at}/${list.path}`)
+      ),
+    ];
+  });

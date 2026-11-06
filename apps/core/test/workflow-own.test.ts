@@ -1,6 +1,5 @@
 import { collections } from "@grasp-os/brain/schema";
 import type { Role } from "@grasp-os/shared/roles";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
@@ -18,6 +17,7 @@ import {
   publishWorkflowVersion,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
+import { greetingOf } from "./json-workflow-apps.ts";
 import { outcome, unique } from "./sign-in.ts";
 
 // A workflow's own knowledge, files and activity (src/workflow-own.ts),
@@ -45,53 +45,13 @@ const person = async (role: Role): Promise<Acting> => {
   return { userId, role, teams: [], staff: false };
 };
 
-/** The schema of an object with `properties`, each required. */
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
-/** A workflow.json that greets, named `name`, as workflow-resources.test.ts publishes one. */
-const definitionOf = (name: string): string =>
-  JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {
-            instructions: {
-              schema: { type: "string", maxLength: 200 },
-              label: "Instructions",
-              default: "Greet the person.",
-              sensitive: false,
-            },
-          },
-          bindings: {},
-        },
-      },
-    },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [{ finish: { set: { status: "done" } } }],
-  });
-
 /** A workflow Ada builds, published once, which Uma uses. */
 const greeting = async () => {
   const ada = await person("builder");
   const uma = await person("user");
   const workflow = await createWorkflowResource(env, ada, `greet-${unique()}`);
   await publishWorkflowVersion(env, ada, workflow.id, {
-    definition: definitionOf(workflow.name),
+    definition: greetingOf(),
     basedOn: null,
   });
   await shareWorkflowResource(env, ada, workflow.id, {

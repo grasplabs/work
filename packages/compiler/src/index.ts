@@ -30,13 +30,20 @@ export type { TypeCheckPlan, Unchecked } from "./checked-build.ts";
 export type { TypeCheckRequest } from "./type-check.ts";
 export type { KitModules } from "./kit.ts";
 export type { BuildRequest, InspectRequest } from "./packages/worker.ts";
+export { expressionTypeCheck } from "./expression-types.ts";
+export type {
+  ExpressionScopeTypes,
+  ExpressionTypeCheck,
+  ExpressionTypeError,
+  TypedExpression,
+} from "./expression-types.ts";
 export type {
   AppCodeBuild,
   CompileTarget,
   IncrementalTarget,
   ComputeModulesBuild,
   InspectTarget,
-  OpenWorkflowBuild,
+  GeneratedWorkflowBuild,
   ScreenBuild,
   TargetBuilds,
   TargetInspections,
@@ -62,13 +69,12 @@ export {
   isGeneratedPath,
   isLintedCode,
   limitErrors,
-  openWorkflowEntry,
-  openWorkflowErrors,
+  generatedWorkflowEntry,
+  generatedWorkflowErrors,
 } from "./inputs.ts";
 export {
   appModuleName,
   computePackagesFile,
-  jqWasmModule,
   kitModuleName,
   packageModuleName,
   packageModulePrefix,
@@ -230,21 +236,6 @@ const esbuildWasmOf = async (assets: Fetcher): Promise<ArrayBuffer> =>
     compilerAssets.esbuildWasm,
     async () =>
       await readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm")
-  );
-
-/** jq's WebAssembly, kept (`reader`): 1 MB, loaded by every workflow isolate. */
-const jqWasmRead = reader<ArrayBuffer>(true);
-
-/**
- * jq's WebAssembly (the workflow SDK's `evaluate`), as every workflow
- * isolate loads it beside the SDK's modules, by `jqWasmModule`: read once
- * per isolate.
- */
-export const jqWasm = async (assets: Fetcher): Promise<ArrayBuffer> =>
-  await jqWasmRead(
-    assets,
-    compilerAssets.jqWasm,
-    async () => await readCompilerBytes(assets, compilerAssets.jqWasm, "wasm")
   );
 
 /**

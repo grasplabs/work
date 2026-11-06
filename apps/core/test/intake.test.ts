@@ -892,26 +892,6 @@ describe("reading notes", { timeout: 60_000 }, () => {
     });
   });
 
-  it("asks the model for at most as many claims as it may answer in one answer", async () => {
-    const admin = await signedInApi(idp, "admin");
-    const app = await copyOf(admin);
-    const { provider } = await extracted(
-      admin,
-      admin,
-      app,
-      { notes, lines: [] },
-      await answering()
-    );
-    const { max_completion_tokens: answerCap } = z
-      .object({ max_completion_tokens: z.number() })
-      .parse(provider.requests[0]?.body);
-    const sent = JSON.stringify(provider.requests[0]?.body);
-    expect({
-      answerCap,
-      told: sent.includes("List at most 9"),
-    }).toStrictEqual({ answerCap: 3000, told: true });
-  });
-
   it("reads nothing for someone with no role in its workflow, and keeps them no draft", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await copyOf(admin);

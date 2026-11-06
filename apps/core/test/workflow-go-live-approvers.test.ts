@@ -1,6 +1,5 @@
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
@@ -15,6 +14,7 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { allEvents } from "./audit-events.ts";
+import { greetingOf } from "./json-workflow-apps.ts";
 import { outcome, unique } from "./sign-in.ts";
 
 // Who may approve a workflow's go-live when whoever asked for it is the
@@ -47,16 +47,6 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
 /** A workflow `owner` created and published at version 1. */
 const workflowOf = async (owner: Identity) => {
   const workflow = await createWorkflowResource(
@@ -65,25 +55,7 @@ const workflowOf = async (owner: Identity) => {
     `greet-${unique()}`
   );
   await publishWorkflowVersion(env, owner, workflow.id, {
-    definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: {},
-          },
-        },
-      },
-      input: { schema: objectSchema({ who: { type: "string" } }) },
-      output: { schema: objectSchema({ status: { type: "string" } }) },
-      do: [{ finish: { set: { status: "done" } } }],
-    }),
+    definition: greetingOf(),
     basedOn: null,
   });
   return workflow;

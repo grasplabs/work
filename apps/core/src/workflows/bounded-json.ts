@@ -1,5 +1,9 @@
 /**
- * JSON text from caller values, written with a hard bound on the work.
+ * JSON text from caller values, written with a hard bound on the work:
+ * what a run's isolate hands core (a step's result, a call's arguments,
+ * the run's output), which arrives over workerd RPC. A structured clone
+ * keeps shared references, so a size check after JSON.stringify comes too
+ * late: hence this writer.
  *
  * JSON.stringify, or any walk of a value, visits a shared reference every
  * time it occurs: `[v, v]` nested 31 times is 31 arrays in memory but 2^31
@@ -19,10 +23,6 @@ export interface JsonBounds {
   maxDepth: number;
   /** Values and object members visited. */
   maxNodes: number;
-  /** Sort object keys, as canonical JSON does. */
-  sortKeys: boolean;
-  /** Refuse integers beyond 2^53, as jq prints overflowing numbers. */
-  safeIntegers: boolean;
 }
 
 /** Why a value has no JSON text within the bounds. */
@@ -101,11 +101,7 @@ const createWriter = (bounds: JsonBounds) => {
   };
 
   const number = (value: number): void => {
-    const unsafe =
-      bounds.safeIntegers &&
-      Number.isInteger(value) &&
-      !Number.isSafeInteger(value);
-    if (!Number.isFinite(value) || unsafe) {
+    if (!Number.isFinite(value)) {
       throw new RefusedError("invalid");
     }
     emit(JSON.stringify(value));
@@ -185,9 +181,6 @@ const createWriter = (bounds: JsonBounds) => {
 
   const object = (value: object, depth: number): void => {
     const members = membersOf(value);
-    if (bounds.sortKeys) {
-      members.sort(([a], [b]) => (a < b ? -1 : 1));
-    }
     emit("{");
     let first = true;
     for (const [key, member] of members) {
@@ -206,12 +199,19 @@ const createWriter = (bounds: JsonBounds) => {
     emit("}");
   };
 
-  return { emit, write, text: () => parts.join("") };
+  return { write, text: () => parts.join("") };
 };
 
-const written = (run: () => string): JsonWritten => {
+/**
+ * The JSON text of one value, or why there is none within `bounds`.
+ * Anything the value's own getters or proxies throw is the caller's to
+ * catch.
+ */
+export const writeJson = (value: unknown, bounds: JsonBounds): JsonWritten => {
   try {
-    return { ok: true, text: run() };
+    const writer = createWriter(bounds);
+    writer.write(value, 0);
+    return { ok: true, text: writer.text() };
   } catch (error) {
     if (error instanceof RefusedError) {
       return { ok: false, refusal: error.refusal };
@@ -219,33 +219,3 @@ const written = (run: () => string): JsonWritten => {
     throw error;
   }
 };
-
-/**
- * The JSON text of `values` as one array, `[a,b,…]` (the array itself not
- * counted in the depth), or why there is none within `bounds`. Anything
- * the values' own getters or proxies throw is the caller's to catch.
- */
-export const writeJsonArray = (
-  values: readonly unknown[],
-  bounds: JsonBounds
-): JsonWritten =>
-  written(() => {
-    const writer = createWriter(bounds);
-    writer.emit("[");
-    for (const [index, value] of values.entries()) {
-      if (index > 0) {
-        writer.emit(",");
-      }
-      writer.write(value, 0);
-    }
-    writer.emit("]");
-    return writer.text();
-  });
-
-/** The JSON text of one value, or why there is none within `bounds`. */
-export const writeJson = (value: unknown, bounds: JsonBounds): JsonWritten =>
-  written(() => {
-    const writer = createWriter(bounds);
-    writer.write(value, 0);
-    return writer.text();
-  });

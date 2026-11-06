@@ -1,8 +1,7 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -24,44 +23,37 @@ import { unique } from "../sign-in.ts";
 // With the supervisor's two processes, the suite holding one while it
 // waits for its run, a store call of its own place would wait for ever.
 
+/** A JSON object schema of `properties`, each required, and nothing else. */
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
-/** A workflow `name` of `tasks`, its input `who` and output `status`. */
+/** A workflow of `steps`, its input `who` and output `status`. */
 const definitionOf = (
-  name: string,
-  tasks: unknown[],
+  steps: unknown[],
+  status: unknown,
   bindings: Record<string, unknown>
 ): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: tasks,
+    bindings,
+    steps,
   });
 
 /** Saves the input's `who` through the `save` operation binding. */
 const save = {
-  save: {
-    call: "grasp.operation",
-    with: { binding: "save", arguments: { who: "${ $workflow.input.who }" } },
-  },
+  id: "save",
+  type: "do",
+  binding: "save",
+  arguments: { who: { $expr: "input.who" } },
 };
 
 /** What a test's fixture gives the workflow the App binds as `followUp`. */
@@ -138,12 +130,14 @@ const contracts = async (admin: Identity) => {
 };
 
 /**
- * The Requests App binding a workflow of `tasks` as `followUp`, its model
+ * The Requests App binding a workflow of `steps`, ending with `status`, as
+ * `followUp`, its model
  * binding `summary` and its operation binding `save`, with `workflow` as
  * its fixture and `tests` as its tests.
  */
 const requestsApp = async (
-  tasks: unknown[],
+  steps: unknown[],
+  status: unknown,
   workflow: WorkflowFixture,
   tests: Record<string, string> = {}
 ) => {
@@ -158,7 +152,7 @@ const requestsApp = async (
     `greet-${unique()}`
   );
   await publishWorkflowVersion(env, builder, resource.id, {
-    definition: definitionOf(resource.name, tasks, {
+    definition: definitionOf(steps, status, {
       summary: { kind: "model", contract: keys.model },
       save: { kind: "operation", contract: keys.operation },
     }),
@@ -210,7 +204,8 @@ ${body.includes("owner") ? '      const owner = await t.as("desk-user");' : ""}
 describe("a workflow test's store call on-prem", { timeout: 180_000 }, () => {
   it("runs as a child of the suite's session, so the suite waiting for its run never holds it up", async () => {
     const app = await requestsApp(
-      [save, { finish: { set: { status: "saved" } } }],
+      [save],
+      "saved",
       { operations: { save: "requests.add" } },
       {
         "tests/save.test.ts": suiteOf(`

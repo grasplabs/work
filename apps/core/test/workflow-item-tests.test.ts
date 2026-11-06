@@ -1,12 +1,11 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowCandidateRun,
   WorkflowItemTest,
 } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -26,6 +25,7 @@ import {
 import { itemTestFor, startItemTest } from "../src/workflows/item-tests.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
+import { objectSchema, passing } from "./json-workflow-apps.ts";
 import { outcome, unique } from "./sign-in.ts";
 
 // A test of a draft's checkpoint over recent real items
@@ -60,48 +60,37 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
-/** A definition of `name` at `version`: its bindings, input and tasks. */
+/**
+ * A definition: its bindings, its input `{ who }` (`who`'s schema), its
+ * steps (one titled `label` unless given), and its output `{ status }`.
+ */
 const definitionOf = (
-  name: string,
-  version: string,
+  label: string,
   {
-    bindings = {},
+    bindings,
     who = { type: "string" },
-    tasks,
+    steps = [passing("echo", label)],
+    status = { $expr: "input.who" },
   }: {
     bindings?: Record<string, unknown>;
     who?: Record<string, unknown>;
-    tasks: unknown[];
+    steps?: unknown[];
+    status?: unknown;
   }
 ): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status },
     },
-    input: { schema: objectSchema({ who }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: tasks,
+    ...(bindings === undefined ? {} : { bindings }),
+    steps,
   });
 
 /** What version 1 does with an item: says who it was for. */
-const echo = [{ echo: { set: { status: "${ $workflow.input.who }" } } }];
+const echo = {};
 
 /** The descriptor of an object of string `fields`, as the catalog holds one. */
 const descriptor = (fields: string[]): string =>
@@ -129,40 +118,35 @@ const mailContract = async (admin: Identity): Promise<string> => {
 /** The draft's way with an item: it mails who it is for, through `mail`. */
 const mailing = (key: string) => ({
   bindings: { mail: { kind: "connector", contract: key } },
-  tasks: [
+  steps: [
     {
-      send: {
-        call: "grasp.connector",
-        with: {
-          binding: "mail",
-          operation: "mail.send",
-          arguments: { to: "${ $workflow.input.who }", subject: "Hello" },
-        },
-        output: {
-          as: '${ {status: ($workflow.input.who + " " + .messageId)} }',
-        },
-      },
+      id: "send",
+      type: "do",
+      binding: "mail",
+      operation: "mail.send",
+      arguments: { to: { $expr: "input.who" }, subject: "Hello" },
     },
   ],
+  status: { $expr: 'input.who + " " + steps.send.output.messageId' },
 });
 
 /**
  * A workflow of `by`'s, version 1 published (`echo`), and its draft saved
- * from `draft` as version 2.0.0: the draft's checked revision.
+ * from `draft`: the draft's checked revision.
  */
 const workflowOf = async (
   by: Identity,
-  draft: Parameters<typeof definitionOf>[2]
+  draft: Parameters<typeof definitionOf>[1]
 ) => {
   const workflow = await createWorkflowResource(env, by, `items-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(workflow.name, "1.0.0", { tasks: echo }),
+    definition: definitionOf("Version 1", echo),
     basedOn: null,
   });
   const { revision: base } = await workflowDraft(env, by, workflow.id);
   const saved = await editWorkflowDraft(env, by, workflow.id, {
     expectedRevision: base,
-    source: definitionOf(workflow.name, "2.0.0", draft),
+    source: definitionOf("Version 2", draft),
     modules: {},
   });
   expect(saved.problems).toStrictEqual([]);
@@ -364,7 +348,7 @@ describe("a test of a draft over recent real items", () => {
     const owner = await person("builder");
     const other = await person("builder");
     const admin = await person("admin");
-    const { workflow, revision } = await workflowOf(owner, { tasks: echo });
+    const { workflow, revision } = await workflowOf(owner, echo);
     await shareWorkflowResource(env, owner, workflow.id, {
       type: "person",
       id: other.userId,
@@ -394,7 +378,7 @@ describe("a test of a draft over recent real items", () => {
 
   it("takes no run whose retention is over", async () => {
     const by = await person("builder");
-    const { workflow, revision } = await workflowOf(by, { tasks: echo });
+    const { workflow, revision } = await workflowOf(by, echo);
     await ranFor(by, workflow.id, "Ada");
     // Past the 30 days its details are kept.
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -417,7 +401,7 @@ describe("a test of a draft over recent real items", () => {
     const by = await person("builder");
     const other = await person("builder");
     const user = await person("user");
-    const { workflow, revision } = await workflowOf(by, { tasks: echo });
+    const { workflow, revision } = await workflowOf(by, echo);
     await shareWorkflowResource(env, by, workflow.id, {
       type: "person",
       id: other.userId,
@@ -459,7 +443,7 @@ describe("a test of a draft over recent real items", () => {
 
   it("is audited without its input, its rows never change, and it goes with its test runs after a week", async () => {
     const by = await person("builder");
-    const { workflow, revision } = await workflowOf(by, { tasks: echo });
+    const { workflow, revision } = await workflowOf(by, echo);
     await ranFor(by, workflow.id, "Ada");
     const test = await settled(
       by,

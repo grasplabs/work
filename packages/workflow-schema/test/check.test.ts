@@ -41,6 +41,12 @@ const nestedList = (depth: number): unknown => {
   return value;
 };
 
+/** The codes of `document`'s problems, or "ok". */
+const codesOf = (document: unknown): unknown => {
+  const result = checkWorkflow(document);
+  return result.ok ? "ok" : result.problems.map(({ code }) => code);
+};
+
 /** `everyStep` with its top-level steps changed by `change`. */
 const withSteps = (change: (steps: unknown[]) => unknown[]) => {
   const document = everyStep();
@@ -825,5 +831,59 @@ describe("checking a workflow", () => {
       steps: [nested],
     });
     expect(result.ok).toBeFalsy();
+  });
+
+  it("refuses a raise passing its error off as the host's", () => {
+    const raise = (error: unknown) =>
+      withSteps((steps) => [...steps, { id: "fail", type: "raise", error }]);
+    expect({
+      hostKind: codesOf(
+        raise({
+          type: "https://grasp.work/schemas/grasp-workflow/1/errors/timeout",
+          status: 408,
+        })
+      ),
+      unauthorized: codesOf(raise({ type: "urn:acme:error:no", status: 401 })),
+      forbidden: codesOf(raise({ type: "urn:acme:error:no", status: 403 })),
+      own: codesOf(raise({ type: "urn:acme:error:rejected", status: 422 })),
+    }).toStrictEqual({
+      hostKind: ["workflow.reserved_error_type"],
+      unauthorized: ["workflow.reserved_error_status"],
+      forbidden: ["workflow.reserved_error_status"],
+      own: "ok",
+    });
+  });
+
+  it("answers what a caller relies on: input, output and each parameter, its default in it", () => {
+    const result = checkWorkflow({
+      $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
+      params: {
+        limit: {
+          kind: "money",
+          label: "Limit",
+          currency: "EUR",
+          sensitive: false,
+          default: 500,
+        },
+        token: { kind: "text", label: "Token" },
+      },
+      steps: [{ id: "pause", type: "wait", for: "1 hour" }],
+    });
+    if (!result.ok) {
+      throw new Error(JSON.stringify(result.problems));
+    }
+    const { input, output, params } = result.workflow.contract;
+    const limit = params.get("limit");
+    expect({
+      input: input.kind,
+      output: output.kind,
+      limit: [limit?.presence, limit?.defaultValue],
+      token: params.get("token")?.presence,
+    }).toStrictEqual({
+      input: "object",
+      output: "null",
+      limit: ["default", 500],
+      token: "required",
+    });
   });
 });

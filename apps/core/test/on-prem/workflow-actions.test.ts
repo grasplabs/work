@@ -1,9 +1,8 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
 import type { Json } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -17,6 +16,7 @@ import { startWorkflow } from "../../src/workflow-starts.ts";
 import { callAction } from "../../src/workflows/resource-action.ts";
 import type { BuiltCall } from "../../src/workflows/resource-calls.ts";
 import { resourceRunFor } from "../../src/workflows/resource-runs.ts";
+import { objectSchema } from "../json-workflow-apps.ts";
 import { unique } from "../sign-in.ts";
 
 // A JSON workflow's own action on-prem: it runs as a sandbox session of
@@ -47,15 +47,28 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
+/** A definition calling action `notify`, with `bindings` besides. */
+const definitionOf = (bindings: Record<string, unknown> = {}): string =>
+  JSON.stringify({
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: { $expr: "steps.notify.output.status" } },
+    },
+    bindings: {
+      notify: { kind: "action", contract: "local:code/notify.ts#notify" },
+      ...bindings,
+    },
+    steps: [
+      {
+        id: "notify",
+        type: "do",
+        binding: "notify",
+        arguments: { to: { $expr: "input.who" } },
+      },
+    ],
+  });
 
 describe("a JSON workflow's own action on-prem", () => {
   it("runs on the sandbox host, its resource calls reaching the host over its session", async () => {
@@ -78,41 +91,7 @@ describe("a JSON workflow's own action on-prem", () => {
     });
     const workflow = await createWorkflowResource(env, ada, `act-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: JSON.stringify({
-        document: {
-          dsl: "1.0.3",
-          namespace: workflowNamespace,
-          name: workflow.name,
-          version: "1.0.0",
-          title: workflow.name,
-          metadata: {
-            grasp: {
-              profile: "grasp-open-workflow/1",
-              params: {},
-              bindings: {
-                notify: {
-                  kind: "operation",
-                  contract: "local:code/notify.ts#notify",
-                },
-                mail: { kind: "connector", contract: key },
-              },
-            },
-          },
-        },
-        input: { schema: objectSchema({ who: { type: "string" } }) },
-        output: { schema: objectSchema({ status: { type: "string" } }) },
-        do: [
-          {
-            notify: {
-              call: "grasp.operation",
-              with: {
-                binding: "notify",
-                arguments: { to: "${ $workflow.input.who }" },
-              },
-            },
-          },
-        ],
-      }),
+      definition: definitionOf({ mail: { kind: "connector", contract: key } }),
       basedOn: null,
       modules: {
         "code/notify.ts": `import { action, resource, v } from "@grasp-os/sdk/action";
@@ -176,40 +155,7 @@ export const notify = action({
     const ada = await person("builder");
     const workflow = await createWorkflowResource(env, ada, `act-${unique()}`);
     await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: JSON.stringify({
-        document: {
-          dsl: "1.0.3",
-          namespace: workflowNamespace,
-          name: workflow.name,
-          version: "1.0.0",
-          title: workflow.name,
-          metadata: {
-            grasp: {
-              profile: "grasp-open-workflow/1",
-              params: {},
-              bindings: {
-                notify: {
-                  kind: "operation",
-                  contract: "local:code/notify.ts#notify",
-                },
-              },
-            },
-          },
-        },
-        input: { schema: objectSchema({ who: { type: "string" } }) },
-        output: { schema: objectSchema({ status: { type: "string" } }) },
-        do: [
-          {
-            notify: {
-              call: "grasp.operation",
-              with: {
-                binding: "notify",
-                arguments: { to: "${ $workflow.input.who }" },
-              },
-            },
-          },
-        ],
-      }),
+      definition: definitionOf(),
       basedOn: null,
       modules: {
         "code/notify.ts": `import { action, v } from "@grasp-os/sdk/action";

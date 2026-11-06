@@ -1,4 +1,4 @@
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -24,32 +24,24 @@ import { pileOf, toCard } from "./pile.ts";
 /** How long a page may take to show what core said. */
 const pageRead = { timeout: 20_000 };
 
+/** A JSON object schema of `properties`, each required, and nothing else. */
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
-/** An independent workflow `name` that counts in one step, and is done. */
-const countingDefinition = (name: string): string =>
+/** An independent workflow that is done at once, its status counted. */
+const countingDefinition = (): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: "counted" },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [{ count: { set: { status: "counted" } } }],
+    steps: [],
   });
 
 test("a builder sees their workflows on the board, and opens them in full", async ({
@@ -64,7 +56,7 @@ test("a builder sees their workflows on the board, and opens them in full", asyn
       [`tally-${tag}`, `later-${tag}`].map(async (name) => {
         const workflow = await api.workflowResources.create(name);
         await api.workflowResources.publish(workflow.id, {
-          definition: countingDefinition(workflow.name),
+          definition: countingDefinition(),
           basedOn: null,
         });
         return { id: workflow.id, name: workflow.name };

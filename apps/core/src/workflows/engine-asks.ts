@@ -1,7 +1,7 @@
 // The ask of a run's code that a host is handling, as the host makes calls
-// of the engine's step API for it. An independent workflow's host
-// (resource-host.ts) does I/O of its own between its run's code asking for
-// a step and calling the step API (the check of the run's person, the step
+// of the engine's step API for it. The run host (host.ts, `RunHost`)
+// does I/O of its own between its run's code asking for a step and
+// calling the step API (the check of the run's person, the step
 // counting's own hashing), and says the run busy meanwhile (workerflow's
 // `step.busy`), so the engine doesn't suspend the run while a call is on
 // its way to it. It needs to know the moment the call is made, which only

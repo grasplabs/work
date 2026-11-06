@@ -1,8 +1,7 @@
-/* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
 import { isRetryableCode } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceVersion } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -15,14 +14,13 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
   workflowSource,
-  workflowVersions,
 } from "../src/workflow-resources.ts";
 import { racingDb } from "./apps.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
 // Compiling JSON workflows into SDK TypeScript and sealed JavaScript
-// (workflow-builds.ts, @grasp-os/open-workflow's generate.ts), from the
+// (workflow-builds.ts, @grasp-os/workflow-schema's generate.ts), from the
 // threat model: definition text never becomes code, the code imports the
 // SDK alone, the same program always has the same identity, a build is
 // what its version names or nothing, and what the generator doesn't lower
@@ -46,64 +44,62 @@ const builder = async (role: Role = "builder"): Promise<Acting> => {
 };
 
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
-/** A grasp-open-workflow/1 definition of `name` running `tasks`. */
-const definitionOf = (
-  name: string,
-  tasks: unknown[],
-  { version = "1.0.0", more = {} }: { version?: string; more?: object } = {}
-): string =>
+/**
+ * A grasp-workflow/1 definition running `steps`, ending with `status`: a
+ * plain parameter `greeting` and a sensitive one, `token`.
+ */
+const definitionOf = (status: unknown, steps: unknown[] = []): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {
-            greeting: {
-              schema: { type: "string", maxLength: 200 },
-              label: "Greeting",
-              default: "Hello",
-              sensitive: false,
-            },
-            token: {
-              schema: { type: "string", maxLength: 64 },
-              label: "Token",
-              default: "none",
-              sensitive: true,
-            },
-          },
-          bindings: {},
-        },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: tasks,
-    ...more,
+    params: {
+      greeting: {
+        kind: "text",
+        label: "Greeting",
+        default: "Hello",
+        sensitive: false,
+      },
+      token: { kind: "text", label: "Token" },
+    },
+    steps,
   });
 
-/** A new workflow of `by`'s, with `definition`'s name, published once. */
-const published = async (by: Acting, definition: (name: string) => string) => {
+/** A new workflow of `by`'s, published once from `definition`. */
+const published = async (by: Acting, definition: string) => {
   const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
   const version = await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definition(workflow.name),
+    definition,
     basedOn: null,
   });
   return { workflow, version };
 };
+
+/** A step `finish` that ends at once, titled `title` if given. */
+const finish = (title?: string) => ({
+  id: "finish",
+  ...(title === undefined ? {} : { title }),
+  type: "raise",
+  if: { $expr: 'input.who === ""' },
+  error: { type: "urn:grasp:error:nameless", status: 422 },
+});
+
+/** A publication refused for `code`, at the output's status. */
+const refused = (code: string) => ({
+  code: "workflow.definition_invalid",
+  details: {
+    problems: [{ code, pointer: "/output/value/status/$expr" }],
+  },
+});
 
 const versionManifest = z.object({
   build: z.object({
@@ -133,7 +129,7 @@ const importPattern = /from "(?<module>[^"]+)"/gu;
 
 /** A version's executable identity; empty for one that isn't executable. */
 const identityOf = (version: WorkflowResourceVersion): string =>
-  version.build.executable ? version.build.hash : "";
+  version.build.hash;
 
 /** U+2028 and U+2029, which end a line in source but not in a string. */
 const lineSeparators = String.fromCodePoint(0x20_28, 0x20_29);
@@ -158,35 +154,46 @@ const compilerThat = (build: () => Promise<never>, targets: string[]): Env => {
   return { ...env, BUILD_WAIT_MS: "50", LOADER: loader };
 };
 
+/**
+ * Core, with the type checker's isolate answering as `check` does: the
+ * outside system here, as in `compilerThat`.
+ */
+const checkerThat = (check: () => Promise<unknown>): Env => {
+  const checker = { getEntrypoint: () => ({ check }) };
+  // SAFETY: only what the type checker's start reads of a Loader.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const loader = { get: () => checker, load: () => checker } as never;
+  return { ...env, BUILD_WAIT_MS: "50", LOADER: loader };
+};
+
 describe("JSON workflow builds", () => {
-  it("seals SDK TypeScript that runs each task in the definition's order, and exports it", async () => {
+  it("seals SDK TypeScript that runs each step in the definition's order, and exports it", async () => {
     const by = await builder();
-    const tasks = [
-      { greet: { set: { status: "${ $params.greeting }" } } },
-      { pause: { wait: "PT1H" } },
-      { finish: { set: { status: "done" } } },
-    ];
-    let definition = "";
-    const { workflow, version } = await published(by, (name) => {
-      definition = definitionOf(name, tasks);
-      return definition;
-    });
+    const { workflow, version } = await published(
+      by,
+      definitionOf({ $expr: "params.greeting" }, [
+        { id: "pause", type: "wait", for: "1 hour" },
+        {
+          id: "late",
+          type: "raise",
+          if: { $expr: 'input.who === ""' },
+          error: { type: "urn:grasp:error:nameless", status: 422 },
+        },
+      ])
+    );
     expect(identityOf(version)).toMatch(/^[0-9a-f]{64}$/u);
     const { files } = await workflowSource(env, by, workflow.id, 1);
     const source = files[generatedPath] ?? "";
-    // Real statements, one per task, in order: not the definition handed
+    // Real statements, one per step, in order: not the definition handed
     // to an interpreter.
-    const places = [
-      'flow.set("greet"',
-      'flow.wait("pause", 3600000)',
-      'flow.set("finish"',
-    ].map((statement) => source.indexOf(statement));
+    const places = ['step.sleep("pause"', '"late"'].map((statement) =>
+      source.indexOf(statement)
+    );
     expect({
-      definition: files["workflow.json"],
       inOrder: places.every(
         (place, index) => place > 0 && place > (places[index - 1] ?? 0)
       ),
-      // The SDK alone, and every expression by its number, never its source.
+      // The workflow SDK alone.
       imports: [
         ...new Set(
           [...source.matchAll(importPattern)].map(
@@ -194,14 +201,9 @@ describe("JSON workflow builds", () => {
           )
         ),
       ],
-      evaluates: source.includes("await task.evaluate(0)"),
-      holdsSource: source.includes("$params"),
     }).toStrictEqual({
-      definition,
       inOrder: true,
-      imports: ["@grasp-os/sdk/open-workflow"],
-      evaluates: true,
-      holdsSource: false,
+      imports: ["@grasp-os/sdk/workflow"],
     });
     // What runs is sealed with it: the compiled module and the SDK too.
     const artifacts = await sealedArtifacts(workflow.id, 1);
@@ -209,10 +211,8 @@ describe("JSON workflow builds", () => {
       expect.arrayContaining([
         "source/workflow.json",
         generatedPath,
-        "modules/app~.grasp~workflow.js",
         "tasks.json",
         "source-map.json",
-        "sdk/@grasp-os~sdk~open-workflow.js",
       ])
     );
   });
@@ -222,67 +222,44 @@ describe("JSON workflow builds", () => {
     const hostile = [
       '"); globalThis.escaped = true; ("',
       `\`\${globalThis}\` */ // \\ ${lineSeparators} </script>`,
-      "${ looks like an expression, but isn't one }x",
+      "{ $expr: looks like an expression, but isn't one }x",
     ];
-    const { workflow, version } = await published(by, (name) =>
-      definitionOf(name, [
-        {
-          finish: {
-            set: {
-              status: "done",
-              [hostile[0] ?? ""]: hostile,
-              toString: { "*/": [hostile[1] ?? "", 1.5, -2, null, true] },
-            },
-          },
+    const { workflow, version } = await published(
+      by,
+      JSON.stringify({
+        $schema: workflowSchemaUrl,
+        output: {
+          schema: objectSchema({
+            status: { type: "string" },
+            [hostile[0] ?? ""]: { type: "array", items: { type: "string" } },
+          }),
+          value: { status: "done", [hostile[0] ?? ""]: hostile },
         },
-      ])
+        steps: [],
+      })
     );
     const { files } = await workflowSource(env, by, workflow.id, 1);
     const source = files[generatedPath] ?? "";
     expect({
       // It type-checked and compiled: nothing in it broke out of a literal.
-      executable: version.build.executable,
+      executable: version.build.hash !== undefined,
       literals: hostile.every((text) => source.includes(JSON.stringify(text))),
-      // Every key is a computed property: a key such as `toString` can't
-      // mean anything but a key.
-      computedKeys: source.includes('["toString"]:'),
-      evaluates: source.includes("evaluate("),
-    }).toStrictEqual({
-      executable: true,
-      literals: true,
-      computedKeys: true,
-      evaluates: false,
-    });
+    }).toStrictEqual({ executable: true, literals: true });
   });
 
   it("gives definitions that lower to the same program one executable identity", async () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
-    const publish = async (
-      version: string,
-      basedOn: number | null,
-      tasks: unknown[]
-    ) =>
+    const publish = async (basedOn: number | null, steps: unknown[]) =>
       await publishWorkflowVersion(env, by, workflow.id, {
-        definition: definitionOf(workflow.name, tasks, { version }),
+        definition: definitionOf({ $expr: "params.greeting" }, steps),
         basedOn,
       });
-    const first = await publish("1.0.0", null, [
-      { finish: { set: { status: "${ $params.greeting }" } } },
-    ]);
-    // Labels and layout change no program.
-    const relabelled = await publish("1.0.1", 1, [
-      {
-        finish: {
-          set: { status: "${ $params.greeting }" },
-          metadata: {
-            grasp: { label: "Finish up", position: { x: 40, y: 80 } },
-          },
-        },
-      },
-    ]);
-    const changed = await publish("1.0.2", 2, [
-      { finish: { set: { status: "${ $params.greeting | ascii_upcase }" } } },
+    const first = await publish(null, [finish()]);
+    // A title changes no program.
+    const relabelled = await publish(1, [finish("Finish up")]);
+    const changed = await publish(2, [
+      { ...finish(), if: { $expr: 'input.who === "nobody"' } },
     ]);
     expect(identityOf(first)).not.toBe("");
     expect(identityOf(relabelled)).toBe(identityOf(first));
@@ -291,71 +268,9 @@ describe("JSON workflow builds", () => {
     expect(relabelled.manifestHash).not.toBe(first.manifestHash);
   });
 
-  it("publishes what the generator doesn't lower without a build, naming each construct", async () => {
-    const by = await builder();
-    const { workflow, version } = await published(by, (name) =>
-      definitionOf(
-        name,
-        [
-          {
-            // A nested list's timeout would bound more than one attempt.
-            check: {
-              do: [{ inner: { set: { status: "checking" } } }],
-              timeout: { after: { seconds: 5 } },
-              then: "finish",
-            },
-          },
-          {
-            // A reusable retry policy's conditions had no error in scope.
-            guard: {
-              try: [{ attempt: { set: { status: "trying" } } }],
-              catch: { retry: "transient" },
-            },
-          },
-          { finish: { set: { status: "done" } } },
-        ],
-        {
-          more: {
-            timeout: { after: { minutes: 5 } },
-            use: {
-              retries: {
-                transient: {
-                  when: "${ true }",
-                  limit: { attempt: { count: 2 } },
-                },
-              },
-            },
-          },
-        }
-      )
-    );
-    expect(version.build.executable).toBeFalsy();
-    expect(
-      version.build.executable ? [] : version.build.unsupported
-    ).toStrictEqual([
-      { pointer: "/timeout", taskId: null, feature: "timeout" },
-      {
-        pointer: "/do/0/check/timeout",
-        taskId: "check",
-        feature: "timeout:do",
-      },
-      {
-        pointer: "/do/1/guard/catch/retry",
-        taskId: "guard",
-        feature: "use.retries:when",
-      },
-    ]);
-    // Nothing generated, nothing sealed: the export is the definition alone.
-    const { files } = await workflowSource(env, by, workflow.id, 1);
-    expect(Object.keys(files)).toStrictEqual(["workflow.json"]);
-    await expect(sealedArtifacts(workflow.id, 1)).resolves.toStrictEqual([]);
-  });
-
   it("refuses a build whose sealed bytes changed in storage", async () => {
     const by = await builder();
-    const { workflow } = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
+    const { workflow } = await published(by, definitionOf("done"));
     const artifacts = await sealedArtifacts(workflow.id, 1);
     const generated = artifacts.find(({ path }) => path === generatedPath);
     await env.FILES.put(
@@ -369,9 +284,7 @@ describe("JSON workflow builds", () => {
 
   it("answers the next load of a build whose first load was cancelled mid-read", async () => {
     const by = await builder();
-    const { workflow } = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
+    const { workflow } = await published(by, definitionOf("done"));
     // R2 that never answers a read: as the first load's request was
     // cancelled while it read, which workerd never settles.
     const reading = Promise.withResolvers<boolean>();
@@ -416,9 +329,7 @@ describe("JSON workflow builds", () => {
 
   it("verifies a build anew after a load of it failed, keeping no failure", async () => {
     const by = await builder();
-    const { workflow, version } = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
+    const { workflow, version } = await published(by, definitionOf("done"));
     const artifacts = await sealedArtifacts(workflow.id, 1);
     const generated = artifacts.find(({ path }) => path === generatedPath);
     const key = artifactKey(generated?.sha256 ?? "");
@@ -441,15 +352,13 @@ describe("JSON workflow builds", () => {
       hash: identityOf(version),
       source: text,
       modules: true,
-      tasks: 1,
+      tasks: 0,
     });
   });
 
   it("keeps a version's build through the release retention sweep", async () => {
     const by = await builder();
-    const { workflow } = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done" } } }])
-    );
+    const { workflow } = await published(by, definitionOf("done"));
     const year = 365 * 86_400_000;
     // Well past every grace: a reservation no release keeps would go.
     await sweepReleases(env, new Date(Date.now() + year));
@@ -462,55 +371,7 @@ describe("JSON workflow builds", () => {
     );
     expect(heads.every((head) => head !== null)).toBeTruthy();
     const { files } = await workflowSource(env, by, workflow.id, 1);
-    expect(files[generatedPath]).toContain('flow.set("finish"');
-  });
-
-  it("doesn't lower a task with more expressions than core evaluates in one", async () => {
-    const by = await builder();
-    const wide = Object.fromEntries(
-      Array.from({ length: 65 }, (_, index) => [
-        `field${index}`,
-        "${ $params.greeting }",
-      ])
-    );
-    const { version } = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { status: "done", ...wide } } }])
-    );
-    expect(
-      version.build.executable ? [] : version.build.unsupported
-    ).toStrictEqual([
-      {
-        pointer: "/do/0/finish/set",
-        taskId: "finish",
-        feature: "set:expressions",
-      },
-    ]);
-  });
-
-  it("lowers nothing at a pointer too long to seal, and names where", async () => {
-    const by = await builder();
-    const key = "k".repeat(2100);
-    const { workflow, version } = await published(by, (name) =>
-      definitionOf(name, [{ finish: { set: { [key]: "${ . }" } } }])
-    );
-    // Listed again from its stored manifest: nothing of it is corrupt.
-    const [listed] = await workflowVersions(env, by, workflow.id);
-    expect({
-      published: version.build,
-      listed: listed?.build,
-    }).toStrictEqual({
-      published: {
-        executable: false,
-        unsupported: [
-          {
-            pointer: "/do/0/finish/set",
-            taskId: "finish",
-            feature: "pointer:too_long",
-          },
-        ],
-      },
-      listed: version.build,
-    });
+    expect(files[generatedPath]).toContain("@grasp-os/sdk/workflow");
   });
 
   it("refuses an expression that reads a sensitive parameter, or all of them", async () => {
@@ -519,9 +380,7 @@ describe("JSON workflow builds", () => {
       const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
       const error = await refusal(
         publishWorkflowVersion(env, by, workflow.id, {
-          definition: definitionOf(workflow.name, [
-            { finish: { set: { status } } },
-          ]),
+          definition: definitionOf({ $expr: status }),
           basedOn: null,
         })
       );
@@ -536,30 +395,17 @@ describe("JSON workflow builds", () => {
         })
         .parse(error);
     };
-    const expected = {
-      code: "workflow.definition_invalid",
-      details: {
-        problems: [
-          {
-            code: "expression.sensitive_param",
-            pointer: "/do/0/finish/set/status",
-          },
-        ],
-      },
-    };
-    await expect(problemsOf("${ $params.token }")).resolves.toMatchObject(
-      expected
+    await expect(problemsOf("params.token")).resolves.toMatchObject(
+      refused("workflow.sensitive")
     );
-    await expect(
-      problemsOf('${ $params["to" + "ken"] }')
-    ).resolves.toMatchObject(expected);
+    await expect(problemsOf('params["to" + "ken"]')).resolves.toMatchObject(
+      refused("expression.computed-key")
+    );
     // Text that only looks like a read reads nothing.
     const quoted = await createWorkflowResource(env, by, `w-${unique()}`);
     await expect(
       publishWorkflowVersion(env, by, quoted.id, {
-        definition: definitionOf(quoted.name, [
-          { finish: { set: { status: '${ "$params.token" }' } } },
-        ]),
+        definition: definitionOf("params.token"),
         basedOn: null,
       })
     ).resolves.toMatchObject({ version: 1 });
@@ -568,12 +414,8 @@ describe("JSON workflow builds", () => {
   it("refuses a publication whose build outlasts the build wait, or dies, as one to try again", async () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
-    const request = (version: string) => ({
-      definition: definitionOf(
-        workflow.name,
-        [{ finish: { set: { status: `late ${unique()}` } } }],
-        { version }
-      ),
+    const request = () => ({
+      definition: definitionOf(`late ${unique()}`),
       basedOn: null,
     });
     const hungTargets: string[] = [];
@@ -591,17 +433,12 @@ describe("JSON workflow builds", () => {
       throw new Error("Worker exceeded CPU time limit.");
     }, diedTargets);
     const late = await outcome(
-      publishWorkflowVersion(hung, by, workflow.id, request("1.0.0"))
+      publishWorkflowVersion(hung, by, workflow.id, request())
     );
     const killed = await outcome(
-      publishWorkflowVersion(died, by, workflow.id, request("1.0.0"))
+      publishWorkflowVersion(died, by, workflow.id, request())
     );
-    const saved = await publishWorkflowVersion(
-      env,
-      by,
-      workflow.id,
-      request("1.0.0")
-    );
+    const saved = await publishWorkflowVersion(env, by, workflow.id, request());
     expect({
       late,
       killed,
@@ -613,9 +450,60 @@ describe("JSON workflow builds", () => {
     }).toStrictEqual({
       late: "workflow.build_slow",
       killed: "workflow.build_slow",
-      targets: ["open-workflow"],
+      targets: ["generated-workflow"],
       bothReached: true,
       retryable: true,
+      published: 1,
+    });
+  });
+
+  it("refuses a publication whose expression check outlasts the build wait, dies or crashes, as one to try again, and keeps none of it", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
+    // A read the type check takes, unique so no earlier check answers it.
+    const request = (name: string) => ({
+      definition: definitionOf({ $expr: `input.who + '${name}'` }),
+      basedOn: null,
+    });
+    const hung = checkerThat(
+      async () =>
+        // oxlint-disable-next-line promise/avoid-new -- a check that never answers
+        await new Promise<never>(() => {
+          // Never answers.
+        })
+    );
+    const died = checkerThat(async () => {
+      await Promise.resolve();
+      throw new Error("Worker exceeded CPU time limit.");
+    });
+    // tsrs failing to run: the check as a whole refused (type-check.ts).
+    const crashed = checkerThat(
+      async () =>
+        await Promise.resolve([
+          { rule: "check", severity: "error", message: "tsrs crashed." },
+        ])
+    );
+    const [lateName, killedName, crashedName] = [unique(), unique(), unique()];
+    const late = await outcome(
+      publishWorkflowVersion(hung, by, workflow.id, request(lateName))
+    );
+    const killed = await outcome(
+      publishWorkflowVersion(died, by, workflow.id, request(killedName))
+    );
+    const crash = await outcome(
+      publishWorkflowVersion(crashed, by, workflow.id, request(crashedName))
+    );
+    // The same expressions, checked again: nothing of the crash was kept.
+    const saved = await publishWorkflowVersion(
+      env,
+      by,
+      workflow.id,
+      request(crashedName)
+    );
+    expect({ late, killed, crash, published: saved.version }).toStrictEqual({
+      late: "workflow.build_slow",
+      killed: "workflow.build_slow",
+      crash: "workflow.build_slow",
       published: 1,
     });
   });
@@ -624,9 +512,7 @@ describe("JSON workflow builds", () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
     const request = {
-      definition: definitionOf(workflow.name, [
-        { finish: { set: { status: `stopped ${unique()}` } } },
-      ]),
+      definition: definitionOf(`stopped ${unique()}`),
       basedOn: null,
     };
     // A sandbox host whose supervisor stops every call at its CPU bound.
@@ -672,7 +558,10 @@ describe("JSON workflow builds", () => {
     );
     // The same module, built again: nothing of the stop was kept.
     const saved = await publishWorkflowVersion(env, by, workflow.id, request);
-    expect({ stopped, executable: saved.build.executable }).toStrictEqual({
+    expect({
+      stopped,
+      executable: saved.build.hash !== undefined,
+    }).toStrictEqual({
       stopped: "workflow.build_slow",
       executable: true,
     });
@@ -685,20 +574,14 @@ describe("JSON workflow builds", () => {
       ...env,
       DB: racingDb(async () => {
         await publishWorkflowVersion(env, by, workflow.id, {
-          definition: definitionOf(
-            workflow.name,
-            [{ finish: { set: { status: "winner" } } }],
-            { version: "1.0.1" }
-          ),
+          definition: definitionOf("winner"),
           basedOn: null,
         });
       }, /insert into "workflow_resource_versions"/iu),
     };
     const lost = await outcome(
       publishWorkflowVersion(raced, by, workflow.id, {
-        definition: definitionOf(workflow.name, [
-          { finish: { set: { status: "loser" } } },
-        ]),
+        definition: definitionOf("loser"),
         basedOn: null,
       })
     );
@@ -749,9 +632,7 @@ describe("JSON workflow builds", () => {
             by,
             workflow.id,
             {
-              definition: definitionOf(workflow.name, [
-                { finish: { set: { status: "failing" } } },
-              ]),
+              definition: definitionOf("failing"),
               basedOn: null,
             }
           )
@@ -760,11 +641,7 @@ describe("JSON workflow builds", () => {
     };
     const saved = await outcome(
       publishWorkflowVersion(raced, by, workflow.id, {
-        definition: definitionOf(
-          workflow.name,
-          [{ finish: { set: { status: "healthy" } } }],
-          { version: "1.0.1" }
-        ),
+        definition: definitionOf("healthy"),
         basedOn: null,
       })
     );
@@ -816,9 +693,7 @@ describe("JSON workflow builds", () => {
     });
     const failed = await outcome(
       publishWorkflowVersion({ ...env, FILES: files }, by, workflow.id, {
-        definition: definitionOf(workflow.name, [
-          { finish: { set: { status: "first" } } },
-        ]),
+        definition: definitionOf("first"),
         basedOn: null,
       })
     );
@@ -852,19 +727,13 @@ describe("JSON workflow builds", () => {
     });
     const failed = await outcome(
       publishWorkflowVersion({ ...env, FILES: failingFiles }, by, workflow.id, {
-        definition: definitionOf(workflow.name, [
-          { finish: { set: { status: "first" } } },
-        ]),
+        definition: definitionOf("first"),
         basedOn: null,
       })
     );
     // The number goes to another publication, of other content.
     await publishWorkflowVersion(env, by, workflow.id, {
-      definition: definitionOf(
-        workflow.name,
-        [{ finish: { set: { status: "second" } } }],
-        { version: "1.0.1" }
-      ),
+      definition: definitionOf("second"),
       basedOn: null,
     });
     const reserved = await env.DB.prepare(

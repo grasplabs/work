@@ -22,22 +22,13 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import {
-  permissions,
-  runChatSources,
-  runEvidenceHolds,
-} from "../db/core/schema.ts";
+import { permissions, runChatSources } from "../db/core/schema.ts";
 import { readableSources } from "../history-access.ts";
 import type { Reader } from "../knowledge/access.ts";
 import { readAsDelegate } from "../knowledge/binding.ts";
 import { brainOf } from "../knowledge/ports.ts";
 import { pinnedTemplate } from "../resource-templates.ts";
-import {
-  callingRunOf,
-  heldRunOf,
-  runAuthority,
-  runContext,
-} from "./resource-authority.ts";
+import { runAuthority, runContext } from "./resource-authority.ts";
 import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 import {
   citedVersions,
@@ -518,61 +509,13 @@ const requireOwnEvidenceReadable = async (
 };
 
 /**
- * Most ancestors a run's check follows: past any lineage's levels, so one
- * deeper is held as one it can't check.
- */
-const ancestorsMax = 64;
-
-/**
- * `requireOwnEvidenceReadable` for each run `run` holds (`runEvidenceHolds`):
- * a child whose output it took, and every run that child held, each under
- * its own workflow's authority as it stands now, ended or not. One whose
- * details are gone is refused as `brain.revoked`: what its output carried
- * can no longer be checked.
- */
-const requireHeldEvidenceReadable = async (
-  env: Env,
-  run: CallingRun
-): Promise<void> => {
-  const held = await drizzle(env.DB)
-    .select({ runId: runEvidenceHolds.heldRunId })
-    .from(runEvidenceHolds)
-    .where(eq(runEvidenceHolds.runId, run.runId));
-  for (const { runId } of held) {
-    // oxlint-disable-next-line no-await-in-loop -- one held run after another, few
-    const heldRun = await heldRunOf(env, runId);
-    if (heldRun === undefined) {
-      throw brainErrors.create("brain.revoked");
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one held run after another, few
-    await requireOwnEvidenceReadable(env, heldRun);
-  }
-};
-
-/**
- * `requireRunEvidenceReadable` for a run of a JSON workflow
- * (resource-host.ts, GRA-299): its recalls are each through a knowledge
- * binding, one collection under one permission of the workflow's, so each
- * binding's documents are checked under that permission, as the run
- * reads now: the permission still the workflow's and active
- * (`boundCollection`), the Brain still admitting the run, each document
- * still in its collection, readable there and unpurged. A test run
- * recalls nothing, so has nothing to check. A child run (run-children.ts,
- * GRA-1093) took its input from its parent's steps, so it is held to each
- * ancestor's evidence too, each under that ancestor's own authority and
- * bindings as they are now. An ancestor no longer going is refused as
- * `brain.revoked`, as is a lineage past `ancestorsMax`. That refuses no
- * live child: a parent that ends stops its children, every call a child
- * makes already asks that its parent is still going (run-children.ts),
- * and retention removes only ended runs' records.
- *
- * A run that took a child's output holds that child's evidence, and the
- * evidence of every run the child held (`runEvidenceHolds`, kept as its
- * parent is told of its end): each checked too, under that run's own
- * authority as it stands now, so a child's output loses none of its
- * protection in its parent's hands.
- *
- * The walk follows workflow parents alone: no other run starts one.
+ * `requireRunEvidenceReadable` for a run of a JSON workflow (GRA-299): its
+ * recalls are each through a knowledge binding, one collection under one
+ * permission of the workflow's, so each binding's documents are checked
+ * under that permission, as the run reads now: the permission still the
+ * workflow's and active (`boundCollection`), the Brain still admitting
+ * the run, each document still in its collection, readable there and
+ * unpurged. A test run recalls nothing, so has nothing to check.
  *
  * What a running run shows needs no check: its details (`resourceRunFor`)
  * hold its output or failure only once it ended, which this checks first,
@@ -587,27 +530,5 @@ export const requireResourceRunEvidenceReadable = async (
   env: Env,
   run: CallingRun
 ): Promise<void> => {
-  let current = run;
-  for (let depth = 0; depth <= ancestorsMax; depth += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- one run after its parent
-    await requireOwnEvidenceReadable(env, current);
-    // What it took from its children carries their evidence too.
-    // oxlint-disable-next-line no-await-in-loop -- one run after its parent
-    await requireHeldEvidenceReadable(env, current);
-    const { invoker } = current;
-    if (invoker.type !== "workflow") {
-      return;
-    }
-    const parentWorkflowId = invoker.parentWorkflowId ?? null;
-    const parent =
-      parentWorkflowId === null
-        ? undefined
-        : // oxlint-disable-next-line no-await-in-loop -- one run after its parent
-          await callingRunOf(env, parentWorkflowId, invoker.id);
-    if (parent === undefined) {
-      throw brainErrors.create("brain.revoked");
-    }
-    current = parent;
-  }
-  throw brainErrors.create("brain.revoked");
+  await requireOwnEvidenceReadable(env, run);
 };

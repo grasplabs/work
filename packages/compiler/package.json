@@ -30,6 +30,7 @@
     "build": "node build.ts"
   },
   "dependencies": {
+    "@babel/parser": "catalog:",
     "@babel/standalone": "catalog:",
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
@@ -50,7 +51,6 @@
     "tailwindcss": "catalog:"
   },
   "devDependencies": {
-    "@babel/parser": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "@grasp-os/sdk": "workspace:*",
     "@types/node": "catalog:",

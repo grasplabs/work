@@ -345,7 +345,7 @@ const seedWorkflow = async (
     }
   }
   await resources.publish(created.id, {
-    definition: definitionText(created.name, workflow.title, workflow.parts),
+    definition: definitionText(workflow.parts),
     basedOn: null,
     modules: workflow.modules,
   });

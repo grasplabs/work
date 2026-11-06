@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { v } from "@grasp-os/sdk";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
 import type {
@@ -24,12 +23,12 @@ import type {
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import {
   maxAttemptTimeoutMs,
   stepIdempotencyKey,
 } from "@grasp-os/shared/workflows";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
@@ -56,7 +55,6 @@ import {
   approveWorkflowBinding,
   revokeWorkflowBinding,
 } from "../src/workflow-bindings.ts";
-import { loadWorkflowBuild } from "../src/workflow-builds.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
@@ -71,11 +69,6 @@ import { appWorkflowStarts } from "../src/workflow-start-intents.ts";
 import type { CallingAgent } from "../src/workflow-start-intents.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runEngine } from "../src/workflows/engine.ts";
-import { cpuLimitKill } from "../src/workflows/host.ts";
-import type { RunStep } from "../src/workflows/host.ts";
-import type { FrozenCatalogBinding } from "../src/workflows/resource-authority.ts";
-import { ResourceRunHost } from "../src/workflows/resource-host.ts";
-import type { TriedOnceMarks } from "../src/workflows/resource-host.ts";
 import { resourceRunTrace } from "../src/workflows/resource-run-trace.ts";
 import {
   resourceRunFor,
@@ -85,11 +78,10 @@ import {
   startDetailsPerSweep,
   sweepRunDetails,
 } from "../src/workflows/retention.ts";
-import type { Settled, StepError } from "../src/workflows/sealed-isolate.ts";
 import { repairWakes } from "../src/workflows/wakes.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { endLiveResourceRuns } from "./json-workflow-apps.ts";
+import { endLiveResourceRuns, objectSchema } from "./json-workflow-apps.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
 import {
@@ -100,7 +92,6 @@ import {
 import type { ProviderReply } from "./model-provider.ts";
 import { withQuotas } from "./quota-limits.ts";
 import {
-  admittedFreely,
   liveStatus,
   resumed,
   runInstance,
@@ -119,14 +110,12 @@ import {
 } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 
-// The named calls of JSON workflows (@grasp-os/open-workflow's
-// generate.ts, the SDK's open-workflow.ts, core's resource-host.ts,
+// The calls of grasp-workflow/1 workflows on the run host (sealed-run.ts,
 // resource-calls.ts and resource-authority.ts), from their threat model:
 // a call reaches only the target its start froze; authority revoked while
-// a run runs stops its next call; a replay repeats no effect, and time,
-// randomness and deadlines replay as recorded; a sensitive parameter
-// reaches connect as a binding argument and nothing the run records; and
-// a workflow's limits only ever lower the host's. Everything runs for
+// a run runs stops its next call; a replay repeats no effect; a sensitive
+// parameter reaches connect as a connector argument and nothing the run
+// records; and a run's model calls stay within its ceiling. Everything runs for
 // real, through the dispatcher, the engine, connect and the App's own
 // code; only the mail server and the model provider behind connect are
 // faked.
@@ -168,16 +157,6 @@ const person = async (role: Role): Promise<Identity> => {
   ]);
   return identityOf(userId, role);
 };
-
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
 
 /**
  * The read of the organization's chosen models, as the gateway routes a
@@ -223,50 +202,42 @@ const granted = async (
 interface Draft {
   bindings?: Record<string, { kind: string; contract: string }>;
   params?: Record<string, unknown>;
-  limits?: Record<string, number>;
-  use?: Record<string, unknown>;
-  tasks: unknown[];
+  steps: readonly unknown[];
+  /** What the run's `status` ends as: an expression, the text `done` if none. */
+  status?: string;
   /** The workflow's own code modules, by path. */
   modules?: Record<string, string>;
 }
 
-/** A definition of `name`: its input `{ who }`, its output `{ status }`. */
-const definitionOf = (
-  name: string,
-  { bindings = {}, params = {}, limits, use, tasks }: Draft
-): string =>
+/** A definition: its input `{ who }`, its output `{ status }`. */
+const definitionOf = ({
+  bindings = {},
+  params = {},
+  steps,
+  status,
+}: Draft): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params,
-          bindings,
-          ...(limits === undefined ? {} : { limits }),
-        },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: status === undefined ? "done" : { $expr: status } },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    ...(use === undefined ? {} : { use }),
-    do: tasks,
+    params,
+    bindings,
+    steps,
   });
 
 /** A workflow of `by`'s, published once from `draft`. */
 const published = async (by: Identity, draft: Draft) => {
   const workflow = await createWorkflowResource(env, by, `calls-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(workflow.name, draft),
+    definition: definitionOf(draft),
     basedOn: null,
     ...(draft.modules === undefined ? {} : { modules: draft.modules }),
   });
   const [version] = await workflowVersions(env, by, workflow.id);
-  return { workflow, executable: version?.build.executable };
+  return { workflow, executable: version?.build.hash !== undefined };
 };
 
 /** Starts version 1 of workflow `id` for `by`, on `startEnv`: its run's ID. */
@@ -349,103 +320,13 @@ const callEventsOf = async (runId: string) => {
 };
 
 /** Suspends a run: the next activation replays from the start. */
-const pause = { pause: { wait: "PT1S" } };
+const pause = { id: "pause", type: "wait", for: "1 second" };
 
 /** Holds a run before its call: long enough to revoke what it needs. */
-const hold = { hold: { wait: "PT1S" } };
+const hold = { id: "hold", type: "wait", for: "1 second" };
 
-describe("time, randomness and deadlines of JSON workflows", () => {
-  beforeAll(chooseModel);
-
-  it("records grasp.now and grasp.random, so a replay after a wait answers the same", async () => {
-    const by = await person("builder");
-    const { workflow, executable } = await published(by, {
-      tasks: [
-        { clock: { call: "grasp.now", export: { as: "${ {at: .} }" } } },
-        {
-          dice: {
-            call: "grasp.random",
-            with: {},
-            export: { as: "${ $context + {r: .} }" },
-          },
-        },
-        pause,
-        {
-          finish: {
-            set: {
-              status:
-                '${ ($context.at | tostring) + " " + ($context.r | tostring) }',
-            },
-          },
-        },
-      ],
-    });
-    const run = await ended(by, workflow.id, await started(by, workflow.id));
-    const [at, r] = z
-      .object({ status: z.string() })
-      .parse(run.output)
-      .status.split(" ")
-      .map(Number);
-    expect({
-      executable,
-      status: run.status,
-      // Recorded before the wait: read again after it, the time would be
-      // at least a second later.
-      recorded: Date.parse(run.endedAt ?? "") - (at ?? 0) >= 1000,
-      fraction: (r ?? -1) >= 0 && (r ?? 1) < 1,
-    }).toStrictEqual({
-      executable: true,
-      status: "completed",
-      recorded: true,
-      fraction: true,
-    });
-  });
-
-  it("resolves an expression wait and grasp.sleepUntil once, to the deadline its step recorded", async () => {
-    const by = await person("builder");
-    const { workflow, executable } = await published(by, {
-      params: {
-        seconds: {
-          schema: { type: "integer", minimum: 1, maximum: 5 },
-          label: "Seconds",
-          default: 1,
-          sensitive: false,
-        },
-      },
-      tasks: [
-        {
-          linger: {
-            wait: '${ "PT" + ($params.seconds | tostring) + "S" }',
-          },
-        },
-        {
-          until: {
-            call: "grasp.sleepUntil",
-            with: {
-              timestamp: "${ $workflow.startedAt.epoch.milliseconds + 2000 }",
-            },
-          },
-        },
-        {
-          finish: {
-            set: {
-              status: "${ $workflow.startedAt.epoch.milliseconds | tostring }",
-            },
-          },
-        },
-      ],
-    });
-    const run = await ended(by, workflow.id, await started(by, workflow.id));
-    const startedAt = Number(
-      z.object({ status: z.string() }).parse(run.output).status
-    );
-    expect({
-      executable,
-      status: run.status,
-      slept: Date.parse(run.endedAt ?? "") - startedAt >= 2000,
-    }).toStrictEqual({ executable: true, status: "completed", slept: true });
-  });
-});
+/** Holds a run asleep for longer than any test takes. */
+const longHold = { id: "asleep", type: "wait", for: "1 hour" };
 
 /** What mail.send takes: `{ to, subject }`. */
 const mailInput = v.object({ to: v.string(), subject: v.string() });
@@ -515,56 +396,50 @@ const servingMail = (input: { descriptor: unknown } = mailInput): Env => {
 /**
  * A workflow of `by`'s sending mail through binding `mail` (a connection
  * of its own, approved by `admin`) to its input's `who`, the subject its
- * sensitive `token` parameter as a binding argument; `before` its tasks
- * before the send, `to` whom it sends, `plan` how the mail server answers.
- * Answers what serves it.
+ * sensitive `token` parameter (set to `token`) as a connector argument;
+ * `before` its steps before the send, `to` whom it sends,
+ * `plan` how the mail server answers. Answers what serves it.
  */
 const mailingWorkflow = async (
   by: Identity,
   admin: Identity,
   {
     before = [],
-    to = "${ $workflow.input.who }",
+    to = { $expr: "input.who" },
     plan = [],
     sharing,
     plain = false,
     retry,
     attachments,
+    token = "none",
   }: {
     before?: unknown[];
-    to?: string;
+    to?: unknown;
     plan?: Parameters<typeof mailConnection>[0];
     /** Another alias, sorted first, approved for the same permission. */
     sharing?: string;
-    /**
-     * It ends with its send, whose answer its `output.as` makes the
-     * run's output: nothing after the send is admitted or evaluated.
-     */
+    /** It ends with its send: nothing after the send is admitted. */
     plain?: boolean;
     /** A retry policy of a try's catch around the send. */
     retry?: Record<string, unknown>;
     /** Files it names to attach, to an operation that takes none. */
     attachments?: unknown[];
+    /** Its sensitive parameter's value, as people set it. */
+    token?: string;
   } = {}
 ) => {
   const input =
     attachments === undefined ? mailInput : mailInputWithAttachments;
   const key = await mailContract(admin, input);
   const send = {
-    send: {
-      call: "grasp.connector",
-      with: {
-        binding: "mail",
-        operation: "mail.send",
-        arguments: {
-          to,
-          subject: "${ $params.token }",
-          ...(attachments === undefined ? {} : { attachments }),
-        },
-      },
-      ...(plain
-        ? { output: { as: "${ {status: .messageId} }" } }
-        : { export: { as: "${ {sent: .messageId} }" } }),
+    id: "send",
+    type: "do",
+    binding: "mail",
+    operation: "mail.send",
+    arguments: {
+      to,
+      subject: { $expr: "params.token" },
+      ...(attachments === undefined ? {} : { attachments }),
     },
   };
   const { workflow, executable } = await published(by, {
@@ -574,41 +449,33 @@ const mailingWorkflow = async (
         ? {}
         : { [sharing]: { kind: "connector", contract: key } }),
     },
-    params: {
-      token: {
-        schema: { type: "string", maxLength: 64 },
-        label: "Token",
-        default: "none",
-        sensitive: true,
-      },
-    },
-    tasks: [
+    params: { token: { kind: "text", label: "Token" } },
+    steps: [
       ...before,
-      // The other alias, declared by a task that never runs.
+      // The other alias, called by a step that never runs.
       ...(sharing === undefined
         ? []
         : [
             {
-              skipped: {
-                if: "${ false }",
-                call: "grasp.connector",
-                with: {
-                  binding: sharing,
-                  operation: "mail.send",
-                  arguments: { to: "Nobody", subject: "Never" },
-                },
-              },
+              id: "skipped",
+              type: "do",
+              if: { $expr: "false" },
+              binding: sharing,
+              operation: "mail.send",
+              arguments: { to: "Nobody", subject: "Never" },
             },
           ]),
-      ...[send].map((task) =>
-        retry === undefined
-          ? task
-          : { guard: { try: [task], catch: { retry } } }
-      ),
-      ...(plain
-        ? []
-        : [pause, { finish: { set: { status: "${ $context.sent }" } } }]),
+      retry === undefined
+        ? send
+        : { id: "guard", type: "try", try: [send], catch: { retry } },
+      ...(plain ? [] : [pause]),
     ],
+    // A step in a try is read by nothing after it: a catch may take it.
+    status: retry === undefined ? "steps.send.output.messageId" : '"sent"',
+  });
+  await setWorkflowParams(env, by, workflow.id, {
+    values: { token },
+    expectedRevision: 0,
   });
   const mail = await mailConnection(plan);
   const permissionId = await granted(by, admin, {
@@ -662,33 +529,18 @@ const echoingMail = async (id: string, echo: string): Promise<void> => {
   });
 };
 
-/** A task sending mail to Ada with `subject`, through binding `mail`. */
-const send = (subject: string) => ({
-  send: {
-    call: "grasp.connector",
-    with: {
-      binding: "mail",
-      operation: "mail.send",
-      arguments: { to: "Ada", subject },
-    },
-  },
-});
-
-describe("grasp.connector calls of JSON workflows", () => {
+describe("connector calls", () => {
   beforeAll(chooseModel);
 
   it("sends once through connect, its sensitive parameter only as a binding argument, and a replay sends nothing again", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
+    const secret = `secret-${unique()}`;
     const { workflow, executable, mail, serving } = await mailingWorkflow(
       ada,
-      admin
+      admin,
+      { token: secret }
     );
-    const secret = `secret-${unique()}`;
-    await setWorkflowParams(env, ada, workflow.id, {
-      values: { token: secret },
-      expectedRevision: 0,
-    });
     const runId = await started(ada, workflow.id, serving);
     const run = await ended(ada, workflow.id, runId);
     const sent = await mail.did();
@@ -730,54 +582,6 @@ describe("grasp.connector calls of JSON workflows", () => {
     });
   });
 
-  it("refuses a call once its run's lineage has made all the host calls it may, sending nothing for it", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    // Two calls of the clock first, one host call each, then the mail's
-    // own: all the lineage may make. Its first argument's evaluation, which
-    // would fail if it ran, is refused before it runs: the call took its
-    // host call before anything of it was built, and nothing is sent.
-    const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
-      before: [
-        { first: { call: "grasp.now" } },
-        { second: { call: "grasp.now" } },
-      ],
-      to: "${ $workflow.input.who | tonumber | tostring }",
-    });
-    const { runId, run } = await withQuotas(
-      { lineageHostCalls: 3 },
-      async () => {
-        const id = await started(ada, workflow.id, serving);
-        return { runId: id, run: await ended(ada, workflow.id, id) };
-      }
-    );
-    const sent = await mail.did();
-    const lineage = await env.DB.prepare(
-      "SELECT host_calls AS hostCalls FROM run_lineages WHERE root_run_id = ?"
-    )
-      .bind(runId)
-      .first<{ hostCalls: number }>();
-    const attempts = await env.DB.prepare(
-      "SELECT host_calls AS hostCalls FROM run_lineage_attempts WHERE run_id = ? ORDER BY admitted_at"
-    )
-      .bind(runId)
-      .all<{ hostCalls: number }>();
-    expect({
-      end: endOf(run),
-      calls: sent.calls,
-      receipts: await receiptsOf(runId),
-      hostCalls: lineage?.hostCalls,
-      byAttempt: attempts.results.map(({ hostCalls }) => hostCalls),
-    }).toStrictEqual({
-      end: { status: "failed", code: "workflow.lineage_limit" },
-      calls: 0,
-      receipts: [],
-      hostCalls: 3,
-      // Each attempt made its call; the mail's went no further.
-      byAttempt: [1, 1, 1],
-    });
-  });
-
   it("refuses files named to attach to an operation whose contract takes none, sending nothing", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -806,11 +610,9 @@ describe("grasp.connector calls of JSON workflows", () => {
   it("refuses a connector's answer that echoes a binding argument, so its value is never recorded", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const { workflow, mail, serving } = await mailingWorkflow(ada, admin);
     const secret = `secret-${unique()}`;
-    await setWorkflowParams(env, ada, workflow.id, {
-      values: { token: secret },
-      expectedRevision: 0,
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
+      token: secret,
     });
     // The server answers with the subject it was sent, in a field the
     // contract takes.
@@ -908,13 +710,10 @@ describe("grasp.connector calls of JSON workflows", () => {
     const admin = await person("admin");
     const ada = await person("builder");
     // The server sends the mail, and its answer is lost on the way back.
+    const secret = `secret-${unique()}`;
     const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
       plan: ["lost"],
-    });
-    const secret = `secret-${unique()}`;
-    await setWorkflowParams(env, ada, workflow.id, {
-      values: { token: secret },
-      expectedRevision: 0,
+      token: secret,
     });
     const runId = await started(ada, workflow.id, serving);
     const run = await ended(ada, workflow.id, runId);
@@ -964,7 +763,7 @@ describe("grasp.connector calls of JSON workflows", () => {
     const ada = await person("builder");
     // `to` is text in the contract; this one is a number.
     const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
-      to: "${ $workflow.input.who | length }",
+      to: { $expr: "input.who.length" },
     });
     const runId = await started(ada, workflow.id, serving);
     const run = await ended(ada, workflow.id, runId);
@@ -972,116 +771,6 @@ describe("grasp.connector calls of JSON workflows", () => {
     expect({ end: endOf(run), calls: sent.calls }).toStrictEqual({
       end: { status: "failed", code: "workflow.call_invalid" },
       calls: 0,
-    });
-  });
-
-  it("refuses at publication a sensitive parameter anywhere but as a whole binding argument of a connector", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const key = await mailContract(admin);
-    const workflow = await createWorkflowResource(
-      env,
-      ada,
-      `calls-${unique()}`
-    );
-    const token = {
-      schema: { type: "string", maxLength: 64 },
-      label: "Token",
-      default: "none",
-      sensitive: true,
-    };
-    // A secret with parts: one of them could come back unseen.
-    const keys = {
-      schema: {
-        type: "object",
-        properties: { key: { type: "string", maxLength: 64 } },
-        required: ["key"],
-        additionalProperties: false,
-      },
-      label: "Keys",
-      default: { key: "none" },
-      sensitive: true,
-    };
-    // A number, which could come back as text unseen.
-    const pin = {
-      schema: { type: "integer" },
-      label: "PIN",
-      default: 1234,
-      sensitive: true,
-    };
-    const problems = async (tasks: unknown[], other?: "keys" | "pin") => {
-      const error = await refusal(
-        publishWorkflowVersion(env, ada, workflow.id, {
-          definition: definitionOf(workflow.name, {
-            bindings: { mail: { kind: "connector", contract: key } },
-            params: { token, ...(other === undefined ? {} : { keys, pin }) },
-            tasks: [...tasks, { finish: { set: { status: "done" } } }],
-          }),
-          basedOn: null,
-        })
-      );
-      return z
-        .object({
-          details: z.object({
-            problems: z.array(
-              z
-                .object({ code: z.string(), pointer: z.string() })
-                .transform(({ code, pointer }) => ({ code, pointer }))
-            ),
-          }),
-        })
-        .parse(error).details.problems;
-    };
-    expect({
-      // Transformed, it would pass through jq.
-      computed: await problems([send('${ $params.token + "!" }')]),
-      // In a set, it would reach the run's output.
-      set: await problems([{ leak: { set: { value: "${ $params.token }" } } }]),
-      // A whole binding argument, but of a secret with parts.
-      compound: await problems([send("${ $params.keys }")], "keys"),
-      number: await problems([send("${ $params.pin }")], "pin"),
-      // Data shaped like a call is no call.
-      lookalike: await problems([
-        {
-          leak: {
-            set: {
-              call: "grasp.connector",
-              with: { arguments: "${ $params.token }" },
-            },
-          },
-        },
-      ]),
-    }).toStrictEqual({
-      computed: [
-        {
-          code: "expression.sensitive_param",
-          pointer: "/do/0/send/with/arguments/subject",
-        },
-      ],
-      set: [
-        {
-          code: "expression.sensitive_param",
-          pointer: "/do/0/leak/set/value",
-        },
-      ],
-      compound: [
-        {
-          code: "expression.sensitive_param",
-          pointer: "/do/0/send/with/arguments/subject",
-        },
-      ],
-      number: [
-        {
-          code: "expression.sensitive_param",
-          pointer: "/do/0/send/with/arguments/subject",
-        },
-      ],
-      lookalike: [
-        {
-          code: "expression.sensitive_param",
-          pointer: "/do/0/leak/set/with/arguments",
-        },
-      ],
     });
   });
 });
@@ -1111,41 +800,33 @@ const sleepOf = async (run: string): Promise<string> =>
     { timeout: 10_000, interval: 50 }
   );
 
+/** An agent step asking binding `summary` to greet the run's `who`. */
+const greetStep = (id = "greet", timeout?: string) => ({
+  id,
+  type: "agent",
+  binding: "summary",
+  instructions: "Greet them.",
+  input: { who: { $expr: "input.who" } },
+  output: objectSchema({ line: { type: "string" } }),
+  ...(timeout === undefined ? {} : { timeout }),
+});
+
 /**
  * A workflow of `by`'s asking binding `summary` (the allowed model,
- * approved by `admin`) to greet its input's `who`, `before` its tasks
- * before the call, and `limits` its own.
+ * approved by `admin`) to greet its input's `who`, `before` its steps
+ * before the call.
  */
 const greetingWorkflow = async (
   by: Identity,
   admin: Identity,
-  {
-    before = [],
-    limits,
-  }: { before?: unknown[]; limits?: Record<string, number> } = {}
+  { before = [] }: { before?: unknown[] } = {}
 ) => {
   const key = `summary-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "model" });
   const { workflow, executable } = await published(by, {
     bindings: { summary: { kind: "model", contract: key } },
-    ...(limits === undefined ? {} : { limits }),
-    tasks: [
-      ...before,
-      {
-        greet: {
-          call: "grasp.model",
-          with: {
-            binding: "summary",
-            instructions: "Greet them.",
-            input: { who: "${ $workflow.input.who }" },
-            outputSchema: objectSchema({ line: { type: "string" } }),
-          },
-          export: { as: "${ {line: .line} }" },
-        },
-      },
-      pause,
-      { finish: { set: { status: "${ $context.line }" } } },
-    ],
+    steps: [...before, greetStep(), pause],
+    status: "steps.greet.output.line",
   });
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "summary",
@@ -1171,7 +852,7 @@ const providerWaitOf = async (by: Identity, id: string, runId: string) =>
     { timeout: 20_000, interval: 100 }
   );
 
-describe("grasp.model calls of JSON workflows", () => {
+describe("model calls", () => {
   beforeAll(chooseModel);
   afterEach(() => {
     vi.restoreAllMocks();
@@ -1293,8 +974,7 @@ describe("grasp.model calls of JSON workflows", () => {
       const greetOf = async (id: string, runId: string) => {
         const { steps } = await signedIn.api.workflowResources.runTrace(
           id,
-          runId,
-          { doors: false }
+          runId
         );
         return steps
           .filter(({ task }) => task === "greet")
@@ -1366,8 +1046,7 @@ describe("grasp.model calls of JSON workflows", () => {
     }
     const { steps, tasks } = await signedIn.api.workflowResources.runTrace(
       workflow.id,
-      runId,
-      { doors: false }
+      runId
     );
     const greet = steps.filter(({ task }) => task === "greet");
 
@@ -1459,10 +1138,10 @@ describe("grasp.model calls of JSON workflows", () => {
     // A trigger's start.
     const byTrigger = await greetingWorkflow(ada, admin, { before: [hold] });
     const trigger = await createTriggerResource(env, ada, {
-      kind: "system",
+      kind: "webhook",
       workflowId: byTrigger.workflow.id,
       version: 1,
-      config: { event: { contract: "notes", type: "note.created" } },
+      config: {},
     });
     const triggerGrant = await startOf(
       { type: "trigger", triggerId: triggerIdSchema.parse(trigger.id) },
@@ -1561,28 +1240,29 @@ describe("grasp.model calls of JSON workflows", () => {
     await providerAnswering(hello, hello, hello, hello);
     // A wait before its call that only the test ends, once the trigger
     // moved: the call can't come before the move.
-    const waits = { hold: { wait: "P1D" } };
+    const waits = { id: "hold", type: "wait", for: "1 day" };
     const runOf = async (move: (trigger: string) => Promise<void>) => {
       const { workflow } = await greetingWorkflow(ada, admin, {
         before: [waits],
       });
-      // A version 2 to move the trigger to: its semantic version alone changed.
+      // A version 2 to move the trigger to: a step's title alone changed.
       const first = z
-        .object({ document: z.looseObject({}) })
-        .loose()
+        .looseObject({ steps: z.array(z.looseObject({})) })
         .parse(JSON.parse(await workflowDefinition(env, ada, workflow.id, 1)));
       await publishWorkflowVersion(env, ada, workflow.id, {
         definition: JSON.stringify({
           ...first,
-          document: { ...first.document, version: "1.0.1" },
+          steps: first.steps.map((step, index) =>
+            index === 0 ? { ...step, title: "Wait a day" } : step
+          ),
         }),
         basedOn: 1,
       });
       const trigger = await createTriggerResource(env, ada, {
-        kind: "system",
+        kind: "webhook",
         workflowId: workflow.id,
         version: 1,
-        config: { event: { contract: "notes", type: "note.created" } },
+        config: {},
       });
       await granted(ada, admin, {
         subject: {
@@ -1702,7 +1382,7 @@ describe("grasp.model calls of JSON workflows", () => {
     });
   });
 
-  it("refuses the next model call once its approval is revoked, and one past the workflow's own limit", async () => {
+  it("refuses the next model call once its approval is revoked", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const revoked = await greetingWorkflow(ada, admin, { before: [hold] });
@@ -1715,54 +1395,12 @@ describe("grasp.model calls of JSON workflows", () => {
       revoked.approval.id
     );
     const revokedEnd = await ended(ada, revoked.workflow.id, revokedRun);
-    const revokedRequests = provider.requests.length;
-    // Two model calls, and a limit of one: the second is never sent.
-    const key = `summary-${unique()}`;
-    await publishCatalogContract(env, admin, { key, kind: "model" });
-    const greet = (id: string) => ({
-      [id]: {
-        call: "grasp.model",
-        with: {
-          binding: "summary",
-          instructions: "Greet them.",
-          input: { who: "${ $workflow.input.who }" },
-          outputSchema: objectSchema({ line: { type: "string" } }),
-        },
-      },
-    });
-    const limited = await published(ada, {
-      bindings: { summary: { kind: "model", contract: key } },
-      limits: { maxModelCalls: 1 },
-      tasks: [
-        greet("greet"),
-        greet("again"),
-        { finish: { set: { status: "done" } } },
-      ],
-    });
-    await approveWorkflowBinding(env, admin, limited.workflow.id, {
-      alias: "summary",
-      target: { kind: "model", model: allowedModel },
-      reviewed: { version: 1 },
-    });
-    const limitedProvider = await providerAnswering(
-      answer('{"line":"Hello Ada"}'),
-      answer('{"line":"Never sent"}')
-    );
-    const limitedEnd = await ended(
-      ada,
-      limited.workflow.id,
-      await started(ada, limited.workflow.id)
-    );
     expect({
       revoked: endOf(revokedEnd),
-      revokedRequests,
-      limited: endOf(limitedEnd),
-      limitedRequests: limitedProvider.requests.length,
+      requests: provider.requests.length,
     }).toStrictEqual({
       revoked: { status: "failed", code: "workflow.call_denied" },
-      revokedRequests: 0,
-      limited: { status: "failed", code: "workflow.model_call_limit" },
-      limitedRequests: 1,
+      requests: 0,
     });
   });
 });
@@ -1835,57 +1473,6 @@ describe("an independent workflow's model spend", () => {
         runs,
       }))
     ).toStrictEqual([{ name: null, spent: true, runs: 1 }]);
-  });
-});
-
-describe("grasp.operation calls of JSON workflows", () => {
-  beforeAll(chooseModel);
-
-  it("lowers no call whose arguments hold more entries than its build seals, and names where", async () => {
-    const admin = await person("admin");
-    const key = `bulk-${unique()}`;
-    await publishCatalogContract(env, admin, {
-      key,
-      kind: "operation",
-      input: descriptorOf(v.object({ items: v.array(v.number()) })),
-      output: descriptorOf(v.object({})),
-    });
-    const workflow = await createWorkflowResource(
-      env,
-      admin,
-      `calls-${unique()}`
-    );
-    await publishWorkflowVersion(env, admin, workflow.id, {
-      definition: definitionOf(workflow.name, {
-        bindings: { bulk: { kind: "operation", contract: key } },
-        tasks: [
-          {
-            send: {
-              call: "grasp.operation",
-              with: {
-                binding: "bulk",
-                arguments: {
-                  items: ["${ 1 }", ...Array.from({ length: 1024 }, () => 0)],
-                },
-              },
-            },
-          },
-          { finish: { set: { status: "sent" } } },
-        ],
-      }),
-      basedOn: null,
-    });
-    const [version] = await workflowVersions(env, admin, workflow.id);
-    expect(version?.build).toStrictEqual({
-      executable: false,
-      unsupported: [
-        {
-          pointer: "/do/0/send/with/arguments/items",
-          taskId: "send",
-          feature: "with:too_large",
-        },
-      ],
-    });
   });
 });
 
@@ -2254,9 +1841,7 @@ describe("runs started by a restricted App", () => {
 
   it("leave nothing held of runs a sweep marks, when two sweeps overlap", async () => {
     const ada = await person("builder");
-    const { workflow } = await published(ada, {
-      tasks: [{ finish: { set: { status: "done" } } }],
-    });
+    const { workflow } = await published(ada, { steps: [] });
     // More ended runs due than one sweep takes, long ago.
     const longAgo = Date.now() - 400 * 86_400_000;
     const prefix = `overlap-${unique()}`;
@@ -2330,12 +1915,13 @@ describe("runs started by a restricted App", () => {
     const starter = await startingApp(ada, admin, workflow.id, {
       restricted: true,
     });
-    // One host call, the send's own: the attempt that was held takes it,
-    // and the lineage has none left. The rerun that collects what Ada
-    // decided is admitted all the same, and takes none, its output.as
-    // included: it repeats the held attempt's work, sending nothing new.
+    // Two host calls: the send's own, which the attempt that was held
+    // takes, and one more. The rerun that collects what Ada decided takes
+    // none: it repeats the held attempt's work, sending nothing new. So
+    // the lineage still has one as the run's output step is admitted
+    // (a step past the lineage's host calls is admitted no more).
     const { runId, run } = await withQuotas(
-      { lineageHostCalls: 1 },
+      { lineageHostCalls: 2 },
       async () => {
         const id = await starter.start(serving);
         const held = await heldFor(ada, id);
@@ -2371,10 +1957,7 @@ describe("runs started by a restricted App", () => {
       to: "Ada",
       plain: true,
       plan: ["unavailable", "unavailable", "unavailable"],
-      retry: {
-        delay: { milliseconds: 10 },
-        limit: { attempt: { count: 2 } },
-      },
+      retry: { attempts: 2, delay: "1 second", backoff: "constant" },
     });
     const starter = await startingApp(ada, admin, workflow.id, {
       restricted: true,
@@ -2413,13 +1996,16 @@ describe("runs started by a restricted App", () => {
       whileHeld,
       end: endOf(run),
       calls: sent.calls,
-      retried: steps.includes("task:send:retry:2-1"),
+      // The retry's round, as the run host names it after the send's key.
+      retried: steps.some((name) =>
+        /^\$grasp:wait:[0-9a-f]{16}:retry:2:run-1$/u.test(name)
+      ),
       heldReruns: steps.filter((name) =>
-        /^task:send:retry:2:held:\d+:run-/u.test(name)
+        /^\$grasp:wait:[0-9a-f]{16}:held:\d+:run-/u.test(name)
       ).length,
     }).toStrictEqual({
       whileHeld: { status: "running", calls: 0 },
-      end: { status: "completed", output: { status: "message-1" } },
+      end: { status: "completed", output: { status: "sent" } },
       calls: 1,
       retried: true,
       heldReruns: 1,
@@ -2429,9 +2015,7 @@ describe("runs started by a restricted App", () => {
   it("start restricted from an agent's restricted chat, or one that names none, and not from an open chat", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const { workflow } = await published(ada, {
-      tasks: [{ finish: { set: { status: "done" } } }],
-    });
+    const { workflow } = await published(ada, { steps: [] });
     const starter = await startingApp(ada, admin, workflow.id, {
       restricted: false,
     });
@@ -2493,1090 +2077,21 @@ describe("runs started by a restricted App", () => {
   });
 });
 
-/**
- * A host of a run of version 1 of workflow `id` for `by`, on steps that
- * run at once, its attempts always holding their lease, its start having
- * frozen `bindings` (none, unless given), on `runEnv`: as the dispatcher
- * makes one for an activation.
- */
-const hostOf = async (
-  by: Identity,
-  id: string,
-  {
-    runEnv = env,
-    bindings = new Map(),
-    activationFuel,
-    retries = [],
-  }: {
-    runEnv?: Env;
-    bindings?: ReadonlyMap<string, FrozenCatalogBinding>;
-    /** The activation's fuel, if not the host's own. */
-    activationFuel?: number;
-    /** Where the retries each step is run with are told. */
-    retries?: number[];
-  } = {}
-): Promise<ResourceRunHost> => {
-  const manifest = await env.DB.prepare(
-    "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
-  )
-    .bind(id)
-    .first<{ hash: string }>();
-  const build = await loadWorkflowBuild(env, id, 1, manifest?.hash ?? "");
-  let count = 0;
-  const step: RunStep = {
-    do: async (name, config, fn) => {
-      count += 1;
-      retries.push(config.retries?.limit ?? 0);
-      return await fn({ attempt: 1, idempotencyKey: `key:${name}:${count}` });
-    },
-    sleep: async () => {
-      await Promise.resolve();
-    },
-    sleepUntil: async () => {
-      await Promise.resolve();
-    },
-    waitForEvent: async () => await Promise.reject(new Error("No waits here")),
-    waitForMatch: async () => await Promise.reject(new Error("No waits here")),
-  };
-  const runId = crypto.randomUUID();
-  return new ResourceRunHost(
-    runEnv,
-    step,
-    {
-      runId,
-      workflowId: id,
-      version: 1,
-      principal: by.userId,
-      input: { who: "Ada" },
-      params: {},
-      createdAt: Date.now(),
-      build,
-      calling: {
-        runId,
-        rootRunId: runId,
-        accountRunId: runId,
-        workflowId: id,
-        version: 1,
-        principal: by.userId,
-        invoker: { type: "person", id: by.userId, appVersion: null },
-        bindings,
-        restricted: false,
-      },
-      maxModelCalls: 1,
-    },
-    {
-      leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
-      ...(activationFuel === undefined ? {} : { activationFuel }),
-      tampered: () => {},
-      admitAttempt: admittedFreely,
-    }
-  );
-};
-
-/** The code `settled` failed with, or "ok". */
-const codeOf = (settled: Settled<unknown>): unknown =>
-  settled.ok ? "ok" : settled.error.code;
-
-/** What a task's step captures: Ada's input, and no context. */
-const adaData = { input: { input: { who: "Ada" }, context: {} } };
-
-/** The transformed input a module passes for a call or a deadline. */
-const adaFrame = { input: { who: "Ada" } };
-
-/** A module's step that makes its task's call with `frame`, and records it. */
-const called = async (
-  attempt: Parameters<Parameters<ResourceRunHost["do"]>[2]>[0],
-  frame: unknown = adaFrame
-) => {
-  const now = await attempt.call(frame);
-  return now.ok
-    ? { ok: true as const, value: { output: now.value } }
-    : { ok: false as const, error: now.error };
-};
-
-/** Marks of tried-once attempts as a run's object keeps them, in memory. */
-const keptMarks = (): TriedOnceMarks => {
-  const unstarted = new Set<string>();
-  const failures = new Map<string, StepError>();
-  return {
-    markUnstarted: (key, attempt) => {
-      unstarted.add(`${attempt}:${key}`);
-    },
-    markStarted: (key, attempt) => {
-      unstarted.delete(`${attempt}:${key}`);
-    },
-    unstarted: (key, attempt) => unstarted.has(`${attempt}:${key}`),
-    keepFailure: (key, attempt, error) => {
-      failures.set(`${attempt}:${key}`, error);
-    },
-    failureOf: (key, attempt) => failures.get(`${attempt}:${key}`),
-  };
-};
-
-/**
- * A host of one activation of run `runKey` of version 1 of workflow `id`
- * for `by`, on `marks`, as the engine gives its steps: each step under a
- * key of the run's and the step's, at the attempt `attempts` says (the
- * first unless given).
- */
-const activationOf = async (
-  by: Identity,
-  id: string,
-  {
-    runId,
-    runKey,
-    marks,
-    attempts = {},
-    bindings,
-    failed,
-    parks = false,
-  }: {
-    /** The run's row: a real start's, which its calls are checked against. */
-    runId: string;
-    runKey: string;
-    /** The run's marks; none: the host's own, of one activation alone. */
-    marks?: TriedOnceMarks;
-    attempts?: Record<string, number>;
-    /** The bindings its start froze. */
-    bindings: ReadonlyMap<string, FrozenCatalogBinding>;
-    /** What each attempt failed with, as the engine heard it: its name and code. */
-    failed: unknown[];
-    /**
-     * Whether a step whose attempt fails as it may be tried again is parked,
-     * as the engine parks it: its call never settles, the activation over.
-     */
-    parks?: boolean;
-  }
-): Promise<ResourceRunHost> => {
-  const manifest = await env.DB.prepare(
-    "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
-  )
-    .bind(id)
-    .first<{ hash: string }>();
-  const build = await loadWorkflowBuild(env, id, 1, manifest?.hash ?? "");
-  const step: RunStep = {
-    do: async (name, _config, fn) => {
-      try {
-        return await fn({
-          attempt: attempts[name] ?? 1,
-          idempotencyKey: `key:${runKey}:${name}`,
-        });
-      } catch (error) {
-        const code: unknown =
-          error instanceof Error ? Reflect.get(error, "code") : undefined;
-        failed.push({
-          name: error instanceof Error ? error.name : "unknown",
-          code: code ?? null,
-        });
-        if (parks && error instanceof Error && error.name === "TimeoutError") {
-          // oxlint-disable-next-line promise/avoid-new -- a parked step's call never settles
-          return await new Promise<never>(() => {
-            // Never settles.
-          });
-        }
-        throw error;
-      }
-    },
-    sleep: async () => {
-      await Promise.resolve();
-    },
-    sleepUntil: async () => {
-      await Promise.resolve();
-    },
-    waitForEvent: async () => await Promise.reject(new Error("No waits here")),
-    waitForMatch: async () => await Promise.reject(new Error("No waits here")),
-  };
-  return new ResourceRunHost(
-    env,
-    step,
-    {
-      runId,
-      workflowId: id,
-      version: 1,
-      principal: by.userId,
-      input: { who: "Ada" },
-      params: {},
-      createdAt: Date.now(),
-      build,
-      calling: {
-        runId,
-        rootRunId: runId,
-        accountRunId: runId,
-        workflowId: id,
-        version: 1,
-        principal: by.userId,
-        invoker: { type: "person", id: by.userId, appVersion: null },
-        bindings,
-        restricted: false,
-      },
-      maxModelCalls: 1,
-    },
-    {
-      leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
-      tampered: () => {},
-      admitAttempt: admittedFreely,
-      ...(marks === undefined ? {} : { triedOnce: marks }),
-    }
-  );
-};
-
-/** Holds a run asleep for longer than any test takes. */
-const longHold = { asleep: { wait: "PT1H" } };
-
-/** Binding `summary` of a greeting workflow, as its start froze it. */
-const frozenSummary = (
-  approval: Awaited<ReturnType<typeof greetingWorkflow>>["approval"]
-): ReadonlyMap<string, FrozenCatalogBinding> =>
-  new Map([
-    [
-      "summary",
-      {
-        alias: approval.alias,
-        kind: approval.kind,
-        resourceId: null,
-        resourceVersion: null,
-        contractId: approval.contractId,
-        fingerprint: approval.fingerprint,
-        approval: approval.id,
-        target: approval.target,
-      },
-    ],
-  ]);
-
-describe("a JSON workflow's model call, once its isolate was stopped past its CPU time", () => {
+describe("a step's own timeout", () => {
   beforeAll(chooseModel);
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("parks a call that never started for the next activation, which makes it once", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const { workflow, approval } = await greetingWorkflow(ada, admin, {
-      before: [longHold, { first: { set: { stage: "first" } } }],
-    });
-    // A run its activations are of, held asleep before its own call.
-    const runId = await started(ada, workflow.id);
-    const provider = await providerAnswering(answer('{"line":"Hello Ada"}'));
-    const runKey = unique();
-    const marks = keptMarks();
-    const bindings = frozenSummary(approval);
-    const ran: string[] = [];
-    const failed: unknown[] = [];
-    const first = await activationOf(ada, workflow.id, {
-      runId,
-      runKey,
-      marks,
-      bindings,
-      failed,
-      parks: true,
-    });
-    // The isolate is stopped past its CPU time in an earlier step's call,
-    // which the engine parks; a step still out after it (one of a branch)
-    // asks next.
-    const parkedOnce = async (count: number) => {
-      await vi.waitFor(() => {
-        expect(failed).toHaveLength(count);
-      });
-    };
-    void first.do("task:first", adaData, async () => {
-      ran.push("first");
-      return await Promise.reject(cpuLimitKill());
-    });
-    await parkedOnce(1);
-    void first.do("task:greet", adaData, async (attempt) => {
-      ran.push("greet, first activation");
-      return await called(attempt);
-    });
-    await parkedOnce(2);
-    const parked = [...failed];
-    // The next activation's attempt, the step's retry: its module runs.
-    const second = await activationOf(ada, workflow.id, {
-      runId,
-      runKey,
-      marks,
-      attempts: { "task:greet": 2 },
-      bindings,
-      failed,
-    });
-    await second.do("task:greet", adaData, async (attempt) => {
-      ran.push("greet, next activation");
-      return await called(attempt);
-    });
-    // (What the forged module then answers for its record isn't this
-    // test's: only that its call went out, once, in the next activation.)
-    expect({
-      parked,
-      ran,
-      requests: provider.requests.length,
-    }).toStrictEqual({
-      // Retryable timeouts, as for attempts the Loader cut off: the
-      // model call's parked for the next activation.
-      parked: [
-        { name: "TimeoutError", code: null },
-        { name: "TimeoutError", code: null },
-      ],
-      ran: ["first", "greet, next activation"],
-      requests: 1,
-    });
-  });
-
-  it("makes once, in the next activation, a call whose attempt waited for a slot as its activation died", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const busy = Array.from({ length: 8 }, (_, index) => ({
-      [`busy-${index}`]: { set: { stage: "busy" } },
-    }));
-    const { workflow, approval } = await greetingWorkflow(ada, admin, {
-      before: [longHold, ...busy],
-    });
-    const runId = await started(ada, workflow.id);
-    const provider = await providerAnswering(answer('{"line":"Hello Ada"}'));
-    const runKey = unique();
-    const marks = keptMarks();
-    const bindings = frozenSummary(approval);
-    const ran: string[] = [];
-    const failed: unknown[] = [];
-    const first = await activationOf(ada, workflow.id, {
-      runId,
-      runKey,
-      marks,
-      bindings,
-      failed,
-    });
-    // Eight attempts hold every slot of the activation, and never end.
-    for (const index of busy.keys()) {
-      void first.do(
-        `task:busy-${index}`,
-        adaData,
-        async () => await Promise.withResolvers<never>().promise
-      );
-    }
-    // The call's first attempt waits for a slot as its activation dies.
-    void first.do("task:greet", adaData, async (attempt) => {
-      ran.push("greet, first activation");
-      return await called(attempt);
-    });
-    await scheduler.wait(100);
-    const second = await activationOf(ada, workflow.id, {
-      runId,
-      runKey,
-      marks,
-      attempts: { "task:greet": 2 },
-      bindings,
-      failed,
-    });
-    await second.do("task:greet", adaData, async (attempt) => {
-      ran.push("greet, next activation");
-      return await called(attempt);
-    });
-    // (What the forged module then answers for its record isn't this
-    // test's: only that its call went out, once, in the next activation,
-    // never refused as left open.)
-    expect({
-      leftOpen: failed.filter(
-        (failure) =>
-          failure instanceof Object &&
-          "name" in failure &&
-          failure.name === "TimeoutError"
-      ),
-      ran,
-      requests: provider.requests.length,
-    }).toStrictEqual({
-      leftOpen: [],
-      ran: ["greet, next activation"],
-      requests: 1,
-    });
-  });
-
-  it("never tries again a call that started on a host given no marks to keep", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const { workflow, approval } = await greetingWorkflow(ada, admin, {
-      before: [longHold],
-    });
-    const runId = await started(ada, workflow.id);
-    const provider = await providerAnswering(
-      // An answer that broke off: its outcome unknown.
-      { ...answer('{"line":"Hello Ada"}'), cut: 5 },
-      answer('{"line":"Never sent"}')
-    );
-    const runKey = unique();
-    const bindings = frozenSummary(approval);
-    const ran: string[] = [];
-    const failed: unknown[] = [];
-    // Hosts with no store of the run's: each keeps its activation's alone.
-    const first = await activationOf(ada, workflow.id, {
-      runId,
-      runKey,
-      bindings,
-      failed,
-    });
-    await first.do("task:greet", adaData, async (attempt) => {
-      ran.push("first attempt");
-      return await called(attempt);
-    });
-    const again = await activationOf(ada, workflow.id, {
-      runId,
-      runKey,
-      attempts: { "task:greet": 2 },
-      bindings,
-      failed,
-    });
-    await again.do("task:greet", adaData, async (attempt) => {
-      ran.push("retry");
-      return await called(attempt);
-    });
-    const [, retried] = failed;
-    expect({
-      retried,
-      ran,
-      requests: provider.requests.length,
-    }).toStrictEqual({
-      // Nothing kept says attempt 1 never started: refused, as left open,
-      // and never tried again: its call was tried. Still a timeout, which
-      // no catch takes (#889).
-      retried: {
-        name: "NonRetryableError",
-        code: "operation.deadline_exceeded",
-      },
-      ran: ["first attempt"],
-      requests: 1,
-    });
-  });
-
-  it("never tries again a call that started, nor one it can't tell never started", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const { workflow, approval } = await greetingWorkflow(ada, admin, {
-      before: [longHold],
-    });
-    const runId = await started(ada, workflow.id);
-    const provider = await providerAnswering(
-      // An answer that broke off: its outcome unknown.
-      { ...answer('{"line":"Hello Ada"}'), cut: 5 },
-      answer('{"line":"Never sent"}')
-    );
-    const runKey = unique();
-    const marks = keptMarks();
-    const bindings = frozenSummary(approval);
-    const ran: string[] = [];
-    const failed: unknown[] = [];
-    const first = await activationOf(ada, workflow.id, {
-      runId,
-      runKey,
-      marks,
-      bindings,
-      failed,
-    });
-    await first.do("task:greet", adaData, async (attempt) => {
-      ran.push("first attempt");
-      return await called(attempt);
-    });
-    // Its step's retry, in the next activation: refused, never run.
-    const again = await activationOf(ada, workflow.id, {
-      runId,
-      runKey,
-      marks,
-      attempts: { "task:greet": 2 },
-      bindings,
-      failed,
-    });
-    await again.do("task:greet", adaData, async (attempt) => {
-      ran.push("retry");
-      return await called(attempt);
-    });
-    // An attempt nothing was kept of (its activation died mid-call): its
-    // retry is refused too, as an attempt left open.
-    const unknown = await activationOf(ada, workflow.id, {
-      runId,
-      runKey: unique(),
-      marks,
-      attempts: { "task:greet": 2 },
-      bindings,
-      failed,
-    });
-    await unknown.do("task:greet", adaData, async (attempt) => {
-      ran.push("after a lost attempt");
-      return await called(attempt);
-    });
-    const [refused, retried, leftOpen] = failed;
-    expect({
-      refused,
-      // The retry fails as the attempt that ran did, never run itself.
-      retried,
-      leftOpen,
-      ran,
-      requests: provider.requests.length,
-    }).toStrictEqual({
-      refused: { name: "Error", code: "model.provider_unavailable" },
-      // As the attempt that ran failed, and never tried again after it.
-      retried: {
-        name: "NonRetryableError",
-        code: "model.provider_unavailable",
-      },
-      leftOpen: {
-        name: "NonRetryableError",
-        code: "operation.deadline_exceeded",
-      },
-      ran: ["first attempt"],
-      requests: 1,
-    });
-  });
-});
-
-describe("a run's host, against a forged module's calls", () => {
-  beforeAll(chooseModel);
-
-  it("builds and makes a task's call itself, once, and through a binding its start froze only", async () => {
-    const admin = await person("admin");
-    const by = await person("builder");
-    const key = await mailContract(admin);
-    const { workflow } = await published(by, {
-      bindings: { mail: { kind: "connector", contract: key } },
-      tasks: [
-        { clock: { call: "grasp.now" } },
-        {
-          send: {
-            call: "grasp.connector",
-            with: {
-              binding: "mail",
-              operation: "mail.send",
-              // Slot 0 of the build's table: its call's to build.
-              arguments: { to: "${ $workflow.input.who }", subject: "Hi" },
-            },
-          },
-        },
-        { finish: { set: { status: "done" } } },
-      ],
-    });
-    const run = async (
-      name: string,
-      fn: Parameters<ResourceRunHost["do"]>[2]
-    ): Promise<unknown> => {
-      const host = await hostOf(by, workflow.id);
-      return codeOf(await host.do(name, adaData, fn));
-    };
-    // What the module's own evaluation of its call's template answered.
-    let templateRead: unknown;
-    await run("task:send", async (attempt) => {
-      templateRead = codeOf(
-        await attempt.evaluate(0, { input: adaFrame.input, output: null })
-      );
-      return { ok: true, value: { output: null } };
-    });
-    expect({
-      honest: await run("task:clock", async (attempt) => {
-        const now = await attempt.call(adaFrame);
-        return { ok: true, value: { output: now.ok ? now.value : null } };
-      }),
-      templateRead,
-      twice: await run("task:clock", async (attempt) => {
-        await attempt.call(adaFrame);
-        const again = await attempt.call(adaFrame);
-        return { ok: true, value: { output: again.ok ? again.value : null } };
-      }),
-      unmade: await run(
-        "task:clock",
-        async () => await Promise.resolve({ ok: true, value: { output: 5 } })
-      ),
-      // The call made, its answer put aside for one of the module's own.
-      discarded: await run("task:clock", async (attempt) => {
-        await attempt.call(adaFrame);
-        return { ok: true, value: { output: 5 } };
-      }),
-      notACall: await run("task:finish", async (attempt) => {
-        await attempt.call(adaFrame);
-        return { ok: true, value: { output: null } };
-      }),
-      // This run's start froze no binding: the call has no target.
-      unfrozen: await run("task:send", async (attempt) => {
-        const sent = await attempt.call(adaFrame);
-        return sent.ok
-          ? { ok: true, value: { output: sent.value } }
-          : { ok: false, error: sent.error };
-      }),
-      // The call failed, and the module answers for it all the same.
-      afterFailure: await run("task:send", async (attempt) => {
-        await attempt.call(adaFrame);
-        return { ok: true, value: { output: { messageId: "forged" } } };
-      }),
-      // The module answers while its call is still on its way.
-      beforeAnswer: await run("task:send", async (attempt) => {
-        void attempt.call(adaFrame);
-        return await Promise.resolve({
-          ok: true,
-          value: { output: { messageId: "forged" } },
-        });
-      }),
-    }).toStrictEqual({
-      honest: "ok",
-      templateRead: "workflow.invalid",
-      twice: "workflow.invalid",
-      unmade: "workflow.invalid",
-      discarded: "workflow.invalid",
-      notACall: "workflow.invalid",
-      unfrozen: "workflow.call_denied",
-      afterFailure: "workflow.invalid",
-      beforeAnswer: "workflow.invalid",
-    });
-  });
-
-  it("transforms a call's answer only with the input its call was made on", async () => {
-    const by = await person("builder");
-    const { workflow } = await published(by, {
-      tasks: [
-        {
-          clock: {
-            call: "grasp.now",
-            output: { as: "${ {at: ., who: $input.who} }" },
-          },
-        },
-        { finish: { set: { status: "done" } } },
-      ],
-    });
-    /** The step, its output.as read on `input`. */
-    const recorded = async (input: unknown) => {
-      const host = await hostOf(by, workflow.id);
-      return codeOf(
-        await host.do("task:clock", adaData, async (attempt) => {
-          const now = await attempt.call(adaFrame);
-          const shaped = await attempt.evaluate(0, {
-            input,
-            output: now.ok ? now.value : null,
-          });
-          return shaped.ok
-            ? { ok: true, value: { output: shaped.value } }
-            : { ok: false, error: shaped.error };
-        })
-      );
-    };
-    expect({
-      honest: await recorded(adaFrame.input),
-      otherInput: await recorded({ who: "Mallory" }),
-    }).toStrictEqual({ honest: "ok", otherInput: "workflow.invalid" });
-  });
-
-  it("makes a call on an input.from of many parts, as the host builds it from its own evaluations", async () => {
-    const by = await person("builder");
-    const { workflow } = await published(by, {
-      tasks: [
-        {
-          clock: {
-            call: "grasp.now",
-            input: {
-              from: {
-                who: "${ .who }",
-                greeting: "Hello",
-                tags: ["a", "${ .who }"],
-              },
-            },
-          },
-        },
-        { finish: { set: { status: "done" } } },
-      ],
-    });
-    const run = await ended(by, workflow.id, await started(by, workflow.id));
-    expect(endOf(run)).toStrictEqual({
-      status: "completed",
-      output: { status: "done" },
-    });
-  });
-
-  it("makes a task's call only once its if held and its input was checked, as the host saw them", async () => {
-    const by = await person("builder");
-    const { workflow } = await published(by, {
-      tasks: [
-        { skip: { if: "${ false }", call: "grasp.now" } },
-        { go: { if: "${ true }", call: "grasp.now" } },
-        {
-          typed: {
-            call: "grasp.now",
-            input: { schema: objectSchema({ who: { type: "string" } }) },
-          },
-        },
-        { finish: { set: { status: "done" } } },
-      ],
-    });
-    const manifest = await env.DB.prepare(
-      "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
-    )
-      .bind(workflow.id)
-      .first<{ hash: string }>();
-    const build = await loadWorkflowBuild(
-      env,
-      workflow.id,
-      1,
-      manifest?.hash ?? ""
-    );
-    const ifOf = (task: string): number =>
-      build.expressions.find(
-        ({ taskId, stage }) => taskId === task && stage === "taskIf"
-      )?.slot ?? -1;
-    const run = async (
-      name: string,
-      fn: Parameters<ResourceRunHost["do"]>[2]
-    ): Promise<unknown> => {
-      const host = await hostOf(by, workflow.id);
-      return codeOf(await host.do(name, adaData, fn));
-    };
-    expect({
-      // A forged module calls a task its sealed workflow skips, its if
-      // never evaluated.
-      skipped: await run("task:skip", async (attempt) => await called(attempt)),
-      honest: await run("task:go", async (attempt) => {
-        await attempt.evaluate(ifOf("go"), {
-          input: adaFrame.input,
-          output: null,
-        });
-        return await called(attempt);
-      }),
-      otherInput: await run("task:go", async (attempt) => {
-        await attempt.evaluate(ifOf("go"), {
-          input: adaFrame.input,
-          output: null,
-        });
-        return await called(attempt, { input: { who: "Eve" } });
-      }),
-      unchecked: await run(
-        "task:typed",
-        async (attempt) => await called(attempt)
-      ),
-      checked: await run("task:typed", async (attempt) => {
-        attempt.check("input", adaFrame.input);
-        return await called(attempt);
-      }),
-    }).toStrictEqual({
-      skipped: "workflow.invalid",
-      honest: "ok",
-      otherInput: "workflow.invalid",
-      unchecked: "workflow.invalid",
-      checked: "ok",
-    });
-  });
-
-  it("counts a model call against the run's limit as it is asked for, so steps run at once can't each make one", async () => {
-    const admin = await person("admin");
-    const by = await person("builder");
-    const key = `summary-${unique()}`;
-    await publishCatalogContract(env, admin, { key, kind: "model" });
-    const greet = {
-      call: "grasp.model",
-      with: {
-        binding: "summary",
-        instructions: "Greet them.",
-        input: { who: "Ada" },
-        outputSchema: objectSchema({ line: { type: "string" } }),
-      },
-    };
-    const { workflow } = await published(by, {
-      bindings: { summary: { kind: "model", contract: key } },
-      limits: { maxModelCalls: 1 },
-      tasks: [
-        { greet },
-        { again: greet },
-        { finish: { set: { status: "done" } } },
-      ],
-    });
-    // The host's run may make one model call; a forged module asks for two
-    // at once. Its start froze no binding, so the one that gets its place
-    // is refused next, and goes nowhere.
-    const host = await hostOf(by, workflow.id);
-    const asked = async (name: string) =>
-      codeOf(
-        await host.do(name, adaData, async (attempt) => {
-          const answered = await attempt.call(adaFrame);
-          return answered.ok
-            ? { ok: true, value: { output: answered.value } }
-            : { ok: false, error: answered.error };
-        })
-      );
-    const codes = await Promise.all([asked("task:greet"), asked("task:again")]);
-    expect(
-      codes.map(String).toSorted((a, b) => (a < b ? -1 : 1))
-    ).toStrictEqual(["workflow.call_denied", "workflow.model_call_limit"]);
-  });
-
-  it("keeps a call's outcome when its receipt can't be kept", async () => {
-    const admin = await person("admin");
-    const by = await person("builder");
-    const key = await mailContract(admin);
-    const { workflow } = await published(by, {
-      bindings: { mail: { kind: "connector", contract: key } },
-      tasks: [send("Hi"), { finish: { set: { status: "done" } } }],
-    });
-    // A binding its start froze, through an approval since gone; the audit
-    // log takes nothing.
-    const binding: FrozenCatalogBinding = {
-      alias: "mail",
-      kind: "connector",
-      resourceId: null,
-      resourceVersion: null,
-      contractId: key,
-      fingerprint: "0".repeat(64),
-      approval: crypto.randomUUID(),
-      target: {
-        kind: "connector",
-        permissionId: crypto.randomUUID(),
-        contract: "composio.mail@1",
-      },
-    };
-    const refusingAudit: Env = {
-      ...env,
-      DB: new Proxy(env.DB, {
-        get: (target, name): unknown => {
-          if (name === "batch") {
-            return async () =>
-              await Promise.reject(new Error("The audit log is down"));
-          }
-          const value: unknown = Reflect.get(target, name);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      }),
-    };
-    const host = await hostOf(by, workflow.id, {
-      runEnv: refusingAudit,
-      bindings: new Map([["mail", binding]]),
-    });
-    const sent = await host.do("task:send", adaData, async (attempt) => {
-      const answered = await attempt.call(adaFrame);
-      return answered.ok
-        ? { ok: true, value: { output: answered.value } }
-        : { ok: false, error: answered.error };
-    });
-    expect(codeOf(sent)).toBe("workflow.call_denied");
-  });
-
-  it("resolves a deadline on the input its task's input.from made, as the host built it", async () => {
-    const by = await person("builder");
-    const { workflow } = await published(by, {
-      tasks: [
-        {
-          later: {
-            input: { from: '${ {who: .who, late: "yes"} }' },
-            call: "grasp.sleepUntil",
-            with: {
-              timestamp: "${ $workflow.startedAt.epoch.milliseconds + 60000 }",
-            },
-          },
-        },
-        { finish: { set: { status: "done" } } },
-      ],
-    });
-    const transformed = { who: "Ada", late: "yes" };
-    /** The enter step, its deadline resolved on `input`. */
-    const entered = async (input: unknown) => {
-      const host = await hostOf(by, workflow.id);
-      return codeOf(
-        await host.do("enter:later", adaData, async (attempt) => {
-          await attempt.evaluate(0, { input: adaFrame.input, output: null });
-          const until = await attempt.until({ input });
-          return until.ok
-            ? { ok: true, value: { output: input, until: until.value } }
-            : { ok: false, error: until.error };
-        })
-      );
-    };
-    expect({
-      transformed: await entered(transformed),
-      raw: await entered(adaFrame.input),
-    }).toStrictEqual({ transformed: "ok", raw: "workflow.invalid" });
-  });
-
-  it("waits for a deadline the module left resolving before its attempt ends", async () => {
-    const by = await person("builder");
-    const { workflow } = await published(by, {
-      tasks: [
-        {
-          later: {
-            call: "grasp.sleepUntil",
-            with: {
-              timestamp: "${ $workflow.startedAt.epoch.milliseconds + 60000 }",
-            },
-          },
-        },
-        { finish: { set: { status: "done" } } },
-      ],
-    });
-    const settledFirst: string[] = [];
-    const leftRunning: Promise<unknown>[] = [];
-    const host = await hostOf(by, workflow.id);
-    await host.do("enter:later", adaData, async (attempt) => {
-      leftRunning.push(
-        attempt.until(adaFrame).then((until) => {
-          settledFirst.push("until");
-          return codeOf(until);
-        })
-      );
-      return await Promise.resolve({ ok: true, value: { output: null } });
-    });
-    settledFirst.push("attempt");
-    await Promise.all(leftRunning);
-    // Asked twice at once: one deadline, the other refused.
-    let twice: unknown[] = [];
-    const again = await hostOf(by, workflow.id);
-    await again.do("enter:later", adaData, async (attempt) => {
-      const both = await Promise.all([
-        attempt.until(adaFrame),
-        attempt.until(adaFrame),
-      ]);
-      twice = both.map((until) => codeOf(until));
-      return { ok: true, value: { output: null } };
-    });
-    expect({ settledFirst, twice }).toStrictEqual({
-      settledFirst: ["until", "attempt"],
-      twice: ["ok", "workflow.invalid"],
-    });
-  });
-
-  it("resolves a literal deadline once, however many times it is asked at once", async () => {
-    const by = await person("builder");
-    const { workflow } = await published(by, {
-      tasks: [
-        {
-          later: {
-            call: "grasp.sleepUntil",
-            with: { timestamp: 1_000_000 },
-          },
-        },
-        { finish: { set: { status: "done" } } },
-      ],
-    });
-    let twice: unknown[] = [];
-    const host = await hostOf(by, workflow.id);
-    await host.do("enter:later", adaData, async (attempt) => {
-      const both = await Promise.all([
-        attempt.until(adaFrame),
-        attempt.until(adaFrame),
-      ]);
-      twice = both.map((until) => codeOf(until));
-      return { ok: true, value: { output: null } };
-    });
-    expect(twice).toStrictEqual(["ok", "workflow.invalid"]);
-  });
-
-  it("sleeps only until the deadline its task's enter step resolved and recorded", async () => {
-    const by = await person("builder");
-    const { workflow } = await published(by, {
-      tasks: [
-        {
-          later: {
-            call: "grasp.sleepUntil",
-            with: {
-              timestamp: "${ $workflow.startedAt.epoch.milliseconds + 60000 }",
-            },
-          },
-        },
-        { finish: { set: { status: "done" } } },
-      ],
-    });
-    /** The enter step, its deadline recorded as `forge` makes it. */
-    const entered = async (
-      host: ResourceRunHost,
-      forge: (until: number) => number = (until) => until
-    ) =>
-      await host.do("enter:later", adaData, async (attempt) => {
-        const until = await attempt.until(adaFrame);
-        return {
-          ok: true,
-          value: {
-            output: adaFrame.input,
-            until: forge(until.ok ? until.value : 0),
-          },
-        };
-      });
-    const early = await hostOf(by, workflow.id);
-    const beforeEnter = await early.sleepUntil("task:later", Date.now());
-    const honestHost = await hostOf(by, workflow.id);
-    const honest = await entered(honestHost);
-    const { until: recorded } = z
-      .object({ until: z.number() })
-      .parse(honest.ok ? honest.value : {});
-    const otherHost = await hostOf(by, workflow.id);
-    await entered(otherHost);
-    const forgedHost = await hostOf(by, workflow.id);
-    // A deadline built on input other than what the step captured.
-    const substitutedHost = await hostOf(by, workflow.id);
-    const substituted = await substitutedHost.do(
-      "enter:later",
-      adaData,
-      async (attempt) => {
-        const until = await attempt.until({ input: { who: "Mallory" } });
-        return until.ok
-          ? { ok: true, value: { output: adaFrame.input, until: until.value } }
-          : { ok: false, error: until.error };
-      }
-    );
-    expect({
-      beforeEnter: codeOf(beforeEnter),
-      honest: codeOf(honest),
-      // A minute after the run started, as its expression says.
-      deadline: recorded - Date.now() > 50_000,
-      sleep: codeOf(await honestHost.sleepUntil("task:later", recorded)),
-      otherTime: codeOf(
-        await otherHost.sleepUntil("task:later", recorded - 30_000)
-      ),
-      forgedRecord: codeOf(
-        await entered(forgedHost, (until) => until - 30_000)
-      ),
-      substituted: codeOf(substituted),
-    }).toStrictEqual({
-      beforeEnter: "workflow.invalid",
-      honest: "ok",
-      deadline: true,
-      sleep: "ok",
-      otherTime: "workflow.invalid",
-      forgedRecord: "workflow.invalid",
-      substituted: "workflow.invalid",
-    });
-  });
-});
-
-describe("a workflow's own limits", () => {
-  beforeAll(chooseModel);
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("lowers the host's step limit, never raises it", async () => {
-    const by = await person("builder");
-    const { workflow } = await published(by, {
-      limits: { maxSteps: 1 },
-      tasks: [
-        { first: { set: { status: "first" } } },
-        { second: { set: { status: "second" } } },
-      ],
-    });
-    const run = await ended(by, workflow.id, await started(by, workflow.id));
-    expect(endOf(run)).toStrictEqual({
-      status: "failed",
-      code: "workflow.too_many_steps",
-    });
-  });
-
-  it("ends an attempt that runs past its task's timeout, a reusable one, long before the host's", async () => {
+  it("ends an attempt that runs past its step's timeout, long before the host's", async () => {
     const admin = await person("admin");
     const by = await person("builder");
     const key = `summary-${unique()}`;
     await publishCatalogContract(env, admin, { key, kind: "model" });
     const { workflow } = await published(by, {
       bindings: { summary: { kind: "model", contract: key } },
-      use: { timeouts: { quick: { after: { seconds: 2 } } } },
-      tasks: [
-        {
-          greet: {
-            call: "grasp.model",
-            with: {
-              binding: "summary",
-              instructions: "Greet them.",
-              input: { who: "Ada" },
-              outputSchema: objectSchema({ line: { type: "string" } }),
-            },
-            timeout: "quick",
-          },
-        },
-        { finish: { set: { status: "done" } } },
-      ],
+      steps: [greetStep("greet", "2 seconds")],
+      status: "steps.greet.output.line",
     });
     await approveWorkflowBinding(env, admin, workflow.id, {
       alias: "summary",
@@ -3596,77 +2111,19 @@ describe("a workflow's own limits", () => {
       { timeout: 5000, interval: 100 }
     );
     expect({
-      // Its outcome unknown, sent and never answered: it fails, saying the
-      // provider isn't answering, and is never sent again.
+      // Sent and never answered: it fails as past its step's time, and is
+      // never sent again.
       end: endOf(run),
       requests: provider.requests.length,
-      // Its task's two seconds, not the host's minute.
+      // Its step's two seconds, not the host's minute.
       early:
         Date.parse(run.endedAt ?? "") - startedAt < maxAttemptTimeoutMs / 2,
       cutOff,
     }).toStrictEqual({
-      end: { status: "failed", code: "model.provider_unavailable" },
+      end: { status: "failed", code: "operation.deadline_exceeded" },
       requests: 1,
       early: true,
       cutOff: true,
-    });
-  });
-
-  it("refuses to lower an active time nothing holds yet, by pointer", async () => {
-    const by = await person("builder");
-    const { executable, workflow } = await published(by, {
-      limits: { maxActiveMs: 60_000 },
-      tasks: [{ finish: { set: { status: "done" } } }],
-    });
-    const [version] = await workflowVersions(env, by, workflow.id);
-    expect({
-      executable,
-      unsupported:
-        version?.build.executable === false ? version.build.unsupported : [],
-    }).toStrictEqual({
-      executable: false,
-      unsupported: [
-        {
-          pointer: "/document/metadata/grasp/limits/maxActiveMs",
-          taskId: null,
-          feature: "limits.maxActiveMs",
-        },
-      ],
-    });
-  });
-});
-
-describe("an activation's share of core's CPU, for calls tried once", () => {
-  beforeAll(chooseModel);
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("never cuts off the one attempt of a model call an activation can't fund", async () => {
-    const admin = await person("admin");
-    const ada = await person("builder");
-    const { workflow } = await greetingWorkflow(ada, admin);
-    /** The step's retries and whether its module ran, on `activationFuel`. */
-    const attempted = async (activationFuel?: number) => {
-      const retries: number[] = [];
-      const ran = { module: false };
-      const host = await hostOf(ada, workflow.id, { activationFuel, retries });
-      await host.do("task:greet", adaData, async () => {
-        ran.module = true;
-        return await Promise.resolve({ ok: true, value: { output: null } });
-      });
-      return { retries, ran: ran.module };
-    };
-    expect({
-      funded: await attempted(),
-      unfunded: await attempted(0),
-    }).toStrictEqual({
-      // Run, the call tried once: its retries only ever run an attempt
-      // that never ran its module (the host's own check); the engine may
-      // make more than its two, for those core cuts off (GRA-1097).
-      funded: { retries: [6], ran: true },
-      // Run all the same, on a share of its own.
-      unfunded: { retries: [6], ran: true },
     });
   });
 });
@@ -3701,40 +2158,38 @@ export const greet = action({
 });
 `;
 
-/** The task calling action `greet` with the run's `who`. */
+/** The step calling action `greet` with the run's `who`. */
 const greetTask = {
-  greet: {
-    call: "grasp.operation",
-    with: {
-      binding: "greet",
-      arguments: { who: "${ $workflow.input.who }" },
-    },
-  },
+  id: "greet",
+  type: "do",
+  binding: "greet",
+  arguments: { who: { $expr: "input.who" } },
 };
 
 /**
  * A workflow of `by`'s whose action `greet` asks `writer` (the allowed
- * model, approved by `admin`) for lines, running `tasks`, its model calls
- * limited to `maxModelCalls`.
+ * model, approved by `admin`) for lines, running `steps`, ending with the
+ * action's status. Its runs' model calls are held to `maxModelCalls`
+ * (`quotas`, as `withQuotas` sets the run's ceiling).
  */
 const writingWorkflow = async (
   by: Identity,
   admin: Identity,
   {
-    tasks,
+    steps,
     maxModelCalls,
     asks,
-  }: { tasks: unknown[]; maxModelCalls: number; asks?: number }
+  }: { steps: unknown[]; maxModelCalls: number; asks?: number }
 ) => {
   const key = `writer-${unique()}`;
   await publishCatalogContract(env, admin, { key, kind: "model" });
   const { workflow, executable } = await published(by, {
     bindings: {
-      greet: { kind: "operation", contract: "local:code/greet.ts#greet" },
+      greet: { kind: "action", contract: "local:code/greet.ts#greet" },
       writer: { kind: "model", contract: key },
     },
-    limits: { maxModelCalls },
-    tasks,
+    steps,
+    status: "steps.greet.output.status",
     modules: { "code/greet.ts": greetModule(asks) },
   });
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
@@ -3742,23 +2197,25 @@ const writingWorkflow = async (
     target: { kind: "model", model: allowedModel },
     reviewed: { version: 1 },
   });
-  return { workflow, executable, approval };
+  return {
+    workflow,
+    executable,
+    approval,
+    quotas: { lineageModelRequests: maxModelCalls },
+  };
 };
 
-/** A JSON task asking `writer` once more, as a task of the run's own. */
+/** An agent step asking `writer` once more, as a step of the run's own. */
 const writeAgain = {
-  again: {
-    call: "grasp.model",
-    with: {
-      binding: "writer",
-      instructions: "Greet them again.",
-      input: { who: "${ $workflow.input.who }" },
-      outputSchema: objectSchema({ line: { type: "string" } }),
-    },
-  },
+  id: "again",
+  type: "agent",
+  binding: "writer",
+  instructions: "Greet them again.",
+  input: { who: { $expr: "input.who" } },
+  output: objectSchema({ line: { type: "string" } }),
 };
 
-describe("model resources of a JSON workflow's own actions", () => {
+describe("model resources of a workflow's own actions", () => {
   beforeAll(chooseModel);
   afterEach(() => {
     vi.restoreAllMocks();
@@ -3768,7 +2225,7 @@ describe("model resources of a JSON workflow's own actions", () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const { workflow, executable } = await writingWorkflow(ada, admin, {
-      tasks: [greetTask, pause],
+      steps: [greetTask, pause],
       maxModelCalls: 2,
     });
     const provider = await providerAnswering(
@@ -3825,15 +2282,10 @@ describe("model resources of a JSON workflow's own actions", () => {
   it("counts an action's model calls against the run's limit, within its attempt and across a replay", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    // The action spends the run's two calls; the task after its replay
+    // The action spends the run's two calls; the step after its replay
     // asks for a third.
     const replayed = await writingWorkflow(ada, admin, {
-      tasks: [
-        greetTask,
-        pause,
-        writeAgain,
-        { finish: { set: { status: "done" } } },
-      ],
+      steps: [greetTask, pause, writeAgain],
       maxModelCalls: 2,
     });
     const replayProvider = await providerAnswering(
@@ -3841,24 +2293,36 @@ describe("model resources of a JSON workflow's own actions", () => {
       answer('{"line":"Hi again"}'),
       answer('{"line":"Never sent"}')
     );
-    const replayedEnd = await ended(
-      ada,
-      replayed.workflow.id,
-      await started(ada, replayed.workflow.id)
+    const replayedEnd = await withQuotas(
+      replayed.quotas,
+      async () =>
+        await ended(
+          ada,
+          replayed.workflow.id,
+          await started(ada, replayed.workflow.id)
+        )
     );
     const replayRequests = replayProvider.requests.length;
     vi.restoreAllMocks();
     // One call left for an action that asks twice: the second is never sent.
     const within = await writingWorkflow(ada, admin, {
-      tasks: [greetTask],
+      steps: [greetTask],
       maxModelCalls: 1,
     });
     const withinProvider = await providerAnswering(
       answer('{"line":"Hello Ada"}'),
       answer('{"line":"Never sent"}')
     );
-    const withinRun = await started(ada, within.workflow.id);
-    const withinEnd = await ended(ada, within.workflow.id, withinRun);
+    const { withinRun, withinEnd } = await withQuotas(
+      within.quotas,
+      async () => {
+        const id = await started(ada, within.workflow.id);
+        return {
+          withinRun: id,
+          withinEnd: await ended(ada, within.workflow.id, id),
+        };
+      }
+    );
     // The call refused at the limit leaves its evidence, naming its binding.
     const events = await allEvents();
     const refusedAtLimit = events
@@ -3896,8 +2360,8 @@ describe("model resources of a JSON workflow's own actions", () => {
   it("takes the run's last model call against the count the run keeps, whichever activation made the others", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const { workflow } = await writingWorkflow(ada, admin, {
-      tasks: [greetTask],
+    const { workflow, quotas } = await writingWorkflow(ada, admin, {
+      steps: [greetTask],
       maxModelCalls: 2,
     });
     const runIdOf = Promise.withResolvers<string>();
@@ -3920,9 +2384,11 @@ describe("model resources of a JSON workflow's own actions", () => {
       },
       { models: [allowedModel] }
     );
-    const runId = await started(ada, workflow.id);
-    runIdOf.resolve(runId);
-    const end = await ended(ada, workflow.id, runId);
+    const end = await withQuotas(quotas, async () => {
+      const runId = await started(ada, workflow.id);
+      runIdOf.resolve(runId);
+      return await ended(ada, workflow.id, runId);
+    });
     expect({
       end: endOf(end),
       requests: provider.requests.length,
@@ -3956,12 +2422,12 @@ export const greet = action({
 `;
     const error = await refusal(
       publishWorkflowVersion(env, ada, workflow.id, {
-        definition: definitionOf(workflow.name, {
+        definition: definitionOf({
           bindings: {
-            greet: { kind: "operation", contract: "local:code/greet.ts#greet" },
+            greet: { kind: "action", contract: "local:code/greet.ts#greet" },
             writer: { kind: "model", contract: key },
           },
-          tasks: [greetTask],
+          steps: [greetTask],
         }),
         basedOn: null,
         modules: { "code/greet.ts": big },
@@ -3988,7 +2454,7 @@ export const greet = action({
       problems: [
         {
           code: "manifest.too_large",
-          pointer: "/document/metadata/grasp/bindings/greet",
+          pointer: "/bindings/greet",
         },
       ],
     });
@@ -3998,7 +2464,7 @@ export const greet = action({
     const admin = await person("admin");
     const ada = await person("builder");
     const shaped = await writingWorkflow(ada, admin, {
-      tasks: [greetTask],
+      steps: [greetTask],
       maxModelCalls: 2,
       asks: 1,
     });
@@ -4013,7 +2479,7 @@ export const greet = action({
     const shapedRequests = shapedProvider.requests.length;
     vi.restoreAllMocks();
     const revoked = await writingWorkflow(ada, admin, {
-      tasks: [hold, greetTask],
+      steps: [hold, greetTask],
       maxModelCalls: 2,
       asks: 1,
     });
@@ -4170,44 +2636,53 @@ describe("runs started by a restricted App, waiting on a held call", () => {
   });
 
   it("go on once their person confirms, though the engine refused the wake: the repair sends it", async () => {
-    await withSlowChecks(async () => {
-      const admin = await person("admin");
-      const ada = await person("builder");
-      const { workflow, mail, serving } = await mailingWorkflow(ada, admin);
-      const starter = await startingApp(ada, admin, workflow.id, {
-        restricted: true,
-      });
-      const runId = await starter.start(serving);
-      const held = await heldFor(ada, runId);
-      await waiting(runId);
-      // Confirmed while the engine takes no event: the wake stays owed.
-      await whileEngineRefuses(
-        (method) => method === "sendEvent",
-        async () => {
-          await confirmPendingAction(env, ada, held.id, held.inputHash);
-        }
-      );
-      const owed = await env.DB.prepare(
-        "SELECT count(*) AS n FROM workflow_run_wakes WHERE resource_run_id = ?"
+    // Who sent the wake is on the record, so this holds however the run's
+    // own timed checks fall: the repair's `workflow.wake.repaired` names
+    // the wake the refused request owed.
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin);
+    const starter = await startingApp(ada, admin, workflow.id, {
+      restricted: true,
+    });
+    const runId = await starter.start(serving);
+    const held = await heldFor(ada, runId);
+    await waiting(runId);
+    // Confirmed while the engine takes no event: the wake stays owed.
+    await whileEngineRefuses(
+      (method) => method === "sendEvent",
+      async () => {
+        await confirmPendingAction(env, ada, held.id, held.inputHash);
+      }
+    );
+    const owed = await env.DB.prepare(
+      "SELECT id FROM workflow_run_wakes WHERE resource_run_id = ?"
+    )
+      .bind(runId)
+      .all<{ id: string }>();
+    await repairWakes(env, new Date(Date.now() + 60_000));
+    const run = await ended(ada, workflow.id, runId);
+    const sent = await mail.did();
+    const events = await allEvents();
+    const repaired = events
+      .filter(
+        ({ action, target }) =>
+          action === "workflow.wake.repaired" && target?.id === runId
       )
-        .bind(runId)
-        .first<{ n: number }>();
-      const stillWaiting = await liveStatus(runId);
-      await repairWakes(env, new Date(Date.now() + 60_000));
-      const run = await ended(ada, workflow.id, runId);
-      const sent = await mail.did();
+      .map(({ actor, detail }) => ({ actor, wake: detail.wake }));
 
-      expect({
-        owed: owed?.n,
-        stillWaiting,
-        end: endOf(run),
-        sent: sent.calls,
-      }).toStrictEqual({
-        owed: 1,
-        stillWaiting: "waiting",
-        end: { status: "completed", output: { status: "message-1" } },
-        sent: 1,
-      });
+    expect({
+      owed: owed.results.length,
+      repaired,
+      left: await wakesOwed(runId),
+      end: endOf(run),
+      sent: sent.calls,
+    }).toStrictEqual({
+      owed: 1,
+      repaired: [{ actor: { type: "system" }, wake: owed.results[0]?.id }],
+      left: 0,
+      end: { status: "completed", output: { status: "message-1" } },
+      sent: 1,
     });
   });
 
@@ -4240,8 +2715,7 @@ describe("runs started by a restricted App, waiting on a held call", () => {
       const sendOf = async (id: string, runId: string) => {
         const { steps } = await signedIn.api.workflowResources.runTrace(
           id,
-          runId,
-          { doors: false }
+          runId
         );
         return steps
           .filter(({ task }) => task === "send")
@@ -4417,7 +2891,7 @@ describe("runs started by a restricted App, waiting on a held call", () => {
 /**
  * Holds `by`'s send through workflow `workflowId`'s mail binding, made in
  * its run `runId` (restricted, so connect holds it), under the key of
- * step `task:send` of run `keyRun`: a held call whose key names whichever
+ * step `send:task` of run `keyRun`: a held call whose key names whichever
  * run the test says.
  */
 const heldSend = async (
@@ -4443,7 +2917,7 @@ const heldSend = async (
       {
         action: "mail.send",
         input: { to: "Ada", subject: "Hello" },
-        idempotencyKey: stepIdempotencyKey(keyRun, "task:send"),
+        idempotencyKey: stepIdempotencyKey(keyRun, "send:task"),
       },
       permissionIdSchema.parse(sending.permissionId)
     )
@@ -4454,7 +2928,7 @@ const heldSend = async (
   );
   const held = waitingFor.find(
     ({ idempotencyKey }) =>
-      idempotencyKey === stepIdempotencyKey(keyRun, "task:send")
+      idempotencyKey === stepIdempotencyKey(keyRun, "send:task")
   );
   if (held === undefined) {
     throw new Error("Nothing held");

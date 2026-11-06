@@ -4,7 +4,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -98,25 +98,22 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
+/** A JSON object schema of `properties`, each required, and nothing else. */
 const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
+  type: "object",
+  properties,
+  required: Object.keys(properties),
+  additionalProperties: false,
 });
 
 const completed = "grasp.job.completed";
 
-/** A listen task `id` for `type` through `binding`, five minutes at most. */
+/** An event wait `id` for `type` through `binding`, five minutes at most. */
 const listen = (id: string, type: string, binding: string) => ({
-  [id]: {
-    listen: { to: { any: [{ with: { type } }] }, read: "data" },
-    timeout: { after: { minutes: 5 } },
-    metadata: { grasp: { binding } },
-  },
+  id,
+  type: "wait",
+  event: { from: binding, type },
+  timeout: "5 minutes",
 });
 
 /** The deployment's hostname, which reply addresses are on. */
@@ -161,27 +158,15 @@ const inboxWorkflow = async () => {
   );
   await publishWorkflowVersion(env, admin, workflow.id, {
     definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: {
-              replies: { kind: "event", contract: emailReplyContract },
-              jobs: { kind: "event", contract: jobs },
-            },
-          },
-        },
+      $schema: workflowSchemaUrl,
+      input: objectSchema({}),
+      output: { schema: objectSchema({}), value: {} },
+      bindings: {
+        replies: { kind: "event", contract: emailReplyContract },
+        jobs: { kind: "event", contract: jobs },
       },
-      input: { schema: objectSchema({}) },
-      output: { schema: objectSchema({}) },
-      do: [
-        { linger: { wait: "PT1H" } },
+      steps: [
+        { id: "linger", type: "wait", for: "1 hour" },
         listen("await-reply", emailReplyType, "replies"),
         listen("await-job", completed, "jobs"),
       ],

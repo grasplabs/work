@@ -130,7 +130,6 @@ export const releaseFiles = [
   compilerAssets.oxcWasm,
   compilerAssets.esbuildWasm,
   compilerAssets.reference,
-  compilerAssets.jqWasm,
   compilerAssets.checker,
   compilerAssets.types,
   compilerAssets.tsrsWasm,

@@ -8,12 +8,7 @@ export default defineProject({
   test: { setupFiles: ["../../scripts/assert-workerd.ts"] },
   plugins: [
     cloudflareTest({
-      miniflare: {
-        compatibilityDate: "2026-09-15",
-        // jq's WebAssembly (`evaluate`), a compiled module as a run's
-        // isolate loads it.
-        modulesRules: [{ type: "CompiledWasm", include: ["**/*.wasm"] }],
-      },
+      miniflare: { compatibilityDate: "2026-09-15" },
     }),
   ],
 });

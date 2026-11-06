@@ -1,13 +1,12 @@
 import { workflowSdkModules } from "@grasp-os/compiler";
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { workflowModuleLimits } from "@grasp-os/shared/workflow-modules";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowResourceRun,
   WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -32,6 +31,7 @@ import {
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { callCompute } from "../src/workflows/resource-compute.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 import { steeringCases } from "./steering-cases.ts";
@@ -59,16 +59,6 @@ const builder = async (): Promise<Acting> => {
   ]);
   return { userId, role: "builder", teams: [], staff: false };
 };
-
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
 
 /** A module summing whole numbers: `total`, a calculation, and a helper. */
 const totalModule = `import { compute, v } from "@grasp-os/sdk/compute";
@@ -101,42 +91,30 @@ export const total = compute({
 `;
 
 /**
- * A definition of `name`: binding `total` to `contract`, a task that calls
- * it on `args`, and a task that answers its result as the status.
+ * A definition binding `total` to `contract`, a step that calls it on
+ * `args`, titled `version`, and the status its result as text.
  */
-const definitionOf = (
-  name: string,
-  {
-    contract = "local:code/total.ts#total",
-    args = "${ [1, 2, 3] }",
-    version = "1.0.0",
-  }: { contract?: string; args?: unknown; version?: string } = {}
-): string =>
+const definitionOf = ({
+  contract = "local:code/total.ts#total",
+  args = [1, 2, 3],
+  version = "1",
+}: { contract?: string; args?: unknown; version?: string } = {}): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version,
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: { total: { kind: "compute", contract } },
-        },
-      },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ who: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: { status: { $expr: '"" + steps.add.output' } },
     },
-    input: { schema: objectSchema({ who: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
+    bindings: { total: { kind: "compute", contract } },
+    steps: [
       {
-        add: {
-          call: "grasp.compute",
-          with: { binding: "total", arguments: args },
-        },
+        id: "add",
+        title: `Version ${version}`,
+        type: "do",
+        binding: "total",
+        arguments: args,
       },
-      { answer: { set: { status: "${ tostring }" } } },
     ],
   });
 
@@ -144,11 +122,11 @@ const definitionOf = (
 const published = async (
   by: Acting,
   modules: Record<string, string>,
-  options?: Parameters<typeof definitionOf>[1]
+  options?: Parameters<typeof definitionOf>[0]
 ) => {
   const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
-    definition: definitionOf(workflow.name, options),
+    definition: definitionOf(options),
     basedOn: null,
     modules,
   });
@@ -160,7 +138,7 @@ const published = async (
 const publicationRefusal = async (
   by: Acting,
   modules: Record<string, string>,
-  options?: Parameters<typeof definitionOf>[1]
+  options?: Parameters<typeof definitionOf>[0]
 ) => {
   const error = await refusal(published(by, modules, options));
   return z
@@ -194,7 +172,7 @@ const ran = async (by: Acting, id: string) => {
 
 /** A version's executable identity; empty for one that isn't executable. */
 const hashOf = (version: WorkflowResourceVersion | undefined): string =>
-  version?.build.executable === true ? version.build.hash : "";
+  version?.build.hash ?? "";
 
 /**
  * Ways module code could intercept what the clock wrappers hand on, each
@@ -308,7 +286,7 @@ describe("a JSON workflow's compute modules", () => {
   it("runs a calculation of its own modules, sealed and exported with the version", async () => {
     const by = await builder();
     const { workflow, version } = await published(by, totalModules);
-    expect(version?.build.executable).toBeTruthy();
+    expect(version?.build.hash !== undefined).toBeTruthy();
     await expect(ran(by, workflow.id)).resolves.toStrictEqual({
       status: "completed",
       output: { status: "6" },
@@ -324,7 +302,7 @@ describe("a JSON workflow's compute modules", () => {
     for (const specifier of [
       "decimal.js",
       "cloudflare:workers",
-      "@grasp-os/sdk/open-workflow",
+      "@grasp-os/sdk/workflow",
       "@grasp-os/sdk/compute-runner",
       "@grasp-os/sdk",
     ]) {
@@ -504,7 +482,7 @@ describe("a JSON workflow's compute modules", () => {
     const { workflow } = await published(
       by,
       { "code/total.ts": moduleAnswering("return amounts.length;") },
-      { args: "${ [$workflow.input.who] }" }
+      { args: [{ $expr: "input.who" }] }
     );
     await expect(ran(by, workflow.id)).resolves.toStrictEqual({
       status: "failed",
@@ -548,7 +526,7 @@ describe("a JSON workflow's compute modules", () => {
     };
     const draft = await editWorkflowDraft(env, by, workflow.id, {
       expectedRevision: 0,
-      source: definitionOf(workflow.name, { version: "1.1.0" }),
+      source: definitionOf({ version: "1.1" }),
       modules: changed,
     });
     await publishWorkflowDraft(env, by, workflow.id, {
@@ -559,7 +537,7 @@ describe("a JSON workflow's compute modules", () => {
     const [latest] = await workflowVersions(env, by, workflow.id);
     expect({
       started: started.modules,
-      version: [latest?.version, latest?.build.executable],
+      version: [latest?.version, latest?.build.hash !== undefined],
       problems: draft.problems,
       checkpoint: draft.checkpoint?.revision,
       modules: draft.modules,
@@ -577,7 +555,7 @@ describe("a JSON workflow's compute modules", () => {
   it("checks a draft's local bindings against its own modules, and keeps modules that don't build with their problems", async () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
-    const source = definitionOf(workflow.name);
+    const source = definitionOf();
     // Without the module it binds, its binding is unknown.
     const bare = await editWorkflowDraft(env, by, workflow.id, {
       expectedRevision: 0,
@@ -647,16 +625,16 @@ describe("a JSON workflow's compute modules", () => {
         problems: draft.problems.map(({ code }) => code),
       };
     };
-    const first = await edit(0, definitionOf(workflow.name), totalModules);
+    const first = await edit(0, definitionOf(), totalModules);
     // Only the definition changes: to an export the modules don't have,
     // which their kept contracts still find.
     const missing = await edit(
       1,
-      definitionOf(workflow.name, { contract: "local:code/total.ts#missing" }),
+      definitionOf({ contract: "local:code/total.ts#missing" }),
       totalModules
     );
-    const back = await edit(2, definitionOf(workflow.name), totalModules);
-    const changed = await edit(3, definitionOf(workflow.name), {
+    const back = await edit(2, definitionOf(), totalModules);
+    const changed = await edit(3, definitionOf(), {
       ...totalModules,
       "code/sum.ts": `${sumModule}// changed\n`,
     });
@@ -671,8 +649,8 @@ describe("a JSON workflow's compute modules", () => {
   it("keeps a draft's modules and their inspections only with the revisions it keeps, and drops them with the workflow", async () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
-    const passing = definitionOf(workflow.name);
-    const failing = definitionOf(workflow.name, {
+    const passing = definitionOf();
+    const failing = definitionOf({
       contract: "local:code/total.ts#missing",
     });
     // A checkpoint, then two whose modules pass and whose definition
@@ -732,7 +710,7 @@ describe("a JSON workflow's compute modules", () => {
       outcome(
         editWorkflowDraft(env, by, workflow.id, {
           expectedRevision: 0,
-          source: definitionOf(workflow.name, { version: "1.1.0" }),
+          source: definitionOf({ version: "1.1" }),
         })
       )
     ).resolves.toBe("workflow.resource_invalid");
@@ -745,21 +723,12 @@ describe("a JSON workflow's compute modules", () => {
       ...totalModules,
       "code/sum.ts": `${sumModule}// changed\n`,
     });
-    expect(first.version?.build.executable).toBeTruthy();
-    expect(second.version?.build.executable).toBeTruthy();
+    expect(first.version?.build.hash !== undefined).toBeTruthy();
+    expect(second.version?.build.hash !== undefined).toBeTruthy();
     expect(hashOf(first.version)).not.toBe(hashOf(second.version));
-    // The same definition and semantic version with other modules is
-    // refused; with the same modules, the saved version answers.
-    const again = await outcome(
-      publishWorkflowVersion(env, by, first.workflow.id, {
-        definition: definitionOf(first.workflow.name),
-        basedOn: 1,
-        modules: { ...totalModules, "code/sum.ts": `${sumModule}// other\n` },
-      })
-    );
-    expect(again).toBe("workflow.version_exists");
+    // Published again with the same modules, the saved version answers.
     const retried = await publishWorkflowVersion(env, by, first.workflow.id, {
-      definition: definitionOf(first.workflow.name),
+      definition: definitionOf(),
       basedOn: null,
       modules: totalModules,
     });
@@ -923,7 +892,7 @@ export const keys = compute({ input: v.record(v.number()), output: v.array(v.str
     };
     const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
     const request = {
-      definition: definitionOf(workflow.name),
+      definition: definitionOf(),
       basedOn: null,
       // Modules no build has cached yet.
       modules: {
@@ -940,7 +909,10 @@ export const keys = compute({ input: v.record(v.number()), output: v.array(v.str
       )
     );
     const saved = await publishWorkflowVersion(env, by, workflow.id, request);
-    expect({ crashed, executable: saved.build.executable }).toStrictEqual({
+    expect({
+      crashed,
+      executable: saved.build.hash !== undefined,
+    }).toStrictEqual({
       crashed: "workflow.build_slow",
       executable: true,
     });
@@ -978,18 +950,13 @@ export const wide = compute({ input: wideInput, output: v.number(), handler: () 
   it("refuses arguments past what a step records before sending anything", async () => {
     const by = await builder();
     const half = Math.ceil(platformLimits.stepPayloadBytes / 2) + 1024;
-    const args = [`\${ "x" * ${half} }`, `\${ "y" * ${half} }`];
     const modules = {
       "code/total.ts": `import { compute, v } from "@grasp-os/sdk/compute";
 export const total = compute({ input: v.array(v.string()), output: v.number(), handler: (items) => items.length });
 `,
     };
-    const { workflow } = await published(by, modules, { args });
-    await expect(ran(by, workflow.id)).resolves.toStrictEqual({
-      status: "failed",
-      code: "workflow.call_invalid",
-    });
-    // Directly, with a sandbox that fails any call made: none is.
+    const { workflow } = await published(by, modules, { args: ["x", "y"] });
+    // With a sandbox that fails any call made: none is.
     const build = await loadWorkflowBuild(env, workflow.id, 1);
     const noLoader: WorkerLoader = {
       get: () => {

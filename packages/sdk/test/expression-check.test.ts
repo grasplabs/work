@@ -121,7 +121,6 @@ describe("reaching a global", () => {
         "Math.max(input.a, 1)",
         "Date.now()",
         "String(input.a)",
-        "undefined",
         "NaN",
         "arguments",
         "require('fs')",
@@ -130,7 +129,17 @@ describe("reaching a global", () => {
         // A callback's parameter is in scope inside it, not after.
         "input.lines.map((line) => line) && line",
       ].map(verdict)
-    ).toStrictEqual(Array.from({ length: 20 }, () => "expression.global"));
+    ).toStrictEqual(Array.from({ length: 19 }, () => "expression.global"));
+  });
+
+  it("reads `undefined` as the value it is, never a global's", () => {
+    expect(
+      [
+        "undefined",
+        "input.note !== undefined ? input.note : ''",
+        "input.lines.filter((line) => line.note === undefined)",
+      ].map(verdict)
+    ).toStrictEqual(["ok", "ok", "ok"]);
   });
 
   it("is refused written with Unicode escapes", () => {

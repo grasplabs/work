@@ -53,6 +53,8 @@ import { followableOrigins } from "./screen-workflows.ts";
 import { loadWorkflowBuild } from "./workflow-builds.ts";
 import { historyEntries } from "./workflows/history.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
+import { sealedStepOf, sealedStepsOf } from "./workflows/sealed-steps.ts";
+import type { SealedSteps } from "./workflows/sealed-steps.ts";
 
 // A workflow reference's ordinary queries, as an App's screens read them
 // (spec 10.7.2): `workflows.<alias>.queries.runs`, `.history`,
@@ -566,9 +568,6 @@ const historyRunOf = async (
   return row;
 };
 
-/** A step of the generated code's own: its kind, then its task's ID. */
-const taskStep = /^(?:task|enter|leave|catch):(?<id>[a-z0-9][a-z0-9-]{0,63})$/u;
-
 /** A history entry's error, as a screen reads one: never the workflow's text. */
 const errorRow = (error: { code: string; message: string }): Json => ({
   code: error.code,
@@ -663,15 +662,16 @@ const declaredTasks = async (
   env: Env,
   pinned: WorkflowPin,
   manifestHash: string
-): Promise<ReadonlySet<string> | undefined> => {
+): Promise<SealedSteps | undefined> => {
   try {
-    const { tasks } = await loadWorkflowBuild(
-      env,
-      pinned.workflowId,
-      pinned.version,
-      manifestHash
+    return sealedStepsOf(
+      await loadWorkflowBuild(
+        env,
+        pinned.workflowId,
+        pinned.version,
+        manifestHash
+      )
     );
-    return new Set(tasks.map(({ id }) => id));
   } catch (error) {
     // A build that is gone or no longer verifies is the platform's fault,
     // logged where it loads (workflow-builds.ts): its history tells
@@ -721,10 +721,9 @@ const historyPage = async (
     {
       // Nobody reads a failure's own message through an App.
       sees: false,
-      taskOf: (engineStep) => {
-        const id = taskStep.exec(engineStep)?.groups?.id;
-        return id !== undefined && declared.has(id) ? id : null;
-      },
+      // As the run host names its steps (sealed-steps.ts): in a loop's
+      // items and a decision's parts too.
+      taskOf: (engineStep) => sealedStepOf(engineStep, declared)?.task ?? null,
     }
   );
   return {
@@ -805,10 +804,6 @@ const historyWindow = async (
   throw operationErrors.create("operation.read_limit");
 };
 
-/** A decision task's call step, as its decision names it: in a loop's scope too. */
-const decisionStep =
-  /^task:(?<id>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?:@[a-z0-9.\-/]+)?$/u;
-
 /** The version the release pins, while the App's binding still names it. */
 const pinnedBound = (
   query: ResolvedWorkflowQuery,
@@ -823,28 +818,37 @@ const pinnedBound = (
 };
 
 /**
- * The decision binding each decision task of version `pinned`'s sealed
- * build asks through, by task ID: a decision's key; none if unreadable.
+ * Version `pinned`'s sealed build, as its decisions read it: its steps, as
+ * the run host names them, and the decision binding each decision task
+ * asks through, by task ID (a decision's key); none if unreadable.
  */
+interface DecisionTasks {
+  readonly steps: SealedSteps;
+  readonly keys: ReadonlyMap<string, string>;
+}
+
 const decisionTasksOf = async (
   env: Env,
   pinned: WorkflowPin,
   manifestHash: string
-): Promise<ReadonlyMap<string, string> | undefined> => {
+): Promise<DecisionTasks | undefined> => {
   try {
-    const { tasks } = await loadWorkflowBuild(
+    const build = await loadWorkflowBuild(
       env,
       pinned.workflowId,
       pinned.version,
       manifestHash
     );
-    return new Map(
-      tasks.flatMap((task) =>
-        task.kind === "call" && task.call.name === "grasp.decision"
-          ? [[task.id, task.call.binding] as const]
-          : []
-      )
-    );
+    return {
+      steps: sealedStepsOf(build),
+      keys: new Map(
+        build.tasks.flatMap((task) =>
+          task.kind === "call" && task.call.name === "grasp.decision"
+            ? [[task.id, task.call.binding] as const]
+            : []
+        )
+      ),
+    };
   } catch (error) {
     // Logged where it loads (workflow-builds.ts): its decisions name no
     // key, so none of them is shown.
@@ -941,11 +945,16 @@ const restrictedApp = async (
  */
 const keyOf = (
   row: DecisionRow,
-  tasks: ReadonlyMap<string, string> | undefined,
+  tasks: DecisionTasks | undefined,
   keys: ReadonlySet<string>
 ): { key: string; taskId: string } | undefined => {
-  const taskId = decisionStep.exec(row.step)?.groups?.id;
-  const key = taskId === undefined ? undefined : tasks?.get(taskId);
+  // Its task's own step, as the run host names it (sealed-steps.ts), in
+  // a loop's item too: never one of the decision's parts.
+  const step =
+    tasks === undefined ? undefined : sealedStepOf(row.step, tasks.steps);
+  const taskId =
+    step?.kind === "task" && step.part === "" ? step.task : undefined;
+  const key = taskId === undefined ? undefined : tasks?.keys.get(taskId);
   return taskId === undefined || key === undefined || !keys.has(key)
     ? undefined
     : { key, taskId };

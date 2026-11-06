@@ -1,9 +1,9 @@
-import { pointerJoin } from "@grasp-os/open-workflow/diagnostics";
-import type { ValueDescriptor } from "@grasp-os/sdk";
 import { runtimeNames } from "@grasp-os/sdk/expression-check";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
+import { z } from "zod";
 
 import type { CheckedWorkflow } from "./check.ts";
+import { pointerJoin } from "./data-schema.ts";
 import {
   durationMs,
   isPlain,
@@ -12,7 +12,6 @@ import {
 } from "./format.ts";
 import type {
   Binding,
-  ErrorFilter,
   EventWaitStep,
   Json,
   PlainParam,
@@ -20,6 +19,14 @@ import type {
   TryStep,
   Value,
 } from "./format.ts";
+import type {
+  SealedCall,
+  SealedCatch,
+  SealedExpression,
+  SealedTable,
+  SealedTask,
+  Template,
+} from "./sealed.ts";
 
 // The generator: a checked grasp-workflow/1 document (check.ts) translated
 // straight into TypeScript on `@grasp-os/sdk/workflow`, one SDK call per
@@ -44,8 +51,7 @@ import type {
 // it doesn't hold; an `if` step's condition in its own task step; the
 // output in `workflow:output`.
 //
-// Threat model (as the generator before it, @grasp-os/open-workflow's
-// generate.ts), and how each is closed:
+// Threat model, and how each is closed:
 //
 // - Text of the document becoming code. No string, key or ID of the
 //   document is spliced into the module as written: every one becomes a
@@ -83,138 +89,8 @@ export const generatedImport = "@grasp-os/sdk/workflow";
 /** The generator, as a build names what made it. */
 export const generatorVersion = "grasp-workflow-ts/1";
 
-/** A value the host builds or checks a call by (core's `SealedTemplate`). */
-export type Template =
-  | { readonly literal: Json }
-  | { readonly slot: number }
-  | { readonly param: string }
-  | { readonly object: readonly (readonly [string, Template])[] }
-  | { readonly array: readonly Template[] };
-
-/** A task's call, as the host checks and makes it (core's `SealedCall`). */
-export type SealedCall =
-  | {
-      readonly name: "grasp.connector";
-      readonly binding: string;
-      readonly operation: string;
-      readonly arguments: Template;
-    }
-  | {
-      readonly name: "grasp.operation";
-      readonly binding: string;
-      readonly arguments: Template;
-    }
-  | {
-      readonly name: "grasp.compute" | "grasp.action";
-      readonly binding: string;
-      readonly module: string;
-      readonly export: string;
-      readonly arguments: Template;
-    }
-  | {
-      readonly name: "grasp.model";
-      readonly binding: string;
-      readonly instructions: Template;
-      readonly input: Template;
-      readonly outputSchema: ValueDescriptor;
-    }
-  | {
-      readonly name: "grasp.decision";
-      readonly binding: string;
-      readonly recipients: Template;
-      readonly prompt: Template;
-      readonly input: Template;
-      /** None: until the run's own deadline. */
-      readonly timeoutMs?: number;
-    }
-  | { readonly name: "grasp.sleepUntil"; readonly timestamp: Template };
-
-/**
- * An event wait's events, as the host takes them (core's sealed listen):
- * the first of any of its types sent through its event binding, matched
- * by type alone; its output is that event's envelope as the host minted it.
- */
-export interface SealedListen {
-  readonly binding: string;
-  readonly strategy: "any";
-  readonly filters: readonly {
-    readonly type: string;
-    readonly attributes: readonly never[];
-  }[];
-}
-
-/** A try task's catch, as the host decides it (core's sealed catch). */
-export interface SealedCatch {
-  readonly variable: string;
-  readonly errors?: ErrorFilter;
-  readonly when?: number;
-  readonly retry?: {
-    readonly attempts: number;
-    readonly delayMs: number;
-    readonly backoff: "constant" | "linear" | "exponential";
-    readonly when?: number;
-  };
-}
-
-/** One task of the module, as the host checks its steps (core's `SealedTask`). */
-export interface SealedTask {
-  readonly id: string;
-  readonly kind:
-    | "call"
-    | "wait"
-    | "try"
-    | "raise"
-    | "for"
-    | "switch"
-    | "listen";
-  readonly pointer: string;
-  /** Its engine steps, `<id>:<step>`: a wait sleeps in its `task` step. */
-  readonly steps: readonly StepKey[];
-  /** The loops around it, outermost first (no forks in this format yet). */
-  readonly scope: readonly string[];
-  /** Beside `scope`: null for each loop, as the host has a fork's branch. */
-  readonly branches: readonly null[];
-  readonly schemas: Readonly<Record<string, never>>;
-  /**
-   * A loop's items, as its enter step records them (`in`, which the host
-   * reads from that record, not from here), the names its items' code
-   * reads them by, and the slot of its `while`, which its item steps
-   * record. Its items run one at a time.
-   */
-  readonly loop?: {
-    readonly in: Template;
-    readonly each: string;
-    readonly at: string;
-    readonly concurrency: 1;
-    readonly while?: number;
-  };
-  readonly call?: SealedCall;
-  readonly listen?: SealedListen;
-  readonly milliseconds?: number;
-  readonly catch?: SealedCatch;
-  readonly error?: {
-    readonly type: string;
-    readonly status: number;
-    readonly title?: string;
-    readonly detail?: string;
-  };
-  readonly timeoutMs?: number;
-}
-
-/** An expression of the module, for review: where it is, what it says. */
-export interface SealedExpression {
-  readonly slot: number;
-  readonly pointer: string;
-  readonly taskId: string | null;
-  readonly stage: "taskIf" | "taskDefinition" | "workflowOutputAs";
-  readonly result: "boolean" | "json";
-  readonly source: string;
-  readonly loopVariables: readonly string[];
-  readonly caught?: readonly {
-    readonly variable: string;
-    readonly taskId: string;
-  }[];
-}
+/** A task as its generator writes it: the loops around it are added. */
+type Unscoped<Task> = Task extends unknown ? Omit<Task, "scope"> : never;
 
 /** The lines a task's code takes in the module, from 1, both ends included. */
 export interface TaskSpan {
@@ -230,15 +106,32 @@ export interface Generation {
   readonly tasks: readonly SealedTask[];
   readonly expressions: readonly SealedExpression[];
   readonly spans: readonly TaskSpan[];
-  /**
-   * The workflow's own input and output steps: no input step, its code
-   * reads its input; an output step where it has an output.
-   */
-  readonly workflow: { readonly input: false; readonly output: boolean };
+  /** Whether it has an output, evaluated in `workflow:output`. */
+  readonly workflow: SealedTable["workflow"];
   /** The parameters its code reads: those that aren't sensitive. */
   readonly params: readonly string[];
-  readonly limits: Readonly<Record<string, never>>;
 }
+
+/**
+ * The innermost task whose code holds `line` of the module, if any: where
+ * a diagnostic of the generated code is, in the document's terms.
+ */
+export const taskAtLine = (
+  spans: readonly TaskSpan[],
+  line: number
+): TaskSpan | undefined => {
+  let inner: TaskSpan | undefined;
+  for (const span of spans) {
+    const holds = span.from <= line && line <= span.to;
+    if (
+      holds &&
+      (inner === undefined || span.to - span.from < inner.to - inner.from)
+    ) {
+      inner = span;
+    }
+  }
+  return inner;
+};
 
 const literal = (value: unknown): string => JSON.stringify(value);
 
@@ -535,13 +428,8 @@ class Generator {
     return binding;
   }
 
-  #task(task: Omit<SealedTask, "scope" | "branches" | "schemas">): void {
-    this.#tasks.push({
-      ...task,
-      scope: this.#loops.map(({ id }) => id),
-      branches: this.#loops.map(() => null),
-      schemas: {},
-    });
+  #task(task: Unscoped<SealedTask>): void {
+    this.#tasks.push({ ...task, scope: this.#loops.map(({ id }) => id) });
   }
 
   /**
@@ -676,7 +564,8 @@ class Generator {
         binding: step.binding,
         instructions: instructions.template,
         input: input.template,
-        outputSchema,
+        // The descriptor as the JSON it is sealed as.
+        outputSchema: z.json().parse(outputSchema),
       },
       operation: "grasp.model",
       arguments: `{ ["instructions"]: ${instructions.code}, ["input"]: ${input.code} }`,
@@ -798,7 +687,6 @@ class Generator {
         in: { slot: items.slot },
         each: loopItem,
         at: loopIndex,
-        concurrency: 1,
         ...(holds === undefined ? {} : { while: holds.slot }),
       },
     });
@@ -813,10 +701,13 @@ class Generator {
         // Over the recorded items, never a fresh evaluation: the host
         // holds the items to what the enter step recorded, and fails a
         // record that isn't a list of at most 1,000
-        // (`workflow.collection_invalid`), so this parse only types them.
+        // (`workflow.collection_invalid`), so this parse only types them:
+        // each item as every value an expression reads (the SDK's `Read`),
+        // which the typed check types where it is written, so an item read
+        // bare (`100 * item`) compiles as it was checked.
         this.#line(
           inner,
-          `for (const [${index}, item${number}] of z.array(z.json()).parse(${entered}.items).entries()) {`
+          `for (const [${index}, item${number}] of z.array(z.any()).parse(${entered}.items).entries()) {`
         );
         this.#line(inner + 1, `const ${loopItem} = item${number};`);
         if (holds !== undefined) {
@@ -1211,9 +1102,8 @@ class Generator {
         from: span.from + offset,
         to: span.to + offset,
       })),
-      workflow: { input: false, output: document.output !== undefined },
+      workflow: { output: document.output !== undefined },
       params: params.map(([name]) => name),
-      limits: {},
     };
   }
 }

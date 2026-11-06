@@ -1,4 +1,3 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import {
   AppError,
   app as registerApp,
@@ -31,8 +30,8 @@ import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -68,6 +67,7 @@ import {
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
+import { objectSchema } from "./json-workflow-apps.ts";
 import { liveStatus } from "./runs.ts";
 import { unique } from "./sign-in.ts";
 
@@ -228,53 +228,30 @@ const person = async (role: Role): Promise<Identity> => {
   };
 };
 
-const objectSchema = (properties: Record<string, unknown>) => ({
-  format: "json",
-  document: {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  },
-});
-
 /**
- * A workflow waiting for its job's completion through `jobEvents`, then
- * ending with the event's source and job.
+ * A workflow waiting, in `job`, for its job's completion through
+ * `jobEvents`, then ending with the event's source and job.
  */
-const definitionOf = (name: string, contract: string): string =>
+const definitionOf = (contract: string): string =>
   JSON.stringify({
-    document: {
-      dsl: "1.0.3",
-      namespace: workflowNamespace,
-      name,
-      version: "1.0.0",
-      title: name,
-      metadata: {
-        grasp: {
-          profile: "grasp-open-workflow/1",
-          params: {},
-          bindings: { jobEvents: { kind: "event", contract } },
+    $schema: workflowSchemaUrl,
+    input: objectSchema({ jobId: { type: "string" } }),
+    output: {
+      schema: objectSchema({ status: { type: "string" } }),
+      value: {
+        status: {
+          $expr:
+            '(steps.job.output.event?.source ?? "") + " " + (steps.job.output.event?.data.jobId ?? "")',
         },
       },
     },
-    input: { schema: objectSchema({ jobId: { type: "string" } }) },
-    output: { schema: objectSchema({ status: { type: "string" } }) },
-    do: [
+    bindings: { jobEvents: { kind: "event", contract } },
+    steps: [
       {
-        "await-job": {
-          listen: {
-            to: { one: { with: { type: completed } } },
-            read: "envelope",
-          },
-          timeout: { after: { hours: 1 } },
-          metadata: { grasp: { binding: "jobEvents" } },
-        },
-      },
-      {
-        finish: {
-          set: { status: '${ .[0].source + " " + .[0].data.jobId }' },
-        },
+        id: "job",
+        type: "wait",
+        event: { from: "jobEvents", type: completed },
+        timeout: "1 hour",
       },
     ],
   });
@@ -385,7 +362,7 @@ const fixture = async () => {
   });
   const workflow = await createWorkflowResource(env, ada, `review-${unique()}`);
   await publishWorkflowVersion(env, ada, workflow.id, {
-    definition: definitionOf(workflow.name, contract),
+    definition: definitionOf(contract),
     basedOn: null,
   });
   await approveWorkflowBinding(env, admin, workflow.id, {

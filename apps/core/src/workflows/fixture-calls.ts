@@ -14,7 +14,6 @@ import {
   appTestRuns,
   businessStores,
 } from "../db/core/schema.ts";
-import { modelSettings } from "../models.ts";
 import { callOperation } from "../operations.ts";
 import { hostedRelease } from "../release-runner.ts";
 import { consumerFailure, fenced, servedIn } from "../store-operations.ts";
@@ -32,7 +31,7 @@ import type { BuiltCall, Effect } from "./resource-calls.ts";
 // The model and store calls of a run an App's test started (fixture-runs.ts,
 // `workflowTest`): the run's host builds each as it builds a real one, holds
 // it to the run's limits, then hands it here in place of `makeCall`
-// (resource-host.ts, `#made`; sealed-run.ts, `#madeOrServed`). A test's
+// (sealed-run.ts, `#madeOrServed`). A test's
 // run never reaches a real model, a real store, the organization's data or
 // its budget. Threat model, and how each is closed
 // (workflow-test-calls.test.ts tries each):
@@ -56,8 +55,8 @@ import type { BuiltCall, Effect } from "./resource-calls.ts";
 //   name a store.
 // - Any other call leaves the run's code: the host refuses a connector's,
 //   Knowledge's, a template's, a file's, an action's and an event's before
-//   it is built or audited (resource-host.ts; sealed-run.ts, `#call`, by
-//   `fixtureCalls`), and `makeCall` refuses every call of a test's run
+//   it is built or audited (sealed-run.ts, `#call`, by `fixtureCalls`),
+//   and `makeCall` refuses every call of a test's run
 //   again (`fixture`), so none reaches connect, a model or a store even if
 //   the host's gate were wrong.
 // - An answer or call the real host wouldn't pass, so a test passes what a
@@ -139,7 +138,7 @@ const bindingOf = async (
   const versions = await bindingsOf(env, run.workflowId, run.version);
   const declared = versions.get(run.version) ?? [];
   const binding = declared.find((each) => each.alias === alias);
-  if (binding?.kind !== kind || binding.resourceId !== null) {
+  if (binding?.kind !== kind) {
     throw callDenied();
   }
   return binding;
@@ -312,21 +311,6 @@ export const fixtureCall = async (
   if (call.name === "grasp.model") {
     await bindingOf(env, run, call.binding, "model");
     requireModelRequest(call);
-    // A test's run holds no approval, so no binding's target model to
-    // hold an explicit model to, as a real call does (resource-calls.ts).
-    // It is held to what any binding could be approved for: a model the
-    // deployment allows (workflow-bindings.ts).
-    const settings =
-      call.model === undefined ? undefined : await modelSettings(env);
-    const allowed: readonly string[] = settings?.models ?? [];
-    if (
-      call.model !== undefined &&
-      (typeof call.model !== "string" || !allowed.includes(call.model))
-    ) {
-      throw workflowResourceErrors.create("workflow.call_invalid", {
-        issues: ["model: The deployment doesn't allow it."],
-      });
-    }
     const answer = ownOf(
       answersSchema.parse(JSON.parse(record.models)),
       call.binding

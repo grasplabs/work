@@ -241,9 +241,6 @@ catalogs:
     jose:
       specifier: 6.2.12
       version: 6.2.12
-    jq-wasm:
-      specifier: 3.0.0-jq-1.8.2
-      version: 3.0.0-jq-1.8.2
     lightningcss:
       specifier: 1.33.0
       version: 1.33.0
@@ -389,7 +386,6 @@ overrides:
 
 patchedDependencies:
   '@cloudflare/vitest-pool-workers@0.22.0': 1b5827a778f33949505b9ea8d43d71a1167964cc97e3ebf8eabf235c657d1323
-  jq-wasm@3.0.0-jq-1.8.2: 3fe839845a97b5c18ce6163b2cbb2bfd1542eff126efd1da93dc9bbda2e283ed
   miniflare@5.20261023.1-beta: 183679469e06acbb262c35b252138578afa9fceb97856d70eb51288d56e25236
 
 importers:
@@ -411,6 +407,9 @@ importers:
       '@grasp-os/workerflow':
         specifier: workspace:*
         version: link:packages/workerflow
+      '@grasp-os/workflow-schema':
+        specifier: workspace:*
+        version: link:packages/workflow-schema
       '@playwright/test':
         specifier: 'catalog:'
         version: 1.63.0
@@ -677,9 +676,6 @@ importers:
       '@grasp-os/workerflow':
         specifier: workspace:*
         version: link:../../packages/workerflow
-      '@grasp-os/workflow-expressions':
-        specifier: workspace:*
-        version: link:../../packages/workflow-expressions
       '@grasp-os/workflow-schema':
         specifier: workspace:*
         version: link:../../packages/workflow-schema
@@ -1013,6 +1009,9 @@ importers:
 
   packages/compiler:
     dependencies:
+      '@babel/parser':
+        specifier: 'catalog:'
+        version: 7.29.9
       '@babel/standalone':
         specifier: 'catalog:'
         version: 7.29.9
@@ -1068,9 +1067,6 @@ importers:
         specifier: 'catalog:'
         version: 4.3.3
     devDependencies:
-      '@babel/parser':
-        specifier: 'catalog:'
-        version: 7.29.9
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 5.20261023.1
@@ -1151,22 +1147,13 @@ importers:
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../shared
-      '@grasp-os/workflow-expressions':
+      '@grasp-os/workflow-schema':
         specifier: workspace:*
-        version: link:../workflow-expressions
+        version: link:../workflow-schema
     devDependencies:
-      '@cfworker/json-schema':
-        specifier: 'catalog:'
-        version: 4.1.1
-      '@cloudflare/vitest-pool-workers':
-        specifier: 'catalog:'
-        version: 0.22.0(patch_hash=1b5827a778f33949505b9ea8d43d71a1167964cc97e3ebf8eabf235c657d1323)(@cloudflare/workers-types@5.20261023.1)(@types/node@26.6.2)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11)
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 5.20261023.1
-      yaml:
-        specifier: 'catalog:'
-        version: 2.9.1
 
   packages/sdk:
     dependencies:
@@ -1185,9 +1172,6 @@ importers:
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../shared
-      '@grasp-os/workflow-expressions':
-        specifier: workspace:*
-        version: link:../workflow-expressions
       '@standard-schema/spec':
         specifier: 'catalog:'
         version: 1.1.0
@@ -1332,42 +1316,20 @@ importers:
         specifier: 'catalog:'
         version: 4.154.0(@cloudflare/workers-types@5.20261023.1)(@types/node@26.6.2)
 
-  packages/workflow-expressions:
-    dependencies:
-      '@grasp-os/shared':
-        specifier: workspace:*
-        version: link:../shared
-      '@standard-schema/spec':
-        specifier: 'catalog:'
-        version: 1.1.0
-      jq-wasm:
-        specifier: 'catalog:'
-        version: 3.0.0-jq-1.8.2(patch_hash=3fe839845a97b5c18ce6163b2cbb2bfd1542eff126efd1da93dc9bbda2e283ed)
-    devDependencies:
-      '@cloudflare/vitest-pool-workers':
-        specifier: 'catalog:'
-        version: 0.22.0(patch_hash=1b5827a778f33949505b9ea8d43d71a1167964cc97e3ebf8eabf235c657d1323)(@cloudflare/workers-types@5.20261023.1)(@types/node@26.6.2)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11)
-      '@cloudflare/workers-types':
-        specifier: 'catalog:'
-        version: 5.20261023.1
-      zod:
-        specifier: 'catalog:'
-        version: 4.6.7
-
   packages/workflow-schema:
     dependencies:
       '@cfworker/json-schema':
         specifier: 'catalog:'
         version: 4.1.1
-      '@grasp-os/open-workflow':
-        specifier: workspace:*
-        version: link:../open-workflow
       '@grasp-os/sdk':
         specifier: workspace:*
         version: link:../sdk
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../shared
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
     devDependencies:
       '@babel/parser':
         specifier: 'catalog:'
@@ -8136,10 +8098,6 @@ packages:
 
   jose@6.2.12:
     resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
-
-  jq-wasm@3.0.0-jq-1.8.2:
-    resolution: {integrity: sha512-jgWSEBJSd0lYR4Q5Fw8333MxQS5jCRI+g9KwAGL7yK1spwzTJy8C5uOS08wbpKE0Gz8oQYLlRpNLE/W70Ksp2g==}
-    engines: {node: '>=20'}
 
   js-sha256@0.10.1:
     resolution: {integrity: sha512-5obBtsz9301ULlsgggLg542s/jqtddfOpV5KJc4hajc9JV8GeY2gZHSVpYBn4nWqAUTJ9v+xwtbJ1mIBgIH5Vw==}
@@ -17346,8 +17304,6 @@ snapshots:
   jose@5.10.0: {}
 
   jose@6.2.12: {}
-
-  jq-wasm@3.0.0-jq-1.8.2(patch_hash=3fe839845a97b5c18ce6163b2cbb2bfd1542eff126efd1da93dc9bbda2e283ed): {}
 
   js-sha256@0.10.1: {}
 
