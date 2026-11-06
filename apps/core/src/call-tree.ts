@@ -28,8 +28,8 @@ export class CallTree {
 
   /**
    * On-prem, the sandbox session, by its call ID, the function the caller
-   * named runs in, once open: a call another App's function makes on its
-   * behalf (a shared store's operation) runs in a child of it.
+   * named runs in, once open: a shared store's operation called on its
+   * behalf runs in a child of it.
    */
   get session(): string | undefined {
     return this.#ownSession;

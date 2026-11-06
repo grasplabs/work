@@ -195,13 +195,12 @@ const jsonOrUndefined = (text: string): unknown => {
   }
 };
 
-/** A row as the API returns it. */
-const toBinding = (row: Row): ResourceBinding => ({
+/** What the API returns of a row, but its target. */
+const rowFields = (row: Row): Omit<ResourceBinding, "target"> => ({
   id: row.id,
   appId: row.appId,
   alias: row.alias,
   kind: row.kind,
-  target: bindingTargetSchema.parse(JSON.parse(row.target)),
   contractId: row.contractId,
   fingerprint: row.fingerprint,
   declarationHash: row.declarationHash,
@@ -212,6 +211,28 @@ const toBinding = (row: Row): ResourceBinding => ({
   revokedBy: row.revokedBy,
   revokedAt: row.revokedAt?.toISOString() ?? null,
 });
+
+/**
+ * A row as the API returns it; undefined when its target no longer parses
+ * (a kind there is no more, such as a binding to another App written by
+ * an older version while this one deployed), so a list leaves it out, as
+ * the other readers of a row's target do.
+ */
+const bindingOf = (row: Row): ResourceBinding | undefined => {
+  const target = bindingTargetSchema.safeParse(jsonOrUndefined(row.target));
+  return target.success
+    ? { ...rowFields(row), target: target.data }
+    : undefined;
+};
+
+/** `row` as the API returns it, or `resource.binding_not_found` when it can't be read. */
+const toBinding = (row: Row): ResourceBinding => {
+  const binding = bindingOf(row);
+  if (binding === undefined) {
+    throw resourceBindingErrors.create("resource.binding_not_found");
+  }
+  return binding;
+};
 
 /** What the audit log records of a binding's target: IDs only. */
 const targetDetail = (target: BindingTarget): Record<string, Json> => {
@@ -435,7 +456,8 @@ export const revokeResourceBinding = async (
           .where(eq(appResourceBindings.id, id))
           .get()
       : undefined;
-  if (found === undefined) {
+  // One whose target no longer parses is no binding the API shows.
+  if (found === undefined || bindingOf(found) === undefined) {
     throw resourceBindingErrors.create("resource.binding_not_found");
   }
   const db = drizzle(env.DB);
@@ -494,7 +516,7 @@ export const listResourceBindings = async (
       desc(appResourceBindings.approvedAt)
     )
     .limit(200);
-  return rows.map(toBinding);
+  return rows.flatMap((row) => bindingOf(row) ?? []);
 };
 
 /** Why an active binding doesn't serve its declaration now. */
@@ -930,12 +952,15 @@ export const reviewResourceBindings = async (
         row === undefined
           ? undefined
           : await resolved(env, found.id, declaration, row, contracts.asks);
+      const binding = row === undefined ? undefined : bindingOf(row);
       return {
         ...declaredOf(declaration),
         usedBy: release === undefined ? [] : usersOf(release, alias),
         state: resolution?.state ?? "unbound",
         binding:
-          row === undefined ? null : { ...toBinding(row), label: labelOf(row) },
+          row === undefined || binding === undefined
+            ? null
+            : { ...binding, label: labelOf(row) },
         choices:
           grants === undefined
             ? null
@@ -951,7 +976,7 @@ export const reviewResourceBindings = async (
     undeclared: rows
       .filter(({ alias }) => !aliases.has(alias))
       .toSorted((one, other) => one.alias.localeCompare(other.alias))
-      .map(toBinding),
+      .flatMap((row) => bindingOf(row) ?? []),
     truncated: contracts.truncated(),
   };
 };

@@ -3,9 +3,10 @@
 // `connector-catalog.gen.ts`) and some of its actions, and
 // `ctx.connections.<alias>.call(action, args)` then infers that action's
 // arguments and answer from the contract alone, without a cast or a
-// generic argument; another App's functions are typed by what the
-// declaration says of them; `ctx.ai`, `ctx.brain` and `ctx.guests` are
-// there only for an action that lists them. This file is type-checked by
+// generic argument; the platform's functions are typed by what
+// `permission.grasp()` declares of them; `ctx.ai`, `ctx.brain`,
+// `ctx.grasp` and `ctx.guests` are there only for an action that lists
+// them. This file is type-checked by
 // `vp check` and never run: every `@ts-expect-error` below must stay an
 // error.
 import { expectTypeOf } from "vite-plus/test";

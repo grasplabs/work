@@ -767,6 +767,45 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     });
   });
 
+  it("leave out a binding whose target no longer parses, as one to another App an older version wrote", async () => {
+    const sealed = await sealedApp(modelFiles());
+    const admin = await person("admin");
+    const binding = await approveResourceBinding(
+      env,
+      admin,
+      writerApproval(sealed)
+    );
+    // Written by the version before, while this one deployed: past the
+    // migration that removed the rest.
+    const stale = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO app_resource_bindings (id, app_id, alias, kind, target,
+        declaration_hash, contract_id, fingerprint, reviewed_version, status,
+        approved_by, approved_at)
+       VALUES (?, ?, 'crm', 'app', ?, 'hash', 'app:crm', 'fingerprint', 1, 'active', ?, 0)`
+    )
+      .bind(
+        stale,
+        sealed.app,
+        JSON.stringify({ kind: "app", appId: "crm" }),
+        admin.userId
+      )
+      .run();
+    const listed = await listResourceBindings(env, admin, sealed.app);
+    const review = await reviewResourceBindings(env, admin, sealed.app);
+    expect({
+      listed: listed.map(({ id }) => id),
+      undeclared: review.undeclared.map(({ id }) => id),
+      revoked: await failure(
+        async () => await revokeResourceBinding(env, admin, stale)
+      ),
+    }).toStrictEqual({
+      listed: [binding.id],
+      undeclared: [],
+      revoked: "resource.binding_not_found",
+    });
+  });
+
   it("are revoked by admins only, while they are admins", async () => {
     const sealed = await sealedApp(modelFiles());
     const admin = await person("admin");

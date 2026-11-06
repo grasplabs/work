@@ -37,7 +37,7 @@ const modelNameSchema = z
  * - `knowledge` (`brain`): one of the App's collection permissions for
  *   each collection the declaration names, read as a delegate on every
  *   call;
- * - `grasp` (`apps`, alias `grasp`): the platform's own read-only
+ * - `grasp` (`grasp`): the platform's own read-only
  *   functions, under one of the App's `{ type: "platform" }` permissions
  *   to read the platform's statistics (`statistics`), checked on every
  *   call;

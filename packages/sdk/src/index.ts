@@ -32,7 +32,6 @@ export type {
   ConnectorAction,
   ConnectorContract,
   FilesPermission,
-  GraspClient,
   GraspFunctions,
   GraspPermission,
   GuestsClient,

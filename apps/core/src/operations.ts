@@ -1536,9 +1536,9 @@ export interface ResourceContext {
   readonly idempotencyKey: string;
   /**
    * On-prem, the sandbox session, by its call ID, the caller's function
-   * runs in: a call the adapter makes of another App's function runs in a
-   * child of it (a shared store's operation, resource-store.ts), never
-   * waiting for a process the caller holds while it waits.
+   * runs in: a call the adapter makes of a shared store's operation
+   * (resource-store.ts) runs in a child of it, never waiting for a process
+   * the caller holds while it waits.
    */
   readonly session?: string;
 }
@@ -1680,7 +1680,7 @@ const guestResults = {
 
 /**
  * Whether `method` with `args` is a `call` of one name `declares`, with an
- * object of arguments: a connection's action, another App's function.
+ * object of arguments: a connection's action, a platform function.
  */
 const isNamedCall = (
   method: unknown,
