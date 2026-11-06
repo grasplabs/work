@@ -10,6 +10,8 @@ import { appDefinition } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { loadFrame, modulePartsOf } from "./page-frames.ts";
+import type { Framed } from "./page-frames.ts";
 import { chatsOf, chatWithDraft, outcome, requestFor } from "./previews.ts";
 import { failure } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -31,6 +33,20 @@ import { signedInApi } from "./sign-in.ts";
 const idp = mockIdp();
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
+
+/**
+ * The code a preview's frame runs: each module's content address. Not its
+ * frame's artifact, which a version opened read-only has of its own
+ * (page-frame.ts, `previewFrame`), whatever code it runs.
+ */
+const codeOf = async (framed: Framed): Promise<string> => {
+  const frame = await loadFrame(framed);
+  return JSON.stringify(
+    Object.values(frame?.addresses ?? {})
+      .map((address) => modulePartsOf(address).hash)
+      .toSorted()
+  );
+};
 
 /** The Desk page, saying `marker`. */
 const desk = (
@@ -343,12 +359,16 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
     await chats.restoreDraftVersion(chatId, app, 1);
     const restored = await chats.preview(chatId, app);
 
+    const [nowCode, firstCode, secondCode, restoredCode] = await Promise.all(
+      [now, first, second, restored].map(async (bundle) => await codeOf(bundle))
+    );
+
     expect({
       first: first.revision,
-      differs: first.artifact !== now.artifact,
-      secondIsNow: second.artifact === now.artifact,
+      differs: firstCode !== nowCode,
+      secondIsNow: secondCode === nowCode,
       calls,
-      restoredIsFirst: restored.artifact === first.artifact,
+      restoredIsFirst: restoredCode === firstCode,
       missing: await failure(async () => await chats.preview(chatId, app, 9)),
     }).toStrictEqual({
       first: readOnlyRevision,
