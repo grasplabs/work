@@ -1,3 +1,4 @@
+import { checkExpression } from "@grasp-os/sdk/expression-check";
 import { appErrors } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -37,6 +38,9 @@ import { signedInApi, unique } from "./sign-in.ts";
 // changes isn't recorded as its own; and it follows runs it wasn't let to.
 
 const idp = mockIdp();
+
+/** An example `{ "$expr": "…" }` in a request's body, as JSON escapes it. */
+const exampleExpression = /\\"\$expr\\": \\"(?<source>[^"\\]*)\\"/gu;
 
 const returned = (text: string | undefined): unknown =>
   z.unknown().parse(JSON.parse(text?.replace("Returned:\n", "") ?? "null"));
@@ -269,6 +273,14 @@ describe("the agent building an independent workflow", () => {
       Object.keys(stepListPaths).filter(
         (type) => !declared.includes(`\`${type}\`: `)
       )
+    ).toStrictEqual([]);
+    // And each example expression in it is one the format takes.
+    const examples = [...declared.matchAll(exampleExpression)].map(
+      (match) => match.groups?.source ?? ""
+    );
+    expect(examples.length).toBeGreaterThan(0);
+    expect(
+      examples.filter((source) => !checkExpression(source).ok)
     ).toStrictEqual([]);
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toStrictEqual({

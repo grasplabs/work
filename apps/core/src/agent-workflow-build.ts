@@ -540,9 +540,14 @@ const workflowBuildDeclaration = `/**
  * contract: "grasp/http" }\` (\`get\` and \`send\`; \`"grasp/http-read"\` for \`get\` alone, on
  * a connection that allows no change) and call it with a \`do\` step, \`operation: "get"\` (a read:
  * \`{ path, method?: "GET" | "HEAD", headers? }\`) or \`"send"\` (a change: \`{ method: "POST" |
- * "PUT" | "PATCH" | "DELETE", path, headers?, body? }\`, body as text, such as
- * \`{ "$expr": "JSON.stringify(input.invoice)" }\`). It answers \`{ status, headers, body }\`, body
- * as text. Ask for the connection with \`requestPermission\` (actions \`["get", "send"]\`, or
+ * "PUT" | "PATCH" | "DELETE", path, headers?, body? }\`, body as text). An expression can't write
+ * JSON (no \`JSON\`): a \`do\` step of the workflow's own compute turns a value into text, such as
+ * \`code/body.ts\`'s (importing \`compute\` and \`v\` from \`"@grasp-os/sdk/compute"\`)
+ * \`export const invoiceBody = compute({ input: <the invoice's schema>, output:
+ * v.string(), handler: (invoice) => JSON.stringify(invoice) })\` bound as \`{ kind: "compute",
+ * contract: "local:code/body.ts#invoiceBody" }\` and called by step \`body\` with
+ * \`arguments: { "$expr": "input.invoice" }\`, then \`body: { "$expr": "steps.body.output" }\`.
+ * It answers \`{ status, headers, body }\`, body as text. Ask for the connection with \`requestPermission\` (actions \`["get", "send"]\`, or
  * \`["get"]\` for reads alone). Never put a URL, key or token in a definition.
  */
 workflowBuild: {
