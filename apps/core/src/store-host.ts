@@ -21,6 +21,7 @@ import type {
   SchemaAnswer,
   SchemaIds,
   SchemaManifest,
+  SchemaPlan,
 } from "@grasp-os/sdk/host";
 import { appDataImportLimits } from "@grasp-os/shared/app-data";
 import type { RecordChangePage } from "@grasp-os/shared/app-data";
@@ -1840,6 +1841,47 @@ export class StoreHost {
         throw migrationErrors.create("migration.busy", { retryable: true });
       }
     }
+  }
+
+  /**
+   * The plan of the schema whose manifest is `manifest` (its text, with
+   * its stable IDs `ids` and the App's `answers`) onto the store's
+   * contract, as `defineTables` would plan it, the contract's IDs and the
+   * store's reserved fields included: what the App's definition tools
+   * show of a change (core's app-definition.ts), from what the store
+   * holds, as a migration tool diffs against the database itself. A
+   * refusal is the plan's, never thrown. Reads only: nothing is recorded,
+   * and no record is checked.
+   */
+  async planTables(
+    storeId: StoreId,
+    manifest: string,
+    ids: SchemaIds = {},
+    answers: readonly SchemaAnswer[] = []
+  ): Promise<SchemaPlan> {
+    const read = readSchema(manifest);
+    const identified = declaredIds(
+      read.manifest,
+      dataErrors.parse("data.invalid", schemaIdsSchema, ids)
+    );
+    const answered = dataErrors.parse(
+      "data.invalid",
+      z.array(schemaAnswerSchema).max(schemaAnswersMax),
+      answers
+    );
+    this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+    });
+    const { base } = await this.#currentContract(
+      this.#liveContractRow(),
+      this.#pendingTarget()
+    );
+    const contract = base?.manifest ?? null;
+    return planSchemaChange(contract, read.manifest, {
+      reserved: this.#reservedFields(),
+      answers: answered,
+      ids: this.#idsOf(contract, identified),
+    });
   }
 
   /**

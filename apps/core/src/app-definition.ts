@@ -205,10 +205,47 @@ export interface DefinitionPlan {
 const fieldsOf = (list: readonly PlanField[]): PlanField[] =>
   list.map(({ table, field }) => ({ table, field }));
 
-/** The plan of the change from `before` to `after` (see `DefinitionPlan`). */
+const plannedField = z.object({ table: z.string(), field: z.string() });
+
+/**
+ * What of a store's plan the definition tools show, as the App's store
+ * answers it (store-host.ts, `planTables`): read back from its JSON.
+ */
+export const storePlanSchema = z.object({
+  accepted: z.boolean(),
+  addedTables: z.array(z.string()),
+  addedFields: z.array(plannedField),
+  renames: z.array(
+    z.object({ table: z.string(), from: z.string(), to: z.string() })
+  ),
+  widenedFields: z.array(plannedField),
+  checks: z.array(plannedField.extend({ answer: z.unknown() })),
+  retainedFields: z.array(plannedField),
+  ruleChanges: z.array(z.string()),
+  refused: z
+    .array(
+      z.object({
+        table: z.string(),
+        field: z.string().optional(),
+        reason: z.string(),
+      })
+    )
+    .optional(),
+});
+
+export type StorePlan = z.infer<typeof storePlanSchema>;
+
+/**
+ * The plan of the change of an App's definition to `after` (see
+ * `DefinitionPlan`): the App's store's own (`planned`, `planTables`),
+ * from what it holds, renames by stable ID after a rollback included; or,
+ * for an App with no store yet, the move from `before`, the definition of
+ * the version people use (null for none).
+ */
 export const definitionPlan = (
   before: AppDefinition | null,
-  after: AppDefinition
+  after: AppDefinition,
+  planned?: StorePlan
 ): DefinitionPlan => {
   const target = definitionManifest(after);
   const sensitiveBefore = new Set(
@@ -216,21 +253,31 @@ export const definitionPlan = (
       table.sensitive === true ? [table.id] : []
     )
   );
-  const plan = planSchemaChange(
-    before === null ? null : definitionManifest(before).schema,
-    target.schema,
-    {
-      answers: target.answers ?? [],
-      ids: {
-        contract: before === null ? {} : schemaIdsOf(before),
-        target: schemaIdsOf(after),
-      },
-    }
-  );
+  const plan =
+    planned ??
+    planSchemaChange(
+      before === null ? null : definitionManifest(before).schema,
+      target.schema,
+      {
+        answers: target.answers ?? [],
+        ids: {
+          contract: before === null ? {} : schemaIdsOf(before),
+          target: schemaIdsOf(after),
+        },
+      }
+    );
   return {
     accepted: plan.accepted,
     addedTables: [...plan.addedTables],
-    addedFields: fieldsOf(plan.addedFields),
+    // A field renamed is one the records hold already: never an addition.
+    addedFields: fieldsOf(
+      plan.addedFields.filter(
+        ({ table, field }) =>
+          !plan.renames.some(
+            (rename) => rename.table === table && rename.to === field
+          )
+      )
+    ),
     renamedFields: plan.renames.map(({ table, from, to }) => ({
       table,
       from,
@@ -251,11 +298,13 @@ export const definitionPlan = (
     ),
     refused: plan.accepted
       ? []
-      : plan.refused.map(({ table, field, reason }) => ({
-          table,
-          ...(field === undefined ? {} : { field }),
-          reason,
-        })),
+      : ("refused" in plan ? (plan.refused ?? []) : []).map(
+          ({ table, field, reason }) => ({
+            table,
+            ...(field === undefined ? {} : { field }),
+            reason,
+          })
+        ),
   };
 };
 

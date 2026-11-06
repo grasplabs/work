@@ -196,6 +196,21 @@ export class DataStore extends DurableObject<Env> {
     this.#live().settleRules(storeId, owedIds);
   }
 
+  /**
+   * `StoreHost.planTables`, as JSON text: a plan carries descriptors,
+   * which RPC types can't carry deeply.
+   */
+  async planTables(
+    storeId: StoreId,
+    manifest: string,
+    ids?: SchemaIds,
+    answers?: SchemaAnswer[]
+  ): Promise<string> {
+    return JSON.stringify(
+      await this.#live().planTables(storeId, manifest, ids, answers)
+    );
+  }
+
   /** `StoreHost.schemaStatus`. */
   schemaStatus(
     storeId: StoreId,

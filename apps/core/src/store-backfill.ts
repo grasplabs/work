@@ -475,6 +475,47 @@ export const storeBindings = async (
 };
 
 /**
+ * The plan of the schema `manifest` (its stable IDs and answers) on the
+ * store version `version` of App `app` binds, as that store answers it
+ * from what it holds (`StoreHost.planTables`), as JSON text. Undefined
+ * when the version binds no store (or no version is current), or when
+ * the store can't answer (it waits on a repair, say): the caller plans
+ * without it.
+ */
+export const planOnBoundStore = async (
+  env: Env,
+  app: AppId,
+  version: number | null,
+  {
+    manifest,
+    ids,
+    answers,
+  }: { manifest: string; ids: SchemaIds; answers: SchemaAnswer[] }
+): Promise<string | undefined> => {
+  if (version === null) {
+    return undefined;
+  }
+  const [bound] = await storeBindings(env, app, version);
+  if (bound === undefined) {
+    return undefined;
+  }
+  try {
+    return await storeObject(env, bound.storeId).planTables(
+      bound.storeId,
+      manifest,
+      ids,
+      answers
+    );
+  } catch (error) {
+    if (!isExpectedError(error)) {
+      throw error;
+    }
+    log.warn("store.plan_unavailable", errorFields(error));
+    return undefined;
+  }
+};
+
+/**
  * Refuses release `version` of `app` while the store it binds doesn't
  * hold its schema in force, keeping its backfill going. A ready explicit
  * migration passes; with `activate` (the last step before the version is

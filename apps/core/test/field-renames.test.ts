@@ -13,8 +13,11 @@ import {
   consumer,
   insertAll,
   newStore,
+  contractHash,
   notes,
   notesOf,
+  objectOf,
+  statusOf,
 } from "./pending-stores.ts";
 import { newRecordId } from "./store-schemas.ts";
 
@@ -292,6 +295,39 @@ describe("a field renamed by its stable ID", () => {
     expect(tableRenamed.changes).toStrictEqual([
       { table: "memos", reason: "table_renamed" },
     ]);
+    await expect(byTitle(store)).resolves.toStrictEqual({
+      A: { title: "A", nickname: "Ace" },
+    });
+  });
+
+  it("plans a rename from what the store holds, recording nothing", async () => {
+    const { store } = await nicknamedStore([{ title: "A", nickname: "Ace" }]);
+    const before = await contractHash(store);
+
+    const planned = z
+      .object({
+        accepted: z.boolean(),
+        renames: z.array(z.unknown()),
+      })
+      .loose()
+      .parse(
+        JSON.parse(
+          await objectOf(store).planTables(
+            store.id,
+            displayNamed,
+            displayNameIds
+          )
+        )
+      );
+
+    expect(planned).toMatchObject({
+      accepted: true,
+      renames: [{ table: "notes", from: "nickname", to: "displayName" }],
+    });
+    await expect(contractHash(store)).resolves.toBe(before);
+    await expect(statusOf(store, displayNamed)).resolves.toStrictEqual({
+      state: "unknown",
+    });
     await expect(byTitle(store)).resolves.toStrictEqual({
       A: { title: "A", nickname: "Ace" },
     });

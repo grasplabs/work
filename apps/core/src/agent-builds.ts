@@ -1,4 +1,9 @@
-import { definitionPath, tryOperation } from "@grasp-os/sdk/definition";
+import {
+  definitionManifest,
+  definitionPath,
+  tryOperation,
+} from "@grasp-os/sdk/definition";
+import { manifestText } from "@grasp-os/sdk/host";
 import { agentErrors } from "@grasp-os/shared/agent";
 import {
   appErrors,
@@ -37,6 +42,8 @@ import {
   definitionPlan,
   operationDetail,
   refuseDefinitionFiles,
+  schemaIdsOf,
+  storePlanSchema,
 } from "./app-definition.ts";
 import type { DefinitionPlan } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
@@ -74,6 +81,7 @@ import {
   draftLintBuild,
   draftServerBuild,
 } from "./save-builds.ts";
+import { planOnBoundStore } from "./store-backfill.ts";
 import { reviewVersion } from "./version-review.ts";
 import { runEngine } from "./workflows/engine.ts";
 import type { Draft } from "./workspace.ts";
@@ -1169,9 +1177,28 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           }
           return { ok: false, problem: refusal };
         }
+        // From what the App's store holds, as its own plan of the move
+        // would be: a rename after a rollback is one there.
+        const target = definitionManifest(result.definition);
+        const planned = await planOnBoundStore(
+          this.env,
+          found.id,
+          found.currentVersion,
+          {
+            manifest: manifestText(target.schema),
+            ids: schemaIdsOf(result.definition),
+            answers: (target.answers ?? []).map((answer) => ({ ...answer })),
+          }
+        );
         return {
           ok: true,
-          plan: definitionPlan(before, result.definition),
+          plan: definitionPlan(
+            before,
+            result.definition,
+            planned === undefined
+              ? undefined
+              : storePlanSchema.parse(JSON.parse(planned))
+          ),
           ...saved,
         };
       },

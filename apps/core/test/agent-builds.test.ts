@@ -796,6 +796,40 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("plans a rename after a rollback as the App's store holds it: a rename keeping its values, not a field added", async () => {
+    const { builder, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
+        const renamed = await env.build.define(app.id, { op: "renameField", table: "notes", field: "nickname", name: "displayName" });
+        return renamed.ok && { renamed: renamed.plan.renamedFields, added: renamed.plan.addedFields };
+      };`),
+      says("Renamed."),
+    ]);
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
+    // Version 2 ran with a nickname, which a note holds; then the App was
+    // rolled back to version 1, which has none. The draft starts from
+    // version 2, the latest.
+    await release(builder, app, notesFiles);
+    await release(builder, app, nicknamedFiles);
+    await calledAs(
+      await builder.api.whoami(),
+      app,
+      { name: "nicknames.create", kind: "mutation" },
+      { title: "Plan", nickname: "Ace" }
+    );
+    await builder.api.apps.versions.setCurrent(app, 1);
+    await grant();
+
+    await chat.ask("Call the nickname a display name");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    expect(returned(result?.text)).toStrictEqual({
+      renamed: [{ table: "notes", from: "nickname", to: "displayName" }],
+      added: [],
+    });
+  });
+
   it("keeps a field's values through a rename, after a rollback to a version without it", async () => {
     const builder = await signedInApi(idp, "builder");
     const person = await builder.api.whoami();
