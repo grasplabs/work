@@ -1,6 +1,7 @@
 import {
   DndContext,
   KeyboardSensor,
+  MeasuringStrategy,
   PointerSensor,
   closestCenter,
   useSensor,
@@ -48,6 +49,18 @@ interface SortableEntry {
 const alongTheList: Modifier = ({ transform }) => ({ ...transform, x: 0 });
 
 const modifiers = [alongTheList];
+
+/**
+ * Where every item is, known before a drag starts: a key pressed right
+ * after another finds them measured.
+ */
+const measuring = { droppable: { strategy: MeasuringStrategy.Always } };
+
+/**
+ * An item dropped is at its place at once: no slide from where it was,
+ * which would also leave the next pick-up measuring it mid-slide.
+ */
+const still = () => false;
 
 /**
  * The items, in order, put in order by hand: `onMove` hears an item's ID
@@ -106,6 +119,7 @@ function SortableList({
         screenReaderInstructions: { draggable: words.instructions },
       }}
       collisionDetection={closestCenter}
+      measuring={measuring}
       modifiers={modifiers}
       onDragEnd={end}
       sensors={sensors}
@@ -147,7 +161,7 @@ function SortableItem({
     transform,
     isDragging,
     node,
-  } = useSortable({ id, transition: null });
+  } = useSortable({ id, transition: null, animateLayoutChanges: still });
   const moved = CSS.Translate.toString(transform) ?? "none";
   // Where the drag has it, set on the item it already holds: a ref of its
   // own would hand dnd-kit a new node each render, mid-drag.

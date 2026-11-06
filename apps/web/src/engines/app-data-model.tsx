@@ -79,11 +79,12 @@ import { LoadingLines } from "../frame/page-states.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
 import { TableRecords } from "./app-data.tsx";
 import { PlanList, planLines, useModelChanges } from "./data-model-changes.tsx";
-import type { ModelOperation } from "./data-model-changes.tsx";
+import type { ModelChange, ModelOperation } from "./data-model-changes.tsx";
 import { AccessPanel, IndexesPanel } from "./data-model-settings.tsx";
 import { FieldsView } from "./field-editor.tsx";
 import { KindIcon } from "./field-kinds.tsx";
 import { identifierOf } from "./identifier.ts";
+import { readTables, useAppRead } from "./use-app-read.ts";
 import { useCoreRead } from "./use-core-read.ts";
 
 // An App's data model in its workspace's Data view, as a database studio
@@ -131,12 +132,12 @@ const SideView = ({
   );
 };
 
-/** The live App's tables, by name, and its version: where records are read. */
+/**
+ * The live App's tables, by name, and its version: where records are
+ * read. Read again as the page is (an import, Reload), so counts follow.
+ */
 const useLiveTables = (app: string) => {
-  const live = useCoreRead(
-    `${app}/live`,
-    async (session) => await session.apps.data.tables(app)
-  );
+  const live = useAppRead(app, readTables);
   return live?.state === "ready" ? live.data : undefined;
 };
 
@@ -155,7 +156,7 @@ const TableView = ({
   table: DataModelTable;
   tables: string[];
   disabled: boolean;
-  onChange: (operation: ModelOperation) => Promise<boolean>;
+  onChange: (change: ModelChange) => Promise<boolean>;
 }) => {
   const { t } = useLingui();
   const [showing, setShowing] = useState<"records" | "fields">("records");
@@ -493,10 +494,10 @@ export const AppDataModel = ({
     model.tables.find(({ id, name }) => id === picked || name === picked) ??
     model.tables.at(0);
   const disabled = running || changes.busy;
-  const change = async (operation: ModelOperation): Promise<boolean> => {
-    const done = await changes.make(operation);
-    if (done && operation.op === "addTable") {
-      setPicked(operation.name);
+  const change = async (next: ModelChange): Promise<boolean> => {
+    const done = await changes.make(next);
+    if (done && "op" in next && next.op === "addTable") {
+      setPicked(next.name);
     }
     return done;
   };

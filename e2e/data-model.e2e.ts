@@ -24,6 +24,17 @@ const moveUp = async (page: Page, name: string, place: number) => {
   await expect(
     page.getByText(`${name} is now at place ${place}.`)
   ).toBeAttached();
+  // dnd-kit listens for the arrows a task after the pick-up, which a
+  // person never beats but a test's next key can.
+  await page.evaluate(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        resolve(true);
+      }, 0);
+    });
+    await promise;
+  });
   await page.keyboard.press("ArrowUp");
   await expect(
     page.getByText(`${name} is now at place ${place - 1}.`)
@@ -59,7 +70,7 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   const dialog = page.getByRole("dialog", { name: "New table" });
   await dialog.getByLabel("Table name").fill("Tasks");
   await dialog.getByRole("button", { name: "Create table" }).click();
-  await expect(page.getByRole("grid", { name: "tasks" })).toBeVisible(read);
+  await expect(page.getByRole("table", { name: "tasks" })).toBeVisible(read);
 
   // Its fields, added in its Fields view, each from its kind: a required
   // text, then a choice whose options are put in order from the keyboard,
@@ -93,7 +104,7 @@ test("a builder creates a table and its fields in the Data view, and sees them i
     read
   );
   await page.getByRole("button", { name: "Records", exact: true }).click();
-  const grid = page.getByRole("grid", { name: "tasks" });
+  const grid = page.getByRole("table", { name: "tasks" });
   await expect(
     grid.getByRole("columnheader", { name: /^status/u })
   ).toBeVisible();

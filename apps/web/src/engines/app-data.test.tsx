@@ -237,7 +237,7 @@ describe("an App's data page", () => {
     expect({
       first: document.body.textContent.includes("first's notes"),
       second: document.body.textContent.includes("first's second notes"),
-      rows: document.querySelectorAll('[role="grid"] [role="row"]').length,
+      rows: document.querySelectorAll('[role="table"] [role="row"]').length,
     }).toStrictEqual({ first: true, second: true, rows: 3 });
   });
 

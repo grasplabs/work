@@ -244,6 +244,39 @@ export const definitionPlan = (
   };
 };
 
+/** The entries of `list` that `before` lacks. */
+const freshIn = <T>(list: readonly T[], before: readonly T[]): T[] => {
+  const seen = new Set(before.map((entry) => JSON.stringify(entry)));
+  return list.filter((entry) => !seen.has(JSON.stringify(entry)));
+};
+
+/**
+ * What a change of the draft does to the App's records on its own: what
+ * publishing the draft after it (`after`) does that publishing it before
+ * (`own`) didn't, both from the version people use (`live`). A field the
+ * draft adds and the change renames is no field the records ever had.
+ */
+export const changePlan = (
+  live: AppDefinition | null,
+  own: AppDefinition,
+  after: AppDefinition
+): DefinitionPlan => {
+  const was = definitionPlan(live, own);
+  const now = definitionPlan(live, after);
+  return {
+    accepted: now.accepted,
+    addedTables: freshIn(now.addedTables, was.addedTables),
+    addedFields: freshIn(now.addedFields, was.addedFields),
+    widenedFields: freshIn(now.widenedFields, was.widenedFields),
+    checks: freshIn(now.checks, was.checks),
+    keptTables: freshIn(now.keptTables, was.keptTables),
+    keptFields: freshIn(now.keptFields, was.keptFields),
+    accessChanges: freshIn(now.accessChanges, was.accessChanges),
+    sensitiveTables: freshIn(now.sensitiveTables, was.sensitiveTables),
+    refused: freshIn(now.refused, was.refused),
+  };
+};
+
 /** The kind a person picks for each kind of descriptor but a choice and a link. */
 const fieldKinds: Record<
   Exclude<
@@ -466,10 +499,14 @@ export const definitionOperationSchema: z.ZodType<DefinitionOperation> =
     }),
   ]);
 
-/** What an operation's audit record keeps: its kind, its table and its alias. */
-export const operationDetail = (
-  operation: unknown
-): Record<string, string | null> => {
+/** One operation, or a few made as one change (a field renamed and retyped). */
+export const definitionOperationsSchema = z.union([
+  definitionOperationSchema,
+  z.array(definitionOperationSchema).min(1).max(8),
+]);
+
+/** An audit's detail of one operation: its op, table and alias. */
+const singleDetail = (operation: unknown): Record<string, string | null> => {
   const parsed = definitionOperationSchema.safeParse(operation);
   if (!parsed.success) {
     return { op: null };
@@ -490,4 +527,21 @@ export const operationDetail = (
     alias = data.alias.slice(0, 64);
   }
   return { op: data.op, table, alias };
+};
+
+/**
+ * An audit's detail of `operation`, or of operations made as one: their
+ * ops, in order, with the table and alias of the first.
+ */
+export const operationDetail = (
+  operation: unknown
+): Record<string, string | null> => {
+  if (Array.isArray(operation)) {
+    const details = operation.map(singleDetail);
+    return {
+      ...details[0],
+      op: details.map(({ op }) => op ?? "?").join(","),
+    };
+  }
+  return singleDetail(operation);
 };

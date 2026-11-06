@@ -42,7 +42,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { PlusIcon, Table2Icon, TrashIcon, XIcon } from "lucide-react";
 import { useId, useState } from "react";
 
-import type { ModelOperation } from "./data-model-changes.tsx";
+import type { ModelChange, ModelOperation } from "./data-model-changes.tsx";
 import { KindIcon, pickedKinds, useFieldKinds } from "./field-kinds.tsx";
 import { identifierOf } from "./identifier.ts";
 
@@ -666,7 +666,7 @@ const FieldEditor = ({
   kind: FieldKind;
   tables: readonly string[];
   disabled: boolean;
-  onChange: (operation: ModelOperation) => Promise<boolean>;
+  onChange: (change: ModelChange) => Promise<boolean>;
   /** Hears the field's name once it's saved. */
   onDone?: (name: string) => void;
   onCancel: () => void;
@@ -694,14 +694,16 @@ const FieldEditor = ({
       className="flex flex-col gap-6"
       onSubmit={(event) => {
         event.preventDefault();
+        const [only] = made;
+        if (only === undefined) {
+          return;
+        }
         void (async () => {
-          for (const operation of made) {
-            // oxlint-disable-next-line no-await-in-loop -- the rename lands before the retype names it
-            if (!(await onChange(operation))) {
-              return;
-            }
+          // A rename and a retype are one change, made or reviewed whole;
+          // the form stays as typed until it's made.
+          if (await onChange(made.length === 1 ? only : made)) {
+            onDone?.(named);
           }
-          onDone?.(named);
         })();
       }}
     >
@@ -874,7 +876,7 @@ export const FieldsView = ({
   table: DataModelTable;
   tables: readonly string[];
   disabled: boolean;
-  onChange: (operation: ModelOperation) => Promise<boolean>;
+  onChange: (change: ModelChange) => Promise<boolean>;
 }) => {
   const { t } = useLingui();
   const { describe } = useFieldKinds();

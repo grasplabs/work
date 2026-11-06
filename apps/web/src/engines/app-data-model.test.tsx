@@ -19,7 +19,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AppDataModel } from "./app-data-model.tsx";
-import type { ModelOperation } from "./data-model-changes.tsx";
+import type { ModelChange, ModelOperation } from "./data-model-changes.tsx";
 
 // An App's data model in its workspace's Data view (app-data-model.tsx),
 // against core's `chats.dataModel` and `chats.defineDraft` as the page
@@ -77,13 +77,22 @@ const notesModel = (): DataModel => ({
 });
 
 /** Core's answer for an operation: the model and plan after it, or a problem. */
-type Answer = (operation: ModelOperation, model: DataModel) => DataModelChange;
+type Answer = (
+  operation: ModelOperation,
+  model: DataModel
+) =>
+  | { ok: false; problem: string }
+  | { ok: true; model: DataModel; plan: DefinitionPlan };
 
-/** Every operation sent to core, and whether it was a preview. */
+/** Every change sent to core (an operation, or a few as one), and whether it was a preview. */
 interface Sent {
-  operation: ModelOperation;
+  operation: ModelChange;
   preview: boolean;
 }
+
+/** A change's operations, in order. */
+const operationsIn = (change: ModelChange): readonly ModelOperation[] =>
+  "op" in change ? [change] : change;
 
 const settled = async (): Promise<void> => {
   for (let turn = 0; turn < 3; turn += 1) {
@@ -117,16 +126,25 @@ const shown = async (
     defineDraft: async (
       _chatId: string,
       _app: string,
-      operation: ModelOperation,
+      operation: ModelChange,
       preview = false
     ): Promise<DataModelChange> => {
       await Promise.resolve();
       sent.push({ operation, preview });
-      const answered = answer(operation, held);
-      if (answered.ok && !preview) {
-        held = answered.model;
+      // A few operations as one: each after the one before, all or none.
+      let after: DataModel = held;
+      let plan = nothingPlanned;
+      for (const each of operationsIn(operation)) {
+        const answered = answer(each, after);
+        if (!answered.ok) {
+          return answered;
+        }
+        ({ model: after, plan } = answered);
       }
-      return answered;
+      if (!preview) {
+        held = after;
+      }
+      return { ok: true, model: after, plan, change: plan };
     },
   };
   // The live App: no version yet, so no records to read.
@@ -621,7 +639,8 @@ describe("an App's data model, changed in its workspace", () => {
       problem: document.querySelector('[role="alert"]')?.textContent,
       made: sent
         .filter(({ preview }) => !preview)
-        .map(({ operation }) => operation.op),
+        .flatMap(({ operation }) => operationsIn(operation))
+        .map(({ op }) => op),
     }).toStrictEqual({
       said: true,
       removed: ["title"],
@@ -668,7 +687,8 @@ describe("an App's data model, changed in its workspace", () => {
     expect({
       made: sent
         .filter(({ preview }) => !preview)
-        .map(({ operation }) =>
+        .flatMap(({ operation }) => operationsIn(operation))
+        .map((operation) =>
           operation.op === "addField" ? operation.type : operation.op
         ),
       crossedRefused,
@@ -680,6 +700,84 @@ describe("an App's data model, changed in its workspace", () => {
         "v.string().trim().max(200).optional()",
       ],
       crossedRefused: true,
+    });
+  });
+
+  it("makes a rename and a retype as one change, and keeps a form as typed when its review is cancelled", async () => {
+    const sent = await shown(notesModel(), (operation, model) => {
+      if (operation.op === "renameField") {
+        return {
+          ok: true,
+          model: {
+            ...model,
+            tables: model.tables.map((table) => ({
+              ...table,
+              fields: table.fields.map((field) =>
+                field.name === operation.field
+                  ? { ...field, name: operation.name }
+                  : field
+              ),
+            })),
+          },
+          plan: nothingPlanned,
+        };
+      }
+      if (operation.op === "changeField") {
+        return { ok: true, model, plan: nothingPlanned };
+      }
+      if (operation.op === "addField") {
+        // notes holds records: a required field asks what they get.
+        return {
+          ok: true,
+          model: withField(model, text(operation.name, true)),
+          plan: {
+            ...nothingPlanned,
+            checks: [{ table: "notes", field: operation.name, answer: null }],
+          },
+        };
+      }
+      throw new Error(`Not asked for: ${operation.op}`);
+    });
+
+    await showFields();
+    await openField("status");
+    await type("Field name", "state");
+    await press(labelledBy("Required"));
+    await press(button("Save"));
+    await press(button("Make the change"));
+    const renamed = fieldsShown();
+
+    await addField("priority", "Text", async () => {
+      await press(labelledBy("Required"));
+    });
+    const asked = document.body.textContent.includes(
+      "What should the ones without priority get?"
+    );
+    await press(button("Cancel"));
+    const kept = labelled("Field name");
+
+    expect({
+      made: sent
+        .filter(({ preview }) => !preview)
+        .map(({ operation }) => operation),
+      renamed,
+      asked,
+      kept: kept instanceof HTMLInputElement ? kept.value : undefined,
+    }).toStrictEqual({
+      made: [
+        [
+          { op: "renameField", table: "notes", field: "status", name: "state" },
+          {
+            op: "changeField",
+            table: "notes",
+            field: "state",
+            type: "v.string()",
+          },
+        ],
+      ],
+      renamed: ["title", "state"],
+      asked: true,
+      kept: "priority",
     });
   });
 

@@ -59,6 +59,15 @@ const files: Record<string, string> = {
         fields: { text: "v.string()" },
         access: { read: "owner", write: "owner" },
       },
+      // Each task read by the person it's for alone: a row rule.
+      tasks: {
+        fields: { title: "v.string()", assignee: "v.person()" },
+        access: {
+          read: "appMembers",
+          write: "appMembers",
+          rows: { read: [{ kind: "person", field: "assignee" }] },
+        },
+      },
       labels: {
         fields: {
           name: "v.string()",
@@ -467,7 +476,7 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
     ).toMatchObject([{ detail: { table: "notes", rows: 4 } }]);
   });
 
-  it("counts each table's records as they are added and deleted, and gives no count where a person reads only some", async () => {
+  it("counts each table's records as they are added and deleted, and gives no count where a person reads only some, by owner or a row rule", async () => {
     const notes = await notesApp();
     const { builder, app } = notes;
     const counted = async () => {
@@ -488,10 +497,11 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
     await call(notes, builder, "notes.pin", { text: "mine" });
 
     expect({ before, after: await counted() }).toStrictEqual({
-      before: { notes: 0, salaries: 0, pins: null, labels: 0 },
+      before: { notes: 0, salaries: 0, pins: null, tasks: null, labels: 0 },
       // Three imported, one deleted; an owner table's pins are each
-      // person's own, so its whole count is nobody's to see here.
-      after: { notes: 2, salaries: 0, pins: null, labels: 0 },
+      // person's own, and each task its assignee's, so neither whole
+      // count is anybody's to see here.
+      after: { notes: 2, salaries: 0, pins: null, tasks: null, labels: 0 },
     });
   });
 

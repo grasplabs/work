@@ -120,10 +120,8 @@ test("a builder has an App built in its chat, publishes it, and someone it is sh
     .getByRole("navigation", { name: "Workspace views" })
     .getByRole("link", { name: "Data" })
     .click();
-  await expect(
-    page.getByRole("gridcell", { name: "Grace Hopper" })
-  ).toBeVisible(built);
-  await expect(
-    page.getByRole("gridcell", { name: "Ada Lovelace" })
-  ).toHaveCount(0);
+  await expect(page.getByRole("cell", { name: "Grace Hopper" })).toBeVisible(
+    built
+  );
+  await expect(page.getByRole("cell", { name: "Ada Lovelace" })).toHaveCount(0);
 });

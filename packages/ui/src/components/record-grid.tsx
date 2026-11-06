@@ -2,6 +2,7 @@ import { cssVars } from "@grasp-os/ui/lib/css-vars";
 import { cn } from "@grasp-os/ui/lib/utils";
 import {
   columnSizingFeature,
+  flexRender,
   tableFeatures,
   useTable,
 } from "@tanstack/react-table";
@@ -21,7 +22,7 @@ import type * as React from "react";
  * only the rows and columns in view, so a table of a million rows and
  * dozens of fields scrolls as one of ten. Nearing the last row it has, the
  * grid asks for more (`onEndReached`), so the page loads the next one as
- * people scroll. It reads as an ARIA grid: rows and cells by role, with the
+ * people scroll. It reads as an ARIA table: rows and cells by role, with the
  * table's whole size given (`aria-rowcount`, `aria-colcount`).
  *
  * The structure follows tablecn's data grid (https://github.com/sadmann7/
@@ -64,6 +65,15 @@ const observeShown = (
 
 const features = tableFeatures({ columnSizingFeature });
 
+/** Room kept for the columns left out on one side of those in view. */
+const gapOf = (width: number) => (
+  <div
+    aria-hidden
+    className="w-(--gap) shrink-0"
+    ref={cssVars({ "--gap": `${width}px` })}
+  />
+);
+
 const cellVariants = cva(
   "flex h-9 min-w-0 shrink-0 items-center border-e border-b px-2.5 text-sm",
   {
@@ -87,6 +97,7 @@ function RecordGrid<Row extends object>({
   columns,
   rows,
   rowKey,
+  total,
   empty,
   onEndReached,
   className,
@@ -95,6 +106,8 @@ function RecordGrid<Row extends object>({
   columns: readonly RecordGridColumn<Row>[];
   rows: readonly Row[];
   rowKey: (row: Row) => string;
+  /** How many rows the table holds, when known: more than `rows` while more are to load. */
+  total?: number;
   empty?: React.ReactNode;
   onEndReached?: () => void;
   className?: string;
@@ -105,19 +118,19 @@ function RecordGrid<Row extends object>({
   // TanStack's own advice is to opt the component out.
   "use no memo";
   const scroller = useRef<HTMLDivElement>(null);
-  const defs: ColumnDef<typeof features, Row>[] = columns.map((column) => ({
-    id: column.id,
-    size: column.width ?? defaultWidth,
-    accessorFn: (row: Row) => rowKey(row),
-  }));
   const table = useTable({
     features,
-    columns: defs,
+    columns: columns.map((column): ColumnDef<typeof features, Row> => ({
+      id: column.id,
+      size: column.width ?? defaultWidth,
+      header: (): React.ReactNode => column.header,
+      cell: ({ row }) => column.cell(row.original),
+    })),
     data: [...rows],
     getRowId: (row) => rowKey(row),
   });
   const tableRows = table.getRowModel().rows;
-  const leaves = table.getAllLeafColumns();
+  const headers = table.getHeaderGroups()[0]?.headers ?? [];
   const rowWindow = useVirtualizer({
     count: tableRows.length,
     getScrollElement: () => scroller.current,
@@ -128,9 +141,9 @@ function RecordGrid<Row extends object>({
   });
   const columnWindow = useVirtualizer({
     horizontal: true,
-    count: leaves.length,
+    count: headers.length,
     getScrollElement: () => scroller.current,
-    estimateSize: (index) => leaves[index]?.getSize() ?? defaultWidth,
+    estimateSize: (index) => headers[index]?.getSize() ?? defaultWidth,
     overscan: 2,
     initialRect: unmeasured,
     observeElementRect: observeShown,
@@ -138,7 +151,7 @@ function RecordGrid<Row extends object>({
   const shownRows = rowWindow.getVirtualItems();
   const shownColumns = columnWindow.getVirtualItems();
   const before = shownColumns[0]?.start ?? 0;
-  const after = columnWindow.getTotalSize() - (shownColumns.at(-1)?.end ?? 0);
+  const after = table.getTotalSize() - (shownColumns.at(-1)?.end ?? 0);
   const count = tableRows.length;
   const nearEnd =
     count > 0 && (shownRows.at(-1)?.index ?? 0) >= count - endReachedWithin;
@@ -152,60 +165,55 @@ function RecordGrid<Row extends object>({
       reachEnd();
     }
   }, [nearEnd, count]);
-  // One row's cells (or the headers'), the ones in view, with room kept
-  // for those left out on either side.
-  const cellsOf = (row?: Row) => (
-    <>
-      <div
-        aria-hidden
-        className="w-(--gap) shrink-0"
-        ref={cssVars({ "--gap": `${before}px` })}
-      />
-      {shownColumns.map((item) => {
-        const column = columns[item.index];
-        return column === undefined ? null : (
-          <div
-            aria-colindex={item.index + 1}
-            className={cn(
-              cellVariants({ part: row === undefined ? "header" : "body" }),
-              "w-(--width)"
-            )}
-            key={column.id}
-            ref={cssVars({ "--width": `${item.size}px` })}
-            role={row === undefined ? "columnheader" : "gridcell"}
-          >
-            {row === undefined ? column.header : column.cell(row)}
-          </div>
-        );
-      })}
-      <div
-        aria-hidden
-        className="w-(--gap) shrink-0"
-        ref={cssVars({ "--gap": `${after}px` })}
-      />
-    </>
-  );
   return (
     <div
       aria-colcount={columns.length}
       aria-label={label}
-      aria-rowcount={rows.length + 1}
-      className={cn("min-h-0 min-w-0 flex-1 overflow-auto", className)}
+      // The header row and every row the table holds; -1 while that isn't known.
+      aria-rowcount={total === undefined ? -1 : total + 1}
+      className={cn(
+        "focus-visible:ring-ring/50 min-h-0 min-w-0 flex-1 overflow-auto outline-none focus-visible:ring-3 focus-visible:ring-inset",
+        className
+      )}
       data-slot="record-grid"
       ref={scroller}
-      role="grid"
+      role="table"
+      // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a region that scrolls is reached from the keyboard, to scroll it (axe: scrollable-region-focusable)
+      tabIndex={0}
     >
-      <div className="w-max min-w-full">
+      <div className="w-max min-w-full" role="rowgroup">
         <div
           aria-rowindex={1}
           className="bg-muted sticky top-0 z-10 flex"
           role="row"
         >
-          {cellsOf()}
+          {gapOf(before)}
+          {shownColumns.map((item) => {
+            const header = headers[item.index];
+            return header === undefined ? null : (
+              <div
+                aria-colindex={item.index + 1}
+                className={cn(cellVariants({ part: "header" }), "w-(--width)")}
+                key={header.id}
+                ref={cssVars({ "--width": `${header.getSize()}px` })}
+                role="columnheader"
+              >
+                {flexRender(
+                  header.column.columnDef.header,
+                  header.getContext()
+                )}
+              </div>
+            );
+          })}
+          {gapOf(after)}
           <div aria-hidden className="flex-1 border-b" />
         </div>
         {rows.length === 0 ? (
-          empty
+          <div role="row">
+            <div aria-colspan={columns.length} role="cell">
+              {empty}
+            </div>
+          </div>
         ) : (
           <div
             className="relative h-(--height)"
@@ -213,7 +221,11 @@ function RecordGrid<Row extends object>({
           >
             {shownRows.map((item) => {
               const tableRow = tableRows[item.index];
-              return tableRow === undefined ? null : (
+              if (tableRow === undefined) {
+                return null;
+              }
+              const cells = tableRow.getAllCells();
+              return (
                 <div
                   aria-rowindex={item.index + 2}
                   className="absolute inset-x-0 top-(--top) flex h-9"
@@ -221,7 +233,27 @@ function RecordGrid<Row extends object>({
                   ref={cssVars({ "--top": `${item.start}px` })}
                   role="row"
                 >
-                  {cellsOf(tableRow.original)}
+                  {gapOf(before)}
+                  {shownColumns.map((column) => {
+                    const cell = cells[column.index];
+                    return cell === undefined ? null : (
+                      <div
+                        aria-colindex={column.index + 1}
+                        className={cn(cellVariants(), "w-(--width)")}
+                        key={cell.id}
+                        ref={cssVars({
+                          "--width": `${cell.column.getSize()}px`,
+                        })}
+                        role="cell"
+                      >
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext()
+                        )}
+                      </div>
+                    );
+                  })}
+                  {gapOf(after)}
                 </div>
               );
             })}

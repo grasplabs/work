@@ -43,6 +43,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { valueText } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // A change of an App's data model from its Data view: what publishing it
@@ -56,9 +57,12 @@ import { useCoreAction } from "../use-core-action.ts";
 /** An operation on the definition, as the Data view makes them. */
 export type ModelOperation = DefinitionOperation;
 
-/** A value as the plan says it: text as it is, anything else as JSON. */
-export const valueText = (value: unknown): string =>
-  typeof value === "string" ? value : JSON.stringify(value);
+/** A change of the model: one operation, or a few made as one (a field renamed and retyped). */
+export type ModelChange = ModelOperation | readonly ModelOperation[];
+
+/** A change's operations, in order. */
+const operationsOf = (change: ModelChange): readonly ModelOperation[] =>
+  "op" in change ? [change] : change;
 
 /** One thing publishing does, in words, with what kind of thing it is. */
 interface PlanLine {
@@ -317,16 +321,19 @@ const AnswerInput = ({
 
 /** A change reviewed before it is made: its operation, what it does, and the values it asks for. */
 interface Review {
-  operation: ModelOperation;
+  change: ModelChange;
+  /** What this change alone does. */
   plan: DefinitionPlan;
   /** The field it would leave unanswered, as the model after it has it. */
   asks: DataModelField | undefined;
   /** Whether it removes something, which can't be put back here. */
   removes: boolean;
+  /** Hears whether it was made, or the review closed without it. */
+  settle: (made: boolean) => void;
 }
 
 /** The field an operation adds or changes, which a value answers for. */
-const targetOf = (operation: ModelOperation): PlanField | undefined => {
+const targetOfOne = (operation: ModelOperation): PlanField | undefined => {
   if (operation.op === "addField") {
     return { table: operation.table, field: operation.name };
   }
@@ -334,6 +341,24 @@ const targetOf = (operation: ModelOperation): PlanField | undefined => {
     return { table: operation.table, field: operation.field };
   }
   return undefined;
+};
+
+/** The field a change adds or changes last, which a value answers for. */
+const targetOf = (change: ModelChange): PlanField | undefined =>
+  operationsOf(change)
+    .map(targetOfOne)
+    .findLast((target) => target !== undefined);
+
+/** `change` with `answer` given to the operation that adds or changes its field. */
+const answered = (change: ModelChange, answer: Answer): ModelChange => {
+  const operations = operationsOf(change).map((operation) =>
+    operation.op === "addField" || operation.op === "changeField"
+      ? { ...operation, answer }
+      : operation
+  );
+  return operations.length === 1 && !Array.isArray(change)
+    ? (operations[0] ?? change)
+    : operations;
 };
 
 const removals: ReadonlySet<string> = new Set([
@@ -360,7 +385,7 @@ const ReviewDialog = ({
   review: Review | undefined;
   busy: boolean;
   failure: string | undefined;
-  onApply: (operation: ModelOperation) => Promise<boolean>;
+  onApply: (change: ModelChange) => Promise<boolean>;
   onClose: () => void;
 }) => {
   const { t, i18n } = useLingui();
@@ -376,22 +401,18 @@ const ReviewDialog = ({
           // A value asked for here is asked below, not as a line.
           ({ asks: asked }) =>
             asked === undefined ||
-            asked.table !== targetOf(review.operation)?.table ||
+            asked.table !== targetOf(review.change)?.table ||
             asked.field !== asks?.name
         );
   const submit = (): void => {
     if (review === undefined || waiting) {
       return;
     }
-    const { operation } = review;
     void onApply(
-      answer === undefined ||
-        (operation.op !== "addField" && operation.op !== "changeField")
-        ? operation
-        : { ...operation, answer }
+      answer === undefined ? review.change : answered(review.change, answer)
     );
   };
-  const table = review === undefined ? "" : targetOf(review.operation)?.table;
+  const table = review === undefined ? "" : targetOf(review.change)?.table;
   return (
     <Dialog
       onOpenChange={(open) => {
@@ -481,16 +502,16 @@ export const useModelChanges = ({
   const [problem, setProblem] = useState<string>();
   const [review, setReview] = useState<Review>();
   const define = async (
-    operation: ModelOperation,
+    change: ModelChange,
     preview: boolean
   ): Promise<DataModelChange | undefined> =>
     await action.run(
       async (session) =>
-        await session.chats.defineDraft(chatId, app, operation, preview)
+        await session.chats.defineDraft(chatId, app, change, preview)
     );
-  /** Makes `operation` now, saying core's problem if it can't be made. */
-  const apply = async (operation: ModelOperation): Promise<boolean> => {
-    const made = await define(operation, false);
+  /** Makes `change` now, saying core's problem if it can't be made. */
+  const apply = async (change: ModelChange): Promise<boolean> => {
+    const made = await define(change, false);
     if (made === undefined) {
       return false;
     }
@@ -499,17 +520,19 @@ export const useModelChanges = ({
       return false;
     }
     setProblem(undefined);
+    review?.settle(true);
     setReview(undefined);
     onMade(made.model, made.plan);
     return true;
   };
   /**
-   * Makes `operation`, or opens its review first: answers whether it was
-   * made or is in review, so a form that asked for it can start over.
+   * Makes `change`, or opens its review first: answers once it's made
+   * (true), or once it can't be, or its review closes without it (false),
+   * so a form that asked for it finishes only when it's made.
    */
-  const make = async (operation: ModelOperation): Promise<boolean> => {
+  const make = async (change: ModelChange): Promise<boolean> => {
     setProblem(undefined);
-    const previewed = await define(operation, true);
+    const previewed = await define(change, true);
     if (previewed === undefined) {
       return false;
     }
@@ -517,7 +540,10 @@ export const useModelChanges = ({
       setProblem(previewed.problem);
       return false;
     }
-    const target = targetOf(operation);
+    const operations = operationsOf(change);
+    const target = targetOf(change);
+    // A value is asked for only where the App's records need one: the
+    // plan from the version people use.
     const unanswered = previewed.plan.checks.some(
       ({ table, field, answer }) =>
         answer === null && table === target?.table && field === target.field
@@ -526,24 +552,27 @@ export const useModelChanges = ({
       unanswered && target !== undefined
         ? fieldIn(previewed.model, target)
         : undefined;
-    if (asks === undefined && !reviewed.has(operation.op)) {
-      return await apply(operation);
+    if (asks === undefined && !operations.some(({ op }) => reviewed.has(op))) {
+      return await apply(change);
     }
+    const { promise, resolve } = Promise.withResolvers<boolean>();
     setReview({
-      operation,
-      plan: previewed.plan,
+      change,
+      plan: previewed.change,
       asks,
-      removes: removals.has(operation.op),
+      removes: operations.some(({ op }) => removals.has(op)),
+      settle: resolve,
     });
-    return true;
+    return await promise;
   };
   const dialog = (
     <ReviewDialog
       busy={action.busy}
       failure={problem ?? action.failure}
-      key={review === undefined ? "none" : JSON.stringify(review.operation)}
+      key={review === undefined ? "none" : JSON.stringify(review.change)}
       onApply={apply}
       onClose={() => {
+        review?.settle(false);
         setReview(undefined);
         setProblem(undefined);
       }}

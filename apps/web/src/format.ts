@@ -166,3 +166,7 @@ export const formatDaysAgo = (
     ? relative.format(-months, "month")
     : relative.format(-Math.round(months / monthsPerYear), "year");
 };
+
+/** A value as text: text as it is, anything else as JSON. */
+export const valueText = (value: unknown): string =>
+  typeof value === "string" ? value : JSON.stringify(value);

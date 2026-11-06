@@ -1043,8 +1043,10 @@ export interface ChatsApi {
   /**
    * Changes the definition of the chat's draft of `app` by `operation`
    * (an operation of `@grasp-os/sdk/definition`, as the chat's agent's
-   * definition tools make them), by the person themselves: the model
-   * after it and the plan, or the problem, which changed nothing. With
+   * definition tools make them, or a few made as one: a field renamed and
+   * retyped), by the person themselves: the model after it, the plan, and
+   * what this change alone does (`change`), or the problem, which changed
+   * nothing. With
    * `preview`, nothing is saved: what it would do, to show first. For the
    * person while they build the App, unless it is archived.
    */

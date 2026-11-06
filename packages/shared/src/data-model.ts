@@ -150,7 +150,11 @@ export interface DraftDataModel {
  */
 export type DataModelChange =
   | { ok: false; problem: string }
-  | ({ ok: true } & DraftDataModel);
+  | ({
+      ok: true;
+      /** What this change alone does: from the draft before it to after it. */
+      change: DefinitionPlan;
+    } & DraftDataModel);
 
 /** A value as code writes it: JSON is a JavaScript literal. */
 const literal = (value: string): string => JSON.stringify(value);

@@ -264,6 +264,61 @@ describe(
       });
     });
 
+    it("makes a few operations as one change, all or none, and says what that change alone does", async () => {
+      const { builder, app, chatId } = await notesWithANote();
+      const { chats } = builder.api;
+      await chats.defineDraft(chatId, app, {
+        op: "removeField",
+        table: "notes",
+        field: "body",
+      });
+      // A field of the draft's own: one a released version has keeps its name.
+      await chats.defineDraft(chatId, app, {
+        op: "addField",
+        table: "notes",
+        name: "category",
+        type: "v.string().optional()",
+      });
+
+      const renamedAndRetyped = await chats.defineDraft(chatId, app, [
+        { op: "renameField", table: "notes", field: "category", name: "rank" },
+        {
+          op: "changeField",
+          table: "notes",
+          field: "rank",
+          type: "v.number().optional()",
+        },
+      ]);
+      const halfRefused = await chats.defineDraft(chatId, app, [
+        { op: "renameField", table: "notes", field: "rank", name: "topic" },
+        { op: "removeTable", table: "nope" },
+      ]);
+      const model = await chats.dataModel(chatId, app);
+      const drafts = await chats.drafts(chatId);
+
+      expect({
+        // The draft's removal of body stays in the plan, never in this change's.
+        planKept: renamedAndRetyped.ok && renamedAndRetyped.plan.keptFields,
+        changeKept: renamedAndRetyped.ok && renamedAndRetyped.change.keptFields,
+        halfRefused: halfRefused.ok,
+        fields: model.model.tables[0]?.fields.map(({ name, type }) => ({
+          name,
+          kind: type.kind,
+        })),
+        revisions: drafts.map(({ revision }) => revision),
+      }).toStrictEqual({
+        planKept: [{ table: "notes", field: "body" }],
+        changeKept: [],
+        halfRefused: false,
+        fields: [
+          { name: "title", kind: "text" },
+          { name: "rank", kind: "number" },
+        ],
+        // The removal, the field added, and the rename and retype as one.
+        revisions: [3],
+      });
+    });
+
     it("is refused to anyone who doesn't build the App, in another person's chat, and for an archived App", async () => {
       const { builder, app, chatId } = await notesWithANote();
       const [user, otherBuilder] = await Promise.all([

@@ -35,7 +35,8 @@ import {
   definitionRefusal,
   definitionFiles,
   definitionIn,
-  definitionOperationSchema,
+  definitionOperationsSchema,
+  changePlan,
   definitionPlan,
   operationDetail,
   refuseDefinitionFiles,
@@ -1056,21 +1057,28 @@ export const defineInDraft = async <Saved>(
       ok: true;
       definition: AppDefinition;
       plan: DefinitionPlan;
+      change: DefinitionPlan;
       saved: Saved;
     }
 > => {
   const parsed = appErrors.parse(
     "app.invalid",
-    definitionOperationSchema,
+    definitionOperationsSchema,
     operation
   );
   const held = await draftDefinitions(env, scope, app);
   if ("problem" in held) {
     return { ok: false, problem: held.problem };
   }
-  const result = tryOperation(held.own, parsed);
-  if ("problem" in result) {
-    return { ok: false, problem: result.problem };
+  // A few operations are one change: each after the one before, the
+  // definition checked after each, and saved once or not at all.
+  let result: { definition: AppDefinition } = { definition: held.own };
+  for (const each of Array.isArray(parsed) ? parsed : [parsed]) {
+    const next = tryOperation(result.definition, each);
+    if ("problem" in next) {
+      return { ok: false, problem: next.problem };
+    }
+    result = next;
   }
   // Saved as any write is, and refused as one is: a rename of a field a
   // version of the App has among it (`withDefinitionCode`).
@@ -1092,6 +1100,7 @@ export const defineInDraft = async <Saved>(
     ok: true,
     definition: result.definition,
     plan: definitionPlan(held.before, result.definition),
+    change: changePlan(held.before, held.own, result.definition),
     saved,
   };
 };

@@ -362,7 +362,51 @@ const expectOverlayOpensAndCloses = async (
 };
 
 /** Keyboard behaviour particular to a component, checked on its page. */
+/**
+ * Once an item is picked up from the keyboard, the arrows move it: dnd-kit
+ * listens for them a task after the pick-up, which a person never beats
+ * but a test's next key can.
+ */
+const pickedUp = async (page: Page): Promise<void> => {
+  await page.evaluate(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        resolve(true);
+      }, 0);
+    });
+    await promise;
+  });
+};
+
 const keyboardChecks: Record<string, (page: Page) => Promise<void>> = {
+  // An item moves from the keyboard, each step said to screen readers:
+  // Space picks it up, an arrow moves it, Space puts it down; Escape puts
+  // it back.
+  "sortable-list": async (page) => {
+    const options = page.getByRole("list", { name: "Options" });
+    const second = options.getByRole("listitem").nth(1);
+    const said = (text: string) => page.getByText(text, { exact: true });
+    await options.getByRole("button", { name: "Move Done" }).focus();
+    await page.keyboard.press("Space");
+    await expect(said("Done is now at place 3.")).toBeAttached();
+    await pickedUp(page);
+    await page.keyboard.press("ArrowUp");
+    await expect(said("Done is now at place 2.")).toBeAttached();
+    await page.keyboard.press("Space");
+    await expect(said("Put Done down at place 2.")).toBeAttached();
+    await expect(second.getByRole("textbox")).toHaveAccessibleName("Done");
+
+    await options.getByRole("button", { name: "Move Open" }).focus();
+    await page.keyboard.press("Space");
+    await expect(said("Open is now at place 1.")).toBeAttached();
+    await pickedUp(page);
+    await page.keyboard.press("ArrowDown");
+    await expect(said("Open is now at place 2.")).toBeAttached();
+    await page.keyboard.press("Escape");
+    await expect(said("Put Open back where it was.")).toBeAttached();
+    await expect(second.getByRole("textbox")).toHaveAccessibleName("Done");
+  },
   // A vertical group moves with the up and down arrows, which only works
   // when the orientation reaches Base UI, not just the styles.
   "toggle-group": async (page) => {

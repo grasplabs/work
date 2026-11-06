@@ -63,7 +63,6 @@ import { useFollowedChat } from "../chat/chat-watch.ts";
 import { DraftVersionBar, shownVersion } from "../chat/draft-versions.tsx";
 import type { ShownVersion } from "../chat/draft-versions.tsx";
 import { DraftPreview } from "../chat/studio.tsx";
-import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { useWide } from "../frame/wide.ts";
@@ -83,7 +82,7 @@ import { AppSettings, Read } from "./app-settings.tsx";
 import type { AppSettingsSection, StoreChangesRead } from "./app-settings.tsx";
 import { readMembers, sharesApp, ShareApp } from "./app-sharing.tsx";
 import { StatusBadge, useStatusMove } from "./app-status.tsx";
-import { useAppRead } from "./use-app-read.ts";
+import { readTables, useAppRead } from "./use-app-read.ts";
 
 // The Code view, with its renderer and highlighter, loads once it opens.
 const AppCode = lazy(async () => {
@@ -853,9 +852,6 @@ const PreviewArea = ({
     </div>
   );
 };
-
-const readTables = async (session: Session, app: string) =>
-  await session.apps.data.tables(app);
 
 /** The live App's tables, one at a time, and their records. */
 const LiveData = ({ app }: { app: string }) => {

@@ -787,6 +787,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
             ok: true,
             model: dataModelOf(defined.definition),
             plan: defined.plan,
+            change: defined.change,
           }
         : defined;
     });

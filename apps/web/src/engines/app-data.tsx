@@ -71,7 +71,7 @@ import type { ReactNode } from "react";
 
 import { downloadCsv } from "../csv.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
+import { formatDateTime, valueText } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // An App's data, for its builders and the admins (core's app-data.ts):
@@ -99,10 +99,6 @@ const unlessStale = async <T,>(
     throw error;
   }
 };
-
-/** A field's value as text: text as it is, anything else as JSON. */
-const valueText = (value: unknown): string =>
-  typeof value === "string" ? value : JSON.stringify(value);
 
 const ops = {
   insert: msg({ message: "Added", context: "a record was added" }),
@@ -640,6 +636,142 @@ const RecordNotes = ({
 };
 
 /**
+ * The records of `live`'s table, a page at a time, read apart from what
+ * else the page does: the first page at once, the next one on `handleEnd`
+ * (none while a read is out, once the last came, or after one failed),
+ * all again on `reload`; and how many there are, when that's known.
+ */
+const useRecordPages = (
+  app: string,
+  live: { table: AppDataTable; version: number } | undefined,
+  stale: boolean,
+  onStale: () => void
+) => {
+  const { busy, failure, run } = useCoreAction();
+  const [records, setRecords] = useState<AppDataRecord[]>();
+  const [cursor, setCursor] = useState<string | null>(null);
+  const load = async (from: string | null) => {
+    if (live === undefined) {
+      return;
+    }
+    const page = await run(
+      async (session) =>
+        await unlessStale(
+          async () =>
+            await session.apps.data.records(
+              app,
+              live.table.name,
+              live.version,
+              from
+            ),
+          onStale
+        )
+    );
+    if (page !== undefined) {
+      setRecords([...(from === null ? [] : (records ?? [])), ...page.records]);
+      setCursor(page.cursor);
+    }
+  };
+  const idle = !busy && failure === undefined;
+  if (live !== undefined && records === undefined && idle && !stale) {
+    void load(null);
+  }
+  return {
+    records: records ?? [],
+    failure,
+    // The table's count, or, once the last page came, the records read.
+    total:
+      live?.table.records ?? (cursor === null ? records?.length : undefined),
+    handleEnd: () => {
+      if (cursor !== null && idle) {
+        void load(cursor);
+      }
+    },
+    reload: () => {
+      void load(null);
+    },
+  };
+};
+
+/**
+ * The records bar's actions: one field that finds a record by its ID,
+ * and one menu to export the table's records, or import some.
+ */
+const RecordActions = ({
+  busy,
+  importable,
+  onFind,
+  onExport,
+  onImport,
+}: {
+  busy: boolean;
+  importable: boolean;
+  onFind: (id: string) => void;
+  onExport: () => void;
+  onImport: () => void;
+}) => {
+  const { t } = useLingui();
+  const [wanted, setWanted] = useState("");
+  return (
+    <>
+      <search>
+        <form
+          className="w-56"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (wanted.trim() !== "" && !busy) {
+              onFind(wanted);
+            }
+          }}
+        >
+          <InputGroup>
+            <InputGroupAddon>
+              <SearchIcon />
+            </InputGroupAddon>
+            <InputGroupInput
+              aria-label={t`Find a record by its ID`}
+              onChange={(event) => {
+                setWanted(event.target.value);
+              }}
+              placeholder={t`Find a record by its ID`}
+              type="search"
+              value={wanted}
+            />
+          </InputGroup>
+        </form>
+      </search>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          disabled={busy}
+          render={
+            <Button
+              aria-label={t`Import or export`}
+              size="icon-sm"
+              title={t`Import or export`}
+              variant="ghost"
+            />
+          }
+        >
+          <ArrowUpDownIcon />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={onExport}>
+            <DownloadIcon />
+            <Trans>Export as CSV</Trans>
+          </DropdownMenuItem>
+          {importable ? (
+            <DropdownMenuItem onClick={onImport}>
+              <UploadIcon />
+              <Trans>Import from CSV</Trans>
+            </DropdownMenuItem>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
+};
+
+/**
  * One table's records in a grid, a page at a time, with find, export and
  * import, the App's version `version` read: its columns the page's
  * (`columns`, by field), and the start of the bar above it (`toolbar`)
@@ -665,54 +797,22 @@ export const TableRecords = ({
   /** What the page shows in place of the records (the table's fields), if anything. */
   instead?: ReactNode;
 }) => {
-  const { t } = useLingui();
-  const { busy, failure, run } = useCoreAction();
+  const router = useRouter();
+  // An export or a lookup that fails never stops the paging.
+  const action = useCoreAction();
   // Core has another version current than the one this page read.
   const [stale, setStale] = useState(false);
   const onStale = () => {
     setStale(true);
   };
-  const [records, setRecords] = useState<AppDataRecord[]>();
-  const [cursor, setCursor] = useState<string | null>(null);
   const [open, setOpen] = useState<AppDataRecord>();
   const [importing, setImporting] = useState(false);
-  const [wanted, setWanted] = useState("");
   const [missing, setMissing] = useState(false);
   const live =
     table !== undefined && version !== null ? { table, version } : undefined;
-  const load = async (from: string | null) => {
-    if (live === undefined) {
-      return;
-    }
-    const page = await run(
-      async (session) =>
-        await unlessStale(
-          async () =>
-            await session.apps.data.records(
-              app,
-              live.table.name,
-              live.version,
-              from
-            ),
-          onStale
-        )
-    );
-    if (page !== undefined) {
-      setRecords([...(from === null ? [] : (records ?? [])), ...page.records]);
-      setCursor(page.cursor);
-    }
-  };
-  if (
-    live !== undefined &&
-    records === undefined &&
-    !busy &&
-    failure === undefined &&
-    !stale
-  ) {
-    void load(null);
-  }
+  const pages = useRecordPages(app, live, stale, onStale);
   const exportTable = async (name: string) => {
-    const text = await run(
+    const text = await action.run(
       async (session) =>
         await new Response(await session.apps.data.export(app, name)).text()
     );
@@ -720,12 +820,12 @@ export const TableRecords = ({
       downloadCsv(text, `${name}.csv`);
     }
   };
-  const find = async () => {
+  const find = async (wanted: string) => {
     if (live === undefined) {
       return;
     }
     setMissing(false);
-    const found = await run(
+    const found = await action.run(
       async (session) =>
         await unlessStale(
           async () =>
@@ -751,74 +851,28 @@ export const TableRecords = ({
         {toolbar}
         <div className="flex-1" />
         {live === undefined || instead !== undefined ? null : (
-          <>
-            <search>
-              <form
-                className="w-56"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (wanted.trim() !== "" && !busy) {
-                    void find();
-                  }
-                }}
-              >
-                <InputGroup>
-                  <InputGroupAddon>
-                    <SearchIcon />
-                  </InputGroupAddon>
-                  <InputGroupInput
-                    aria-label={t`Find a record by its ID`}
-                    onChange={(event) => {
-                      setWanted(event.target.value);
-                    }}
-                    placeholder={t`Find a record by its ID`}
-                    type="search"
-                    value={wanted}
-                  />
-                </InputGroup>
-              </form>
-            </search>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                disabled={busy}
-                render={
-                  <Button
-                    aria-label={t`Import or export`}
-                    size="icon-sm"
-                    title={t`Import or export`}
-                    variant="ghost"
-                  />
-                }
-              >
-                <ArrowUpDownIcon />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onClick={() => {
-                    void exportTable(live.table.name);
-                  }}
-                >
-                  <DownloadIcon />
-                  <Trans>Export as CSV</Trans>
-                </DropdownMenuItem>
-                {live.table.write === "none" ? null : (
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setImporting(true);
-                    }}
-                  >
-                    <UploadIcon />
-                    <Trans>Import from CSV</Trans>
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </>
+          <RecordActions
+            busy={action.busy}
+            importable={live.table.write !== "none"}
+            onExport={() => {
+              void exportTable(live.table.name);
+            }}
+            onFind={(id) => {
+              void find(id);
+            }}
+            onImport={() => {
+              setImporting(true);
+            }}
+          />
         )}
       </div>
       {instead}
       {instead === undefined ? (
-        <RecordNotes failure={failure} missing={missing} stale={stale} />
+        <RecordNotes
+          failure={pages.failure ?? action.failure}
+          missing={missing}
+          stale={stale}
+        />
       ) : null}
       {instead === undefined ? (
         <RecordGrid
@@ -829,15 +883,10 @@ export const TableRecords = ({
             </p>
           }
           label={label}
-          onEndReached={() => {
-            // One page at a time: none while a read is out, nor once the
-            // last page came, nor after a read failed (Reload reads again).
-            if (cursor !== null && !busy && failure === undefined) {
-              void load(cursor);
-            }
-          }}
+          onEndReached={pages.handleEnd}
           rowKey={(record) => record.id}
-          rows={records ?? []}
+          rows={pages.records}
+          total={pages.total}
         />
       ) : null}
       {open === undefined || live === undefined ? null : (
@@ -860,7 +909,9 @@ export const TableRecords = ({
             setImporting(false);
           }}
           onDone={() => {
-            void load(null);
+            pages.reload();
+            // The table list's counts, read again.
+            void router.invalidate();
           }}
           onStale={onStale}
           table={live.table}
