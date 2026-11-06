@@ -846,8 +846,7 @@ const loadedRun = async (
   if (
     receipt?.manifestHash !== pin.manifest ||
     receipt.input === null ||
-    receipt.params === null ||
-    receipt.stateHash === null
+    receipt.params === null
   ) {
     throw new Error(`Run ${runId}'s receipt doesn't admit it`);
   }

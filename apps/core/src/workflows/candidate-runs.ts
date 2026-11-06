@@ -465,8 +465,7 @@ const loadedCandidateRun = async (
   if (
     row === undefined ||
     row.workflowResourceId !== pin.workflow ||
-    row.manifestHash !== pin.manifest ||
-    row.stateHash === null
+    row.manifestHash !== pin.manifest
   ) {
     throw new Error(`Test run ${runId} doesn't match its record`);
   }

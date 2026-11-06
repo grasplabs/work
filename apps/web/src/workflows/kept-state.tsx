@@ -50,17 +50,22 @@ const KeptEntries = ({
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  // What the last reset here answered, or what the page loaded.
-  const [state, setState] = useState(loaded);
+  // What the last reset here answered, only while the page shows the read
+  // it reset: a newer read of the page's replaces it.
+  const [reset, setReset] = useState<{
+    of: WorkflowState;
+    answer: WorkflowState;
+  }>();
+  const state = reset?.of === loaded ? reset.answer : loaded;
   const used = kilobytes(state.bytes);
   const cap = kilobytes(workflowStateMaxBytes);
 
-  const reset = async (): Promise<void> => {
+  const resetAll = async (): Promise<void> => {
     const emptied = await run(
       async (session) => await session.workflowResources.resetState(workflow)
     );
     if (emptied !== undefined) {
-      setState(emptied);
+      setReset({ of: loaded, answer: emptied });
     }
   };
 
@@ -137,7 +142,7 @@ const KeptEntries = ({
                 <AlertDialogAction
                   disabled={busy}
                   onClick={() => {
-                    void reset();
+                    void resetAll();
                   }}
                   variant="destructive"
                 >

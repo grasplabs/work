@@ -8,7 +8,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
+import { act, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -45,6 +45,30 @@ const kept: WorkflowState = {
   bytes: 1500,
 };
 
+/** Gives the page a newer read, as its loader does once it reads again. */
+const page: { readAgain?: (state: WorkflowState) => void } = {};
+
+/** The page around the section, as its loader hands it each read. */
+const Page = ({
+  editable,
+  readable,
+}: {
+  editable: boolean;
+  readable: boolean;
+}) => {
+  const [loaded, setLoaded] = useState(kept);
+  useEffect(() => {
+    page.readAgain = setLoaded;
+  }, []);
+  return (
+    <KeptState
+      editable={editable}
+      read={readable ? { state: "ready", data: loaded } : undefined}
+      workflow="workflow-1"
+    />
+  );
+};
+
 /** The section, for a reader who may reset it or not, and who may read it or not. */
 const shown = async (editable: boolean, readable = true) => {
   const asked: string[] = [];
@@ -64,13 +88,7 @@ const shown = async (editable: boolean, readable = true) => {
   };
   const router = createRouter({
     routeTree: createRootRoute({
-      component: () => (
-        <KeptState
-          editable={editable}
-          read={readable ? { state: "ready", data: kept } : undefined}
-          workflow="workflow-1"
-        />
-      ),
+      component: () => <Page editable={editable} readable={readable} />,
     }),
     history: createMemoryHistory(),
     context: { core },
@@ -129,6 +147,35 @@ describe("what a workflow keeps between its runs, on its page", () => {
       asked: ["workflow-1"],
       emptied: true,
     });
+  });
+
+  it("shows what the page reads again after a reset, not the reset's answer", async () => {
+    await shown(true);
+    await press("Reset what it keeps");
+    await press("Reset");
+    const emptied = document.body.textContent.includes("Nothing is kept yet.");
+    // A run wrote since: the page's next read has it.
+    const newer: WorkflowState = {
+      entries: [
+        {
+          key: "count",
+          value: 3,
+          runId: "run-2",
+          updatedAt: "2026-11-05T09:00:00.000Z",
+        },
+      ],
+      bytes: 100,
+    };
+    await act(async () => {
+      page.readAgain?.(newer);
+      await settled();
+    });
+
+    expect({
+      emptied,
+      shows: document.body.textContent.includes("count"),
+      stillEmpty: document.body.textContent.includes("Nothing is kept yet."),
+    }).toStrictEqual({ emptied: true, shows: true, stillEmpty: false });
   });
 
   it("shows nothing to a reader the page didn't read it for: a user, whose runs' results aren't all theirs", async () => {

@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { closeFormerWorkflowStores } from "../src/data-stores.ts";
+import { closeFormerWorkflowStores, openStore } from "../src/data-stores.ts";
 import { allEvents } from "./audit-events.ts";
 import { resetStorage } from "./reset-storage.ts";
 import { testBinding } from "./test-env.ts";
@@ -133,5 +133,52 @@ describe("removing workflow stores", () => {
       approval: "revoked",
       permissions: "app-grant",
     });
+  });
+
+  it("closes every former workflow store in turn, though one an older run still holds is refused each time", async () => {
+    await resetStorage();
+    await applyD1Migrations(env.DB, migrations);
+    const now = Date.now();
+    await run(
+      [
+        "INSERT INTO business_stores (id, owner_id, physical_namespace_role, created_at) VALUES ('a-held-store', 'ada', 'data_store', ?), ('b-free-store', 'ada', 'data_store', ?)",
+        now,
+        now,
+      ],
+      [
+        "INSERT INTO sdk_store_owners (store_id, app_id, workflow_id, claimed_at) VALUES ('a-held-store', NULL, 'owner', ?), ('b-free-store', NULL, 'owner', ?)",
+        now,
+        now,
+      ]
+    );
+    // An older core's run on `a-held-store` holds a receipt: its close is
+    // refused (`data.store_in_use`) until the receipt expires.
+    const held = await openStore(env, "a-held-store");
+    await held.claim({
+      scope: {
+        principal: "ada",
+        resource: "owner",
+        binding: null,
+        contractId: "orders.add",
+        contractVersion: 1,
+        operationKind: "mutation",
+      },
+      key: [crypto.randomUUID()],
+      inputHash: "c".repeat(64),
+      runId: null,
+      deadline: Date.now() + 60_000,
+    });
+    const deleted = async (id: string): Promise<boolean> =>
+      (await one(
+        "SELECT deleted_at IS NOT NULL AS v FROM business_stores WHERE id = ?",
+        id
+      )) === 1;
+    // One store a run, as many as the clock's runs would reach in turn.
+    await closeFormerWorkflowStores(env, 1);
+    await closeFormerWorkflowStores(env, 1);
+    expect({
+      held: await deleted("a-held-store"),
+      free: await deleted("b-free-store"),
+    }).toStrictEqual({ held: false, free: true });
   });
 });

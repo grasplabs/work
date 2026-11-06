@@ -445,6 +445,35 @@ return null;`),
     });
   });
 
+  it("goes on with an empty state for a run started before runs froze their state, whose receipt names no snapshot", async () => {
+    await ranAs(
+      await waitingRun(sealed),
+      moduleOf(keepFetch('{ count: 1, seen: input.who, kind: "visit" }')),
+      { sealed: keepsFetch }
+    );
+    const older = await waitingRun(sealed);
+    // Its receipt as a core before this one wrote it: no snapshot named,
+    // written around the trigger that keeps a receipt as it was.
+    const guard = await env.DB.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'workflow_start_receipts_immutable_update'"
+    ).first<{ sql: string }>();
+    await env.DB.batch([
+      env.DB.prepare("DROP TRIGGER workflow_start_receipts_immutable_update"),
+      env.DB.prepare(
+        "UPDATE workflow_start_receipts SET state_hash = NULL WHERE id = ?"
+      ).bind(older),
+      env.DB.prepare(guard?.sql ?? ""),
+    ]);
+    const resumed = await ranAs(
+      older,
+      `
+import { workflow, z } from ${sdkWorkflow};
+export default workflow("sealed", { params: {}, input: z.object({ who: z.string() }) }, async (step, { state }) => ({ state }));
+`
+    );
+    expect(resumed).toStrictEqual({ ended: { state: {} }, tampered: [] });
+  });
+
   it("hands every activation of a run the snapshot its start froze, frozen, whatever other runs write since", async () => {
     await ranAs(
       await waitingRun(sealed),

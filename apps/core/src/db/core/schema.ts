@@ -4540,6 +4540,8 @@ export const workflowState = sqliteTable(
  * or tried again never writes twice. `bytes` is the workflow's state in
  * all once it landed, which may not pass the cap: the batch fails else.
  * `writeId` tells the batch's own receipt from one an earlier one wrote.
+ * Removed with its run's details (workflows/retention.ts), once no step of
+ * the run can replay.
  */
 export const workflowStateWrites = sqliteTable(
   "workflow_state_writes",

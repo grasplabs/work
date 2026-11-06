@@ -214,7 +214,9 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   {
     name: "stores.former_workflow",
     period: "quarterHour",
-    run: closeFormerWorkflowStores,
+    run: async (env) => {
+      await closeFormerWorkflowStores(env);
+    },
   },
   { name: "visitors.sweep", period: "quarterHour", run: sweepAppVisitors },
   // Connector triggers' holds and tombstones of events long settled or no

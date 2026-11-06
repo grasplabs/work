@@ -326,6 +326,9 @@ const formerWorkflowStore = async (env: Env, id: StoreId): Promise<boolean> =>
 /** How many former workflow stores one clock run closes. */
 const formerStoresPerRun = 50;
 
+/** Who holds a former workflow store's closing mark: the clock's close. */
+const formerStoresCloser = "former-workflow-stores";
+
 /**
  * Closes the stores workflows declared before they stopped owning stores
  * (GRA-1552), on the clock, on every deployment: each object marked
@@ -334,10 +337,17 @@ const formerStoresPerRun = 50;
  * records (store-deletion.ts). Closing a closed store changes nothing, so
  * a run that stopped half-way is finished by the next; one a receipt
  * still holds (`data.store_in_use`, an older core's run on it) waits for
- * the next run. Removed with the columns that name these stores
- * (GRA-1613).
+ * the next run. Each run takes the ones it tried longest ago first, by
+ * the closing mark each try sets (`closingAt`, which no other deletion
+ * of these sets: nobody manages them), so stores refused again and again
+ * never keep the rest waiting. Removed with the columns that name these
+ * stores (GRA-1613).
  */
-export const closeFormerWorkflowStores = async (env: Env): Promise<void> => {
+export const closeFormerWorkflowStores = async (
+  env: Env,
+  /** How many it tries this run. */
+  limit = formerStoresPerRun
+): Promise<void> => {
   const db = drizzle(env.DB);
   const stores = await db
     .select({ id: businessStores.id })
@@ -349,10 +359,19 @@ export const closeFormerWorkflowStores = async (env: Env): Promise<void> => {
         isNull(businessStores.deletedAt)
       )
     )
-    .limit(formerStoresPerRun);
+    // Never tried first (no mark), then the oldest try.
+    .orderBy(asc(businessStores.closingAt), asc(businessStores.id))
+    .limit(limit);
   for (const { id } of stores) {
     const store = storeIdSchema.parse(id);
     try {
+      // This try, marked first: whatever comes of it, the next run takes
+      // the others first.
+      // oxlint-disable-next-line no-await-in-loop -- one store after another
+      await db
+        .update(businessStores)
+        .set({ closingAt: new Date(), closingOwner: formerStoresCloser })
+        .where(eq(businessStores.id, store));
       // oxlint-disable-next-line no-await-in-loop -- one store after another
       const mark = await inJurisdiction(env, env.DATA_STORES)
         .getByName(store)
