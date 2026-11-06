@@ -15,6 +15,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { briefText, checkChange, copiedFrom } from "./climb-agent.ts";
 import type { Brief } from "./climb-agent.ts";
 import {
+  changedBetween,
   climb,
   defaultClimb,
   noiseBetween,
@@ -307,6 +308,23 @@ describe("the climb", () => {
 });
 
 describe("what the climb works out", () => {
+  it("counts as his change only a file that is new or holds something else, not one left as it was before he started", () => {
+    const before = new Map([
+      ["scripts/lab/fixtures/transcripts/01-p1.json", "kept"],
+      ["scripts/lab/fixtures/moments/01-p4.json", "mined"],
+    ]);
+    const after = new Map([
+      ["scripts/lab/fixtures/transcripts/01-p1.json", "kept"],
+      ["scripts/lab/fixtures/moments/01-p4.json", "edited"],
+      ["apps/core/src/onboarding/stephen.ts", "changed"],
+    ]);
+
+    expect(changedBetween(before, after)).toStrictEqual([
+      "scripts/lab/fixtures/moments/01-p4.json",
+      "apps/core/src/onboarding/stephen.ts",
+    ]);
+  });
+
   it("counts as noise what two runs of one Stephen differ by, never less than the least", () => {
     const one = standingOf(
       runsOf({ ...startingNumbers(0.9), heard: 0.8 }, [

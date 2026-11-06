@@ -30,7 +30,9 @@
  * Stephen.
  */
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -568,6 +570,40 @@ const lab = async (args: readonly string[]): Promise<void> => {
 const git = async (args: readonly string[]): Promise<string> =>
   await run("git", args);
 
+/** Each file git calls changed, untracked ones too, with a hash of what it holds now. */
+const uncommitted = async (): Promise<Map<string, string>> => {
+  const status = await git(["status", "--porcelain", "--untracked-files=all"]);
+  const held = new Map<string, string>();
+  for (const line of status.split("\n")) {
+    if (line.trim() === "") {
+      continue;
+    }
+    const file = line.slice(3).trim();
+    const full = path.join(repoRoot, file);
+    held.set(
+      file,
+      existsSync(full)
+        ? createHash("sha256").update(readFileSync(full)).digest("hex")
+        : "gone"
+    );
+  }
+  return held;
+};
+
+/**
+ * What changed between two looks at the files git calls changed: a file
+ * new to the list, or one that holds something else now. A file that was
+ * already there and stayed as it was (a fixture `keep` or `mine` wrote
+ * before the climb) is not the change of the one who changes him.
+ */
+export const changedBetween = (
+  before: ReadonlyMap<string, string>,
+  after: ReadonlyMap<string, string>
+): string[] =>
+  [...after]
+    .filter(([file, hash]) => before.get(file) !== hash)
+    .map(([file]) => file);
+
 const marksSchema = z.object({
   marks: z.array(z.string()),
   length: z.number(),
@@ -665,21 +701,13 @@ export const climbWorld = (setting: {
       return [path.relative(repoRoot, casesFolderOf(newest))];
     },
     change: async (brief) => {
+      const before = await uncommitted();
       const proposal = await askForChange(repoRoot, brief);
-      const status = await git([
-        "status",
-        "--porcelain",
-        "--untracked-files=all",
-      ]);
-      const changed = status
-        .split("\n")
-        .filter((line) => line.trim() !== "")
-        .map((line) => line.slice(3).trim())
-        .filter(
-          (file) =>
-            !file.startsWith("scripts/lab/results/") &&
-            !file.startsWith("scripts/lab/scores/")
-        );
+      const changed = changedBetween(before, await uncommitted()).filter(
+        (file) =>
+          !file.startsWith("scripts/lab/results/") &&
+          !file.startsWith("scripts/lab/scores/")
+      );
       const diff = await git(["diff", "-U0", "--", ...stephenFiles]);
       const added = diff
         .split("\n")
