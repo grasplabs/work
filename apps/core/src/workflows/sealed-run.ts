@@ -77,7 +77,7 @@ import {
   openRunDecision,
   promptOf,
   recipientsOf,
-  requireDecisionAuthority,
+  requireDecisionAsk,
   takeDecision,
 } from "./resource-decisions.ts";
 import type { DecisionAnswer } from "./resource-decisions.ts";
@@ -89,7 +89,6 @@ import {
   retryable,
 } from "./resource-errors.ts";
 import type { CaughtError, Failure } from "./resource-errors.ts";
-import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 import { inboxOf } from "./run-inboxes.ts";
 import { sealedMainModules } from "./sealed-isolate.ts";
 import type { Settled, StepError } from "./sealed-isolate.ts";
@@ -2321,8 +2320,6 @@ class SealedRun implements SealedRunKind {
         this.#openings.set(attempt, opened);
         return opened;
       }
-      // Its input is shown to people other than the run's person.
-      await requireResourceRunEvidenceReadable(this.#env, calling);
       this.#requireHolds(attempt);
       const opened = await openRunDecision(
         this.#env,
@@ -2369,8 +2366,7 @@ class SealedRun implements SealedRunKind {
       }
       // Its people are shown what it asks: never once its binding was
       // revoked, or its run's evidence can't be read, since it opened.
-      await requireDecisionAuthority(this.#env, calling, task.call.binding);
-      await requireResourceRunEvidenceReadable(this.#env, calling);
+      await requireDecisionAsk(this.#env, calling, task.id, task.call.binding);
       this.#requireHolds(attempt);
       await askDeciders(this.#env, calling, opened);
       // Its people were told: a later failure of the step the host hears

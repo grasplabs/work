@@ -37,6 +37,7 @@ import type {
   FrozenCatalogBinding,
 } from "./resource-authority.ts";
 import { contractOf, requireShape } from "./resource-calls.ts";
+import { requireResourceRunEvidenceReadable } from "./resource-reads.ts";
 
 // The decisions a run of an independent workflow waits for: its
 // `grasp.decision` calls (platform specification 13.6), each on the
@@ -248,19 +249,6 @@ const decisionBinding = (
 };
 
 /**
- * Decides again the authority of `run`'s decision binding `alias`
- * (`requireCallAuthority`): `workflow.call_denied` once it is revoked, or
- * isn't a decision binding of its start.
- */
-export const requireDecisionAuthority = async (
-  env: Env,
-  run: CallingRun,
-  alias: string
-): Promise<void> => {
-  await requireCallAuthority(env, run, decisionBinding(run, alias));
-};
-
-/**
  * The response schema of decision contract `contract`: what an answer's
  * payload must be. A contract without one, or with one taking nothing the
  * decision page sends, could take no answer the run takes: refused before
@@ -333,10 +321,32 @@ const receiptOf = (
   },
 });
 
+/** Keeps `run`'s receipt of `outcome` (`receiptOf`), or logs that it couldn't. */
+const keepReceipt = async (
+  env: Env,
+  run: CallingRun,
+  task: string,
+  binding: FrozenCatalogBinding,
+  outcome: string
+): Promise<void> => {
+  try {
+    await audited(env, receiptOf(run, task, binding, outcome));
+  } catch (error) {
+    log.error("workflow.run_receipt_unkept", {
+      runId: run.runId,
+      task,
+      outcome,
+      ...errorFields(error),
+    });
+  }
+};
+
 /**
  * Runs `work`, `run`'s decision call of task `task` through `binding`,
- * leaving its receipt in the audit log: `opened` or `answered`, or its
- * refusal's code. The outcome's receipt that can't be kept is logged, never
+ * leaving its receipt in the audit log: `done` (`opened`, `answered`;
+ * none when `null`, for a check whose going ahead another receipt stands
+ * for), or its refusal's code. Every refusal of a decision call is kept
+ * here, once. The outcome's receipt that can't be kept is logged, never
  * put in place of what came of the call.
  */
 const receipted = async <T>(
@@ -344,7 +354,7 @@ const receipted = async <T>(
   run: CallingRun,
   task: string,
   binding: FrozenCatalogBinding,
-  done: string,
+  done: string | null,
   work: () => Promise<T>
 ): Promise<T> => {
   let outcome = done;
@@ -354,17 +364,31 @@ const receipted = async <T>(
     outcome = isExpectedError(error) ? error.code : "internal.unexpected";
     throw error;
   } finally {
-    try {
-      await audited(env, receiptOf(run, task, binding, outcome));
-    } catch (error) {
-      log.error("workflow.run_receipt_unkept", {
-        runId: run.runId,
-        task,
-        outcome,
-        ...errorFields(error),
-      });
+    if (outcome !== null) {
+      await keepReceipt(env, run, task, binding, outcome);
     }
   }
+};
+
+/**
+ * Refuses the ask of `run`'s open decision of task `task` through binding
+ * `alias`, which shows its people what it asks, once the binding's
+ * authority no longer holds (`workflow.call_denied`) or the run's evidence
+ * can't be read since it opened, leaving the refusal's receipt as its
+ * opening's would. One that goes ahead leaves none: its `opened` stands
+ * for it.
+ */
+export const requireDecisionAsk = async (
+  env: Env,
+  run: CallingRun,
+  task: string,
+  alias: string
+): Promise<void> => {
+  const binding = decisionBinding(run, alias);
+  await receipted(env, run, task, binding, null, async () => {
+    await requireCallAuthority(env, run, binding);
+    await requireResourceRunEvidenceReadable(env, run);
+  });
 };
 
 /**
@@ -401,6 +425,8 @@ export const openRunDecision = async (
   const binding = decisionBinding(run, call.binding);
   return await receipted(env, run, task, binding, "opened", async () => {
     await requireCallAuthority(env, run, binding);
+    // Its input is shown to people other than the run's person.
+    await requireResourceRunEvidenceReadable(env, run);
     const contract = await contractOf(env, binding);
     const response = responseOf(contract);
     const recipients = recipientsOf(call.recipients);
