@@ -1278,12 +1278,8 @@ export const planSchemaChange = (
   return {
     accepted: true,
     contract: union,
-<<<<<<< HEAD
     ids: ids === undefined ? {} : idsAfter(union, ids),
-    changed: manifestText(union) !== manifestText(before),
-=======
     changed: manifestText(union) !== manifestText(held),
->>>>>>> 644459f452 (feat(core,sdk): rename an App's tables by stable ID, keeping their records)
     migratedTables: [...migrated].toSorted(),
     activates:
       changes.checks.length > 0 ||

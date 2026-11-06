@@ -29,12 +29,16 @@ import { newRecordId } from "./store-schemas.ts";
 // holds.
 
 /** Notes, with `fields`, under `name`, and tags that each refer to one. */
-const schemaOf = (name: string, fields: ValueShape = {}) =>
+const schemaOf = (
+  name: string,
+  fields: ValueShape = {},
+  read: "appMembers" | "owner" = "appMembers"
+) =>
   manifestText(
     schemaManifest(
       defineSchema({
         [name]: defineTable({ title: v.string(), ...fields }).access({
-          read: "appMembers",
+          read,
           write: "appMembers",
         }),
         tags: defineTable({ label: v.string(), note: v.id(name) }).access({
@@ -121,6 +125,25 @@ const notesStore = async () => {
   return { store, first: first.schemaHash, note };
 };
 
+/** A read of note `id` of `table` under schema `schemaHash`, as `principal`. */
+const readAs = async (
+  store: OpenStore,
+  schemaHash: string,
+  { principal, table, id }: { principal: string; table: string; id: string }
+) => {
+  const { value } = await store.read(
+    {
+      schemaHash,
+      principal,
+      appMember: true,
+      appBuilder: false,
+      consumer: consumer(1),
+    },
+    { kind: "get", table, id, expectedRevision: null }
+  );
+  return value;
+};
+
 /** The details of a `migration.required` refusal of `call`. */
 const requiredOf = async (call: Promise<unknown>) => {
   try {
@@ -174,7 +197,7 @@ describe("a table renamed by its stable ID", () => {
           tags: [{ label: "red", note }],
         },
       },
-      older: "migration.incompatible_write",
+      older: "migration.names_moved",
     });
   });
 
@@ -225,6 +248,115 @@ describe("a table renamed by its stable ID", () => {
     expect(held.memos).toStrictEqual([
       { title: "A", displayName: "Ace", pinned: false },
     ]);
+  });
+
+  it("reads a renamed table under the contract's rules only: a version that names it otherwise reads nothing", async () => {
+    // Version 1 lets every member read the notes; version 2 renames them
+    // and lets only their owners.
+    const store = await newStore();
+    const first = await define(
+      store,
+      schemaOf("notes", {}, "appMembers"),
+      1,
+      idsOf("notes")
+    );
+    const note = await insert(store, first.schemaHash, "notes", {
+      title: "Ada's",
+    });
+    const second = await define(
+      store,
+      schemaOf("memos", {}, "owner"),
+      2,
+      idsOf("memos")
+    );
+    // Sealed, not current: its name is another's on the store.
+    const early = await codeOf(
+      readAs(store, second.schemaHash, {
+        principal: "bob",
+        table: "memos",
+        id: note,
+      })
+    );
+    await activate(store, second.schemaHash, 2);
+
+    expect({
+      early,
+      // Left behind, version 1 would read the memos under its own looser
+      // rules: refused.
+      older: await codeOf(
+        readAs(store, first.schemaHash, {
+          principal: "bob",
+          table: "notes",
+          id: note,
+        })
+      ),
+      bob: await readAs(store, second.schemaHash, {
+        principal: "bob",
+        table: "memos",
+        id: note,
+      }),
+      ada: await readAs(store, second.schemaHash, {
+        principal: "ada",
+        table: "memos",
+        id: note,
+      }),
+    }).toMatchObject({
+      early: "migration.names_moved",
+      older: "migration.names_moved",
+      bob: null,
+      ada: { _id: note, title: "Ada's" },
+    });
+  });
+
+  it("keeps the table IDs the contract holds, not the newest a schema sealed but never current gave them", async () => {
+    const { store, first } = await notesStore();
+    const second = await define(store, schemaOf("memos"), 2, idsOf("memos"));
+    await activate(store, second.schemaHash, 2);
+    // Version 3, sealed, never current: the memos, and a new table under
+    // the free name `notes`.
+    const third = await define(
+      store,
+      manifestText(
+        schemaManifest(
+          defineSchema({
+            memos: defineTable({ title: v.string() }).access({
+              read: "appMembers",
+              write: "appMembers",
+            }),
+            tags: defineTable({
+              label: v.string(),
+              note: v.id("memos"),
+            }).access({ read: "appMembers", write: "appMembers" }),
+            notes: defineTable({ body: v.string() }).access({
+              read: "appMembers",
+              write: "appMembers",
+            }),
+          })
+        )
+      ),
+      3,
+      {
+        ...idsOf("memos"),
+        notes: { id: "t-other", fields: { body: "f-body" } },
+      }
+    );
+
+    // The rollback to version 1: its `notes` is the other table now.
+    const rollback = await activate(store, first, 1);
+    const afterRollback = await tablesNow(store);
+    const current = await activate(store, third.schemaHash, 3);
+
+    expect({
+      rollback,
+      afterRollback,
+      current,
+      tables: await tableNames(store),
+    }).toMatchObject({
+      rollback: "incompatible",
+      afterRollback: { memos: [{ title: "A" }] },
+      current: "active",
+      tables: ["memos", "notes", "tags"],
+    });
   });
 
   it("refuses a name the store holds for another table", async () => {
