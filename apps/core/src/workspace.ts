@@ -111,9 +111,9 @@ import type {
 } from "./agent-scope.ts";
 import { inOwnWords } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
-import { latestVersion, listApps } from "./apps.ts";
+import { latestVersion } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
-import { memberOf, memberRole } from "./auth/identity.ts";
+import { memberRole } from "./auth/identity.ts";
 import {
   drainCaptures,
   eraseCaptured,
@@ -730,22 +730,6 @@ const outputOf = (
   output: { callId: string; text: string } | undefined
 ): ChatOutput | null =>
   output === undefined ? null : { callId: output.callId, text: output.text };
-
-/**
- * Whether `personId` builds Apps or workflows: a role that does, or a
- * builder's role in an App.
- */
-const buildsAny = async (env: Env, personId: string): Promise<boolean> => {
-  const member = await memberOf(env.DB, personId);
-  if (member === undefined) {
-    return false;
-  }
-  if (canBuild(member.role)) {
-    return true;
-  }
-  const roles = await listApps(env, member);
-  return roles.some(({ role }) => role === "builder");
-};
 
 /** A person's or team's workspace: chats and the Code Mode agent on Pi. */
 export class Workspace extends DurableObject<Env> {
@@ -2027,9 +2011,10 @@ export class Workspace extends DurableObject<Env> {
     // An App's own chat: the App its builds change.
     const app = this.chatApp(work.chatId);
     // Only who builds reads Grasp's docs, in their own chat: thousands of
-    // tokens in every request, of no use to anyone else.
-    const builds =
-      !shared && (app !== null || (await buildsAny(this.env, scope.personId)));
+    // tokens in every request, of no use to anyone else. Building, an App
+    // included, needs a role that builds (app-access.ts).
+    const role = await memberRole(this.env.DB, scope.personId);
+    const builds = !shared && role !== undefined && canBuild(role);
     return {
       memory,
       skills,

@@ -6,6 +6,8 @@ import {
   docsSearchIndexFile,
 } from "@grasp-os/shared/docs";
 import type { DocsPage } from "@grasp-os/shared/docs";
+import { sharedRun } from "@grasp-os/shared/shared-runs";
+import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import { create, insertMultiple, search } from "@orama/orama";
 import { z } from "zod";
 
@@ -75,24 +77,31 @@ const loadDocs = async (assets: Fetcher) => {
 type Docs = Awaited<ReturnType<typeof loadDocs>>;
 
 /**
- * The release's docs, read once per isolate (the release's static files
- * never change under it) and shared by calls that come at once; read
- * again after a failure.
+ * The release's docs, once read: the release's static files never change
+ * under an isolate. Kept only once read, never as a pending promise.
  */
-let releaseDocs: Promise<Docs> | undefined;
+let releaseDocs: Docs | undefined;
+
+/**
+ * Reads under way, which the requests that come meanwhile share
+ * (`sharedRun`), each going on in its own context once it settles.
+ */
+const docsReads = new Map<string, SharedRun<Docs>>();
+
+/**
+ * The longest a read of the docs' index, and its indexing, may take
+ * before the requests waiting on it take it for abandoned and read again.
+ */
+const docsReadMs = 10_000;
 
 const docsOf = async (assets: Fetcher): Promise<Docs> => {
-  if (releaseDocs === undefined) {
-    const loading = loadDocs(assets);
-    releaseDocs = loading;
-    try {
-      return await loading;
-    } catch (error) {
-      releaseDocs = undefined;
-      throw error;
-    }
-  }
-  return await releaseDocs;
+  releaseDocs ??= await sharedRun(
+    docsReads,
+    docsSearchIndexFile,
+    docsReadMs,
+    async () => await loadDocs(assets)
+  );
+  return releaseDocs;
 };
 
 /** A page's Markdown, refused when the static files answer with the frontend's page instead. */
