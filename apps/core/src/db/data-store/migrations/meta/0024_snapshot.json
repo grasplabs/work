@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d4a7356f-5f98-4c75-b98b-d5ad8416ef48",
+  "id": "5fd1fa0e-d9a5-4b05-ad90-494c6bbd4e15",
   "prevId": "f4ca45b0-6006-49d3-9ed3-c409bdf020da",
   "tables": {
     "sdk_abandoned_targets": {
@@ -1960,6 +1960,14 @@
           "autoincrement": false,
           "default": "'[]'"
         },
+        "field_ids": {
+          "name": "field_ids",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -2147,6 +2155,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "contract_ids": {
+          "name": "contract_ids",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
         },
         "preferences_contract": {
           "name": "preferences_contract",

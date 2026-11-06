@@ -20,8 +20,8 @@ import type {
   ReservedFields,
   SchemaAnswer,
   SchemaIds,
+  PlannedChanges,
   SchemaManifest,
-  SchemaPlan,
 } from "@grasp-os/sdk/host";
 import { appDataImportLimits } from "@grasp-os/shared/app-data";
 import type { RecordChangePage } from "@grasp-os/shared/app-data";
@@ -90,7 +90,6 @@ import {
   and,
   asc,
   count,
-  desc,
   eq,
   gt,
   inArray,
@@ -900,6 +899,8 @@ interface ContractChange {
   readonly answers: string;
   /** The schema's stable IDs, as canonical JSON, kept with the schema. */
   readonly ids: string;
+  /** The IDs of the contract's names after the change (`AcceptedPlan.ids`). */
+  readonly contractIds: SchemaIds;
   /**
    * The defaulted fields the change adds to tables the contract has: to
    * fill in first, wherever those tables hold records (`fillMissing`).
@@ -1532,6 +1533,21 @@ const statusInForce = (
   return { state: "unknown" };
 };
 
+/** A change refused, as `planTables` answers it: the plan's reason, or the store's code. */
+const storeRefusalSchema = z.object({
+  table: z.string(),
+  field: z.string().optional(),
+  reason: z.string(),
+});
+
+type StoreRefusal = z.infer<typeof storeRefusalSchema>;
+
+/** What `StoreHost.planTables` answers: a plan, and why the store would refuse it. */
+export type PlannedTables = PlannedChanges & {
+  readonly accepted: boolean;
+  readonly refused?: readonly StoreRefusal[];
+};
+
 /** The stable IDs of a schema applied without any, as the store keeps them. */
 const noIds = "{}";
 
@@ -1580,23 +1596,93 @@ const awaitsActivation = (
   return plan.accepted && plan.activates;
 };
 
+/** `ids`, kept beside a contract, for the names `contract` holds alone. */
+const heldIds = (contract: SchemaManifest, ids: SchemaIds): SchemaIds =>
+  Object.fromEntries(
+    Object.entries(ids).flatMap(([table, { id, fields }]) => {
+      const kept = Object.hasOwn(contract.tables, table)
+        ? contract.tables[table]
+        : undefined;
+      return kept === undefined
+        ? []
+        : [
+            [
+              table,
+              {
+                id,
+                fields: Object.fromEntries(
+                  Object.entries(fields).filter(([field]) =>
+                    Object.hasOwn(kept.fields, field)
+                  )
+                ),
+              },
+            ],
+          ];
+    })
+  );
+
+/** `kept` with `given` over it, table by table and field by field. */
+const mergedIds = (kept: SchemaIds, given: SchemaIds): SchemaIds => ({
+  ...kept,
+  ...Object.fromEntries(
+    Object.entries(given).map(([table, { id, fields }]) => [
+      table,
+      {
+        id,
+        fields: {
+          ...(Object.hasOwn(kept, table) && kept[table]?.id === id
+            ? kept[table]?.fields
+            : {}),
+          ...fields,
+        },
+      },
+    ])
+  ),
+});
+
+/** The name `ids` gives the table or field (of `fields`) whose ID is `id`. */
+const nameOf = (
+  entries: readonly (readonly [string, string])[],
+  id: string
+): string | undefined => entries.find(([, held]) => held === id)?.[0];
+
 /**
  * Whether a schema's stable IDs (`ids`) name any table or field of the
- * contract (its IDs `held`) as another: its writes and reads would take
- * that one's values for its own.
+ * contract (its IDs `held`) otherwise than the contract does: a name the
+ * contract holds for another table or field, or a table or field the
+ * contract holds under another name (renamed since, or renamed by a
+ * schema not current yet). Its reads and writes would take another's
+ * values for its own, or another table's rules for its table's.
  */
-const idsDiffer = (held: SchemaIds, ids: SchemaIds): boolean =>
-  Object.entries(ids).some(([table, { id, fields }]) => {
+const idsDiffer = (held: SchemaIds, ids: SchemaIds): boolean => {
+  const heldTables = Object.entries(held).map(
+    ([table, { id }]) => [table, id] as const
+  );
+  return Object.entries(ids).some(([table, { id, fields }]) => {
+    const named = nameOf(heldTables, id);
+    if (named !== undefined && named !== table) {
+      return true;
+    }
     const kept = Object.hasOwn(held, table) ? held[table] : undefined;
-    return (
-      kept !== undefined &&
-      (kept.id !== id ||
-        Object.entries(fields).some(
-          ([field, fieldId]) =>
-            Object.hasOwn(kept.fields, field) && kept.fields[field] !== fieldId
-        ))
-    );
+    if (kept === undefined) {
+      return false;
+    }
+    if (kept.id !== id) {
+      return true;
+    }
+    const keptFields = Object.entries(kept.fields);
+    return Object.entries(fields).some(([field, fieldId]) => {
+      const name = nameOf(keptFields, fieldId);
+      const heldId = Object.hasOwn(kept.fields, field)
+        ? kept.fields[field]
+        : undefined;
+      return (
+        (heldId !== undefined && heldId !== fieldId) ||
+        (name !== undefined && name !== field)
+      );
+    });
   });
+};
 
 /**
  * Whether a schema recorded as `manifest` (its text) with stable IDs
@@ -1849,16 +1935,20 @@ export class StoreHost {
    * contract, as `defineTables` would plan it, the contract's IDs and the
    * store's reserved fields included: what the App's definition tools
    * show of a change (core's app-definition.ts), from what the store
-   * holds, as a migration tool diffs against the database itself. A
-   * refusal is the plan's, never thrown. Reads only: nothing is recorded,
-   * and no record is checked.
+   * holds, as a migration tool diffs against the database itself. It is
+   * planned through `defineTables`' own checks (`#planContract`: the
+   * contract and the store's tables checked, a pending target, the dry
+   * run over every record), so it refuses what a seal would: a refusal is
+   * the plan's, never thrown, the change's own reasons, or the store's
+   * code as the reason. Records that don't fit leave it accepted, with
+   * the checks they fail unanswered. Reads only: nothing is recorded.
    */
   async planTables(
     storeId: StoreId,
     manifest: string,
     ids: SchemaIds = {},
     answers: readonly SchemaAnswer[] = []
-  ): Promise<SchemaPlan> {
+  ): Promise<PlannedTables> {
     const read = readSchema(manifest);
     const identified = declaredIds(
       read.manifest,
@@ -1872,16 +1962,66 @@ export class StoreHost {
     this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
     });
+    const refused = await this.#planRefusals(
+      read.manifest,
+      answered,
+      identified
+    );
     const { base } = await this.#currentContract(
       this.#liveContractRow(),
       this.#pendingTarget()
     );
     const contract = base?.manifest ?? null;
-    return planSchemaChange(contract, read.manifest, {
+    const plan = planSchemaChange(contract, read.manifest, {
       reserved: this.#reservedFields(),
       answers: answered,
       ids: this.#idsOf(contract, identified),
     });
+    if (!plan.accepted) {
+      return plan;
+    }
+    const { contract: _contract, ids: _ids, ...changes } = plan;
+    return { ...changes, accepted: refused.length === 0, refused };
+  }
+
+  /**
+   * Why `defineTables` would refuse `target` (its answers and IDs) now,
+   * planned as it plans it (`#planContract`, no consumer) without
+   * recording anything: none when it would take it, or when only records
+   * that don't fit refuse it (questions a value or a migration answers).
+   */
+  async #planRefusals(
+    target: SchemaManifest,
+    answers: readonly SchemaAnswer[],
+    ids: SchemaIds
+  ): Promise<StoreRefusal[]> {
+    try {
+      await this.#planContract(
+        target,
+        await hashOf(target),
+        undefined,
+        [],
+        answers,
+        ids
+      );
+      return [];
+    } catch (error) {
+      if (migrationErrors.codeOf(error) === "migration.required") {
+        const details: unknown =
+          typeof error === "object" && error !== null
+            ? Reflect.get(error, "details")
+            : undefined;
+        const changes = z
+          .object({ changes: z.array(storeRefusalSchema) })
+          .safeParse(details);
+        return changes.success ? changes.data.changes : [];
+      }
+      const code = migrationErrors.codeOf(error) ?? dataErrors.codeOf(error);
+      if (code === undefined) {
+        throw error;
+      }
+      return [{ table: "", reason: code }];
+    }
   }
 
   /**
@@ -1922,7 +2062,6 @@ export class StoreHost {
     const idsText = canonicalText(ids);
     const row = this.#liveContractRow();
     this.#requireTablesFit(target);
-    this.#requireSameIds(schemaHash, idsText);
     const pending = this.#pendingTarget();
     const { stored, base } = await this.#currentContract(row, pending);
     const pendingSeen = pending?.hash ?? null;
@@ -1953,6 +2092,7 @@ export class StoreHost {
         activates: false,
         answers: answersText,
         ids: idsText,
+        contractIds: {},
       };
     }
     const { plan, migrated } = this.#acceptedPlan(baseManifest, target, {
@@ -2000,6 +2140,7 @@ export class StoreHost {
         activates: plan.activates,
         answers: answersText,
         ids: idsText,
+        contractIds: plan.ids,
       };
     }
     if (plan.changed && pending !== null) {
@@ -2026,6 +2167,7 @@ export class StoreHost {
         activates: plan.activates,
         answers: answersText,
         ids: idsText,
+        contractIds: plan.ids,
       };
     }
     const contractText = manifestText(plan.contract);
@@ -2053,6 +2195,7 @@ export class StoreHost {
       activates: plan.activates,
       answers: answersText,
       ids: idsText,
+      contractIds: plan.ids,
     };
   }
 
@@ -2494,53 +2637,33 @@ export class StoreHost {
   }
 
   /**
-   * The stable IDs of the tables and fields `contract` holds (none for a
-   * store holding nothing): each name's as the newest schema the store
-   * recorded that declares it gives it, a schema a change left behind
-   * too, which may be the one that brought it. A name came into the
-   * contract only through a schema planned against these IDs, which
-   * refused one held for another table or field (`id_changed`), so the
-   * newest is the one whose values the name holds. Call it inside a
-   * transaction, or before one that checks the contract it read.
+   * The stable IDs of the tables and fields `contract` holds, as the store
+   * keeps them beside its contract (`sdk_store.contract_ids`): only names
+   * `contract` holds, so one a pending target or a rename left there means
+   * nothing until a change brings it in again, with its own ID. None for a
+   * store holding nothing. Call it inside a transaction, or before one that
+   * checks the contract it read.
    */
   #contractIds(contract: SchemaManifest | null): SchemaIds {
     if (contract === null) {
       return {};
     }
-    const rows = this.#db
-      .select({ ids: schemas.fieldIds })
-      .from(schemas)
-      .where(isNull(schemas.abandonedAt))
-      .orderBy(desc(schemas.createdAt), desc(schemas.schemaHash))
-      .all();
-    // Newest first: the first ID found for a name is its.
-    const found = new Map<
-      string,
-      { id: string; fields: Map<string, string> }
-    >();
-    for (const row of rows) {
-      for (const [table, held] of Object.entries(storedIds(row.ids))) {
-        const kept = Object.hasOwn(contract.tables, table)
-          ? contract.tables[table]
-          : undefined;
-        if (kept === undefined) {
-          continue;
-        }
-        const ids = found.get(table) ?? { id: held.id, fields: new Map() };
-        found.set(table, ids);
-        for (const [field, id] of Object.entries(held.fields)) {
-          if (Object.hasOwn(kept.fields, field) && !ids.fields.has(field)) {
-            ids.fields.set(field, id);
-          }
-        }
-      }
-    }
-    return Object.fromEntries(
-      [...found].map(([table, { id, fields }]) => [
-        table,
-        { id, fields: Object.fromEntries(fields) },
-      ])
-    );
+    const row = this.#db.select({ ids: store.contractIds }).from(store).get();
+    return heldIds(contract, storedIds(row?.ids ?? noIds));
+  }
+
+  /**
+   * Keeps the IDs a change's `plan` gives the contract's names
+   * (`AcceptedPlan.ids`) beside the contract, over those kept: in the
+   * transaction that moves the contract, or makes its target pending.
+   */
+  #keepContractIds(plan: SchemaIds): void {
+    const row = this.#db.select({ ids: store.contractIds }).from(store).get();
+    const kept = storedIds(row?.ids ?? noIds);
+    this.#db
+      .update(store)
+      .set({ contractIds: canonicalText(mergedIds(kept, plan)) })
+      .run();
   }
 
   /** The IDs a plan of a schema whose IDs are `ids` onto `contract` takes. */
@@ -2559,30 +2682,6 @@ export class StoreHost {
       .where(eq(schemas.schemaHash, schemaHash))
       .get();
     return row === undefined ? {} : storedIds(row.ids);
-  }
-
-  /**
-   * Refuses (`migration.required`, `id_changed`) schema `schemaHash`
-   * applied with IDs (`idsText`, canonical) other than those the store
-   * recorded it with: its names would mean other fields than they did.
-   * Either without IDs is no conflict.
-   */
-  #requireSameIds(schemaHash: string, idsText: string): void {
-    const row = this.#db
-      .select({ ids: schemas.fieldIds })
-      .from(schemas)
-      .where(eq(schemas.schemaHash, schemaHash))
-      .get();
-    if (
-      row !== undefined &&
-      row.ids !== noIds &&
-      idsText !== noIds &&
-      row.ids !== idsText
-    ) {
-      throw migrationErrors.create("migration.required", {
-        changes: [{ table: "", reason: "id_changed" }],
-      });
-    }
   }
 
   /**
@@ -2712,35 +2811,68 @@ export class StoreHost {
     }
     installIndexes(this.ctx.storage.sql, plan.indexes);
     installSearches(this.ctx.storage.sql, plan.searches);
-    // Applied again after an abandoned target held it (a later release
-    // adding the reserved fields as they were): in force or pending once
-    // more, as this change leaves it.
-    // Its IDs kept from its first application with any (`#requireSameIds`).
-    this.#db
-      .insert(schemas)
-      .values({
-        schemaHash,
-        manifest: text,
-        createdAt: now,
-        fieldIds: change.ids,
-      })
-      .onConflictDoUpdate({
-        target: schemas.schemaHash,
-        set:
-          change.ids === noIds
-            ? { abandonedAt: null }
-            : { abandonedAt: null, fieldIds: change.ids },
-      })
-      .run();
+    this.#recordSchema(schemaHash, text, change.ids, now);
     // A change that checks records waits, recorded with its receipt, for
     // its release to be made current (`activateReady`): the contract stays.
-    if (!change.onto && !change.activates && change.hash !== change.stored) {
-      this.#moveContract(change, all, now);
+    if (!change.activates) {
+      this.#takeChange(change, schemaHash, all, now);
     }
     return {
       ...definedTables(names, all),
       contract: this.#receive(schemaHash, change, now),
     };
+  }
+
+  /**
+   * `#defineIn`'s take of `change`, which checks no record, for schema
+   * `schemaHash`: the IDs it gives the contract's names first, as what
+   * moves the contract now or once its target is in force (a name only
+   * the target holds means nothing until then, `#contractIds`); then the
+   * contract moved (`#moveContract`); then the schema back in force when
+   * a change left it behind once and it fits now (applied again with
+   * other IDs that fit, its names other fields now, for its new consumer).
+   */
+  #takeChange(
+    change: ContractChange,
+    schemaHash: string,
+    all: readonly { name: string; tableId: string }[],
+    now: number
+  ): void {
+    this.#keepContractIds(change.contractIds);
+    if (!change.onto && change.hash !== change.stored) {
+      this.#moveContract(change, all, now);
+    }
+    const contract = this.#contractNow();
+    if (contract !== undefined) {
+      this.#reinstate(contract, schemaHash);
+    }
+  }
+
+  /**
+   * Records schema `schemaHash` (its text) with stable IDs `ids` (their
+   * text), in `#defineIn`'s transaction: in force or pending once more
+   * when an abandoned target held it before (a later release adding the
+   * reserved fields as they were), its IDs as the last consumer that
+   * applied it with any gave them, what a read under it is checked
+   * against (`#pinned`).
+   */
+  #recordSchema(
+    schemaHash: string,
+    text: string,
+    ids: string,
+    now: number
+  ): void {
+    this.#db
+      .insert(schemas)
+      .values({ schemaHash, manifest: text, createdAt: now, fieldIds: ids })
+      .onConflictDoUpdate({
+        target: schemas.schemaHash,
+        set:
+          ids === noIds
+            ? { abandonedAt: null }
+            : { abandonedAt: null, fieldIds: ids },
+      })
+      .run();
   }
 
   /**
@@ -2995,6 +3127,7 @@ export class StoreHost {
         planHash: change.planHash,
         plan: change.plan,
         answers: change.answers,
+        fieldIds: change.ids,
         createdAt: now,
       })
       .run();
@@ -3805,9 +3938,12 @@ export class StoreHost {
 
   /**
    * The schema `schemaHash` as this store recorded it, with its tables'
-   * IDs and its indexes' physical names: read and planned once per object,
-   * since neither ever changes for a hash. `data.unknown_schema` for a
-   * hash the store wasn't handed.
+   * IDs and its indexes' physical names, under the contract's access and
+   * rules: kept per object until a schema change or an abandonment moves
+   * the contract (`#forgetSchemas`). `data.unknown_schema` for a hash the
+   * store wasn't handed; `migration.names_moved` for one whose
+   * stable IDs name the contract's tables or fields otherwise
+   * (`idsDiffer`).
    */
   async #pinned(storeId: StoreId, schemaHash: string): Promise<PinnedSchema> {
     const known = this.#schemas.get(schemaHash);
@@ -3815,18 +3951,21 @@ export class StoreHost {
       return known;
     }
     const generation = this.#schemasGeneration;
-    const { row, contract } = this.ctx.storage.transactionSync(() => {
+    const { row, contract, held } = this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
+      const now = this.#contractNow();
       return {
         row: this.#db
           .select({
             manifest: schemas.manifest,
             abandonedAt: schemas.abandonedAt,
+            ids: schemas.fieldIds,
           })
           .from(schemas)
           .where(eq(schemas.schemaHash, schemaHash))
           .get(),
-        contract: this.#contractNow(),
+        contract: now,
+        held: this.#contractIds(now ?? null),
       };
     });
     if (row === undefined) {
@@ -3836,6 +3975,13 @@ export class StoreHost {
     // (`abandonBackfill` forgets the schemas read before).
     if (row.abandonedAt !== null) {
       throw migrationErrors.create("migration.abandoned");
+    }
+    // Its names mean other tables or fields than the contract's now (a
+    // rename moved them on, or it renames them and isn't current yet):
+    // read under them, it would take another's values, and another
+    // table's rules, for its own.
+    if (idsDiffer(held, storedIds(row.ids))) {
+      throw migrationErrors.create("migration.names_moved");
     }
     const { manifest: own } = readSchemaManifest(row.manifest);
     const tableIds = Object.fromEntries(
@@ -6251,28 +6397,42 @@ export class StoreHost {
   }
 
   /**
-   * The answers `consumer` applied schema `schemaHash` with, as its
-   * receipt keeps them; none without a receipt. Call it inside a
+   * The answers and stable IDs `consumer` applied schema `schemaHash`
+   * with, as its receipt keeps them; none without a receipt, or without a
+   * consumer (IDs then the schema's own, `#schemaIds`). Call it inside a
    * transaction.
    */
-  #answersOf(consumer: SchemaConsumer, schemaHash: string): SchemaAnswer[] {
-    const receipt = this.#db
-      .select({ answers: schemaActivations.answers })
-      .from(schemaActivations)
-      .where(
-        and(
-          eq(schemaActivations.resourceId, consumer.resourceId),
-          eq(schemaActivations.resourceVersion, consumer.resourceVersion),
-          eq(schemaActivations.schemaHash, schemaHash)
-        )
-      )
-      .get();
-    return receipt === undefined
-      ? []
-      : z
-          .array(schemaAnswerSchema)
-          .parse(JSON.parse(receipt.answers))
-          .map((answer) => ({ ...answer }));
+  #appliedWith(
+    consumer: SchemaConsumer | undefined,
+    schemaHash: string
+  ): { answers: SchemaAnswer[]; ids: SchemaIds } {
+    const receipt =
+      consumer === undefined
+        ? undefined
+        : this.#db
+            .select({
+              answers: schemaActivations.answers,
+              ids: schemaActivations.fieldIds,
+            })
+            .from(schemaActivations)
+            .where(
+              and(
+                eq(schemaActivations.resourceId, consumer.resourceId),
+                eq(schemaActivations.resourceVersion, consumer.resourceVersion),
+                eq(schemaActivations.schemaHash, schemaHash)
+              )
+            )
+            .get();
+    if (receipt === undefined) {
+      return { answers: [], ids: this.#schemaIds(schemaHash) };
+    }
+    return {
+      answers: z
+        .array(schemaAnswerSchema)
+        .parse(JSON.parse(receipt.answers))
+        .map((answer) => ({ ...answer })),
+      ids: storedIds(receipt.ids),
+    };
   }
 
   /**
@@ -6412,7 +6572,7 @@ export class StoreHost {
     return this.#checkedStep(
       readSchemaManifest(recorded.manifest).manifest,
       recorded.supersededAt !== null,
-      { answers: this.#answersOf(consumer, hash), ids: this.#schemaIds(hash) },
+      this.#appliedWith(consumer, hash),
       keepRules
     );
   }
@@ -6468,6 +6628,7 @@ export class StoreHost {
       contractHash,
       manifestText(step.plan.contract)
     );
+    this.#keepContractIds(step.plan.ids);
     // A rollback brings back what the contract covers again.
     this.#reinstate(step.plan.contract);
     this.#supersede(step.plan.contract, now);
@@ -6700,9 +6861,10 @@ export class StoreHost {
 
   /**
    * Puts every schema a change left behind that `contract` covers back in
-   * force (`sdk_schemas.superseded_at`): its writes fit the records again.
+   * force (`sdk_schemas.superseded_at`), or only schema `only`: its writes
+   * fit the records again.
    */
-  #reinstate(contract: SchemaManifest): void {
+  #reinstate(contract: SchemaManifest, only?: string): void {
     const held = this.#contractIds(contract);
     const back = this.#db
       .select({
@@ -6711,7 +6873,13 @@ export class StoreHost {
         ids: schemas.fieldIds,
       })
       .from(schemas)
-      .where(and(isNull(schemas.abandonedAt), isNotNull(schemas.supersededAt)))
+      .where(
+        and(
+          isNull(schemas.abandonedAt),
+          isNotNull(schemas.supersededAt),
+          only === undefined ? undefined : eq(schemas.schemaHash, only)
+        )
+      )
       .all()
       .filter((row) => !leftBehind(contract, held, row))
       .map(({ hash }) => hash);
@@ -7996,15 +8164,23 @@ export class StoreHost {
       // (`applyRules`). Unless a target is pending, which the contract
       // can't move past: a changed rule waits for it as a checked change
       // does, never answered as in force under the old rules.
+      const applied = this.#appliedWith(named, hash);
       const step = this.#checkedStep(
         schema,
         recorded.supersededAt !== null,
-        {
-          answers: named === undefined ? [] : this.#answersOf(named, hash),
-          ids: this.#schemaIds(hash),
-        },
+        applied,
         pending === null
       );
+      // Its consumer's names mean other fields than the contract's: in
+      // force for another consumer of the same schema, never for this one.
+      const contractNow = this.#contractNow();
+      if (
+        step === null &&
+        contractNow !== undefined &&
+        idsDiffer(this.#contractIds(contractNow), applied.ids)
+      ) {
+        return { state: "incompatible" };
+      }
       if (recorded.supersededAt !== null) {
         // Writes under it are refused (`#requireInForce`): it runs on the
         // store again only as it is made current, every record checked

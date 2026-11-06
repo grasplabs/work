@@ -654,6 +654,8 @@ export const migrationErrors = defineErrorFamily({
     "This version's migrations don't fit this store: each transforms one table, from a schema the store recorded, to this version's schema, and a migration can't share a change with defaults to fill in elsewhere.",
   "migration.incompatible_write":
     "This version's schema no longer fits the store: a newer version's schema change or migration moved its records on. Make that version current, or make this one current again.",
+  "migration.names_moved":
+    "This version names tables or fields the store now holds under other names, or holds other tables and fields under its names: a rename moved them on. Make the version that renamed them current, or make this one current again.",
   "migration.not_current":
     "This version's schema change is applied to the store's records as the version is made current. Until then it can't write to the store.",
   "migration.rollback_incompatible":

@@ -214,6 +214,13 @@ export interface AcceptedPlan extends PlannedChanges {
   readonly migratedTables: readonly string[];
   /** The contract after the change, canonical. */
   readonly contract: SchemaManifest;
+  /**
+   * The stable IDs of the contract's tables and fields after the change
+   * (`ids`): each name the target declares with the target's ID, every
+   * other with the contract's. None without `ids`. What a store keeps
+   * beside its contract, so the next change is planned from them.
+   */
+  readonly ids: SchemaIds;
   /** Whether the contract differs from the one before. */
   readonly changed: boolean;
   /**
@@ -1073,6 +1080,36 @@ const classifyFields = (
 };
 
 /**
+ * The stable IDs of `contract`'s tables and fields, as `target` gives them
+ * where it declares them and `held` (the contract's before) otherwise.
+ */
+const idsAfter = (
+  contract: SchemaManifest,
+  ids: { readonly contract: SchemaIds; readonly target: SchemaIds }
+): SchemaIds =>
+  mapOf(
+    Object.entries(contract.tables).flatMap(([table, kept]) => {
+      const declared = own(ids.target, table);
+      const held = own(ids.contract, table);
+      const id = declared?.id ?? held?.id;
+      if (id === undefined) {
+        return [];
+      }
+      const fields = mapOf(
+        Object.keys(kept.fields).flatMap((field) => {
+          const fieldId =
+            (declared === undefined
+              ? undefined
+              : own(declared.fields, field)) ??
+            (held === undefined ? undefined : own(held.fields, field));
+          return fieldId === undefined ? [] : [[field, fieldId] as const];
+        })
+      );
+      return [[table, { id, fields }] as const];
+    })
+  );
+
+/**
  * How `contract`, a store's data contract (null for a store holding
  * nothing yet), changes when the store is handed `target` (see the
  * header), given the fields the store reserved, the tables an explicit
@@ -1156,6 +1193,7 @@ export const planSchemaChange = (
   return {
     accepted: true,
     contract: union,
+    ids: options.ids === undefined ? {} : idsAfter(union, options.ids),
     changed: manifestText(union) !== manifestText(before),
     migratedTables: [...migrated].toSorted(),
     activates:

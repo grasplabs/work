@@ -1,6 +1,5 @@
-import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/sdk";
 import type { ValueShape } from "@grasp-os/sdk";
-import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
 import type { SchemaIds } from "@grasp-os/sdk/host";
 import type { StoreFields } from "@grasp-os/shared/stores";
 import { describe, expect, it } from "vite-plus/test";
@@ -16,7 +15,9 @@ import {
   contractHash,
   notes,
   notesOf,
+  noteFields,
   objectOf,
+  pendingStore,
   statusOf,
 } from "./pending-stores.ts";
 import { newRecordId } from "./store-schemas.ts";
@@ -90,6 +91,25 @@ const insert = async (
     { op: "insert", table: "notes", id: newRecordId(), fields },
   ]);
 
+/** Every note's fields. */
+const fieldsNow = async (store: OpenStore) => {
+  const held = await notesOf(store);
+  return [...held.values()].map(({ fields }) => fields);
+};
+
+/** A read of one note under schema `schemaHash`, as a version's call makes it. */
+const readUnder = async (store: OpenStore, schemaHash: string) =>
+  await store.read(
+    {
+      schemaHash,
+      principal: "ada",
+      appMember: true,
+      appBuilder: false,
+      consumer: consumer(1),
+    },
+    { kind: "get", table: "notes", id: newRecordId(), expectedRevision: null }
+  );
+
 /** The details of a `migration.required` refusal of `call`. */
 const requiredOf = async (call: Promise<unknown>) => {
   try {
@@ -142,7 +162,7 @@ describe("a field renamed by its stable ID", () => {
     // Version 1 writes a nickname no version reads: refused.
     await expect(
       codeOf(insert(store, first, { title: "D", nickname: "Dee" }))
-    ).resolves.toBe("migration.incompatible_write");
+    ).resolves.toBe("migration.names_moved");
   });
 
   it("moves them back with a rollback, and on again with the version that renames them, whatever the version before wrote", async () => {
@@ -161,7 +181,7 @@ describe("a field renamed by its stable ID", () => {
     });
     await expect(
       codeOf(insert(store, second.schemaHash, { title: "X" }))
-    ).resolves.toBe("migration.incompatible_write");
+    ).resolves.toBe("migration.names_moved");
     await insert(store, first, { title: "C", nickname: "Cy" });
 
     await expect(activate(store, second.schemaHash, 2)).resolves.toBe("active");
@@ -251,7 +271,188 @@ describe("a field renamed by its stable ID", () => {
     await expect(activate(store, first, 1)).resolves.toBe("incompatible");
   });
 
-  it("refuses a name the store holds for another field, a schema applied again with other IDs, and a table renamed", async () => {
+  it("applies a schema again with other IDs as the other fields they are, and refuses the rollback to its first, whose name another field holds now", async () => {
+    const { store, first } = await nicknamedStore([
+      { title: "A", nickname: "Ace" },
+    ]);
+    const second = await define(store, displayNamed, 2, displayNameIds);
+    await activate(store, second.schemaHash, 2);
+    // Version 3 declares what version 1 did, name for name, its nickname
+    // a new field: the same schema, other IDs.
+    const third = await define(
+      store,
+      nicknamed,
+      3,
+      idsOf({ nickname: "f-new" })
+    );
+    await insert(store, third.schemaHash, { title: "B", nickname: "New" });
+
+    expect(third.schemaHash).toBe(first);
+    await expect(byTitle(store)).resolves.toStrictEqual({
+      A: { title: "A", displayName: "Ace" },
+      B: { title: "B", nickname: "New" },
+    });
+    // Version 1's own nickname is the first field: the store holds the
+    // name for another now.
+    await expect(activate(store, first, 1)).resolves.toBe("incompatible");
+  });
+
+  it("refuses a field swap, its names each the other's", async () => {
+    const { store } = await nicknamedStore([{ title: "A", nickname: "Ace" }]);
+    const both = notesWith({
+      nickname: v.string().optional(),
+      alias: v.string().optional(),
+    });
+    const first = await define(
+      store,
+      both,
+      2,
+      idsOf({ nickname: "f-nick", alias: "f-alias" })
+    );
+    await activate(store, first.schemaHash, 2);
+
+    const swapped = await requiredOf(
+      define(store, both, 3, idsOf({ nickname: "f-alias", alias: "f-nick" }))
+    );
+
+    expect(
+      swapped.changes.toSorted((a, b) =>
+        String(a.field).localeCompare(String(b.field))
+      )
+    ).toStrictEqual([
+      { table: "notes", field: "alias", reason: "id_changed" },
+      { table: "notes", field: "nickname", reason: "id_changed" },
+    ]);
+    await expect(byTitle(store)).resolves.toStrictEqual({
+      A: { title: "A", nickname: "Ace" },
+    });
+  });
+
+  it("moves the values back across two renames, and past a version skipped", async () => {
+    const aliased = notesWith({ alias: v.string().optional() });
+    const aliasIds = idsOf({ alias: "f-nick" });
+    // Two renames made current, then a rollback past both.
+    const { store, first } = await nicknamedStore([
+      { title: "A", nickname: "Ace" },
+    ]);
+    const second = await define(store, displayNamed, 2, displayNameIds);
+    await activate(store, second.schemaHash, 2);
+    const third = await define(store, aliased, 3, aliasIds);
+    await activate(store, third.schemaHash, 3);
+    const back = await activate(store, first, 1);
+    // A rename sealed and skipped, the next made current, then a rollback.
+    const { store: skipped, first: skippedFirst } = await nicknamedStore([
+      { title: "A", nickname: "Ace" },
+    ]);
+    await define(skipped, displayNamed, 2, displayNameIds);
+    const aliasedAfter = await define(skipped, aliased, 3, aliasIds);
+    await activate(skipped, aliasedAfter.schemaHash, 3);
+    const skippedState = await byTitle(skipped);
+    const skippedBack = await activate(skipped, skippedFirst, 1);
+
+    expect({
+      back,
+      held: await byTitle(store),
+      skippedState,
+      skippedBack,
+      skippedHeld: await byTitle(skipped),
+    }).toStrictEqual({
+      back: "active",
+      held: { A: { title: "A", nickname: "Ace" } },
+      skippedState: { A: { title: "A", alias: "Ace" } },
+      skippedBack: "active",
+      skippedHeld: { A: { title: "A", nickname: "Ace" } },
+    });
+  });
+
+  it("keeps the IDs the contract holds, not the newest a schema sealed but never current gave them", async () => {
+    // Version 1 has `name` (A); version 2 renames it `title`, current;
+    // version 3, sealed, never current, holds `title` (A) and a new
+    // `name` (B).
+    const store = await newStore();
+    const named = notes({ label: v.string(), name: v.string().optional() });
+    const first = await define(store, named, 1, {
+      notes: { id: "t1", fields: { label: "f-label", name: "A" } },
+    });
+    await insertAll(store, first.schemaHash, [{ label: "x", name: "Ace" }]);
+    const second = await define(
+      store,
+      notes({ label: v.string(), title: v.string().optional() }),
+      2,
+      { notes: { id: "t1", fields: { label: "f-label", title: "A" } } }
+    );
+    await activate(store, second.schemaHash, 2);
+    const third = await define(
+      store,
+      notes({
+        label: v.string(),
+        title: v.string().optional(),
+        name: v.string().optional(),
+      }),
+      3,
+      {
+        notes: {
+          id: "t1",
+          fields: { label: "f-label", title: "A", name: "B" },
+        },
+      }
+    );
+
+    // The rollback to version 1: its `name` is B's on the store now.
+    const rollback = await activate(store, first.schemaHash, 1);
+    const afterRollback = await fieldsNow(store);
+    const current = await activate(store, third.schemaHash, 3);
+
+    expect({
+      rollback,
+      afterRollback,
+      current,
+      held: await fieldsNow(store),
+      // Version 2 still writes: nothing moved under it.
+      second: await codeOf(
+        insert(store, second.schemaHash, { label: "y", title: "Tee" })
+      ),
+    }).toStrictEqual({
+      rollback: "incompatible",
+      afterRollback: [{ label: "x", title: "Ace" }],
+      current: "active",
+      held: [{ label: "x", title: "Ace" }],
+      second: "ok",
+    });
+  });
+
+  it("refuses reads and writes under a schema whose names the store holds for other fields now", async () => {
+    const { store, first } = await nicknamedStore([
+      { title: "A", nickname: "Ace" },
+    ]);
+    const second = await define(store, displayNamed, 2, displayNameIds);
+    await activate(store, second.schemaHash, 2);
+    const third = await define(
+      store,
+      notesWith({
+        displayName: v.string().optional(),
+        nickname: v.string().optional(),
+      }),
+      3,
+      idsOf({ displayName: "f-nick", nickname: "f-new" })
+    );
+    await insert(store, third.schemaHash, {
+      title: "B",
+      displayName: "Bee",
+      nickname: "New",
+    });
+
+    // Version 1's `nickname` is the new field now: a read under it would
+    // answer the new field's values as its own.
+    await expect(codeOf(readUnder(store, first))).resolves.toBe(
+      "migration.names_moved"
+    );
+    await expect(codeOf(readUnder(store, third.schemaHash))).resolves.toBe(
+      "ok"
+    );
+  });
+
+  it("refuses a name the store holds for another field", async () => {
     const { store } = await nicknamedStore([{ title: "A", nickname: "Ace" }]);
 
     // The nickname renamed, and its name given to a new field at once.
@@ -266,37 +467,33 @@ describe("a field renamed by its stable ID", () => {
         idsOf({ displayName: "f-nick", nickname: "f-new" })
       )
     );
-    const again = await requiredOf(
-      define(store, nicknamed, 3, idsOf({ nickname: "f-other" }))
-    );
-    const tableRenamed = await requiredOf(
-      store.defineTables(
-        manifestText(
-          schemaManifest(
-            defineSchema({
-              memos: defineTable({ title: v.string() }).access({
-                read: "appMembers",
-                write: "appMembers",
-              }),
-            })
-          )
-        ),
-        consumer(4),
-        [],
-        [],
-        { memos: { id: "t1", fields: { title: "f-title" } } }
-      )
-    );
 
     expect(reused.changes).toStrictEqual([
       { table: "notes", field: "nickname", reason: "id_changed" },
     ]);
-    expect(again.changes).toStrictEqual([{ table: "", reason: "id_changed" }]);
-    expect(tableRenamed.changes).toStrictEqual([
-      { table: "memos", reason: "table_renamed" },
-    ]);
     await expect(byTitle(store)).resolves.toStrictEqual({
       A: { title: "A", nickname: "Ace" },
+    });
+  });
+
+  it("plans what a seal would refuse as refused: a change past a pending target", async () => {
+    const { store } = await pendingStore(1);
+
+    const planned = z
+      .object({ accepted: z.boolean(), refused: z.array(z.unknown()) })
+      .loose()
+      .parse(
+        JSON.parse(
+          await objectOf(store).planTables(
+            store.id,
+            notes({ ...noteFields, later: v.string().optional() })
+          )
+        )
+      );
+
+    expect(planned).toMatchObject({
+      accepted: false,
+      refused: [{ table: "", reason: "migration.pending" }],
     });
   });
 

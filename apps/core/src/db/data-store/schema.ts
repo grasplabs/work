@@ -64,6 +64,15 @@ export const store = sqliteTable(
     contractHash: text("contract_hash"),
     contractManifest: text("contract_manifest"),
     /**
+     * The stable IDs of the contract's tables and fields, by name, as the
+     * App's definitions gave them (sdk schema-plan.ts, `SchemaIds`), as
+     * canonical JSON: written with every change that moves the contract,
+     * or makes a target pending, from the plan's own (`AcceptedPlan.ids`),
+     * so a rename is told by what the contract holds, never by history.
+     * A name the contract doesn't hold is read as having none.
+     */
+    contractIds: text("contract_ids").notNull().default("{}"),
+    /**
      * The store's preferences contract (store-host.ts, `definePreferences`):
      * every preference any version sealed on it declared, by name, with
      * its descriptor, as canonical JSON. Null until the first version with
@@ -257,10 +266,11 @@ export const schemas = sqliteTable("sdk_schemas", {
    */
   supersededAt: integer("superseded_at"),
   /**
-   * The stable IDs of its tables and fields by name, as the App's
-   * definition gave them (sdk schema-plan.ts, `SchemaIds`), as JSON; `{}`
-   * for a schema applied without (a workflow's). What tells a rename
-   * (store-host.ts, `#contractIds`).
+   * The stable IDs of its tables and fields by name, as the last consumer
+   * that applied it with any gave them (sdk schema-plan.ts, `SchemaIds`),
+   * as JSON; `{}` for a schema applied without (a workflow's). What a read
+   * under it is checked against (store-host.ts, `#pinned`); a release's
+   * own are its receipt's (`sdk_schema_activations.field_ids`).
    */
   fieldIds: text("field_ids").notNull().default("{}"),
 });
@@ -292,6 +302,13 @@ export const schemaActivations = sqliteTable("sdk_schema_activations", {
    * value a record holds.
    */
   answers: text().notNull().default("[]"),
+  /**
+   * The consumer's stable IDs of the schema's tables and fields
+   * (`sdk_schemas.field_ids`), as canonical JSON: what its activation is
+   * planned with, so two releases of one schema whose names mean other
+   * fields each move what theirs mean.
+   */
+  fieldIds: text("field_ids").notNull().default("{}"),
   createdAt: integer("created_at").notNull(),
   /**
    * When the pending target this receipt waited on was abandoned
