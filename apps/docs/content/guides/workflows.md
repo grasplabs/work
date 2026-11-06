@@ -40,7 +40,7 @@ export const finish = mutation({
 
 export const reviewNow = action({
   args: { id: v.id("tasks") },
-  returns: v.string().nullable(),
+  returns: v.string(),
   uses: [review],
   handler: async (ctx, args) => {
     const run = await ctx.workflows.review.start({ task: args.id });
