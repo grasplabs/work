@@ -4,6 +4,7 @@
  * workers.dev route, reading what is live, and applying D1 migrations.
  */
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { log } from "@grasp-os/shared/log";
 import { mapConcurrently } from "@grasp-os/shared/release";
 import { z } from "zod";
 
@@ -319,10 +320,6 @@ export const uploadTargetAssets = async (
     uploadSessionSchema
   );
   const buckets = session.buckets ?? [];
-  if (buckets.length === 0) {
-    // The account holds every file: the session's token completes it.
-    return session.jwt;
-  }
   const byHash = new Map(named.map(({ file, hash }) => [hash, file]));
   // A hash asked for that isn't ours goes unanswered, and the upload then
   // ends without a completion token.
@@ -330,6 +327,20 @@ export const uploadTargetAssets = async (
     const file = byHash.get(hash);
     return file === undefined ? [] : [{ file, hash }];
   });
+  // How much of a release the account already holds, counts only: whether
+  // Cloudflare keeps static files per script or for the whole account
+  // decides whether each client's deploy sends a release's new files again.
+  log.info("deploy.assets_session", {
+    script: target.scriptName,
+    files: files.length,
+    bytes: files.reduce((total, { size }) => total + size, 0),
+    asked: missing.length,
+    askedBytes: missing.reduce((total, { file }) => total + file.size, 0),
+  });
+  if (buckets.length === 0) {
+    // The account holds every file: the session's token completes it.
+    return session.jwt;
+  }
   // Grouped by our own byte count rather than the session's buckets, whose
   // size isn't documented: one could hold tens of MB of base64. A request
   // reads its files one at a time as it goes out, so three on their way
@@ -533,8 +544,43 @@ const sqlText = (text: string): string => `'${text.replaceAll("'", "''")}'`;
 export type BeforeMigration = () => Promise<void>;
 
 /**
- * Applies `pending` in order, each with its record in one query, stopping
- * at the first that fails, and checking `before` before each send of each.
+ * The most SQL one query of migrations carries, in bytes: a client's
+ * first deploy applies every migration (about 270, some 230 KB in all),
+ * which one query each took minutes to send, and this makes a handful.
+ * Well under what D1 runs in its 30 s, and each statement stays within its
+ * 100 KB as it is: a migration over this goes alone.
+ */
+const migrationQueryBytes = 64 * 1024;
+
+const sqlEncoder = new TextEncoder();
+
+/** `migration` with its record after it, as one query's SQL. */
+const recorded = ({ name, sql }: D1Migration): string =>
+  `${sql}\nINSERT INTO d1_migrations (name) VALUES (${sqlText(name)});`;
+
+/** `pending`, in order, in queries of up to `migrationQueryBytes` each. */
+const migrationQueries = (pending: readonly D1Migration[]): string[] => {
+  const queries: string[] = [];
+  let bytes = 0;
+  for (const migration of pending) {
+    const sql = recorded(migration);
+    const size = sqlEncoder.encode(sql).byteLength;
+    const last = queries.length - 1;
+    if (last >= 0 && bytes + size <= migrationQueryBytes) {
+      queries[last] = `${queries[last]}\n${sql}`;
+      bytes += size;
+    } else {
+      queries.push(sql);
+      bytes = size;
+    }
+  }
+  return queries;
+};
+
+/**
+ * Applies `pending` in order, each with its record right after it, a few
+ * to a query (`migrationQueries`), stopping at the first query that fails,
+ * and checking `before` before each send of each.
  */
 const applyInOrder = async (
   api: CloudflareApi,
@@ -543,32 +589,26 @@ const applyInOrder = async (
   pending: readonly D1Migration[],
   before: BeforeMigration
 ): Promise<void> => {
-  const [next, ...rest] = pending;
-  if (next === undefined) {
-    return;
+  for (const sql of migrationQueries(pending)) {
+    // Checked before each send of it, the API client's retries included: a
+    // 429 waited out must not let a runner that lost its client send it.
+    // oxlint-disable-next-line no-await-in-loop -- in order, each after the last
+    await queryD1(api, accountId, databaseId, sql, before);
   }
-  // Checked before each send of it, the API client's retries included: a
-  // 429 waited out must not let a runner that lost its client send it.
-  await queryD1(
-    api,
-    accountId,
-    databaseId,
-    `${next.sql}\nINSERT INTO d1_migrations (name) VALUES (${sqlText(next.name)});`,
-    before
-  );
-  await applyInOrder(api, accountId, databaseId, rest, before);
 };
 
 /**
  * Applies the migrations the database hasn't had, in order, and returns
  * their names. They're recorded as Wrangler records them (its
  * `d1_migrations` table), so the admin and `wrangler d1 migrations`
- * agree on what was applied. Each migration and its record go in one
- * query, as Wrangler sends them; the API doesn't document such a query as
- * atomic, so a failure part way could leave a migration half applied and
- * unrecorded (threat model CO13). The first that fails stops the rest.
- * `before` is checked before each one: a runner's check that it still
- * holds its client, so one that lost it applies nothing more.
+ * agree on what was applied. Each migration's record goes right after it,
+ * in the same query, as Wrangler sends them, a few migrations to a query;
+ * the API doesn't document such a query as atomic, so a failure part way
+ * could leave a migration half applied and unrecorded (threat model
+ * CO13), and those before it in its query applied and recorded. The first
+ * that fails stops the rest. `before` is checked before each query: a
+ * runner's check that it still holds its client, so one that lost it
+ * applies nothing more.
  */
 export const applyD1Migrations = async (
   api: CloudflareApi,

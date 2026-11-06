@@ -191,6 +191,44 @@ describe("static assets", () => {
     );
   });
 
+  it("logs how many files and bytes each upload session asks for, counts only", async () => {
+    const account = namespaced();
+    const files = await Promise.all([
+      file("/index.html", "<!doctype html>"),
+      file("/app.js", "console.log(1)"),
+    ]);
+    await deploy(core(account.id), "26.01.1", files);
+    const added = await file("/new.js", "1");
+    const entries: unknown[] = [];
+    const logged = vi
+      .spyOn(console, "info")
+      .mockImplementation((entry: unknown) => {
+        entries.push(entry);
+      });
+    try {
+      await deploy(core(account.id), "26.01.2", [...files, added]);
+    } finally {
+      logged.mockRestore();
+    }
+    const sessions = entries.filter(
+      (entry) =>
+        typeof entry === "object" &&
+        entry !== null &&
+        Reflect.get(entry, "event") === "deploy.assets_session"
+    );
+
+    expect(sessions).toStrictEqual([
+      {
+        event: "deploy.assets_session",
+        script: "grasp-os-core",
+        files: 3,
+        bytes: [...files, added].reduce((total, { size }) => total + size, 0),
+        asked: 1,
+        askedBytes: added.size,
+      },
+    ]);
+  });
+
   it("names each file by the key the release manifest gives it (Wrangler's shape and extension rule, with SHA-256) bound to its type, dot-files included", async () => {
     const account = namespaced();
     await deploy(
@@ -460,6 +498,36 @@ describe("D1 migrations", () => {
     );
     expect(rows).toStrictEqual([{ id: "a", note: "it's; here" }]);
     expect(recorded).toStrictEqual(migrations.map(({ name }) => ({ name })));
+  });
+
+  it("applies a first deploy's many migrations in one query, in order, each recorded", async () => {
+    const account = cloudflare.addAccount();
+    const { uuid } = await database(account.id, "grasp-os-core");
+    const prefix = `m_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+    const many = Array.from({ length: 120 }, (_, index) => ({
+      name: `${prefix}_${String(index).padStart(4, "0")}.sql`,
+      sql: `CREATE TABLE ${prefix}_${String(index)} (id TEXT);`,
+    }));
+    const before = cloudflare.calls.length;
+
+    await expect(
+      applyD1Migrations(api, account.id, uuid, many)
+    ).resolves.toStrictEqual(many.map(({ name }) => name));
+    const queries = cloudflare.calls
+      .slice(before)
+      .filter(({ path }) => path.endsWith("/query")).length;
+    const [recorded] = await queryD1(
+      api,
+      account.id,
+      uuid,
+      `SELECT name FROM d1_migrations WHERE name LIKE '${prefix}%' ORDER BY id;`
+    );
+
+    expect({ queries, recorded }).toStrictEqual({
+      // What the database applied, then every migration it hadn't.
+      queries: 2,
+      recorded: many.map(({ name }) => ({ name })),
+    });
   });
 
   it("applies core's real migrations: FTS5 tables, triggers and comments", async () => {
