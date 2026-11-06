@@ -260,11 +260,19 @@ export const resultsSinceQuestion = (body: unknown): string[] => {
 
 const tokensOf = (text: string): number => Math.ceil(text.length / 4);
 
+/**
+ * The stub's calls so far. A call's ID is sent back to the model with its
+ * result, so it's part of what the leak gate reads: counted, it can never
+ * spell a restricted value. A random UUID could, about once in 500,000
+ * calls: `…b-7781-…` holds a badge number the gate looks for.
+ */
+let calls = 0;
+
 export const codeStep = (code: string, input: string): ProviderReply => ({
   text: "",
   toolCalls: [
     {
-      id: `call_${crypto.randomUUID()}`,
+      id: `call_${(calls += 1)}`,
       name: "executeCode",
       arguments: { code },
     },
