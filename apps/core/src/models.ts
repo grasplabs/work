@@ -1972,11 +1972,14 @@ const answerCall = async <Output>(
     // oxlint-disable-next-line no-await-in-loop
     const sent = await sendFallingBack(env, request, limit, attempt);
     const { answer } = sent;
-    usage.inputTokens += inputTokens(answer.usage);
-    usage.outputTokens += answer.usage.output;
-    usage.cacheRead += answer.usage.cacheRead;
-    usage.cacheWrite += answer.usage.cacheWrite;
-    cost += costOf(request.ref, answer.usage);
+    // What core records of it (`usedBy`): an estimate where the provider
+    // sent no count, so the caller sees what its audit event says.
+    const used = usedBy(request, sent);
+    usage.inputTokens += used.inputTokens;
+    usage.outputTokens += used.outputTokens;
+    usage.cacheRead += used.cacheReadTokens;
+    usage.cacheWrite += used.cacheWriteTokens;
+    cost += used.cost;
     const text = answerText(answer);
     const truncated = answer.stopReason === "length";
 

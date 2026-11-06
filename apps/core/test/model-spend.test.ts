@@ -642,6 +642,27 @@ describe("model spend", { timeout: 60_000 }, () => {
     expect(rows.map(({ id }) => id)).toStrictEqual([kept.id]);
   });
 
+  it("return what it records of an answer that came with no count: the estimate, never nothing", async () => {
+    const { call, month } = withProvider([{ ...pricedAnswer, noUsage: true }]);
+    const ada = hello();
+
+    const answer = await call(ada);
+    const [event] = await callEventsOf(ada.trigger, 1);
+    const [row] = await recordedUsage(month, 1, { personId: userOf(ada) });
+
+    expect({
+      returned: [answer.usage.inputTokens, answer.usage.outputTokens],
+      audited: [event?.model?.inputTokens, event?.model?.outputTokens],
+      recorded: [row?.inputTokens, row?.outputTokens, row?.estimated],
+      cost: [answer.cost > 0, answer.cost === event?.cost?.amount],
+    }).toStrictEqual({
+      returned: [row?.inputTokens, row?.outputTokens],
+      audited: [row?.inputTokens, row?.outputTokens],
+      recorded: [row?.inputTokens, row?.outputTokens, true],
+      cost: [true, true],
+    });
+  });
+
   it("charge a Claude Sonnet 4.5 prompt past 200K tokens at Anthropic's long-context prices, as its audit event counts it", async () => {
     const { call, month } = withProvider([
       { text: "Hi.", inputTokens: 250_000, outputTokens: 100 },
