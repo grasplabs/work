@@ -236,6 +236,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.collection_teams": noPerson,
   "core.dependency_policy": noPerson,
   "core.improvement_signal_computations": noPerson,
+  "core.jwks": noPerson,
   "core.knowledge_signal_computations": noPerson,
   "core.mail_domains": noPerson,
   "core.onboarding_gate": noPerson,

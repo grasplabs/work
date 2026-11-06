@@ -353,6 +353,7 @@ const bookkeeping = new Set([
   "core.model_usage",
   "core.provider_health",
   "core.sessions",
+  "core.jwks",
   "core.sqlite_sequence",
   "knowledge.sqlite_sequence",
   "core.improvement_signal_computations",

@@ -122,6 +122,22 @@ export const verifications = sqliteTable(
   (table) => [index("verifications_identifier_idx").on(table.identifier)]
 );
 
+/**
+ * The signing keys of the removed App tokens. Nothing reads or writes it
+ * now; it stays until a later release drops it (expand, then contract),
+ * since the release before this one still runs against it while a deploy
+ * rolls out.
+ */
+export const jwks = sqliteTable("jwks", {
+  id: text().primaryKey(),
+  publicKey: text("public_key").notNull(),
+  privateKey: text("private_key").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  expiresAt: timestamp("expires_at"),
+  alg: text(),
+  crv: text(),
+});
+
 /** The deployment's one organization. */
 export const organizations = sqliteTable("organizations", {
   id: text().primaryKey(),
