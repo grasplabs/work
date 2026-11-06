@@ -601,8 +601,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         steps.unanswered = unanswered.ok && unanswered.plan.checks;
         const answered = await env.build.define(app.id, { op: "changeField", table: "notes", field: "category", type: "v.string()", answer: "general" });
         steps.answered = answered.ok && answered.plan.checks;
-        // The released answer went with the first change; the draft's own
-        // goes with a rename of its field, which this draft added.
+        // An answer belongs to the version it is committed with: the
+        // draft starts with none of the released version's, and keeps its
+        // own through a rename of its field, which this draft added.
         steps.answers = (await definition()).answers.length;
         const renamed = await env.build.define(app.id, { op: "renameField", table: "notes", field: "category", name: "topic" });
         steps.renamed = renamed.ok && renamed.plan.checks;
@@ -664,8 +665,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       unanswered: [{ table: "notes", field: "category", answered: false }],
       answered: [{ table: "notes", field: "category", answered: true }],
       answers: 1,
-      renamed: [{ table: "notes", field: "topic", answered: false }],
-      afterRename: 0,
+      renamed: [{ table: "notes", field: "topic", answered: true }],
+      afterRename: 1,
       sensitive: ["notes"],
       audited: [
         ["renameField", "notes"],
@@ -701,13 +702,14 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     expect(returned(result?.text)).toStrictEqual({ changed: files, files });
   });
 
-  it("plans a definition change from the version people use, not a later one that isn't current", async () => {
+  it("plans a definition change from the version people use, and asks again for an answer a skipped version had", async () => {
     const { builder, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
         const indexed = await env.build.define(app.id, { op: "addIndex", table: "notes", name: "by_title", fields: ["title"] });
+        const answered = await env.build.define(app.id, { op: "changeField", table: "notes", field: "category", type: "v.string()", answer: "general" });
         const definition = JSON.parse((await env.build.files(app.id)).files["definition.json"]);
-        return { ok: indexed.ok, checks: indexed.ok && indexed.plan.checks, answers: definition.answers.length };
+        return { indexed: indexed.ok && indexed.plan.checks, answered: answered.ok && answered.plan.checks, answers: definition.answers.length };
       };`),
       says("Indexed."),
     ]);
@@ -732,11 +734,12 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await chat.ask("Index the notes by title");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    // Released from version 1, the notes still lack the category: its
-    // answer stays, and the plan checks them for it.
+    // Released from version 1, the notes still lack the category: the
+    // plan of that move checks them for it, unanswered, as version 2's
+    // answer was version 2's; answered again, it is the draft's own.
     expect(returned(result?.text)).toStrictEqual({
-      ok: true,
-      checks: [{ table: "notes", field: "category", answered: true }],
+      indexed: [{ table: "notes", field: "category", answered: false }],
+      answered: [{ table: "notes", field: "category", answered: true }],
       answers: 1,
     });
   });
@@ -774,6 +777,45 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       .object({ ok: z.literal(false), problem: z.string() })
       .parse(returned(result?.text));
     expect(refused.problem).toContain("`notes.nickname` is in a version");
+  });
+
+  it("keeps a draft's answer for a field whose type the version people use doesn't have yet, whatever that version answered", async () => {
+    const { builder, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
+        const changed = await env.build.define(app.id, { op: "changeField", table: "notes", field: "category", type: 'v.string().default("general")', answer: "general" });
+        const indexed = await env.build.define(app.id, { op: "addIndex", table: "notes", name: "by_title", fields: ["title"] });
+        const definition = JSON.parse((await env.build.files(app.id)).files["definition.json"]);
+        return { changed: changed.ok, checks: indexed.ok && indexed.plan.checks, answers: definition.answers.map(({ value }) => value) };
+      };`),
+      says("Changed."),
+    ]);
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
+    // The version people use: a category that may be null, answered null.
+    await release(
+      builder,
+      app,
+      definedWith(notesFiles, {
+        op: "addField",
+        table: "notes",
+        name: "category",
+        type: "v.string().nullable().default(null)",
+        answer: null,
+      })
+    );
+    await grant();
+
+    await chat.ask("Make the category required");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    // The draft's own answer stays through a later change: the notes
+    // holding null need it to fit the category that can't be null.
+    expect(returned(result?.text)).toStrictEqual({
+      changed: true,
+      checks: [{ table: "notes", field: "category", answered: true }],
+      answers: ["general"],
+    });
   });
 
   it("keeps no change that leaves a file as the base has it", async () => {

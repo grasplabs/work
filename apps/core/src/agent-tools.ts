@@ -243,7 +243,7 @@ const typeParameter = Type.String({
 const answerParameter = Type.Optional(
   Type.Unknown({
     description:
-      "The value records the table holds already take where they lack this field (JSON that fits its type): needed when a required field is added to, or narrowed on, a table that may hold records.",
+      "The value records the table holds already take where they lack this field (JSON that fits its type): needed when a required field is added to, or narrowed on, a table that may hold records. It belongs to the version this draft becomes, used once as that version is made current: a draft starts with none, and a plan check left unanswered asks for it again.",
   })
 );
 

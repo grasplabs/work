@@ -37,7 +37,6 @@ import {
   operationDetail,
   refuseDefinitionFiles,
   renameRefusal,
-  withoutAnswersOf,
 } from "./app-definition.ts";
 import type { DefinitionPlan } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
@@ -1118,7 +1117,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         const files = await draftFiles(this.env, found.id, draft);
         // The version people use, which a release of this draft starts
         // from: never the draft's base, a later commit that may not be
-        // current. Its records are what a rename and an answer are for.
+        // current. The plan is the move from it.
         const base = new Map(
           found.currentVersion === null
             ? []
@@ -1157,10 +1156,15 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         if (refused !== undefined) {
           return { ok: false, problem: refused };
         }
-        const result = tryOperation(
-          withoutAnswersOf(current.definition, before),
-          parsed
-        );
+        // An answer belongs to the version it is committed with: what that
+        // version's move gives the records that don't fit it, used once,
+        // as the store applies it (store-host.ts, `defineTables`). A draft
+        // starts with none of its base's: the store's plan of the move
+        // from the version people use asks again for any it still needs.
+        const own = Object.hasOwn(draft.changes, definitionPath)
+          ? current.definition
+          : { ...current.definition, answers: [] };
+        const result = tryOperation(own, parsed);
         if ("problem" in result) {
           return { ok: false, problem: result.problem };
         }

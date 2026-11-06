@@ -290,7 +290,7 @@ describe("operations", () => {
     ).toThrow(/stays so/u);
   });
 
-  test("drop a field's answer when it is renamed, as its records under the new name lack it", () => {
+  test("keep a field's answer when it is renamed, as it fills the same records by the field's ID", () => {
     const answered = applyOperation(tasks(), {
       op: "addField",
       table: "tasks",
@@ -304,7 +304,7 @@ describe("operations", () => {
       field: "priority",
       name: "urgency",
     });
-    expect([answered.answers.length, renamed.answers]).toStrictEqual([1, []]);
+    expect(renamed.answers).toStrictEqual(answered.answers);
   });
 
   test("keep an answer for the records a required field is added to", () => {

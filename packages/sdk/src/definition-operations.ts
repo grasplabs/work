@@ -326,19 +326,14 @@ const applied = (
           `\`${table.name}\` has a field \`${operation.name}\` already.`
         );
       }
-      return {
-        ...withTable(definition, {
-          ...table,
-          fields: table.fields.map((held) =>
-            held.id === field.id ? { ...held, name: operation.name } : held
-          ),
-        }),
-        // An answer was for the records that lacked the field by its old
-        // name: under the new one, it would fill every record anew.
-        answers: definition.answers.filter(
-          (answer) => answer.table !== table.id || answer.field !== field.id
+      // Its answer, by the field's ID, stays: the records it fills are
+      // the same under either name.
+      return withTable(definition, {
+        ...table,
+        fields: table.fields.map((held) =>
+          held.id === field.id ? { ...held, name: operation.name } : held
         ),
-      };
+      });
     }
     case "setAccess": {
       const table = tableNamed(definition, operation.table);

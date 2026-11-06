@@ -140,24 +140,6 @@ export const renameRefusal = (
     : undefined;
 };
 
-/**
- * `definition` without the answers `before`, the released definition,
- * holds as well: those were for a change that is applied, or applies as
- * that version is made current, and would fill records anew if kept.
- */
-export const withoutAnswersOf = (
-  definition: AppDefinition,
-  before: AppDefinition | null
-): AppDefinition => ({
-  ...definition,
-  answers: definition.answers.filter(
-    (answer) =>
-      !(before?.answers ?? []).some(
-        (held) => held.table === answer.table && held.field === answer.field
-      )
-  ),
-});
-
 /** Where a field is, as a plan names it. */
 interface PlanField {
   table: string;
