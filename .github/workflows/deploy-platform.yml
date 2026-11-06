@@ -1,13 +1,14 @@
 # Deploys the admin, router and connect gateway to Grasp's Cloudflare
-# account: the admin holds a token for every client, so it never changes on
-# a merge. Run it by hand from main, once with stage "staging"
-# (grasp-admin-staging, grasp-router-staging and
-# grasp-connect-gateway-staging, serving grasp-clients-staging), then with
-# "production" once the change works there. Every name comes from
-# @grasp-os/shared/names. Each stage runs in the GitHub environment of its
-# name and reads the 1Password Environment of the same name: production
-# requires a second person to approve every run; staging, which CI also
-# publishes releases from on every merge, doesn't.
+# account: staging's (grasp-admin-staging, grasp-router-staging and
+# grasp-connect-gateway-staging, serving grasp-clients-staging) on every
+# push to main, from CI (ci.yml, deploy-platform), and production's only
+# by hand, from main, once the change works on staging: the production
+# admin holds a token for every client. Run it by hand with stage
+# "staging" too, to redeploy staging without a merge. Every name comes
+# from @grasp-os/shared/names. Each stage runs in the GitHub environment
+# of its name and reads the 1Password Environment of the same name:
+# production requires a second person to approve every run; staging
+# doesn't.
 #
 # Every secret lives in the stage's 1Password Environment, by its plain
 # name. Every run first copies the runtime secrets the stage's admin and
@@ -26,6 +27,19 @@
 name: Deploy platform
 
 on:
+  # CI calls it for staging on every push to main. The job reads the
+  # stage's OP_SERVICE_ACCOUNT_TOKEN from its own GitHub environment, so
+  # the caller passes no secrets.
+  workflow_call:
+    inputs:
+      stage:
+        type: string
+        required: true
+    outputs:
+      # "true" when the run's commit is still main's head (head, below):
+      # CI publishes the commit's release only then.
+      current:
+        value: ${{ jobs.head.outputs.current }}
   workflow_dispatch:
     inputs:
       stage:
@@ -41,14 +55,50 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: deploy-platform-${{ inputs.stage }}
-  cancel-in-progress: false
-
 jobs:
+  # From CI only (a push to main): deploys only main's head. A push that
+  # main has moved past, whether a newer push landed while it built or it
+  # is a rerun of an older one, deploys nothing, and CI publishes nothing
+  # for it either (the `current` output): deploying it would roll the
+  # platform back under newer releases, and publishing it would let the
+  # old admin roll out a release without its platform. The newer push
+  # deploys and publishes everything, since a release is a build of all of
+  # main. Main's head, not "not older than what's deployed": the newest
+  # push deploys anyway, and nothing records what's deployed. A run by
+  # hand deploys whatever commit of main it was started on, on purpose.
+  head:
+    name: head
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      current: ${{ steps.head.outputs.current }}
+    steps:
+      - id: head
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$head" = "$GITHUB_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Not deploying $GITHUB_SHA: main's head is $head now, which deploys the platform itself"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   deploy-platform:
     name: deploy-platform
-    if: github.ref == 'refs/heads/main'
+    needs: head
+    # Head is skipped on a run by hand, so its output is empty there.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.head.result != 'failure' && needs.head.outputs.current != 'false' }}
+    # One deploy per stage at a time, by hand or from CI: a newer one
+    # replaces one still waiting, and never cancels one that's deploying.
+    # On the job, not the workflow, so CI's call doesn't wait on CI's own
+    # run group.
+    concurrency:
+      group: deploy-platform-${{ inputs.stage }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: ${{ inputs.stage }}

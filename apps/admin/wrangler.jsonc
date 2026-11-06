@@ -1,5 +1,5 @@
-// Deployed only by hand, with deploy-platform (never by CI on a merge), behind
-// Cloudflare Access (company sign-in + MFA).
+// Deployed with deploy-platform: staging's on every push to main, production's
+// only by hand. Behind Cloudflare Access (company sign-in + MFA).
 // The Worker verifies the Access JWT on every request itself (src/access.ts),
 // against the CF_ACCESS_AUD and CF_ACCESS_ISS vars; without them it refuses
 // everything, so a deploy of a stage missing either stops (cf-worker.ts).

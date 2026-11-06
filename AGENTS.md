@@ -54,7 +54,7 @@ Vite+ docs: `node_modules/vite-plus/docs`.
 
 ## Branches and pull requests
 
-Trunk-based: `main` is the only long-lived branch; every merge deploys core and connect to staging. The admin and router, in the same Cloudflare account, are deployed only through the manual Deploy grasp-os-ops workflow. Releases reach clients through the admin, channel by channel: Edge, then Beta, then Stable.
+Trunk-based: `main` is the only long-lived branch; every merge deploys core and connect to staging. The admin and router, in the same Cloudflare account, deploy to staging on every merge to `main` too; production's are deployed only through the manual Deploy platform workflow. Releases reach clients through the admin, channel by channel: Edge, then Beta, then Stable.
 
 1. Branch from `main` as `<type>/<kebab-description>`, e.g. `feat/audit-export`, using the commit types. A pre-push hook and CI check the name.
 2. Open a pull request into `main`. CI runs.
