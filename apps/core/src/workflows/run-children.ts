@@ -32,12 +32,9 @@ import { runOf, tellParentOfEnd } from "./resource-runs.ts";
 //   first (quotas.ts, `admitChild`): one level deeper, within the levels,
 //   descendant runs and age a lineage may have, its slot never given back.
 //   Its attempts and host calls count on the lineage's root (quotas.ts),
-//   and so do its model requests, at the gateway: each run's own
-//   `maxModelCalls` bounds only that run, so every model call names the
-//   lineage's root (resource-calls.ts, `callModel`), and the model ledger
-//   holds the lineage's requests, every run's together, to the quota
-//   policy's `lineageModelRequests` (model-spend.ts). A workflow bound to itself stops at the
-//   nesting limit. Each task runs at most once a run, so a run starts at
+//   a model call among them: each run's own `maxModelCalls` bounds that
+//   run's, and the lineage's host calls bound every run's together. A
+//   workflow bound to itself stops at the nesting limit. Each task runs at most once a run, so a run starts at
 //   most one child per `run` task.
 // - A start retried, or its answer lost. The child's lineage slot is
 //   keyed by the parent run and the step that starts it, and its start by

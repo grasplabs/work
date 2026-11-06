@@ -1,1 +1,0 @@
-CREATE INDEX `request_scopes_scope_key` ON `request_scopes` (`scope`,`key`);

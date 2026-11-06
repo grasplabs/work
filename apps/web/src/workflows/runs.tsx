@@ -3,7 +3,6 @@ import { runsPageSize } from "@grasp-os/shared/workflows";
 import type {
   ListedRun,
   RunAiProviderWait,
-  RunQueue,
   RunStatus,
 } from "@grasp-os/shared/workflows";
 import {
@@ -46,27 +45,6 @@ export const runStatusLabel = (status: RunStatus): string =>
 /** Who started a run, in words, for the person `me`. */
 const startedByOf = ({ startedBy }: ListedRun, me: string): string =>
   startedBy.userId === me ? i18n._(msg`You`) : i18n._(msg`Someone else`);
-
-/**
- * Why a queued run waits, and when it asks again at the latest: throttling,
- * not a fault of the workflow, and it goes on by itself. Core names only
- * the share it waits for, never who else holds it.
- */
-const QueuedFor = ({ queued }: { queued: RunQueue }) => {
-  const { t } = useLingui();
-  const time = formatDateTime(queued.retryAt);
-  switch (queued.waitingFor) {
-    case "person": {
-      return t`Waiting for a share of this person's runs; tries again by ${ph({ time })}`;
-    }
-    case "client": {
-      return t`Waiting for a share of the organization's runs; tries again by ${ph({ time })}`;
-    }
-    default: {
-      return queued.waitingFor satisfies never;
-    }
-  }
-};
 
 /** The status in words, after its dot. */
 const RunStatusDot = ({ status }: { status: RunStatus }) => (
@@ -128,27 +106,18 @@ export const WaitingForAiProvider = ({ wait }: { wait: RunAiProviderWait }) => {
  * A run's status with its dot, as the prototype's `RunResult`: green once
  * done, the attention colour where someone is needed (waiting, failed),
  * ink while it goes on (queued included) or after it stopped. A queued
- * run also says which share it waits for and when it tries again, or
- * since when it waits for a working AI provider key.
+ * run also says since when it waits for a working AI provider key.
  */
 export const RunResult = ({
   status,
-  queued,
   aiProvider,
 }: {
   status: RunStatus;
-  /** While it is queued: the share it waits for, and when it asks again. */
-  queued?: RunQueue | undefined;
   /** While it is queued for a working AI provider key: since when. */
   aiProvider?: RunAiProviderWait | undefined;
 }) => (
   <span className="inline-flex flex-col items-start gap-0.5">
     <RunStatusDot status={status} />
-    {status === "queued" && queued !== undefined ? (
-      <span className="text-muted-foreground text-xs">
-        <QueuedFor queued={queued} />
-      </span>
-    ) : null}
     {status === "queued" && aiProvider !== undefined ? (
       <span className="text-muted-foreground text-xs">
         <WaitingForAiProvider wait={aiProvider} />
@@ -163,11 +132,7 @@ export const RunResult = ({
  */
 const RunOutcome = ({ run }: { run: ListedRun }) => (
   <div className="flex flex-col items-start gap-1">
-    <RunResult
-      aiProvider={run.aiProvider}
-      queued={run.queued}
-      status={run.status}
-    />
+    <RunResult aiProvider={run.aiProvider} status={run.status} />
     {run.decision === undefined ? null : (
       <Link
         className="underline-offset-4 hover:underline"

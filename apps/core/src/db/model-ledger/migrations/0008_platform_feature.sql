@@ -1,1 +1,0 @@
-ALTER TABLE `requests` ADD `feature` text;

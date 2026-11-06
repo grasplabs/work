@@ -271,10 +271,6 @@ describe("a step's failure, as a catch sees it", () => {
         { name: "Error", code: "workflow.task_data_invalid" },
         task
       ),
-      spent: retries(
-        { name: "Error", code: "resource.budget_exhausted" },
-        task
-      ),
       busyStore: retries(
         { name: "Error", code: "resource.busy" },
         onceTask("grasp.operation")
@@ -293,7 +289,6 @@ describe("a step's failure, as a catch sees it", () => {
       conflict: false,
       denied: false,
       invalid: false,
-      spent: false,
       busyStore: true,
       failedStore: false,
       modelTimedOut: false,

@@ -89,14 +89,6 @@ export interface HostedRun {
   accountRunId?: RunId;
   /** Who the run acts for in this execution. */
   authority: Authority;
-  /**
-   * Whose person share its workflow attempts and model requests take, from
-   * its row (dispatcher.ts, `admissionSubjectOf`): who started it, its
-   * account's (its lineage root's, or its App's first run in the lineage),
-   * or its App's triggers' (`trigger:<app>`). Not who it
-   * acts for, which is the App's owner for a run nobody started.
-   */
-  shareSubject: string;
 }
 
 /**
@@ -935,10 +927,9 @@ export const keyRound = async (
 };
 
 /**
- * The most an AI step waits after a full share of the model requests in
- * flight or a provider's rate turned it away, before its attempt fails and
- * the engine retries it at the step's own delay: so a step with a tight
- * retry config can't loop on the gateway. The refusal's
+ * The most an AI step waits after a provider's rate turned it away, before
+ * its attempt fails and the engine retries it at the step's own delay: so
+ * a step with a tight retry config can't loop on the gateway. The refusal's
  * `retryAfterSeconds` is advisory, and steps don't wait longer: their
  * retries are theirs to set.
  */
@@ -1039,10 +1030,10 @@ export const newAiCalls = (): AiCalls => ({
 export const stepLimitOf = (env: Env): number => quotaLimits(env).workflowSteps;
 
 /**
- * The model calls a run's lineage may make, as the quota limits have them
+ * The model calls a run may make, as the quota limits have them
  * (`lineageModelRequests`): the ceiling a run's host holds its model calls
- * to (`maxModelCalls`). Every model request of a run's lineage is held to
- * them again as it is sent (models.ts, `scopesNowOf`).
+ * to (`maxModelCalls`). Each is a host call too, so a lineage's are held
+ * together by its host calls (quotas.ts, `lineageHostCalls`).
  */
 export const modelCallLimitOf = (env: Env): number =>
   quotaLimits(env).lineageModelRequests;
@@ -2798,16 +2789,14 @@ export class RunHost extends RpcTarget {
       // Settled: stop holding later attempts on it before this one waits,
       // or they would await the same settled promise again and again.
       this.#stopAsking(attempt.step, asking);
-      // A full share of the model requests in flight (the gateway already
-      // waited its turn for as long as a call may), or the provider's
-      // rate: the attempt waits the wait core computed, as long as its
-      // timeout lets it and no longer than {@link throttledWaitMs}, before
-      // it fails, unless it is the last.
+      // The provider's rate: the attempt waits the wait core computed, as
+      // long as its timeout lets it and no longer than
+      // {@link throttledWaitMs}, before it fails, unless it is the last.
       // One its provider limits on the organization's key holds the run
       // instead (`keyMarkerOf`): no wait here.
       const throttled = modelErrors.codeOf(error);
       if (
-        (throttled === "model.queued" || throttled === "model.rate_limited") &&
+        throttled === "model.rate_limited" &&
         aiWaitOf(error) === undefined &&
         !attempt.last
       ) {

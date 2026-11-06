@@ -91,12 +91,8 @@ export const operationErrors = defineErrorFamily({
     "The App didn't declare that use of this resource for this function.",
   "resource.unavailable":
     "This resource isn't bound to the App, or its binding doesn't serve the contract the App declared.",
-  "resource.budget_exhausted":
-    "The model budget this request counts against is used up, so it wasn't sent.",
   "resource.budget_busy":
-    "Model requests still under way hold what's left of the budget this request counts against, so it wasn't sent. Try again shortly.",
-  "resource.queued":
-    "Other requests running now fill this share of the model requests that may run at once, so this one wasn't sent yet. Try again after the wait it names.",
+    "Runs still under way take all the room this request may use, so it wasn't started. Try again shortly.",
   "resource.rate_limited":
     "The model's provider is taking no more requests for now, so this request wasn't answered. Try again after the wait it names.",
   "resource.awaiting_confirmation":
@@ -166,9 +162,7 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "data.access_denied": "authorization",
   "resource.unavailable": "authorization",
   "resource.not_allowed": "contract",
-  "resource.budget_exhausted": "operational",
   "resource.budget_busy": "operational",
-  "resource.queued": "operational",
   "resource.rate_limited": "operational",
   "resource.awaiting_confirmation": "operational",
   "resource.item_not_found": "domain",
@@ -234,9 +228,7 @@ const retryableCodes: ReadonlySet<string> = new Set([
   "submission.deadline_passed",
   // Nothing was sent; room comes back as requests under way settle.
   "resource.budget_busy",
-  // Nothing was sent; a share comes back as requests in flight end, and a
-  // provider's rate as its window passes.
-  "resource.queued",
+  // Nothing was sent; a provider's rate comes back as its window passes.
   "resource.rate_limited",
   // A shared store's operation that couldn't run now (busy, a concurrent
   // change): nothing it did stands in the way of the same call again.

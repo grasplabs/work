@@ -5,10 +5,9 @@
 # The model (`STEPHEN_EVAL_MODEL`) is reached at its provider's own API
 # with the stephen-eval 1Password Environment's key for that provider
 # (`STEPHEN_EVAL_MODEL_KEY`). The run's budget (`STEPHEN_EVAL_BUDGET_USD`)
-# is the ledger's deployment limit, the one cap on what a run spends: core
-# refuses any request that could take it past that. Give the key a spend
-# limit at the provider too if a run should never exceed one whatever the
-# code does. Its numbers go to the run's summary and, when the
+# stops it between cases once its calls cost that much, so it may go one
+# case past it; core refuses nothing for spend. The key's own spend limit
+# at the provider is the hard cap: give it one. Its numbers go to the run's summary and, when the
 # branch has an open pull request, on it; its report and every model
 # exchange go to the run's artifact. The weekly run on main is
 # stephen-weekly.yml.

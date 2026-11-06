@@ -11,20 +11,10 @@ export const modelErrors = defineErrorFamily({
   "model.provider_unavailable":
     "The AI provider isn't answering, so this call wasn't answered. This is usually an outage on their side; try again in a while.",
   "model.not_allowed": "This deployment doesn't allow that model.",
-  "model.run_limit":
-    "This workflow run, with the runs it started, has made the most model calls one run may make. No more model calls can be made in it.",
-  "model.queued":
-    "Other model calls running now fill this share of the model requests that may run at once, so this one waits its turn. Try again after the wait it names: it isn't a fault, and it goes on once a share comes free.",
   "model.rate_limited":
     "Your AI provider is limiting requests (a rate or spending limit at the provider), so this call wasn't answered. Try again after a while.",
-  "model.unpriced":
-    "What this model call would cost can't be bounded at known prices, so it wasn't sent. Choose another model, or send less.",
   "model.answer_too_long":
     "That model can't give an answer as long as this call asks for, so it wasn't sent. Choose a model with a larger window, or ask for a shorter answer.",
-  "model.ledger_unavailable":
-    "Model spend can't be accounted for right now, so no model call was made. Try again later.",
-  "model.quota_policy_unavailable":
-    "This deployment's quota policy can't be read right now, so no model call was made. Try again later.",
   "model.failed": "The model call failed. Try again later.",
   "model.invalid_output":
     "The model's answer didn't match the expected shape, also when asked again.",

@@ -107,14 +107,11 @@ export const platformLimits = {
   /** Live independent triggers one person has (core's trigger-resources.ts). */
   triggerResourcesPerPerson: 100,
 
-  // Model requests in flight (core's model ledger, model-admission.ts).
-  /** Provider requests to models in flight at once in the whole deployment. */
-  modelClientRequests: 16,
-  /** Provider requests in flight at once for one person. */
-  modelPersonRequests: 4,
-
   // Calls a run lineage makes.
-  /** Provider requests of one run lineage, retries included. */
+  /**
+   * Model calls of one workflow run (core's `maxModelCalls`). Each is a
+   * host call too, so a lineage's are held by `lineageHostCalls`.
+   */
   lineageModelRequests: 100,
   /** Host calls of one run lineage. */
   lineageHostCalls: 10_000,

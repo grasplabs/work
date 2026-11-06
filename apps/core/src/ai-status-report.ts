@@ -23,15 +23,17 @@ import { readModelChoice } from "./ai-model-choice.ts";
 import { consoleSigned } from "./console-signed.ts";
 import { errorResponse } from "./errors.ts";
 import { parseModelRef } from "./model-catalog.ts";
-import { modelLedger } from "./model-ledger.ts";
-import type { PlatformSpendByPeriod, ProviderHealth } from "./model-ledger.ts";
+import { platformSpend } from "./model-spend.ts";
+import type { PlatformSpendByPeriod } from "./model-spend.ts";
+import { providerHealthOf } from "./model-usage.ts";
+import type { ProviderHealth } from "./model-usage.ts";
 
 // The organization's AI, for the admin alone: which providers it
 // connected, its default model's first, and how each one's calls last
-// fared, as the model ledger noted them from real calls
-// (`providerHealth`), with how Grasp's own keys fared for its platform
+// fared, as the gateway noted them from real calls
+// (`providerHealthOf`), with how Grasp's own keys fared for its platform
 // features, and what those features cost on Grasp's keys this month and
-// last (`platformSpend`, the ledger's charges). Staff read it as one line
+// last (`platformSpend`, from the recorded usage). Staff read it as one line
 // on the organization's Setup and as its spend on its AI use; it changes
 // nothing. Signed with a key derived for this purpose only
 // (console-signed.ts); nothing an App, a
@@ -40,7 +42,7 @@ import type { PlatformSpendByPeriod, ProviderHealth } from "./model-ledger.ts";
 // connect and the organization's admins see, and nothing of what a call
 // carried.
 
-/** How `provider`'s calls fared by `kind`'s key, from the ledger's health. */
+/** How `provider`'s calls fared by `kind`'s key, from its recorded health. */
 const statusOf = (
   health: readonly ProviderHealth[],
   provider: AiProviderId,
@@ -70,7 +72,7 @@ const periodOf = (now: Date, monthsBack: number): string =>
     .toISOString()
     .slice(0, 7);
 
-/** `period`'s rows of what the ledger charged, the dearest first. */
+/** `period`'s rows of what was spent, the dearest first. */
 const monthSpend = (
   rows: readonly PlatformSpendByPeriod[],
   period: string
@@ -94,9 +96,9 @@ const aiStatus = async (env: Env): Promise<AiStatusReport> => {
   const lastMonth = periodOf(now, 1);
   const [keys, health, choice, spend] = await Promise.all([
     env.CONNECT.aiProviderKeys(),
-    modelLedger(env).providerHealth(),
+    providerHealthOf(env),
     readModelChoice(env),
-    modelLedger(env).platformSpend([thisMonth, lastMonth]),
+    platformSpend(env, [thisMonth, lastMonth]),
   ]);
   const chosen =
     choice?.defaultModel === null || choice === null

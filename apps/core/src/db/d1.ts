@@ -38,6 +38,32 @@ export const isTransientD1Error = (error: unknown): boolean =>
   error instanceof Error &&
   (transientD1Error.test(error.message) || isTransientD1Error(error.cause));
 
+/** Most tries of a batch that D1 failed for a moment. */
+const batchTries = 3;
+
+/**
+ * `batch`, tried again when D1 fails for a moment (`isTransientD1Error`),
+ * up to {@link batchTries}; any other failure is thrown at once. Only for a
+ * batch that is safe to run twice: a try that committed though its answer
+ * was lost runs again (making a version current compares and sets, and a
+ * model response's record inserts by ID).
+ */
+export const retriedBatch = async <Result>(
+  batch: () => Promise<Result>
+): Promise<Result> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      // One try after the other.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      return await batch();
+    } catch (error) {
+      if (attempt >= batchTries || !isTransientD1Error(error)) {
+        throw error;
+      }
+    }
+  }
+};
+
 /**
  * Whether D1 refused a write because `column` (`table.column`) would be
  * NULL, however it was wrapped: the guard of an insert that selects its

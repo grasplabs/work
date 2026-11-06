@@ -2,16 +2,13 @@ import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
+import { drizzle } from "drizzle-orm/d1";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import type {
-  Admission as LedgerAdmission,
-  ModelLedger,
-} from "../src/model-ledger.ts";
-import { modelLedger } from "../src/model-ledger.ts";
+import { modelUsage } from "../src/db/core/schema.ts";
+import { monthSpend } from "../src/model-spend.ts";
+import { recordResponse } from "../src/model-usage.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { allEvents } from "./audit-events.ts";
@@ -23,23 +20,29 @@ import {
   jsonWorkflowAppsOf,
   startedBy,
 } from "./json-workflow-apps.ts";
+import { runQuarterHourTasks } from "./maintenance.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { FakeProvider, ProviderReply } from "./model-provider.ts";
+import {
+  providerHealthRows,
+  recordedUsage,
+  spentMicros,
+  usageRows,
+} from "./model-usage.ts";
 import { plan } from "./platform-providers.ts";
 import { streamText } from "./provider-streams.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
-// Model spend, counted by the model ledger: every provider request is
-// admitted before it is sent, counted against all of its scopes at once,
-// and charged what it used once it ends, or the most it can cost when
-// what it used can't be known. Nothing limits it. The model provider
-// behind connect is the outside system (test/model-provider.ts). The
-// ledger, the audit log and the runs are real; where a test needs the
-// ledger to fail, its binding fails, as an unreachable Durable Object
-// would. A run's calls are a JSON workflow's run's real `grasp.model`
-// tasks (resource-calls.ts). An App workflow's run making a call on Grasp's own
-// key, counted as a request of its lineage, went with App workflows: no
-// JSON workflow's run makes one.
+// Model spend, recorded after each response (src/model-usage.ts): the
+// request goes straight to the provider, and once it answered, what it
+// used and cost is written in the same D1 batch as its audit event, in
+// the background. Nothing is reserved before a request, and nothing in the
+// record can fail or hold up a call. The spend overview is a query over
+// the rows (src/model-spend.ts). The model provider behind connect is the
+// outside system (test/model-provider.ts). The usage rows, the audit log
+// and the runs are real; where a test needs the record to fail, core's
+// database refuses its writes, as an unreachable one would. A run's calls
+// are a JSON workflow's run's real `grasp.model` tasks (resource-calls.ts).
 
 const idp = mockIdp();
 
@@ -53,14 +56,10 @@ const chosen = [mistral, anthropic, tiered];
 
 /**
  * Costs 650 micros from Mistral Large, at its list prices of $0.50 per
- * million tokens in and $1.50 out, each rounded up to whole micros.
+ * million tokens in and $1.50 out.
  */
 const pricedAnswer = { text: "Hi.", inputTokens: 1000, outputTokens: 100 };
 const pricedMicros = 500 + 150;
-
-/** Costs 29,650 micros from Mistral Large. */
-const dearAnswer = { text: "Hi.", inputTokens: 59_000, outputTokens: 100 };
-const dearMicros = 29_500 + 150;
 
 /** The answer's cap the tests ask for: a request then can cost well under a cent. */
 const smallCap = 100;
@@ -96,7 +95,7 @@ const withProvider = (more: ProviderReply[], overrides: Partial<Env> = {}) => {
   const month = newMonth();
   const rulesEnv: Env = {
     ...env,
-    MODEL_BUDGET_MONTH: month,
+    SPEND_MONTH: month,
     ...overrides,
   };
   const { call, agent } = models(rulesEnv);
@@ -141,10 +140,6 @@ const userOf = (made: ModelCall<undefined>): string => {
   return made.trigger.userId;
 };
 
-/** Values in order, as their JSON sorts. */
-const byJson = (one: unknown, other: unknown): number =>
-  JSON.stringify(one).localeCompare(JSON.stringify(other));
-
 /** The outcomes of `calls`, one after another. */
 const inTurn = async (
   calls: readonly (() => Promise<unknown>)[]
@@ -157,134 +152,61 @@ const inTurn = async (
   return outcomes;
 };
 
-/**
- * The audit events `actor` triggered, the ledger's alerts included: its
- * alarm delivers what its outbox holds.
- */
+/** The audit events `actor` triggered. */
 const eventsOf = async (actor: unknown): Promise<AuditEvent[]> => {
-  await runDurableObjectAlarm(modelLedger(env));
   const events = await allEvents();
   return events.filter(
     (event) => JSON.stringify(event.actor) === JSON.stringify(actor)
   );
 };
 
-/** What `userId` spent in `month`, in micros, as the ledger counts it. */
-const ledgerOf = async (month: string, userId: string): Promise<number> => {
-  const spent = await modelLedger(env).spendOf(month, ["user"], 1000);
-  return spent.user?.find(({ key }) => key === userId)?.spentMicros ?? 0;
+/** `actor`'s `model.call` events, once there are `count`: recorded after the answer. */
+const callEventsOf = async (actor: unknown, count: number) =>
+  await vi.waitFor(
+    async () => {
+      const all = await eventsOf(actor);
+      const events = all.filter(({ action }) => action === "model.call");
+      expect(events).toHaveLength(count);
+      return events;
+    },
+    { timeout: 5000, interval: 20 }
+  );
+
+/** What `userId` spent in `month`, in micros, once `count` responses of theirs are recorded. */
+const spentBy = async (
+  month: string,
+  userId: string,
+  count = 1
+): Promise<number> => {
+  await recordedUsage(month, count, { personId: userId });
+  return await spentMicros(month, { personId: userId });
 };
 
 /**
- * The ledger's binding with `method` failing on every object, as an
- * unreachable Durable Object's would; everything else as it is.
+ * Core's database, refusing what `refuses` says of a statement's SQL, as
+ * an unreachable database would; everything else as it is.
  */
-const failingLedger = (
-  method: "admit" | "settle"
-): DurableObjectNamespace<ModelLedger> =>
-  new Proxy(env.MODEL_LEDGER, {
-    get: (namespace, name): unknown => {
-      if (name !== "getByName") {
-        return Reflect.get(namespace, name, namespace);
+const refusingDatabase = (refuses: (sql: string) => Error | undefined) => {
+  const database: D1Database = env.DB;
+  return new Proxy(database, {
+    get: (target, name): unknown => {
+      if (name !== "prepare") {
+        return Reflect.get(target, name, target);
       }
-      return (id: string) =>
-        new Proxy(namespace.getByName(id), {
-          get: (stub, member): unknown =>
-            member === method
-              ? async () => await Promise.reject(new Error("Unavailable"))
-              : Reflect.get(stub, member, stub),
-        });
-    },
-  });
-
-/**
- * The ledger's binding whose first `admit` is made, then its answer lost
- * as a restart loses it (a deploy resets the object under the call): the
- * platform's error, marked as one that broke on its way.
- */
-const restartingLedger = (): DurableObjectNamespace<ModelLedger> => {
-  let restarted = false;
-  return new Proxy(env.MODEL_LEDGER, {
-    get: (namespace, name): unknown => {
-      if (name !== "getByName") {
-        return Reflect.get(namespace, name, namespace);
-      }
-      return (id: string) => {
-        const stub = namespace.getByName(id);
-        return new Proxy(stub, {
-          get: (target, member): unknown =>
-            member === "admit" && !restarted
-              ? async (admission: LedgerAdmission) => {
-                  restarted = true;
-                  await target.admit(admission);
-                  throw Object.assign(
-                    new Error(
-                      "Durable Object reset because its code was updated."
-                    ),
-                    { durableObjectReset: true, retryable: true }
-                  );
-                }
-              : Reflect.get(target, member, target),
-        });
+      return (sql: string) => {
+        const refusal = refuses(sql);
+        if (refusal !== undefined) {
+          throw refusal;
+        }
+        return target.prepare(sql);
       };
     },
   });
 };
 
-/** Whether `sql` writes to or reads an audit outbox. */
-const auditing = (sql: string): boolean => sql.includes("audit_outbox");
-
-/** The audit log's binding, refusing every append, as an unreachable one would. */
-const failingAuditLog = (): Env["AUDIT_LOG"] =>
-  new Proxy(env.AUDIT_LOG, {
-    get: (namespace, name): unknown => {
-      if (name !== "getByName" && name !== "get") {
-        return Reflect.get(namespace, name, namespace);
-      }
-      return () =>
-        new Proxy(
-          {},
-          {
-            get: () => async () =>
-              await Promise.reject(new Error("Unavailable")),
-          }
-        );
-    },
-  });
-
-/** What a call's audit event says the ledger did, its amounts in micros. */
-const said = (event: AuditEvent | undefined) => [
-  event?.detail.ledger,
-  event?.detail.ledgerRequests,
-  Math.round(Number(event?.detail.ledgerCharged) * 1_000_000),
-  Math.round(Number(event?.detail.ledgerHeld) * 1_000_000),
-];
-
-/**
- * Brings `userId`'s open requests due now, and runs the ledger's alarm:
- * each is charged the most it can cost, as when it comes due.
- */
-const reconcileNow = async (userId: string): Promise<void> => {
-  const ledger = modelLedger(env);
-  await runInDurableObject(ledger, (_instance, state) => {
-    state.storage.sql.exec(
-      "UPDATE requests SET reconcile_at = ? WHERE subject = ? AND state IN ('dispatched', 'unknown')",
-      Date.now() - 1,
-      userId
-    );
-  });
-  await runDurableObjectAlarm(ledger);
-};
-
-/** The provider requests the ledger admitted for `userId`. */
-const requestsOf = async (userId: string): Promise<number> =>
-  await runInDurableObject(modelLedger(env), (_instance, state) =>
-    Number(
-      state.storage.sql
-        .exec("SELECT count(*) AS n FROM requests WHERE subject = ?", userId)
-        .one().n
-    )
-  );
+/** Whether `sql` writes a usage row. */
+const recordsUsage = (sql: string): boolean =>
+  sql.includes('insert into "model_usage"');
 
 describe("model spend", { timeout: 60_000 }, () => {
   beforeEach(async () => {
@@ -311,7 +233,7 @@ describe("model spend", { timeout: 60_000 }, () => {
   it("count a call on Grasp's own key as Grasp's, apart from the organization's spend and the person's", async () => {
     const { call, month } = withProvider([pricedAnswer]);
     const trigger = newPerson();
-    const rulesEnv: Env = { ...env, MODEL_BUDGET_MONTH: month };
+    const rulesEnv: Env = { ...env, SPEND_MONTH: month };
 
     await expect(outcome(call(hello({ trigger })))).resolves.toBe("ok");
     await plan(platformOpenAiKey, [
@@ -337,30 +259,19 @@ describe("model spend", { timeout: 60_000 }, () => {
         },
       })
     );
-    const deployment = await modelLedger(env).spendOf(
-      month,
-      ["deployment"],
-      10
-    );
-    const grasp = await modelLedger(env).platformSpend([month]);
+    const [grasp] = await recordedUsage(month, 1, { credential: "platform" });
 
     expect({
       converted,
-      user: await ledgerOf(month, trigger.userId),
-      deployment: deployment.deployment?.[0]?.spentMicros,
-      grasp: grasp.map(({ feature, model, micros }) => ({
-        feature,
-        model,
-        charged: micros > 0,
-      })),
+      user: await spentBy(month, trigger.userId),
+      organization: await spentMicros(month),
+      grasp: [grasp?.feature, grasp?.model, (grasp?.cost ?? 0) > 0],
     }).toStrictEqual({
       converted: "ok",
       // The organization's spend is what its own key cost: the call.
       user: pricedMicros,
-      deployment: pricedMicros,
-      grasp: [
-        { feature: "conversion", model: "openai/gpt-5.4-mini", charged: true },
-      ],
+      organization: pricedMicros,
+      grasp: ["conversion", "openai/gpt-5.4-mini", true],
     });
   });
 
@@ -377,7 +288,7 @@ describe("model spend", { timeout: 60_000 }, () => {
         { ...pricedAnswer, text: '{"line": "Hi."}' },
         ...times(2, pricedAnswer),
       ],
-      { MODEL_BUDGET_MONTH: undefined }
+      { SPEND_MONTH: undefined }
     );
     const month = new Date().toISOString().slice(0, "yyyy-mm".length);
     const ada = { type: "person", userId: builder.userId } as const;
@@ -396,7 +307,14 @@ describe("model spend", { timeout: 60_000 }, () => {
       inTurn(forAda.map((made) => async () => await call(made)))
     ).resolves.toStrictEqual(["ok", "ok"]);
     expect(run.status).toBe("completed");
-    await expect(ledgerOf(month, ada.userId)).resolves.toBe(3 * pricedMicros);
+    await expect(spentBy(month, ada.userId, 3)).resolves.toBe(3 * pricedMicros);
+    // The run's call names its workflow and its lineage too.
+    const rows = await usageRows(month, { personId: ada.userId });
+    expect(
+      rows
+        .filter(({ workflowId }) => workflowId === id)
+        .map(({ runId }) => runId)
+    ).toHaveLength(1);
   });
 
   it("charge what a model thought, as the provider counts it in the answer's output", async () => {
@@ -411,10 +329,10 @@ describe("model spend", { timeout: 60_000 }, () => {
     const ada = newPerson();
 
     await expect(outcome(call(hello({ trigger: ada })))).resolves.toBe("ok");
-    await expect(ledgerOf(month, ada.userId)).resolves.toBe(500 + 1500);
+    await expect(spentBy(month, ada.userId)).resolves.toBe(500 + 1500);
   });
 
-  it("charge an answer cancelled midway what it used, never nothing, and say on its audit event that it was estimated", async () => {
+  it("record an answer cancelled midway at what it used, never nothing, and say that it was estimated", async () => {
     // The answer stops after its first 12 characters, until released: the
     // provider's count, which comes with the answer's end, never arrives.
     const rest = Promise.withResolvers<boolean>();
@@ -424,9 +342,7 @@ describe("model spend", { timeout: 60_000 }, () => {
       outputTokens: 100,
       pause: { at: 12, until: rest.promise },
     };
-    // Some 50,000 tokens at four characters each, and four times as many
-    // bytes: its bound, for Mistral Large, is some $0.10, its answer
-    // capped at 100 tokens.
+    // Some 50,000 tokens at four characters each.
     const limited = withProvider([cut]);
     const open = withProvider([cut]);
     const prompt = "word ".repeat(40_000);
@@ -468,30 +384,29 @@ describe("model spend", { timeout: 60_000 }, () => {
         await cancelled(limited.agent, mistral, ada),
         await cancelled(open.agent, anthropic, ben),
       ];
-      const spent = await ledgerOf(limited.month, ada.userId);
-      const adaEvents = await eventsOf(ada);
-      const adas = adaEvents.find(({ action }) => action === "model.call");
-      const [bens] = await eventsOf(ben);
+      const [adas] = await callEventsOf(ada, 1);
+      const [bens] = await callEventsOf(ben, 1);
+      const [adaRow] = await recordedUsage(limited.month, 1, {
+        personId: ada.userId,
+      });
       const tokens = adas?.model?.inputTokens ?? 0;
       expect({
         stopped,
-        charged: spent > 100_000,
+        recorded: [adaRow?.estimated, adaRow?.inputTokens === tokens],
         ada: [adas?.action, adas?.detail, adas?.model?.outputTokens],
         prompt: tokens >= prompt.length / 4 && tokens < prompt.length / 4 + 200,
         ben: [bens?.action, bens?.detail, bens?.model],
       }).toMatchObject({
         stopped: ["aborted", "aborted"],
         // Chat completions count nothing before their end: the prompt is
-        // charged at its bound, so cancelling is never free.
-        charged: true,
+        // estimated from what was sent, so cancelling is never free.
+        recorded: [true, true],
         ada: [
           "model.call",
           {
             outcome: "cancelled",
             errorType: "cancelled",
             estimated: true,
-            ledger: "settled",
-            ledgerHeld: 0,
           },
           // "Hello there," at four characters a token.
           3,
@@ -518,67 +433,9 @@ describe("model spend", { timeout: 60_000 }, () => {
     }
   });
 
-  it("charge an answer that breaks off midway, with no end and no count, the most it can cost once it comes due", async () => {
-    // The stream closes after the answer's first 12 characters.
-    const brokenOff = {
-      text: "Hello there, how are you today?",
-      inputTokens: 1000,
-      outputTokens: 100,
-      cut: 12,
-    };
-    // Its bound, for Mistral Large, is some $0.10, its answer capped at
-    // 100 tokens.
-    const { agent, month } = withProvider([brokenOff]);
-    const prompt = "word ".repeat(40_000);
-    const ada = newPerson();
-    const session = await agent({
-      model: mistral,
-      maxTokens: smallCap,
-      purpose: "chat.turn",
-      trigger: ada,
-      work: requireWork(),
-    });
-    const stream = session.stream(
-      session.model,
-      normalizeContext({
-        messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-      })
-    );
-    let streamed = "";
-    for await (const event of stream) {
-      if (event.type === "text_delta") {
-        streamed += event.delta;
-      }
-    }
-    const { stopReason } = await stream.result();
-    const before = await ledgerOf(month, ada.userId);
-    const [event] = await eventsOf(ada);
-    await reconcileNow(ada.userId);
-    const after = await ledgerOf(month, ada.userId);
-
-    expect({
-      ended: [stopReason, streamed],
-      event: [event?.action, event?.detail.outcome, event?.detail.ledger],
-      before,
-      charged: after > 100_000,
-    }).toStrictEqual({
-      // What came reached the caller, before the failure.
-      ended: ["error", "Hello there,"],
-      event: ["model.call", "failed", "unknown"],
-      // Nothing yet: what it used can't be known until it comes due.
-      before: 0,
-      charged: true,
-    });
-  });
-
-  it("count a rate-limited request's retry on its own, and charge a request that failed after it may have been taken on its bound", async () => {
-    // A server error may have come after the provider took the request on:
-    // it is charged its bound once it comes due, and the call fails, not
-    // retried.
-    const failedLate = withProvider([{ status: 500 }]);
-    // A refusal for the provider's rate before it took the request on
-    // costs nothing: the gateway asks again once the wait is over, the
-    // retry admitted on its own.
+  it("record each answered response once, with its tokens and cost: never a refusal before the provider took it on, nor a request that got no answer", async () => {
+    // A refusal for the provider's rate costs nothing: the gateway asks
+    // again once the wait is over, and only the answer is recorded.
     const refused = withProvider([
       {
         status: 429,
@@ -587,187 +444,223 @@ describe("model spend", { timeout: 60_000 }, () => {
       },
       pricedAnswer,
     ]);
-    const ada = hello();
-    const ben = hello();
-
-    await expect(
-      inTurn([
-        async () => await failedLate.call(ada),
-        async () => await refused.call(ben),
-      ])
-    ).resolves.toStrictEqual(["model.provider_unavailable", "ok"]);
-    await reconcileNow(userOf(ada));
-    const [adas, bens] = await Promise.all([
-      ledgerOf(failedLate.month, userOf(ada)),
-      ledgerOf(refused.month, userOf(ben)),
-    ]);
-    expect({
-      ada: adas > 0,
-      ben: bens,
-      admitted: await Promise.all([
-        requestsOf(userOf(ada)),
-        requestsOf(userOf(ben)),
-      ]),
-    }).toStrictEqual({ ada: true, ben: pricedMicros, admitted: [1, 2] });
-  });
-
-  it("say on a call's audit event what every one of its provider requests charged or has still to be charged, a refused one's and a failed one's too", async () => {
-    const retried = withProvider([
-      {
-        status: 429,
-        errorType: "rate_limit_error",
-        headers: { "retry-after": "1" },
-      },
-      pricedAnswer,
-    ]);
-    // A server error: neither retried nor fallen back from.
+    // A server error: no answer, nothing to record, the call failed.
     const failed = withProvider([{ status: 500 }]);
     const ada = hello();
     const ben = hello();
 
     await expect(
       inTurn([
-        async () => await retried.call(ada),
+        async () => await refused.call(ada),
         async () => await failed.call(ben),
       ])
     ).resolves.toStrictEqual(["ok", "model.provider_unavailable"]);
-    const [adaEvent] = await eventsOf(ada.trigger);
-    const [benEvent] = await eventsOf(ben.trigger);
-    const benHeld = said(benEvent).at(-1);
-    await reconcileNow(userOf(ben));
-    const charged = await ledgerOf(failed.month, userOf(ben));
-    expect({ ada: said(adaEvent), ben: said(benEvent) }).toStrictEqual({
-      // The answer charged; the refused first try charged nothing.
-      ada: ["settled", 2, pricedMicros, 0],
-      // The failed try still to be charged its bound.
-      ben: ["unknown", 1, 0, benHeld],
-    });
-    // What the event said is still to be charged is what it is charged.
-    expect([Number(benHeld) > 0, charged]).toStrictEqual([true, benHeld]);
-  });
+    const [adaEvent] = await callEventsOf(ada.trigger, 1);
+    const [benEvent] = await callEventsOf(ben.trigger, 1);
+    const rows = await usageRows(refused.month, { personId: userOf(ada) });
 
-  it("charge a prompt past a tier's threshold at that tier's prices, as its audit event counts it", async () => {
-    const { call, month } = withProvider([
-      { text: "Hi.", inputTokens: 300_000, outputTokens: 100 },
-    ]);
-    const ada = hello({ model: tiered, maxTokens: undefined });
-
-    await expect(outcome(call(ada))).resolves.toBe("ok");
-    const [event] = await eventsOf(ada.trigger);
-    // $5 a million in and $22.50 out past 272K, not $2.50 and $15.
     expect({
-      ledger: await ledgerOf(month, userOf(ada)),
-      // In micros, as the audit event's dollars come out of floats.
-      audited: Math.round((event?.cost?.amount ?? 0) * 1_000_000),
-      // How the ledger settled it, on the event too.
-      settled: [event?.detail.ledger, event?.detail.ledgerCharged],
+      // The provider is one: its refusal, its answer, and its server error.
+      sent: refused.fake.requests.length,
+      ada: rows.map(({ model, inputTokens, outputTokens, estimated }) => ({
+        model,
+        inputTokens,
+        outputTokens,
+        estimated,
+      })),
+      adaSpent: await spentMicros(refused.month, { personId: userOf(ada) }),
+      ben: await usageRows(failed.month, { personId: userOf(ben) }),
+      events: [adaEvent?.detail.outcome, benEvent?.detail.outcome],
     }).toStrictEqual({
-      ledger: 300_000 * 5 + 2250,
-      audited: 300_000 * 5 + 2250,
-      settled: ["settled", 1.50225],
+      sent: 3,
+      ada: [
+        {
+          model: mistral,
+          inputTokens: 1000,
+          outputTokens: 100,
+          estimated: false,
+        },
+      ],
+      adaSpent: pricedMicros,
+      ben: [],
+      events: ["answered", "failed"],
     });
   });
 
-  it("charge a cancelled answer at its tier's prices, as its audit event estimates it", async () => {
-    const rest = Promise.withResolvers<boolean>();
-    const { agent, month } = withProvider([
-      {
-        text: "Hello there, how are you today?",
-        inputTokens: 250_000,
-        outputTokens: 100,
-        pause: { at: 12, until: rest.promise },
-      },
-    ]);
-    const ada = newPerson();
-    try {
-      const session = await agent({
-        model: anthropic,
-        purpose: "chat.turn",
-        trigger: ada,
-        work: requireWork(),
-      });
-      const cancel = new AbortController();
-      const stream = session.stream(
-        session.model,
-        normalizeContext({
-          messages: [{ role: "user", content: "Hi.", timestamp: Date.now() }],
-        }),
-        { signal: cancel.signal }
-      );
-      for await (const event of stream) {
-        if (event.type === "text_delta") {
-          cancel.abort();
-        }
-      }
-      const held = await ledgerOf(month, ada.userId);
-      const [event] = await eventsOf(ada);
-      expect({
-        // The prompt as Anthropic counted it, past 200K, and "Hello there,"
-        // estimated, both at the long-context prices.
-        audited:
-          Math.abs(
-            (event?.cost?.amount ?? 0) - (250_000 * 6 + 3 * 22.5) / 1e6
-          ) < 1e-9,
-        settled: said(event),
-        held,
-      }).toStrictEqual({
-        audited: true,
-        // The ledger rounds each kind up to a micro.
-        settled: ["settled", 1, 250_000 * 6 + 68, 0],
-        held: 250_000 * 6 + 68,
-      });
-    } finally {
-      rest.resolve(true);
-    }
+  it("answer a call whose usage can't be recorded, logging it and keeping its audit event", async () => {
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(JSON.stringify(args));
+    });
+    const { call, month } = withProvider([pricedAnswer], {
+      DB: refusingDatabase((sql) =>
+        recordsUsage(sql) ? new Error("Unavailable") : undefined
+      ),
+    });
+    const ada = hello();
+
+    await expect(call(ada)).resolves.toMatchObject({ text: "Hi." });
+    const [event] = await callEventsOf(ada.trigger, 1);
+    expect({
+      event: [event?.detail.outcome, event?.model?.inputTokens],
+      logged: errors.some((line) => line.includes("model.usage_unrecorded")),
+      recorded: await usageRows(month, { personId: userOf(ada) }),
+    }).toStrictEqual({
+      event: ["answered", 1000],
+      logged: true,
+      recorded: [],
+    });
   });
 
-  it("charge an answer whose provider never sent its count the most it can cost once it comes due, never nothing", async () => {
+  it("record a response once when core's database failed for a moment, trying again", async () => {
+    let refusals = 1;
+    const { call, month } = withProvider([pricedAnswer], {
+      DB: refusingDatabase((sql) => {
+        const refused = recordsUsage(sql) && refusals > 0;
+        refusals -= refused ? 1 : 0;
+        // Worded as D1 words a moment's overload.
+        return refused
+          ? new Error("D1 DB is overloaded. Requests queued for too long.")
+          : undefined;
+      }),
+    });
+    const ada = hello();
+
+    await expect(call(ada)).resolves.toMatchObject({ text: "Hi." });
+    await expect(spentBy(month, userOf(ada))).resolves.toBe(pricedMicros);
+    await expect(callEventsOf(ada.trigger, 1)).resolves.toHaveLength(1);
+    await expect(
+      usageRows(month, { personId: userOf(ada) })
+    ).resolves.toHaveLength(1);
+  });
+
+  it("keep a response's event and usage once when every batch commits but its answer is lost", async () => {
+    const database: D1Database = env.DB;
+    const { call, month } = withProvider([pricedAnswer], {
+      // Each batch is written, then its answer lost on the way back.
+      DB: new Proxy(database, {
+        get: (target, name): unknown => {
+          if (name !== "batch") {
+            return Reflect.get(target, name, target);
+          }
+          return async (statements: D1PreparedStatement[]) => {
+            await target.batch(statements);
+            throw new Error("Network connection lost.");
+          };
+        },
+      }),
+    });
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(JSON.stringify(args));
+    });
+    const ada = hello();
+
+    await expect(call(ada)).resolves.toMatchObject({ text: "Hi." });
+    // Past every try of the batch, then drained into the log.
+    await vi.waitFor(() => {
+      expect(
+        errors.some((line) => line.includes("model.usage_unrecorded"))
+      ).toBeTruthy();
+    });
+    const events = await eventsOf(ada.trigger);
+    const rows = await usageRows(month, { personId: userOf(ada) });
+    expect({
+      events: events.filter(({ action }) => action === "model.call").length,
+      rows: rows.length,
+    }).toStrictEqual({ events: 1, rows: 1 });
+  });
+
+  it("never put an older result over a newer one in a provider's health, however late its record lands", async () => {
+    const named = `provider-${crypto.randomUUID()}`;
+    /** A response of `provider`'s that ended at `at`, failed or not, recorded now. */
+    const noted = async (at: number, failed: boolean) => {
+      await recordResponse(
+        env,
+        {
+          at,
+          entry: {
+            actor: { type: "system" },
+            action: "model.call",
+            detail: { purpose: "test.health" },
+          },
+          spend: { trigger: { type: "system" } },
+          health: {
+            provider: named,
+            credential: "organization",
+            ...(failed
+              ? {
+                  failed: { failure: "auth", status: 401, trouble: "refused" },
+                }
+              : {}),
+          },
+        },
+        { awaited: true }
+      );
+    };
+    const now = Date.now();
+
+    // A newer failure lands first; an older success, tried again, after it.
+    await noted(now, true);
+    await noted(now - 1000, false);
+    const rows = await providerHealthRows();
+
+    expect(rows.find((row) => row.provider === named)).toMatchObject({
+      lastOkAt: null,
+      lastFailedAt: now,
+      failingClass: "refused",
+    });
+  });
+
+  it("keep usage rows 400 days, then sweep them from the clock", async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const month = newMonth();
+    const now = Date.now();
+    /** A usage row of `month` written `days` ago. */
+    const rowOf = (days: number) => ({
+      id: crypto.randomUUID(),
+      period: month,
+      personId: null,
+      triggerType: "person",
+      model: mistral,
+      credential: "organization",
+      inputTokens: 1000,
+      outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cost: pricedMicros / 1_000_000,
+      estimated: false,
+      createdAt: new Date(now - days * day),
+    });
+    const [kept, gone] = [rowOf(399), rowOf(401)];
+    await drizzle(env.DB).insert(modelUsage).values(kept);
+    await drizzle(env.DB).insert(modelUsage).values(gone);
+
+    await runQuarterHourTasks({}, new Date(now));
+    const rows = await usageRows(month);
+
+    expect(rows.map(({ id }) => id)).toStrictEqual([kept.id]);
+  });
+
+  it("return what it records of an answer that came with no count: the estimate, never nothing", async () => {
     const { call, month } = withProvider([{ ...pricedAnswer, noUsage: true }]);
     const ada = hello();
 
-    await expect(call(ada)).resolves.toMatchObject({ text: "Hi." });
-    const before = await ledgerOf(month, userOf(ada));
-    await reconcileNow(userOf(ada));
-    const after = await ledgerOf(month, userOf(ada));
-    expect([before, after > 0]).toStrictEqual([0, true]);
-  });
+    const answer = await call(ada);
+    const [event] = await callEventsOf(ada.trigger, 1);
+    const [row] = await recordedUsage(month, 1, { personId: userOf(ada) });
 
-  it("charge an answer that wrote to a one-hour cache, which the catalog doesn't price, the most it can cost once it comes due", async () => {
-    const { call, month } = withProvider([
-      { ...pricedAnswer, cacheWrite1h: 2000 },
-    ]);
-    const ada = hello({ model: anthropic, maxTokens: 1 });
-
-    await expect(call(ada)).resolves.toMatchObject({ text: "Hi." });
-    const before = await ledgerOf(month, userOf(ada));
-    await reconcileNow(userOf(ada));
-    const after = await ledgerOf(month, userOf(ada));
-    expect([before, after > 0]).toStrictEqual([0, true]);
-  });
-
-  it("settle an answered request at what it used even when its audit event can't be stored", async () => {
-    const database: D1Database = env.DB;
-    const { call, month } = withProvider([pricedAnswer], {
-      // The audit outbox refuses every write; everything else works.
-      DB: new Proxy(database, {
-        get: (target, name): unknown => {
-          if (name === "prepare") {
-            return (sql: string) => {
-              if (auditing(sql)) {
-                throw new Error("Unavailable");
-              }
-              return target.prepare(sql);
-            };
-          }
-          return Reflect.get(target, name, target);
-        },
-      }),
-      AUDIT_LOG: failingAuditLog(),
+    expect({
+      returned: [answer.usage.inputTokens, answer.usage.outputTokens],
+      audited: [event?.model?.inputTokens, event?.model?.outputTokens],
+      recorded: [row?.inputTokens, row?.outputTokens, row?.estimated],
+      cost: [answer.cost > 0, answer.cost === event?.cost?.amount],
+    }).toStrictEqual({
+      returned: [row?.inputTokens, row?.outputTokens],
+      audited: [row?.inputTokens, row?.outputTokens],
+      recorded: [row?.inputTokens, row?.outputTokens, true],
+      cost: [true, true],
     });
-    const ada = hello();
-
-    await expect(call(ada)).resolves.toMatchObject({ text: "Hi." });
-    await expect(ledgerOf(month, userOf(ada))).resolves.toBe(pricedMicros);
   });
 
   it("charge a Claude Sonnet 4.5 prompt past 200K tokens at Anthropic's long-context prices, as its audit event counts it", async () => {
@@ -777,189 +670,50 @@ describe("model spend", { timeout: 60_000 }, () => {
     const ada = hello({ model: anthropic, maxTokens: 1 });
 
     await expect(outcome(call(ada))).resolves.toBe("ok");
-    const [event] = await eventsOf(ada.trigger);
+    const [event] = await callEventsOf(ada.trigger, 1);
     // $6 a million in and $22.50 out past 200K, not $3 and $15.
     expect({
-      ledger: await ledgerOf(month, userOf(ada)),
+      spent: await spentBy(month, userOf(ada)),
       audited: Math.round((event?.cost?.amount ?? 0) * 1_000_000),
     }).toStrictEqual({
-      ledger: 250_000 * 6 + 2250,
+      spent: 250_000 * 6 + 2250,
       audited: 250_000 * 6 + 2250,
     });
   });
 
-  it("send no request whose content its bytes can't bound, such as an image", async () => {
-    const { fake, agent } = withProvider([pricedAnswer]);
+  it("answer every request of a long agent turn, recording each once", async () => {
+    const steps = 40;
+    const { agent, month } = withProvider(times(steps, pricedAnswer));
     const ada = newPerson();
     const session = await agent({
-      model: anthropic,
+      model: mistral,
+      maxTokens: smallCap,
       purpose: "chat.turn",
       trigger: ada,
       work: requireWork(),
     });
-    const stream = session.stream(
-      session.model,
-      normalizeContext({
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "What's this?" },
-              { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
-            ],
-            timestamp: Date.now(),
-          },
-        ],
-      })
-    );
-    const { stopReason, errorMessage } = await stream.result();
-
-    expect({ stopReason, errorMessage, sent: fake.requests }).toStrictEqual({
-      stopReason: "error",
-      errorMessage: "The model call was refused (model.unpriced).",
-      sent: [],
-    });
-  });
-
-  it("send nothing when the ledger can't admit a request, and say so", async () => {
-    const { fake, call } = withProvider([pricedAnswer], {
-      MODEL_LEDGER: failingLedger("admit"),
-    });
-    const ada = hello();
-
-    await expect(call(ada)).rejects.toMatchObject({
-      code: "model.ledger_unavailable",
-      message:
-        "Model spend can't be accounted for right now, so no model call was made. Try again later.",
-    });
-    expect(fake.requests).toStrictEqual([]);
-    await expect(eventsOf(ada.trigger)).resolves.toMatchObject([
-      {
-        action: "model.refused",
-        detail: { reason: "model.ledger_unavailable" },
-      },
-    ]);
-  });
-
-  it("send a request whose admission was lost to the ledger restarting, counted once", async () => {
-    const { fake, call, month } = withProvider([pricedAnswer], {
-      MODEL_LEDGER: restartingLedger(),
-    });
-    const ada = hello();
-
-    await expect(call(ada)).resolves.toMatchObject({ text: "Hi." });
-    // Admitted twice under one ID: once its request comes due, nothing
-    // more is charged than it used.
-    await reconcileNow(userOf(ada));
-    expect({
-      sent: fake.requests.length,
-      admitted: await requestsOf(userOf(ada)),
-      spent: await ledgerOf(month, userOf(ada)),
-    }).toStrictEqual({ sent: 1, admitted: 1, spent: pricedMicros });
-  });
-
-  it("keep a paid answer when its settlement can't be stored, and charge it the most it can cost once it comes due", async () => {
-    const { call, month } = withProvider([pricedAnswer], {
-      MODEL_LEDGER: failingLedger("settle"),
-    });
-    const ada = hello();
-
-    await expect(call(ada)).resolves.toMatchObject({ text: "Hi." });
-    const before = await ledgerOf(month, userOf(ada));
-    await reconcileNow(userOf(ada));
-    const after = await ledgerOf(month, userOf(ada));
-    expect([before, after > pricedMicros]).toStrictEqual([0, true]);
-  });
-
-  it("admit and count a retry in the month it is sent in, when the month turns between attempts", async () => {
-    const [before, after] = [newMonth(), newMonth()];
-    const dearer = { ...dearAnswer, inputTokens: 150_000 };
-    replies.push(
-      dearAnswer,
-      dearAnswer,
-      { ...dearer, text: "No JSON here." },
-      { ...dearer, text: '{ "total": 1 }' }
-    );
-    const fake = requireProvider();
-    const turningEnv: Env = {
-      ...env,
-      // The month turns once the call's first attempt was sent.
-      get MODEL_BUDGET_MONTH() {
-        return fake.requests.length < 3 ? before : after;
-      },
-    };
-    const ada = hello();
-    const call = async (more: Partial<ModelCall<undefined>> = {}) =>
-      await outcome(models(turningEnv).call({ ...ada, ...more }));
-
-    await expect(Promise.all([call(), call()])).resolves.toStrictEqual([
-      "ok",
-      "ok",
-    ]);
-    // Its first attempt counts in the old month; its retry in the new one.
-    await expect(
-      outcome(
-        models(turningEnv).call({
-          ...ada,
-          schema: z.object({ total: z.number() }),
+    const stopped: string[] = [];
+    for (let step = 0; step < steps; step += 1) {
+      const stream = session.stream(
+        session.model,
+        normalizeContext({
+          messages: [
+            { role: "user", content: `Step ${step}`, timestamp: Date.now() },
+          ],
         })
-      )
-    ).resolves.toBe("ok");
-    const dearerMicros = 75_000 + 150;
-    await expect(
-      Promise.all([ledgerOf(before, userOf(ada)), ledgerOf(after, userOf(ada))])
-    ).resolves.toStrictEqual([2 * dearMicros + dearerMicros, dearerMicros]);
+      );
+      // oxlint-disable-next-line no-await-in-loop -- one request after another, as a turn makes them
+      const answer = await stream.result();
+      stopped.push(answer.stopReason);
+    }
+
+    expect(new Set(stopped)).toStrictEqual(new Set(["stop"]));
+    await expect(spentBy(month, ada.userId, steps)).resolves.toBe(
+      steps * pricedMicros
+    );
   });
 
-  it("give every provider request of a call the call's own cut-off as its deadline, a second ask's too, never a whole timeout from when it is sent", async () => {
-    const timeoutMs = 60_000;
-    const release = Promise.withResolvers<boolean>();
-    const { call } = withProvider([
-      // The first answer takes its time, and doesn't fit: asked again.
-      {
-        ...pricedAnswer,
-        text: "No JSON here.",
-        pause: { at: 2, until: release.promise },
-      },
-      { ...pricedAnswer, text: '{ "total": 1 }' },
-    ]);
-    const ada = hello();
-    const started = Date.now();
-    const asking = outcome(
-      call({ ...ada, schema: z.object({ total: z.number() }), timeoutMs })
-    );
-    await scheduler.wait(1500);
-    release.resolve(true);
-    const answered = await asking;
-    const deadlines = await runInDurableObject(
-      modelLedger(env),
-      (_instance, state) =>
-        state.storage.sql
-          .exec<{ deadline: number }>(
-            "SELECT deadline FROM requests WHERE subject = ?",
-            userOf(ada)
-          )
-          .toArray()
-          .map(({ deadline }) => deadline)
-    );
-
-    expect({
-      answered,
-      asked: deadlines.length,
-      // Both the call's cut-off: the second, sent 1.5 seconds on, too.
-      same: new Set(deadlines).size,
-      withinTimeout: deadlines.every(
-        (at) => at >= started + timeoutMs && at <= started + timeoutMs + 1000
-      ),
-    }).toStrictEqual({
-      answered: "ok",
-      asked: 2,
-      same: 1,
-      withinTimeout: true,
-    });
-  });
-
-  it("count a workflow's calls apart from other workflows', and the deployment's across every caller", async () => {
+  it("sum a month's spend in the overview: the total across every caller, and each workflow's apart", async () => {
     const app = `app-${crypto.randomUUID()}`;
     const { call, month } = withProvider(times(5, pricedAnswer));
     const step = async (workflow: string) =>
@@ -979,25 +733,26 @@ describe("model spend", { timeout: 60_000 }, () => {
       Array.from({ length: 3 }, () => async () => await step("invoices"))
     );
     await step("orders");
-    // A new person: the deployment counts every caller, in this month.
+    // A new person: the total counts every caller, in this month.
     await call(hello());
-    const spent = await modelLedger(env).spendOf(
-      month,
-      ["workflow", "deployment"],
-      10
-    );
+    await recordedUsage(month, 5);
+    const spend = await monthSpend(env, month);
 
     expect({
-      workflows: (spent.workflow ?? [])
-        .map(({ key, spentMicros }) => [key, spentMicros])
-        .toSorted(byJson),
-      deployment: spent.deployment,
+      total: Math.round(spend.total * 1_000_000),
+      workflows: spend.workflows.map(({ appId, workflowId, amount }) => [
+        appId,
+        workflowId,
+        Math.round(amount * 1_000_000),
+      ]),
+      more: spend.more,
     }).toStrictEqual({
+      total: 5 * pricedMicros,
       workflows: [
-        [JSON.stringify([app, "invoices"]), 3 * pricedMicros],
-        [JSON.stringify([app, "orders"]), pricedMicros],
-      ].toSorted(byJson),
-      deployment: [{ key: "deployment", spentMicros: 5 * pricedMicros }],
+        [app, "invoices", 3 * pricedMicros],
+        [app, "orders", pricedMicros],
+      ],
+      more: false,
     });
   });
 });

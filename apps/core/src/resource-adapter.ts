@@ -148,14 +148,6 @@ export interface BindingCaller {
    */
   readonly held?: (key: string) => void;
   /**
-   * For a workflow run's call: whose person share of the model requests in
-   * flight it takes, from the run's row (workflows/dispatcher.ts): who
-   * started it, or its App's triggers' for a run nobody started. Not who
-   * it acts for: such a run acts for the App's owner, and never takes the
-   * owner's share.
-   */
-  readonly shareSubject?: string;
-  /**
    * For a workflow run's call: throws, synchronously, once the run's
    * step attempt no longer holds its lease. An adapter runs it last
    * before its side effect leaves core (connect's call, the provider
@@ -214,8 +206,7 @@ export interface BindingCaller {
   readonly appCalls?: { used: number };
   /**
    * For an invocation called, through other Apps, from a workflow run's
-   * (resource-apps.ts): the run, as the audit log names it, and whose
-   * person share of the model requests in flight it takes. A model
+   * (resource-apps.ts): the run, as the audit log names it. A model
    * request down the chain is the run's (resource-model.ts): it counts in
    * the run's workflow and lineage spend, and meets the rules for its
    * workflow, besides the called App's own binding.
@@ -231,7 +222,6 @@ export interface BindingCaller {
 /** The workflow run a chain of calls between Apps started from. */
 export interface RunOrigin {
   readonly actor: AuditActor;
-  readonly shareSubject?: string;
 }
 
 /** How an app resource calls another App's function (`BindingCaller.callApp`). */

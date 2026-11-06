@@ -123,7 +123,7 @@ interface __BaseEnv_Env {
    * Tests only: the UTC month model spend counts in, such as `2031-01`
    * (src/model-spend.ts).
    */
-  MODEL_BUDGET_MONTH?: string;
+  SPEND_MONTH?: string;
   /**
    * Tests only: fewer connector events one clock run delivers
    * (src/workflows/connector-events.ts).

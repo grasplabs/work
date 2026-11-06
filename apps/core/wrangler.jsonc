@@ -106,9 +106,6 @@
       { "name": "CLOCK", "class_name": "Clock" },
       // The onboarding's one store (src/onboarding/store.ts).
       { "name": "ONBOARDING", "class_name": "Onboarding" },
-      // The one ledger of what model requests reserve and spend
-      // (src/model-ledger.ts).
-      { "name": "MODEL_LEDGER", "class_name": "ModelLedger" },
       // One object per business store, named by the store's ID
       // (src/data-store.ts, src/data-stores.ts).
       { "name": "DATA_STORES", "class_name": "DataStore" },
@@ -139,6 +136,9 @@
     { "tag": "v8", "new_sqlite_classes": ["Clock"] },
     { "tag": "v9", "new_sqlite_classes": ["ChatState"] },
     { "tag": "v10", "new_sqlite_classes": ["ChatSession"] },
+    // The model ledger, and its storage: spend is recorded after each
+    // response, in D1 (src/model-usage.ts).
+    { "tag": "v11", "deleted_classes": ["ModelLedger"] },
   ],
   // Runs App sandboxes and the App compiler.
   "worker_loaders": [{ "binding": "LOADER" }],

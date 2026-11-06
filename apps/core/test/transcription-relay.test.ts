@@ -8,13 +8,13 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { modelLedger } from "../src/model-ledger.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import type { RealtimeSocket } from "./ai-providers-fake.ts";
 import { allEvents, logHead, eventsAfter } from "./audit-events.ts";
 import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { onLink, participate } from "./interview-link.ts";
+import { spentMicros } from "./model-usage.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
 import {
   actOnRealtime,
@@ -79,17 +79,17 @@ const relaying = async <T>(
   run: () => Promise<T>,
   { month }: { month?: string } = {}
 ): Promise<{ upstream: Upstream; result: T }> => {
-  const before = env.MODEL_BUDGET_MONTH;
+  const before = env.SPEND_MONTH;
   const { length: known } = await realtimeSockets();
   if (month !== undefined) {
-    env.MODEL_BUDGET_MONTH = month;
+    env.SPEND_MONTH = month;
   }
   try {
     const result = await run();
     const sockets = await realtimeSockets();
     return { upstream: { opened: sockets.slice(known) }, result };
   } finally {
-    env.MODEL_BUDGET_MONTH = before;
+    env.SPEND_MONTH = before;
   }
 };
 
@@ -250,27 +250,16 @@ const twoSeconds = (): Uint8Array => new Uint8Array(32_000).fill(7);
 const slowStart = (link: { secret: string; key: string }) =>
   ({ type: "start", language: "en", sampleRate: 8000, link }) as const;
 
-/**
- * GPT-4o Transcribe's price as the ledger pins it: micros per million
- * seconds, rounded up ($0.60 an hour).
- */
-const microsPerMillionSeconds = Math.ceil((0.6 / 3600) * 1e12);
-
-/** What `seconds` heard cost, in micros, as the ledger charges them. */
+/** What `seconds` heard cost, in micros: $0.60 an hour. */
 const heardMicros = (seconds: number): number =>
-  Math.ceil((seconds * microsPerMillionSeconds) / 1e6);
+  Math.round(((seconds * 0.6) / 3600) * 1e6);
 
-/** What the deployment spent in `month`, as the ledger counts it. */
-const deploymentSpend = async (month: string) => {
-  const spent = await modelLedger(env).spendOf(month, ["deployment"], 10);
-  return spent.deployment?.[0]?.spentMicros ?? 0;
-};
+/** What the organization's keys spent in `month`: nothing heard counts there. */
+const deploymentSpend = async (month: string) => await spentMicros(month);
 
-/** What Grasp's own key spent in `month`: transcription counts there. */
-const graspSpend = async (month: string) => {
-  const spent = await modelLedger(env).spendOf(month, ["platform"], 10);
-  return spent.platform?.[0]?.spentMicros ?? 0;
-};
+/** What Grasp's own key spent in `month`: what was heard counts there. */
+const graspSpend = async (month: string) =>
+  await spentMicros(month, { credential: "platform" });
 
 /**
  * Holds `seconds` of a link's day as a socket opened elsewhere would,

@@ -1,160 +1,52 @@
+import type { Usage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  boundMicros,
-  costDollars,
-  costMicros,
-  listPricesOf,
-  pinnedPrice,
-} from "../src/model-prices.ts";
+import { parseModelRef } from "../src/model-catalog.ts";
+import { listPricesOf, usageCost } from "../src/model-prices.ts";
 
-// What model requests cost in whole micros: pure arithmetic, tested on
-// its own.
+// What a model request cost at list prices: pi's `calculateCost` over the
+// provider's usage, with the tier pi's catalog leaves out. Pure
+// arithmetic, tested on its own.
 
-const mistral = { input: 0.5, output: 1.5, cacheRead: 0, cacheWrite: 0 };
 const claude = { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 };
 /** GPT-5.4's prices past 272K prompt tokens, as pi's catalog gives them. */
-const longPrompt = {
-  inputTokensAbove: 272_000,
-  input: 5,
-  output: 22.5,
-  cacheRead: 0.5,
-  cacheWrite: 0,
-};
-/** As pi's catalog prices it: twice the input and half again the output past 272K. */
 const gpt54 = {
   input: 2.5,
   output: 15,
   cacheRead: 0.25,
   cacheWrite: 0,
-  tiers: [longPrompt],
+  tiers: [
+    {
+      inputTokensAbove: 272_000,
+      input: 5,
+      output: 22.5,
+      cacheRead: 0.5,
+      cacheWrite: 0,
+    },
+  ],
+};
+
+/** A provider's usage of `counts`, its cost not yet worked out. */
+const usageOf = (counts: Partial<Usage>): Usage => ({
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  ...counts,
+});
+
+/** Claude Sonnet 4.5 from pi's catalog, as the gateway prices it. */
+const sonnet = () => {
+  const ref = parseModelRef("anthropic/claude-sonnet-4-5");
+  if (ref === undefined) {
+    throw new Error("The catalog has Claude Sonnet 4.5");
+  }
+  return { provider: ref.provider, id: ref.id, model: ref.catalog };
 };
 
 describe("model prices", () => {
-  it("pin a model's list prices as whole micros a million tokens, rounded up, named by their hash", async () => {
-    const pinned = await pinnedPrice(mistral);
-    expect(pinned).toMatchObject({
-      input: 500_000,
-      output: 1_500_000,
-      cacheRead: 0,
-      cacheWrite: 0,
-    });
-    expect(pinned?.version).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    await expect(pinnedPrice({ ...mistral })).resolves.toStrictEqual(pinned);
-    const other = await pinnedPrice(claude);
-    expect(other?.version).not.toBe(pinned?.version);
-    await expect(
-      pinnedPrice({ ...mistral, input: 0.0000001 })
-    ).resolves.toMatchObject({ input: 1 });
-  });
-
-  it("give a model no price when its input or output has none, or one isn't a price", async () => {
-    const prices = await Promise.all([
-      pinnedPrice({ ...mistral, input: 0 }),
-      pinnedPrice({ ...mistral, output: 0 }),
-      pinnedPrice({ ...mistral, output: Number.NaN }),
-      pinnedPrice({ ...mistral, cacheRead: -1 }),
-      pinnedPrice({ ...mistral, cacheWrite: Number.POSITIVE_INFINITY }),
-      pinnedPrice({ ...mistral, output: 1e300 }),
-    ]);
-    expect(prices.map((price) => price === undefined)).toStrictEqual([
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
-    ]);
-  });
-
-  it("charge each kind of token at its own price, rounding each up, so no use is free", async () => {
-    const pinned = await pinnedPrice(claude);
-    if (pinned === undefined) {
-      throw new Error("Claude has prices");
-    }
-    expect(
-      costMicros(pinned, {
-        input: 1000,
-        output: 100,
-        cacheRead: 1000,
-        cacheWrite: 1000,
-      })
-    ).toBe(3000 + 1500 + 300 + 3750);
-    expect(
-      costMicros(pinned, { input: 1, output: 0, cacheRead: 0, cacheWrite: 0 })
-    ).toBe(3);
-    expect(
-      costMicros(pinned, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
-    ).toBe(0);
-  });
-
-  it("bound a request at the dearest input price, so a cache write can't cost more than was reserved", async () => {
-    const pinned = await pinnedPrice(claude);
-    if (pinned === undefined) {
-      throw new Error("Claude has prices");
-    }
-    const bound = boundMicros(pinned, { inputTokens: 1000, outputTokens: 100 });
-    expect(bound).toBe(3750 + 1500);
-    for (const tokens of [
-      { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0 },
-      { input: 0, output: 100, cacheRead: 1000, cacheWrite: 0 },
-      { input: 0, output: 100, cacheRead: 0, cacheWrite: 1000 },
-      { input: 500, output: 100, cacheRead: 250, cacheWrite: 250 },
-    ]) {
-      expect(costMicros(pinned, tokens)).toBeLessThanOrEqual(bound);
-    }
-  });
-
-  it("charge a prompt past a tier's threshold at that tier's prices, as pi counts it, cached tokens included", async () => {
-    const pinned = await pinnedPrice(gpt54);
-    if (pinned === undefined) {
-      throw new Error("GPT-5.4 has prices");
-    }
-    // At the threshold: the base prices.
-    expect(
-      costMicros(pinned, {
-        input: 272_000,
-        output: 100,
-        cacheRead: 0,
-        cacheWrite: 0,
-      })
-    ).toBe(272_000 * 2.5 + 1500);
-    // Past it, cached tokens counting towards it: the tier's, for all of it.
-    expect(
-      costMicros(pinned, {
-        input: 272_000,
-        output: 100,
-        cacheRead: 28_000,
-        cacheWrite: 0,
-      })
-    ).toBe(272_000 * 5 + 2250 + 28_000 * 0.5);
-  });
-
-  it("bound a tiered model at its dearest tier, and name its tiers in its version", async () => {
-    const pinned = await pinnedPrice(gpt54);
-    const untiered = await pinnedPrice({ ...gpt54, tiers: [] });
-    if (pinned === undefined || untiered === undefined) {
-      throw new Error("GPT-5.4 has prices");
-    }
-    expect(boundMicros(pinned, { inputTokens: 1000, outputTokens: 100 })).toBe(
-      1000 * 5 + 2250
-    );
-    expect(pinned.version).not.toBe(untiered.version);
-    // A tier whose prices aren't prices leaves the model with none.
-    await expect(
-      pinnedPrice({
-        ...gpt54,
-        tiers: [{ ...longPrompt, output: Number.NaN }],
-      })
-    ).resolves.toBeUndefined();
-    await expect(
-      pinnedPrice({
-        ...gpt54,
-        tiers: [{ ...longPrompt, inputTokensAbove: -1 }],
-      })
-    ).resolves.toBeUndefined();
-  });
-
   it("give the Claude models that carry Anthropic's long-context premium a tier past 200K, and no others", () => {
     const premium = {
       inputTokensAbove: 200_000,
@@ -182,35 +74,35 @@ describe("model prices", () => {
     ]);
   });
 
-  it("cost in exact dollars at the tier a count is in, as the ledger charges it before rounding", async () => {
-    const pinned = await pinnedPrice(gpt54);
-    if (pinned === undefined) {
-      throw new Error("GPT-5.4 has prices");
-    }
-    const long = { input: 300_000, output: 100, cacheRead: 0, cacheWrite: 0 };
-    const short = { input: 1000, output: 3, cacheRead: 0, cacheWrite: 0 };
-    expect([
-      costDollars(pinned, long),
-      costDollars(pinned, short),
-    ]).toStrictEqual([1.50225, 0.002545]);
+  it("cost a prompt past 200K on a model with the premium at the premium, and one below it at list prices", () => {
+    const model = sonnet();
+    const { input, output } = model.model.cost;
+    const short = usageOf({ input: 100_000, output: 1000 });
+    const long = usageOf({ input: 250_000, output: 1000 });
+
+    expect([usageCost(model, short), usageCost(model, long)]).toStrictEqual([
+      (100_000 * input + 1000 * output) / 1_000_000,
+      (250_000 * input * 2 + 1000 * output * 1.5) / 1_000_000,
+    ]);
   });
 
-  it("refuse a count that isn't one, or a cost too large to count exactly", async () => {
-    const pinned = await pinnedPrice(claude);
-    if (pinned === undefined) {
-      throw new Error("Claude has prices");
-    }
-    expect(() =>
-      costMicros(pinned, { input: -1, output: 0, cacheRead: 0, cacheWrite: 0 })
-    ).toThrow(RangeError);
-    expect(() =>
-      costMicros(pinned, { input: 1.5, output: 0, cacheRead: 0, cacheWrite: 0 })
-    ).toThrow(RangeError);
-    expect(() =>
-      boundMicros(pinned, {
-        inputTokens: Number.MAX_SAFE_INTEGER,
-        outputTokens: Number.MAX_SAFE_INTEGER,
-      })
-    ).toThrow(RangeError);
+  it("cost one-hour cache writes at twice the input price, as Anthropic bills them", () => {
+    const model = sonnet();
+    const { input } = model.model.cost;
+
+    expect(
+      usageCost(model, usageOf({ cacheWrite: 10_000, cacheWrite1h: 10_000 }))
+    ).toBeCloseTo((10_000 * input * 2) / 1_000_000, 12);
+  });
+
+  it("cost a count that isn't one as nothing, and never write into the caller's usage", () => {
+    const model = sonnet();
+    const usage = usageOf({ input: 1000 });
+
+    expect({
+      broken: usageCost(model, usageOf({ input: Number.NaN })),
+      cost: usageCost(model, usage) > 0,
+      untouched: usage.cost.total,
+    }).toStrictEqual({ broken: 0, cost: true, untouched: 0 });
   });
 });

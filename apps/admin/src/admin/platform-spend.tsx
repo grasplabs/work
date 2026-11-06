@@ -2,9 +2,9 @@
  * What Grasp's own AI features cost on its keys, read only: on an
  * organization's AI use, its own this month and last, by feature and by
  * model; on Platform, every active organization's summed, with those
- * that cost the most (src/admin/platform-spend-sums.ts). The model
- * ledger's charges at list prices, in US dollars, read from each core
- * now. Nothing caps these features: this is where staff watch them.
+ * that cost the most (src/admin/platform-spend-sums.ts). What each call
+ * used, recorded after it, at list prices, in US dollars, read from each
+ * core now. Nothing caps these features: this is where staff watch them.
  */
 import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
 import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
@@ -35,7 +35,7 @@ const featureWords: Record<PlatformAiFeature, string> = {
   speech: "Speech",
 };
 
-/** A feature in words; one the ledger didn't record as "Other". */
+/** A feature in words; one core didn't record as "Other". */
 const featureLabel = (feature: PlatformAiFeature | null): string =>
   feature === null ? "Other" : featureWords[feature];
 
@@ -206,7 +206,7 @@ export const OrganizationPlatformSpend = ({
   status: Promise<AiStatusReport | null>;
 }) => (
   <Section
-    description="What document conversion, transcription and speech cost Grasp on its own keys for this organization: the model ledger’s charges in US dollars at list prices, read from its core now. Nothing caps them."
+    description="What document conversion, transcription and speech cost Grasp on its own keys for this organization: what each call used, recorded after it, in US dollars at list prices, read from its core now. Nothing caps them."
     title="Grasp’s own AI features"
   >
     <Await fallback={<Line>Reading its core…</Line>} promise={status}>
@@ -291,7 +291,7 @@ export const PlatformSpendPanel = ({
   spend: Promise<PlatformSpend | null>;
 }) => (
   <Section
-    description="Every active organization’s, summed: the model ledger’s charges in US dollars at list prices, read from each core now. Nothing caps them."
+    description="Every active organization’s, summed: what each call used, recorded after it, in US dollars at list prices, read from each core now. Nothing caps them."
     title="What they cost"
   >
     <Await fallback={<Line>Reading each core…</Line>} promise={spend}>

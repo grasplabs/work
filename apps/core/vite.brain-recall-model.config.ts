@@ -7,7 +7,7 @@ import { coreProject } from "./vite.config.ts";
 // runs it. The model is `BRAIN_MODEL`, as the gateway names it, such as
 // `mistral/mistral-large-latest` (the one while unset). The run's
 // organization chooses it, so it is the one a rerank asks, reached through
-// core's model gateway, ledger and connect, then from the test's isolate
+// core's model gateway and connect, then from the test's isolate
 // to the provider's own API with the real key `BRAIN_MODEL_KEY`
 // (test/brain-real-provider.ts): Anthropic's, Mistral's or OpenRouter's.
 // Never commit the key; give it in the shell. Run from the repository
@@ -18,8 +18,7 @@ import { coreProject } from "./vite.config.ts";
 //
 // It takes the repeats from `BRAIN_MODEL_REPEATS` (3 while unset). Each
 // recall that reranks makes one call; a warm one makes none. The budget is
-// the ledger's deployment limit for the run, and the only cap on it: core
-// refuses any request that could take the spend past it. The run reports
+// checked against what the run spent, as core recorded it; the provider key's own spend limit is the hard cap. The run reports
 // on its output as JSON lines (`BRAIN_RECALL_REPORT`); keep them outside
 // the repository.
 

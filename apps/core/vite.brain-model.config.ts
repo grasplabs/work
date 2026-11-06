@@ -7,7 +7,7 @@ import { coreProject } from "./vite.config.ts";
 // The model is `BRAIN_MODEL`, as the gateway names it, such as
 // `anthropic/claude-sonnet-5` or `mistral/mistral-large-latest` (the
 // latter while unset). The run's organization chooses it, so it is the one
-// its chats ask, reached through core's model gateway, ledger and connect,
+// its chats ask, reached through core's model gateway and connect,
 // then from the test's isolate to the provider's own API with the real key
 // `BRAIN_MODEL_KEY` (test/brain-real-provider.ts): Anthropic's, Mistral's
 // or OpenRouter's. Never commit the key; give it in the shell. A model the
@@ -26,9 +26,8 @@ import { coreProject } from "./vite.config.ts";
 // Both take the repeats from `BRAIN_MODEL_REPEATS` (3 while unset), so give
 // the estimate the repeats the run will have.
 //
-// The budget is the ledger's deployment limit for the run, and the only
-// cap on it: core refuses any request that could take the spend past it,
-// so the run stops there. Each run reports on its output as JSON lines
+// The budget is checked against what the run spent, as core recorded it;
+// core refuses nothing for spend, so the provider key's own spend limit is the hard cap. Each run reports on its output as JSON lines
 // (`BRAIN_MODEL_REPORT`); keep them outside the repository.
 
 const mode = process.env.BRAIN_MODEL_MODE;

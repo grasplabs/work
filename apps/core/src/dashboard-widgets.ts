@@ -247,7 +247,7 @@ const sameDraft = (one: WidgetDraft, other: WidgetDraft): boolean =>
  * writes it, it is checked against their rows, sent back to be put right
  * at most twice, and kept, a new one last on their dashboard. Refused as
  * `dashboard.widget_unreadable` when no answer would do, and with the
- * gateway's own refusals (a full share of the requests in flight, say).
+ * gateway's own refusals (a provider's rate limit, say).
  */
 export const makeWidget = async (
   env: Env,

@@ -185,14 +185,13 @@ const failureRecorded = (
   ] as const;
 
 /**
- * A run as it reads with its place in the queue (admission.ts,
- * `queuedRuns`): `queued`, with the share it waits for and when it asks
- * again, or since when it waits for its AI provider, while it would otherwise read as running, or as waiting the way
- * the engine has a step that sleeps between asks. A run that is paused or
- * has ended waits for no share, whatever place may still lapse.
+ * A run as it reads while held for its AI provider (admission.ts,
+ * `queuedRuns`): `queued`, with since when, while it would otherwise read
+ * as running, or as waiting the way the engine has a step that sleeps
+ * between asks. A run that is paused or has ended waits for nothing.
  */
 export const queuedRun = <
-  Run extends Pick<WorkflowRun, "status" | "queued" | "aiProvider">,
+  Run extends Pick<WorkflowRun, "status" | "aiProvider">,
 >(
   run: Run,
   wait: RunWait | undefined

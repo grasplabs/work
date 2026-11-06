@@ -534,7 +534,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     const [called] = await auditedFor("model.call", sealed.app);
     expect(called).toMatchObject({
       actor: { type: "app", appId: sealed.app },
-      detail: { purpose: "app.resource", ledger: "settled" },
+      detail: { purpose: "app.resource" },
     });
   });
 

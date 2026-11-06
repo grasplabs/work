@@ -1775,7 +1775,7 @@ const thisMonth = (): string =>
 const workflowSpend = async (workflowId: string) => {
   const { session } = await signedInWithRole(idp, "admin");
   const { core } = await openRpc(session, {
-    coreEnv: { ...env, MODEL_BUDGET_MONTH: thisMonth() },
+    coreEnv: { ...env, SPEND_MONTH: thisMonth() },
   });
   const spend = await core.authenticate().models.spend();
   return spend.workflows.filter((each) => each.workflowId === workflowId);

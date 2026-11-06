@@ -5731,25 +5731,13 @@ msgstr "Grasp vraagt, {number} van {total}"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp is nu niet bereikbaar. Probeer het zo opnieuw."
 
-#: src/chat/failure.ts
-msgid "Grasp can't count model spend right now. Try again later."
-msgstr "Grasp kan de modelkosten nu niet bijhouden. Probeer het later opnieuw."
-
 #: src/onboarding/review-parts.tsx
 msgid "Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews."
 msgstr "Grasp kan je mensen hun interviewlinks voorlopig niet mailen. Stuur iedereen zelf zijn link, vanuit Interviews."
 
-#: src/chat/failure.ts
-msgid "Grasp can't read your organization's model limits right now. Try again later."
-msgstr "Grasp kan de modellimieten van je organisatie nu niet lezen. Probeer het later opnieuw."
-
 #: src/settings/erasures.tsx
 msgid "Grasp can’t say how far it got just now. It goes on all the same."
 msgstr "Grasp kan nu niet zeggen hoe ver het is. Het gaat toch door."
-
-#: src/chat/failure.ts
-msgid "Grasp can't tell what this model would cost. Pick another one."
-msgstr "Grasp weet niet wat dit model zou kosten. Kies een ander model."
 
 #: src/chat/thread.tsx
 msgid "Grasp changed a widget on your dashboard."
@@ -5803,10 +5791,6 @@ msgstr "Grasp in jouw taal. Getallen, datums en bedragen volgen die ook."
 #: src/engines/app-workspace.tsx
 msgid "Grasp is building"
 msgstr "Grasp is aan het bouwen"
-
-#: src/chat/failure.ts
-msgid "Grasp is busy with other questions. Try again in a minute."
-msgstr "Grasp is bezig met andere vragen. Probeer het over een minuut opnieuw."
 
 #: src/dashboard/widget-ask.tsx
 msgid "Grasp is making it…"
@@ -13604,10 +13588,6 @@ msgstr "Deze pagina wil een andere site openen in een nieuw tabblad. Open die al
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "De opgeslagen code van deze pagina komt niet meer overeen met de gepubliceerde code, dus is hij niet geopend. Laat het een beheerder weten."
 
-#: src/chat/failure.ts
-msgid "This run has made all the model calls it may make."
-msgstr "Deze run heeft alle modelaanroepen gedaan die hij mag doen."
-
 #: src/engines/store-change-errors.ts
 msgid "This store no longer exists, so there is nothing to abandon."
 msgstr "Deze opslag bestaat niet meer, dus er valt niets op te geven."
@@ -14435,14 +14415,6 @@ msgstr "Wachten op een beslissing: {waiting}"
 #: src/dashboard/signals.tsx
 msgid "Waiting for a person"
 msgstr "Wacht op een persoon"
-
-#: src/workflows/runs.tsx
-msgid "Waiting for a share of the organization's runs; tries again by {time}"
-msgstr "Wacht op een deel van de uitvoeringen van de organisatie; probeert het uiterlijk {time} opnieuw"
-
-#: src/workflows/runs.tsx
-msgid "Waiting for a share of this person's runs; tries again by {time}"
-msgstr "Wacht op een deel van de uitvoeringen van deze persoon; probeert het uiterlijk {time} opnieuw"
 
 #: src/engines/app-webhooks.tsx
 #: src/workflows/workflow-triggers-tab.tsx

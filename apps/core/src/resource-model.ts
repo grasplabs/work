@@ -106,10 +106,9 @@ const answerSchema = (descriptor: ValueDescriptor) => {
 /**
  * What a gateway refusal means to App code, from an allow-list: a model the
  * deployment no longer lets this call use is a binding that can't serve,
- * a run lineage out of model requests is used up for good, a full share
- * of the requests in flight is queued and a provider's rate limit is rate-limited (each
- * worth asking again, after the wait core computed), an answer
- * that never fit is a contract the provider broke. Anything else stays the
+ * a provider's rate limit is rate-limited (worth asking again, after the
+ * wait core computed), an answer that never fit is a contract the
+ * provider broke. Anything else stays the
  * gateway's, for the operation host to redact.
  */
 const refusalOf = (error: unknown): unknown => {
@@ -117,7 +116,6 @@ const refusalOf = (error: unknown): unknown => {
   if (
     code === "model.not_allowed" ||
     code === "model.unconfigured" ||
-    code === "model.unpriced" ||
     code === "model.answer_too_long"
   ) {
     return operationErrors.create("resource.unavailable");
@@ -127,15 +125,8 @@ const refusalOf = (error: unknown): unknown => {
     : undefined;
   const after =
     typeof wait === "number" ? { retryAfterSeconds: wait } : undefined;
-  // A run lineage out of model requests: used up for good.
-  if (code === "model.run_limit") {
-    return operationErrors.create("resource.budget_exhausted", after);
-  }
-  // A full share of the requests in flight, and the provider's rate:
-  // throttling, worth asking again after the wait core computed.
-  if (code === "model.queued") {
-    return operationErrors.create("resource.queued", after);
-  }
+  // The provider's rate: throttling, worth asking again after the wait
+  // core computed.
   if (code === "model.rate_limited") {
     return operationErrors.create("resource.rate_limited", after);
   }
@@ -186,7 +177,6 @@ const generate = async (
       ? undefined
       : descriptorFromText(JSON.stringify(args[1]));
   const { runOrigin } = caller;
-  const shareSubject = caller.shareSubject ?? runOrigin?.shareSubject;
   try {
     const answer = await models(env).call({
       model: target.model,
@@ -204,8 +194,6 @@ const generate = async (
       // made, through other Apps, from a run's: its requests are the
       // run's, besides the called App's binding.
       trigger: runOrigin?.actor ?? caller.actor,
-      // A run's: whose share its requests take (BindingCaller).
-      ...(shareSubject === undefined ? {} : { shareSubject }),
       provenance: [...caller.sources.snapshot().collectionIds],
       work: { authority: caller.authority, context: caller.context },
       requestId: context.requestId,

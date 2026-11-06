@@ -7,7 +7,6 @@ import { describe, expect, it } from "vite-plus/test";
 import * as auditLog from "../src/db/audit-log/schema.ts";
 import * as core from "../src/db/core/schema.ts";
 import * as dataStore from "../src/db/data-store/schema.ts";
-import * as modelLedger from "../src/db/model-ledger/schema.ts";
 import * as onboarding from "../src/db/onboarding/schema.ts";
 import * as workspace from "../src/db/workspace/schema.ts";
 import {
@@ -28,7 +27,6 @@ const schemas = {
   workspace,
   onboarding,
   dataStore,
-  modelLedger,
   auditLog,
   brain,
 };

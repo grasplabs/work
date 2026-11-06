@@ -428,10 +428,10 @@ describe("step.do", () => {
     const rateLimited = failingWith(() =>
       Object.assign(new Error("Busy"), { code: "connect.server_unavailable" })
     );
-    // As the model gateway answers while a share of the requests in flight
-    // is full: nothing sent, and a share comes back as they end.
-    const queued = failingWith(() =>
-      Object.assign(new Error("Queued"), { code: "model.queued" })
+    // As the model gateway answers while the provider limits requests:
+    // nothing answered, and its rate comes back as its window passes.
+    const limited = failingWith(() =>
+      Object.assign(new Error("Limited"), { code: "model.rate_limited" })
     );
     // As an App's model binding answers while its budget is held so.
     const bindingHeld = failingWith(() =>
@@ -448,16 +448,6 @@ describe("step.do", () => {
       retryable: true,
       requestId: "request-1",
     }));
-    // As the model gateway answers once a run lineage made all its model
-    // requests: it stays so.
-    const runSpent = failingWith(() =>
-      Object.assign(new Error("Spent"), { code: "model.run_limit" })
-    );
-    const bindingSpent = failingWith(() =>
-      Object.assign(new Error("Binding spent"), {
-        code: "resource.budget_exhausted",
-      })
-    );
     // As a tool reports bad input: trying again changes nothing.
     const refused = failingWith(() =>
       Object.assign(new Error("Refused"), { code: "connect.action_failed" })
@@ -470,20 +460,16 @@ describe("step.do", () => {
       );
     expect({
       rateLimited: await outcomeOf(rateLimited),
-      queued: await outcomeOf(queued),
+      limited: await outcomeOf(limited),
       bindingHeld: await outcomeOf(bindingHeld),
       answerHeld: await outcomeOf(answerHeld),
-      runSpent: await outcomeOf(runSpent),
-      bindingSpent: await outcomeOf(bindingSpent),
       refused: await outcomeOf(refused),
       thrown: await outcomeOf(thrown),
     }).toStrictEqual({
       rateLimited: 3,
-      queued: 3,
+      limited: 3,
       bindingHeld: 3,
       answerHeld: 3,
-      runSpent: "Spent",
-      bindingSpent: "Binding spent",
       refused: "Refused",
       thrown: "No such customer",
     });

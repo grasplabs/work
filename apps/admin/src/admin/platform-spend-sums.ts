@@ -11,7 +11,7 @@ import type {
 } from "@grasp-os/shared/ai-status-report";
 import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
 
-/** Millionths of a US dollar in a dollar, as the ledger counts them. */
+/** Millionths of a US dollar in a dollar, as core reports them. */
 export const microsPerDollar = 1_000_000;
 
 /** The most organizations the platform's overview lists. */

@@ -5731,25 +5731,13 @@ msgstr "Grasp asks, {number} of {total}"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp can't be reached right now. Try again in a moment."
 
-#: src/chat/failure.ts
-msgid "Grasp can't count model spend right now. Try again later."
-msgstr "Grasp can't count model spend right now. Try again later."
-
 #: src/onboarding/review-parts.tsx
 msgid "Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews."
 msgstr "Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews."
 
-#: src/chat/failure.ts
-msgid "Grasp can't read your organization's model limits right now. Try again later."
-msgstr "Grasp can't read your organization's model limits right now. Try again later."
-
 #: src/settings/erasures.tsx
 msgid "Grasp can’t say how far it got just now. It goes on all the same."
 msgstr "Grasp can’t say how far it got just now. It goes on all the same."
-
-#: src/chat/failure.ts
-msgid "Grasp can't tell what this model would cost. Pick another one."
-msgstr "Grasp can't tell what this model would cost. Pick another one."
 
 #: src/chat/thread.tsx
 msgid "Grasp changed a widget on your dashboard."
@@ -5803,10 +5791,6 @@ msgstr "Grasp in your language. Numbers, dates and amounts follow it too."
 #: src/engines/app-workspace.tsx
 msgid "Grasp is building"
 msgstr "Grasp is building"
-
-#: src/chat/failure.ts
-msgid "Grasp is busy with other questions. Try again in a minute."
-msgstr "Grasp is busy with other questions. Try again in a minute."
 
 #: src/dashboard/widget-ask.tsx
 msgid "Grasp is making it…"
@@ -13604,10 +13588,6 @@ msgstr "This page wants to open another site in a new tab. Open it only if you e
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 
-#: src/chat/failure.ts
-msgid "This run has made all the model calls it may make."
-msgstr "This run has made all the model calls it may make."
-
 #: src/engines/store-change-errors.ts
 msgid "This store no longer exists, so there is nothing to abandon."
 msgstr "This store no longer exists, so there is nothing to abandon."
@@ -14435,14 +14415,6 @@ msgstr "Waiting for a decision: {waiting}"
 #: src/dashboard/signals.tsx
 msgid "Waiting for a person"
 msgstr "Waiting for a person"
-
-#: src/workflows/runs.tsx
-msgid "Waiting for a share of the organization's runs; tries again by {time}"
-msgstr "Waiting for a share of the organization's runs; tries again by {time}"
-
-#: src/workflows/runs.tsx
-msgid "Waiting for a share of this person's runs; tries again by {time}"
-msgstr "Waiting for a share of this person's runs; tries again by {time}"
 
 #: src/engines/app-webhooks.tsx
 #: src/workflows/workflow-triggers-tab.tsx

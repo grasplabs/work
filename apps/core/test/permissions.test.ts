@@ -708,8 +708,7 @@ describe("permissions", () => {
       "CONNECT_PROVIDERS",
       // Tests set these for a while (env.d.ts), and a test running beside
       // this one, or one that put back no value, leaves the name in env.
-      "MODEL_BUDGET_MONTH",
-      "MODEL_BUDGET_DAY",
+      "SPEND_MONTH",
     ]);
     const own = Object.keys(env).filter((name) => !testOnly.has(name));
     expect(

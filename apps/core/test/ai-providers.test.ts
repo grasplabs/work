@@ -3,8 +3,8 @@
  * through core's `/rpc`, connect seals it, and core's model gateway
  * reaches the provider's own API through connect, which adds the key.
  * The providers are the outside systems here, faked behind connect's
- * fetch (test/ai-providers-fake.ts); core, connect, the ledger and the
- * audit log are real.
+ * fetch (test/ai-providers-fake.ts); core, connect, the usage record and
+ * the audit log are real.
  *
  * The ways it can fail come first (threat model in src/ai-providers.ts,
  * src/model-transport-connect.ts and connect's src/ai-providers.ts): a key
@@ -22,7 +22,6 @@ import {
 import type { OrganizationProviderId } from "@grasp-os/shared/ai-providers";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
   afterEach,
@@ -34,7 +33,7 @@ import {
 } from "vite-plus/test";
 import { z } from "zod";
 
-import { modelLedger } from "../src/model-ledger.ts";
+import { spendMonth } from "../src/model-spend.ts";
 import { modelFailureOf, models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
@@ -45,6 +44,7 @@ import { platformOpenAiKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { holdAlarm } from "./interview-link.ts";
 import type { Answer } from "./model-provider.ts";
+import { recordedUsage } from "./model-usage.ts";
 import { agree, fact, mapped, team } from "./onboarding-team.ts";
 import { streamText } from "./provider-streams.ts";
 import {
@@ -296,17 +296,6 @@ const onlyAt = ({ host, header }: Pick<ProviderCase, "host" | "header">) => ({
   inBody: false,
   placeholder: false,
 });
-
-/** The model ledger's routes for the requests of `model`. */
-const ledgerRoutes = async (model: string) =>
-  await runInDurableObject(modelLedger(env), (_ledger, state) =>
-    state.storage.sql
-      .exec(
-        "SELECT transport, provider, region, credential FROM requests WHERE model = ?",
-        model
-      )
-      .toArray()
-  );
 
 /** The rows of every table in core's database, as text. */
 const coreDatabaseText = async (): Promise<string> => {
@@ -1345,7 +1334,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
       await expect(placesOf(key)).resolves.toStrictEqual(onlyAt(each));
     });
 
-    it("records its usage and the route in the audit log and the ledger", async () => {
+    it("records its usage and the route in the audit log and its usage", async () => {
       const key = await connected(each);
       await plan(key, [answered(each.api, "Hello, Ada.")]);
       const trigger = newPerson();
@@ -1367,12 +1356,17 @@ describe("AI providers", { timeout: 60_000 }, () => {
           credential: "organization",
         },
       });
-      await expect(ledgerRoutes(each.model)).resolves.toContainEqual({
-        transport: "connect",
-        provider: each.provider,
-        region: each.region,
-        credential: "organization",
+      const rows = await recordedUsage(spendMonth(env), 1, {
+        personId: trigger.userId,
       });
+      expect(rows).toMatchObject([
+        {
+          model: each.model,
+          credential: "organization",
+          inputTokens: 1000,
+          outputTokens: 100,
+        },
+      ]);
     });
 
     it("stops a request its caller cancels mid-answer", async () => {

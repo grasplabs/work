@@ -40,8 +40,8 @@ import type { BuiltCall, Effect } from "./resource-calls.ts";
 // - A test's model call reaches a model, or spends budget: it is answered
 //   with the answer its fixture gives the binding
 //   (`workflows.<alias>.models.<binding>`), read from the run's record. The
-//   model gateway is never called, so nothing is admitted against a ledger,
-//   a budget or a share, nothing is billed, and no provider hears of it. A
+//   model gateway is never called, so nothing is billed or recorded, and
+//   no provider hears of it. A
 //   binding the fixture gives no answer fails the run
 //   (`workflow.test_unfixtured`): it never falls through to a real call.
 // - A test's store call reaches a real store or real data: it runs only on

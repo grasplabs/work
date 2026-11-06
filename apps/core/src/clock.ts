@@ -31,6 +31,7 @@ import { advanceExports } from "./knowledge/brain-export.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
+import { sweepModelUsage } from "./model-usage.ts";
 import { checkReadings } from "./onboarding/documents.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { retryErasures } from "./person-erasure.ts";
@@ -299,6 +300,8 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     run: recheckMalware,
   },
   { name: "apps.releases", period: "quarterHour", run: sweepReleases },
+  // Model usage past its retention (src/model-usage.ts).
+  { name: "models.usage", period: "quarterHour", run: sweepModelUsage },
   {
     name: "apps.test_fixtures",
     period: "quarterHour",

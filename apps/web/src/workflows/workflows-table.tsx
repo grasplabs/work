@@ -91,7 +91,6 @@ const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
       ) : (
         <RunResult
           aiProvider={workflow.lastRun.aiProvider}
-          queued={workflow.lastRun.queued}
           status={workflow.lastRun.status}
         />
       )}

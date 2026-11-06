@@ -56,9 +56,9 @@ import type ExtractorWorker from "./extractor/worker.ts";
 //   key connect holds, at its EU host; without the key the file is read
 //   here, sent nowhere. One the gateway refuses fails as
 //   `upload.conversion_unavailable`.
-// - A file that runs up the bill: an upload is at most 10 MB, and the
-//   ledger bounds the request by the model's whole context window before
-//   it is sent (model-documents.ts), against the uploader's budgets.
+// - A file that runs up the bill: an upload is at most 10 MB, the
+//   provider refuses a request beyond the model's window, and what each
+//   conversion cost is recorded on Grasp's key (model-usage.ts).
 // - The file's own words taken as instructions: the answer is only ever
 //   the document's text, saved as its version, which a person reads; it
 //   is checked as the local extractor's is (`markdownMaxBytes`), and an
@@ -409,15 +409,11 @@ const unavailableCodes: ReadonlySet<string> = new Set([
   "model.unconfigured",
   "model.no_provider",
   "model.not_allowed",
-  "model.unpriced",
   "model.answer_too_long",
 ]);
 
 /** The gateway's refusals that pass with time: waited out, no retry spent. */
-const busyCodes: ReadonlySet<string> = new Set([
-  "model.queued",
-  "model.rate_limited",
-]);
+const busyCodes: ReadonlySet<string> = new Set(["model.rate_limited"]);
 
 /** What converts a PDF: a provider and its model (platform-ai.ts). */
 type ConversionSettings = (typeof platformAi)["conversion"];

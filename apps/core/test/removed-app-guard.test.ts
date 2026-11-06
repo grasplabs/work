@@ -21,6 +21,9 @@ const leftOpen = new Set([
   "sdk_release_pins",
   "sdk_release_tombstones",
   "dependency_approvers",
+  // What a response used is recorded after it, even for an App removed
+  // meanwhile: the provider billed it (src/model-usage.ts).
+  "model_usage",
 ]);
 
 /**

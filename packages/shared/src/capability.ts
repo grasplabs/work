@@ -396,10 +396,9 @@ export const verifyCapability = async (
 // The model grant: core's capability for one provider request of a model
 // call, which connect makes with a credential it holds (connect's
 // ai-providers.ts). Core signs it only once the model gateway decided the
-// call and the model ledger admitted the request (core's models.ts), for
-// exactly that request: the credential (the organization's or Grasp's),
-// the provider, the host it goes to, the ledger's ID for it and the hash
-// of its body. Made with the same key and scheme as a capability, under a
+// call (core's models.ts), for exactly that request: the credential (the
+// organization's or Grasp's), the provider, the host it goes to, the
+// request's ID and the hash of its body. Made with the same key and scheme as a capability, under a
 // context of its own, so one never passes for the other. A grant isn't
 // kept as used: within its few seconds it could be sent again, but only
 // with the very body core signed for, to the same host on the same
@@ -439,7 +438,7 @@ export const modelGrantClaimsSchema = z.strictObject({
   ]),
   /** The host the request goes to, lowercase. */
   host: z.string().min(1).max(253),
-  /** The model ledger's ID for the request, for connect's log. */
+  /** The gateway's ID for the request, for connect's log. */
   request: z.uuid(),
   /**
    * The SHA-256 of the request's body, hex: connect sends only the body

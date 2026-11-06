@@ -14,13 +14,8 @@ const failureWords: Readonly<Record<ModelErrorCode, MessageDescriptor>> = {
   "model.provider_key_failed": msg`Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.`,
   "model.provider_unavailable": msg`Your AI provider isn't answering. This is usually an outage on their side; try again in a while.`,
   "model.not_allowed": msg`Your organization doesn't allow this model. Pick another one.`,
-  "model.run_limit": msg`This run has made all the model calls it may make.`,
-  "model.queued": msg`Grasp is busy with other questions. Try again in a minute.`,
   "model.rate_limited": msg`Your AI provider is limiting requests (a rate or spending limit at the provider). Try again in a while.`,
-  "model.unpriced": msg`Grasp can't tell what this model would cost. Pick another one.`,
   "model.answer_too_long": msg`This model can't give an answer that long. Pick another model, or ask for less.`,
-  "model.ledger_unavailable": msg`Grasp can't count model spend right now. Try again later.`,
-  "model.quota_policy_unavailable": msg`Grasp can't read your organization's model limits right now. Try again later.`,
   "model.failed": msg`The model couldn't answer. Try again.`,
   "model.invalid_output": msg`The model's answer came back in the wrong shape. Try again.`,
 };

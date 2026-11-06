@@ -278,7 +278,6 @@ const permanentCodes: ReadonlySet<string> = new Set([
   "resource.idempotency_conflict",
   "resource.declined",
   "connect.declined",
-  "resource.budget_exhausted",
   "resource.limit_reached",
   "workflow.model_call_limit",
   "workflow.action_call_limit",

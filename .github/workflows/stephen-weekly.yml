@@ -1,9 +1,9 @@
 # Stephen's eval against the real model once a week (GRA-739), on main as
 # staging runs it, at the model's provider's own API with staging's key for
 # it (`STEPHEN_EVAL_MODEL_KEY`) and a budget of its own
-# (`STEPHEN_WEEKLY_BUDGET_USD`, about €20): the ledger's deployment limit
-# for the run, the one cap on what it spends (core refuses any request that
-# could take it past that). So a model's drift shows even when nothing in
+# (`STEPHEN_WEEKLY_BUDGET_USD`, about €20), which stops the run between
+# cases once its calls cost that much; the key's own spend limit at the
+# provider is the hard cap. So a model's drift shows even when nothing in
 # Stephen changed. Its numbers go to the run's summary, to the issue
 # `STEPHEN_EVAL_ISSUE` names when set, and its report and every model
 # exchange to the run's artifact. Also by hand, from the Actions tab.

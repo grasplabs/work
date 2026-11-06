@@ -7,12 +7,11 @@ import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { encode } from "@grasp-os/workerflow/codec";
 import { WorkflowRun } from "@grasp-os/workerflow/run";
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { appFor } from "../src/apps.ts";
-import { modelLedger } from "../src/model-ledger.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
@@ -36,8 +35,7 @@ import {
   resourceRunFor,
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
-import { connectModels, fakeProviderFor } from "./model-provider.ts";
-import type { ProviderReply } from "./model-provider.ts";
+import { connectModels } from "./model-provider.ts";
 import { withQuotas } from "./quota-limits.ts";
 import {
   admittedFreely,
@@ -157,13 +155,6 @@ const allowedModel = "mistral/mistral-large-latest";
 const chooseModel = async (): Promise<void> => {
   await connectModels(`test-model-key-${crypto.randomUUID()}`, [allowedModel]);
 };
-
-/** A model's answer greeting with `greeting`, to a child's schema. */
-const greetingAnswer = (greeting: string) => ({
-  text: JSON.stringify({ greeting }),
-  inputTokens: 100,
-  outputTokens: 20,
-});
 
 /** The binding of `child`'s 1.0.0, as a parent declares it. */
 const childBinding = (child: string) => ({
@@ -356,65 +347,6 @@ const listeningChild = async (admin: Identity) => {
     reviewed: { version: 1 },
   });
   return child;
-};
-
-/** A child of `admin`'s asking a model once, through a binding approved for it. */
-const askingChild = async (admin: Identity) => {
-  const contract = `models-${unique()}`;
-  await publishCatalogContract(env, admin, { key: contract, kind: "model" });
-  const child = await workflowOf(admin, "child", [
-    (name) =>
-      definitionOf(
-        name,
-        [
-          {
-            ask: {
-              call: "grasp.model",
-              with: {
-                binding: "summary",
-                instructions: "Greet them.",
-                input: { who: "${ .who }" },
-                outputSchema: objectSchema({ greeting: { type: "string" } }),
-              },
-            },
-          },
-        ],
-        { bindings: { summary: { kind: "model", contract } } }
-      ),
-  ]);
-  await approveWorkflowBinding(env, admin, child.id, {
-    alias: "summary",
-    target: { kind: "model", model: allowedModel },
-    reviewed: { version: 1 },
-  });
-  return child;
-};
-
-/** The provider of the chosen model answering `replies` in turn. */
-const providerAnswering = async (...replies: ProviderReply[]) =>
-  await fakeProviderFor([allowedModel], ...replies);
-
-/** What the model ledger keeps of lineage `root`: its spend rows. */
-const lineageSpendOf = async (root: string): Promise<number> =>
-  await runInDurableObject(
-    modelLedger(env),
-    (_instance, state) =>
-      state.storage.sql
-        .exec(
-          "SELECT 1 FROM spend WHERE scope = 'run' AND key = ? AND period = 'lineage'",
-          root
-        )
-        .toArray().length
-  );
-
-/** The model ledger's alarm, with its sweep, now. */
-const ledgerSwept = async (): Promise<void> => {
-  // Set an hour ahead, never for now: workerd would run one due now on
-  // its own, and this one would then find none to run.
-  await runInDurableObject(modelLedger(env), async (_instance, state) => {
-    await state.storage.setAlarm(Date.now() + 60 * 60 * 1000);
-  });
-  await expect(runDurableObjectAlarm(modelLedger(env))).resolves.toBeTruthy();
 };
 
 /** Once run `parentId`'s child is waiting, as the engine says. */
@@ -876,69 +808,6 @@ describe("run tasks", { timeout: 180_000 }, () => {
       deep: { status: "failed", code: "workflow.child_failed" },
       wide: { status: "failed", code: "workflow.lineage_limit" },
     });
-  });
-
-  it("count every run of the lineage against its model requests, so children never start them afresh", async () => {
-    const admin = await person("admin");
-    const child = await askingChild(admin);
-    const { parent } = await parentOf(admin, child, [
-      runChild("first", child.name),
-      runChild("second", child.name),
-    ]);
-    const provider = await providerAnswering(
-      greetingAnswer("Hello, Ada"),
-      greetingAnswer("Never sent")
-    );
-
-    // One request for the lineage: each child alone may make one, as its
-    // own limit of model calls allows, but not both.
-    const result = await withQuotas({ lineageModelRequests: 1 }, async () => {
-      const runId = await started(admin, parent.id);
-      const run = await endOf(admin, parent.id, runId);
-      const children = await childrenOf(runId);
-      return {
-        end: endStateOf(run),
-        children: children.map(({ status }) => status),
-        requests: provider.requests.length,
-      };
-    });
-
-    expect(result).toStrictEqual({
-      end: { status: "failed", code: "workflow.child_failed" },
-      children: ["completed", "failed"],
-      requests: 1,
-    });
-  });
-
-  it("have the model ledger forget a lineage's requests once every run of it ended long ago, and keep them till then", async () => {
-    const admin = await person("admin");
-    const child = await askingChild(admin);
-    const { parent } = await parentOf(admin, child, [
-      runChild("ask-child", child.name),
-    ]);
-    await providerAnswering(greetingAnswer("Hello, Ada"));
-    const runId = await started(admin, parent.id);
-    await endOf(admin, parent.id, runId);
-    const [asked] = await childrenOf(runId);
-    // Ended just now: kept, in case a late delivery starts a run in it.
-    await ledgerSwept();
-    const ended = await lineageSpendOf(runId);
-    // Past the ledger's retention of an ended lineage, and the oldest a
-    // lineage may grow: as the clock would have it a year on (runs' rows
-    // keep when they started and ended, which nothing changes).
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(Date.now() + 400 * 24 * 60 * 60 * 1000);
-    try {
-      await ledgerSwept();
-    } finally {
-      vi.useRealTimers();
-    }
-
-    expect({
-      child: asked?.status,
-      ended,
-      pruned: await lineageSpendOf(runId),
-    }).toStrictEqual({ child: "completed", ended: 1, pruned: 0 });
   });
 
   it("wait for a child only while the lineage may run, from its root's start, then stop it", async () => {

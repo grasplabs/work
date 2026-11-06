@@ -17,7 +17,7 @@ import { testBinding } from "./test-env.ts";
 // connect differs (brain-real-provider.ts): the provider's own API, with
 // the real key the run was given (`BRAIN_MODEL_KEY`), the model the run
 // names the one the organization chose, which a rerank asks, and the
-// run's budget is the ledger's deployment limit. It reports on the run's
+// run's budget is checked against what it spent; the provider key's own spend limit is the hard cap. It reports on the run's
 // output as one JSON line: the numbers a decision to make reranking a
 // default rests on.
 

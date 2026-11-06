@@ -117,14 +117,12 @@ import { busyRetryAfterSeconds, slotFree } from "./admission.ts";
 /**
  * The limits core reads as it admits work, each a ceiling: a run's steps,
  * a step's attempts (its first included), the levels and descendant runs
- * of a run lineage, the lineage's active execution and age, the provider
- * requests it sends to models (core's model ledger, model-spend.ts), the
- * host calls its attempts make, the attempts running at once in the
- * client and of one App (admission.ts), how long one step waits for load,
- * the independent workflows and live triggers one person creates
- * (workflow-resources.ts, trigger-resources.ts), and the provider requests
- * to models in flight at once in the client and for one person
- * (model-admission.ts).
+ * of a run lineage, the lineage's active execution and age, the model
+ * calls one run makes (`maxModelCalls`), the host calls its attempts make,
+ * the attempts running at once in the client and of one App
+ * (admission.ts), how long one step waits for load, and the independent
+ * workflows and live triggers one person creates (workflow-resources.ts,
+ * trigger-resources.ts).
  */
 const quotaLimitNames = [
   "workflowSteps",
@@ -140,8 +138,6 @@ const quotaLimitNames = [
   "workflowAppAttempts",
   "workflowQueuedStepMs",
   "triggerResourcesPerPerson",
-  "modelClientRequests",
-  "modelPersonRequests",
 ] as const;
 
 type QuotaLimit = (typeof quotaLimitNames)[number];

@@ -86,7 +86,7 @@ export interface AiProviderSpec {
   keyHeader: AiKeyHeader;
   /** Where it runs, in plain words, for the admin. */
   whereItRuns: string;
-  /** Its region, as the model ledger records each call's route. */
+  /** Its region, as the model gateway records each call's route. */
   region: "us" | "eu" | "custom";
   /**
    * The connect Worker secret holding Grasp's own key for it, for platform
@@ -240,7 +240,7 @@ const platformHosts: Readonly<Partial<Record<AiProviderId, string>>> = {
 /** Where a platform feature's requests go on Grasp's own key, and where that is. */
 export interface PlatformRoute {
   host: string;
-  /** Its region, as the model ledger records it. */
+  /** Its region, as the model gateway records it. */
   region: AiProviderSpec["region"];
   /** Where it runs, in plain words. */
   whereItRuns: string;
@@ -390,7 +390,7 @@ export interface AiProviderRoutes {
   platform: AiProviderId[];
 }
 
-/** How a provider's calls went lately, from the model ledger. */
+/** How a provider's calls went lately, as the model gateway noted them. */
 export interface AiProviderStatus {
   /** When a call last worked, and last failed, in ms since the epoch. */
   lastOkAt: number | null;
@@ -569,7 +569,7 @@ export interface AiProviderConnectApi {
   aiProviderRoutes: () => Promise<AiProviderRoutes>;
   /**
    * Sends one provider request of a model call, which core's gateway
-   * decided and its ledger admitted, with the credential `grant` names
+   * decided, with the credential `grant` names
    * (`signModelGrant`): only to the provider's own host (or the
    * organization's registered base URL), only to its model paths,
    * carrying `aiCredentialPlaceholder` where the key goes, which connect
