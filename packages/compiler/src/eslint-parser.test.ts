@@ -4,20 +4,15 @@ import { Linter } from "eslint/universal";
 import { describe, expect, test } from "vite-plus/test";
 
 import { oxcWasmModule } from "../oxc-wasm/wasm.ts";
-import {
-  commentsOf,
-  parser,
-  startOxcParser,
-  unparsableMessage,
-} from "./eslint-parser.ts";
-import { asEslint } from "./lint-comments.ts";
+import { parser, startOxcParser, unparsableMessage } from "./eslint-parser.ts";
 import { oxcOf } from "./oxc.ts";
 
 // The lint isolate's ESLint parser (eslint-parser.ts), on oxc.wasm as the
 // isolate starts it: what ESLint reads of a file, where it is, and what a
 // file it can't read says.
 
-startOxcParser(oxcOf(await oxcWasmModule(), { lint: {}, format: {} }).parse);
+const oxc = oxcOf(await oxcWasmModule());
+startOxcParser((path, source) => oxc.parse(path, source, true));
 
 /** A rule that reports every node of `type`, with its value and range. */
 const reporting = (type: string): ESLint.Plugin => ({
@@ -88,13 +83,6 @@ describe("what ESLint reads of a file", () => {
         message: `undefined ${code.indexOf("<p>")}-${code.indexOf(";\r\n", code.indexOf("<p>"))}`,
       },
     ]);
-    expect(commentsOf("a.tsx", code)).toStrictEqual([
-      {
-        type: "Line",
-        value: " ü 😀",
-        range: [code.indexOf("//"), code.indexOf("\r\n", code.indexOf("//"))],
-      },
-    ]);
   });
 
   test("says where a file stops parsing, past characters outside ASCII", () => {
@@ -140,20 +128,16 @@ describe("a file too large or nested too deep to read", () => {
     });
   });
 
-  test("says to split it, whether it is too large or too deep, and its disable comments are none", () => {
+  test("says to split it, whether it is too large or too deep", () => {
     const larger = data(1_000_000);
     const deeper = deep(20_000);
 
     expect({
       larger: verify(larger, "Program", "a.ts").map(({ message }) => message),
       deeper: verify(deeper, "Program", "a.ts").map(({ message }) => message),
-      comments: commentsOf("a.ts", deeper),
-      read: asEslint("a.ts", deeper).text === deeper,
     }).toStrictEqual({
       larger: [`Parsing error: ${unparsableMessage}`],
       deeper: [`Parsing error: ${unparsableMessage}`],
-      comments: [],
-      read: true,
     });
   });
 

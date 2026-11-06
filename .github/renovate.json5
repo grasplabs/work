@@ -57,7 +57,7 @@
       ],
     },
     {
-      groupName: "page checks",
+      groupName: "server code lint",
       matchPackageNames: ["eslint", "@typescript-eslint/**"],
     },
     {
@@ -128,8 +128,8 @@
       minimumReleaseAgeBehaviour: "timestamp-optional",
     },
 
-    // App code's oxlint and oxfmt move only with oxc.wasm, which is built
-    // from their release (packages/compiler/oxc-wasm/pin.json).
+    // App code's oxlint, oxfmt and oxc-parser move only with oxc.wasm,
+    // which is built from their release (packages/compiler/oxc-wasm/pin.json).
     {
       matchDepTypes: ["pnpm.catalog.oxc"],
       enabled: false,

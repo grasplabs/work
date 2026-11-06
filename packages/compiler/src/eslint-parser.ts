@@ -1,8 +1,8 @@
 /**
- * The parser of the lint isolate's ESLint lints (lint.ts, server-lint.ts),
- * and the one @shadcn/lint reads the kit's components with: oxc's, on the
- * oxc.wasm instance Ultracite's lint runs on (oxc-wasm/src/lib.rs
- * `parse`), with typescript-eslint's own scope analysis and visitor keys.
+ * The parser of the lint isolate's ESLint lint of server code
+ * (server-lint.ts): oxc's, on the oxc.wasm instance Ultracite's lint runs
+ * on (oxc-wasm/src/lib.rs `parse`, with ESLint's tokens), with
+ * typescript-eslint's own scope analysis and visitor keys.
  * That is typescript-eslint's parser less TypeScript: oxc answers
  * TS-ESTree, the tree typescript-eslint converts TypeScript's to, and
  * ESLint's tokens (oxc_estree_tokens, which oxc checks against
@@ -183,50 +183,6 @@ const parsed = (path: string, source: string): Parsed => {
     fixed(found.node, found.fixes);
   }
   return found;
-};
-
-/**
- * The comments of `source` (`path`), with where each is; none if it
- * doesn't parse, or can't be read (the lint's parse says so).
- */
-export const commentsOf = (
-  path: string,
-  source: string
-): { range: [number, number]; type: "Line" | "Block"; value: string }[] => {
-  let found: Parsed;
-  try {
-    found = parsed(path, source);
-  } catch (error) {
-    if (error instanceof UnparsableFileError) {
-      return [];
-    }
-    throw error;
-  }
-  return "error" in found
-    ? []
-    : found.comments.map(({ type, value, start, end }) => ({
-        range: [start, end],
-        type,
-        value,
-      }));
-};
-
-/**
- * oxc-parser's `parseSync`, as far as @shadcn/lint calls it to read the
- * kit's components (build.ts `shadcnParser`): the program, and an error
- * when it doesn't parse.
- */
-export const parseSync = (
-  filename: string,
-  source: string
-): { program: unknown; errors: { severity: "Error"; message: string }[] } => {
-  const found = parsed(filename, source);
-  return "error" in found
-    ? {
-        program: { type: "Program", body: [] },
-        errors: [{ severity: "Error", message: found.error.message }],
-      }
-    : { program: found.node, errors: [] };
 };
 
 /** What ends a line, as ESLint counts lines. */

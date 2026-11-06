@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { oxcWasmModule } from "../oxc-wasm/wasm.ts";
+import { startOxc } from "./oxc.ts";
 import { pageRefusals } from "./refusals.ts";
 import { routeTree } from "./route-tree.ts";
+
+// The pages' syntax is oxc's, on oxc.wasm, as the compiler's isolate
+// starts it.
+startOxc(await oxcWasmModule());
 
 const root = `import { createRootRoute, Outlet } from "@tanstack/react-router";
 

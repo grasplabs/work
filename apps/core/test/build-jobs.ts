@@ -31,7 +31,7 @@ const Desk = () => (
 export const Route = createFileRoute("/")({ component: Desk });
 `;
 
-/** The page with its button restyled, which @shadcn/lint refuses. */
+/** The page with its button restyled, which the design system's class checks refuse. */
 export const restyled = desk.replace(
   '<Button variant="outline">',
   '<Button className="rounded-full">'

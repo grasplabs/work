@@ -3,10 +3,10 @@
  * than checks: a comment it reads as a directive (a triple-slash
  * directive, which reaches the whole program, or a suppression, which
  * switches the check off), and an ambient module or global declaration.
- * Read from the file as Babel's parser gives it, comments and syntax
- * tree: the platform's compile (imports.ts) and a standalone definition
- * project's check (standalone-check.ts) both parse with Babel and refuse
- * the same things through this file.
+ * Read from the file as oxc's parser gives it, comments and syntax tree:
+ * the platform's compile (oxc.wasm, worker.ts) and a standalone definition
+ * project's check (standalone-check.ts, with oxc-parser) both parse with
+ * oxc and refuse the same things through this file.
  *
  * It imports nothing: a standalone definition project
  * (scripts/package-definition-lib.ts) carries this very file beside its
@@ -74,28 +74,14 @@ const directiveIn = (
     : suppressionIn(value);
 
 /**
- * The parser options a file is read with, on the platform (compile.ts
- * `stripTypes`, stand-ins.ts) and in a project's check alike: TypeScript,
- * a `.d.ts` as declarations (`export const x: number;`, no initializers),
- * and JSX in a `.tsx`.
+ * A comment as the parser keeps it: whether it is a line comment (`//`),
+ * its text without its delimiters, and where it starts (1-based).
  */
-export const parserPlugins = (
-  file: string
-): (["typescript", { dts: boolean }] | "jsx")[] => [
-  ["typescript", { dts: file.endsWith(".d.ts") }],
-  ...(file.endsWith(".tsx") ? (["jsx"] as const) : []),
-];
-
-/** Where Babel's parser puts a node or a comment: a 1-based line, a 0-based column. */
-interface Location {
-  readonly start: { readonly line: number; readonly column: number };
-}
-
-/** A comment as Babel's parser keeps it: its text, without its delimiters. */
 export interface ParsedComment {
-  readonly type: string;
+  readonly lineComment: boolean;
   readonly value: string;
-  readonly loc?: Location | null;
+  readonly line?: number;
+  readonly column?: number;
 }
 
 /** A comment TypeScript reads as a directive to the type check. */
@@ -107,33 +93,26 @@ export interface DirectiveSite {
   readonly column: number | undefined;
 }
 
-/** Babel's 0-based column, as a 1-based one. */
-const columnOf = (loc: Location | null | undefined): number | undefined =>
-  loc === null || loc === undefined ? undefined : loc.start.column + 1;
-
 /** Every comment of a parsed file TypeScript would obey as a directive. */
 export const directivesIn = (
   comments: readonly ParsedComment[]
 ): DirectiveSite[] =>
-  comments.flatMap(({ type, value, loc }) => {
-    const directive = directiveIn(
-      type === "CommentLine" ? "line" : "block",
-      value
-    );
-    return directive === undefined
-      ? []
-      : [{ directive, line: loc?.start.line, column: columnOf(loc) }];
+  comments.flatMap(({ lineComment, value, line, column }) => {
+    const directive = directiveIn(lineComment ? "line" : "block", value);
+    return directive === undefined ? [] : [{ directive, line, column }];
   });
 
-/** A `declare module`, `declare global` or `namespace`, as Babel parses it. */
+/**
+ * A `declare module`, `declare global` or `namespace`, as TS-ESTree has
+ * it (`TSModuleDeclaration`).
+ */
 export interface ModuleDeclaration {
   readonly id: {
     readonly type: string;
     readonly value?: unknown;
-    readonly name?: string;
   };
-  /** Set on `declare global { … }`. */
-  readonly global?: boolean;
+  /** `global` on `declare global { … }`. */
+  readonly kind?: string;
 }
 
 /**
@@ -143,12 +122,12 @@ export interface ModuleDeclaration {
  */
 export const ambientOf = ({
   id,
-  global,
+  kind,
 }: ModuleDeclaration): { global: true } | { module: string } | undefined => {
-  if (global === true || (id.type === "Identifier" && id.name === "global")) {
+  if (kind === "global") {
     return { global: true };
   }
-  return id.type === "StringLiteral" && typeof id.value === "string"
+  return id.type === "Literal" && typeof id.value === "string"
     ? { module: id.value }
     : undefined;
 };

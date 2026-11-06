@@ -376,25 +376,25 @@ const incrementalShaped = (
   value.metrics !== null;
 
 /**
- * The CPU time, in ms, Babel with the React Compiler takes for one
+ * The CPU time, in ms, oxc's React transform (oxc.wasm) takes for one
  * character of page source on Cloudflare, at most: measured on a laptop
- * (2026-11-04) at 5–9 µs (a 60-page App's 820,000 characters in 4.2–6.9
- * s), and Cloudflare runs 2–5× slower than a laptop.
+ * (2026-11-07) at 0.6–1 µs (the blueprints' and the kit's 586,000
+ * characters in 0.37 s), and Cloudflare runs 2–5× slower than a laptop.
  */
-const transformCpuMsPerCharacter = 0.045;
+const transformCpuMsPerCharacter = 0.005;
 
 /**
  * The CPU time on Cloudflare a batch of transforms is sized to: a few
  * seconds, so a first build answers in steps and a stop costs little, far
  * below a call's ceiling (`compilerTaskCpuMs`, 60 s), which only stops
- * failures and leaves room for a cold isolate's start (loading Babel, the
- * React Compiler and the kit) and a machine slower than measured.
+ * failures and leaves room for a cold isolate's start (compiling
+ * oxc.wasm, loading the kit) and a machine slower than measured.
  */
 const batchCpuMs = 4000;
 
 /**
  * The most characters of source one batch of transforms takes
- * (`transformInBatches`): about 89,000 (`batchCpuMs`), or fewer where
+ * (`transformInBatches`): about 800,000 (`batchCpuMs`), or fewer where
  * tests size batches to less CPU time (`BUILD_BATCH_CPU_MS`). One file
  * larger than that (up to the 200,000 a file may have) is a batch of its
  * own, still well within a call's CPU time.

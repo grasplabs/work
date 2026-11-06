@@ -6,7 +6,8 @@ import { oxcOf } from "./oxc.ts";
 import { lintServerCode } from "./server-lint.ts";
 
 // oxc's parser on oxc.wasm, started as the lint's isolate starts it.
-startOxcParser(oxcOf(await oxcWasmModule(), { lint: {}, format: {} }).parse);
+const oxc = oxcOf(await oxcWasmModule());
+startOxcParser((path, source) => oxc.parse(path, source, true));
 
 // The server code lint (server-lint.ts): a mutation that reads the clock
 // or randomness is warned of, where it reads it; nothing else is.
