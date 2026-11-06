@@ -458,7 +458,13 @@ describe("An App's Code", () => {
       versionsOffered: named("button", "Current (version 1)") !== undefined,
     }).toStrictEqual({
       first: ["server", "notes.ts", "grasp.config.ts"],
-      written: ["screens", "inbox.tsx", "server", "notes.ts", "grasp.config.ts"],
+      written: [
+        "screens",
+        "inbox.tsx",
+        "server",
+        "notes.ts",
+        "grasp.config.ts",
+      ],
       open: "notes.ts",
       readOnly: true,
       versionsOffered: false,

@@ -83,7 +83,6 @@ const writesTally = (
   outputTokens: 40,
 });
 
-
 /** The SDK's `defineApp`, as a search of Grasp's reference finds it (core's agent-tools.ts). */
 const sdkApp =
   /(?<found>@grasp-os\/sdk\/src\/app\.ts:\d+:export const defineApp =)/u;
