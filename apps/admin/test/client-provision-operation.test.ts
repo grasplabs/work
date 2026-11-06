@@ -10,7 +10,11 @@ import {
   provisionProbePath,
 } from "@grasp-os/shared/provision-probe";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
-import { moduleKey, releaseManifestSchema } from "@grasp-os/shared/release";
+import {
+  assetKey,
+  moduleKey,
+  releaseManifestSchema,
+} from "@grasp-os/shared/release";
 import { deriveRouterSecret, routerHostKey } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -54,6 +58,7 @@ import {
 import { operationErrorWords } from "../src/hosting/words.ts";
 import { provisionPlacedClient } from "../src/hosting/workflow.ts";
 import { getProvisioning } from "../src/provision/queries.ts";
+import type { ReleaseStore } from "../src/releases/import.ts";
 import { pinClient } from "../src/rollout/channels.ts";
 import { reconcile } from "../src/rollout/reconciler.ts";
 import {
@@ -432,6 +437,42 @@ const resourceOf = async (clientId: string, role: string) => {
   }
   return row;
 };
+
+/** The files a call's form carries: all its parts but the metadata. */
+const filesSent = (call: ApiCall | undefined): number =>
+  call?.body instanceof FormData
+    ? [...call.body.keys()].filter((name) => name !== "metadata").length
+    : 0;
+
+/** How an R2 object is read whole, rather than streamed from `body`. */
+const wholeReads: ReadonlySet<PropertyKey> = new Set([
+  "arrayBuffer",
+  "bytes",
+  "text",
+  "json",
+  "blob",
+]);
+
+/** `object` read from `body`, calling `onReadWhole` when it's read whole. */
+const withBody = (
+  object: R2ObjectBody,
+  body: ReadableStream,
+  onReadWhole: () => void
+): R2ObjectBody =>
+  new Proxy(object, {
+    get: (target, property): unknown => {
+      if (property === "body") {
+        return body;
+      }
+      if (wholeReads.has(property)) {
+        onReadWhole();
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
 
 /** Client `clientId`'s core and connect scripts, as its inventory names them. */
 const scriptsOf = async (clientId: string) => {
@@ -983,6 +1024,225 @@ describe("provisioning a placed client", () => {
         ])
       )
     ).toStrictEqual(types);
+  });
+
+  it("reads core's files from the release only for the request that sends them, never the whole release at once", async () => {
+    // Core's release is over 100 MB in memory (its modules, and its static
+    // files as base64), past what a Worker may hold: read whole, its
+    // deploy's isolate was killed before core went up.
+    const manifest = await importRelease({
+      assets: Object.fromEntries(
+        Array.from({ length: 5 }, (_, index) => [
+          `/assets/chunk-${index}.js`,
+          `export default "${crypto.randomUUID()}";`,
+        ])
+      ),
+    });
+    const { core: coreWorker } = manifest.workers;
+    const coreFiles = new Set([
+      ...(coreWorker?.modules ?? []).map(({ r2Key }) => r2Key),
+      ...Object.values(coreWorker?.assets?.manifest ?? {}).map(({ hash }) =>
+        assetKey(hash)
+      ),
+    ]);
+    const modules = new Set(coreWorker?.modules.map(({ r2Key }) => r2Key));
+    // When each of core's files is read: as the count of calls sent.
+    const readAt: number[] = [];
+    // Modules read whole rather than streamed.
+    const readWhole: string[] = [];
+    const store: ReleaseStore = {
+      get: async (...args: Parameters<R2Bucket["get"]>) => {
+        const [key] = args;
+        if (coreFiles.has(key)) {
+          readAt.push(cloudflare.calls.length);
+        }
+        const object = await env.RELEASES.get(...args);
+        return object === null || !modules.has(key)
+          ? object
+          : withBody(object, object.body, () => {
+              readWhole.push(key);
+            });
+      },
+      list: async (...args: Parameters<R2Bucket["list"]>) =>
+        await env.RELEASES.list(...args),
+    };
+    const { clientId, held } = await setUp(manifest);
+
+    await runClientProvision({ ...context, store }, held);
+
+    const { core } = await scriptsOf(clientId);
+    // Each file is read once, right before the request that carries it:
+    // a static files upload, or the script's upload with its modules,
+    // each module streamed into it.
+    const carriers = [...Map.groupBy(readAt, (at) => at)].map(([at, reads]) => {
+      const path = cloudflare.calls[at]?.path ?? "";
+      return {
+        to: path.endsWith(`/scripts/${core}`) ? "script" : path,
+        read: reads.length,
+        sent: filesSent(cloudflare.calls[at]),
+      };
+    });
+    const script = carriers.pop();
+    expect(readWhole).toStrictEqual([]);
+    expect(readAt).toHaveLength(coreFiles.size);
+    expect(carriers).toStrictEqual(
+      carriers.map(({ sent }) => ({
+        to: `/accounts/${platformAccountId}/workers/assets/upload`,
+        read: sent,
+        sent,
+      }))
+    );
+    expect(script).toStrictEqual({
+      to: "script",
+      read: modules.size,
+      sent: modules.size,
+    });
+  });
+
+  it("uploads a first deploy's static files before core's script, so they don't spend its send limit", async () => {
+    // Forty static files, each upload answered after 50 ms: one file a
+    // request in the script's window would take 2 s of its 500 ms.
+    const manifest = await importRelease({
+      assets: Object.fromEntries(
+        Array.from({ length: 40 }, (_, index) => [
+          `/assets/chunk-${index}.js`,
+          `export default "${crypto.randomUUID()}";`,
+        ])
+      ),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      if (new URL(request.url).pathname.endsWith("/workers/assets/upload")) {
+        await scheduler.wait(50);
+      }
+      return await cloudflare.fetch(request);
+    });
+    const { clientId, held } = await setUp(manifest);
+
+    await runClientProvision({ ...context, sendTimeoutMs: 500 }, held);
+
+    await expect(operationOf(clientId)).resolves.toMatchObject({
+      status: "done",
+      error: null,
+    });
+  });
+
+  it("stops core's upload before the last chunk of a module whose bytes aren't the release's, doesn't retry it, and still lets the client roll back past the migration it never ran", async () => {
+    const live = await importRelease();
+    const { account, clientId } = await liveClient(live);
+    // A release with a new Durable Object migration, which core never runs.
+    const manifest = await importRelease(
+      { notes: "feat(core): new class", core: "export default { core: 9 };" },
+      (entry) => ({
+        ...entry,
+        durableObjectMigrations: [
+          ...entry.durableObjectMigrations,
+          { tag: "v2", new_sqlite_classes: ["Extra"] },
+        ],
+      })
+    );
+    const [module] = manifest.workers.core?.modules ?? [];
+    if (module === undefined) {
+      throw new Error("The test release's core has no module");
+    }
+    // The module in R2 changed since the import: its size the same, its
+    // bytes reversed, read in three chunks.
+    const stored = await env.RELEASES.get(module.r2Key);
+    const bytes = new Uint8Array(
+      (await stored?.arrayBuffer()) ?? []
+    ).toReversed();
+    const third = Math.ceil(bytes.length / 3);
+    const chunks = [0, 1, 2].map((index) =>
+      bytes.slice(index * third, (index + 1) * third)
+    );
+    const store: ReleaseStore = {
+      get: async (...args: Parameters<R2Bucket["get"]>) => {
+        const object = await env.RELEASES.get(...args);
+        if (object === null || args[0] !== module.r2Key) {
+          return object;
+        }
+        await object.body.cancel();
+        return withBody(
+          object,
+          new ReadableStream({
+            start: (controller) => {
+              for (const chunk of chunks) {
+                controller.enqueue(chunk);
+              }
+              controller.close();
+            },
+          }),
+          () => {
+            throw new Error("Read whole");
+          }
+        );
+      },
+      list: async (...args: Parameters<R2Bucket["list"]>) =>
+        await env.RELEASES.list(...args),
+    };
+    // What core's upload sent before it stopped.
+    const sent: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      if (request.method !== "PUT" || !request.url.endsWith("-core")) {
+        return await cloudflare.fetch(request);
+      }
+      let text = "";
+      try {
+        for await (const chunk of request.body?.pipeThrough(
+          new TextDecoderStream()
+        ) ?? []) {
+          text += chunk;
+        }
+      } finally {
+        sent.push(text);
+      }
+      return await cloudflare.fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: text,
+      });
+    });
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: manifest.releaseId,
+    });
+
+    const failure = await failing(await attempt(clientId), {
+      ...context,
+      store,
+    });
+
+    const decoder = new TextDecoder();
+    const [first = "", second = "", last = ""] = chunks.map((chunk) =>
+      decoder.decode(chunk)
+    );
+    const { progress } = (await operationOf(clientId)) ?? {};
+    expect({
+      code: codeFrom(failure),
+      // Sent once.
+      sends: sent.length,
+      // What core ran is recorded as it was: v1, never v2.
+      migrated: z
+        .object({ migrated: z.record(z.string(), z.string().nullable()) })
+        .parse(JSON.parse(progress ?? "{}")).migrated.core,
+      ran: [...clientScripts(account)]
+        .filter(([name]) => name.endsWith("-core"))
+        .map(([, script]) => script.migrationTag),
+      rollback: await codeOf(
+        startClientRelease(db, staff, await attempt(clientId), {
+          rollback: true,
+        })
+      ),
+    }).toStrictEqual({
+      code: "release_blob_mismatch",
+      sends: 1,
+      migrated: "v1",
+      ran: ["v1"],
+      rollback: "started",
+    });
+    // Up to the module's last chunk, and never whole.
+    expect(sent[0]).toContain(`${first}${second}`);
+    expect(sent[0]).not.toContain(`${first}${second}${last}`);
   });
 
   it("does nothing once done", async () => {

@@ -98,6 +98,7 @@ import {
   putTargetSecret,
   targetMigrationState,
   targetSecretNames,
+  uploadTargetAssets,
   uploadTargetScript,
 } from "../cloudflare/workers.ts";
 import type { ScriptTarget } from "../cloudflare/workers.ts";
@@ -125,6 +126,7 @@ import {
   keyedHash,
   lockMailSender,
   renderedWorkerUpload,
+  workerAssets,
   secretsFingerprint,
 } from "../deploy/upload.ts";
 import { deployOrder, pendingMigrations } from "../deploy/versions.ts";
@@ -1609,10 +1611,12 @@ const recordMigrated = async (
  * Sends Worker `app`'s upload (`send`) with its migrations counted as run
  * from just before: an upload whose answer is lost may have run them, so
  * what's recorded moves forward to the release's last (`laterMigration`)
- * and is trusted lower again only once observed. An upload the API
- * refused outright (a 4xx: nothing of it ran) puts back what was
- * recorded before, its error code in the answer, so a refusal never
- * blocks a rollback it couldn't have made unsafe.
+ * and is trusted lower again only once observed. An upload Cloudflare
+ * never took puts back what was recorded before, so it never blocks a
+ * rollback it couldn't have made unsafe: one that never went out whole
+ * (`send` calls `sent` once it has: its files are read as it goes, and
+ * one that can't be read stops it), or one the API refused outright (a
+ * 4xx: nothing of it ran).
  */
 const uploadCountedAsRun = async (
   db: AdminDatabase,
@@ -1622,7 +1626,7 @@ const uploadCountedAsRun = async (
     app,
     history,
   }: { app: App; history: WorkerEntry["durableObjectMigrations"] },
-  send: () => Promise<void>
+  send: (sent: () => void) => Promise<void>
 ): Promise<void> => {
   const { [app]: recorded, ...others } = progress.migrated;
   progress.migrated = {
@@ -1630,8 +1634,11 @@ const uploadCountedAsRun = async (
     [app]: laterMigration(recorded, history.at(-1)?.tag ?? null, history),
   };
   await recordProgress(db, loaded, progress);
+  let wentOut = false;
   try {
-    await send();
+    await send(() => {
+      wentOut = true;
+    });
   } catch (error) {
     // Only Cloudflare's own refusal, its error code in the answer: a 4xx
     // with no answer it wrote, or a timeout or rate limit a proxy may send
@@ -1643,7 +1650,7 @@ const uploadCountedAsRun = async (
       error.status !== 408 &&
       error.status !== 429 &&
       error.codes.length > 0;
-    if (refused) {
+    if (!wentOut || refused) {
       progress.migrated =
         recorded === undefined ? others : { ...others, [app]: recorded };
       await recordProgress(db, loaded, progress);
@@ -1763,13 +1770,29 @@ const upload = async (
       worker.durableObjectMigrations,
       before.migrationTag
     );
-    const prepared = await renderedWorkerUpload(
+    const prepared = renderedWorkerUpload(
       store,
       manifest,
       worker,
       rendered.bindings,
       vars
     );
+    // Its static files first, with a deadline of their own: they're named
+    // by their content and change nothing a script runs until its upload
+    // names them, so they need no mark (`sendHolding`) and don't spend the
+    // upload's. Each request checks this attempt still holds the client.
+    const assets = workerAssets(store, worker);
+    const assetsJwt =
+      assets === undefined
+        ? undefined
+        : await uploadTargetAssets(api, target, assets, {
+            signal: AbortSignal.timeout(
+              context.sendTimeoutMs ?? defaultSendTimeoutMs
+            ),
+            beforeSend: async () => {
+              await assertHolds(db, held);
+            },
+          });
     await noteSuperseded(db, loaded, progress, app);
     // Delivered secrets go with the next delivery, whatever this upload
     // keeps.
@@ -1780,7 +1803,7 @@ const upload = async (
       loaded,
       progress,
       { app, history: worker.durableObjectMigrations },
-      async () => {
+      async (sent) => {
         await sendHolding(context, loaded, async (signal) => {
           await uploadTargetScript(
             api,
@@ -1791,8 +1814,9 @@ const upload = async (
                 ...prepared.metadata,
                 ...(migrations === undefined ? {} : { migrations }),
               },
+              ...(assetsJwt === undefined ? {} : { assetsJwt }),
             },
-            { signal }
+            { signal, sent }
           );
         });
       }
