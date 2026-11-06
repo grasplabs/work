@@ -40,7 +40,6 @@ describe("live queries under load and loss", { timeout: 180_000 }, () => {
   it("charges the reads a burst of commits causes to the person's budget, however many queries they follow", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
-    const writer = await memberOf(opened);
     // A second tab of the owner's: each follows up to its bound.
     const { core } = await openRpc(opened.cookie);
     const otherTab = core.authenticate().pages;
@@ -75,11 +74,13 @@ describe("live queries under load and loss", { timeout: 180_000 }, () => {
       0
     );
 
-    // Another person's commits to the table every one of them read.
+    // Commits every one of them shows, from the owner's second tab: only
+    // a changed result is pushed.
+    const writer = clientFor(opened, otherTab).client;
     const started = Date.now();
     for (let note = 1; note <= 12; note += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one commit after the other
-      await writer.client.mutation(api.create, { title: `Note ${note}` });
+      await writer.mutation(api.create, { title: `Note ${note}` });
       // oxlint-disable-next-line no-await-in-loop -- spread over a few seconds
       await scheduler.wait(400);
     }
