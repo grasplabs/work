@@ -76,7 +76,9 @@ import { manifestPackagesSchema } from "./workflows/package-seal.ts";
 //   artifact no manifest names; the runtime has no write path to them.
 // - A build of a newer SDK under an old manifest. The SDK modules the code
 //   was compiled against are sealed with it and loaded from the seal, never
-//   from what the host serves now.
+//   from what the host serves now; a build this host doesn't read, as
+//   one an earlier platform release published, is refused as such
+//   (`workflow.format_unsupported`), to publish again.
 // - A table holding what the run host has no rule for. The sealed table
 //   loads only as the generator writes it (@grasp-os/workflow-schema's
 //   sealed.ts, `sealedTableSchema`); anything else is
@@ -135,13 +137,6 @@ const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
  */
 export const sealedBuildSchema = z.strictObject({
   generator: z.string().min(1).max(64),
-  /**
-   * The protocol a version built before it was dropped still names, part
-   * of its identity. Accepted so that version keeps loading, never written
-   * and never compared: `grasp-workflow/1` names the format. GRA-1619 drops
-   * it once no stored version names it.
-   */
-  protocol: z.int().positive().optional(),
   compilerVersion: z.string().min(1).max(128),
   /** The executable identity: see `identityOf`. */
   hash: sha256Schema,
@@ -177,15 +172,12 @@ export const compiledTasksOf = (
  */
 const identityOf = async (build: {
   generator: string;
-  protocol?: number | undefined;
   compilerVersion: string;
   artifacts: readonly ReleaseArtifact[];
 }): Promise<string> =>
   await sha256Hex(
     canonicalJson({
       generator: build.generator,
-      // Only a build sealed before it was dropped names it (GRA-1619).
-      ...(build.protocol === undefined ? {} : { protocol: build.protocol }),
       compilerVersion: build.compilerVersion,
       artifacts: build.artifacts
         .filter(
@@ -455,9 +447,19 @@ export const buildSummary = (build: SealedBuild): WorkflowVersionBuild => ({
 /** Where a version's manifest holds its build. */
 const manifestBuildSchema = z.object({ build: sealedBuildSchema });
 
-/** The build a version's manifest text seals. */
-export const buildOf = (manifest: string): SealedBuild =>
-  manifestBuildSchema.parse(JSON.parse(manifest)).build;
+/**
+ * The build a version's manifest text seals. One of a shape this host
+ * doesn't read is `workflow.format_unsupported`: its manifest is what an
+ * earlier platform release published, to be published again, never taken
+ * for one that was changed.
+ */
+export const buildOf = (manifest: string): SealedBuild => {
+  const parsed = manifestBuildSchema.safeParse(JSON.parse(manifest));
+  if (!parsed.success) {
+    throw workflowResourceErrors.create("workflow.format_unsupported");
+  }
+  return parsed.data.build;
+};
 
 /** A version's executable build, loaded and verified, as a run runs it. */
 export interface LoadedBuild {

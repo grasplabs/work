@@ -169,6 +169,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "A listen task's events didn't all arrive before its timeout.",
   "workflow.run_paused":
     "This run is paused. Resume it, then confirm what it holds.",
+  "workflow.format_unsupported":
+    "This version was published by an earlier release of the platform that this one doesn't read. Publish it again as a new version.",
   "workflow.start_unconfirmed":
     "The run never started: the workflow engine didn't confirm its start in time, so nothing of it ran. Start the workflow again.",
   "workflow.start_invalid":
