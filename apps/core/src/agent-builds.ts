@@ -1,4 +1,4 @@
-import { definitionPath, tryOperation } from "@grasp-os/sdk/host";
+import { definitionPath, tryOperation } from "@grasp-os/sdk/definition";
 import { agentErrors } from "@grasp-os/shared/agent";
 import {
   appErrors,

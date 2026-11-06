@@ -5,10 +5,13 @@ import {
   definitionText,
   emptyDefinition,
   generatedFiles,
-  planSchemaChange,
   tryReadDefinition,
-} from "@grasp-os/sdk/host";
-import type { AppDefinition, DefinitionOperation } from "@grasp-os/sdk/host";
+} from "@grasp-os/sdk/definition";
+import type {
+  AppDefinition,
+  DefinitionOperation,
+} from "@grasp-os/sdk/definition";
+import { planSchemaChange } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import { z } from "zod";
 

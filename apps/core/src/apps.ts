@@ -1,5 +1,5 @@
 import { isAppLayout, isAppTestSuite } from "@grasp-os/compiler";
-import { definitionPath } from "@grasp-os/sdk/host";
+import { definitionPath } from "@grasp-os/sdk/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {

@@ -1,5 +1,6 @@
 import { serverSdkModules } from "@grasp-os/compiler";
-import { schemaHash, definitionManifest } from "@grasp-os/sdk/host";
+import { definitionManifest } from "@grasp-os/sdk/definition";
+import { schemaHash } from "@grasp-os/sdk/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import {
   releaseFormatVersion,

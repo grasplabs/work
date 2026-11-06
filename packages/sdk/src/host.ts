@@ -191,26 +191,6 @@ export {
 } from "./preference-operations.ts";
 export type { PreferenceOperationName } from "./preference-operations.ts";
 
-// An App's definition (definition.ts): read, changed by its operations, and
-// the config and schema generated from it. Only Grasp writes one.
-export {
-  definitionManifest,
-  definitionPath,
-  definitionText,
-  emptyDefinition,
-  generatedFiles,
-  readDefinition,
-} from "./definition.ts";
-export type { AppDefinition } from "./definition.ts";
-export type { FrozenJson } from "./value-descriptor.ts";
-export {
-  applyOperation,
-  tryOperation,
-  tryReadDefinition,
-  typeFrom,
-} from "./definition-operations.ts";
-export type { DefinitionOperation } from "./definition-operations.ts";
-export { definitionSources } from "./definition-source.ts";
 export { planPreferenceChange } from "./preference-plan.ts";
 // Who calls an App, and the organization's people, which core answers
 // itself (people.ts).

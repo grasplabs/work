@@ -8,12 +8,12 @@ import {
   generatedFiles,
   readDefinition,
   typeFrom,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/sdk/definition";
 import type {
   AppDefinition,
   DefinitionOperation,
   FrozenJson,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/sdk/definition";
 
 // An App's definition as a test writes it, and the files it is: the
 // definition, and the config and schema generated from it, exactly as

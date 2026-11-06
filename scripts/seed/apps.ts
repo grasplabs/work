@@ -9,7 +9,7 @@ import {
   definitionSources,
   definitionText,
   emptyDefinition,
-} from "@grasp-os/sdk/host";
+} from "@grasp-os/sdk/definition";
 
 import type { EngineSeed } from "./engines.ts";
 

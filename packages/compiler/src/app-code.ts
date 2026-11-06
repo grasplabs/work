@@ -456,6 +456,7 @@ const serverSpecifiers: ReadonlySet<string> = new Set([
   "@server/_generated/dataModel",
   "@grasp-os/sdk/server",
   "@grasp-os/sdk/host",
+  "@grasp-os/sdk/definition",
   "@grasp-os/sdk/runner",
   "@grasp-os/sdk/database",
 ]);
@@ -480,6 +481,7 @@ const platformOnly: ReadonlySet<string> = new Set([
 const bootstrapOnly: ReadonlySet<string> = new Set([
   "@grasp-os/sdk/client",
   "@grasp-os/sdk/host",
+  "@grasp-os/sdk/definition",
   "@grasp-os/sdk/screen-runtime",
 ]);
 
