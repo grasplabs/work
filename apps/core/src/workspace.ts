@@ -1,5 +1,4 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
-import { isAppLayout } from "@grasp-os/compiler";
 import { generatedPaths, generateModules } from "@grasp-os/sdk/host";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
@@ -111,7 +110,7 @@ import type {
 } from "./agent-scope.ts";
 import { inOwnWords } from "./agent.ts";
 import type { TurnContext, TurnResult } from "./agent.ts";
-import { draftFiles, latestVersion } from "./apps.ts";
+import { latestVersion } from "./apps.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
 import {
@@ -5007,27 +5006,6 @@ export class Workspace extends DurableObject<Env> {
       throw failure;
     }
     return { base: latest, changes: {}, revision: appVersionRevision };
-  }
-
-  /**
-   * Whether `personId`'s own chat's draft of App `appId` is of spec 8's
-   * layout, so its preview runs on its sealed draft release
-   * (sealed-previews.ts) and never as v1 server code.
-   */
-  async sealsDraft(
-    chatId: unknown,
-    personId: string,
-    appId: string
-  ): Promise<boolean> {
-    const { draft } = this.#draftToPreview(
-      chatId,
-      personId,
-      appId,
-      false,
-      await this.#latestFor(chatId, personId, appId, false)
-    );
-    const files = await draftFiles(this.env, appIdSchema.parse(appId), draft);
-    return isAppLayout(Object.fromEntries(files));
   }
 
   /**

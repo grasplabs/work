@@ -1471,8 +1471,9 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    * draft would: its public function at path `method`, with `args` as its
    * input, on its draft release (sealed-previews.ts), on a store of the
    * preview's own and with no resources. How the draft's code failed, if
-   * it did, comes back as data. A draft not of spec 8's layout is refused
-   * (`app.preview_layout`); anything else (no draft, a refusal) is thrown.
+   * it did, comes back as data; anything else (no draft, a refusal) is
+   * thrown. Every draft holds its definition's config and schema from its
+   * first write (apps.ts, `applyChanges`), so every draft previews.
    */
   async call(
     app: unknown,
@@ -1494,11 +1495,6 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         // (chats-rpc.ts), before anything of the draft is read: a loop of
         // the agent's spends their budget too, a refused call included.
         await admitPreviewCall(this.env, by, id);
-        // Only a draft of spec 8's layout previews, from its sealed draft
-        // release: no draft's server code runs anywhere else.
-        if (!(await chats.sealsDraft(chatId, personId, id))) {
-          throw appErrors.create("app.preview_layout");
-        }
         if (!isPlainData(args ?? {})) {
           throw appErrors.create("app.invalid", {
             issues: ["A function's path and its input, as plain data."],
@@ -1796,8 +1792,7 @@ build: {
    * diagnostic as \`file:line: message\`, or what its registration threw),
    * or a function's own failure as the preview answered it (a contract it
    * broke, say); anything else
-   * (no draft, a refusal of the call) is thrown. Only an App with
-   * grasp.config.ts and server/schema.ts previews (\`app.preview_layout\`, thrown).
+   * (no draft, a refusal of the call) is thrown.
    */
   call(app: string, method: string, args?: unknown): Promise<
     | { ok: true; answer: unknown }

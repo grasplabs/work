@@ -1035,8 +1035,6 @@ export const appErrors = defineErrorFamily({
     "This chat neither changes that App nor is its chat, so it has no preview of it.",
   "app.preview_outdated":
     "The draft changed since this preview loaded it. Load the preview again.",
-  "app.preview_layout":
-    "A preview runs only an App with grasp.config.ts and server/schema.ts, which Grasp generates from its definition as its draft is first written.",
   "app.preview_side_effect":
     "A preview changes nothing and reaches nothing outside it: no connections, no other Apps, no workflows and no writes to Knowledge.",
 });
