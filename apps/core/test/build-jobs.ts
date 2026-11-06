@@ -159,7 +159,7 @@ export const writtenMeanwhile = async (
     { ...draft.changes, "src/routes/note.tsx": desk },
     [],
     draft.revision,
-    run
+    { runId: run }
   );
   expect(saved).toBeTruthy();
 };

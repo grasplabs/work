@@ -27,6 +27,10 @@ import type {
   PreviewShown,
   PreviewUpdate,
 } from "@grasp-os/shared/chat";
+import type {
+  DataModelChange,
+  DraftDataModel,
+} from "@grasp-os/shared/data-model";
 import { authErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
@@ -45,8 +49,19 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
-import { draftOf, proposeChatDraft } from "./agent-builds.ts";
+import {
+  defineInDraft,
+  draftDefinitions,
+  draftOf,
+  proposeChatDraft,
+  saveDraftChanges,
+} from "./agent-builds.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
+import {
+  dataModelOf,
+  definitionPlan,
+  operationDetail,
+} from "./app-definition.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import {
   appFor,
@@ -698,6 +713,82 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         throw appErrors.create("app.draft_failed");
       }
       return version;
+    });
+  }
+
+  /**
+   * The data model of the chat's draft of `app` (its definition), and
+   * what publishing it does to the App's records: only while the person
+   * builds the App, as for its files.
+   */
+  async dataModel(chatId: string, app: string): Promise<DraftDataModel> {
+    return await withPerson(this.#check, async (by) => {
+      const found = await appFor(this.#env, by, app, "builder");
+      const scope = {
+        workspaceId: personalWorkspaceId(by.userId),
+        chatId: await this.#ownChat(by.userId, chatId),
+      };
+      const held = await draftDefinitions(this.#env, scope, found);
+      if ("problem" in held) {
+        throw appErrors.create("app.definition_invalid", {
+          issues: [held.problem],
+        });
+      }
+      return {
+        model: dataModelOf(held.own),
+        plan: definitionPlan(held.before, held.own),
+      };
+    });
+  }
+
+  /**
+   * Changes the definition in the chat's draft of `app` by `operation`,
+   * by the person themselves, as the chat's agent's definition tools do
+   * (agent-builds.ts, `defineInDraft`), audited as theirs: only while
+   * they build the App and it isn't archived. With `preview`, saves
+   * nothing: what it would make of the model, and the plan, to show
+   * before it is made.
+   */
+  async defineDraft(
+    chatId: string,
+    app: string,
+    operation: unknown,
+    preview = false
+  ): Promise<DataModelChange> {
+    return await withPerson(this.#check, async (by) => {
+      const found = await editableApp(this.#env, by, app);
+      const scope = {
+        workspaceId: personalWorkspaceId(by.userId),
+        chatId: await this.#ownChat(by.userId, chatId),
+      };
+      const defined = await defineInDraft(
+        this.#env,
+        scope,
+        found,
+        operation,
+        async (draft, files, changes) => {
+          if (!preview) {
+            await saveDraftChanges(
+              this.#env,
+              scope,
+              {
+                personId: by.userId,
+                actor: actorOf(by),
+                detail: operationDetail(operation),
+              },
+              found,
+              { draft, files, changes }
+            );
+          }
+        }
+      );
+      return defined.ok
+        ? {
+            ok: true,
+            model: dataModelOf(defined.definition),
+            plan: defined.plan,
+          }
+        : defined;
     });
   }
 

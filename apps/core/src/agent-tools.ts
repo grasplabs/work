@@ -205,11 +205,11 @@ const answersWithDiagnostics =
 
 /** What the file tools say of the files the definition tools write. */
 const generatedNote =
-  "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code generated from it: change them with the definition tools (addTable, addField, changeField, renameField, setAccess, addIndex, addPermission), never by writing them.";
+  "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code generated from it: change them with the definition tools (addTable, addField, changeField, renameField, setAccess, addIndex, addPermission, their remove counterparts, and the preference tools), never by writing them.";
 
 /** What the definition tools say of what they answer with (`env.build.define`). */
 const definitionAnswer =
-  "Changes the App's definition in this chat's draft, checked as it is made, and writes grasp.config.ts and server/schema.ts from it. A change the definition can't take answers `ok: false` and the `problem`, saving nothing. Otherwise it answers the `plan`, what the change does to the records the App holds (added, widened, `checks`: fields every record must fit as the version is made current, where an `answer` fills a record that lacks the field; `refused`: what only a migration in server/migrations/ can do), and what fails in the whole App now, as writeFile does.";
+  "Changes the App's definition in this chat's draft, checked as it is made, and writes grasp.config.ts and server/schema.ts from it. A change the definition can't take answers `ok: false` and the `problem`, saving nothing. Otherwise it answers the `plan`, what the change does to the records the App holds (added, widened, kept, `checks`: fields every record must fit as the version is made current, where an `answer` (null until given) fills a record that lacks the field; `refused`: what only a migration in server/migrations/ can do), and what fails in the whole App now, as writeFile does.";
 
 /** A type, as the definition tools take it. */
 const typeParameter = Type.String({
@@ -286,6 +286,13 @@ const tableParameter = Type.String({
   minLength: 1,
   maxLength: 64,
   description: "The table, by its name.",
+});
+
+/** A field's name, as the definition tools take it. */
+const fieldParameter = Type.String({
+  minLength: 1,
+  maxLength: 64,
+  description: "The field, by its name.",
 });
 
 /** The definition change `operation` of `app`, as `env.build.define` makes it. */
@@ -650,11 +657,7 @@ const definitions = (known: Set<string>) => [
       {
         app: appParameter,
         table: tableParameter,
-        field: Type.String({
-          minLength: 1,
-          maxLength: 64,
-          description: "The field, by its name.",
-        }),
+        field: fieldParameter,
         type: typeParameter,
         answer: answerParameter,
       },
@@ -747,6 +750,109 @@ const definitions = (known: Set<string>) => [
     ),
     run: async (scope, { app, permission }) =>
       await define(scope, app, { op: "addPermission", permission }),
+  }),
+  tool({
+    name: "removeTable",
+    label: "Remove a table",
+    api: "build",
+    description: `Removes a table from the App's data model. Its records stay in the App's store, never dropped, but no function reads them any more; a table another table links to (\`v.id\`) can't go until that link does. ${definitionAnswer}`,
+    parameters: Type.Object(
+      { app: appParameter, table: tableParameter },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, table }) =>
+      await define(scope, app, { op: "removeTable", table }),
+  }),
+  tool({
+    name: "removeField",
+    label: "Remove a field",
+    api: "build",
+    description: `Removes a field from a table. Its values stay in the records, never dropped. Refused while an index, the search index or a row rule reads it: remove or change those first. ${definitionAnswer}`,
+    parameters: Type.Object(
+      { app: appParameter, table: tableParameter, field: fieldParameter },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "removeField", ...input }),
+  }),
+  tool({
+    name: "removeIndex",
+    label: "Remove an index",
+    api: "build",
+    description: `Removes an index by its name, or, with \`search\`, the table's search index. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        table: tableParameter,
+        name: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+        search: Type.Optional(Type.Boolean()),
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "removeIndex", ...input }),
+  }),
+  tool({
+    name: "removePermission",
+    label: "Remove a permission",
+    api: "build",
+    description: `Removes a permission the App declares, by its alias (\`people\` for reading the organization's people). Server code that still lists it in \`uses\` stops building. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        alias: Type.String({ minLength: 1, maxLength: 64 }),
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, alias }) =>
+      await define(scope, app, { op: "removePermission", alias }),
+  }),
+  tool({
+    name: "addPreference",
+    label: "Add a preference",
+    api: "build",
+    description: `Adds a preference each person sets for themselves in the App (a compact view, a default team), read and changed through \`api.preferences.get\` and \`api.preferences.update\`. Give it a default (\`v.boolean().default(false)\`) or make it optional: nobody has set it yet. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        name: Type.String({ minLength: 1, maxLength: 64 }),
+        type: typeParameter,
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "addPreference", ...input }),
+  }),
+  tool({
+    name: "changePreference",
+    label: "Change a preference",
+    api: "build",
+    description: `Changes a preference's type. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        name: Type.String({ minLength: 1, maxLength: 64 }),
+        type: typeParameter,
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "changePreference", ...input }),
+  }),
+  tool({
+    name: "removePreference",
+    label: "Remove a preference",
+    api: "build",
+    description: `Removes a preference. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        name: Type.String({ minLength: 1, maxLength: 64 }),
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, name }) =>
+      await define(scope, app, { op: "removePreference", name }),
   }),
   tool({
     name: "searchFiles",

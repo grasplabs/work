@@ -1,4 +1,5 @@
 import { definitionPath, tryOperation } from "@grasp-os/sdk/definition";
+import type { AppDefinition } from "@grasp-os/sdk/definition";
 import { agentErrors } from "@grasp-os/shared/agent";
 import {
   appErrors,
@@ -16,6 +17,7 @@ import type {
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { PreviewProblem } from "@grasp-os/shared/chat";
+import type { DefinitionPlan } from "@grasp-os/shared/data-model";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ServerLog } from "@grasp-os/shared/pages";
@@ -38,7 +40,6 @@ import {
   operationDetail,
   refuseDefinitionFiles,
 } from "./app-definition.ts";
-import type { DefinitionPlan } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import {
   appFor,
@@ -77,7 +78,7 @@ import {
 } from "./save-builds.ts";
 import { reviewVersion } from "./version-review.ts";
 import { runEngine } from "./workflows/engine.ts";
-import type { Draft } from "./workspace.ts";
+import type { Draft, DraftWriter } from "./workspace.ts";
 
 // Building Apps from a chat: `await env.build.write(app, { ... })`. The
 // chat's agent creates Apps (new, or from a blueprint the person may
@@ -889,6 +890,212 @@ export const buildingAs = async (
   };
 };
 
+/**
+ * Saves `changes` into the chat's `draft` of `app`, whose files are
+ * `files` (changed in place), by `writer` (`DraftWriter`), refused as a
+ * whole as the changes of a commit would be, or when it writes a file
+ * under `workflows/`, which nobody does (a draft may delete one).
+ * `admit`, if given, admits the write right before it is saved. Answers
+ * every path the draft changes now, sorted.
+ */
+export const saveDraftChanges = async (
+  env: Env,
+  scope: Pick<AgentScope, "workspaceId" | "chatId">,
+  writer: DraftWriter,
+  { id, name, currentVersion }: Pick<App, "id" | "name" | "currentVersion">,
+  {
+    draft,
+    files,
+    changes,
+  }: {
+    draft: Draft;
+    files: Map<string, string>;
+    changes: Record<string, string | null>;
+  },
+  admit?: () => Promise<void>
+): Promise<string[]> => {
+  const base = await draftFiles(env, id, { base: draft.base, changes: {} });
+  const held = await heldDefinitions(env, id, currentVersion, base);
+  // Changed in place (`applyChanges`): the draft as it is written, its
+  // TypeScript fixed and formatted first (`tidied`).
+  // The definition and the code generated from it are kept as generated,
+  // never tidied: every commit must hold them exactly so.
+  const generated = Object.entries(changes).filter(([path]) =>
+    definitionFiles.has(path)
+  );
+  const code = Object.entries(changes).filter(
+    ([path]) => !definitionFiles.has(path)
+  );
+  const written = applyChanges(
+    env,
+    files,
+    {
+      // A change of the definition alone has no code to tidy.
+      ...(code.length === 0 && generated.length > 0
+        ? {}
+        : await tidied(env, id, Object.fromEntries(code))),
+      ...Object.fromEntries(generated),
+    },
+    name,
+    held
+  );
+  refuseAppWorkflows(
+    written.flatMap(([path, content]) => (content === null ? [] : [path]))
+  );
+  // Only what differs from the base is kept: a path written back as the
+  // base has it (a deleted file that isn't there, too) is a change no
+  // more. A draft holds at most the base's paths and the files it adds,
+  // which the App's limits bound.
+  const kept = written.filter(
+    ([path, content]) => (content ?? undefined) !== base.get(path)
+  );
+  const unchanged = written.flatMap(([path, content]) =>
+    (content ?? undefined) === base.get(path) ? [path] : []
+  );
+  await admit?.();
+  const saved = await workspace(env, scope.workspaceId).saveDraft(
+    scope.chatId,
+    id,
+    draft.base,
+    Object.fromEntries(kept),
+    unchanged,
+    draft.revision,
+    writer
+  );
+  if (!saved) {
+    throw appErrors.create("app.conflict");
+  }
+  const changed = new Set([
+    ...Object.keys(draft.changes),
+    ...kept.map(([path]) => path),
+  ]);
+  for (const path of unchanged) {
+    changed.delete(path);
+  }
+  return [...changed].toSorted();
+};
+
+/**
+ * The definition of the chat's draft of `app`, as an operation changes
+ * it (`own`), the draft and its files, and the definition of the version
+ * people use (`before`, null for none), which a release of the draft
+ * starts from: never the draft's base, a later commit that may not be
+ * current. The plan is the move from it. The problem, for a definition
+ * that doesn't read.
+ */
+export const draftDefinitions = async (
+  env: Env,
+  scope: Pick<AgentScope, "workspaceId" | "chatId">,
+  { id, name, currentVersion }: Pick<App, "id" | "name" | "currentVersion">
+): Promise<
+  | { problem: string }
+  | {
+      draft: Draft;
+      files: Map<string, string>;
+      own: AppDefinition;
+      before: AppDefinition | null;
+    }
+> => {
+  const draft = await draftOf(env, scope, id);
+  const files = await draftFiles(env, id, draft);
+  const base = new Map(
+    currentVersion === null
+      ? []
+      : Object.entries(await versionFiles(env, id, currentVersion))
+  );
+  const current = definitionIn(files, name);
+  const released = definitionIn(base, name);
+  if ("problem" in current) {
+    return { problem: `The App's definition isn't valid: ${current.problem}` };
+  }
+  if ("problem" in released) {
+    return {
+      problem: `The App's released definition isn't valid: ${released.problem}`,
+    };
+  }
+  // An answer belongs to the version it is committed with: what that
+  // version's move gives the records that don't fit it, used once, as
+  // the store applies it (store-host.ts, `defineTables`). A draft starts
+  // with none of its base's: the store's plan of the move from the
+  // version people use asks again for any it still needs.
+  const own = Object.hasOwn(draft.changes, definitionPath)
+    ? current.definition
+    : { ...current.definition, answers: [] };
+  return {
+    draft,
+    files,
+    own,
+    before: base.has(definitionPath) ? released.definition : null,
+  };
+};
+
+/**
+ * Changes the App's definition in the chat's draft of `app`
+ * (app-definition.ts): applies `operation` to it, checked whole, and
+ * saves it with `save` (`saveDraftChanges`, by whoever writes) with the
+ * config and schema generated from it; a `save` that saves nothing only
+ * asks what it would do. Answers the problem, saving nothing, for an operation the
+ * definition can't take; otherwise the definition after it, what it does
+ * to the App's records (`plan`), and what `save` answered. The chat's
+ * agent's definition tools (`BuildApi.define`) and the workspace's Data
+ * view (`ChatsApi.defineDraft`) both change it here.
+ */
+export const defineInDraft = async <Saved>(
+  env: Env,
+  scope: Pick<AgentScope, "workspaceId" | "chatId">,
+  app: Pick<App, "id" | "name" | "currentVersion">,
+  operation: unknown,
+  save: (
+    draft: Draft,
+    files: Map<string, string>,
+    changes: Record<string, string | null>
+  ) => Promise<Saved>
+): Promise<
+  | { ok: false; problem: string }
+  | {
+      ok: true;
+      definition: AppDefinition;
+      plan: DefinitionPlan;
+      saved: Saved;
+    }
+> => {
+  const parsed = appErrors.parse(
+    "app.invalid",
+    definitionOperationSchema,
+    operation
+  );
+  const held = await draftDefinitions(env, scope, app);
+  if ("problem" in held) {
+    return { ok: false, problem: held.problem };
+  }
+  const result = tryOperation(held.own, parsed);
+  if ("problem" in result) {
+    return { ok: false, problem: result.problem };
+  }
+  // Saved as any write is, and refused as one is: a rename of a field a
+  // version of the App has among it (`withDefinitionCode`).
+  let saved: Saved;
+  try {
+    saved = await save(
+      held.draft,
+      held.files,
+      definitionChanges(result.definition)
+    );
+  } catch (error) {
+    const refusal = definitionRefusal(error);
+    if (refusal === undefined) {
+      throw error;
+    }
+    return { ok: false, problem: refusal };
+  }
+  return {
+    ok: true,
+    definition: result.definition,
+    plan: definitionPlan(held.before, result.definition),
+    saved,
+  };
+};
+
 /** Building Apps, as a chat's code does it. */
 export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   /**
@@ -1109,72 +1316,17 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.define",
       async (by): Promise<DraftDefinition> => {
         const found = await editableApp(this.env, by, app);
-        const parsed = appErrors.parse(
-          "app.invalid",
-          definitionOperationSchema,
-          operation
+        const defined = await defineInDraft(
+          this.env,
+          this.ctx.props,
+          found,
+          operation,
+          async (draft, files, changes) =>
+            await this.#save(found, draft, files, changes)
         );
-        const draft = await draftOf(this.env, this.ctx.props, found.id);
-        const files = await draftFiles(this.env, found.id, draft);
-        // The version people use, which a release of this draft starts
-        // from: never the draft's base, a later commit that may not be
-        // current. The plan is the move from it.
-        const base = new Map(
-          found.currentVersion === null
-            ? []
-            : Object.entries(
-                await versionFiles(this.env, found.id, found.currentVersion)
-              )
-        );
-        const current = definitionIn(files, found.name);
-        const released = definitionIn(base, found.name);
-        if ("problem" in current) {
-          return {
-            ok: false,
-            problem: `The App's definition isn't valid: ${current.problem}`,
-          };
-        }
-        if ("problem" in released) {
-          return {
-            ok: false,
-            problem: `The App's released definition isn't valid: ${released.problem}`,
-          };
-        }
-        const before = base.has(definitionPath) ? released.definition : null;
-        // An answer belongs to the version it is committed with: what that
-        // version's move gives the records that don't fit it, used once,
-        // as the store applies it (store-host.ts, `defineTables`). A draft
-        // starts with none of its base's: the store's plan of the move
-        // from the version people use asks again for any it still needs.
-        const own = Object.hasOwn(draft.changes, definitionPath)
-          ? current.definition
-          : { ...current.definition, answers: [] };
-        const result = tryOperation(own, parsed);
-        if ("problem" in result) {
-          return { ok: false, problem: result.problem };
-        }
-        // Saved as any write is, and refused as one is: a rename of a
-        // field a version of the App has among it (`withDefinitionCode`).
-        let saved: DraftWrite;
-        try {
-          saved = await this.#save(
-            found,
-            draft,
-            files,
-            definitionChanges(result.definition)
-          );
-        } catch (error) {
-          const refusal = definitionRefusal(error);
-          if (refusal === undefined) {
-            throw error;
-          }
-          return { ok: false, problem: refusal };
-        }
-        return {
-          ok: true,
-          plan: definitionPlan(before, result.definition),
-          ...saved,
-        };
+        return defined.ok
+          ? { ok: true, plan: defined.plan, ...defined.saved }
+          : defined;
       },
       (defined) => ({
         app: typeof app === "string" ? app : null,
@@ -1193,79 +1345,24 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    * agent fixes next.
    */
   async #save(
-    { id, name, currentVersion }: Pick<App, "id" | "name" | "currentVersion">,
+    found: Pick<App, "id" | "name" | "currentVersion">,
     draft: Draft,
     files: Map<string, string>,
     changes: Record<string, string | null>
   ): Promise<DraftWrite> {
-    const base = await draftFiles(this.env, id, {
-      base: draft.base,
-      changes: {},
-    });
-    const held = await heldDefinitions(this.env, id, currentVersion, base);
-    // Changed in place (`applyChanges`): the draft as it is written, its
-    // TypeScript fixed and formatted first (`tidied`).
-    // The definition and the code generated from it are kept as generated,
-    // never tidied: every commit must hold them exactly so.
-    const generated = Object.entries(changes).filter(([path]) =>
-      definitionFiles.has(path)
+    const { env } = this;
+    const changed = await saveDraftChanges(
+      env,
+      this.ctx.props,
+      { runId: this.ctx.props.runId },
+      found,
+      { draft, files, changes },
+      this.#admit
     );
-    const code = Object.entries(changes).filter(
-      ([path]) => !definitionFiles.has(path)
-    );
-    const written = applyChanges(
-      this.env,
-      files,
-      {
-        // A change of the definition alone has no code to tidy.
-        ...(code.length === 0 && generated.length > 0
-          ? {}
-          : await tidied(this.env, id, Object.fromEntries(code))),
-        ...Object.fromEntries(generated),
-      },
-      name,
-      held
-    );
-    refuseAppWorkflows(
-      written.flatMap(([path, content]) => (content === null ? [] : [path]))
-    );
-    // Only what differs from the base is kept: a path written back as
-    // the base has it (a deleted file that isn't there, too) is a
-    // change no more. A draft holds at most the base's paths and the
-    // files it adds, which the App's limits bound.
-    const kept = written.filter(
-      ([path, content]) => (content ?? undefined) !== base.get(path)
-    );
-    const unchanged = written.flatMap(([path, content]) =>
-      (content ?? undefined) === base.get(path) ? [path] : []
-    );
-    await admitEffect(this.env, this.ctx.props);
-    const saved = await workspace(
-      this.env,
-      this.ctx.props.workspaceId
-    ).saveDraft(
-      this.ctx.props.chatId,
-      id,
-      draft.base,
-      Object.fromEntries(kept),
-      unchanged,
-      draft.revision,
-      this.ctx.props.runId
-    );
-    if (!saved) {
-      throw appErrors.create("app.conflict");
-    }
-    const changed = new Set([
-      ...Object.keys(draft.changes),
-      ...kept.map(([path]) => path),
-    ]);
-    for (const path of unchanged) {
-      changed.delete(path);
-    }
     // The draft as saved: its files, with the changes applied.
     const builds = await draftBuilds(
-      this.env,
-      id,
+      env,
+      found.id,
       draft.base,
       Object.fromEntries(files)
     );
@@ -1279,7 +1376,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     }
     return {
       base: draft.base,
-      changed: [...changed].toSorted(),
+      changed,
       ...writtenDiagnostics(builds),
       notChecked,
     };
@@ -1770,8 +1867,10 @@ build: {
   /**
    * Changes the App's definition in the draft, as the chat's definition
    * tools do (\`addTable\`, \`addField\`, \`changeField\`,
-   * \`renameField\`, \`setAccess\`, \`addIndex\`, \`addPermission\`:
-   * \`operation\` is \`{ op, ...that tool's input but app }\`), and writes
+   * \`renameField\`, \`setAccess\`, \`addIndex\`, \`addPermission\`,
+   * \`removeTable\`, \`removeField\`, \`removeIndex\`,
+   * \`removePermission\`, \`addPreference\`, \`changePreference\`,
+   * \`removePreference\`: \`operation\` is \`{ op, ...that tool's input but app }\`), and writes
    * grasp.config.ts and server/schema.ts from it. \`ok: false\` with the
    * problem saves nothing; otherwise the \`plan\` of what it does to the
    * App's records, and what fails in the whole draft now, as \`write\`.
@@ -1785,9 +1884,11 @@ build: {
           addedTables: string[];
           addedFields: { table: string; field: string }[];
           widenedFields: { table: string; field: string }[];
-          checks: { table: string; field: string; answered: boolean }[];
+          checks: { table: string; field: string; answer: unknown }[];
+          keptTables: string[];
           keptFields: { table: string; field: string }[];
           accessChanges: string[];
+          sensitiveTables: string[];
           refused: { table: string; field?: string; reason: string }[];
         };
         base: number | null;

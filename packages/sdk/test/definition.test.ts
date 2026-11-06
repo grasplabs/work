@@ -31,6 +31,10 @@ const counter = () => {
   };
 };
 
+/** The names of the first table's fields. */
+const fieldNames = (definition: AppDefinition) =>
+  definition.tables[0]?.fields.map(({ name }) => name);
+
 /** `operations` applied in order to an empty App's definition. */
 const defined = (...operations: DefinitionOperation[]): AppDefinition => {
   const newId = counter();
@@ -305,6 +309,164 @@ describe("operations", () => {
       name: "urgency",
     });
     expect(renamed.answers).toStrictEqual(answered.answers);
+  });
+
+  test("remove a field, an index, a table and a permission, with their answers", () => {
+    const answered = applyOperation(
+      applyOperation(tasks(), {
+        op: "addField",
+        table: "tasks",
+        name: "priority",
+        type: 'v.enum(["low", "high"])',
+        answer: "low",
+      }),
+      { op: "addPermission", permission: "people" }
+    );
+    const fieldless = applyOperation(answered, {
+      op: "removeField",
+      table: "tasks",
+      field: "priority",
+    });
+    const indexless = applyOperation(fieldless, {
+      op: "removeIndex",
+      table: "tasks",
+      name: "by_title",
+    });
+    const tableless = applyOperation(answered, {
+      op: "removeTable",
+      table: "tasks",
+    });
+    expect({
+      fields: fieldNames(fieldless),
+      answers: fieldless.answers,
+      indexes: indexless.tables[0]?.indexes,
+      // Nothing reads `title` once its index is gone, so it goes too.
+      untitled: fieldNames(
+        applyOperation(indexless, {
+          op: "removeField",
+          table: "tasks",
+          field: "title",
+        })
+      ),
+      permissions: applyOperation(indexless, {
+        op: "removePermission",
+        alias: "people",
+      }).permissions,
+      tables: tableless.tables,
+      tableAnswers: tableless.answers,
+    }).toStrictEqual({
+      fields: ["title", "done", "owner"],
+      answers: [],
+      indexes: [],
+      untitled: ["done", "owner"],
+      permissions: [],
+      tables: [],
+      tableAnswers: [],
+    });
+  });
+
+  test("refuse a removal that would leave something pointing at nothing", () => {
+    const linked = applyOperation(
+      applyOperation(
+        applyOperation(tasks(), {
+          op: "addIndex",
+          table: "tasks",
+          fields: ["title"],
+          search: true,
+        }),
+        {
+          op: "setAccess",
+          table: "tasks",
+          access: {
+            read: "appMembers",
+            write: "appMembers",
+            rows: { read: [{ kind: "person", field: "owner" }] },
+          },
+        }
+      ),
+      {
+        op: "addTable",
+        name: "notes",
+        fields: { task: 'v.id("tasks")' },
+      }
+    );
+    const unsearched = applyOperation(linked, {
+      op: "removeIndex",
+      table: "tasks",
+      search: true,
+    });
+    const refusals: [AppDefinition, DefinitionOperation, RegExp][] = [
+      [
+        linked,
+        { op: "removeField", table: "tasks", field: "title" },
+        /the index `by_title`, the search index: remove or change them first/u,
+      ],
+      [
+        linked,
+        { op: "removeField", table: "tasks", field: "owner" },
+        /a row rule/u,
+      ],
+      [
+        linked,
+        { op: "removeField", table: "tasks", field: "nope" },
+        /no field/u,
+      ],
+      // `notes.task` links to it.
+      [linked, { op: "removeTable", table: "tasks" }, /`tasks`/u],
+      [linked, { op: "removeTable", table: "nope" }, /no table `nope`/u],
+      [
+        linked,
+        { op: "removeIndex", table: "tasks", name: "nope" },
+        /no index/u,
+      ],
+      [linked, { op: "removePermission", alias: "nope" }, /no permission/u],
+      [
+        unsearched,
+        { op: "removeIndex", table: "tasks", search: true },
+        /no search index/u,
+      ],
+    ];
+    for (const [definition, operation, message] of refusals) {
+      expect(() => applyOperation(definition, operation)).toThrow(message);
+    }
+    expect(unsearched.tables[0]?.searchIndex).toBeUndefined();
+  });
+
+  test("add, change and remove a preference, declared as code would", () => {
+    const added = applyOperation(tasks(), {
+      op: "addPreference",
+      name: "compact",
+      type: "v.boolean().default(false)",
+    });
+    const changed = applyOperation(added, {
+      op: "changePreference",
+      name: "compact",
+      type: 'v.enum(["on", "off"]).default("off")',
+    });
+    expect({
+      declared: definitionManifest(changed).preferences !== undefined,
+      id: changed.preferences[0]?.id,
+      kind: changed.preferences[0]?.type.kind,
+      removed: applyOperation(changed, {
+        op: "removePreference",
+        name: "compact",
+      }).preferences,
+    }).toStrictEqual({
+      declared: true,
+      id: added.preferences[0]?.id,
+      kind: "enum",
+      removed: [],
+    });
+    expect(() =>
+      applyOperation(added, {
+        op: "addPreference",
+        name: "compact",
+        type: "v.boolean()",
+      })
+    ).toThrow(/changePreference/u);
+    expect(() =>
+      applyOperation(changed, { op: "removePreference", name: "nope" })
+    ).toThrow(/no preference `nope`/u);
   });
 
   test("keep an answer for the records a required field is added to", () => {

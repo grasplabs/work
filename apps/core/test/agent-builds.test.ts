@@ -501,15 +501,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       ...notesFiles,
       "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}// ${crypto.randomUUID()}\n`,
     };
-    await chat.stub.saveDraft(
-      chatId,
-      app,
-      null,
-      files,
-      [],
-      0,
-      await openTestRun(chat.stub, chatId)
-    );
+    await chat.stub.saveDraft(chatId, app, null, files, [], 0, {
+      runId: await openTestRun(chat.stub, chatId),
+    });
     // The sandbox ends the first inspection only, as its deadline would.
     const { LOADER: loader } = env;
     let inspections = 0;
@@ -666,10 +660,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       audited: defined.map(({ detail }) => [detail.op, detail.table]),
     }).toStrictEqual({
       released: true,
-      unanswered: [{ table: "notes", field: "category", answered: false }],
-      answered: [{ table: "notes", field: "category", answered: true }],
+      unanswered: [{ table: "notes", field: "category", answer: null }],
+      answered: [{ table: "notes", field: "category", answer: "general" }],
       answers: 1,
-      renamed: [{ table: "notes", field: "topic", answered: true }],
+      renamed: [{ table: "notes", field: "topic", answer: "general" }],
       afterRename: 1,
       sensitive: ["notes"],
       audited: [
@@ -678,6 +672,68 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         ["changeField", "notes"],
         ["renameField", "notes"],
         ["setAccess", "notes"],
+      ],
+    });
+  });
+
+  it("removes what the definition holds and sets its preferences with the definition tools, recording each by its table or alias", async () => {
+    const { builder, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
+        const define = async (operation) => {
+          const answered = await env.build.define(app.id, operation);
+          return answered.ok ? "ok" : answered.problem;
+        };
+        const steps = [
+          await define({ op: "addPermission", permission: "people" }),
+          await define({ op: "addPreference", name: "compact", type: "v.boolean().default(false)" }),
+          await define({ op: "changePreference", name: "compact", type: "v.boolean().default(true)" }),
+          await define({ op: "removeIndex", table: "notes", name: "by_updated" }),
+          await define({ op: "removeField", table: "notes", field: "body" }),
+          await define({ op: "removePermission", alias: "people" }),
+          await define({ op: "removePreference", name: "compact" }),
+          await define({ op: "removeTable", table: "notes" }),
+        ];
+        const definition = JSON.parse((await env.build.files(app.id)).files["definition.json"]);
+        const schema = (await env.build.files(app.id)).files["server/schema.ts"];
+        return { steps, definition: [definition.tables.length, definition.preferences.length, definition.permissions.length], schema: schema.includes("notes") };
+      };`),
+      says("Removed."),
+    ]);
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await release(builder, app, notesFiles);
+    await grant();
+
+    await chat.ask("Start the data model over");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    const events = await allEvents();
+    const defined = events.filter(
+      ({ action, detail }) =>
+        action === "agent.call" &&
+        detail.chat === chat.chat.id &&
+        detail.method === "build.define"
+    );
+    expect({
+      ...z.object({}).loose().parse(returned(result?.text)),
+      audited: defined.map(({ detail }) => [
+        detail.op,
+        detail.table,
+        detail.alias,
+      ]),
+    }).toStrictEqual({
+      steps: Array.from({ length: 8 }, () => "ok"),
+      definition: [0, 0, 0],
+      schema: false,
+      audited: [
+        ["addPermission", null, "people"],
+        ["addPreference", null, null],
+        ["changePreference", null, null],
+        ["removeIndex", "notes", null],
+        ["removeField", "notes", null],
+        ["removePermission", null, "people"],
+        ["removePreference", null, null],
+        ["removeTable", "notes", null],
       ],
     });
   });
@@ -742,8 +798,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // plan of that move checks them for it, unanswered, as version 2's
     // answer was version 2's; answered again, it is the draft's own.
     expect(returned(result?.text)).toStrictEqual({
-      indexed: [{ table: "notes", field: "category", answered: false }],
-      answered: [{ table: "notes", field: "category", answered: true }],
+      indexed: [{ table: "notes", field: "category", answer: null }],
+      answered: [{ table: "notes", field: "category", answer: "general" }],
       answers: 1,
     });
   });
@@ -817,7 +873,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // holding null need it to fit the category that can't be null.
     expect(returned(result?.text)).toStrictEqual({
       changed: true,
-      checks: [{ table: "notes", field: "category", answered: true }],
+      checks: [{ table: "notes", field: "category", answer: "general" }],
       answers: ["general"],
     });
   });
@@ -1477,10 +1533,16 @@ export const Route = createFileRoute("/late")({ component: Page });
         testRunOpening
       );
       return [
-        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, run),
+        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, {
+          runId: run,
+        }),
         // Another write read revision 0 too, and lost.
-        instance.saveDraft(chatId, "app-1", null, { "a.md": "b" }, [], 0, run),
-        instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 1, run),
+        instance.saveDraft(chatId, "app-1", null, { "a.md": "b" }, [], 0, {
+          runId: run,
+        }),
+        instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 1, {
+          runId: run,
+        }),
         instance.draft(chatId, "app-1"),
       ];
     });
@@ -1510,16 +1572,28 @@ export const Route = createFileRoute("/late")({ component: Page });
       return [
         // A write reads revision 0; meanwhile another creates the draft and
         // writes its only change back as the base has it.
-        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, run),
-        instance.saveDraft(chatId, "app-1", null, {}, ["a.md"], 1, run),
+        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, {
+          runId: run,
+        }),
+        instance.saveDraft(chatId, "app-1", null, {}, ["a.md"], 1, {
+          runId: run,
+        }),
         instance.draft(chatId, "app-1"),
         // The write that read revision 0 lands on nothing.
-        instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 0, run),
+        instance.saveDraft(chatId, "app-1", null, { "b.md": "b" }, [], 0, {
+          runId: run,
+        }),
         // Nor once the draft is dropped, as a proposal drops it.
-        instance.saveDraft(chatId, "app-1", null, { "c.md": "c" }, [], 2, run),
+        instance.saveDraft(chatId, "app-1", null, { "c.md": "c" }, [], 2, {
+          runId: run,
+        }),
         instance.dropDraft(chatId, "app-1", { revision: 3 }),
-        instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 0, run),
-        instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 3, run),
+        instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 0, {
+          runId: run,
+        }),
+        instance.saveDraft(chatId, "app-1", null, { "d.md": "d" }, [], 3, {
+          runId: run,
+        }),
         instance.draft(chatId, "app-1"),
       ];
     });
@@ -1550,7 +1624,9 @@ export const Route = createFileRoute("/late")({ component: Page });
       return [
         // A first write reads revision 0; a discard runs before it lands.
         instance.dropDraft(chatId, "app-1", { runId: run }),
-        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, run),
+        instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, {
+          runId: run,
+        }),
         instance.draft(chatId, "app-1"),
       ];
     });
@@ -1949,7 +2025,7 @@ export const titles = action({
         },
         [],
         0,
-        run
+        { runId: run }
       );
     });
 

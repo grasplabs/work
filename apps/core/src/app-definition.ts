@@ -6,13 +6,27 @@ import {
   emptyDefinition,
   generatedFiles,
   tryReadDefinition,
+  validatorSource,
 } from "@grasp-os/sdk/definition";
 import type {
   AppDefinition,
+  DefinedField,
+  DefinedRule,
+  DefinedTable,
   DefinitionOperation,
+  ValueDescriptor,
 } from "@grasp-os/sdk/definition";
 import { planSchemaChange } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
+import type {
+  DataModel,
+  DataModelField,
+  DataModelRule,
+  DataModelTable,
+  DefinitionPlan,
+  FieldType,
+  PlanField,
+} from "@grasp-os/shared/data-model";
 import { z } from "zod";
 
 // An App's definition among its files (@grasp-os/sdk's definition.ts):
@@ -176,47 +190,17 @@ export const heldDefinition = (
   return "definition" in read ? read.definition : null;
 };
 
-/** Where a field is, as a plan names it. */
-interface PlanField {
-  table: string;
-  field: string;
-}
-
-/**
- * What a change of the definition does to the App's records, from the
- * definition its draft is over (`before`, null for an App with none) to
- * `after`, as the store plans it (@grasp-os/sdk's schema-plan.ts): what
- * is applied as it is, and what every record is checked for as the
- * version is made current, which a record that doesn't fit stops until
- * the field has an `answer`.
- */
-export interface DefinitionPlan {
-  /** Whether the store can apply it without a migration in code. */
-  accepted: boolean;
-  addedTables: string[];
-  addedFields: PlanField[];
-  /** Fields every record still fits: nothing to check. */
-  widenedFields: PlanField[];
-  /** Fields every record is checked against, and whether one lacking it takes an answer. */
-  checks: (PlanField & { answered: boolean })[];
-  /** Fields the schema left out: kept in every record, never dropped. */
-  keptFields: PlanField[];
-  /** Tables whose access changes, for every record at once. */
-  accessChanges: string[];
-  /**
-   * Tables declared sensitive: their change history keeps no values from
-   * now on, and every read is audited. A table stays so once declared.
-   */
-  sensitiveTables: string[];
-  /** What needs a migration in code, and why. */
-  refused: { table: string; field?: string; reason: string }[];
-}
-
 /** Where each of `list`'s fields is, as a plan names it. */
 const fieldsOf = (list: readonly PlanField[]): PlanField[] =>
   list.map(({ table, field }) => ({ table, field }));
 
-/** The plan of the change from `before` to `after` (see `DefinitionPlan`). */
+/**
+ * The plan of the change from `before`, the definition the draft is over
+ * (null for an App with none), to `after` (`DefinitionPlan`): what is
+ * applied as it is, and what every record is checked for as the version
+ * is made current, which a record that doesn't fit stops until the field
+ * has an `answer`.
+ */
 export const definitionPlan = (
   before: AppDefinition | null,
   after: AppDefinition
@@ -240,8 +224,9 @@ export const definitionPlan = (
     checks: plan.checks.map(({ table, field, answer }) => ({
       table,
       field,
-      answered: answer !== null,
+      answer: answer?.value ?? null,
     })),
+    keptTables: [...plan.retainedTables],
     keptFields: fieldsOf(plan.retainedFields),
     accessChanges: [...plan.ruleChanges],
     sensitiveTables: after.tables.flatMap((table) =>
@@ -258,6 +243,106 @@ export const definitionPlan = (
         })),
   };
 };
+
+/** The kind a person picks for each kind of descriptor but a choice and a link. */
+const fieldKinds: Record<
+  Exclude<ValueDescriptor["kind"], "enum" | "id">,
+  Exclude<FieldType["kind"], "choice" | "link">
+> = {
+  string: "text",
+  number: "number",
+  boolean: "boolean",
+  timestamp: "date",
+  person: "person",
+  file: "file",
+  money: "money",
+  literal: "other",
+  null: "other",
+  object: "other",
+  array: "other",
+  union: "other",
+  record: "other",
+  duration: "other",
+  model: "other",
+  schedule: "other",
+  template: "other",
+};
+
+/** A field's kind, as a person picks it (`FieldType`). */
+const fieldTypeOf = (type: ValueDescriptor): FieldType => {
+  if (type.kind === "enum") {
+    return { kind: "choice", values: [...type.values] };
+  }
+  if (type.kind === "id") {
+    return { kind: "link", table: type.tableName };
+  }
+  if (type.kind === "string" && type.email) {
+    return { kind: "email" };
+  }
+  return { kind: fieldKinds[type.kind] };
+};
+
+/** A field as the Data view shows it (`DataModelField`). */
+const modelFieldOf = ({ id, name, type }: DefinedField): DataModelField => {
+  // Its code with no presence: `required` says that, and a change of it
+  // adds `.optional()` or doesn't (`fieldCode`).
+  const { defaultValue: _default, ...declared } = type;
+  return {
+    id,
+    name,
+    type: fieldTypeOf(type),
+    required: type.presence === "required",
+    code: validatorSource({ ...declared, presence: "required" }),
+  };
+};
+
+/** A table's field's name, by its ID; the ID itself for a managed field. */
+const nameOf = (table: DefinedTable, id: string): string =>
+  table.fields.find((field) => field.id === id)?.name ?? id;
+
+/** A table as the Data view shows it (`DataModelTable`), its fields by name. */
+const modelTableOf = (table: DefinedTable): DataModelTable => {
+  const rules = (list: readonly DefinedRule[] = []): DataModelRule[] =>
+    list.map((rule) =>
+      rule.kind === "person" || rule.kind === "team"
+        ? { kind: rule.kind, field: nameOf(table, rule.field) }
+        : { ...rule }
+    );
+  return {
+    id: table.id,
+    name: table.name,
+    fields: table.fields.map(modelFieldOf),
+    indexes: table.indexes.map((index) => ({
+      name: index.name,
+      fields: index.fields.map((field) => nameOf(table, field)),
+    })),
+    searchIndex:
+      table.searchIndex?.map((field) => nameOf(table, field)) ?? null,
+    sensitive: table.sensitive === true,
+    access: {
+      read: table.access.read,
+      write: table.access.write,
+      rows: {
+        read: rules(table.access.rows?.read),
+        write: rules(table.access.rows?.write),
+      },
+    },
+  };
+};
+
+/** A permission's alias or kind: text, as every declaration's is. */
+const textOf = (value: unknown): string =>
+  typeof value === "string" ? value : "";
+
+/** `definition`'s data model, as the workspace's Data view shows it. */
+export const dataModelOf = (definition: AppDefinition): DataModel => ({
+  tables: definition.tables.map(modelTableOf),
+  preferences: definition.preferences.map(modelFieldOf),
+  permissions: definition.permissions.map((permission) => ({
+    alias: textOf(permission.alias),
+    kind: textOf(permission["~permission"]),
+  })),
+});
 
 /** A row rule, as the tools take it: its field by name. */
 const ruleSchema = z.union([
@@ -329,6 +414,25 @@ export const definitionOperationSchema: z.ZodType<DefinitionOperation> =
       search: z.boolean().optional(),
     }),
     z.strictObject({ op: z.literal("addPermission"), permission: text }),
+    z.strictObject({ op: z.literal("removeTable"), table: text }),
+    z.strictObject({
+      op: z.literal("removeField"),
+      table: text,
+      field: text,
+    }),
+    z.strictObject({
+      op: z.literal("removeIndex"),
+      table: text,
+      name: text.optional(),
+      search: z.boolean().optional(),
+    }),
+    z.strictObject({ op: z.literal("removePermission"), alias: text }),
+    z.strictObject({
+      op: z.enum(["addPreference", "changePreference"]),
+      name: text,
+      type: text,
+    }),
+    z.strictObject({ op: z.literal("removePreference"), name: text }),
   ]);
 
 /** What an operation's audit record keeps: its kind, its table and its alias. */
@@ -346,13 +450,13 @@ export const operationDetail = (
   } else if (data.op === "addTable") {
     table = data.name;
   }
-  return {
-    op: data.op,
-    table,
-    alias:
-      data.op === "addPermission"
-        ? (/["'`](?<alias>[\w-]+)["'`]/u.exec(data.permission)?.groups?.alias ??
-          data.permission.slice(0, 64))
-        : null,
-  };
+  let alias: string | null = null;
+  if (data.op === "addPermission") {
+    alias =
+      /["'`](?<alias>[\w-]+)["'`]/u.exec(data.permission)?.groups?.alias ??
+      data.permission.slice(0, 64);
+  } else if (data.op === "removePermission") {
+    alias = data.alias.slice(0, 64);
+  }
+  return { op: data.op, table, alias };
 };

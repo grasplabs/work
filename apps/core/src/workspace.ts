@@ -280,6 +280,19 @@ export interface Draft {
   revision: number;
 }
 
+/**
+ * Who writes a chat's draft: its agent, in its open code run `runId`; or
+ * its person themselves, from the App's workspace (the Data view), the
+ * write audited as `actor`'s with `detail`.
+ */
+export type DraftWriter =
+  | { runId: string }
+  | {
+      personId: string;
+      actor: AuditActor;
+      detail: Record<string, AuditDetailValue>;
+    };
+
 /** What a chat's agent spent building Apps this turn: the Apps it created (agent-builds.ts). */
 interface TurnBuilds {
   created: number;
@@ -1361,6 +1374,7 @@ export class Workspace extends DurableObject<Env> {
       | "chat.deleted"
       | "chat.moved"
       | "chat.draft_restored"
+      | "chat.draft_defined"
       | "chat.file_attached"
       | "chat.file_removed"
       | "chat.draft_discarded",
@@ -4128,10 +4142,11 @@ export class Workspace extends DurableObject<Env> {
    * `base`, and drops its changes to the paths in `unchanged` (back as the
    * base has them), only over the revision `revision` the write read (0:
    * there was none): `false`, and nothing written, when another write
-   * landed since, or the chat is gone. Refused, in the same transaction,
-   * once the code run `runId` that writes it has closed. Kept as the
-   * version of the run's turn, too (draft-versions.ts): the preview
-   * follows every write, the versions one per turn.
+   * landed since, or the chat is gone. By `writer` (`DraftWriter`): the
+   * chat's code run, refused in the same transaction once it has closed;
+   * or the chat's own person, audited as theirs. Kept as the version of
+   * the run's turn, too (draft-versions.ts): the preview follows every
+   * write, the versions one per turn.
    */
   saveDraft(
     chatId: ChatId,
@@ -4140,10 +4155,14 @@ export class Workspace extends DurableObject<Env> {
     changes: Record<string, string | null>,
     unchanged: readonly string[],
     revision: number,
-    runId: string
+    writer: DraftWriter
   ): boolean {
     const saved = this.ctx.storage.transactionSync(() => {
-      this.#requireOpenRun(chatId, runId);
+      if ("runId" in writer) {
+        this.#requireOpenRun(chatId, writer.runId);
+      } else {
+        this.#ownChat(chatId, writer.personId);
+      }
       const [row] = this.#db
         .select({ revision: chatDrafts.revision })
         .from(chatDrafts)
@@ -4157,15 +4176,18 @@ export class Workspace extends DurableObject<Env> {
       }
       const updatedAt = new Date();
       // The code step and turn that write it, from the run's own record:
-      // never what the run's code says.
-      const run = this.#db
-        .select({
-          callId: chatCodeRuns.toolCallId,
-          turnId: chatCodeRuns.turnId,
-        })
-        .from(chatCodeRuns)
-        .where(eq(chatCodeRuns.id, runId))
-        .get();
+      // never what the run's code says. None for the person's own write.
+      const run =
+        "runId" in writer
+          ? this.#db
+              .select({
+                callId: chatCodeRuns.toolCallId,
+                turnId: chatCodeRuns.turnId,
+              })
+              .from(chatCodeRuns)
+              .where(eq(chatCodeRuns.id, writer.runId))
+              .get()
+          : undefined;
       const callId = run?.callId ?? null;
       this.#db
         .insert(chatDrafts)
@@ -4215,8 +4237,18 @@ export class Workspace extends DurableObject<Env> {
         { turnId: run?.turnId ?? null, callId },
         updatedAt
       );
+      if ("personId" in writer) {
+        this.#outboxed(writer.actor, "chat.draft_defined", chatId, {
+          app: appId,
+          revision: revision + 1,
+          ...writer.detail,
+        });
+      }
       return true;
     });
+    if (saved && "personId" in writer) {
+      this.#deliverAudit();
+    }
     if (saved) {
       // The preview of the revision before is over once changed server
       // code seals, its database with it; until then, and for good while

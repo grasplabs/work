@@ -49,7 +49,7 @@ export const chatWithDraft = async (
       written,
       [],
       revision,
-      await openTestRun(chatsOf(person), chatId)
+      { runId: await openTestRun(chatsOf(person), chatId) }
     );
     if (!saved) {
       throw new Error("The draft wasn't written");

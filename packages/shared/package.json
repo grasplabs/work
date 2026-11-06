@@ -53,6 +53,7 @@
     "./app-releases": "./src/app-releases.ts",
     "./apps": "./src/apps.ts",
     "./audit": "./src/audit.ts",
+    "./data-model": "./src/data-model.ts",
     "./audit-log": "./src/audit-log.ts",
     "./business-processes": "./src/business-processes.ts",
     "./brain": "./src/brain.ts",
