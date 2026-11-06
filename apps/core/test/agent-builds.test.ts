@@ -21,7 +21,7 @@ import {
   transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
-import { appDefinition, redefined } from "./app-definitions.ts";
+import { appDefinition, definedWith, redefined } from "./app-definitions.ts";
 import { published, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -672,6 +672,70 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         ["renameField", "notes"],
         ["setAccess", "notes"],
       ],
+    });
+  });
+
+  it("saves a new App's first write with the definition it gets, so its draft reads and previews whole", async () => {
+    const { chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled.replace(' className="rounded-full"', "") })});
+        const draft = await env.build.files(app.id);
+        return { changed: written.changed.toSorted(), files: Object.keys(draft.files).toSorted() };
+      };`),
+      says("Written."),
+    ]);
+    await grant();
+
+    await chat.ask("Build a desk");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    const files = [
+      "definition.json",
+      "grasp.config.ts",
+      "screens/desk.tsx",
+      "server/schema.ts",
+    ];
+    expect(returned(result?.text)).toStrictEqual({ changed: files, files });
+  });
+
+  it("plans a definition change from the version people use, not a later one that isn't current", async () => {
+    const { builder, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
+        const indexed = await env.build.define(app.id, { op: "addIndex", table: "notes", name: "by_title", fields: ["title"] });
+        const definition = JSON.parse((await env.build.files(app.id)).files["definition.json"]);
+        return { ok: indexed.ok, checks: indexed.ok && indexed.plan.checks, answers: definition.answers.length };
+      };`),
+      says("Indexed."),
+    ]);
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
+    // Version 1 runs; version 2 adds a category its notes lack, answered,
+    // and isn't current yet.
+    await release(builder, app, notesFiles);
+    await builder.api.apps.files.commit(
+      app,
+      definedWith(notesFiles, {
+        op: "addField",
+        table: "notes",
+        name: "category",
+        type: "v.string()",
+        answer: "general",
+      }),
+      "Categories"
+    );
+    await grant();
+
+    await chat.ask("Index the notes by title");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    // Released from version 1, the notes still lack the category: its
+    // answer stays, and the plan checks them for it.
+    expect(returned(result?.text)).toStrictEqual({
+      ok: true,
+      checks: [{ table: "notes", field: "category", answered: true }],
+      answers: 1,
     });
   });
 

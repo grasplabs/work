@@ -59,6 +59,11 @@ const objectOf = (
     if (unsafeKeys.has(key)) {
       return refuse(`\`${key}\` can't be a key.`);
     }
+    // Defined once each (a defined property can't be redefined): a key
+    // given twice is refused, as no one can tell which value it holds.
+    if (Object.hasOwn(object, key)) {
+      return refuse(`\`${key}\` is a key twice.`);
+    }
     Object.defineProperty(object, key, {
       enumerable: true,
       // oxlint-disable-next-line no-use-before-define -- the evaluator is recursive

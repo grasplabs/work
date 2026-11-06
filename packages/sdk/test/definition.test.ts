@@ -199,6 +199,16 @@ describe("operations", () => {
         },
         /./u,
       ],
+      // A key given twice: which value would it hold?
+      [
+        {
+          op: "addField",
+          table: "tasks",
+          name: "x",
+          type: "v.object({ title: v.string(), title: v.number() })",
+        },
+        /`title` is a key twice/u,
+      ],
       [
         {
           op: "addPermission",
@@ -371,5 +381,10 @@ describe("reading", () => {
       expect(() => readDefinition(input)).toThrow(/./u);
     }
     expect(() => readDefinition("not json")).toThrow(AppDefinitionError);
+    // Two fields of one table named alike, each with an ID of its own.
+    const twice = text.replace('"name": "done"', '"name": "title"');
+    expect(twice).not.toBe(text);
+    expect(() => readDefinition(twice)).toThrow(AppDefinitionError);
+    expect(() => readDefinition(twice)).toThrow(/named `title`/u);
   });
 });

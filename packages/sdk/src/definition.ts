@@ -258,6 +258,9 @@ const shapeOf = (
 ): Record<string, AnySchema> => {
   const shape: Record<string, AnySchema> = {};
   for (const field of fields) {
+    if (Object.hasOwn(shape, field.name)) {
+      refuse(`Two fields are named \`${field.name}\`.`);
+    }
     Object.defineProperty(shape, field.name, {
       enumerable: true,
       value: typeOf(field),

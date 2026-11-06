@@ -46,7 +46,7 @@ import {
   requireNotArchived,
 } from "./app-access.ts";
 import type { Person } from "./app-access.ts";
-import { withDefinitionCode } from "./app-definition.ts";
+import { definitionFiles, withDefinitionCode } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import { refuseV1Server } from "./app-v1-server.ts";
 import { queuedWebhookDeliveries } from "./app-webhook-queue.ts";
@@ -773,12 +773,28 @@ export const applyChanges = (
     }
   }
   // The config and schema as the definition generates them, whatever the
-  // changes held of them, before the App's limits are checked on them.
+  // changes held of them, before the App's limits are checked on them;
+  // and the definition a first write gets. Answered as changes too, so a
+  // draft saves the files it was checked with.
+  const submitted = new Map(
+    [...definitionFiles].map((path) => [path, files.get(path)])
+  );
   withDefinitionCode(files, name, defined);
   checkLimits(files, before);
   checkPaths(files.keys(), added);
   checkMemory(agentsBefore, files.get(appMemoryPath));
-  return changes;
+  const generated = [...definitionFiles].flatMap((path): [string, string][] => {
+    const content = files.get(path);
+    return content === undefined || content === submitted.get(path)
+      ? []
+      : [[path, content]];
+  });
+  return [
+    ...changes.filter(
+      ([path]) => !generated.some(([changed]) => changed === path)
+    ),
+    ...generated,
+  ];
 };
 
 /**

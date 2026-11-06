@@ -48,6 +48,7 @@ import {
   draftFiles,
   draftOverLatest,
   editableApp,
+  versionFiles,
   latestVersion,
   proposeDraft,
 } from "./apps.ts";
@@ -1115,10 +1116,16 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         );
         const draft = await draftOf(this.env, this.ctx.props, found.id);
         const files = await draftFiles(this.env, found.id, draft);
-        const base = await draftFiles(this.env, found.id, {
-          base: draft.base,
-          changes: {},
-        });
+        // The version people use, which a release of this draft starts
+        // from: never the draft's base, a later commit that may not be
+        // current. Its records are what a rename and an answer are for.
+        const base = new Map(
+          found.currentVersion === null
+            ? []
+            : Object.entries(
+                await versionFiles(this.env, found.id, found.currentVersion)
+              )
+        );
         const current = definitionIn(files, found.name);
         const released = definitionIn(base, found.name);
         if ("problem" in current) {
