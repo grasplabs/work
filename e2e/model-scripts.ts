@@ -82,8 +82,30 @@ const writesTally = (
   outputTokens: 40,
 });
 
-/** The SDK's `app`, as a search of Grasp's reference finds it (core's agent-tools.ts). */
-const sdkApp = /(?<found>@grasp-os\/sdk\/src\/app\.ts:\d+:export const app =)/u;
+
+/** The SDK's `defineApp`, as a search of Grasp's reference finds it (core's agent-tools.ts). */
+const sdkApp =
+  /(?<found>@grasp-os\/sdk\/src\/app\.ts:\d+:export const defineApp =)/u;
+
+/** A table the agent adds with `addTable`, every member reading and writing it. */
+const sharedTable = (
+  app: string,
+  name: string,
+  fields: Record<string, string>
+): Record<string, unknown> => ({
+  app,
+  name,
+  fields,
+  access: { read: "appMembers", write: "appMembers" },
+});
+
+/** `files` as the agent writes them: never the definition's config or schema. */
+const codeOf = (files: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(files).filter(
+      ([path]) => path !== "grasp.config.ts" && path !== "server/schema.ts"
+    )
+  );
 
 /** The workflow open beside a chat, as its first message names it (web's draw-in-chat.ts). */
 const besideWorkflow = /\(ID (?<found>[^)\s]+)\) is open beside this chat/u;
@@ -130,7 +152,7 @@ export const modelScripts = {
             name: "writeFile",
             arguments: {
               app: readIn(said, ownApp),
-              files: tallyFiles("in the preview"),
+              files: codeOf(tallyFiles("in the preview")),
             },
           },
         ],
@@ -191,18 +213,26 @@ export const modelScripts = {
       "A contact list for the sales team: each contact's name, added from its screen.",
     replies: [
       calls("findsapp1", "searchFiles", {
-        text: "export const app =",
+        text: "export const defineApp =",
         path: "@grasp-os/sdk/src/app.ts",
       }),
-      // Only once the reference answered with how `app` is declared: a
-      // search that failed or found nothing ends the script.
+      // Only once the reference answered with how `defineApp` is declared:
+      // a search that failed or found nothing ends the script.
       (said) => {
         readIn(said, sdkApp);
-        return calls("writesap1", "writeFile", {
-          app: readIn(said, ownApp),
-          files: contactsApp,
-        });
+        return calls(
+          "definesap1",
+          "addTable",
+          sharedTable(readIn(said, ownApp), "contacts", {
+            name: "v.string().max(200)",
+          })
+        );
       },
+      (said) =>
+        calls("writesap1", "writeFile", {
+          app: readIn(said, ownApp),
+          files: codeOf(contactsApp),
+        }),
       says(appReady),
     ],
   },
@@ -232,10 +262,16 @@ export const modelScripts = {
     opener: "Build a tally, and get it working.",
     replies: [
       (said) =>
+        calls(
+          "definesbr1",
+          "addTable",
+          sharedTable(readIn(said, ownApp), "tally", { added: "v.boolean()" })
+        ),
+      (said) =>
         calls("writesbr1", "writeFile", {
           app: readIn(said, ownApp),
           files: {
-            ...tallyFiles("in the preview"),
+            ...codeOf(tallyFiles("in the preview")),
             "screens/tally.tsx": "export default function Tally( {",
           },
         }),
