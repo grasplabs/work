@@ -139,7 +139,12 @@ const writePart = async (
   );
 };
 
-/** `parts` as a multipart form, each read as the request sends it. */
+/**
+ * `parts` as a multipart form, each read as the request sends it. Not
+ * form-data-encoder (4.1.0): it splits a chunk over 64 KiB from the start
+ * of its whole buffer, ignoring `byteOffset`, so it would send a stream's
+ * view into a larger buffer as other bytes, silently and after our check.
+ */
 const formBody = (
   boundary: string,
   parts: readonly FormPart[],
