@@ -299,16 +299,17 @@ const mebibytes = (bytes: number): string =>
  * outgrows it fails in CI rather than on a client's deploy days later
  * (apps/admin/src/cloudflare/workers.ts):
  * - A Worker's modules, all together, raw: the deploy sends them in one
- *   upload, which Cloudflare takes up to 64 MiB, and the Worker must start
- *   within 1 s, which parsing that much code comes close to. The deploy
- *   streams them into the upload, so they don't bound its memory.
+ *   upload, which Cloudflare takes up to 64 MiB uncompressed; 48 MiB
+ *   leaves a quarter of that as headroom. The deploy streams them into the
+ *   upload, so they don't bound its memory. The 1 s startup limit isn't
+ *   a size: Cloudflare checks it on every upload.
  * - A static file: Cloudflare takes 25 MiB at most. The deploy holds the
  *   one it's sending, read and as base64, so this bounds its memory too.
  * Static files in total aren't bounded here: the deploy sends one at a
  * time.
  */
 export const releaseBudget = {
-  workerModules: 24 * 1024 * 1024,
+  workerModules: 48 * 1024 * 1024,
   staticFile: 20 * 1024 * 1024,
 } as const;
 

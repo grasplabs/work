@@ -170,8 +170,8 @@ describe("the release manifest", () => {
     if (connect === undefined || core === undefined || main === undefined) {
       throw new Error("expected two builds");
     }
-    // Two modules each under half the budget, which together are over it:
-    // the deploy sends them all in one upload.
+    // Two modules of half the budget each, neither over it alone, which
+    // with core's own are over it: the deploy sends them all in one upload.
     const half = releaseBudget.workerModules / 2;
     const halves = ["a.js", "b.js"].map((name) => ({
       ...main,
@@ -184,7 +184,7 @@ describe("the release manifest", () => {
         connect,
         { ...core, modules: [...core.modules, ...halves] },
       ])
-    ).toThrow(/core is over the release budget: its modules are 2\d\.\d MiB/u);
+    ).toThrow(/core is over the release budget: its modules are 4\d\.\d MiB/u);
     expect(() =>
       generateManifest(info, [
         connect,
