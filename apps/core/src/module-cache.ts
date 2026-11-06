@@ -154,14 +154,12 @@ export const keepIncrements = async (
 
 /**
  * What earlier lints found in each of `files` (by path), for those whose
- * result is kept under the key of their content and, for a page or a
- * component, of the App's others (`designContext`, `lintKey`): the rest
- * are linted again.
+ * result is kept under the key of their content (`lintKey`): the rest are
+ * linted again.
  */
 export const readLints = async (
   env: CacheEnv,
   files: Readonly<Record<string, string>>,
-  designContext: string,
   refreshAfterMs: number
 ): Promise<Record<string, Diagnostic[]>> => {
   const found: Record<string, Diagnostic[]> = {};
@@ -169,7 +167,7 @@ export const readLints = async (
     Object.entries(files),
     concurrency,
     async ([path, source]) => {
-      const key = await lintKey(path, source, designContext);
+      const key = await lintKey(path, source);
       const record = lintRecordOf(
         await readRecord(env, "lints", key, refreshAfterMs),
         path
@@ -190,7 +188,6 @@ export const readLints = async (
 export const keepLints = async (
   env: CacheEnv,
   files: Readonly<Record<string, string>>,
-  designContext: string,
   linted: Readonly<Record<string, Diagnostic[]>>,
   leaseMs: number
 ): Promise<void> => {
@@ -205,7 +202,7 @@ export const keepLints = async (
       try {
         await keepUnderLease(
           env,
-          cacheKeyOf("lints", await lintKey(path, source, designContext)),
+          cacheKeyOf("lints", await lintKey(path, source)),
           JSON.stringify({ path, diagnostics }),
           leaseMs
         );

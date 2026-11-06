@@ -1,10 +1,13 @@
-// What an App's code reads of its tables' indexes, collected as the build
-// compiles it, in the same parse: a server function orders a table along
-// an index with `ctx.db.query(table).withIndex(name)` and searches one
-// with `ctx.db.search(table, text)`, and a page calls a function as
-// `api.<file>.<name>`. Only what the code spells out (string literals) is
-// found. The Data view says from it what uses each index (core's
-// app-definition.ts).
+// What an App's code reads of its tables' indexes, read from its syntax
+// tree (oxc's, syntax.ts) as the build compiles it: a server function
+// orders a table along an index with `ctx.db.query(table).withIndex(name)`
+// and searches one with `ctx.db.search(table, text)`, and a page calls a
+// function as `api.<file>.<name>`. Only what the code spells out (string
+// literals) is found. The Data view says from it what uses each index
+// (core's app-definition.ts).
+
+import { child, children, walk } from "./syntax.ts";
+import type { Node, Parsed } from "./syntax.ts";
 
 /** An index a server function reads: by name, or its table's search (`index` null). */
 export interface IndexRead {
@@ -14,28 +17,9 @@ export interface IndexRead {
   query: string;
 }
 
-/** The parts of a Babel node these plugins read. */
-interface Node {
-  type: string;
-  value?: unknown;
-  name?: unknown;
-  callee?: Node;
-  object?: Node;
-  property?: Node;
-  arguments?: Node[];
-  id?: Node;
-}
-
-/** The parts of a Babel path these plugins read. */
-interface Path {
-  node: Node;
-  parentPath?: { node: Node; parentPath?: { node: Node } | null } | null;
-  traverse: (visitor: Record<string, (inner: Path) => void>) => void;
-}
-
 /** A string literal's value; undefined for anything else. */
 const literalOf = (node: Node | undefined): string | undefined =>
-  node?.type === "StringLiteral" && typeof node.value === "string"
+  node?.type === "Literal" && typeof node.value === "string"
     ? node.value
     : undefined;
 
@@ -49,14 +33,14 @@ const nameOf = (node: Node | undefined): string | undefined =>
 const tableUnder = (start: Node | undefined): string | undefined => {
   let current = start;
   while (current?.type === "CallExpression") {
-    const { callee } = current;
+    const callee = child(current, "callee");
     if (callee?.type !== "MemberExpression") {
       return undefined;
     }
-    if (nameOf(callee.property) === "query") {
-      return literalOf(current.arguments?.[0]);
+    if (nameOf(child(callee, "property")) === "query") {
+      return literalOf(children(current, "arguments")[0]);
     }
-    current = callee.object;
+    current = child(callee, "object");
   }
   return undefined;
 };
@@ -65,20 +49,21 @@ const tableUnder = (start: Node | undefined): string | undefined => {
 const indexRead = (
   call: Node
 ): { table: string; index: string | null } | undefined => {
-  const { callee } = call;
+  const callee = child(call, "callee");
   if (callee?.type !== "MemberExpression") {
     return undefined;
   }
-  const method = nameOf(callee.property);
+  const method = nameOf(child(callee, "property"));
+  const [first] = children(call, "arguments");
   if (method === "withIndex") {
-    const index = literalOf(call.arguments?.[0]);
-    const table = tableUnder(callee.object);
+    const index = literalOf(first);
+    const table = tableUnder(child(callee, "object"));
     return index === undefined || table === undefined
       ? undefined
       : { table, index };
   }
   if (method === "search") {
-    const table = literalOf(call.arguments?.[0]);
+    const table = literalOf(first);
     return table === undefined ? undefined : { table, index: null };
   }
   return undefined;
@@ -92,53 +77,70 @@ const moduleOf = (path: string): string =>
     .replaceAll("/", ".");
 
 /**
- * A Babel plugin that lists into `reads` the indexes each exported
- * function of the server file `path` reads.
+ * The indexes each exported function (`export const name = …`) of the
+ * server file `path` reads, in the order its source reads them; none of a
+ * file that doesn't parse.
  */
-export const collectIndexReads = (path: string, reads: IndexRead[]) => () => ({
-  visitor: {
-    VariableDeclarator: (declarator: Path) => {
-      const exported =
-        declarator.parentPath?.parentPath?.node.type ===
-        "ExportNamedDeclaration";
-      const name = nameOf(declarator.node.id);
-      if (!exported || name === undefined) {
-        return;
+export const indexReadsOf = (
+  path: string,
+  tree: Parsed | undefined
+): IndexRead[] =>
+  children(tree?.program, "body").flatMap((statement) => {
+    const declaration = child(statement, "declaration");
+    if (
+      statement.type !== "ExportNamedDeclaration" ||
+      declaration?.type !== "VariableDeclaration"
+    ) {
+      return [];
+    }
+    return children(declaration, "declarations").flatMap((declarator) => {
+      const name = nameOf(child(declarator, "id"));
+      if (name === undefined) {
+        return [];
       }
       const query = `${moduleOf(path)}.${name}`;
-      declarator.traverse({
-        CallExpression: (call) => {
-          const read = indexRead(call.node);
-          if (read !== undefined) {
-            reads.push({ ...read, query });
-          }
-        },
+      const reads: IndexRead[] = [];
+      walk(declarator, (node) => {
+        const read =
+          node.type === "CallExpression" ? indexRead(node) : undefined;
+        if (read !== undefined) {
+          reads.push({ ...read, query });
+        }
       });
-    },
-  },
-});
+      return reads;
+    });
+  });
 
-/** A Babel plugin that lists into `calls` the functions a page calls: `api.deals.list` as `deals.list`. */
-export const collectApiCalls = (calls: Set<string>) => () => ({
-  visitor: {
-    MemberExpression: (member: Path) => {
-      // Only a whole chain, from its outermost member.
-      if (member.parentPath?.node.type === "MemberExpression") {
+/**
+ * The functions a page file calls through `api`, `api.deals.list` as
+ * `deals.list`, each once and sorted; none of a file that doesn't parse.
+ */
+export const apiCallsOf = (tree: Parsed | undefined): string[] => {
+  const calls = new Set<string>();
+  if (tree === undefined) {
+    return [];
+  }
+  walk(tree.program, (member, parent) => {
+    // Only a whole chain, from its outermost member.
+    if (
+      member.type !== "MemberExpression" ||
+      parent?.type === "MemberExpression"
+    ) {
+      return;
+    }
+    const parts: string[] = [];
+    let current: Node | undefined = member;
+    while (current?.type === "MemberExpression") {
+      const part = nameOf(child(current, "property"));
+      if (part === undefined) {
         return;
       }
-      const parts: string[] = [];
-      let current: Node | undefined = member.node;
-      while (current?.type === "MemberExpression") {
-        const part = nameOf(current.property);
-        if (part === undefined) {
-          return;
-        }
-        parts.unshift(part);
-        current = current.object;
-      }
-      if (nameOf(current) === "api" && parts.length > 0) {
-        calls.add(parts.join("."));
-      }
-    },
-  },
-});
+      parts.unshift(part);
+      current = child(current, "object");
+    }
+    if (nameOf(current) === "api" && parts.length > 0) {
+      calls.add(parts.join("."));
+    }
+  });
+  return [...calls].toSorted();
+};

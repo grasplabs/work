@@ -636,7 +636,8 @@ describe("a JSON workflow's compute modules", () => {
     const back = await edit(2, definitionOf(), totalModules);
     const changed = await edit(3, definitionOf(), {
       ...totalModules,
-      "code/sum.ts": `${sumModule}// changed\n`,
+      // Another program: a comment alone compiles to the same one.
+      "code/sum.ts": `${sumModule}export const none = 0;\n`,
     });
     expect({ first, missing, back, changed }).toStrictEqual({
       first: { ran: true, problems: [] },
@@ -721,7 +722,8 @@ describe("a JSON workflow's compute modules", () => {
     const first = await published(by, totalModules);
     const second = await published(by, {
       ...totalModules,
-      "code/sum.ts": `${sumModule}// changed\n`,
+      // Another program: a comment alone compiles to the same one.
+      "code/sum.ts": `${sumModule}export const none = 0;\n`,
     });
     expect(first.version?.build.hash !== undefined).toBeTruthy();
     expect(second.version?.build.hash !== undefined).toBeTruthy();

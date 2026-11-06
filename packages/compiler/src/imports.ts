@@ -1,3 +1,6 @@
+import { parse } from "es-module-lexer/js";
+import type { Import } from "es-module-lexer/js";
+
 import { appCodeImport, pageImportError, typeImportError } from "./app-code.ts";
 import { routeTreePath } from "./inputs.ts";
 import {
@@ -11,12 +14,9 @@ import {
   sdkRoot,
 } from "./kit.ts";
 import type { Kit } from "./kit.ts";
-import { ambientOf, directivesIn } from "./steering.ts";
-import type {
-  DirectiveSite,
-  ModuleDeclaration,
-  ParsedComment,
-} from "./steering.ts";
+import type { Transformed } from "./oxc.ts";
+import { child, children, parsed } from "./syntax.ts";
+import type { Node } from "./syntax.ts";
 
 /** An import in a source file, as written. */
 export interface ImportSite {
@@ -39,241 +39,107 @@ export interface ImportSite {
   ambient?: true;
 }
 
-/** The parts of Babel's AST the import scan and rewrite read and write. */
-interface Name {
-  type: string;
-  name?: string;
-  value?: string;
-}
-interface Specifier {
-  type: string;
-  local: Name;
-  imported?: Name;
-  exported?: Name;
-  importKind?: string | null;
-  exportKind?: string | null;
-}
-interface StringLiteral {
-  type: string;
-  value: string;
-}
-interface Statement {
-  type: string;
-  loc?: { start: { line: number } } | null;
-  source?: StringLiteral | null;
-  /** `import X = require("…")`'s module (`TSExternalModuleReference`). */
-  moduleReference?: { type: string; expression?: StringLiteral };
-  specifiers?: Specifier[];
-  importKind?: string | null;
-  exportKind?: string | null;
-}
-interface Call {
-  callee: { type: string; name?: string };
-  arguments: { type: string; value?: unknown }[];
-  loc?: { start: { line: number } } | null;
-}
-
-const moduleStatements = new Set([
-  "ImportDeclaration",
-  "ExportNamedDeclaration",
-  "ExportAllDeclaration",
-]);
-
-/** An import, or an export from another module (`export … from`). */
-const isModuleStatement = (statement: Statement): boolean =>
-  moduleStatements.has(statement.type) &&
-  statement.source !== null &&
-  statement.source !== undefined;
-
-const isTypeSpecifier = (specifier: Specifier): boolean =>
-  specifier.importKind === "type" || specifier.exportKind === "type";
-
-/** The specifiers that bring in values; types are erased when compiling. */
-const valueSpecifiers = (statement: Statement): Specifier[] =>
-  (statement.specifiers ?? []).filter(
-    (specifier) => !isTypeSpecifier(specifier)
-  );
-
-/** An `import type`, or an import whose every name is a type. */
-const isTypeOnly = (statement: Statement): boolean =>
-  statement.importKind === "type" ||
-  statement.exportKind === "type" ||
-  ((statement.specifiers ?? []).length > 0 &&
-    valueSpecifiers(statement).length === 0);
-
-const nameOf = (name: Name | undefined): string | undefined =>
-  name?.name ?? name?.value;
-
-/** The name a specifier takes from the other module. */
-const importedName = (specifier: Specifier): string | undefined =>
-  specifier.type === "ExportSpecifier"
-    ? nameOf(specifier.local)
-    : nameOf(specifier.imported);
-
-const namedSpecifiers = new Set(["ImportSpecifier", "ExportSpecifier"]);
-
 /**
- * The names a statement takes from the other module, or undefined when it
- * takes a default, a namespace or everything (`export *`).
+ * The modules a transformed file's source names (oxc.ts `Transformed`),
+ * as written: type-only ones too, which the transform erases but which
+ * still name modules, some no file may name.
  */
-const namesOf = (statement: Statement): string[] | undefined => {
-  if (statement.type === "ExportAllDeclaration") {
-    return undefined;
-  }
-  const names = valueSpecifiers(statement).map((specifier) =>
-    namedSpecifiers.has(specifier.type) ? importedName(specifier) : undefined
-  );
-  return names.every((name) => name !== undefined) ? names : undefined;
-};
+export const importSitesOf = ({ sites }: Transformed): ImportSite[] =>
+  sites.map(({ specifier, line, names, typeOnly, ambient }) => ({
+    specifier: specifier ?? undefined,
+    line,
+    names: names ?? undefined,
+    ...(typeOnly === true ? { typeOnly } : {}),
+    ...(ambient === true ? { ambient } : {}),
+  }));
 
-const isImportCall = (call: Call): boolean => call.callee.type === "Import";
-
-/** `import(x)` as Babel may also parse it: an `ImportExpression` node. */
-interface ImportExpression {
-  source: Call["arguments"][number];
-  loc?: Call["loc"];
+/** A change to a module's code: `text` in place of `start` to `end`. */
+interface Edit {
+  start: number;
+  end: number;
+  text: string;
 }
 
 /**
- * An `ImportExpression` as the `import()` call the visitors read. Its
- * source is the same node, so rewriting the call's argument rewrites it.
+ * `code`, a module oxc's transform made, with its imports pointed
+ * elsewhere, as es-module-lexer finds them: each import's specifier
+ * replaced by what `moduleFor` answers for it, which throws for one that
+ * isn't allowed, or the whole statement by what `statement` answers, when
+ * it answers one.
  */
-const asImportCall = ({ source, loc }: ImportExpression): Call => ({
-  callee: { type: "Import" },
-  arguments: [source],
-  loc,
-});
-
-const stringArgument = (call: Call): string | undefined => {
-  const [first] = call.arguments;
-  return first?.type === "StringLiteral" && typeof first.value === "string"
-    ? first.value
-    : undefined;
-};
-
-/** A type's `import("…")` (`typeof import()`, `import("…").Name`). */
-interface ImportType {
-  argument: { type: string; value?: unknown };
-  loc?: Call["loc"];
-}
-
-/**
- * A Babel plugin that lists a file's imports into `imports`, as written:
- * it reads the top-level statements before anything else runs. Type-only
- * imports are listed as such (`typeOnly`): erased by the compile, they
- * still name modules, and some no file may name.
- */
-export const collectImports = (imports: ImportSite[]) => () => {
-  const collect = (call: Call): void => {
-    if (isImportCall(call)) {
-      imports.push({
-        specifier: stringArgument(call),
-        line: call.loc?.start.line,
-        names: undefined,
-      });
+const pointImports = (
+  code: string,
+  moduleFor: (specifier: string | undefined) => string,
+  statement?: (site: Import) => string | undefined
+): string => {
+  const [imports] = parse(code);
+  const edits = imports.flatMap((site): Edit[] => {
+    if (site.type === "import-meta") {
+      return [];
     }
-  };
-  const collectImportType = ({ argument, loc }: ImportType): void => {
-    imports.push({
-      specifier:
-        argument.type === "StringLiteral" && typeof argument.value === "string"
-          ? argument.value
-          : undefined,
-      line: loc?.start.line,
-      names: undefined,
-      typeOnly: true,
-    });
-  };
-  return {
-    visitor: {
-      Program: (path: {
-        node: { body: Statement[] };
-        traverse: (visitor: {
-          TSImportType: (inner: { node: ImportType }) => void;
-          TSModuleDeclaration: (inner: {
-            node: ModuleDeclaration & { loc?: Call["loc"] };
-          }) => void;
-        }) => void;
-      }) => {
-        // A type's `import("…")` sits in types the TypeScript transform
-        // removes as it goes, and so does an ambient module: read them all
-        // now, before it runs.
-        path.traverse({
-          TSImportType: (inner) => {
-            collectImportType(inner.node);
-          },
-          TSModuleDeclaration: ({ node }) => {
-            const ambient = ambientOf(node);
-            if (ambient !== undefined) {
-              imports.push({
-                specifier: "module" in ambient ? ambient.module : undefined,
-                line: node.loc?.start.line,
-                names: undefined,
-                typeOnly: true,
-                ambient: true,
-              });
-            }
-          },
-        });
-        for (const statement of path.node.body) {
-          const { moduleReference } = statement;
-          if (
-            statement.type === "TSImportEqualsDeclaration" &&
-            moduleReference?.type === "TSExternalModuleReference"
-          ) {
-            // `import X = require("…")`: a value, or with `type` a type.
-            imports.push({
-              specifier: moduleReference.expression?.value,
-              line: statement.loc?.start.line,
-              names: undefined,
-              ...(statement.importKind === "type"
-                ? { typeOnly: true as const }
-                : {}),
-            });
-          }
-          if (isModuleStatement(statement)) {
-            imports.push(
-              isTypeOnly(statement)
-                ? {
-                    specifier: statement.source?.value,
-                    line: statement.loc?.start.line,
-                    names: undefined,
-                    typeOnly: true,
-                  }
-                : {
-                    specifier: statement.source?.value,
-                    line: statement.loc?.start.line,
-                    names: namesOf(statement),
-                  }
-            );
-          }
-        }
-      },
-      CallExpression: (path: { node: Call }) => {
-        collect(path.node);
-      },
-      ImportExpression: (path: { node: ImportExpression }) => {
-        collect(asImportCall(path.node));
-      },
-    },
-  };
+    const replaced = statement?.(site);
+    if (replaced !== undefined) {
+      return [{ start: site.importStart, end: site.importEnd, text: replaced }];
+    }
+    // An `import()`'s span is its argument, quotes and all; a static
+    // import's, the specifier's text alone.
+    if (site.type === "dynamic") {
+      const module = moduleFor(site.specifier);
+      return [
+        { start: site.start, end: site.end, text: JSON.stringify(module) },
+      ];
+    }
+    return [
+      { start: site.start, end: site.end, text: moduleFor(site.specifier) },
+    ];
+  });
+  let text = "";
+  let at = 0;
+  for (const { start, end, text: edit } of edits) {
+    text += code.slice(at, start) + edit;
+    at = end;
+  }
+  return text + code.slice(at);
 };
 
+/** A name a statement takes or gives: an identifier's, or a string's. */
+const nameOf = (node: Node | undefined): string => {
+  const name = node?.type === "Identifier" ? node.name : node?.value;
+  return typeof name === "string" ? name : "";
+};
+
+/** Why an import of icons can't be read: it names none of them. */
+const iconsByName =
+  "import or export icons from lucide-react by name, e.g. { InboxIcon }.";
+
 /**
- * A Babel plugin that lists into `directives` every comment of a file
- * TypeScript would obey as a directive to its type check rather than
- * read as a comment (steering.ts `directivesIn`).
+ * An import or re-export of lucide-react icons by name (`statement`, as
+ * oxc's transform printed it), as one statement per icon from its own
+ * module (`moduleOf`): `import local from "icon"`, or `export { default
+ * as exported } from "icon"`. Read with oxc's parser.
  */
-export const collectDirectives = (directives: DirectiveSite[]) => () => ({
-  visitor: {
-    Program: (
-      _path: unknown,
-      state: { file: { ast: { comments?: ParsedComment[] | null } } }
-    ) => {
-      directives.push(...directivesIn(state.file.ast.comments ?? []));
-    },
-  },
-});
+const iconStatements = (
+  statement: string,
+  moduleOf: (icon: string) => string
+): string => {
+  const [read] = children(parsed("icons.js", statement)?.program, "body");
+  if (read === undefined) {
+    throw new TypeError(iconsByName);
+  }
+  return children(read, "specifiers")
+    .map((each) => {
+      if (each.type === "ExportSpecifier") {
+        const module = JSON.stringify(moduleOf(nameOf(child(each, "local"))));
+        return `export{default as ${nameOf(child(each, "exported"))}}from${module}`;
+      }
+      if (each.type !== "ImportSpecifier") {
+        throw new TypeError(iconsByName);
+      }
+      const module = JSON.stringify(moduleOf(nameOf(child(each, "imported"))));
+      return `import ${nameOf(child(each, "local"))} from${module}`;
+    })
+    .join(";");
+};
 
 /** How an import may name an App file: as written, or without its extension. */
 const importSuffixes = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"];
@@ -517,34 +383,6 @@ export const importError = (
     : `"${specifier}" is outside the kit. Pages can import the App's own files and ${packagesOf(kit)}.`;
 };
 
-/**
- * One icon's import or re-export, from its own module: `import local from
- * "icon"`, or `export { default as exported } from "icon"`.
- */
-const fromIconModule = (specifier: Specifier, module: string): Statement => {
-  const source = { type: "StringLiteral", value: module };
-  if (specifier.type === "ExportSpecifier") {
-    return {
-      type: "ExportNamedDeclaration",
-      exportKind: "value",
-      specifiers: [
-        {
-          type: "ExportSpecifier",
-          local: { type: "Identifier", name: "default" },
-          exported: specifier.exported ?? specifier.local,
-        },
-      ],
-      source,
-    };
-  }
-  return {
-    type: "ImportDeclaration",
-    importKind: "value",
-    specifiers: [{ type: "ImportDefaultSpecifier", local: specifier.local }],
-    source,
-  };
-};
-
 /** What one compiled file imports, by flat module name. */
 export interface ModuleImports {
   /** The App's own modules. */
@@ -557,98 +395,69 @@ export interface ModuleImports {
 const compilerRuntime = "react/compiler-runtime";
 
 /**
- * A Babel plugin that points a compiled module's imports at flat module
- * names: App files by path, kit modules by specifier, and each lucide-react
- * icon at its own module, so a page loads only the icons it uses. It adds
- * the modules it points at to `imported`.
+ * Points a compiled module's imports (`code`, `file`'s) at flat module
+ * names: App files by path, kit modules by specifier, and each
+ * lucide-react icon at its own module, so a page loads only the icons it
+ * uses. It adds the modules it points at to `imported`.
  *
- * It runs on compiled code, so it also sees the imports the compiler and
- * the JSX transform added, which the check of the source can't: a
+ * It reads compiled code, so it also sees the imports the React Compiler
+ * and the JSX transform added, which the check of the source can't: a
  * `@jsxImportSource` comment, for one, makes JSX import from any package.
  * Anything that isn't the kit or the App's own files throws.
  */
-export const rewriteImports =
-  (
-    file: string,
-    files: ReadonlySet<string>,
-    kit: Kit,
-    imported: ModuleImports
-  ) =>
-  () => {
-    const allowed = new Set([...kit.imports, compilerRuntime]);
-    const kitModule = (module: string | undefined): string => {
-      if (module === undefined) {
-        throw new Error("Not a lucide-react icon.");
-      }
-      imported.kit.add(module);
-      return module;
-    };
-    const moduleFor = (specifier: string): string => {
-      if (
-        specifier === pageReferences.specifier &&
-        files.has(pageReferences.path)
-      ) {
-        const module = appModuleName(pageReferences.path);
-        imported.app.add(module);
-        return module;
-      }
-      if (!isRelative(specifier)) {
-        if (!allowed.has(specifier)) {
-          throw new Error(
-            `"${specifier}" is outside the kit, and the compiled file imports it: remove what adds it, such as a @jsxImportSource comment.`
-          );
-        }
-        return kitModule(kitModuleName(specifier));
-      }
-      const target = resolveRelative(file, specifier, files);
-      if (target === undefined) {
-        throw new Error(`"${specifier}" is not a file in this App.`);
-      }
-      const module = appModuleName(target);
+export const rewriteImports = (
+  code: string,
+  file: string,
+  files: ReadonlySet<string>,
+  kit: Kit,
+  imported: ModuleImports
+): string => {
+  const allowed = new Set([...kit.imports, compilerRuntime]);
+  const kitModule = (module: string): string => {
+    imported.kit.add(module);
+    return module;
+  };
+  const icon = (name: string): string => {
+    const module = ownEntry(kit.icons, name);
+    if (module === undefined) {
+      throw new Error(`"${name}" is not a lucide-react icon.`);
+    }
+    return kitModule(module);
+  };
+  const moduleFor = (specifier: string | undefined): string => {
+    if (specifier === undefined) {
+      throw new Error("import() must name a module in quotes.");
+    }
+    if (
+      specifier === pageReferences.specifier &&
+      files.has(pageReferences.path)
+    ) {
+      const module = appModuleName(pageReferences.path);
       imported.app.add(module);
       return module;
-    };
-    const rewriteCall = (call: Call): void => {
-      const [first] = call.arguments;
-      if (isImportCall(call) && typeof first?.value === "string") {
-        first.value = moduleFor(first.value);
+    }
+    if (!isRelative(specifier)) {
+      if (!allowed.has(specifier)) {
+        throw new Error(
+          `"${specifier}" is outside the kit, and the compiled file imports it: remove what adds it, such as a @jsxImportSource comment.`
+        );
       }
-    };
-    const icons = (statement: Statement): Statement[] =>
-      valueSpecifiers(statement).map((specifier) =>
-        fromIconModule(
-          specifier,
-          kitModule(ownEntry(kit.icons, importedName(specifier) ?? ""))
-        )
-      );
-    return {
-      visitor: {
-        Program: (path: {
-          node: { body: Statement[] };
-          scope: { crawl: () => void };
-        }) => {
-          path.node.body = path.node.body.flatMap((statement) => {
-            const { source } = statement;
-            if (!isModuleStatement(statement) || !source) {
-              return [statement];
-            }
-            if (source.value === "lucide-react") {
-              return icons(statement);
-            }
-            source.value = moduleFor(source.value);
-            return [statement];
-          });
-          path.scope.crawl();
-        },
-        CallExpression: (path: { node: Call }) => {
-          rewriteCall(path.node);
-        },
-        ImportExpression: (path: { node: ImportExpression }) => {
-          rewriteCall(asImportCall(path.node));
-        },
-      },
-    };
+      return kitModule(kitModuleName(specifier));
+    }
+    const target = resolveRelative(file, specifier, files);
+    if (target === undefined) {
+      throw new Error(`"${specifier}" is not a file in this App.`);
+    }
+    const module = appModuleName(target);
+    imported.app.add(module);
+    return module;
   };
+  return pointImports(code, moduleFor, (site) =>
+    site.type === "static" && site.specifier === "lucide-react"
+      ? iconStatements(code.slice(site.importStart, site.importEnd), icon)
+      : undefined
+  );
+};
 
 /**
  * Code built here that runs outside the pages: a JSON workflow's
@@ -814,62 +623,19 @@ export const codeImportError = (
     : `"${specifier}" can't be imported here. ${kind.name} code can import its own files in ${kind.folder} and ${[...kind.imports.keys()].join(", ")}.`;
 };
 
-const isRequireCall = ({ callee }: Call): boolean =>
-  callee.type === "Identifier" && callee.name === "require";
-
 /**
- * A Babel plugin that points a module's imports at the flat names
- * `moduleFor` gives them, which throws for one that isn't allowed:
- * `require()` included, which is never available in `what`.
- */
-const rewriteWith =
-  (moduleFor: (specifier: string | undefined) => string, what: string) =>
-  () => {
-    const rewriteCall = (call: Call): void => {
-      if (isImportCall(call)) {
-        const module = moduleFor(stringArgument(call));
-        const [first] = call.arguments;
-        if (first) {
-          first.value = module;
-        }
-      }
-    };
-    return {
-      visitor: {
-        Program: (path: { node: { body: Statement[] } }) => {
-          for (const statement of path.node.body) {
-            if (isModuleStatement(statement) && statement.source) {
-              statement.source.value = moduleFor(statement.source.value);
-            }
-          }
-        },
-        CallExpression: (path: { node: Call }) => {
-          if (isRequireCall(path.node)) {
-            throw new Error(
-              `require() isn't available in ${what}: use import.`
-            );
-          }
-          rewriteCall(path.node);
-        },
-        ImportExpression: (path: { node: ImportExpression }) => {
-          rewriteCall(asImportCall(path.node));
-        },
-      },
-    };
-  };
-
-/**
- * A Babel plugin that points a module's imports at the flat names of the
- * App's files and the platform's modules. Like `rewriteImports`, it runs
- * on compiled code, so it also sees imports the source check can't, and
- * throws on anything `kind` can't import, `require()` included.
+ * Points a compiled module's imports (`code`, `file`'s) at the flat names
+ * of the App's files and the platform's modules. Like `rewriteImports`,
+ * it reads compiled code, so it also sees imports the source check can't,
+ * and throws on anything `kind` can't import.
  */
 export const rewriteCodeImports = (
+  code: string,
   kind: CodeKind,
   file: string,
   files: ReadonlySet<string>
-) =>
-  rewriteWith((specifier) => {
+): string =>
+  pointImports(code, (specifier) => {
     const error = codeImportError(kind, { specifier }, file, files);
     if (error !== undefined || specifier === undefined) {
       throw new Error(error);
@@ -880,21 +646,22 @@ export const rewriteCodeImports = (
     return target === undefined
       ? (kind.imports.get(specifier) ?? specifier)
       : appModuleName(target);
-  }, `${kind.name.toLowerCase()} code`);
+  });
 
 /**
- * A Babel plugin that points the imports of a file of an App's server code
- * of spec 8's layout (app-code.ts) at flat module names, throwing on any
- * its kind can't import.
+ * Points the imports of a compiled file of an App's server code of spec
+ * 8's layout (app-code.ts) at flat module names, throwing on any its kind
+ * can't import.
  */
 export const rewriteAppCodeImports = (
+  code: string,
   file: string,
   files: ReadonlySet<string>
-) =>
-  rewriteWith((specifier) => {
+): string =>
+  pointImports(code, (specifier) => {
     const resolved = appCodeImport(file, specifier, files);
     if ("error" in resolved) {
       throw new Error(resolved.error);
     }
     return resolved.module;
-  }, "server code");
+  });

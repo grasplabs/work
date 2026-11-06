@@ -1037,9 +1037,9 @@ export const pageModuleResponse = async (
 // hand the page a way past every lock. Inside the closure they exist
 // only for the wrappers that use them. That, the locks being
 // non-configurable, and the frame's policy are the boundary. The
-// compiler's no-peer-connections rule (@grasp-os/compiler's
-// design-rules.ts) only tells an author early; it reads source, which a
-// page can always spell some other way, and nothing relies on it.
+// pages' lint rules against WebRTC (@grasp-os/compiler's page-rules.ts)
+// only tell an author early; they read source, which a page can always
+// spell some other way, and nothing relies on them.
 const bootstrap = `"use strict";
 (() => {
 const apply = Reflect.apply;

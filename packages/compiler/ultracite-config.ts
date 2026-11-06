@@ -1,8 +1,8 @@
 /**
  * How App code is linted and formatted, wherever it is: Ultracite's oxlint
  * presets as the repo extends them (`core`, `react`, `tanstack` and
- * `vitest`; `shadcn` is the design system's lint, src/lint.ts) and its
- * oxfmt config, as Grasp's isolate runs them (src/ultracite.ts, with
+ * `vitest`), with the pages' own rules on pages and their components
+ * (src/page-rules.ts), and its oxfmt config, as Grasp's isolate runs them (src/ultracite.ts, with
  * oxlint and oxfmt compiled to WebAssembly) and as an exported App's own
  * oxlint and oxfmt read them (scripts/package-definition-lib.ts). Worked
  * out once, when the compiler is built, into `#ultracite-config`: the
@@ -13,6 +13,8 @@ import core from "ultracite/oxlint/core";
 import react from "ultracite/oxlint/react";
 import tanstack from "ultracite/oxlint/tanstack";
 import vitest from "ultracite/oxlint/vitest";
+
+import { pageRules } from "./src/page-rules.ts";
 
 /**
  * Ultracite's oxlint presets App code is held to, by name, in the order
@@ -55,11 +57,21 @@ const merged = (levels: (Levels | undefined)[]): Levels =>
   Object.fromEntries(levels.flatMap((each) => Object.entries(each ?? {})));
 
 /**
+ * Where the pages' own rules apply: a page and every other file of the
+ * App's front end (`src/`), by its path from `root`.
+ */
+export const pageOverride = (root = "") => ({
+  files: [`${root}src/**/*.ts`, `${root}src/**/*.tsx`],
+  rules: pageRules,
+});
+
+/**
  * The presets as one config, merged as oxlint merges what a config
  * extends: plugins added, a later level over an earlier one, overrides in
- * order; less `leftOut`, and the presets' `ignorePatterns`, which pick
- * files (Grasp picks what it lints itself: save-builds.ts `lintedFiles`).
- * Only the overrides for TypeScript: Astro's pages have their own.
+ * order, then the pages' own rules (`pageOverride`); less `leftOut`, and
+ * the presets' `ignorePatterns`, which pick files (Grasp picks what it
+ * lints itself: save-builds.ts `lintedFiles`). Only the overrides for
+ * TypeScript: Astro's pages have their own.
  */
 export const ultraciteLint = (): LintConfig => {
   const presets = Object.values(ultracitePresets);
@@ -70,14 +82,17 @@ export const ultraciteLint = (): LintConfig => {
       ...presets.map((preset) => preset.rules),
       Object.fromEntries(leftOut.map((rule) => [rule, "off"])),
     ]),
-    overrides: presets
-      .flatMap((preset) => preset.overrides ?? [])
-      .filter(({ files }) => files.some((glob) => glob.includes("ts")))
-      .map(({ files, plugins, rules }) => ({
-        files: [...files],
-        ...(plugins === undefined ? {} : { plugins: [...plugins] }),
-        rules: { ...rules },
-      })),
+    overrides: [
+      ...presets
+        .flatMap((preset) => preset.overrides ?? [])
+        .filter(({ files }) => files.some((glob) => glob.includes("ts")))
+        .map(({ files, plugins, rules }) => ({
+          files: [...files],
+          ...(plugins === undefined ? {} : { plugins: [...plugins] }),
+          rules: { ...rules },
+        })),
+      pageOverride(),
+    ],
   };
 };
 

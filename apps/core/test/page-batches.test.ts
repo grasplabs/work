@@ -27,12 +27,16 @@ import { unique } from "./sign-in.ts";
 //   compiler, until the process runs out of heap.
 // Plain workerd enforces no CPU time: what bounds a call's is the source
 // it is handed, held to a batch's characters (`batchCharacters` in
-// pages.ts: 4 s at 45 µs a character); the runtime's message stands in
+// pages.ts: 4 s at 5 µs a character); the runtime's message stands in
 // for a stop, and `BUILD_BATCH_CPU_MS` sizes batches smaller to scale an
 // App up.
 
-/** A batch's characters at its 4 s of CPU time, at 45 µs a character. */
-const batchCharacters = 88_888;
+/** A batch's characters at its 4 s of CPU time, at 5 µs a character. */
+const batchCharacters = 800_000;
+
+/** A batch's characters at a tenth of a second (`BUILD_BATCH_CPU_MS`), to batch a small App. */
+const smallBatchCpuMs = "100";
+const smallBatchCharacters = 20_000;
 
 /** One call into the compiler's isolate: its method, what it was handed, whether it was stopped, how long it ran. */
 interface Call {
@@ -382,13 +386,16 @@ describe("a first pages build of a large App", () => {
   }, 300_000);
 
   it("splits a batch stopped at its CPU time, each part tried once, and resumes a build stopped part way", async () => {
-    // Batches as production sizes them: about 89,000 characters, some six
-    // of these pages each.
+    // Small batches: 20,000 characters, about one of these pages each.
     const files = syntheticApp(8, 4);
     // Its files, and the root route the build adds (it has none of its own).
     const count = Object.keys(files).length + 1;
     const whose = `app-${unique()}`;
-    const onCloudflare = { ...env, RUNTIME_PROFILE: "cloudflare" };
+    const onCloudflare = {
+      ...env,
+      RUNTIME_PROFILE: "cloudflare",
+      BUILD_BATCH_CPU_MS: smallBatchCpuMs,
+    };
     // Every batch of several files stops, and the build's own call ends
     // before it answers, as when its request is cancelled.
     const stopping = recordingLoader((method, handed) => {
@@ -432,7 +439,7 @@ describe("a first pages build of a large App", () => {
             .filter(([name]) => name.startsWith("app~src~routes~s"))
             .map(
               ([, code]) =>
-                /createFileRoute\("(?<path>[^"]*)"\)/u.exec(code)?.groups
+                /createFileRoute\(["`](?<path>[^"`]*)["`]\)/u.exec(code)?.groups
                   ?.path ?? ""
             )
         : [];
@@ -443,8 +450,8 @@ describe("a first pages build of a large App", () => {
     );
     const tried = transforms.map(({ paths }) => paths.join("\n"));
     expect({
-      batched: charactersOf(files) > batchCharacters,
-      heldToABatch: heldTo(stopping.calls, batchCharacters),
+      batched: charactersOf(files) > smallBatchCharacters,
+      heldToABatch: heldTo(stopping.calls, smallBatchCharacters),
       batchesStopped: transforms.some(({ stopped: was }) => was),
       // No part tried twice: a stop splits it, never retries it whole.
       eachTriedOnce: new Set(tried).size === tried.length,
@@ -529,13 +536,18 @@ describe("a first pages build of a large App", () => {
     const { loader, calls } = recordingLoader();
 
     const built = await buildPages(
-      { ...env, LOADER: loader, RUNTIME_PROFILE: "cloudflare" },
+      {
+        ...env,
+        LOADER: loader,
+        RUNTIME_PROFILE: "cloudflare",
+        BUILD_BATCH_CPU_MS: smallBatchCpuMs,
+      },
       files,
       `app-${unique()}`
     );
 
     expect({
-      batched: charactersOf(files) > batchCharacters,
+      batched: charactersOf(files) > smallBatchCharacters,
       refused: built.ok ? [] : built.diagnostics.map(({ rule }) => rule),
       calls: calls.map(({ method }) => method),
     }).toStrictEqual({

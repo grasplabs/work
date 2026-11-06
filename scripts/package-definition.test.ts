@@ -44,6 +44,7 @@ import {
   serverEntryPath,
   serverEntrySource,
 } from "../packages/compiler/src/app-code.ts";
+import { pageRuleNames } from "../packages/compiler/src/page-rules.ts";
 import { ultraciteOf } from "../packages/compiler/src/ultracite.ts";
 import { ultraciteConfig } from "../packages/compiler/ultracite-config.ts";
 import { notesWorkflows } from "../packages/sdk/test/notes-workflows.ts";
@@ -382,11 +383,8 @@ const tidy = (files: Record<string, string>): Record<string, string> =>
     ])
   );
 
-/** The Babel the platform parses App files with, its parser bundled. */
-const platformParser = installedVersion(
-  "packages/compiler",
-  "@babel/standalone"
-);
+/** The oxc-parser a project's check parses App files with: the oxc of oxc.wasm. */
+const platformParser = installedVersion("packages/compiler", "oxc-parser");
 
 const problemLine = /^(?<file>[^(:]+)(?:\(\d+,\d+\))?: error (?<code>\S+):/u;
 
@@ -451,8 +449,9 @@ const run = (
   };
 };
 
-/** A finding of `rulesOf` of the design system's lint: its rules' or the compiler's. */
-const designFinding = / (?:shadcn|grasp)\//u;
+/** A finding of `rulesOf` of the pages' own rules (the compiler's page-rules.ts). */
+const designFinding = (finding: string): boolean =>
+  pageRuleNames.has(finding.split(" ")[2] ?? "");
 
 /** A rule as oxlint's report codes it: `plugin(rule)`, `eslint(rule)`. */
 const reportCode = /^(?<plugin>[^(]+)\((?<rule>[^)]+)\)$/u;
@@ -809,8 +808,8 @@ describe(
           tsrs: project.devDependencies["@tsrs/wasm"],
           // No TypeScript of its own: the check is tsrs's.
           typescript: project.devDependencies.typescript,
-          // The parser it reads files with, as the platform's Babel does.
-          parser: project.devDependencies["@babel/parser"],
+          // The parser it reads files with, as the platform's oxc does.
+          parser: project.devDependencies["oxc-parser"],
         },
         // Its lint and format: the releases Grasp's isolate runs.
         tools: {
@@ -1691,17 +1690,15 @@ export const later = (): number => {
       for (const file of Object.keys(unusedFiles)) {
         rmSync(path.join(out, "app", file));
       }
-      // And the design system's lint, as Grasp's page build runs it
-      // (apps/core/test/page-checks.test.ts, on the same files): a raw
-      // colour and a kit component restyled (@shadcn/lint), a remote image
-      // (the compiler's own rules), and its cases (design-cases.ts).
+      // And the pages' own rules, as Grasp's lint runs them
+      // (apps/core/test/page-checks.test.ts, on the same files): a plain
+      // form, an inline style, WebRTC, and its cases (design-cases.ts).
       const off = `import { Button } from "@grasp-os/ui/components/button";
 
 export const Off = () => (
-  <p className="bg-red-500">
-    <Button className="rounded-none">Go</Button>
-    <img alt="" src="https://example.com/logo.png" />
-  </p>
+  <form>
+    <Button style={{ margin: 0 }}>{typeof RTCPeerConnection}</Button>
+  </form>
 );
 `;
       write("app/src/components/off.tsx", off);
@@ -1713,14 +1710,14 @@ export const Off = () => (
       const casesFound = rulesOf(run(out, "lint", "--format=json").stdout);
       const cases = {
         design: casesFound
-          .filter((finding) => designFinding.test(finding))
+          .filter((finding) => designFinding(finding))
           .map((finding) => {
             const [file, , rule] = finding.split(" ");
             return `${file?.slice("app/".length)} ${rule}`;
           }),
-        // And Ultracite's lint of them, in both.
+        // And Grasp's lint of them, the pages' rules among Ultracite's.
         grasp: graspRulesOf(designCases),
-        project: casesFound.filter((finding) => !designFinding.test(finding)),
+        project: casesFound.filter((finding) => !designFinding(finding)),
       };
       for (const file of Object.keys(designCases)) {
         rmSync(path.join(out, "app", file));
@@ -1779,12 +1776,20 @@ export const Off = () => (
         design: {
           status: 1,
           rules: [
-            "app/src/components/off.tsx error grasp/no-remote-resources",
-            "app/src/components/off.tsx error shadcn/no-raw-colors",
-            "app/src/components/off.tsx error shadcn/no-restyle",
+            "app/src/components/off.tsx error no-restricted-globals",
+            "app/src/components/off.tsx error react/forbid-component-props",
+            "app/src/components/off.tsx error react/forbid-elements",
           ],
         },
-        cases: { design: designFindings, grasp: [], project: [] },
+        cases: {
+          design: designFindings,
+          // Grasp's lint finds what the project's does, by the same rules.
+          grasp: designFindings.map((finding) => {
+            const [file, rule] = finding.split(" ");
+            return `app/${file} error ${rule}`;
+          }),
+          project: [],
+        },
         unformatted: 1,
         unused: "typechecks",
       });
@@ -1804,7 +1809,6 @@ export const Off = () => (
           "LICENSES",
           "THIRD-PARTY-NOTICES.md",
           "app",
-          "components.json",
           "grasp",
           "grasp-project.json",
           "oxlint.config.ts",

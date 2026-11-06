@@ -40,16 +40,15 @@ import type { Plugin as RolldownPlugin } from "rolldown";
 import { dts } from "rolldown-plugin-dts";
 import { ResolverFactory } from "rolldown/experimental";
 import { __unstable__loadDesignSystem } from "tailwindcss";
-import shadcnPreset from "ultracite/oxlint/shadcn";
 import { build, parseSync } from "vite-plus";
 import type { InlineConfig, Plugin, Rolldown } from "vite-plus";
 import { z } from "zod";
 
 import { withBuildLock } from "./build-lock.ts";
-import { oxcWasm } from "./oxc-wasm/wasm.ts";
+import { oxcWasm, oxcWasmModule } from "./oxc-wasm/wasm.ts";
 import { serverSdkImports } from "./src/app-code.ts";
 import { extractCandidates } from "./src/candidates.ts";
-import { compileModule } from "./src/compile.ts";
+import { compileReact } from "./src/compile.ts";
 import {
   computeRunnerImports,
   computeSdkImports,
@@ -70,7 +69,7 @@ import {
   sdkRoot,
 } from "./src/kit.ts";
 import type { Kit, KitModules } from "./src/kit.ts";
-import type { DesignKit } from "./src/lint.ts";
+import { startOxc } from "./src/oxc.ts";
 import { platformModules } from "./src/packages/platform.ts";
 import { compilerOptions, serverLibs } from "./src/type-check.ts";
 import type { KitTypes } from "./src/type-check.ts";
@@ -360,8 +359,9 @@ const kitOptOuts: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Compiles the kit's own sources with Babel and the React Compiler, the same
- * way as App files. They are the only TypeScript in the build.
+ * Compiles the kit's own sources with oxc and its React Compiler, the same
+ * way as App files (src/compile.ts). They are the only TypeScript in the
+ * build.
  */
 const reactCompiler: Plugin = {
   name: "kit-react-compiler",
@@ -371,9 +371,16 @@ const reactCompiler: Plugin = {
       return null;
     }
     const file = path.relative(ui, id);
-    return {
-      code: compileModule(code, file, [], { optOut: kitOptOuts.has(file) }),
-    };
+    const compiled = compileReact(file, code, {
+      optOut: kitOptOuts.has(file),
+    });
+    if (compiled.code === null) {
+      const [error] = compiled.errors;
+      throw new Error(
+        `${file}:${error?.line ?? 0}:${error?.column ?? 0}: ${error?.message ?? "it doesn't compile"}`
+      );
+    }
+    return { code: compiled.code };
   },
 };
 
@@ -496,7 +503,8 @@ const buildKitModules = async (
     mode: preview ? "development" : "production",
     define: preview ? development : production,
     resolve: preview ? previewKitResolve : kitResolve,
-    // Babel compiles TypeScript here, with the React Compiler.
+    // oxc.wasm compiles TypeScript here, with the React Compiler
+    // (`reactCompiler`): Vite's own transform has nothing left to do.
     oxc: false,
     plugins: [
       reactEntries(preview ? "development" : "production"),
@@ -1290,30 +1298,16 @@ const typeChunks = async (
   return { files: kept, resolved };
 };
 
-const componentsJsonSchema = z.looseObject({
-  tailwind: z.looseObject({ css: z.string() }),
-});
-
-/** A class name as a stylesheet's `@utility` names one. */
-const utilityName = /^-?[\w-]+$/u;
-
 /**
- * Every class the kit's theme gives Tailwind by name, from Tailwind's own
- * design system of it, as `@utility` rules: what the design-system lint
- * reads as a class the theme declares. @shadcn/lint asks Tailwind which
- * classes it knows in a worker thread (`node:worker_threads`), which an
- * isolate has none of; without, it reads the theme's own declarations
- * and a grammar of its own, which know neither the theme's values
- * (`ease-house`) nor what its imports add (`animate-in`, tw-animate-css's).
- * With these it knows what Tailwind knows, as an exported App's lint,
- * whose worker runs, does.
+ * The theme's own colours: the `--color-*` the kit's stylesheet declares,
+ * less Tailwind's palette, which the theme imports with Tailwind's
+ * default theme (`Kit.colors`), each from Tailwind's own design system.
  */
-const kitClassRules = async (
+const themeColors = async (
   stylesheets: Record<string, string>
-): Promise<string> => {
-  const design = await __unstable__loadDesignSystem(
-    stylesheets[kitStylesheet] ?? "",
-    {
+): Promise<string[]> => {
+  const colorsOf = async (css: string): Promise<Set<string>> => {
+    const design = await __unstable__loadDesignSystem(css, {
       // oxlint-disable-next-line require-await -- Tailwind expects a promise
       loadStylesheet: async (id: string) => {
         const content = stylesheets[id];
@@ -1322,143 +1316,99 @@ const kitClassRules = async (
         }
         return { path: id, base: "/", content };
       },
-    }
-  );
-  return design
-    .getClassList()
-    .map(([name]) => name)
-    .filter((name) => utilityName.test(name))
-    .map((name) => `@utility ${name} {}`)
-    .join("\n");
+    });
+    return new Set(
+      [...design.theme.namespace("--color").keys()].filter(
+        (name): name is string => name !== null
+      )
+    );
+  };
+  const palette = await colorsOf('@import "tailwindcss";');
+  const theme = await colorsOf(stylesheets[kitStylesheet] ?? "");
+  return [...theme].filter((name) => !palette.has(name)).toSorted();
 };
+
+/** A property's key as written, if it is a name or a string. */
+const keyName = (node: unknown): string | undefined => {
+  const key: unknown =
+    typeof node === "object" && node !== null
+      ? Reflect.get(node, "key")
+      : undefined;
+  if (typeof key !== "object" || key === null) {
+    return undefined;
+  }
+  const name: unknown = Reflect.get(key, "name") ?? Reflect.get(key, "value");
+  return typeof name === "string" ? name : undefined;
+};
+
+/** `node`'s nodes under `key`. */
+const nodesOf = (node: unknown, key: string): unknown[] => {
+  const value: unknown =
+    typeof node === "object" && node !== null
+      ? Reflect.get(node, key)
+      : undefined;
+  return Array.isArray(value) ? value : [];
+};
+
+/** The value of `node`, an object's property. */
+const valueOf = (node: unknown): unknown =>
+  typeof node === "object" && node !== null
+    ? Reflect.get(node, "value")
+    : undefined;
 
 /**
- * The kit as the design-system lint reads it from disk (see src/lint.ts),
- * by path relative to the App. The kit's sources go in `ui/`: in
- * `node_modules`, the lint doesn't read components' sources, so it couldn't
- * name their variants. A tsconfig maps the kit's exports there; the
- * stylesheets the theme imports go in `node_modules`, where the lint looks.
- * The theme ends with every class Tailwind makes of it (`kitClassRules`).
+ * Each kit component module's variant props and their values, from the
+ * `cva` calls in its source (`Kit.components`): `variant` and `size` of
+ * the button, say. A module with none has none to offer.
  */
-const collectLintProject = (
-  stylesheets: Record<string, string>,
-  classRules: string
-): Record<string, string> => {
-  const files: Record<string, string> = {
-    "package.json": JSON.stringify({ name: "app", private: true }),
-    "ui/package.json": readText(path.join(ui, "package.json")),
-  };
-  for (const file of readdirSync(path.join(ui, "src"), {
-    recursive: true,
-    encoding: "utf-8",
-  })) {
-    const source = path.join(ui, "src", file);
-    if (statSync(source).isFile() && !notShipped.test(file)) {
-      files[`ui/src/${file}`] = readText(source);
-    }
-  }
-  const components = componentsJsonSchema.parse(
-    JSON.parse(readText(path.join(ui, "components.json")))
-  );
-  const theme = `ui/${components.tailwind.css}`;
-  files[theme] =
-    `${files[theme] ?? ""}\n/* Every class Tailwind makes of this theme, for the lint (build.ts). */\n${classRules}\n`;
-  files["components.json"] = JSON.stringify({
-    ...components,
-    tailwind: { ...components.tailwind, css: `ui/${components.tailwind.css}` },
-  });
-  const paths: Record<string, string[]> = {};
-  for (const [key, target] of Object.entries(exportsOf(ui))) {
-    if (typeof target === "string") {
-      const specifier = `@grasp-os/ui${key.slice(1)}`;
-      paths[specifier] = [`./ui${target.slice(1)}`];
-      // `components.json` names the components' directory by its alias.
-      if (key.endsWith("/*")) {
-        paths[specifier.slice(0, -2)] = [
-          `./ui${path.posix.dirname(target.slice(1))}`,
-        ];
+const componentVariants = (
+  components: readonly Entry[]
+): Record<string, Record<string, string[]>> =>
+  Object.fromEntries(
+    components.map(({ specifier, id }) => {
+      const variants: Record<string, string[]> = {};
+      const pending: unknown[] = [parseSync(id, readText(id)).program];
+      for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+        if (typeof node !== "object" || node === null) {
+          continue;
+        }
+        const callee: unknown = Reflect.get(node, "callee");
+        if (
+          Reflect.get(node, "type") === "CallExpression" &&
+          typeof callee === "object" &&
+          callee !== null &&
+          Reflect.get(callee, "name") === "cva"
+        ) {
+          const [, options] = nodesOf(node, "arguments");
+          const groups = nodesOf(options, "properties").find(
+            (property) => keyName(property) === "variants"
+          );
+          for (const group of nodesOf(valueOf(groups), "properties")) {
+            const prop = keyName(group);
+            if (prop !== undefined) {
+              variants[prop] = [
+                ...new Set([
+                  ...(variants[prop] ?? []),
+                  ...nodesOf(valueOf(group), "properties").flatMap(
+                    (each) => keyName(each) ?? []
+                  ),
+                ]),
+              ];
+            }
+          }
+        }
+        const inner: unknown[] = Object.values(node);
+        pending.push(...inner);
       }
-    }
-  }
-  files["tsconfig.json"] = JSON.stringify({ compilerOptions: { paths } });
-  for (const [id, content] of Object.entries(stylesheets)) {
-    if (id !== kitStylesheet) {
-      files[`node_modules/${id.endsWith(".css") ? id : `${id}/index.css`}`] =
-        content;
-    }
-  }
-  return files;
-};
-
-const severity = z.enum(["off", "warn", "error"]);
-const rulesSchema = z.record(
-  z.string(),
-  z.union([severity, z.tuple([severity]).rest(z.unknown())])
-);
+      return [specifier, variants];
+    })
+  );
 
 /** Node's built-ins, which the isolate has through `nodejs_compat`. */
 const nodeBuiltins = [
   /^node:/u,
   ...builtinModules.filter((name) => !name.startsWith("_")),
 ];
-
-/**
- * The React Compiler is CommonJS written for Node and `require`s Node's
- * built-ins. An ES module has no `require`; the bundle's
- * `require` shim uses one if it is in scope, and `createRequire` makes one.
- * It takes the module's URL, and a Dynamic Worker's modules have no
- * `import.meta.url`, so this passes the URL the module would have. It goes
- * in after minifying, which would rename `require`.
- */
-const requireShim = (moduleUrl: string): string =>
-  `import { createRequire } from "node:module"; const require = createRequire("${moduleUrl}");`;
-
-/**
- * Where the module would be, for @shadcn/lint, which asks
- * (`import.meta.url`): it only looks next to itself for files that aren't
- * there, and carries on without them.
- */
-const moduleLocation = (moduleUrl: string) => ({
-  "import.meta.url": JSON.stringify(moduleUrl),
-});
-
-/**
- * The design-system lint (@shadcn/lint) loads oxc-parser, which it reads
- * the kit's components with, by a `require` at runtime, which in the
- * isolate only finds Node's built-ins: this hands it Ultracite's own
- * oxc parser (src/eslint-parser.ts, on oxc.wasm), started before a lint.
- */
-const shadcnParser: Plugin = {
-  name: "shadcn-lint-parser",
-  transform: (code, id) => {
-    if (!id.endsWith("/@shadcn/lint/dist/index.js")) {
-      return null;
-    }
-    const required = 'require("oxc-parser")';
-    if (!code.includes(required)) {
-      throw new Error(
-        "@shadcn/lint no longer requires its parser the way the build expects"
-      );
-    }
-    return `import * as oxcParser from ${JSON.stringify(path.join(root, "src/eslint-parser.ts"))};
-${code.replace(required, "oxcParser")}`;
-  },
-};
-
-/**
- * What the design system's lint reads of the kit (`#design-kit`): its
- * theme and component sources and @shadcn/lint's rules, worked out here
- * into a module of Ultracite's bundle, whose lint it is part of.
- */
-const designKitModule = (designKit: DesignKit): Plugin => ({
-  name: "design-kit",
-  enforce: "pre",
-  resolveId: (id) => (id === "#design-kit" ? "\0design-kit" : null),
-  load: (id) =>
-    id === "\0design-kit"
-      ? `export default ${JSON.stringify(designKit)};`
-      : null,
-});
 
 /**
  * How App code is linted and formatted (`#ultracite-config`), worked out
@@ -1476,97 +1426,47 @@ const ultraciteConfigModule: Plugin = {
 };
 
 /**
- * ESLint checks each rule's options against its JSON schema with Ajv,
- * which compiles a schema to code at runtime, which Workers forbid. Every
- * rule's options in the compiler are fixed (the design system's), so the
- * bundled ESLint checks none.
+ * How the compiler's and Ultracite's bundles are built: one module each,
+ * written in ASCII alone (V8 holds a module's source as one byte a
+ * character only then, two otherwise, and these are megabytes).
  */
-const lintOptionsUnchecked: Plugin = {
-  name: "lint-options-unchecked",
-  transform: (code, id) => {
-    if (!id.endsWith("/eslint/lib/config/config.js")) {
-      return null;
-    }
-    const compiled = "validators.set(rule, getAjv().compile(schema));";
-    if (!code.includes(compiled)) {
-      throw new Error(
-        "ESLint no longer compiles rule option schemas the way the build expects"
-      );
-    }
-    return code.replace(compiled, "validators.set(rule, undefined);");
+const isolateBuild = (entry: string, plugins: Plugin[]): InlineConfig => ({
+  configFile: false,
+  root,
+  logLevel: "warn",
+  mode: "production",
+  resolve: { conditions: ["workerd", "worker", "browser"] },
+  ssr: {
+    noExternal: true,
+    target: "webworker",
+    // Production's, whatever `NODE_ENV` is (`kitResolve`).
+    resolve: { conditions: ["workerd", "worker", "browser", "production"] },
   },
-};
-
-/**
- * A package the build would take a build of that doesn't run in the
- * isolate, taken as Node's `require` resolves it instead: esquery
- * (ESLint's selectors), whose ES module ESLint's `require` would get as a
- * namespace with no `parse`.
- */
-const nodeResolved = new Set(["esquery"]);
-
-const resolvedAsNode: Plugin = {
-  name: "resolved-as-node",
-  enforce: "pre",
-  resolveId: (id, importer) =>
-    nodeResolved.has(id) && importer !== undefined
-      ? createRequire(importer).resolve(id)
-      : null,
-};
-
-/**
- * What the compiler's and Ultracite's bundles both need: Ultracite's
- * ESLint checks no rule's options in the isolate, and reads selectors
- * with esquery's CommonJS build (`lintOptionsUnchecked`,
- * `resolvedAsNode`). Both are written in ASCII alone: V8 holds a module's
- * source as one byte a character only then, two otherwise, and these are
- * megabytes.
- */
-const isolateBuild = (
-  entry: string,
-  fileName: string,
-  plugins: Plugin[]
-): InlineConfig => {
-  const moduleUrl = `file:///${fileName}`;
-  return {
-    configFile: false,
-    root,
-    logLevel: "warn",
-    mode: "production",
-    resolve: { conditions: ["workerd", "worker", "browser"] },
-    ssr: {
-      noExternal: true,
-      target: "webworker",
-      // Production's, whatever `NODE_ENV` is (`kitResolve`).
-      resolve: { conditions: ["workerd", "worker", "browser", "production"] },
-    },
-    define: { ...production, ...moduleLocation(moduleUrl) },
-    plugins: [...plugins, resolvedAsNode, lintOptionsUnchecked],
-    build: {
-      ssr: entry,
-      write: false,
-      // Rolldown's (`output.minify`), to write it in ASCII.
-      minify: false,
-      target: "es2022",
-      rolldownOptions: {
-        // oxc's WebAssembly is a module of the isolate: Ultracite's lint's
-        // and its ESLint lints' parser's.
-        external: ["cloudflare:workers", "#kit", "./oxc.wasm", ...nodeBuiltins],
-        output: {
-          minify: {
-            compress: true,
-            mangle: true,
-            codegen: { asciiOnly: true },
-          },
-          format: "es",
-          codeSplitting: false,
-          paths: { "#kit": kitModule },
-          postBanner: requireShim(moduleUrl),
+  define: production,
+  plugins,
+  build: {
+    ssr: entry,
+    write: false,
+    // Rolldown's (`output.minify`), to write it in ASCII.
+    minify: false,
+    target: "es2022",
+    rolldownOptions: {
+      // oxc's WebAssembly is a module of the isolate: the compiler's
+      // transform's and parser's, Ultracite's lint's and format's.
+      external: ["cloudflare:workers", "#kit", "./oxc.wasm", ...nodeBuiltins],
+      output: {
+        minify: {
+          compress: true,
+          mangle: true,
+          codegen: { asciiOnly: true },
         },
+        format: "es",
+        codeSplitting: false,
+        paths: { "#kit": kitModule },
       },
     },
-  };
-};
+  },
+});
 
 /** The one module `config` builds to, named `what` where it doesn't. */
 const oneModule = async (
@@ -1628,25 +1528,19 @@ const routeGeneratorStandIn: Plugin = {
  */
 const buildCompiler = async (): Promise<string> =>
   await oneModule(
-    isolateBuild("src/worker.ts", compilerAssets.source, [
-      routeGeneratorStandIn,
-    ]),
+    isolateBuild("src/worker.ts", [routeGeneratorStandIn]),
     "The compiler"
   );
 
 /**
- * Ultracite's lint and format (src/ultracite-worker.ts), with the design
- * system's lint, a module of its own that core runs in an isolate of its
- * own, with oxc.wasm: it isn't loaded by an isolate that only builds, nor
- * read by core but to start one that lints.
+ * Ultracite's lint and format (src/ultracite-worker.ts), a module of its
+ * own that core runs in an isolate of its own, with oxc.wasm: it isn't
+ * loaded by an isolate that only builds, nor read by core but to start
+ * one that lints.
  */
-const buildUltracite = async (designKit: DesignKit): Promise<string> =>
+const buildUltracite = async (): Promise<string> =>
   await oneModule(
-    isolateBuild("src/ultracite-worker.ts", compilerAssets.ultracite, [
-      ultraciteConfigModule,
-      designKitModule(designKit),
-      shadcnParser,
-    ]),
+    isolateBuild("src/ultracite-worker.ts", [ultraciteConfigModule]),
     "Ultracite's lint"
   );
 
@@ -1821,6 +1715,8 @@ const buildAppCompiler = async (
   assets: string,
   versionModule: string
 ): Promise<void> => {
+  // The kit's sources compile on oxc.wasm, as App code does.
+  startOxc(await oxcWasmModule());
   const { entries: icons, icons: iconNames } = iconEntries();
   const components = uiEntries();
   const react = reactSpecifiers.map((specifier) => ({
@@ -1887,19 +1783,13 @@ const buildAppCompiler = async (
     moduleCandidates: candidatesByModule(sources),
     moduleImports,
     previewModuleImports,
-  };
-  const designKit: DesignKit = {
-    lintProject: collectLintProject(
-      stylesheets,
-      await kitClassRules(stylesheets)
-    ),
-    // The repo's lint config extends the same preset.
-    lintRules: rulesSchema.parse(shadcnPreset.rules),
+    components: componentVariants(components),
+    colors: await themeColors(stylesheets),
   };
   const kitJson = JSON.stringify(kit);
   const typesJson = JSON.stringify(await typeChunks(typeSources, typed));
   const compiler = await buildCompiler();
-  const ultracite = await buildUltracite(designKit);
+  const ultracite = await buildUltracite();
   const packageBuilder = await buildPackageBuilder();
   const checker = await buildChecker();
   // The WebAssembly the type checker runs, as the package ships it.
@@ -1908,8 +1798,8 @@ const buildAppCompiler = async (
   const esbuildWasm = readFileSync(
     require.resolve("esbuild-wasm/esbuild.wasm")
   );
-  // oxlint's, oxfmt's and oxc's parser's, which Ultracite's isolate runs,
-  // as pinned.
+  // oxc's transform and parser, which the compiler's isolate runs, and
+  // oxlint's and oxfmt's, which Ultracite's does, as pinned.
   const oxc = await oxcWasm();
   const kitModules = modulesOf(kitCode);
   const kitPreviewModules = modulesOf(previewKitCode);
