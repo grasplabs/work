@@ -760,7 +760,7 @@ const teamSecrets = async () => {
 };
 
 describe("live queries and a person's teams", { timeout: 180_000 }, () => {
-  it("pushes nothing of a row the person's teams don't read, written while they watch", async () => {
+  it("pushes nothing at all for a row the person's teams don't read, and once for one they do", async () => {
     const { opened, member, sales, support, lease, secrets, tell } =
       await teamSecrets();
     const received: Push[] = [];
@@ -773,24 +773,22 @@ describe("live queries and a person's teams", { timeout: 180_000 }, () => {
       expect(received).toHaveLength(1);
     });
 
-    // Support's secret first, then Sales': once Sales' is pushed, every
-    // read after Support's write has been.
+    // Support's secret first, read again on its own, then Sales': once
+    // Sales' is pushed, every read after Support's write has been. A push
+    // of the same result would tell the person the table was written.
     const { client } = clientFor(opened);
     await client.mutation(tell, { text: "Support only", team: support });
+    await scheduler.wait(1000);
     await client.mutation(tell, { text: "Sales news", team: sales });
     await eventually(() => {
-      expect(
-        received.some(({ result }) =>
-          JSON.stringify(result).includes("Sales news")
-        )
-      ).toBeTruthy();
+      expect(received).toHaveLength(2);
     });
 
     expect(
-      received.some(({ result }) =>
-        JSON.stringify(result).includes("Support only")
+      received.map(({ result }) =>
+        JSON.stringify(result).includes("Sales news")
       )
-    ).toBeFalsy();
+    ).toStrictEqual([false, true]);
   });
 
   it("never pushes what was read under a team the person has left, even a result that waited", async () => {
