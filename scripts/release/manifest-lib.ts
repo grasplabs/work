@@ -18,7 +18,6 @@ import {
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { gzipSync } from "node:zlib";
 
 import {
   assetKey,
@@ -297,39 +296,29 @@ const mebibytes = (bytes: number): string =>
 
 /**
  * What one release may carry to a client, with headroom, so a build that
- * outgrows it fails in CI rather than on a client's deploy days later:
- * - A static file: Cloudflare takes 25 MiB at most.
- * - A Worker's modules, gzipped as the upload is measured: Cloudflare
- *   takes 10 MiB at most.
- * - One module: the admin's deploy holds the largest whole in memory,
- *   twice (read from R2, then copied into the upload's form), in an
- *   isolate stopped past 128 MB (apps/admin/src/cloudflare/workers.ts).
- * Static files in total aren't bounded here: the deploy reads them one
- * upload bucket at a time.
+ * outgrows it fails in CI rather than on a client's deploy days later
+ * (apps/admin/src/cloudflare/workers.ts):
+ * - A Worker's modules, all together, raw: the deploy sends them in one
+ *   upload, which Cloudflare takes up to 64 MiB, and the Worker must start
+ *   within 1 s, which parsing that much code comes close to. The deploy
+ *   streams them into the upload, so they don't bound its memory.
+ * - A static file: Cloudflare takes 25 MiB at most. The deploy holds the
+ *   one it's sending, read and as base64, so this bounds its memory too.
+ * Static files in total aren't bounded here: the deploy sends one at a
+ * time.
  */
 export const releaseBudget = {
+  workerModules: 24 * 1024 * 1024,
   staticFile: 20 * 1024 * 1024,
-  workerGzipped: 8 * 1024 * 1024,
-  module: 32 * 1024 * 1024,
 } as const;
 
 /** Throws when a Worker's build carries more than `releaseBudget` allows. */
 const checkBudget = (build: WorkerBuild): void => {
   const over: string[] = [];
-  for (const module of build.modules) {
-    if (module.size > releaseBudget.module) {
-      over.push(
-        `module ${module.name} is ${mebibytes(module.size)} (budget ${mebibytes(releaseBudget.module)})`
-      );
-    }
-  }
-  const gzipped = build.modules.reduce(
-    (total, module) => total + gzipSync(module.bytes).length,
-    0
-  );
-  if (gzipped > releaseBudget.workerGzipped) {
+  const modules = build.modules.reduce((total, { size }) => total + size, 0);
+  if (modules > releaseBudget.workerModules) {
     over.push(
-      `its modules are ${mebibytes(gzipped)} gzipped (budget ${mebibytes(releaseBudget.workerGzipped)})`
+      `its modules are ${mebibytes(modules)} (budget ${mebibytes(releaseBudget.workerModules)})`
     );
   }
   for (const [file, { size }] of Object.entries(build.assets?.manifest ?? {})) {

@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 /**
  * The release manifest, generated from the real wrangler.jsonc of core and
  * connect (fixture-release.ts). Changing either config fails the golden test until the golden file is
@@ -171,27 +170,21 @@ describe("the release manifest", () => {
     if (connect === undefined || core === undefined || main === undefined) {
       throw new Error("expected two builds");
     }
-    const sized = (size: number, bytes = Buffer.alloc(size)) => ({
+    // Two modules each under half the budget, which together are over it:
+    // the deploy sends them all in one upload.
+    const half = releaseBudget.workerModules / 2;
+    const halves = ["a.js", "b.js"].map((name) => ({
       ...main,
-      name: "big.js",
-      size,
-      bytes,
-    });
-    const withModule = (module: ReturnType<typeof sized>) => [
-      connect,
-      { ...core, modules: [...core.modules, module] },
-    ];
+      name,
+      size: half,
+      bytes: Buffer.alloc(half),
+    }));
     expect(() =>
-      generateManifest(info, withModule(sized(releaseBudget.module + 1)))
-    ).toThrow(/core is over the release budget: module big\.js/u);
-    // Random bytes don't compress.
-    const incompressible = randomBytes(releaseBudget.workerGzipped);
-    expect(() =>
-      generateManifest(
-        info,
-        withModule(sized(incompressible.length, incompressible))
-      )
-    ).toThrow(/its modules are [\d.]+ MiB gzipped/u);
+      generateManifest(info, [
+        connect,
+        { ...core, modules: [...core.modules, ...halves] },
+      ])
+    ).toThrow(/core is over the release budget: its modules are 2\d\.\d MiB/u);
     expect(() =>
       generateManifest(info, [
         connect,
