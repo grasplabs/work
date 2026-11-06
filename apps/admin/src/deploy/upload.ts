@@ -7,11 +7,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
  * files read from R2 and checked against the manifest. Its secrets are in
  * src/deploy/secrets.ts.
  */
-import {
-  assetContentKey,
-  assetKey,
-  d1IdPlaceholder,
-} from "@grasp-os/shared/release";
+import { d1IdPlaceholder } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import mime from "mime";
 import { z } from "zod";
@@ -25,7 +21,7 @@ import type {
 } from "../cloudflare/workers.ts";
 import type { ReleaseStore } from "../releases/import.ts";
 import { DeployError } from "./errors.ts";
-import { readBlob, readChecked } from "./release.ts";
+import { readAssetBase64, readBlob } from "./release.ts";
 
 const unknownPlaceholder = (worker: WorkerEntry, binding: string) =>
   new DeployError(
@@ -111,46 +107,41 @@ const assetType = (path: string): string => {
 };
 
 /**
- * `worker`'s static files, read from R2, each checked against the key the
- * manifest gives it before it's uploaded.
+ * `worker`'s static files, each read from R2 and checked against the key
+ * the manifest gives it only as it's uploaded (`AssetFile`).
  */
-const readAssets = async (
-  store: ReleaseStore,
-  worker: WorkerEntry
-): Promise<AssetFile[]> =>
-  await Promise.all(
-    Object.entries(worker.assets?.manifest ?? {}).map(
-      async ([path, { hash, size }]) => ({
-        path,
-        content: await readChecked(
-          store,
-          { name: path, size, r2Key: assetKey(hash) },
-          async (bytes) => (await assetContentKey(bytes, path)) === hash
-        ),
-        type: assetType(path),
-      })
-    )
+const assetsOf = (store: ReleaseStore, worker: WorkerEntry): AssetFile[] =>
+  Object.entries(worker.assets?.manifest ?? {}).map(
+    ([path, { hash, size }]) => ({
+      path,
+      key: hash,
+      size,
+      type: assetType(path),
+      readBase64: async () =>
+        await readAssetBase64(store, { path, key: hash, size }),
+    })
   );
 
 /**
- * `workerUpload` with `bindings` rendered already: a placed client's,
- * mapped onto its inventory (src/hosting/inventory.ts), its mail locked
- * (`lockMailSender`).
+ * What `worker` of `manifest` is uploaded as, `bindings` rendered already:
+ * a placed client's, mapped onto its inventory (src/hosting/inventory.ts),
+ * its mail locked (`lockMailSender`). Its metadata on the release's
+ * compatibility date and flags, `vars` added as JSON bindings, and its
+ * modules and static files, each read from `store` and checked against
+ * the manifest as the upload sends it.
  */
-export const renderedWorkerUpload = async (
+export const renderedWorkerUpload = (
   store: ReleaseStore,
   manifest: ReleaseManifest,
   worker: WorkerEntry,
   bindings: readonly Record<string, unknown>[],
   vars: Readonly<Record<string, unknown>>
-): Promise<WorkerUpload> => {
-  const modules = await Promise.all(
-    worker.modules.map(async (file): Promise<WorkerModule> => ({
-      name: file.name,
-      content: await readBlob(store, file),
-      type: moduleTypes[file.type],
-    }))
-  );
+): WorkerUpload => {
+  const modules = worker.modules.map((file): WorkerModule => ({
+    name: file.name,
+    type: moduleTypes[file.type],
+    read: async () => await readBlob(store, file),
+  }));
   const metadata: WorkerMetadata = {
     main_module: worker.mainModule,
     compatibility_date: manifest.compatibilityDate,
@@ -172,34 +163,9 @@ export const renderedWorkerUpload = async (
     releaseId: manifest.releaseId,
     metadata,
     modules,
-    ...(worker.assets === undefined
-      ? {}
-      : { assets: await readAssets(store, worker) }),
+    ...(worker.assets === undefined ? {} : { assets: assetsOf(store, worker) }),
   };
 };
-
-/**
- * What `worker` of `manifest` is uploaded as: its metadata on the
- * release's compatibility date and flags, its bindings filled in (its
- * mail locked to `mailSender`, `renderBindings`) and
- * `vars` added as JSON bindings, and its modules and static files, all
- * read from `store` and checked against the manifest.
- */
-export const workerUpload = async (
-  store: ReleaseStore,
-  manifest: ReleaseManifest,
-  worker: WorkerEntry,
-  databases: ReadonlyMap<string, string>,
-  vars: Readonly<Record<string, unknown>>,
-  mailSender: string
-): Promise<WorkerUpload> =>
-  await renderedWorkerUpload(
-    store,
-    manifest,
-    worker,
-    renderBindings(worker, databases, mailSender),
-    vars
-  );
 
 /**
  * Throws `binding_name_taken` unless every binding, var and secret of

@@ -1763,7 +1763,7 @@ const upload = async (
       worker.durableObjectMigrations,
       before.migrationTag
     );
-    const prepared = await renderedWorkerUpload(
+    const prepared = renderedWorkerUpload(
       store,
       manifest,
       worker,

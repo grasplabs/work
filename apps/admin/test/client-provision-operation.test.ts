@@ -10,7 +10,11 @@ import {
   provisionProbePath,
 } from "@grasp-os/shared/provision-probe";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
-import { moduleKey, releaseManifestSchema } from "@grasp-os/shared/release";
+import {
+  assetKey,
+  moduleKey,
+  releaseManifestSchema,
+} from "@grasp-os/shared/release";
 import { deriveRouterSecret, routerHostKey } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -54,6 +58,7 @@ import {
 import { operationErrorWords } from "../src/hosting/words.ts";
 import { provisionPlacedClient } from "../src/hosting/workflow.ts";
 import { getProvisioning } from "../src/provision/queries.ts";
+import type { ReleaseStore } from "../src/releases/import.ts";
 import { pinClient } from "../src/rollout/channels.ts";
 import { reconcile } from "../src/rollout/reconciler.ts";
 import {
@@ -434,6 +439,12 @@ const resourceOf = async (clientId: string, role: string) => {
 };
 
 /** Client `clientId`'s core and connect scripts, as its inventory names them. */
+/** The files a call's form carries: all its parts but the metadata. */
+const filesSent = (call: ApiCall | undefined): number =>
+  call?.body instanceof FormData
+    ? [...call.body.keys()].filter((name) => name !== "metadata").length
+    : 0;
+
 const scriptsOf = async (clientId: string) => {
   const [core, connect] = await Promise.all([
     resourceOf(clientId, "worker:grasp-os-core"),
@@ -983,6 +994,63 @@ describe("provisioning a placed client", () => {
         ])
       )
     ).toStrictEqual(types);
+  });
+
+  it("reads core's files from the release only for the request that sends them, never the whole release at once", async () => {
+    // Core's release is over 100 MB in memory (its modules, and its static
+    // files as base64), past what a Worker may hold: read whole, its
+    // deploy's isolate was killed before core went up.
+    const manifest = await importRelease({
+      assets: Object.fromEntries(
+        Array.from({ length: 5 }, (_, index) => [
+          `/assets/chunk-${index}.js`,
+          `export default "${crypto.randomUUID()}";`,
+        ])
+      ),
+    });
+    const { core: coreWorker } = manifest.workers;
+    const coreFiles = new Set([
+      ...(coreWorker?.modules ?? []).map(({ r2Key }) => r2Key),
+      ...Object.values(coreWorker?.assets?.manifest ?? {}).map(({ hash }) =>
+        assetKey(hash)
+      ),
+    ]);
+    // When each of core's files is read: as the count of calls sent.
+    const readAt: number[] = [];
+    const store: ReleaseStore = {
+      get: async (...args: Parameters<R2Bucket["get"]>) => {
+        if (coreFiles.has(args[0])) {
+          readAt.push(cloudflare.calls.length);
+        }
+        return await env.RELEASES.get(...args);
+      },
+      list: async (...args: Parameters<R2Bucket["list"]>) =>
+        await env.RELEASES.list(...args),
+    };
+    const { clientId, held } = await setUp(manifest);
+
+    await runClientProvision({ ...context, store }, held);
+
+    const { core } = await scriptsOf(clientId);
+    // Each file is read once, right before the request that carries it:
+    // its assets bucket, or the script's upload with its modules.
+    const readBefore = Map.groupBy(readAt, (at) => at);
+    const sends = [...readBefore].map(([at, reads]) => ({
+      read: reads.length,
+      sent: filesSent(cloudflare.calls[at]),
+    }));
+    expect(sends).toStrictEqual(
+      sends.map(({ sent }) => ({ read: sent, sent }))
+    );
+    expect(readAt).toHaveLength(coreFiles.size);
+    const carriers = [...readBefore.keys()].map(
+      (at) => cloudflare.calls[at]?.path ?? ""
+    );
+    // Six static files in buckets of two, then the script.
+    expect(
+      carriers.filter((path) => path.endsWith("/workers/assets/upload"))
+    ).toHaveLength(3);
+    expect(carriers.at(-1)).toMatch(new RegExp(`/scripts/${core}$`, "u"));
   });
 
   it("does nothing once done", async () => {

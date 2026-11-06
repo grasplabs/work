@@ -1,3 +1,4 @@
+import { encodeAsset } from "@grasp-os/shared/release";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -42,18 +43,36 @@ const release = (
     {
       name: "index.js",
       type: "application/javascript+module",
-      content: `export default { fetch: () => new Response("${releaseId}") };`,
+      read: async () =>
+        await Promise.resolve(
+          `export default { fetch: () => new Response("${releaseId}") };`
+        ),
     },
-    { name: "skills/SKILL.md", type: "text/plain", content: "# Skill" },
+    {
+      name: "skills/SKILL.md",
+      type: "text/plain",
+      read: async () => await Promise.resolve("# Skill"),
+    },
   ],
   ...(assets === undefined ? {} : { assets }),
 });
 
-const file = (path: string, content: string): AssetFile => ({
-  path,
-  content: encoder.encode(content),
-  type: "text/plain",
-});
+/** A static file at `path` holding `content`, of type `type`. */
+const file = async (
+  path: string,
+  content: string,
+  type = "text/plain"
+): Promise<AssetFile> => {
+  const bytes = encoder.encode(content);
+  const { key, base64 } = await encodeAsset(bytes, path);
+  return {
+    path,
+    key,
+    size: bytes.length,
+    type,
+    readBase64: async () => await Promise.resolve(base64),
+  };
+};
 
 /**
  * A version's assets metadata: its config, and whether its token came from
@@ -90,11 +109,11 @@ const database = async (accountId: string, name: string) =>
 describe("static assets", () => {
   it("uploads only the files the account lacks, and names them in each upload", async () => {
     const account = namespaced();
-    const files = [
+    const files = await Promise.all([
       file("/index.html", "<!doctype html>"),
       file("/app.js", "console.log(1)"),
       file("/app.css", "body{}"),
-    ];
+    ]);
     await uploadTargetScript(api, core(account.id), release("26.01.1", files));
     const firstUploads = cloudflare.calls.filter(({ path }) =>
       path.endsWith("/workers/assets/upload")
@@ -102,7 +121,7 @@ describe("static assets", () => {
     await uploadTargetScript(
       api,
       core(account.id),
-      release("26.01.2", [...files, file("/new.js", "1")])
+      release("26.01.2", [...files, await file("/new.js", "1")])
     );
     const allUploads = cloudflare.calls.filter(({ path }) =>
       path.endsWith("/workers/assets/upload")
@@ -130,12 +149,15 @@ describe("static assets", () => {
     await uploadTargetScript(
       api,
       core(account.id),
-      release("26.01.1", [
-        file("/index.html", "<html></html>"),
-        file("/.hidden", "x"),
-        file("/.well-known/security.txt", "x"),
-        file("/a.tar.gz", "x"),
-      ])
+      release(
+        "26.01.1",
+        await Promise.all([
+          file("/index.html", "<html></html>"),
+          file("/.hidden", "x"),
+          file("/.well-known/security.txt", "x"),
+          file("/a.tar.gz", "x"),
+        ])
+      )
     );
 
     const session = cloudflare.calls.find(({ path }) =>
@@ -181,20 +203,17 @@ describe("static assets", () => {
 
   it("uploads a file the account holds again when its type changes, and the account serves it with the new one", async () => {
     const account = namespaced();
-    const wasm = (type: string): AssetFile => ({
-      path: "/_compiler/v1/esbuild.wasm",
-      content: encoder.encode("\0asm"),
-      type,
-    });
+    const wasm = async (type: string): Promise<AssetFile> =>
+      await file("/_compiler/v1/esbuild.wasm", "\0asm", type);
     await uploadTargetScript(
       api,
       core(account.id),
-      release("26.01.1", [wasm("application/octet-stream")])
+      release("26.01.1", [await wasm("application/octet-stream")])
     );
     await uploadTargetScript(
       api,
       core(account.id),
-      release("26.01.2", [wasm("application/wasm")])
+      release("26.01.2", [await wasm("application/wasm")])
     );
 
     const uploads = cloudflare.calls.filter(({ path }) =>
@@ -214,7 +233,7 @@ describe("static assets", () => {
 
   it("names files the account already holds by the session's token", async () => {
     const account = namespaced();
-    const files = [file("/index.html", "<!doctype html>")];
+    const files = [await file("/index.html", "<!doctype html>")];
     await uploadTargetScript(api, core(account.id), release("26.01.1", files));
     await uploadTargetScript(api, core(account.id), release("26.01.2", files));
     const uploads = cloudflare.calls.filter(({ path }) =>
@@ -230,10 +249,14 @@ describe("static assets", () => {
 });
 
 describe("uploads that fail part way", () => {
-  it("uploads asset buckets three at a time, retrying one after a server error", async () => {
+  it("uploads asset buckets one at a time, retrying one after a server error", async () => {
     const account = namespaced();
-    const files = Array.from({ length: 15 }, (_, index) =>
-      file(`/file-${index}.js`, `export default ${index};`)
+    const files = await Promise.all(
+      Array.from(
+        { length: 15 },
+        async (_, index) =>
+          await file(`/file-${index}.js`, `export default ${index};`)
+      )
     );
     // The session, then the first bucket's upload fails once.
     cloudflare.failCall(2, 500);
@@ -244,7 +267,7 @@ describe("uploads that fail part way", () => {
     // Eight buckets of two, one sent twice.
     expect(uploads).toHaveLength(9);
     expect(account.assets.size).toBe(15);
-    expect(cloudflare.peakConcurrency()).toBe(3);
+    expect(cloudflare.peakConcurrency()).toBe(1);
   });
 
   it("retries a script upload after a server error, unless it migrates Durable Objects", async () => {

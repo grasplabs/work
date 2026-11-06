@@ -4,19 +4,32 @@
  * workers.dev route, reading what is live, and applying D1 migrations.
  */
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { encodeAsset } from "@grasp-os/shared/release";
 import { z } from "zod";
 
 import { isNotFound } from "./api.ts";
 import type { CloudflareApi } from "./api.ts";
 
+/*
+ * A release's files are read as its upload sends them, never all at once:
+ * core's are over 100 MB (its modules, and its static files as the
+ * base64 the assets upload takes), and a Worker, a Workflow step's run
+ * included, is stopped past 128 MB of memory. So each file is a reader,
+ * read when it goes into a request: a static file only when the account
+ * lacks it, in its bucket, one bucket at a time, and the modules after
+ * them, each copied into the form as it's read.
+ */
+
+/** Bytes as the upload's form takes them. */
+type Content = string | Uint8Array<ArrayBuffer>;
+
 /** One module of a Worker, as its bundle holds it. */
 export interface WorkerModule {
   /** Its path in the bundle, such as `index.js`. */
   name: string;
-  content: string | Uint8Array<ArrayBuffer>;
   /** Such as `application/javascript+module`, `text/plain` or `application/wasm`. */
   type: string;
+  /** Its contents, read as the upload's form is built. */
+  read: () => Promise<Content>;
 }
 
 /**
@@ -33,9 +46,17 @@ export type WorkerMetadata = Record<string, unknown> & {
 export interface AssetFile {
   /** Its URL path, such as `/index.html`. */
   path: string;
-  content: Uint8Array<ArrayBuffer>;
+  /** Its content key (`encodeAsset`), as the release manifest names it. */
+  key: string;
+  /** Its size in bytes. */
+  size: number;
   /** Its content type, such as `text/html`. */
   type: string;
+  /**
+   * Its contents as base64 (`encodeAsset`), checked against `key`: read
+   * only when the account lacks the file.
+   */
+  readBase64: () => Promise<Uint8Array<ArrayBuffer>>;
 }
 
 /** What one Worker of a release is uploaded as. */
@@ -55,22 +76,6 @@ const uploadSessionSchema = z.object({
 });
 const uploadedSchema = z.object({ jwt: z.string().nullish() }).nullish();
 
-/** Most asset buckets uploaded at once. */
-const assetUploadConcurrency = 3;
-
-/** Runs `task` on each of `items`, at most `limit` at a time, in order of results. */
-const inBatches = async <T, R>(
-  items: readonly T[],
-  limit: number,
-  task: (item: T) => Promise<R>
-): Promise<R[]> => {
-  if (items.length === 0) {
-    return [];
-  }
-  const batch = await Promise.all(items.slice(0, limit).map(task));
-  return [...batch, ...(await inBatches(items.slice(limit), limit, task))];
-};
-
 /**
  * The key a file goes up under: its content key (`encodeAsset`) and its
  * type, hashed together, cut to the 32 hex characters the API takes.
@@ -78,6 +83,25 @@ const inBatches = async <T, R>(
 const typedAssetKey = async (key: string, type: string): Promise<string> => {
   const hash = await sha256Hex(`${key}\n${type}`);
   return hash.slice(0, 32);
+};
+
+/** A bucket's form: each file it asks for, as base64, read one at a time. */
+const bucketForm = async (
+  bucket: readonly string[],
+  byHash: ReadonlyMap<string, AssetFile>
+): Promise<FormData> => {
+  const form = new FormData();
+  for (const hash of bucket) {
+    // A hash it asks for that isn't ours goes unanswered, and the upload
+    // then ends without a completion token.
+    const file = byHash.get(hash);
+    if (file !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one file's bytes read at a time
+      const base64 = await file.readBase64();
+      form.set(hash, new File([base64], hash, { type: file.type }));
+    }
+  }
+  return form;
 };
 
 /**
@@ -93,16 +117,16 @@ const uploadAssetsAt = async (
   scriptAt: string,
   files: readonly AssetFile[]
 ): Promise<string> => {
-  const encoded = await Promise.all(
-    files.map(async (file) => {
-      // Encoded once for its key and its body, and named by the key the
-      // release manifest gives it (Wrangler's shape and extension rule,
-      // with SHA-256) bound to its type: the account keeps a file it holds
-      // under its key with the type it was first uploaded with, so a file
-      // whose type changes must go up again under a new key.
-      const { key, base64 } = await encodeAsset(file.content, file.path);
-      return { ...file, base64, hash: await typedAssetKey(key, file.type) };
-    })
+  // Named by the key the release manifest gives each file (Wrangler's
+  // shape and extension rule, with SHA-256) bound to its type: the account
+  // keeps a file it holds under its key with the type it was first
+  // uploaded with, so a file whose type changes must go up again under a
+  // new key. A file is read, and its key checked, only if it goes up.
+  const named = await Promise.all(
+    files.map(async (file) => ({
+      file,
+      hash: await typedAssetKey(file.key, file.type),
+    }))
   );
   const session = await api.call(
     {
@@ -110,10 +134,7 @@ const uploadAssetsAt = async (
       path: `${scriptAt}/assets-upload-session`,
       json: {
         manifest: Object.fromEntries(
-          encoded.map(({ path, hash, content }) => [
-            path,
-            { hash, size: content.byteLength },
-          ])
+          named.map(({ file, hash }) => [file.path, { hash, size: file.size }])
         ),
       },
     },
@@ -124,45 +145,37 @@ const uploadAssetsAt = async (
     // The account holds every file: the session's token completes it.
     return session.jwt;
   }
-  const byHash = new Map(encoded.map((file) => [file.hash, file]));
-  const uploads = await inBatches(
-    buckets,
-    assetUploadConcurrency,
-    async (bucket) => {
-      const form = new FormData();
-      for (const hash of bucket) {
-        // A hash it asks for that isn't ours goes unanswered, and the
-        // upload then ends without a completion token.
-        const file = byHash.get(hash);
-        if (file !== undefined) {
-          form.set(hash, new File([file.base64], hash, { type: file.type }));
-        }
-      }
-      return await api.call(
-        {
-          method: "POST",
-          path: `/accounts/${accountId}/workers/assets/upload`,
-          query: { base64: "true" },
-          body: form,
-          bearer: session.jwt,
-          // Files are named by their content's hash: sending a bucket again
-          // stores the same files.
-          idempotent: true,
-        },
-        uploadedSchema
-      );
+  const byHash = new Map(named.map(({ file, hash }) => [hash, file]));
+  // One bucket at a time, not Wrangler's three, which would hold three in
+  // memory. The upload that completes the set answers with the token.
+  let completion: string | undefined;
+  for (const bucket of buckets) {
+    // oxlint-disable-next-line no-await-in-loop -- one bucket in memory at a time
+    const form = await bucketForm(bucket, byHash);
+    // oxlint-disable-next-line no-await-in-loop -- one bucket in memory at a time
+    const uploaded = await api.call(
+      {
+        method: "POST",
+        path: `/accounts/${accountId}/workers/assets/upload`,
+        query: { base64: "true" },
+        body: form,
+        bearer: session.jwt,
+        // Files are named by their content's hash: sending a bucket again
+        // stores the same files.
+        idempotent: true,
+      },
+      uploadedSchema
+    );
+    if (typeof uploaded?.jwt === "string") {
+      completion = uploaded.jwt;
     }
-  );
-  // The upload that completes the set answers with the completion token.
-  const completion = uploads.find(
-    (uploaded) => typeof uploaded?.jwt === "string"
-  );
-  if (typeof completion?.jwt !== "string") {
+  }
+  if (completion === undefined) {
     throw new TypeError(
       "The assets upload finished without a completion token"
     );
   }
-  return completion.jwt;
+  return completion;
 };
 
 /** One of a Worker's deployments, as Cloudflare names its versions. */
@@ -225,8 +238,9 @@ const uploadForm = async (
       { type: "application/json" }
     )
   );
-  for (const { name, content, type } of modules) {
-    form.set(name, new File([content], name, { type }));
+  for (const { name, type, read } of modules) {
+    // oxlint-disable-next-line no-await-in-loop -- one module read at a time, copied into the form
+    form.set(name, new File([await read()], name, { type }));
   }
   return form;
 };
