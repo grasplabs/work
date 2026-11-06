@@ -96,21 +96,27 @@ const file = async (
 
 const mebibyte = 1024 * 1024;
 
-/** Static file `index` of `size` bytes, made only as it's read. */
-const sized = async (index: number, size: number): Promise<AssetFile> => {
-  const path = `/chunk-${index}.wasm`;
-  const bytes = () => new Uint8Array(size).fill(index);
-  const { key } = await encodeAsset(bytes(), path);
-  return {
-    path,
-    key,
-    size,
-    type: "application/wasm",
-    readBase64: async () => {
-      const { base64 } = await encodeAsset(bytes(), path);
-      return base64;
-    },
-  };
+/**
+ * `count` static files of `size` zero bytes each, numbered from `first`,
+ * sharing one base64 encoded up front: only how a deploy groups them is
+ * tested, so each has a key of its own without encoding its own copy.
+ */
+const zeroFiles = async (
+  first: number,
+  count: number,
+  size: number
+): Promise<AssetFile[]> => {
+  const { base64 } = await encodeAsset(new Uint8Array(size), "/zeros.wasm");
+  return Array.from({ length: count }, (_, offset) => {
+    const index = first + offset;
+    return {
+      path: `/chunk-${index}.wasm`,
+      key: index.toString(16).padStart(32, "0"),
+      size,
+      type: "application/wasm",
+      readBase64: async () => await Promise.resolve(base64),
+    };
+  });
 };
 
 /** Base64's padding, at the end. */
@@ -263,20 +269,41 @@ describe("static assets", () => {
     expect(account.assets.get(served?.hash ?? "")).toBe("application/wasm");
   });
 
-  it("uploads a first deploy's files within its deadline, small ones sharing up to 8 MiB a request, three at a time, a larger one alone", async () => {
+  it("uploads a first deploy's files within a deadline its requests' latency sets, not one a file", async () => {
     const account = namespaced();
-    // Thirty files of 1 MiB and two of 9 MiB, each made only as it's read.
-    const files = await Promise.all([
-      ...Array.from(
-        { length: 30 },
-        async (_, index) => await sized(index, mebibyte)
-      ),
-      sized(30, 9 * mebibyte),
-      sized(31, 9 * mebibyte),
-    ]);
-    // Each upload answered after 200 ms: one file a request, one at a
-    // time, would take 6.4 s.
+    const files = await Promise.all(
+      Array.from(
+        { length: 40 },
+        async (_, index) => await file(`/chunk-${index}.js`, `export ${index};`)
+      )
+    );
+    // Each upload answered after 200 ms. They fit one request, so 200 ms
+    // and a second's margin; one file a request would take 8 s.
     const latencyMs = 200;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      if (new URL(request.url).pathname.endsWith("/workers/assets/upload")) {
+        await scheduler.wait(latencyMs);
+      }
+      return await cloudflare.fetch(request);
+    });
+
+    await uploadTargetAssets(api, core(account.id), files, {
+      signal: AbortSignal.timeout(latencyMs + 1000),
+    });
+
+    expect(account.assets.size).toBe(40);
+  });
+
+  it("uploads a first deploy's files with small ones sharing up to 8 MiB a request, three at a time, and a larger one alone", async () => {
+    const account = namespaced();
+    // Thirty files of 1 MiB and two of 9 MiB.
+    const files = [
+      ...(await zeroFiles(0, 30, mebibyte)),
+      ...(await zeroFiles(30, 2, 9 * mebibyte)),
+    ];
+    // Answered after a moment, so the requests overlap as they would.
+    const latencyMs = 20;
     const active = new Set<{ files: number; raw: number; alongside: number }>();
     const requests: { files: number; raw: number; alongside: number }[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -292,16 +319,17 @@ describe("static assets", () => {
       }
       try {
         const form = await request.clone().formData();
-        const texts = await Promise.all(
-          [...form.values()].map(async (part) =>
-            part instanceof Blob ? await part.text() : part
-          )
+        // Each part's raw size, from its base64's length and padding.
+        const sizes = await Promise.all(
+          [...form.values()].map(async (part) => {
+            const tail =
+              part instanceof Blob ? await part.slice(-2).text() : "";
+            const length = part instanceof Blob ? part.size : 0;
+            return (length / 4) * 3 - (padding.exec(tail)?.[0].length ?? 0);
+          })
         );
-        sent.files = texts.length;
-        for (const text of texts) {
-          sent.raw +=
-            (text.length / 4) * 3 - (padding.exec(text)?.[0].length ?? 0);
-        }
+        sent.files = sizes.length;
+        sent.raw = sizes.reduce((total, size) => total + size, 0);
         await scheduler.wait(latencyMs);
         return await cloudflare.fetch(request);
       } finally {
@@ -309,9 +337,7 @@ describe("static assets", () => {
       }
     });
 
-    await uploadTargetAssets(api, core(account.id), files, {
-      signal: AbortSignal.timeout(4000),
-    });
+    await uploadTargetAssets(api, core(account.id), files);
 
     const budget = 8 * mebibyte;
     expect({
