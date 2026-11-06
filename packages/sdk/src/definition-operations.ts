@@ -130,7 +130,14 @@ export type DefinitionOperation =
       readonly name: string;
       readonly type: string;
     }
-  | { readonly op: "removePreference"; readonly name: string };
+  | { readonly op: "removePreference"; readonly name: string }
+  | {
+      readonly op: "moveField";
+      readonly table: string;
+      readonly field: string;
+      /** Where it goes among the table's fields, from 0. */
+      readonly to: number;
+    };
 
 const refuse = (message: string): never => {
   throw new AppDefinitionError(message);
@@ -407,6 +414,37 @@ const removed = (
   }
 };
 
+/**
+ * `definition` with `operation`'s field moved to its place among its
+ * table's fields: the order the generated schema, and every grid, lists
+ * them in. Nothing a record holds changes.
+ */
+const withFieldMoved = (
+  definition: AppDefinition,
+  operation: Extract<DefinitionOperation, { op: "moveField" }>
+): AppDefinition => {
+  const table = tableNamed(definition, operation.table);
+  const field = fieldNamed(table, operation.field);
+  if (
+    !Number.isInteger(operation.to) ||
+    operation.to < 0 ||
+    operation.to >= table.fields.length
+  ) {
+    return refuse(
+      `\`${table.name}\` has ${table.fields.length} fields: a field moves to a place from 0 to ${table.fields.length - 1}.`
+    );
+  }
+  const rest = table.fields.filter(({ id }) => id !== field.id);
+  return withTable(definition, {
+    ...table,
+    fields: [
+      ...rest.slice(0, operation.to),
+      field,
+      ...rest.slice(operation.to),
+    ],
+  });
+};
+
 /** The preference named `name`. */
 const preferenceNamed = (
   definition: AppDefinition,
@@ -567,6 +605,9 @@ const applied = (
           held.id === field.id ? { ...held, name: operation.name } : held
         ),
       });
+    }
+    case "moveField": {
+      return withFieldMoved(definition, operation);
     }
     case "setAccess": {
       return withAccess(definition, operation);

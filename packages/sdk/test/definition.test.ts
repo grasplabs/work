@@ -432,6 +432,30 @@ describe("operations", () => {
     expect(unsearched.tables[0]?.searchIndex).toBeUndefined();
   });
 
+  test("move a field to its place, keeping its ID, and refuse a place its table hasn't", () => {
+    const moved = applyOperation(tasks(), {
+      op: "moveField",
+      table: "tasks",
+      field: "owner",
+      to: 0,
+    });
+    expect(
+      moved.tables[0]?.fields.map(({ id, name }) => [id, name])
+    ).toStrictEqual([
+      ["id4", "owner"],
+      ["id2", "title"],
+      ["id3", "done"],
+    ]);
+    expect(() =>
+      applyOperation(tasks(), {
+        op: "moveField",
+        table: "tasks",
+        field: "owner",
+        to: 3,
+      })
+    ).toThrow(/from 0 to 2/u);
+  });
+
   test("add, change and remove a preference, declared as code would", () => {
     const added = applyOperation(tasks(), {
       op: "addPreference",

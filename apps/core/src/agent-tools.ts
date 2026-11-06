@@ -752,6 +752,23 @@ const definitions = (known: Set<string>) => [
       await define(scope, app, { op: "addPermission", permission }),
   }),
   tool({
+    name: "moveField",
+    label: "Move a field",
+    api: "build",
+    description: `Moves a field to its place among its table's fields (\`to\`, from 0): the order the schema and the App's Data view list them in. Nothing a record holds changes. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        table: tableParameter,
+        field: fieldParameter,
+        to: Type.Integer({ minimum: 0 }),
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "moveField", ...input }),
+  }),
+  tool({
     name: "removeTable",
     label: "Remove a table",
     api: "build",

@@ -1870,7 +1870,7 @@ build: {
    * \`renameField\`, \`setAccess\`, \`addIndex\`, \`addPermission\`,
    * \`removeTable\`, \`removeField\`, \`removeIndex\`,
    * \`removePermission\`, \`addPreference\`, \`changePreference\`,
-   * \`removePreference\`: \`operation\` is \`{ op, ...that tool's input but app }\`), and writes
+   * \`removePreference\`, \`moveField\`: \`operation\` is \`{ op, ...that tool's input but app }\`), and writes
    * grasp.config.ts and server/schema.ts from it. \`ok: false\` with the
    * problem saves nothing; otherwise the \`plan\` of what it does to the
    * App's records, and what fails in the whole draft now, as \`write\`.

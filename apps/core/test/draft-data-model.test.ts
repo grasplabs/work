@@ -67,13 +67,13 @@ describe(
       const { builder, app, chatId } = await notesWithANote();
       const { chats } = builder.api;
       const kinds = {
-        title: "v.string()",
+        title: "v.string().trim().max(200)",
         email: "v.string().email().optional()",
-        amount: "v.number()",
-        done: "v.boolean()",
+        amount: "v.number().integer().min(0)",
+        done: "v.boolean().default(false)",
         due: "v.timestamp().optional()",
         status: 'v.enum(["open", "done"])',
-        note: 'v.id("notes").optional()',
+        note: 'v.id("notes", { onDelete: "cascade" }).optional()',
         owner: "v.person()",
         file: "v.file().optional()",
         price: "v.money().optional()",
@@ -114,25 +114,25 @@ describe(
         fields: [
           {
             name: "title",
-            type: { kind: "text" },
+            type: { kind: "text", trim: true, min: null, max: 200 },
             required: true,
-            code: "v.string()",
+            code: "v.string().trim().max(200)",
           },
           {
             name: "email",
-            type: { kind: "email" },
+            type: { kind: "email", trim: false, min: null, max: null },
             required: false,
             code: "v.string().email()",
           },
           {
             name: "amount",
-            type: { kind: "number" },
+            type: { kind: "number", integer: true, min: 0, max: null },
             required: true,
-            code: "v.number()",
+            code: "v.number().integer().min(0)",
           },
           {
             name: "done",
-            type: { kind: "boolean" },
+            type: { kind: "boolean", default: false },
             required: true,
             code: "v.boolean()",
           },
@@ -150,9 +150,9 @@ describe(
           },
           {
             name: "note",
-            type: { kind: "link", table: "notes" },
+            type: { kind: "link", table: "notes", cascade: true },
             required: false,
-            code: 'v.id("notes")',
+            code: 'v.id("notes", {\n  onDelete: "cascade"\n})',
           },
           {
             name: "owner",

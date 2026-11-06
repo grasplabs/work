@@ -246,12 +246,12 @@ export const definitionPlan = (
 
 /** The kind a person picks for each kind of descriptor but a choice and a link. */
 const fieldKinds: Record<
-  Exclude<ValueDescriptor["kind"], "enum" | "id">,
-  Exclude<FieldType["kind"], "choice" | "link">
+  Exclude<
+    ValueDescriptor["kind"],
+    "enum" | "id" | "string" | "number" | "boolean"
+  >,
+  "date" | "person" | "file" | "money" | "other"
 > = {
-  string: "text",
-  number: "number",
-  boolean: "boolean",
   timestamp: "date",
   person: "person",
   file: "file",
@@ -268,16 +268,40 @@ const fieldKinds: Record<
   template: "other",
 };
 
-/** A field's kind, as a person picks it (`FieldType`). */
+/** A field's kind, as a person picks it, with what it takes (`FieldType`). */
 const fieldTypeOf = (type: ValueDescriptor): FieldType => {
   if (type.kind === "enum") {
     return { kind: "choice", values: [...type.values] };
   }
   if (type.kind === "id") {
-    return { kind: "link", table: type.tableName };
+    return {
+      kind: "link",
+      table: type.tableName,
+      cascade: type.onDelete === "cascade",
+    };
   }
-  if (type.kind === "string" && type.email) {
-    return { kind: "email" };
+  if (type.kind === "string") {
+    return {
+      kind: type.email ? "email" : "text",
+      trim: type.trim,
+      min: type.min ?? null,
+      max: type.max ?? null,
+    };
+  }
+  if (type.kind === "number") {
+    return {
+      kind: "number",
+      integer: type.integer,
+      min: type.min ?? null,
+      max: type.max ?? null,
+    };
+  }
+  if (type.kind === "boolean") {
+    return {
+      kind: "boolean",
+      default:
+        typeof type.defaultValue === "boolean" ? type.defaultValue : null,
+    };
   }
   return { kind: fieldKinds[type.kind] };
 };
@@ -291,7 +315,8 @@ const modelFieldOf = ({ id, name, type }: DefinedField): DataModelField => {
     id,
     name,
     type: fieldTypeOf(type),
-    required: type.presence === "required",
+    // A default fills every record that leaves it out, so none goes without.
+    required: type.presence !== "optional",
     code: validatorSource({ ...declared, presence: "required" }),
   };
 };
@@ -433,6 +458,12 @@ export const definitionOperationSchema: z.ZodType<DefinitionOperation> =
       type: text,
     }),
     z.strictObject({ op: z.literal("removePreference"), name: text }),
+    z.strictObject({
+      op: z.literal("moveField"),
+      table: text,
+      field: text,
+      to: z.int().min(0),
+    }),
   ]);
 
 /** What an operation's audit record keeps: its kind, its table and its alias. */

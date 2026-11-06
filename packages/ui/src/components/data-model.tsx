@@ -195,5 +195,103 @@ function ModelTableItem({
   );
 }
 
-export { FieldTypeIcon, FieldTypePicker, ModelTableItem, ModelTableList };
+/**
+ * A field of a table's list, a button that opens it: its kind's icon, its
+ * name, what it is in a few words (`description`) and what to say of it
+ * (`meta`); the open one `active` (`aria-current`). It sits in a list's
+ * item of its own (a `SortableItem`, beside its handle).
+ */
+function ModelFieldButton({
+  active = false,
+  icon,
+  description,
+  meta,
+  children,
+  className,
+  ...props
+}: Omit<React.ComponentProps<"button">, "type"> & {
+  active?: boolean;
+  icon: React.ReactNode;
+  description?: React.ReactNode;
+  meta?: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      data-slot="model-field-button"
+      aria-current={active ? "true" : undefined}
+      className={cn(modelTableItemVariants({ active }), className)}
+      {...props}
+    >
+      <FieldTypeIcon size="sm">{icon}</FieldTypeIcon>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{children}</span>
+        {description === undefined ? null : (
+          <span className="text-muted-foreground truncate text-xs font-normal">
+            {description}
+          </span>
+        )}
+      </span>
+      {meta === undefined ? null : (
+        <span className="text-muted-foreground text-xs">{meta}</span>
+      )}
+    </button>
+  );
+}
+
+/**
+ * Every kind a new field can be, laid out to pick from at a glance: each
+ * a tile with its icon, its name and what it holds. `label` names the
+ * group; `onPick` hears the kind picked.
+ */
+function FieldTypeGallery({
+  options,
+  onPick,
+  label,
+  className,
+}: {
+  options: readonly FieldTypeOption[];
+  onPick: (value: string) => void;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <ul
+      aria-label={label}
+      data-slot="field-type-gallery"
+      className={cn("grid gap-2 sm:grid-cols-2", className)}
+    >
+      {options.map((option) => (
+        <li key={option.value} className="min-w-0">
+          <button
+            type="button"
+            onClick={() => {
+              onPick(option.value);
+            }}
+            className="hover:bg-muted focus-visible:ring-ring/50 flex w-full min-w-0 items-center gap-3 rounded-lg border p-3 text-start transition-colors duration-100 outline-none focus-visible:ring-3"
+          >
+            <FieldTypeIcon>{option.icon}</FieldTypeIcon>
+            <span className="flex min-w-0 flex-col">
+              <span className="text-sm font-medium">{option.label}</span>
+              {option.description === undefined ? null : (
+                <span className="text-muted-foreground text-xs">
+                  {option.description}
+                </span>
+              )}
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export {
+  FieldTypeGallery,
+  FieldTypeIcon,
+  FieldTypePicker,
+  ModelFieldButton,
+  ModelTableItem,
+  ModelTableList,
+};
 export type { FieldTypeOption };

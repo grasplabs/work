@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
@@ -11,6 +12,27 @@ import { apiOf, peopleIn } from "./people.ts";
 
 /** A read or a build on a loaded stack. */
 const read = { timeout: 20_000 };
+
+/**
+ * Moves the item `name`, at `place`, up one place from the keyboard, as a
+ * screen reader's user does: each step once it's said.
+ */
+const moveUp = async (page: Page, name: string, place: number) => {
+  await page.getByRole("button", { name: `Move ${name}`, exact: true }).focus();
+  await page.keyboard.press("Space");
+  // Picked up, and over its own place.
+  await expect(
+    page.getByText(`${name} is now at place ${place}.`)
+  ).toBeAttached();
+  await page.keyboard.press("ArrowUp");
+  await expect(
+    page.getByText(`${name} is now at place ${place - 1}.`)
+  ).toBeAttached();
+  await page.keyboard.press("Space");
+  await expect(
+    page.getByText(`Put ${name} down at place ${place - 1}.`)
+  ).toBeAttached();
+};
 
 test.use({ trace: "retain-on-failure", actionTimeout: read.timeout });
 
@@ -39,22 +61,35 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   await dialog.getByRole("button", { name: "Create table" }).click();
   await expect(page.getByRole("grid", { name: "tasks" })).toBeVisible(read);
 
-  // Its fields, added in its Fields view: a required text and a choice,
-  // then each a column of the grid.
+  // Its fields, added in its Fields view, each from its kind: a required
+  // text, then a choice whose options are put in order from the keyboard,
+  // as the field itself is put before the first.
   await page.getByRole("button", { name: "Fields", exact: true }).click();
+  const kinds = page.getByRole("list", { name: "Kinds of field" });
+  const fields = page.getByRole("list", { name: "Fields" });
+  await kinds.getByRole("button", { name: /^Text/u }).click();
   await page.getByLabel("Field name").fill("title");
-  await page.getByText("Required", { exact: true }).last().click();
-  await page.getByRole("button", { name: "Add field" }).click();
-  await expect(page.getByRole("button", { name: "Edit title" })).toBeVisible(
+  await page.getByRole("switch", { name: "Required" }).click();
+  await page.getByRole("button", { name: "Add field" }).last().click();
+  await expect(fields.getByRole("button", { name: /^title/u })).toBeVisible(
     read
   );
-  await page.getByRole("button", { name: "Add field" }).click();
+  await page.getByRole("button", { name: "Add field" }).first().click();
+  await kinds.getByRole("button", { name: /^Choice/u }).click();
   await page.getByLabel("Field name").fill("status");
-  await page.getByLabel("Type", { exact: true }).click();
-  await page.getByRole("option", { name: /^Choice/u }).click();
-  await page.getByLabel("Options, separated by commas").fill("Open, Done");
-  await page.getByRole("button", { name: "Add field" }).click();
-  await expect(page.getByRole("button", { name: "Edit status" })).toBeVisible(
+  await page.getByLabel("New option").fill("Open");
+  await page.getByLabel("New option").press("Enter");
+  await page.getByLabel("New option").fill("Done");
+  await page.getByLabel("New option").press("Enter");
+  await moveUp(page, "Done", 2);
+  await expect(page.getByLabel("Option 1")).toHaveValue("Done");
+  await page.getByRole("button", { name: "Add field" }).last().click();
+  await expect(fields.getByRole("button", { name: /^status/u })).toBeVisible(
+    read
+  );
+  await moveUp(page, "status", 2);
+  await expect(fields.getByRole("listitem").first()).toContainText(
+    "status",
     read
   );
   await page.getByRole("button", { name: "Records", exact: true }).click();
@@ -82,5 +117,7 @@ test("a builder creates a table and its fields in the Data view, and sees them i
     .click();
   const code = page.getByRole("region", { name: "Code of server/schema.ts" });
   await expect(code).toContainText("tasks: defineTable", read);
-  await expect(code).toContainText('v.enum(["Open", "Done"])');
+  await expect(code).toContainText('v.enum(["Done", "Open"])');
+  // In the order the fields were put in.
+  await expect(code).toContainText(/status:[\s\S]*title:/u);
 });

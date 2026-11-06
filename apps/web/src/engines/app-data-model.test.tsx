@@ -49,7 +49,7 @@ const nothingPlanned: DefinitionPlan = {
 const text = (name: string, required = false): DataModelField => ({
   id: `id-${name}`,
   name,
-  type: { kind: "text" },
+  type: { kind: "text", trim: false, min: null, max: null },
   required,
   code: "v.string()",
 });
@@ -211,7 +211,7 @@ const labelledBy = (label: string) => {
 
 /** Types `value` into the input named `label`. */
 const type = async (label: string, value: string): Promise<void> => {
-  const box = labelled(label);
+  const box = labelled(label) ?? labelledBy(label);
   if (!(box instanceof HTMLInputElement)) {
     throw new TypeError(`No input ${label}`);
   }
@@ -235,11 +235,30 @@ const choose = async (label: string, option: string): Promise<void> => {
   );
 };
 
+/** The fields the table's Fields view lists, each its button, by name. */
+const fieldButtons = (): [string, HTMLElement][] =>
+  [
+    ...document.querySelectorAll<HTMLElement>(
+      '[data-slot="model-field-button"]'
+    ),
+  ].map((each) => [
+    (each.querySelector("span > span")?.textContent ?? "").trim(),
+    each,
+  ]);
+
 /** The fields the table's Fields view lists, by name. */
-const fieldsShown = (): string[] =>
-  [...document.querySelectorAll('[data-slot="item-title"]')].map((title) =>
-    (title.firstChild?.textContent ?? "").trim()
-  );
+const fieldsShown = (): string[] => fieldButtons().map(([name]) => name);
+
+/** Opens the field `name` from the Fields view's list. */
+const openField = async (name: string): Promise<void> => {
+  await press(fieldButtons().find(([listed]) => listed === name)?.[1]);
+};
+
+/** Adds the option `value` to the choice open. */
+const addOption = async (value: string): Promise<void> => {
+  await type("New option", value);
+  await press(button("Add option"));
+};
 
 /** Opens the table's Fields view, from its bar. */
 const showFields = async (): Promise<void> => {
@@ -252,10 +271,14 @@ const addField = async (
   kind: string,
   more?: () => Promise<void>
 ): Promise<void> => {
-  // Opens a new field's form; a table with none has it open already.
+  // Starts a new field from its kind, picked from all of them laid out.
   await press(button("Add field"));
+  await press(
+    [
+      ...document.querySelectorAll('[data-slot="field-type-gallery"] button'),
+    ].find((each) => each.textContent.startsWith(kind))
+  );
   await type("Field name", name);
-  await choose("Type", kind);
   await more?.();
   await press(button("Add field"));
 };
@@ -326,14 +349,16 @@ describe("an App's data model, changed in its workspace", () => {
         "status",
         "Choice",
         async () => {
-          await type("Options, separated by commas", "open, done, open");
+          await addOption("open");
+          await addOption("done");
+          await addOption("open");
         },
       ],
       [
         "parent",
         "Link to a table",
         async () => {
-          await choose("Linked table", "openTasks");
+          await choose("Links to", "openTasks");
         },
       ],
       ["owner", "Person"],
@@ -503,16 +528,17 @@ describe("an App's data model, changed in its workspace", () => {
       throw new Error(`Not asked for: ${operation.op}`);
     });
 
-    // Each from its own column's header, in place.
+    // Each opened from the list, beside it.
     await showFields();
-    await press(button("Edit title"));
+    await openField("title");
     await type("Field name", "heading");
     await press(button("Save"));
     const renamed = fieldsShown();
 
-    await press(button("Edit status"));
+    await openField("status");
     await choose("Type", "Choice");
-    await type("Options, separated by commas", "open, done");
+    await addOption("open");
+    await addOption("done");
     await press(labelledBy("Required"));
     await press(button("Save"));
     const asked = document.body.textContent.includes(
@@ -580,7 +606,7 @@ describe("an App's data model, changed in its workspace", () => {
     });
 
     await showFields();
-    await press(button("Edit status"));
+    await openField("status");
     await press(button("Remove"));
     const said = document.body.textContent.includes(
       "Keeps the values of status in notes, though nothing reads them any more."
@@ -605,6 +631,58 @@ describe("an App's data model, changed in its workspace", () => {
     });
   });
 
+  it("says what each kind takes in its own editor, and sends it as code declares it", async () => {
+    const sent = await shown(notesModel(), (operation, model) => {
+      if (operation.op === "addField") {
+        return {
+          ok: true,
+          model: withField(model, text(operation.name)),
+          plan: nothingPlanned,
+        };
+      }
+      throw new Error(`Not asked for: ${operation.op}`);
+    });
+
+    await showFields();
+    await addField("estimate", "Number", async () => {
+      await press(labelledBy("Allow decimals"));
+      await type("Lowest", "0");
+      await type("Highest", "100");
+    });
+    await addField("done", "Yes or no", async () => {
+      await press(labelledBy("No"));
+    });
+    await addField("parent", "Link to a table", async () => {
+      await press(labelledBy("Delete this record too"));
+    });
+    await addField("title2", "Text", async () => {
+      await press(labelledBy("Remove spaces at the start and end"));
+      await type("Most characters", "200");
+    });
+    await addField("crossed", "Number", async () => {
+      await type("Lowest", "5");
+      await type("Highest", "1");
+    });
+    const crossedRefused = button("Add field")?.hasAttribute("disabled");
+
+    expect({
+      made: sent
+        .filter(({ preview }) => !preview)
+        .map(({ operation }) =>
+          operation.op === "addField" ? operation.type : operation.op
+        ),
+      crossedRefused,
+    }).toStrictEqual({
+      made: [
+        "v.number().integer().min(0).max(100).optional()",
+        "v.boolean().default(false)",
+        'v.id("notes", { onDelete: "cascade" }).optional()',
+        "v.string().trim().max(200).optional()",
+      ],
+      crossedRefused: true,
+    });
+  });
+
   it("changes nothing while the chat's agent works on the App", async () => {
     await shown(
       notesModel(),
@@ -619,11 +697,13 @@ describe("an App's data model, changed in its workspace", () => {
     expect({
       newTable: button("New table")?.hasAttribute("disabled"),
       addField: button("Add field")?.hasAttribute("disabled"),
-      change: button("Edit title")?.hasAttribute("disabled"),
+      rename: labelled("Field name")?.hasAttribute("disabled"),
+      move: labelled("Move title")?.hasAttribute("disabled"),
     }).toStrictEqual({
       newTable: true,
       addField: true,
-      change: true,
+      rename: true,
+      move: true,
     });
   });
 });

@@ -390,6 +390,7 @@ export const definitionToolNames = [
   "addPreference",
   "changePreference",
   "removePreference",
+  "moveField",
 ] as const;
 
 /**

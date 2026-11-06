@@ -26,10 +26,33 @@ export type FieldKind =
 /** A field's kind, with what it takes: a choice's values, a link's table. */
 export type FieldType =
   | {
-      kind: Exclude<FieldKind, "choice" | "link">;
+      kind: "text" | "email";
+      /** Spaces at either end dropped as a value is saved. */
+      trim: boolean;
+      /** The fewest and most characters, where code bounds them. */
+      min: number | null;
+      max: number | null;
+    }
+  | {
+      kind: "number";
+      /** Whole numbers only. */
+      integer: boolean;
+      min: number | null;
+      max: number | null;
+    }
+  | {
+      kind: "boolean";
+      /** What a record that doesn't say holds; null for none. */
+      default: boolean | null;
     }
   | { kind: "choice"; values: string[] }
-  | { kind: "link"; table: string };
+  | {
+      kind: "link";
+      table: string;
+      /** Whether deleting the linked record deletes this one too; otherwise that delete is refused. */
+      cascade: boolean;
+    }
+  | { kind: "date" | "person" | "file" | "money" | "other" };
 
 /** A field of a table, or a preference. */
 export interface DataModelField {
@@ -133,32 +156,55 @@ export type DataModelChange =
 const literal = (value: string): string => JSON.stringify(value);
 
 /** The code of each kind that takes nothing more. */
-const kindCodes: Record<
-  Exclude<FieldKind, "choice" | "link" | "other">,
-  string
-> = {
-  text: "v.string()",
-  email: "v.string().email()",
-  number: "v.number()",
-  boolean: "v.boolean()",
+const kindCodes = {
   date: "v.timestamp()",
   person: "v.person()",
   file: "v.file()",
   money: "v.money()",
-};
+} as const;
+
+/** `.min(n)` and `.max(n)`, for the bounds that are set. */
+const bounds = (min: number | null, max: number | null): string =>
+  `${min === null ? "" : `.min(${min})`}${max === null ? "" : `.max(${max})`}`;
 
 /**
  * The code that declares a required field of `type`, as the definition's
  * operations take a type; undefined for `other`, which only code says.
  */
 export const fieldKindCode = (type: FieldType): string | undefined => {
-  if (type.kind === "choice") {
-    return `v.enum([${type.values.map(literal).join(", ")}])`;
+  switch (type.kind) {
+    case "text": {
+      return `v.string()${type.trim ? ".trim()" : ""}${bounds(type.min, type.max)}`;
+    }
+    case "email": {
+      return `v.string()${type.trim ? ".trim()" : ""}.email()${bounds(type.min, type.max)}`;
+    }
+    case "number": {
+      return `v.number()${type.integer ? ".integer()" : ""}${bounds(type.min, type.max)}`;
+    }
+    case "boolean": {
+      return `v.boolean()${type.default === null ? "" : `.default(${String(type.default)})`}`;
+    }
+    case "choice": {
+      return `v.enum([${type.values.map(literal).join(", ")}])`;
+    }
+    case "link": {
+      return `v.id(${literal(type.table)}${type.cascade ? ', { onDelete: "cascade" }' : ""})`;
+    }
+    case "date":
+    case "person":
+    case "file":
+    case "money": {
+      return kindCodes[type.kind];
+    }
+    case "other": {
+      // A type only code says.
+      return undefined;
+    }
+    default: {
+      return undefined;
+    }
   }
-  if (type.kind === "link") {
-    return `v.id(${literal(type.table)})`;
-  }
-  return type.kind === "other" ? undefined : kindCodes[type.kind];
 };
 
 /** A field's type as code writes it: `code`, optional unless `required`. */
