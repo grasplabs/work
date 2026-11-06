@@ -267,6 +267,13 @@ export default defineConfig({
         rules: { "react/style-prop-object": "off" },
       },
       {
+        // RecordGrid draws through TanStack Virtual, which the React
+        // Compiler lists as incompatible: the one component is opted out
+        // with "use no memo" (AGENTS.md, Architecture rules).
+        files: ["packages/ui/src/components/record-grid.tsx"],
+        rules: { "react/incompatible-library": "off" },
+      },
+      {
         // Schema files start as comment-only placeholders until their first table.
         files: ["apps/*/src/db/**/schema.ts"],
         rules: { "unicorn/no-empty-file": "off" },

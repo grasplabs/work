@@ -6,26 +6,23 @@ import {
   useTable,
 } from "@tanstack/react-table";
 import type { ColumnDef } from "@tanstack/react-table";
+import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual";
+import type { Rect, Virtualizer } from "@tanstack/react-virtual";
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import type * as React from "react";
 
 /*
  * A dense grid of records, as a database's studio shows a table: a sticky
  * row of column headers (each the page's to fill: a field's kind, name and
  * whether it is required), then the records, a row each. TanStack Table
- * keeps the columns, their widths and the rows. Only the rows and
- * columns in view are drawn, so a table of a million rows and dozens of
- * fields scrolls as one of ten: every row is one height and every column
- * has a width, so what is in view is arithmetic on where the grid is
- * scrolled to (`windowOf`). Not TanStack Virtual: the React Compiler
- * refuses its `useVirtualizer` (its list of known-incompatible APIs: the
- * hook's results can't be memoized), which fails the build, and every
- * component here is compiled. Nearing the last row it has,
- * the grid asks for more (`onEndReached`), so the page loads the next one
- * as people scroll. It reads as an ARIA grid: rows and cells by role, with
- * the table's whole size given (`aria-rowcount`, `aria-colcount`).
+ * keeps the columns, their widths and the rows; TanStack Virtual draws
+ * only the rows and columns in view, so a table of a million rows and
+ * dozens of fields scrolls as one of ten. Nearing the last row it has, the
+ * grid asks for more (`onEndReached`), so the page loads the next one as
+ * people scroll. It reads as an ARIA grid: rows and cells by role, with the
+ * table's whole size given (`aria-rowcount`, `aria-colcount`).
  *
  * The structure follows tablecn's data grid (https://github.com/sadmann7/
  * tablecn, MIT, (c) 2024 Sadman Sakib), redrawn in the kit's own tokens.
@@ -45,42 +42,25 @@ const rowHeight = 36;
 /** How wide a column is when the page says nothing. */
 const defaultWidth = 200;
 
-/** Rows drawn past either edge of what is in view. */
-const overscanRows = 8;
-
-/** How far past either side columns are drawn, in px. */
-const overscanWidth = 400;
-
 /** How near its last row the grid asks for more, in rows. */
 const endReachedWithin = 20;
 
+/** A laptop's screen: the grid's size until it is laid out. */
+const unmeasured: Rect = { width: 1280, height: 720 };
+
 /**
- * Where the grid is scrolled to, and how large it shows: a laptop's screen
- * until it is measured (a first render, a test's page, which measures
- * nothing).
+ * The grid's size as it shows, kept as it changes; a size of nothing (not
+ * laid out yet, or a test's page, which lays out nothing) keeps the last.
  */
-interface Viewport {
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-}
-
-const unmeasured: Viewport = { top: 0, left: 0, width: 1280, height: 720 };
-
-/** The first and past-the-last index of what lies in `[from, to)`, by `ends`. */
-const windowOf = (
-  ends: readonly number[],
-  from: number,
-  to: number
-): [number, number] => {
-  const first = ends.findIndex((end) => end > from);
-  if (first === -1) {
-    return [ends.length, ends.length];
-  }
-  const past = ends.findIndex((end) => end >= to);
-  return [first, past === -1 ? ends.length : past + 1];
-};
+const observeShown = (
+  instance: Virtualizer<HTMLDivElement, Element>,
+  heard: (rect: Rect) => void
+) =>
+  observeElementRect(instance, (rect) => {
+    if (rect.width > 0 || rect.height > 0) {
+      heard(rect);
+    }
+  });
 
 const features = tableFeatures({ columnSizingFeature });
 
@@ -119,25 +99,12 @@ function RecordGrid<Row extends object>({
   onEndReached?: () => void;
   className?: string;
 }) {
+  // Left to React as it is: the React Compiler lists `useVirtualizer` as
+  // incompatible (it returns functions whose results change while the
+  // functions stay the same, so memoized output would go stale), and
+  // TanStack's own advice is to opt the component out.
+  "use no memo";
   const scroller = useRef<HTMLDivElement>(null);
-  const [viewport, setViewport] = useState(unmeasured);
-  // The grid's size as it shows, kept as it changes.
-  useEffect(() => {
-    const element = scroller.current;
-    const observer = new ResizeObserver(() => {
-      setViewport((held) => ({
-        ...held,
-        width: element?.clientWidth ?? held.width,
-        height: element?.clientHeight ?? held.height,
-      }));
-    });
-    if (element !== null) {
-      observer.observe(element);
-    }
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
   const defs: ColumnDef<typeof features, Row>[] = columns.map((column) => ({
     id: column.id,
     size: column.width ?? defaultWidth,
@@ -151,46 +118,40 @@ function RecordGrid<Row extends object>({
   });
   const tableRows = table.getRowModel().rows;
   const leaves = table.getAllLeafColumns();
-  const columnEnds: number[] = [];
-  for (const leaf of leaves) {
-    columnEnds.push((columnEnds.at(-1) ?? 0) + leaf.getSize());
-  }
-  const totalWidth = columnEnds.at(-1) ?? 0;
-  const [firstColumn, pastColumn] = windowOf(
-    columnEnds,
-    viewport.left - overscanWidth,
-    viewport.left + viewport.width + overscanWidth
-  );
-  const before = columnEnds[firstColumn - 1] ?? 0;
-  const after = totalWidth - (columnEnds[pastColumn - 1] ?? 0);
-  const firstRow = Math.max(
-    0,
-    Math.floor(viewport.top / rowHeight) - overscanRows
-  );
-  const pastRow = Math.min(
-    tableRows.length,
-    Math.ceil((viewport.top + viewport.height) / rowHeight) + overscanRows
-  );
-  const shownColumns = leaves
-    .slice(firstColumn, pastColumn)
-    .map((leaf, offset) => ({
-      id: leaf.id,
-      size: leaf.getSize(),
-      index: firstColumn + offset,
-    }));
+  const rowWindow = useVirtualizer({
+    count: tableRows.length,
+    getScrollElement: () => scroller.current,
+    estimateSize: () => rowHeight,
+    overscan: 8,
+    initialRect: unmeasured,
+    observeElementRect: observeShown,
+  });
+  const columnWindow = useVirtualizer({
+    horizontal: true,
+    count: leaves.length,
+    getScrollElement: () => scroller.current,
+    estimateSize: (index) => leaves[index]?.getSize() ?? defaultWidth,
+    overscan: 2,
+    initialRect: unmeasured,
+    observeElementRect: observeShown,
+  });
+  const shownRows = rowWindow.getVirtualItems();
+  const shownColumns = columnWindow.getVirtualItems();
+  const before = shownColumns[0]?.start ?? 0;
+  const after = columnWindow.getTotalSize() - (shownColumns.at(-1)?.end ?? 0);
   const count = tableRows.length;
-  const nearEnd = count > 0 && pastRow > count - endReachedWithin;
+  const nearEnd =
+    count > 0 && (shownRows.at(-1)?.index ?? 0) >= count - endReachedWithin;
   const reachEnd = useEffectEvent(() => {
     onEndReached?.();
   });
   // Each time the rows near their end, once per count of rows: a page
   // that loaded nothing more isn't asked again until it has.
   useEffect(() => {
-    if (nearEnd && count > 0) {
+    if (nearEnd) {
       reachEnd();
     }
   }, [nearEnd, count]);
-  const byId = new Map(columns.map((column) => [column.id, column]));
   // One row's cells (or the headers'), the ones in view, with room kept
   // for those left out on either side.
   const cellsOf = (row?: Row) => (
@@ -201,7 +162,7 @@ function RecordGrid<Row extends object>({
         ref={cssVars({ "--gap": `${before}px` })}
       />
       {shownColumns.map((item) => {
-        const column = byId.get(item.id);
+        const column = columns[item.index];
         return column === undefined ? null : (
           <div
             aria-colindex={item.index + 1}
@@ -231,14 +192,6 @@ function RecordGrid<Row extends object>({
       aria-rowcount={rows.length + 1}
       className={cn("min-h-0 min-w-0 flex-1 overflow-auto", className)}
       data-slot="record-grid"
-      onScroll={(event) => {
-        const { scrollTop, scrollLeft } = event.currentTarget;
-        setViewport((held) => ({
-          ...held,
-          top: scrollTop,
-          left: scrollLeft,
-        }));
-      }}
       ref={scroller}
       role="grid"
     >
@@ -256,16 +209,16 @@ function RecordGrid<Row extends object>({
         ) : (
           <div
             className="relative h-(--height)"
-            ref={cssVars({ "--height": `${tableRows.length * rowHeight}px` })}
+            ref={cssVars({ "--height": `${rowWindow.getTotalSize()}px` })}
           >
-            {tableRows.slice(firstRow, pastRow).map((tableRow, offset) => {
-              const index = firstRow + offset;
-              return (
+            {shownRows.map((item) => {
+              const tableRow = tableRows[item.index];
+              return tableRow === undefined ? null : (
                 <div
-                  aria-rowindex={index + 2}
+                  aria-rowindex={item.index + 2}
                   className="absolute inset-x-0 top-(--top) flex h-9"
                   key={tableRow.id}
-                  ref={cssVars({ "--top": `${index * rowHeight}px` })}
+                  ref={cssVars({ "--top": `${item.start}px` })}
                   role="row"
                 >
                   {cellsOf(tableRow.original)}

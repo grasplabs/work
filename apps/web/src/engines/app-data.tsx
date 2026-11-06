@@ -18,6 +18,12 @@ import {
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/ui/components/dropdown-menu";
+import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -25,6 +31,11 @@ import {
 } from "@grasp-os/ui/components/empty";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@grasp-os/ui/components/input-group";
 import {
   RecordGrid,
   RecordGridHeader,
@@ -49,7 +60,12 @@ import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { DownloadIcon, SearchIcon, UploadIcon } from "lucide-react";
+import {
+  ArrowUpDownIcon,
+  DownloadIcon,
+  SearchIcon,
+  UploadIcon,
+} from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -736,57 +752,67 @@ export const TableRecords = ({
         <div className="flex-1" />
         {live === undefined || instead !== undefined ? null : (
           <>
-            <form
-              className="flex items-center gap-1"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void find();
-              }}
-            >
-              <Input
-                aria-label={t`Record ID`}
-                className="h-8 w-36"
-                onChange={(event) => {
-                  setWanted(event.target.value);
+            <search>
+              <form
+                className="w-56"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (wanted.trim() !== "" && !busy) {
+                    void find();
+                  }
                 }}
-                placeholder={t`Record ID`}
-                value={wanted}
-              />
-              <Button
-                aria-label={t`Find`}
-                disabled={busy || wanted.trim() === ""}
-                size="icon-sm"
-                type="submit"
-                variant="ghost"
               >
-                <SearchIcon />
-              </Button>
-            </form>
-            <Button
-              aria-label={t`Export CSV`}
-              disabled={busy}
-              onClick={() => {
-                void exportTable(live.table.name);
-              }}
-              size="icon-sm"
-              title={t`Export CSV`}
-              variant="ghost"
-            >
-              <DownloadIcon />
-            </Button>
-            {live.table.write === "none" ? null : (
-              <Button
-                aria-label={t`Import CSV`}
-                onClick={() => {
-                  setImporting(true);
-                }}
-                size="icon-sm"
-                title={t`Import CSV`}
-                variant="ghost"
+                <InputGroup>
+                  <InputGroupAddon>
+                    <SearchIcon />
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    aria-label={t`Find a record by its ID`}
+                    onChange={(event) => {
+                      setWanted(event.target.value);
+                    }}
+                    placeholder={t`Find a record by its ID`}
+                    type="search"
+                    value={wanted}
+                  />
+                </InputGroup>
+              </form>
+            </search>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={busy}
+                render={
+                  <Button
+                    aria-label={t`Import or export`}
+                    size="icon-sm"
+                    title={t`Import or export`}
+                    variant="ghost"
+                  />
+                }
               >
-                <UploadIcon />
-              </Button>
-            )}
+                <ArrowUpDownIcon />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={() => {
+                    void exportTable(live.table.name);
+                  }}
+                >
+                  <DownloadIcon />
+                  <Trans>Export as CSV</Trans>
+                </DropdownMenuItem>
+                {live.table.write === "none" ? null : (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setImporting(true);
+                    }}
+                  >
+                    <UploadIcon />
+                    <Trans>Import from CSV</Trans>
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         )}
       </div>

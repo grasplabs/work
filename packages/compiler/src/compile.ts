@@ -64,6 +64,12 @@ export interface CompileOptions {
    * cache when its source changes. Never for production.
    */
   readonly refresh?: boolean;
+  /**
+   * For one of the kit's own files, never App code: lets a component opt
+   * out of the React Compiler (`compilerOptOuts`), as the kit does only
+   * for a library the compiler lists as incompatible.
+   */
+  readonly optOut?: boolean;
 }
 
 /**
@@ -85,7 +91,7 @@ export const compileModule = (
   source: string,
   filename: string,
   plugins: unknown[] = [],
-  { refresh = false }: CompileOptions = {}
+  { refresh = false, optOut = false }: CompileOptions = {}
 ): string => {
   const isTSX = filename.endsWith(".tsx");
   // Babel unwraps the plugin's CommonJS default export itself, the same way
@@ -96,7 +102,7 @@ export const compileModule = (
     configFile: false,
     sourceType: "module",
     plugins: [
-      refuseCompilerOptOuts,
+      ...(optOut ? [] : [refuseCompilerOptOuts]),
       ...plugins,
       [
         reactCompiler,

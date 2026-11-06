@@ -83,7 +83,7 @@ Work is planned in Linear (workspace Grasp OS, team GRA), not in this repo. Issu
 - Workflow code imports only `@grasp-os/sdk`, never the engine.
 - Only use platform APIs that also run on workerd. Platform services sit behind adapter interfaces so the on-prem profile can swap them.
 - EU jurisdiction is set when a resource is created (R2 `jurisdiction`, Durable Object `jurisdiction("eu")`, D1 location).
-- All React is compiled by the React Compiler, and the build fails on anything it can't compile. Don't write `useMemo`, `useCallback` or `memo` by hand; if the compiler rejects a component, fix the component.
+- All React is compiled by the React Compiler, and the build fails on anything it can't compile. Don't write `useMemo`, `useCallback` or `memo` by hand; if the compiler rejects a component, fix the component. The one exception is a library the compiler itself lists as incompatible: opt out only the single component that uses it with `"use no memo"`, say why in a comment, and turn off `react/incompatible-library` for that file alone.
 - UI uses `@grasp-os/ui` components and theme tokens: no raw colours, arbitrary values or inline styles. `@shadcn/lint` names the component, variant or token to use instead.
 
 ## Design

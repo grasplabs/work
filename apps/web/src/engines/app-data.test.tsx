@@ -155,6 +155,21 @@ const settled = async () => {
   });
 };
 
+/** Picks the open menu's item whose text is `name`. */
+const pick = async (name: string) => {
+  const item = [...document.querySelectorAll('[role="menuitem"]')].find(
+    (each) => each.textContent?.trim() === name
+  );
+  if (!(item instanceof HTMLElement)) {
+    throw new Error(`No menu item ${name}`);
+  }
+  await act(async () => {
+    item.click();
+    await Promise.resolve();
+  });
+  await settled();
+};
+
 /** Presses the button whose text, or name, is `name`. */
 const press = async (name: string) => {
   const button = [...document.querySelectorAll("button")].find(
@@ -236,7 +251,8 @@ describe("an App's data page", () => {
   it("forgets a file's preview as soon as another is chosen, Import staying off until that one reads", async () => {
     await shown();
     await settled();
-    await press("Import CSV");
+    await press("Import or export");
+    await pick("Import from CSV");
     await choose("title\nFirst\n");
     expect(importable()).toBeTruthy();
 

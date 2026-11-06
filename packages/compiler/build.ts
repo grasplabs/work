@@ -351,16 +351,30 @@ const withoutDomAtLoad: Plugin = {
 };
 
 /**
+ * The kit's files that opt a component out of the React Compiler, each for
+ * a library the compiler lists as incompatible (AGENTS.md): RecordGrid,
+ * for TanStack Virtual's `useVirtualizer`.
+ */
+const kitOptOuts: ReadonlySet<string> = new Set([
+  "src/components/record-grid.tsx",
+]);
+
+/**
  * Compiles the kit's own sources with Babel and the React Compiler, the same
  * way as App files. They are the only TypeScript in the build.
  */
 const reactCompiler: Plugin = {
   name: "kit-react-compiler",
   enforce: "pre",
-  transform: (code, id) =>
-    /\.tsx?$/u.test(id)
-      ? { code: compileModule(code, path.relative(ui, id)) }
-      : null,
+  transform: (code, id) => {
+    if (!/\.tsx?$/u.test(id)) {
+      return null;
+    }
+    const file = path.relative(ui, id);
+    return {
+      code: compileModule(code, file, [], { optOut: kitOptOuts.has(file) }),
+    };
+  },
 };
 
 const chunksOf = (
