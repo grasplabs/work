@@ -39,8 +39,9 @@ permissions:
 
 # The nightly and by-hand runs on main in a group of their own: in main's,
 # a push would wait for the full suite to end before it could publish.
+# Pushes publish in a group named for that.
 concurrency:
-  group: ci-${{ contains(fromJSON('["schedule", "workflow_dispatch"]'), github.event_name) && 'full-' || '' }}${{ github.ref }}
+  group: ci-${{ contains(fromJSON('["schedule", "workflow_dispatch"]'), github.event_name) && 'full-' || github.event_name == 'push' && 'publish-' || '' }}${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
