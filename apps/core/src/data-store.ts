@@ -41,6 +41,7 @@ import type {
   BackfillStatus,
   BackfillStep,
   SchemaStatus,
+  TableFacts,
   TransformedBatch,
 } from "./store-host.ts";
 import { storeOutboxConsumers } from "./store-outbox-consumers.ts";
@@ -271,9 +272,9 @@ export class DataStore extends DurableObject<Env> {
     await this.#live().stageImport(storeId, batch);
   }
 
-  /** `StoreHost.sensitiveTables`. */
-  sensitiveTables(storeId: StoreId): string[] {
-    return this.#live().sensitiveTables(storeId);
+  /** `StoreHost.tableFacts`. */
+  tableFacts(storeId: StoreId): Record<string, TableFacts> {
+    return this.#live().tableFacts(storeId);
   }
 
   /** `StoreHost.applyImport`. */

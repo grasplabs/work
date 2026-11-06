@@ -467,6 +467,34 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
     ).toMatchObject([{ detail: { table: "notes", rows: 4 } }]);
   });
 
+  it("counts each table's records as they are added and deleted, and gives no count where a person reads only some", async () => {
+    const notes = await notesApp();
+    const { builder, app } = notes;
+    const counted = async () => {
+      const { tables } = await builder.api.apps.data.tables(app);
+      return Object.fromEntries(
+        tables.map(({ name, records }) => [name, records])
+      );
+    };
+    const before = await counted();
+    await builder.api.apps.data.import(app, "notes", {
+      version: notes.version,
+      csv: "Title\nFirst\nSecond\nThird\n",
+      mapping: { Title: "title" },
+    });
+    const held = await everyRecord(notes, "notes");
+    const first = held.find(({ fields }) => fields.title === "First");
+    await call(notes, builder, "notes.remove", { id: first?.id ?? "" });
+    await call(notes, builder, "notes.pin", { text: "mine" });
+
+    expect({ before, after: await counted() }).toStrictEqual({
+      before: { notes: 0, salaries: 0, pins: null, labels: 0 },
+      // Three imported, one deleted; an owner table's pins are each
+      // person's own, so its whole count is nobody's to see here.
+      after: { notes: 2, salaries: 0, pins: null, labels: 0 },
+    });
+  });
+
   it("round-trips a table through its CSV export and an import", async () => {
     const notes = await notesApp();
     const { builder } = notes;

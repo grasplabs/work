@@ -638,7 +638,7 @@ export const noStore = (): OpenStore => ({
   history: unbound,
   stageImport: unbound,
   applyImport: unbound,
-  sensitiveTables: unbound,
+  tableFacts: unbound,
   filesUsable: async () => {
     await Promise.reject(fileErrors.create("file.unavailable"));
   },

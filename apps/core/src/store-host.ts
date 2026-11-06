@@ -607,6 +607,12 @@ const personIdOf = z
   .max(256)
   .regex(/^[\w-]+$/u);
 
+/** What the store keeps of one of its tables (`tableFacts`). */
+export interface TableFacts {
+  readonly sensitive: boolean;
+  readonly records: number;
+}
+
 /** A person's preferences as stored (`readPreferences`). */
 export interface StoredPreferences {
   readonly valueJson: string | null;
@@ -3886,18 +3892,29 @@ export class StoreHost {
   }
 
   /**
-   * The table names of the store that are sensitive (`sdk_tables`): their
-   * history keeps field names only.
+   * What the store keeps of each of its tables (`sdk_tables`), by name:
+   * whether it is sensitive (its history keeps field names only), and how
+   * many records it holds, counted in the same query along the records'
+   * index by table (`sdk_records_created`).
    */
-  sensitiveTables(storeId: StoreId): string[] {
+  tableFacts(storeId: StoreId): Record<string, TableFacts> {
     return this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
-      return this.#db
-        .select({ name: tables.name })
-        .from(tables)
-        .where(eq(tables.sensitive, true))
-        .all()
-        .map(({ name }) => name);
+      return Object.fromEntries(
+        this.#db
+          .select({
+            name: tables.name,
+            sensitive: tables.sensitive,
+            // Qualified by hand: Drizzle names a column alone in a subquery.
+            records: sql<number>`(SELECT count(*) FROM sdk_records AS counted WHERE counted.table_id = sdk_tables.table_id)`,
+          })
+          .from(tables)
+          .all()
+          .map(({ name, sensitive, records: held }) => [
+            name,
+            { sensitive, records: held },
+          ])
+      );
     });
   }
 

@@ -76,6 +76,7 @@ import type {
   ImportBatch,
   ReadResult,
   SchemaStatus,
+  TableFacts,
 } from "./store-host.ts";
 
 // The deployment's business stores, as core finds them: its inventory in
@@ -209,8 +210,8 @@ export interface OpenStore {
   ) => Promise<RecordChangePage>;
   /** One batch of an import's rows (`StoreHost.stageImport`). */
   stageImport: (batch: ImportBatch) => Promise<void>;
-  /** The store's sensitive tables (`StoreHost.sensitiveTables`). */
-  sensitiveTables: () => Promise<string[]>;
+  /** Whether each table is sensitive, and its records (`StoreHost.tableFacts`). */
+  tableFacts: () => Promise<Record<string, TableFacts>>;
   /** Lands an import's staged rows (`StoreHost.applyImport`). */
   applyImport: (landing: ImportApply) => Promise<{ inserted: number }>;
   /**
@@ -1013,7 +1014,7 @@ const storeClient = (
       await stub.stageImport(storeId, batch);
     },
     applyImport: async (landing) => await stub.applyImport(storeId, landing),
-    sensitiveTables: async () => await stub.sensitiveTables(storeId),
+    tableFacts: async () => await stub.tableFacts(storeId),
     filesUsable: async (reader, fileIds, resources) => {
       await stub.filesUsable(storeId, reader, fileIds, resources);
     },

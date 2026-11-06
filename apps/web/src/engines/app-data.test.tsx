@@ -44,6 +44,7 @@ const tableOf = (name: string, fields: string[]): AppDataTable => ({
     kind: "string",
     required: true,
   })),
+  records: 1,
 });
 
 /** The one record core holds of `table` in App `app`. */
