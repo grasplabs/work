@@ -29,11 +29,12 @@ import {
   ended,
   followAdminRuns,
   holdBatchOf,
+  holdSecretReadsOf,
   reached,
   startsOf,
   timeOutAttempt,
 } from "./runs.ts";
-import type { LostWrite } from "./runs.ts";
+import type { HeldReads, LostWrite } from "./runs.ts";
 import {
   emptyStoreSecret,
   setStoreSecret,
@@ -429,6 +430,52 @@ describe("a client's deploy", () => {
       for (const attempt of attempts) {
         attempt.release();
       }
+      await Promise.allSettled(takeovers);
+      errors.mockRestore();
+    }
+  });
+
+  it("fails a deploy whose every attempt is killed before its first step there, as the operation it started is its own", async () => {
+    const before = await placedRelease("feat(core): before");
+    const client = await live(before);
+    const release = await placedRelease("feat(core): lost before validating");
+    // Each attempt is held reading its secrets, before its operation's
+    // first step: there its isolate dies.
+    let reads: HeldReads | undefined;
+    using deploys = startsOf(adminWorkflows.deploy, async (stub) => {
+      reads = await holdSecretReadsOf(stub, "CLIENT_KEY");
+    });
+    const takeovers: Promise<void>[] = [];
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await releaseToEdge(env, [release]);
+      await reconcile(env);
+      const [runId] = deploys.started;
+      if (runId === undefined || reads === undefined) {
+        throw new Error("The deploy's run wasn't started");
+      }
+      for (const attempt of [1, 2, 3]) {
+        // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
+        await reads.reached(attempt);
+        takeovers.push(deliverAlarm(adminWorkflows.deploy, runId));
+      }
+      const run = await ended(adminWorkflows.deploy, runId);
+
+      expect({
+        status: run.status,
+        deploy: await deployOf(client.clientId),
+        releases: await releasesOf(client.clientId),
+      }).toStrictEqual({
+        status: "errored",
+        deploy: {
+          releaseId: release,
+          status: "failed",
+          error: "attempt_lost: validated",
+        },
+        releases: on(before),
+      });
+    } finally {
+      reads?.release();
       await Promise.allSettled(takeovers);
       errors.mockRestore();
     }
