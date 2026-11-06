@@ -12,3 +12,10 @@ interface __BaseEnv_Env {
   /** Local dev only, from .dev.vars: who requests to this machine come from (src/access.ts). */
   DEV_ACCESS_EMAIL?: string;
 }
+
+// workerd's streaming digest (src/deploy/release.ts): workers-types puts it
+// on its Crypto, which the DOM's, in the admin's types for its pages,
+// replaces. Merged into the DOM's.
+interface Crypto {
+  DigestStream: typeof DigestStream;
+}

@@ -7,20 +7,22 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { z } from "zod";
 
 import { isNotFound } from "./api.ts";
-import type { CloudflareApi } from "./api.ts";
+import type { ApiCall, CloudflareApi } from "./api.ts";
 
 /*
  * A release's files are read as its upload sends them, never all at once:
  * core's are over 100 MB (its modules, and its static files as the
  * base64 the assets upload takes), and a Worker, a Workflow step's run
- * included, is stopped past 128 MB of memory. So each file is a reader,
- * read when it goes into a request: a static file only when the account
- * lacks it, in its bucket, one bucket at a time, and the modules after
- * them, each copied into the form as it's read.
+ * included, is stopped past 128 MB of memory, which its isolate may share
+ * with other requests. So a static file is read only when the account
+ * lacks it, one file per request, and the modules stream into the
+ * script's upload one after another: it holds a chunk at a time, whatever
+ * the release's size. FormData can't do that (its files are Blobs, held
+ * whole, and workerd builds the whole body again to send it), so the
+ * uploads' forms are written as the HTML standard encodes
+ * multipart/form-data, their length known up front (`FixedLengthStream`),
+ * as a form's is.
  */
-
-/** Bytes as the upload's form takes them. */
-type Content = string | Uint8Array<ArrayBuffer>;
 
 /** One module of a Worker, as its bundle holds it. */
 export interface WorkerModule {
@@ -28,8 +30,10 @@ export interface WorkerModule {
   name: string;
   /** Such as `application/javascript+module`, `text/plain` or `application/wasm`. */
   type: string;
-  /** Its contents, read as the upload's form is built. */
-  read: () => Promise<Content>;
+  /** Its size in bytes. */
+  size: number;
+  /** Its `size` bytes, streamed as the upload sends them. */
+  stream: () => Promise<ReadableStream<Uint8Array>>;
 }
 
 /**
@@ -85,24 +89,126 @@ const typedAssetKey = async (key: string, type: string): Promise<string> => {
   return hash.slice(0, 32);
 };
 
-/** A bucket's form: each file it asks for, as base64, read one at a time. */
-const bucketForm = async (
-  bucket: readonly string[],
-  byHash: ReadonlyMap<string, AssetFile>
-): Promise<FormData> => {
-  const form = new FormData();
-  for (const hash of bucket) {
-    // A hash it asks for that isn't ours goes unanswered, and the upload
-    // then ends without a completion token.
-    const file = byHash.get(hash);
-    if (file !== undefined) {
-      // oxlint-disable-next-line no-await-in-loop -- one file's bytes read at a time
-      const base64 = await file.readBase64();
-      form.set(hash, new File([base64], hash, { type: file.type }));
-    }
+/** One file of an upload's form: `size` bytes of `type`, read as it goes out. */
+interface FormPart {
+  name: string;
+  type: string;
+  size: number;
+  read: () => Promise<ReadableStream<Uint8Array> | Uint8Array>;
+}
+
+const encoder = new TextEncoder();
+const lineBreak = encoder.encode("\r\n");
+
+/** `name` quoted in a part's header, escaped as the HTML standard does. */
+const quoted = (name: string): string =>
+  `"${name.replaceAll("\n", "%0A").replaceAll("\r", "%0D").replaceAll('"', "%22")}"`;
+
+/**
+ * Writes `part`'s contents to `writer` as they're read. A part that can't
+ * be read aborts `failed` with why, so the call stops with it rather than
+ * being retried as if its answer were lost; a write that fails, because
+ * the request ended, doesn't.
+ */
+const writePart = async (
+  writer: WritableStreamDefaultWriter<Uint8Array>,
+  part: FormPart,
+  failed: AbortController
+): Promise<void> => {
+  let contents: ReadableStream<Uint8Array> | Uint8Array;
+  try {
+    contents = await part.read();
+  } catch (error) {
+    failed.abort(error);
+    throw error;
   }
-  return form;
+  if (contents instanceof Uint8Array) {
+    await writer.write(contents);
+    return;
+  }
+  await contents.pipeTo(
+    new WritableStream({
+      write: async (chunk) => {
+        await writer.write(chunk);
+      },
+      // Called when the part's stream errors, not when a write fails.
+      abort: (reason) => {
+        failed.abort(reason);
+      },
+    })
+  );
 };
+
+/** `parts` as a multipart form, each read as the request sends it. */
+const formBody = (
+  boundary: string,
+  parts: readonly FormPart[],
+  failed: AbortController
+): ReadableStream<Uint8Array> => {
+  const headed = parts.map((part) => ({
+    part,
+    head: encoder.encode(
+      `--${boundary}\r\nContent-Disposition: form-data; name=${quoted(part.name)}; filename=${quoted(part.name)}\r\nContent-Type: ${part.type}\r\n\r\n`
+    ),
+  }));
+  const tail = encoder.encode(`--${boundary}--\r\n`);
+  const { readable, writable } = new FixedLengthStream(
+    headed.reduce(
+      (length, { part, head }) =>
+        length + head.byteLength + part.size + lineBreak.byteLength,
+      tail.byteLength
+    )
+  );
+  const writer = writable.getWriter();
+  const write = async (): Promise<void> => {
+    try {
+      for (const { part, head } of headed) {
+        // oxlint-disable-next-line no-await-in-loop -- one part at a time, in order
+        await writer.write(head);
+        // oxlint-disable-next-line no-await-in-loop -- one part at a time, in order
+        await writePart(writer, part, failed);
+        // oxlint-disable-next-line no-await-in-loop -- one part at a time, in order
+        await writer.write(lineBreak);
+      }
+      await writer.write(tail);
+      await writer.close();
+    } catch (error) {
+      await writer.abort(error);
+    }
+  };
+  // Written as the request reads it.
+  void write();
+  return readable;
+};
+
+/**
+ * The result of `call` sending `parts` as its multipart form, made again
+ * for each attempt. A part that can't be read stops it with why.
+ */
+const callWithForm = async <T>(
+  api: CloudflareApi,
+  call: ApiCall,
+  parts: readonly FormPart[],
+  schema: z.ZodType<T>
+): Promise<T> => {
+  const boundary = crypto.randomUUID();
+  const failed = new AbortController();
+  return await api.call(
+    {
+      ...call,
+      headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+      body: () => formBody(boundary, parts, failed),
+      signal:
+        call.signal === undefined
+          ? failed.signal
+          : AbortSignal.any([call.signal, failed.signal]),
+    },
+    schema
+  );
+};
+
+/** The length of the base64 of `size` bytes. */
+const base64Length = (size: number): number => Math.ceil(size / 3) * 4;
 
 /**
  * Uploads the files the script at `scriptAt` serves that the account
@@ -146,24 +252,37 @@ const uploadAssetsAt = async (
     return session.jwt;
   }
   const byHash = new Map(named.map(({ file, hash }) => [hash, file]));
-  // One bucket at a time, not Wrangler's three, which would hold three in
-  // memory. The upload that completes the set answers with the token.
+  // One file per request, one request at a time, as Wrangler's single-file
+  // mode sends them: a bucket's size isn't documented, and one could hold
+  // tens of MB of base64. The upload that completes the set answers with
+  // the token. A hash asked for that isn't ours goes unanswered, and the
+  // upload then ends without one.
   let completion: string | undefined;
-  for (const bucket of buckets) {
-    // oxlint-disable-next-line no-await-in-loop -- one bucket in memory at a time
-    const form = await bucketForm(bucket, byHash);
-    // oxlint-disable-next-line no-await-in-loop -- one bucket in memory at a time
-    const uploaded = await api.call(
+  for (const hash of buckets.flat()) {
+    const file = byHash.get(hash);
+    if (file === undefined) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one file in memory at a time
+    const uploaded = await callWithForm(
+      api,
       {
         method: "POST",
         path: `/accounts/${accountId}/workers/assets/upload`,
         query: { base64: "true" },
-        body: form,
         bearer: session.jwt,
-        // Files are named by their content's hash: sending a bucket again
-        // stores the same files.
+        // Files are named by their content's hash: sending one again
+        // stores the same file.
         idempotent: true,
       },
+      [
+        {
+          name: hash,
+          type: file.type,
+          size: base64Length(file.size),
+          read: file.readBase64,
+        },
+      ],
       uploadedSchema
     );
     if (typeof uploaded?.jwt === "string") {
@@ -201,15 +320,15 @@ export interface Secret {
 const keptBindings = ["secret_text", "secret_key"];
 
 /**
- * The upload's form: the metadata, then each module under its name. It
- * keeps the latest version's secrets.
+ * The upload's form, its static files uploaded first: the metadata, then
+ * each module under its name. It keeps the latest version's secrets.
  */
 const uploadForm = async (
   api: CloudflareApi,
   accountId: string,
   path: string,
   { releaseId, metadata, modules, assets }: WorkerUpload
-): Promise<FormData> => {
+): Promise<FormPart[]> => {
   const assetsJwt =
     assets === undefined
       ? undefined
@@ -217,32 +336,34 @@ const uploadForm = async (
   const bindings: unknown[] = Array.isArray(metadata.bindings)
     ? metadata.bindings
     : [];
-  const form = new FormData();
-  form.set(
-    "metadata",
-    new Blob(
-      [
-        JSON.stringify({
-          ...metadata,
-          bindings,
-          keep_bindings: keptBindings,
-          ...(assetsJwt === undefined
-            ? {}
-            : { assets: { ...metadata.assets, jwt: assetsJwt } }),
-          annotations: {
-            "workers/tag": releaseId,
-            "workers/message": `Release ${releaseId}`,
-          },
-        }),
-      ],
-      { type: "application/json" }
-    )
+  const json = encoder.encode(
+    JSON.stringify({
+      ...metadata,
+      bindings,
+      keep_bindings: keptBindings,
+      ...(assetsJwt === undefined
+        ? {}
+        : { assets: { ...metadata.assets, jwt: assetsJwt } }),
+      annotations: {
+        "workers/tag": releaseId,
+        "workers/message": `Release ${releaseId}`,
+      },
+    })
   );
-  for (const { name, type, read } of modules) {
-    // oxlint-disable-next-line no-await-in-loop -- one module read at a time, copied into the form
-    form.set(name, new File([await read()], name, { type }));
-  }
-  return form;
+  return [
+    {
+      name: "metadata",
+      type: "application/json",
+      size: json.byteLength,
+      read: async () => await Promise.resolve(json),
+    },
+    ...modules.map(({ name, type, size, stream }) => ({
+      name,
+      type,
+      size,
+      read: stream,
+    })),
+  ];
 };
 
 const serviceSchema = z.object({
@@ -458,14 +579,15 @@ export const uploadTargetScript = async (
   { signal }: { signal?: AbortSignal } = {}
 ): Promise<void> => {
   const path = targetPath(target);
-  await api.call(
+  await callWithForm(
+    api,
     {
       method: "PUT",
       path,
-      body: await uploadForm(api, target.accountId, path, upload),
       idempotent: upload.metadata.migrations === undefined,
       ...(signal === undefined ? {} : { signal }),
     },
+    await uploadForm(api, target.accountId, path, upload),
     z.unknown()
   );
 };

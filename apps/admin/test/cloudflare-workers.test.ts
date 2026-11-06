@@ -13,6 +13,7 @@ import {
 import type {
   AssetFile,
   ScriptTarget,
+  WorkerModule,
   WorkerUpload,
 } from "../src/cloudflare/workers.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
@@ -22,6 +23,21 @@ const cloudflare = mockCloudflareApi(token);
 const api = cloudflareApi({ token, retryDelayMs: 0 });
 
 const encoder = new TextEncoder();
+
+/** A module `name` of `type` holding `content`. */
+const workerModule = (
+  name: string,
+  type: string,
+  content: string
+): WorkerModule => {
+  const bytes = encoder.encode(content);
+  return {
+    name,
+    type,
+    size: bytes.byteLength,
+    stream: async () => await Promise.resolve(new Blob([bytes]).stream()),
+  };
+};
 
 /** A release's core Worker: one module, one binding, tagged `releaseId`. */
 const release = (
@@ -40,19 +56,12 @@ const release = (
       : { assets: { config: { run_worker_first: true } } }),
   },
   modules: [
-    {
-      name: "index.js",
-      type: "application/javascript+module",
-      read: async () =>
-        await Promise.resolve(
-          `export default { fetch: () => new Response("${releaseId}") };`
-        ),
-    },
-    {
-      name: "skills/SKILL.md",
-      type: "text/plain",
-      read: async () => await Promise.resolve("# Skill"),
-    },
+    workerModule(
+      "index.js",
+      "application/javascript+module",
+      `export default { fetch: () => new Response("${releaseId}") };`
+    ),
+    workerModule("skills/SKILL.md", "text/plain", "# Skill"),
   ],
   ...(assets === undefined ? {} : { assets }),
 });
@@ -127,9 +136,9 @@ describe("static assets", () => {
       path.endsWith("/workers/assets/upload")
     );
 
-    // Three files in buckets of two, then only the new one.
-    expect(firstUploads).toHaveLength(2);
-    expect(allUploads).toHaveLength(3);
+    // Three files, one per request, then only the new one.
+    expect(firstUploads).toHaveLength(3);
+    expect(allUploads).toHaveLength(4);
     expect(account.assets.size).toBe(4);
     for (const { headers } of allUploads) {
       expect(headers.get("authorization")).not.toBe(`Bearer ${token}`);
@@ -249,7 +258,7 @@ describe("static assets", () => {
 });
 
 describe("uploads that fail part way", () => {
-  it("uploads asset buckets one at a time, retrying one after a server error", async () => {
+  it("uploads static files one at a time, retrying one after a server error", async () => {
     const account = namespaced();
     const files = await Promise.all(
       Array.from(
@@ -258,14 +267,14 @@ describe("uploads that fail part way", () => {
           await file(`/file-${index}.js`, `export default ${index};`)
       )
     );
-    // The session, then the first bucket's upload fails once.
+    // The session, then the first file's upload fails once.
     cloudflare.failCall(2, 500);
     await uploadTargetScript(api, core(account.id), release("26.01.1", files));
     const uploads = cloudflare.calls.filter(({ path }) =>
       path.endsWith("/workers/assets/upload")
     );
-    // Eight buckets of two, one sent twice.
-    expect(uploads).toHaveLength(9);
+    // Fifteen files, one sent twice.
+    expect(uploads).toHaveLength(16);
     expect(account.assets.size).toBe(15);
     expect(cloudflare.peakConcurrency()).toBe(1);
   });

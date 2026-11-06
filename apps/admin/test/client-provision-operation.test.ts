@@ -438,13 +438,43 @@ const resourceOf = async (clientId: string, role: string) => {
   return row;
 };
 
-/** Client `clientId`'s core and connect scripts, as its inventory names them. */
 /** The files a call's form carries: all its parts but the metadata. */
 const filesSent = (call: ApiCall | undefined): number =>
   call?.body instanceof FormData
     ? [...call.body.keys()].filter((name) => name !== "metadata").length
     : 0;
 
+/** How an R2 object is read whole, rather than streamed from `body`. */
+const wholeReads: ReadonlySet<PropertyKey> = new Set([
+  "arrayBuffer",
+  "bytes",
+  "text",
+  "json",
+  "blob",
+]);
+
+/** `object` read from `body`, calling `onReadWhole` when it's read whole. */
+const withBody = (
+  object: R2ObjectBody,
+  body: ReadableStream,
+  onReadWhole: () => void
+): R2ObjectBody =>
+  new Proxy(object, {
+    get: (target, property): unknown => {
+      if (property === "body") {
+        return body;
+      }
+      if (wholeReads.has(property)) {
+        onReadWhole();
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+
+/** Client `clientId`'s core and connect scripts, as its inventory names them. */
 const scriptsOf = async (clientId: string) => {
   const [core, connect] = await Promise.all([
     resourceOf(clientId, "worker:grasp-os-core"),
@@ -1015,14 +1045,23 @@ describe("provisioning a placed client", () => {
         assetKey(hash)
       ),
     ]);
+    const modules = new Set(coreWorker?.modules.map(({ r2Key }) => r2Key));
     // When each of core's files is read: as the count of calls sent.
     const readAt: number[] = [];
+    // Modules read whole rather than streamed.
+    const readWhole: string[] = [];
     const store: ReleaseStore = {
       get: async (...args: Parameters<R2Bucket["get"]>) => {
-        if (coreFiles.has(args[0])) {
+        const [key] = args;
+        if (coreFiles.has(key)) {
           readAt.push(cloudflare.calls.length);
         }
-        return await env.RELEASES.get(...args);
+        const object = await env.RELEASES.get(...args);
+        return object === null || !modules.has(key)
+          ? object
+          : withBody(object, object.body, () => {
+              readWhole.push(key);
+            });
       },
       list: async (...args: Parameters<R2Bucket["list"]>) =>
         await env.RELEASES.list(...args),
@@ -1033,24 +1072,115 @@ describe("provisioning a placed client", () => {
 
     const { core } = await scriptsOf(clientId);
     // Each file is read once, right before the request that carries it:
-    // its assets bucket, or the script's upload with its modules.
-    const readBefore = Map.groupBy(readAt, (at) => at);
-    const sends = [...readBefore].map(([at, reads]) => ({
-      read: reads.length,
-      sent: filesSent(cloudflare.calls[at]),
-    }));
-    expect(sends).toStrictEqual(
-      sends.map(({ sent }) => ({ read: sent, sent }))
-    );
+    // its own static file upload, or the script's upload with its modules,
+    // each module streamed into it.
+    const carriers = [...Map.groupBy(readAt, (at) => at)].map(([at, reads]) => {
+      const path = cloudflare.calls[at]?.path ?? "";
+      return {
+        to: path.endsWith(`/scripts/${core}`) ? "script" : path,
+        read: reads.length,
+        sent: filesSent(cloudflare.calls[at]),
+      };
+    });
+    const script = carriers.pop();
+    expect(readWhole).toStrictEqual([]);
     expect(readAt).toHaveLength(coreFiles.size);
-    const carriers = [...readBefore.keys()].map(
-      (at) => cloudflare.calls[at]?.path ?? ""
+    expect(carriers).toStrictEqual(
+      carriers.map(() => ({
+        to: `/accounts/${platformAccountId}/workers/assets/upload`,
+        read: 1,
+        sent: 1,
+      }))
     );
-    // Six static files in buckets of two, then the script.
+    expect(script).toStrictEqual({
+      to: "script",
+      read: modules.size,
+      sent: modules.size,
+    });
+  });
+
+  it("stops core's upload before the last chunk of a module whose bytes aren't the release's, and doesn't retry it", async () => {
+    const manifest = await importRelease();
+    const [module] = manifest.workers.core?.modules ?? [];
+    if (module === undefined) {
+      throw new Error("The test release's core has no module");
+    }
+    // The module in R2 changed since the import: its size the same, its
+    // bytes reversed, read in three chunks.
+    const stored = await env.RELEASES.get(module.r2Key);
+    const bytes = new Uint8Array(
+      (await stored?.arrayBuffer()) ?? []
+    ).toReversed();
+    const third = Math.ceil(bytes.length / 3);
+    const chunks = [0, 1, 2].map((index) =>
+      bytes.slice(index * third, (index + 1) * third)
+    );
+    const store: ReleaseStore = {
+      get: async (...args: Parameters<R2Bucket["get"]>) => {
+        const object = await env.RELEASES.get(...args);
+        if (object === null || args[0] !== module.r2Key) {
+          return object;
+        }
+        await object.body.cancel();
+        return withBody(
+          object,
+          new ReadableStream({
+            start: (controller) => {
+              for (const chunk of chunks) {
+                controller.enqueue(chunk);
+              }
+              controller.close();
+            },
+          }),
+          () => {
+            throw new Error("Read whole");
+          }
+        );
+      },
+      list: async (...args: Parameters<R2Bucket["list"]>) =>
+        await env.RELEASES.list(...args),
+    };
+    // What core's upload sent before it stopped.
+    const sent: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      if (request.method !== "PUT" || !request.url.endsWith("-core")) {
+        return await cloudflare.fetch(request);
+      }
+      let text = "";
+      try {
+        for await (const chunk of request.body?.pipeThrough(
+          new TextDecoderStream()
+        ) ?? []) {
+          text += chunk;
+        }
+      } finally {
+        sent.push(text);
+      }
+      return await cloudflare.fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: text,
+      });
+    });
+    const { account, held } = await setUp(manifest);
+
+    const failure = await failing(held, { ...context, store });
+
+    expect(codeFrom(failure)).toBe("release_blob_mismatch");
+    const decoder = new TextDecoder();
+    const [first = "", second = "", last = ""] = chunks.map((chunk) =>
+      decoder.decode(chunk)
+    );
+    // Sent once, up to the module's last chunk, and never whole.
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain(`${first}${second}`);
+    expect(sent[0]).not.toContain(`${first}${second}${last}`);
     expect(
-      carriers.filter((path) => path.endsWith("/workers/assets/upload"))
-    ).toHaveLength(3);
-    expect(carriers.at(-1)).toMatch(new RegExp(`/scripts/${core}$`, "u"));
+      [...clientScripts(account).keys()].filter((name) =>
+        name.endsWith("-core")
+      )
+    ).toStrictEqual([]);
   });
 
   it("does nothing once done", async () => {

@@ -21,7 +21,7 @@ import type {
 } from "../cloudflare/workers.ts";
 import type { ReleaseStore } from "../releases/import.ts";
 import { DeployError } from "./errors.ts";
-import { readAssetBase64, readBlob } from "./release.ts";
+import { readAssetBase64, streamBlob } from "./release.ts";
 
 const unknownPlaceholder = (worker: WorkerEntry, binding: string) =>
   new DeployError(
@@ -140,7 +140,8 @@ export const renderedWorkerUpload = (
   const modules = worker.modules.map((file): WorkerModule => ({
     name: file.name,
     type: moduleTypes[file.type],
-    read: async () => await readBlob(store, file),
+    size: file.size,
+    stream: async () => await streamBlob(store, file),
   }));
   const metadata: WorkerMetadata = {
     main_module: worker.mainModule,
