@@ -51,7 +51,6 @@ import {
   ProvisionOperationError,
   recordUnstarted,
   runClientProvision,
-  sendsSettled,
   startClientProvision,
   startClientRelease,
 } from "../src/hosting/operation.ts";
@@ -393,6 +392,10 @@ const failing = async (
     errors.mockRestore();
   }
 };
+
+/** A script's upload, wherever it's put. */
+const isScriptUpload = ({ method, path }: ApiCall): boolean =>
+  method === "PUT" && (path.endsWith("-core") || path.endsWith("-connect"));
 
 /** A core script's upload, wherever it's put. */
 const isCoreUpload = ({ method, path }: ApiCall): boolean =>
@@ -2230,25 +2233,51 @@ describe("provisioning a placed client", () => {
     ).toStrictEqual([]);
   });
 
-  it("holds a rollback while marks it can't read are fresh, and lets it go once they age out", async () => {
-    const manifest = await importRelease();
-    const { clientId } = await setUp(manifest);
-    const operation = await operationOf(clientId);
-    const change = operation?.change ?? 0;
-    const mark = async (updatedAt: Date) => {
+  it.each([
+    {
+      marks: "an earlier change's call, still on its way",
+      sending: (change: number) =>
+        JSON.stringify({ "dead-run#1": { change, at: Date.now() } }),
+    },
+    { marks: "it can't read", sending: () => "not json" },
+  ])(
+    "holds a release that took the client over while marks $marks are fresh, and lets it go once they age out",
+    async ({ sending }) => {
+      const first = await importRelease();
+      const { clientId } = await liveClient(first);
+      const before = await operationOf(clientId);
+      const second = await importRelease({ notes: "feat(core): second" });
+      await startClientRelease(db, staff, await attempt(clientId), {
+        releaseId: second.releaseId,
+      });
+      // What the change before it sent, as a run that died left it marked.
       await db
         .update(clientProvisions)
-        .set({ sending: "not json", updatedAt })
+        .set({ sending: sending(before?.change ?? 0), updatedAt: new Date() })
         .where(eq(clientProvisions.clientId, clientId));
-    };
+      const uploads = () => cloudflare.calls.filter(isScriptUpload).length;
+      const sentBefore = uploads();
 
-    await mark(new Date());
-    const fresh = await sendsSettled(db, clientId, change);
-    await mark(new Date(Date.now() - 10 * 60_000));
-    const aged = await sendsSettled(db, clientId, change);
+      const run = runClientProvision(context, await attempt(clientId));
+      await scheduler.wait(500);
+      const whileMarked = uploads() - sentBefore;
+      // Aged out: no call of it can land any more.
+      await db
+        .update(clientProvisions)
+        .set({
+          sending: JSON.stringify({ "dead-run#1": { change: 0, at: 0 } }),
+          updatedAt: new Date(0),
+        })
+        .where(eq(clientProvisions.clientId, clientId));
+      await run;
+      const after = await operationOf(clientId);
 
-    expect({ fresh, aged }).toStrictEqual({ fresh: false, aged: true });
-  });
+      expect({ whileMarked, status: after?.status }).toStrictEqual({
+        whileMarked: 0,
+        status: "done",
+      });
+    }
+  );
 
   it("aborts an upload left unanswered past its limit, and keeps it marked sent, as it may still land", async () => {
     const manifest = await importRelease();
@@ -2289,7 +2318,7 @@ describe("provisioning a placed client", () => {
       outcome,
       aborted: cloudflare.abortedCalls() - abortedBefore,
       status: row?.status,
-      // Marked still: a rollback waits it out (`sendsSettled`).
+      // Marked still: a release or rollback after it waits it out.
       marked:
         Object.keys(
           z
