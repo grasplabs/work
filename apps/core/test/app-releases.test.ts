@@ -564,43 +564,56 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     ).resolves.toBe("version.manifest_corrupt");
   });
 
-  it("is refused as sealed in another format, to seal again, not as tampering", async () => {
-    const fixture = await appWith(notesFiles());
-    const release = await seal(fixture);
-    // Its pages, as a release sealed before pages were file routes holds
-    // them: under screens/, none under src/routes/.
-    const pages = async () =>
-      await failure(
-        async () =>
-          await versionPageCodes(env, fixture.app, 1, notesFiles(), {
-            unsealed: "refuse",
-          })
-      );
-    // In this format, that is an App without pages.
-    const current = await pages();
-    await rewrite(fixture.app, release, {
-      manifest: (manifest) => {
-        // As the format before this one sealed: it still named an SDK
-        // protocol, which this format's strict reader would call corrupt.
+  it.each([
+    [
+      // Its runner lacks what the host's isolate module imports of it now.
+      "the format before this one",
+      (manifest: Record<string, Json>) => {
         manifest.formatVersion = releaseFormatVersion - 1;
+      },
+    ],
+    [
+      // It still named an SDK protocol, which this format's strict reader
+      // would call corrupt.
+      "a format that named an SDK protocol",
+      (manifest: Record<string, Json>) => {
+        manifest.formatVersion = releaseFormatVersion - 2;
         manifest.sdkProtocolVersion = 3;
       },
-    });
-    // Sealed for good: sealing the version again is refused the same way,
-    // so a new version is what replaces it.
-    await expect(
-      Promise.all([
-        failure(async () => await loadRelease(env, fixture.app, 1)),
-        failure(async () => await seal(fixture)),
-        pages(),
-      ])
-    ).resolves.toStrictEqual([
-      "version.format_unsupported",
-      "version.format_unsupported",
-      "version.format_unsupported",
-    ]);
-    expect(current).toBe("page.not_found");
-  });
+    ],
+  ])(
+    "is refused as sealed in %s, to seal again, not as tampering",
+    async (_format, sealedIn) => {
+      const fixture = await appWith(notesFiles());
+      const release = await seal(fixture);
+      // Its pages, as a release sealed before pages were file routes holds
+      // them: under screens/, none under src/routes/.
+      const pages = async () =>
+        await failure(
+          async () =>
+            await versionPageCodes(env, fixture.app, 1, notesFiles(), {
+              unsealed: "refuse",
+            })
+        );
+      // In this format, that is an App without pages.
+      const current = await pages();
+      await rewrite(fixture.app, release, { manifest: sealedIn });
+      // Sealed for good: sealing the version again is refused the same way,
+      // so a new version is what replaces it.
+      await expect(
+        Promise.all([
+          failure(async () => await loadRelease(env, fixture.app, 1)),
+          failure(async () => await seal(fixture)),
+          pages(),
+        ])
+      ).resolves.toStrictEqual([
+        "version.format_unsupported",
+        "version.format_unsupported",
+        "version.format_unsupported",
+      ]);
+      expect(current).toBe("page.not_found");
+    }
+  );
 
   it.each([
     [
