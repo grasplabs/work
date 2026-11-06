@@ -1,3 +1,4 @@
+import type { AppId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -5,8 +6,13 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
+import type { OpenStore } from "../src/data-stores.ts";
 import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
-import { threwOnRecord } from "../src/migration-transform.ts";
+import {
+  failedOutside,
+  inputMismatch,
+  threwOnRecord,
+} from "../src/migration-transform.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
 import { racingDb } from "./apps.ts";
 import {
@@ -74,6 +80,57 @@ const reportedRollback = async (
 //   still fit"; one to a version that fits is refused, or a version whose
 //   receipt was abandoned is named beside another on its schema: same
 //   test.
+// - A transform carries a record its builders can't read (each person's
+//   own notes) into its failure, which they are shown, by failing outside
+//   its handler with the record's values (replacing `JSON.stringify`,
+//   which the isolate answers through): "shows nothing of a record its
+//   builders can't read when the transform fails outside its handler";
+//   or through the issues of a record that doesn't fit its input, their
+//   paths or messages: "shows only which declared field a hidden record
+//   doesn't fit its input on". Wherever the failure is told: the release's
+//   refusal, the App's status and the admins'.
+
+/**
+ * Waits for the run of `store`'s migration to fail, and answers the failure
+ * wherever it is told: the refusal of making version 3 of `app` current,
+ * what the App is shown of its schema, and the admins' status.
+ */
+const failureTold = async (
+  app: AppId,
+  store: OpenStore,
+  schemaHash: string
+): Promise<{ refusal: unknown; status: unknown; admins: unknown }> => {
+  await vi.waitFor(
+    async () => {
+      await expect(
+        refusalOf(async () => {
+          await requireStoreSchemaActive(env, app, 3);
+        })
+      ).resolves.toMatchObject({ code: "migration.backfill_failed" });
+    },
+    { timeout: 120_000, interval: 500 }
+  );
+  const object = env.DATA_STORES.getByName(store.id);
+  const refused = await refusalOf(async () => {
+    await requireStoreSchemaActive(env, app, 3);
+  });
+  return {
+    refusal: refused.details,
+    status: await object.schemaStatus(store.id, schemaHash, {
+      resourceId: app,
+      resourceVersion: 3,
+    }),
+    admins: await object.backfillStatus(store.id),
+  };
+};
+
+/** The notes' titles: the records the failures must not show. */
+const titlesOf = async (store: OpenStore): Promise<string[]> => {
+  const notes = await notesOf(store);
+  return notes.map(({ fields }) =>
+    typeof fields.title === "string" ? fields.title : ""
+  );
+};
 
 describe("an explicit migration's run", { timeout: 180_000 }, () => {
   it("makes the release current with its store when a person commits between the switch and the batch", async () => {
@@ -464,5 +521,104 @@ export default appTest({
     expect(new Set(records.map(({ revision }) => revision))).toStrictEqual(
       new Set([1])
     );
+  });
+
+  it("shows nothing of a record its builders can't read when the transform fails outside its handler", async () => {
+    // As its module loads, it replaces `JSON.stringify` with one that
+    // throws the title of the last record it saw on the isolate's answer
+    // (the one object with an own `ok`), after the handler returned. It
+    // passes on its fixtures, the App's own data, which it tells apart by
+    // their IDs. Past the types, as an attacker's code would.
+    const { fixture, store, release } = await migrated(
+      3,
+      `(() => {
+        let seen = "";
+        const stringify = JSON.stringify;
+        Reflect.set(JSON, "stringify", (value: unknown, ...rest: unknown[]) => {
+          if (seen !== "" && typeof value === "object" && value !== null && Object.hasOwn(value, "ok")) {
+            throw new Error(\`Leaked: \${seen}\`);
+          }
+          return Reflect.apply(stringify, JSON, [value, ...rest]);
+        });
+        return (ctx: { id: string }, row: { title: string }) => {
+          if (!ctx.id.startsWith("fixture-")) {
+            seen = row.title;
+          }
+          return { ...row, category: "general" as const };
+        };
+      })()`,
+      { fixtures: '[{ row: { title: "Note" } }]' }
+    );
+
+    const told = await failureTold(
+      fixture.app,
+      store,
+      release.manifest.schemaHash
+    );
+    const text = JSON.stringify(told);
+    const titles = await titlesOf(store);
+
+    expect({
+      told,
+      leaked:
+        text.includes("Leaked") || titles.some((title) => text.includes(title)),
+    }).toMatchObject({
+      told: {
+        refusal: {
+          failure: {
+            id: null,
+            reason: "invalid_answer",
+            issues: [failedOutside],
+          },
+        },
+        status: {
+          state: "failed",
+          failure: { reason: "invalid_answer", issues: [failedOutside] },
+        },
+        admins: {
+          failure: { reason: "invalid_answer", issues: [failedOutside] },
+        },
+      },
+      leaked: false,
+    });
+  });
+
+  it("shows only which declared field a hidden record doesn't fit its input on", async () => {
+    // Version 3's titles are of a list: the migration's input takes them
+    // from it, and the first note's ("launch 0") isn't on it. What the
+    // validator would say of it names the value.
+    const { fixture, store, release } = await migrated(3, deriving, {
+      fixtures: '[{ row: { title: "Note 1" } }]',
+      next: notesOfFields({
+        title: 'v.enum(["Note 1", "Note 2"])',
+        category: 'v.enum(["launch", "general"])',
+      }),
+    });
+
+    const told = await failureTold(
+      fixture.app,
+      store,
+      release.manifest.schemaHash
+    );
+    const text = JSON.stringify(told);
+    const titles = await titlesOf(store);
+    const failure = {
+      reason: "invalid_input",
+      issues: [inputMismatch, "title: doesn't fit"],
+    };
+
+    expect({
+      told,
+      leaked: titles
+        .filter((title) => title.startsWith("launch"))
+        .some((title) => text.includes(title)),
+    }).toMatchObject({
+      told: {
+        refusal: { failure },
+        status: { state: "failed", failure },
+        admins: { failure },
+      },
+      leaked: false,
+    });
   });
 });
