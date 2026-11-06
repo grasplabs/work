@@ -52,7 +52,7 @@ import { useStoreSecrets } from "./secrets-store.ts";
 // - a new client started on a release its channel doesn't have, or on
 //   none while its channel has none;
 // - two ticks at once deploying one client twice, or more than
-//   `parallelDeploys` clients between them;
+//   `parallelDeploys` clients between them, or across channels;
 // - a failure that lands mid-tick, missed by the rest of the tick;
 // - clients another runner has taking the channel's slots for good.
 
@@ -526,6 +526,17 @@ describe("release channels", () => {
       whileHeld: 0,
       started: parallelDeploys,
     });
+  });
+
+  it("starts at most parallelDeploys across every channel, as they share one rate limit", async () => {
+    const release = await placedRelease("feat(core): two channels at once");
+    const edge = await waitingClients("edge", "e-edge", parallelDeploys);
+    const beta = await waitingClients("beta", "f-beta", parallelDeploys);
+    await promoteTo("beta", release);
+
+    await reconcile(env);
+
+    await expect(startedOf([...edge, ...beta])).resolves.toBe(parallelDeploys);
   });
 
   it("starts nothing more once a deploy fails mid-tick", async () => {

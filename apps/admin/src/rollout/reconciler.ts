@@ -5,11 +5,12 @@
  * other than the ones Secrets Store holds now. Nothing else deploys a
  * release.
  *
- * Per channel, at most `parallelDeploys` deploys are out at once, each a
- * run of its own (src/rollout/deploy.ts). Once a client following the
- * channel failed its deploy of the channel's release, no new deploy
- * starts on the channel: the ones out finish, and staff retry, or promote
- * another release (src/rollout/channels.ts).
+ * At most `parallelDeploys` deploys are out at once, every channel
+ * together, each a run of its own (src/rollout/deploy.ts): they share
+ * Cloudflare's rate limit. Once a client following a channel failed its
+ * deploy of the channel's release, no new deploy starts on the channel:
+ * the ones out finish, and staff retry, or promote another release
+ * (src/rollout/channels.ts).
  *
  * One tick at a time: a tick acts only while it holds the reconciler's
  * lease (`takeLease`), so the count of deploys out and the check for a
@@ -403,20 +404,17 @@ const startWaiting = async (
 };
 
 /**
- * Reconciles `channel` once. A first pass over its clients settles
- * deploys whose runs ended, counts those still out, and finds whether a
- * client following it failed on its release; a second, while none did,
- * starts deploying the clients waiting, page by page, as many as fit
- * beside those out. One that fails mid-tick stops the claims after it
- * (`claim`).
+ * Surveys `channel` once: settles deploys whose runs ended, and counts
+ * those still out, and finds whether a client following it failed on its
+ * release.
  */
-const reconcileChannel = async (
+const surveyChannel = async (
   env: Env,
+  db: AdminDatabase,
   channel: Channel,
   releases: ChannelReleases,
   desired: SharedByWorker | null
-): Promise<void> => {
-  const db = adminDatabase(env.DB);
+): Promise<{ deploying: number; failed: boolean }> => {
   let deploying = 0;
   let failed = false;
   await eachPage(db, channel, desired, async (page): Promise<"next"> => {
@@ -429,13 +427,83 @@ const reconcileChannel = async (
     failed ||= rows.some((row) => failsChannel(row, releases));
     return "next";
   });
-  if (failed) {
-    return;
-  }
+  return { deploying, failed };
+};
+
+/**
+ * Starts deploying `channel`'s waiting clients, page by page, as many as
+ * fit beside the `deploying` ones out on every channel, and returns how
+ * many are out now. One that fails mid-tick stops the claims after it
+ * (`claim`).
+ */
+const startChannel = async (
+  env: Env,
+  db: AdminDatabase,
+  channel: Channel,
+  releases: ChannelReleases,
+  desired: SharedByWorker | null,
+  deploying: number
+): Promise<number> => {
+  let out = deploying;
   await eachPage(db, channel, desired, async (page) => {
-    deploying = await startWaiting(env, db, page, releases, deploying);
-    return deploying >= parallelDeploys ? "stop" : "next";
+    out = await startWaiting(env, db, page, releases, out);
+    return out >= parallelDeploys ? "stop" : "next";
   });
+  return out;
+};
+
+/**
+ * Reconciles every channel once: a first pass surveys each
+ * (`surveyChannel`), then a second starts deploys on each that didn't
+ * fail, channel by channel, while the deploys out on all of them leave
+ * room. A channel that can't be surveyed is logged, and the tick starts
+ * nothing: deploys it can't count could take it past `parallelDeploys`.
+ */
+const reconcileChannels = async (
+  env: Env,
+  releases: ChannelReleases,
+  desired: SharedByWorker | null
+): Promise<void> => {
+  const db = adminDatabase(env.DB);
+  const failed = new Set<Channel>();
+  let deploying = 0;
+  for (const channel of channelIds) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one channel at a time
+      const survey = await surveyChannel(env, db, channel, releases, desired);
+      deploying += survey.deploying;
+      if (survey.failed) {
+        failed.add(channel);
+      }
+    } catch (error) {
+      log.error("reconcile.channel_failed", {
+        channel,
+        error: errorCode(error),
+      });
+      return;
+    }
+  }
+  for (const channel of channelIds) {
+    if (failed.has(channel)) {
+      continue;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one channel at a time
+      deploying = await startChannel(
+        env,
+        db,
+        channel,
+        releases,
+        desired,
+        deploying
+      );
+    } catch (error) {
+      log.error("reconcile.channel_failed", {
+        channel,
+        error: errorCode(error),
+      });
+    }
+  }
 };
 
 /** The one lease's id. */
@@ -477,10 +545,9 @@ const giveLeaseBack = async (
 };
 
 /**
- * The reconciler's tick: every channel in turn, each logged and left on
- * its own failure, while it holds the lease. Nothing while another tick
- * holds it, or while the admin has no CLIENT_DOMAIN, so no client can be
- * deployed.
+ * The reconciler's tick: every channel (`reconcileChannels`), while it
+ * holds the lease. Nothing while another tick holds it, or while the
+ * admin has no CLIENT_DOMAIN, so no client can be deployed.
  */
 export const reconcile = async (env: Env): Promise<void> => {
   if (clientDomain(env) === null) {
@@ -494,17 +561,7 @@ export const reconcile = async (env: Env): Promise<void> => {
   try {
     const releases = await channelReleases(db);
     const desired = await desiredShared(env);
-    for (const channel of channelIds) {
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- one channel at a time
-        await reconcileChannel(env, channel, releases, desired);
-      } catch (error) {
-        log.error("reconcile.channel_failed", {
-          channel,
-          error: errorCode(error),
-        });
-      }
-    }
+    await reconcileChannels(env, releases, desired);
   } finally {
     await giveLeaseBack(db, holder);
   }

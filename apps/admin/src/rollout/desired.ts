@@ -12,12 +12,16 @@
 import type { Channel } from "../db/schema.ts";
 
 /**
- * How many clients of one channel deploy at once. Cloudflare's API allows
- * about 1,200 requests per 5 minutes per token, and one deploy makes a few
- * dozen calls, so 25 at once stays well under it. To be adjusted once a
- * real deploy on staging is timed.
+ * How many clients deploy at once, every channel together: they share one
+ * deployer token. Cloudflare's API allows 1,200 requests per 5 minutes per
+ * user, and going over blocks every call for 5 minutes. A release's deploy
+ * makes about 30 calls (its script, secrets, static files, migrations and
+ * reads back, src/hosting/operation.ts) over a minute or two, and a slot
+ * it frees waits for the next tick (every minute), so 8 at once make at
+ * most about 8 × 30 calls a minute and a half: 160 a minute, 800 in 5,
+ * with room for retries and reads that wait out Cloudflare's lag.
  */
-export const parallelDeploys = 25;
+export const parallelDeploys = 8;
 
 /** The release each channel points at; null before one was promoted to it. */
 export type ChannelReleases = Readonly<Record<Channel, string | null>>;
@@ -155,15 +159,15 @@ export interface ChannelPlan {
    * staff retry, or promote another release.
    */
   failed: boolean;
-  /** The clients to start deploying now, at most `parallelDeploys` with those out. */
+  /** The clients to start deploying now, at most `parallelDeploys` with all those out. */
   start: string[];
 }
 
 /**
  * The plan for one channel's `clients` (a page of them, or all): none
  * while it failed; otherwise the clients waiting, in the order given, as
- * many as fit beside the `deploying` ones already out (a count over the
- * whole channel).
+ * many as fit beside the `deploying` ones already out (a count over every
+ * channel).
  */
 export const planChannel = (
   clients: readonly ClientFacts[],
