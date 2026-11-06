@@ -161,6 +161,9 @@ const fieldOf = (input: Record<string, unknown>, field: string): string => {
 /** The tools that change an App's definition. */
 const definitionTools: ReadonlySet<string> = new Set(definitionToolNames);
 
+/** The tools that read Grasp's docs. */
+const docsTools: ReadonlySet<string> = new Set(["searchDocs", "readDocs"]);
+
 /** The paths of the files a call writes (`files`, by path), as far as they came. */
 const pathsOf = (input: Record<string, unknown>): string[] => {
   const { files } = input;
@@ -183,6 +186,17 @@ const useToolSummary = (): ((call: ChatToolCall, done: boolean) => string) => {
     return done
       ? t`${plural(count, { one: "Wrote # file", other: "Wrote # files" })}`
       : t`${plural(count, { one: "Writing # file", other: "Writing # files" })}`;
+  };
+  /** What a call of the docs' tools read: the docs Grasp's release ships. */
+  const docsLineOf = ({ tool, input }: ChatToolCall, done: boolean): string => {
+    if (tool === "searchDocs") {
+      const query = fieldOf(input, "query");
+      return done
+        ? t`Searched the docs for ${query}`
+        : t`Searching the docs for ${query}`;
+    }
+    const path = fieldOf(input, "path");
+    return done ? t`Read ${path} in the docs` : t`Reading ${path} in the docs`;
   };
   const lineOf = ({ tool, input }: ChatToolCall, done: boolean): string => {
     const name = fieldOf(input, "name");
@@ -227,6 +241,9 @@ const useToolSummary = (): ((call: ChatToolCall, done: boolean) => string) => {
     }
   };
   return (call, done) => {
+    if (docsTools.has(call.tool)) {
+      return docsLineOf(call, done);
+    }
     if (!definitionTools.has(call.tool)) {
       return lineOf(call, done);
     }

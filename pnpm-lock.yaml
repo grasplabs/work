@@ -791,6 +791,9 @@ importers:
       '@grasp-os/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
+      '@grasp-os/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@grasp-os/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -824,6 +827,12 @@ importers:
       typescript:
         specifier: catalog:typescript6
         version: 6.0.3
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.1
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
 
   apps/gateway:
     dependencies:

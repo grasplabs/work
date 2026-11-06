@@ -22,6 +22,17 @@
     "version": ""
   },
   {
+    "breadcrumb": ["Guides"],
+    "content": "A page the index lists whose Markdown the build never wrote.",
+    "contentType": "doc",
+    "description": "",
+    "locale": "",
+    "route": "/guides/unwritten",
+    "section": "Guides",
+    "title": "Unwritten",
+    "version": ""
+  },
+  {
     "breadcrumb": ["Reference"],
     "content": "Functions query Declares a query: a server function that reads.",
     "contentType": "doc",

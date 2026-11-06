@@ -98,12 +98,15 @@ export const journeyFiles = [
  * suite's time (October 2026). A package that depends on web for its code
  * belongs elsewhere.
  *
- * Core's dependency on the docs is followed: the chat's agent carries
- * their guides in its system prompt, which core's tests check against
- * the guides as written (apps/core/test/agent-docs.test.ts).
+ * Core depends on the docs the same way: its build adds their site to the
+ * frontend's files, and its tests serve a stand-in of it
+ * (apps/core/test/fixtures/assets/docs). A change to the docs, their
+ * build and config included, runs their own project: their examples,
+ * their build's output and the guides as core's build embeds them for the
+ * chat's agent (apps/docs/*.test.ts).
  */
 export const buildOnlyDependencies: ReadonlyMap<string, readonly string[]> =
-  new Map([["@grasp-os/core", ["@grasp-os/web"]]]);
+  new Map([["@grasp-os/core", ["@grasp-os/web", "@grasp-os/docs"]]]);
 
 /** A workspace package: its name, directory and workspace dependencies. */
 export interface WorkspacePackage {

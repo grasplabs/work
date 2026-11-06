@@ -13,6 +13,7 @@
     "@fontsource-variable/newsreader": "catalog:",
     "@grasp-os/compiler": "workspace:*",
     "@grasp-os/sdk": "workspace:*",
+    "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",
     "@tanstack/react-router": "catalog:",
     "@types/mdast": "catalog:",
@@ -23,6 +24,8 @@
     "react": "catalog:",
     "typedoc": "catalog:",
     "typedoc-plugin-markdown": "catalog:",
-    "typescript": "catalog:typescript6"
+    "typescript": "catalog:typescript6",
+    "yaml": "catalog:",
+    "zod": "catalog:"
   }
 }

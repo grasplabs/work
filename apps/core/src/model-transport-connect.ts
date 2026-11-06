@@ -21,6 +21,7 @@ import { sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { isRouteApi } from "./model-catalog.ts";
 import type { ModelRef } from "./model-catalog.ts";
 import type { TransportRoute } from "./model-transport.ts";
+import { withSharedPrefixCached } from "./prompt-cache.ts";
 
 // The provider's own API, reached through connect, which holds every key
 // (connect's ai-providers.ts): the organization's own, or Grasp's for
@@ -468,6 +469,10 @@ export const connectRoute = (
     host: host.toLowerCase(),
     headers: placeholderHeaders(target.provider),
     fetch: connectFetch(env, target, host.toLowerCase()),
+    // The chat's shared prompt cached apart from what differs between chats.
+    ...(api === "anthropic-messages"
+      ? { onPayload: withSharedPrefixCached }
+      : {}),
     tagged: (init, id, endsAt) => {
       const headers = new Headers(init?.headers);
       headers.set(providerRequestHeader, id);

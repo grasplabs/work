@@ -80,6 +80,7 @@
     "./deployment-config": "./src/deployment-config.ts",
     "./diagnostics": "./src/diagnostics.ts",
     "./directory": "./src/directory.ts",
+    "./docs": "./src/docs.ts",
     "./document-places": "./src/document-places.ts",
     "./encoding": "./src/encoding.ts",
     "./error-namespaces": "./src/error-namespaces.ts",

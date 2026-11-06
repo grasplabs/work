@@ -9892,6 +9892,10 @@ msgstr "Lectura"
 msgid "Read {path}"
 msgstr "Se leyó {path}"
 
+#: src/chat/thread.tsx
+msgid "Read {path} in the docs"
+msgstr "Se leyó {path} en la documentación"
+
 #: src/activity/audit-words.ts
 msgid "Read a knowledge document"
 msgstr "Leyó un documento de conocimiento"
@@ -9985,6 +9989,10 @@ msgstr "Leyendo {name}"
 #: src/chat/thread.tsx
 msgid "Reading {path}"
 msgstr "Leyendo {path}"
+
+#: src/chat/thread.tsx
+msgid "Reading {path} in the docs"
+msgstr "Leyendo {path} en la documentación"
 
 #: src/interview/words.ts
 msgid "Reading it back"
@@ -11118,12 +11126,20 @@ msgid "Searched the brain for {query}"
 msgstr "Se buscó {query} en el cerebro"
 
 #: src/chat/thread.tsx
+msgid "Searched the docs for {query}"
+msgstr "Se buscó {query} en la documentación"
+
+#: src/chat/thread.tsx
 msgid "Searching the App's files for {text}"
 msgstr "Buscando {text} en los archivos de la App"
 
 #: src/chat/thread.tsx
 msgid "Searching the brain for {query}"
 msgstr "Buscando {query} en el cerebro"
+
+#: src/chat/thread.tsx
+msgid "Searching the docs for {query}"
+msgstr "Buscando {query} en la documentación"
 
 #: src/connections/http-connections.tsx
 #: src/shown-once.tsx

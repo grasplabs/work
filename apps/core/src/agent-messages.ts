@@ -12,8 +12,9 @@ import { definitionToolNames } from "@grasp-os/shared/chat";
 export const showThinkingName = "show_thinking";
 
 /**
- * The agent's tools for what it does most (agent-tools.ts), as their
- * stored calls name them: the chat shows each call as one line.
+ * The agent's tools for what it does most (agent-tools.ts) and its docs
+ * tools (agent-docs.ts), as their stored calls name them: the chat shows
+ * each call as one line.
  */
 export const dedicatedToolNames = [
   "createApp",
@@ -25,6 +26,8 @@ export const dedicatedToolNames = [
   "searchBrain",
   "requestConnection",
   "editWorkflow",
+  "searchDocs",
+  "readDocs",
 ] as const;
 
 export type DedicatedToolName = (typeof dedicatedToolNames)[number];

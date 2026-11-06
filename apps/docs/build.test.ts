@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
+import {
+  docsMarkdownFile,
+  docsPagesSchema,
+  docsSearchIndexFile,
+} from "@grasp-os/shared/docs";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 
 // The site the docs' build writes (build.ts), as core serves it at /docs
@@ -105,6 +110,20 @@ describe("the docs' build", () => {
       [...links, ...agentLinks].filter(
         (link) => link !== "/docs" && !link.startsWith("/docs/")
       )
+    ).toStrictEqual([]);
+  });
+
+  it("writes the search index the agent's docs tools read, and each page it lists as Markdown", () => {
+    // As core's `searchDocs` and `readDocs` read them (apps/core/src/agent-docs.ts).
+    const listed = docsPagesSchema.parse(
+      JSON.parse(readFileSync(path.join(site, docsSearchIndexFile), "utf-8"))
+    );
+
+    expect(listed.map(({ route }) => route)).toContain("/guides/project");
+    expect(
+      listed
+        .map(({ route }) => docsMarkdownFile(route))
+        .filter((file) => !existsSync(path.join(site, file)))
     ).toStrictEqual([]);
   });
 

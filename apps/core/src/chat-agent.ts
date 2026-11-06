@@ -27,7 +27,7 @@ import type {
 import { agentErrors } from "@grasp-os/shared/agent";
 import { z } from "zod";
 
-import { buildsWith, readDocs, searchDocs } from "./agent-docs.ts";
+import { readDocs, searchDocs } from "./agent-docs.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { dedicatedTools, durableTool } from "./agent-tools.ts";
 import {
@@ -607,7 +607,9 @@ export const chatAgent = (agent: ChatAgent): Extension => {
   const tools: AgentTool[] = [
     executeCode(agent),
     readApi(apis),
-    ...(buildsWith(apis) ? [searchDocs(assets), readDocs(assets)] : []),
+    ...(agent.context.builds === true
+      ? [searchDocs(assets), readDocs(assets)]
+      : []),
     ...dedicatedTools({ apis, scope, runs }, agent.history),
     ...(agent.thinking === undefined ? [] : [agent.thinking]),
     // A chat app's chat asks in words: the questions take the composer's
