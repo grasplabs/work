@@ -159,16 +159,11 @@ const typeRules: readonly {
   { action: "app.called", access: "read", type: "read" },
   { action: "app.called", type: "action" },
   // Code refused an App's data (core's src/page-delivery.ts): a page
-  // of a revoked release, or a portable host while the App's data isn't
-  // `ordinary`. An admin approving a page's build or taking that back
+  // of a revoked release, or a call with no lease while the App's data
+  // isn't `ordinary`. An admin approving a page's build or taking that back
   // is no longer recorded, but past records stay decisions.
   { action: "app.artifact.refused", type: "action" },
   { action: "app.artifact", type: "decision" },
-  // A portable host's access to an App (core's app-token-route.ts and
-  // app-function-route.ts): a person minting an App token grants that
-  // host access, and its calls, recorded once a window, act on the App.
-  { action: "app.token.issued", type: "permission" },
-  { action: "app.portable.called", type: "action" },
   // An App's webhooks (core's src/app-webhooks.ts): an admin letting its
   // data go to one's URL, a delivery given up, and connect sending one
   // (`webhook.call`); adding and removing one are the App's configuration.

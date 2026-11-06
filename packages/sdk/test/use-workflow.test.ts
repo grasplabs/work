@@ -1518,20 +1518,6 @@ describe("losing access", () => {
       commands: page.commands,
     }).toStrictEqual({ run: [], binding: [], commands: [] });
   });
-
-  it("follows no run on a host that can't push them", async () => {
-    const portable = new GraspClient({
-      url: "https://grasp.example.com",
-      getToken: async () => await Promise.resolve(null),
-    });
-    const store = new WorkflowStore(
-      workflowChannel(portable),
-      readWorkflowReference(workflows.summarizeNote)
-    );
-    store.subscribe("run-1", unheard);
-    await flush();
-    expect(store.error("run-1")?.code).toBe("workflow.unavailable");
-  });
 });
 
 const style = workflows.summarizeNote.events.styleChosen;

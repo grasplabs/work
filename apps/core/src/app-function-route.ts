@@ -1,16 +1,12 @@
-import { actorOf } from "@grasp-os/shared/audit";
 import {
   authErrors,
   internalErrors,
   isExpectedError,
   requestErrors,
 } from "@grasp-os/shared/errors";
-import type { CodedError } from "@grasp-os/shared/errors";
-import { readAtMost, requestIdHeader } from "@grasp-os/shared/http";
+import { readAtMost } from "@grasp-os/shared/http";
 import type { AppId } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import type { LogFields } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { AppErrorPayload } from "@grasp-os/shared/operations";
@@ -23,10 +19,8 @@ import {
   streamCallActions,
 } from "@grasp-os/shared/pages";
 import type { StreamCallAction } from "@grasp-os/shared/pages";
-import { portableFunctionPath } from "@grasp-os/shared/portable";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { idempotencyKeySchema } from "@grasp-os/shared/submissions";
-import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 
 import {
   accessOf,
@@ -40,10 +34,7 @@ import {
 } from "./app-functions.ts";
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
 import { currentVersionOf } from "./apps.ts";
-import { checkAppToken } from "./auth/app-tokens.ts";
-import type { TokenCheck } from "./auth/app-tokens.ts";
 import { identify, identifyFull } from "./auth/identity.ts";
-import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import {
   delivering,
@@ -52,11 +43,10 @@ import {
   requireDelivery,
 } from "./page-delivery.ts";
 import type { LeasedBuild } from "./page-delivery.ts";
-import { isWorkflowRequest } from "./page-workflows.ts";
 import { admitted, admitWindow, windowCharger } from "./pages-rpc.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import { auditStaffRoute, routeMember } from "./staff-audit.ts";
+import { routeMember } from "./staff-audit.ts";
 
 // A running App's page calling one of its App's functions (spec 32.6):
 // `POST /api/app-functions/<app>`, the request as the body, the frame's
@@ -95,30 +85,6 @@ import { auditStaffRoute, routeMember } from "./staff-audit.ts";
 // - An answer larger than a frame takes: refused here
 //   (`page.answer_too_large`), as a call of the App's server is.
 //
-// A portable host (spec 10.7.1: the App's UI outside Grasp's shell, a
-// native app or another site) calls the same functions at
-// `POST /api/portable/app-functions/<app>` with an App token
-// (auth/app-tokens.ts) as `Authorization: Bearer`, under the same bounds.
-// What differs, and why:
-//
-// - Who calls: the token alone, never a cookie. Cookies are not read on
-//   that route, and the cookie route reads no token, so neither can lend
-//   its authority to the other.
-// - From where: any origin. The token is the authority and a browser
-//   attaches it to nothing by itself, so a site that has none gets
-//   nothing; CORS answers without credentials, so a browser never sends
-//   the person's cookies along. The cookie route still answers no
-//   preflight.
-// - Which code gets the data: no build core leased, since core doesn't
-//   deliver the host's code, which has all the network its browser or app
-//   gives it. It runs as a page without a lease does: only when an admin
-//   classified the App's data `ordinary` (accepting that it goes to code
-//   Grasp didn't serve, data-policy.ts), never once the release of the
-//   App's current version is revoked; checked before the call and again
-//   before its answer, and a refusal recorded (page-delivery.ts).
-// - The budget: the same as the person's pages of that App, so a token
-//   adds no requests to it.
-//
 // A streaming action (spec 10.7.6) goes through the same admission, at
 // `<path>/<app>/<stream | attach | cancel>`, and runs in an object of its
 // own (action-invocation.ts), which keeps its latest progress and its
@@ -142,17 +108,13 @@ import { auditStaffRoute, routeMember } from "./staff-audit.ts";
 // resend joins the run under way or answers its receipt, never runs it
 // again. Every resend is admitted exactly as a start is, the person's
 // access fingerprinted again (`accessOf`), the build's delivery checked
-// before the run and again before its answer. A portable host's action
-// goes the same way, its token checked again where a page's session is.
+// before the run and again before its answer.
 
 /** How long a page waits for a function's answer. */
 const pageCallMs = 30_000;
 
 /** The App ID after `base` in `pathname`, if it is one of base's paths. */
-export const appAfter = (
-  pathname: string,
-  base: string
-): string | undefined => {
+const appAfter = (pathname: string, base: string): string | undefined => {
   const prefix = `${base}/`;
   if (!pathname.startsWith(prefix)) {
     return undefined;
@@ -164,10 +126,6 @@ export const appAfter = (
 /** The App ID in `pathname`, if it is a function call's path. */
 export const functionCallApp = (pathname: string): string | undefined =>
   appAfter(pathname, appFunctionPath);
-
-/** The App ID in `pathname`, if it is a portable host's call's path. */
-export const portableCallApp = (pathname: string): string | undefined =>
-  appAfter(pathname, portableFunctionPath);
 
 const streamActions: ReadonlySet<string> = new Set(streamCallActions);
 
@@ -218,7 +176,7 @@ const withinFrame = (answer: FunctionAnswer): FunctionAnswer => {
 };
 
 /** Whether `request` says its body is JSON. */
-export const isJson = (request: Request): boolean =>
+const isJson = (request: Request): boolean =>
   request.headers.get("content-type")?.split(";")[0]?.trim() ===
   "application/json";
 
@@ -226,7 +184,7 @@ export const isJson = (request: Request): boolean =>
  * A refusal as its error response, or an unexpected failure, logged as
  * `event`, as `internal.unexpected`.
  */
-export const refusalResponse = (
+const refusalResponse = (
   error: unknown,
   requestId: string,
   event: string
@@ -245,69 +203,12 @@ export const refusalResponse = (
 /** How much of a path's App ID a log line keeps: the path is the caller's. */
 const loggedAppMaxLength = 128;
 
-/** How long a window of refused-token log lines is. */
-const tokenLogWindowMs = 60_000;
-
-/** How many refused-token lines one isolate writes a window, at most. */
-const tokenLogsPerWindow = 20;
-
-/** The window being counted, its lines so far, and the lines left out. */
-const tokenLog = { window: 0, written: 0, dropped: 0 };
-
-/**
- * Logs a genuine App token refused (for another App, a session that
- * ended, a person without access): at most `tokenLogsPerWindow` lines a
- * minute per isolate, the rest counted in one line when the next window
- * starts, so someone holding a token can't flood the logs with it.
- */
-export const logRefusedToken = (fields: LogFields): void => {
-  const window = Math.floor(Date.now() / tokenLogWindowMs);
-  if (window !== tokenLog.window) {
-    if (tokenLog.dropped > 0) {
-      log.warn("portable.token_refused.dropped", { count: tokenLog.dropped });
-    }
-    Object.assign(tokenLog, { window, written: 0, dropped: 0 });
-  }
-  if (tokenLog.written >= tokenLogsPerWindow) {
-    tokenLog.dropped += 1;
-    return;
-  }
-  tokenLog.written += 1;
-  log.warn("portable.token_refused", fields);
-};
-
-/**
- * Records that `person` called `app` from a portable host, with the
- * session its token came from: once a window per person, session and App
- * (the App host's `auditOnce`), not a row a call.
- */
-export const recordPortableUse = async (
-  env: Env,
-  person: Identity,
-  app: AppId,
-  session: string
-): Promise<void> => {
-  await appHost(env, app).auditOnce(
-    canonicalJson(["portable", person.userId, session]),
-    {
-      actor: actorOf(person),
-      action: "app.portable.called",
-      target: { type: "app", id: app },
-      detail: { session },
-    }
-  );
-};
-
-/** Who calls, and as which build (`undefined`: none core leased). */
+/** Who calls, and as which build. */
 interface Caller {
   person: Identity;
-  /** The lease the call came with, or `undefined` for none. */
-  lease: string | null | undefined;
-  /** The gate's name for what is asked, in a refusal's record. */
-  operation: string;
-  /** For a portable host's call: the session its App token came from. */
-  portableSession?: string;
-  /** Who calls now, read again: the session, or the App token, still theirs. */
+  /** The lease the call came with, or `null` for none. */
+  lease: string | null;
+  /** Who calls now, read again: the session still theirs. */
   current: () => Promise<Identity | undefined>;
 }
 
@@ -392,7 +293,7 @@ const requireReleasesLive = async (
  */
 const stillTheirs = async (
   env: Env,
-  { person, operation, current }: Caller,
+  { person, current }: Caller,
   { id, build }: KeyedTarget,
   { access, versions }: { access: string; versions: readonly number[] }
 ): Promise<void> => {
@@ -405,7 +306,7 @@ const stillTheirs = async (
     throw operationErrors.create("operation.access_changed");
   }
   await requireDelivery(env, now, id, build, {
-    operation,
+    operation: "call",
     stage: "delivery",
   });
   await requireReleasesLive(env, id, versions);
@@ -456,17 +357,13 @@ const keyedAnswer = async (
   target: KeyedTarget,
   { call, key }: { call: FunctionRequest; key: string }
 ): Promise<KeyedAnswer> => {
-  const { person, operation } = caller;
+  const { person } = caller;
   const { id, build } = target;
   // Nothing ran yet: a build refused is refused as any call is.
   await requireDelivery(env, person, id, build, {
-    operation,
+    operation: "call",
     stage: "admission",
   });
-  // A page's form, told to the App's webhooks once the run succeeds,
-  // named as its own release resolves it (action-invocation.ts); a
-  // portable host's is not.
-  const tellsForm = caller.portableSession === undefined;
   const name = await invocationName(person.userId, id, call, key, false);
   const access = await accessOf(env, person, id);
   const invocation = actionInvocation(env, name);
@@ -478,7 +375,9 @@ const keyedAnswer = async (
     call,
     streaming: false,
     attach: false,
-    ...(tellsForm ? { form: { key } } : {}),
+    // A page's form, told to the App's webhooks once the run succeeds,
+    // named as its own release resolves it (action-invocation.ts).
+    form: { key },
   });
   const text = await new Response(frames).text();
   const frame = text
@@ -545,7 +444,7 @@ const boundedCall = async (
   caller: Caller,
   requestId: string
 ): Promise<Response> => {
-  const { person, lease, operation, portableSession } = caller;
+  const { person, lease } = caller;
   try {
     const id = await admitted(env, person, app);
     // SAFETY: a request's body in workerd is a byte stream, of Uint8Array
@@ -563,34 +462,10 @@ const boundedCall = async (
         requestId
       );
     }
-    // Recorded once the call is one it reads: a body past the bound costs
-    // the audit log nothing.
-    if (portableSession !== undefined) {
-      await recordPortableUse(env, person, id, portableSession);
-    }
     const text = new TextDecoder().decode(body);
-    // A portable host's App token, from any origin and with no build core
-    // leased, starts and controls no run (page-workflows.ts): refused
-    // until that is decided on its own (GRA-626).
-    if (portableSession !== undefined && isWorkflowRequest(text)) {
-      return Response.json({
-        result: {
-          ok: false,
-          error: refusalOf(
-            workflowResourceErrors.create("workflow.portable_unavailable"),
-            requestId
-          ),
-        },
-        provenance: null,
-        manifestHash: null,
-      } satisfies FunctionAnswer);
-    }
     // A window counts as the pages it reads (query-windows.ts).
     await admitWindow(env, person, id, text);
-    const build =
-      lease === undefined
-        ? undefined
-        : await leasedBuild(env, person.userId, id, lease);
+    const build = await leasedBuild(env, person.userId, id, lease);
     const keyed = keyedAction(text);
     if (keyed !== undefined) {
       // Checks delivery itself, before the run and again before its answer.
@@ -598,26 +473,19 @@ const boundedCall = async (
         await keyedAnswer(env, caller, { id, build }, keyed)
       );
     }
-    const answer = await delivering(
-      env,
-      person,
-      id,
-      build,
-      operation,
-      async () =>
-        withinFrame(
-          await callPageFunction(
-            env,
-            person,
-            id,
-            text,
-            Date.now() + pageCallMs,
-            windowCharger(env, person, id),
-            // No form a portable host sends is told to the App's webhooks.
-            // A page's keyed mutation commits its form with its writes.
-            portableSession === undefined ? { tellsForm: true } : {}
-          )
+    const answer = await delivering(env, person, id, build, "call", async () =>
+      withinFrame(
+        await callPageFunction(
+          env,
+          person,
+          id,
+          text,
+          Date.now() + pageCallMs,
+          windowCharger(env, person, id),
+          // A page's keyed mutation commits its form with its writes.
+          { tellsForm: true }
         )
+      )
     );
     return Response.json(answer);
   } catch (error) {
@@ -703,136 +571,9 @@ export const appFunctionResponse = async (
       person,
       // A missing lease is no build: code core didn't serve.
       lease: request.headers.get(pageLeaseHeader),
-      operation: "call",
       current: async () => await identifyFull(env, request.headers),
     },
     requestId
-  );
-};
-
-/** How long a browser may keep a preflight's answer: 10 minutes. */
-const preflightMaxAgeSeconds = 600;
-
-/**
- * CORS for a portable host on any origin, without credentials: the
- * browser sends no cookies, and the page reads the answer and its
- * request ID.
- */
-const corsHeaders = {
-  "access-control-allow-origin": "*",
-  "access-control-expose-headers": requestIdHeader,
-} as const;
-
-/** `response`, readable by a portable host on any origin. */
-const withCors = (response: Response): Response => {
-  const readable = new Response(response.body, response);
-  for (const [name, value] of Object.entries(corsHeaders)) {
-    readable.headers.set(name, value);
-  }
-  return readable;
-};
-
-/** `Authorization: Bearer <token>`'s token, if the request has one. */
-const bearerToken = (request: Request): string | undefined => {
-  const [scheme, token, ...more] = (
-    request.headers.get("authorization") ?? ""
-  ).split(" ");
-  return scheme?.toLowerCase() === "bearer" &&
-    token !== undefined &&
-    token.length > 0 &&
-    more.length === 0
-    ? token
-    : undefined;
-};
-
-/** A refusal before anything is read, for a portable host to read. */
-const refused = (
-  status: number,
-  error: CodedError,
-  requestId: string
-): Response => withCors(errorResponse(status, error, requestId));
-
-/**
- * `/api/portable/app-functions/<app>`: a portable host's preflight, or
- * its call of a function of the App for the person its App token names
- * (see the header).
- */
-export const portableFunctionResponse = async (
-  request: Request,
-  env: Env,
-  app: string,
-  requestId: string
-): Promise<Response> => {
-  if (request.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        ...corsHeaders,
-        "access-control-allow-methods": "POST",
-        "access-control-allow-headers": "authorization, content-type",
-        "access-control-max-age": String(preflightMaxAgeSeconds),
-      },
-    });
-  }
-  if (request.method !== "POST") {
-    return refused(404, requestErrors.create("request.not_found"), requestId);
-  }
-  if (!isJson(request)) {
-    return refused(403, requestErrors.create("request.forbidden"), requestId);
-  }
-  const token = bearerToken(request);
-  let checked: TokenCheck;
-  try {
-    checked =
-      token === undefined
-        ? { ok: false, reason: "invalid" }
-        : await checkAppToken(env, token, app);
-  } catch (error) {
-    return withCors(
-      refusalResponse(error, requestId, "app_token.check_failed")
-    );
-  }
-  if (!checked.ok && checked.reason === "keys_pending") {
-    return refused(503, authErrors.create("auth.token_unavailable"), requestId);
-  }
-  if (!checked.ok) {
-    // A staff member's refused call is in the client's audit log too.
-    if ("staff" in checked && checked.staff !== undefined) {
-      await auditStaffRoute(env, checked.staff, "app.functions.portable", {
-        app,
-      });
-    }
-    if (checked.reason !== "invalid") {
-      logRefusedToken({
-        requestId,
-        app: app.slice(0, loggedAppMaxLength),
-        reason: checked.reason,
-        userId: checked.userId,
-        sessionId: checked.sessionId,
-      });
-    }
-    return refused(401, authErrors.create("auth.unauthenticated"), requestId);
-  }
-  // A staff member's call from a portable host is in the client's audit
-  // log too (staff-audit.ts).
-  await auditStaffRoute(env, checked.person, "app.functions.portable", { app });
-  return withCors(
-    await boundedCall(
-      request,
-      env,
-      app,
-      {
-        person: checked.person,
-        lease: undefined,
-        operation: "portable.call",
-        portableSession: checked.sessionId,
-        current: async () => {
-          const now = await checkAppToken(env, token ?? "", app);
-          return now.ok ? now.person : undefined;
-        },
-      },
-      requestId
-    )
   );
 };
 

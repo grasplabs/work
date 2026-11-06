@@ -161,10 +161,6 @@ const clientErrors = {
       "No run is shown yet: start one, or wait for the selected run to load, before you control it.",
     category: "contract",
   },
-  "workflow.unavailable": {
-    message: "Workflow runs can't be followed here.",
-    category: "operational",
-  },
   "file.operation_undeclared": {
     message:
       "This App doesn't declare that use of these files: add it to the resource's operations.",
@@ -263,18 +259,6 @@ export const detailIssues = (
 };
 
 /**
- * Sign-in refusals that don't mean the person lost access: the host had
- * no token to give yet. `auth.principal_changed` fences: core answers it
- * when the browser's session is someone else's than the page's (its
- * function route), so nothing held for the person before stays. The
- * client's own refusal under that code is unsent and fenced already, so
- * it never reaches the fence check.
- */
-const nonFencingAuthCodes: ReadonlySet<string> = new Set([
-  "auth.token_unavailable",
-]);
-
-/**
  * Refusals, besides sign-in's (`fences`), that mean the person or the
  * build they run no longer gets the App's data.
  */
@@ -292,11 +276,13 @@ const fencingCodes: ReadonlySet<string> = new Set([
 /**
  * Whether a refusal means the person, or the build they run, no longer
  * gets the App's data: the client clears every cached result on one.
- * Every sign-in refusal does (`auth.*`), but for `nonFencingAuthCodes`.
+ * Every sign-in refusal does (`auth.*`): `auth.principal_changed` among
+ * them, which core answers when the browser's session is someone else's
+ * than the page's (its function route), so nothing held for the person
+ * before stays.
  */
 export const fences = (code: string): boolean =>
-  fencingCodes.has(code) ||
-  (code.startsWith("auth.") && !nonFencingAuthCodes.has(code));
+  fencingCodes.has(code) || code.startsWith("auth.");
 
 /**
  * Host failures of a query or a mutation that changed nothing and may be
@@ -518,7 +504,7 @@ export const retryAfterOf = (details: unknown): number | undefined => {
 
 /**
  * A refusal coded `code`, as the page or core said it before any call ran
- * (a transport's rejection, or core's refusal on a portable host's route):
+ * (a transport's rejection):
  * of its details, only how long to wait before asking again is kept.
  * `internal.unexpected` is the page's word for a request that may or may
  * not have arrived: a lost response.

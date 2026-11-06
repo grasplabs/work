@@ -5,9 +5,8 @@ import { appDefinition, withoutDefinition } from "./app-definitions.ts";
 import type { AppSpec } from "./app-definitions.ts";
 
 // A Notes App on the accepted SDK, and its `api` as its pages import it
-// from `@server/_generated/api`: what the session client's tests call, through a page's
-// page (page-client*.test.ts) or a portable host
-// (portable-client.test.ts).
+// from `@server/_generated/api`: what the session client's tests call,
+// through a page's page (page-client*.test.ts).
 
 /** The Notes App's definition: its notes, which each person keeps their own. */
 export const notesSpec = {

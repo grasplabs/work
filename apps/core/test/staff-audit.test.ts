@@ -10,7 +10,6 @@ import {
   pageLeaseHeader,
   pagePersonHeader,
 } from "@grasp-os/shared/page-limits";
-import { appTokenPath } from "@grasp-os/shared/portable";
 import { uploadOriginalPath } from "@grasp-os/shared/uploads";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 import { createExecutionContext } from "cloudflare:test";
@@ -183,19 +182,6 @@ describe("Grasp staff's views, audited", () => {
               [pageLeaseHeader]: "lease",
             },
             body: JSON.stringify({}),
-          }),
-      ],
-      [
-        "app.token",
-        async () =>
-          await routed(`${appTokenPath}/${app}`, {
-            method: "POST",
-            headers: {
-              cookie: session,
-              origin: clientOrigin,
-              "content-type": "application/json",
-            },
-            body: "{}",
           }),
       ],
       [

@@ -301,8 +301,6 @@ describe("a running page whose App's version core refuses the person", () => {
       { status: "failed", reason: "principal-changed" },
     ],
     ["auth.unauthenticated", { status: "signed-out" }],
-    // Possibly passing: the page runs on.
-    ["auth.token_unavailable", undefined],
   ])("on %s, ends as %o, offering no new version", async (code, ended) => {
     const states: PageState[] = [];
     const { cleanups, pushed } = await runningPage(

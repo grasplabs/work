@@ -226,8 +226,7 @@ export const browserApi = async (
 
 /**
  * Serves `api` over the accepted socket `server` with Cap'n Web, for a
- * browser's connection (`/rpc`, or a portable host's live connection,
- * portable-live.ts). What a browser sends is untrusted, a page's calls
+ * browser's connection (`/rpc`). What a browser sends is untrusted, a page's calls
  * among it, and it may be reachable before anyone signed in: bound it
  * before Cap'n Web expands it. The accountant wraps the transport: it
  * refuses a message longer than `browserMessageSize` or of too many nodes

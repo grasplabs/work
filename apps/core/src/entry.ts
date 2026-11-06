@@ -34,13 +34,8 @@ import { adminKickoffResponse } from "./admin-kickoff.ts";
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
 import { aiStatusReportResponse } from "./ai-status-report.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
-import {
-  appFunctionRoute,
-  portableCallApp,
-  portableFunctionResponse,
-} from "./app-function-route.ts";
+import { appFunctionRoute } from "./app-function-route.ts";
 import { appLinkResponse, linkRouteOf } from "./app-link-route.ts";
-import { appTokenResponse, tokenRequestApp } from "./app-token-route.ts";
 import { appVisitorResponse } from "./app-visitors.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
@@ -73,7 +68,6 @@ import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import { transcriptionResponse } from "./onboarding/transcription.ts";
 import { packageArtifactResponse } from "./packages/serve.ts";
 import { pageFrameResponse, pageModuleResponse } from "./page-frame.ts";
-import { liveConnectionApp, portableLiveResponse } from "./portable-live.ts";
 import {
   connectVersionResponse,
   provisionProbeResponse,
@@ -297,10 +291,8 @@ const connectionRouteResponse = async (
 };
 
 /**
- * A call of an App's functions, from a page's page or a portable host,
- * a portable host's live connection, or its token request, or a
- * page's file channel request (app-file-route.ts); `undefined` for any
- * other path.
+ * A call of an App's functions from a page's page, or a page's file
+ * channel request (app-file-route.ts); `undefined` for any other path.
  */
 const appCallResponse = async (
   pathname: string,
@@ -313,18 +305,6 @@ const appCallResponse = async (
   const pageCall = await appFunctionRoute(request, env, pathname, requestId);
   if (pageCall !== undefined) {
     return pageCall;
-  }
-  const portableApp = portableCallApp(pathname);
-  if (portableApp !== undefined) {
-    return await portableFunctionResponse(request, env, portableApp, requestId);
-  }
-  const liveApp = liveConnectionApp(pathname);
-  if (liveApp !== undefined) {
-    return portableLiveResponse(request, env, liveApp, requestId);
-  }
-  const tokenApp = tokenRequestApp(pathname);
-  if (tokenApp !== undefined) {
-    return await appTokenResponse(request, env, tokenApp, requestId);
   }
   const linkRoute = linkRouteOf(pathname, request.method);
   if (linkRoute === "not_found") {

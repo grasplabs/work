@@ -427,27 +427,6 @@ describe("the session client and lost access", () => {
     await expect(reading).resolves.toMatchObject({ code });
   });
 
-  it("keeps what it read when the host only couldn't give a token yet", async () => {
-    let refuse = false;
-    const { client } = network(async () => {
-      await Promise.resolve();
-      if (refuse) {
-        throw Object.assign(new Error("No token yet."), {
-          code: "auth.token_unavailable",
-        });
-      }
-      return answered({ title: "Kept" });
-    });
-    await client.query(api.notes.get, { id: noteId });
-    refuse = true;
-    await failureOf(client.mutation(api.notes.create, { title: "Later" }));
-    refuse = false;
-    // Not fenced: the query it read is still there to read again.
-    await expect(
-      client.query(api.notes.get, { id: noteId })
-    ).resolves.toStrictEqual({ title: "Kept" });
-  });
-
   it("never sends a key left unknown again once access was lost since, though a resend found it out", async () => {
     let signedOut = false;
     const sent: string[] = [];

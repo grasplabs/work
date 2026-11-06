@@ -73,7 +73,6 @@ export const pageTests = [
   "test/app-tests.test.ts",
   "test/app-test-live.test.ts",
   "test/app-function-route.test.ts",
-  "test/portable-client.test.ts",
   "test/app-files-uploads.test.ts",
   "test/app-files-downloads.test.ts",
   "test/app-files-records.test.ts",

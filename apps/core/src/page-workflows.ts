@@ -117,9 +117,6 @@ import { runWaits, withRespond } from "./workflows/run-waits.ts";
 //   workflow's own, can be made of what the run read through grants the
 //   App doesn't hold. A restricted run's result goes only through an App
 //   in restricted mode itself.
-// - A portable host: an App token from any origin, with no build core
-//   approved, starts, controls and follows no run yet (app-function-route.ts,
-//   portable-live.ts), until that is decided on its own.
 // - An event sent to a run by someone, or through something, that may not
 //   send it (spec 10.4.6). A send names a run the page sees (above), an
 //   event the release declares for the workflow, of exactly the type and

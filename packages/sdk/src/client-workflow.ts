@@ -1232,15 +1232,6 @@ export class WorkflowChannel {
 
   async #connect(entry: Watched<unknown>, live: Live): Promise<void> {
     const { watch } = this.#link;
-    if (watch === undefined) {
-      WorkflowChannel.#show(entry, {
-        ...nothingYet,
-        error: clientError("workflow.unavailable"),
-      });
-      live.stopped = true;
-      entry.live = undefined;
-      return;
-    }
     let handle: { release: () => void };
     try {
       handle = await watch(
