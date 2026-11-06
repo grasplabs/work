@@ -285,22 +285,9 @@ describe("applying a client's settings", () => {
     await pinTo(client.clientId, other);
     const pinned = await driftOf(db, client.clientId, health);
     await pinTo(client.clientId, null);
-    // Someone deploys connect's first version outside the admin: its
-    // upload's, before its secrets' versions, which core then names.
-    const connect = await db
-      .select({ scriptName: clientWorkers.scriptName })
-      .from(clientWorkers)
-      .where(
-        and(
-          eq(clientWorkers.clientId, client.clientId),
-          eq(clientWorkers.worker, "connect")
-        )
-      )
-      .get();
-    const scriptName = connect?.scriptName ?? "";
-    const [first] =
-      clientScripts(client.account).get(scriptName)?.versions ?? [];
-    client.core.connectAnswering = first?.id ?? null;
+    // Someone deploys a version of connect outside the admin, which core
+    // then names.
+    client.core.connectAnswering = "deployed-outside-the-admin";
     const changed = await driftOf(db, client.clientId, health);
 
     expect({
