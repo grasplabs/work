@@ -213,7 +213,11 @@ ${rows}
 `;
 };
 
-/** One of a synthetic App's pages, of `sections` sections. */
+/**
+ * One of a synthetic App's pages, of `sections` sections. Its route says
+ * the path it had before its file was renamed: TanStack's generator
+ * corrects it, and what compiles is what the tree routes.
+ */
 const page = (index: number, sections: number, tag: string): string => {
   const names = Array.from({ length: sections }, (_, each) => each);
   return `import { createFileRoute } from "@tanstack/react-router";
@@ -259,7 +263,7 @@ ${names.map((each) => `      <Section${each} entries={entries} onToggle={toggle}
     </main>
   );
 }
-export const Route = createFileRoute("/s${String(index).padStart(2, "0")}")({ component: Page${index} });
+export const Route = createFileRoute("/page-${index}")({ component: Page${index} });
 `;
 };
 
@@ -414,6 +418,7 @@ describe("a first pages build of a large App", () => {
       }
     });
 
+    let routes: string[] = [];
     const resumed = await batchesLogged(async () => {
       const built = await buildPages(
         { ...onCloudflare, LOADER: after.loader },
@@ -421,6 +426,16 @@ describe("a first pages build of a large App", () => {
         whose
       );
       expect(built.ok).toBeTruthy();
+      // Each page as the batches made it: its route at its file's path.
+      routes = built.ok
+        ? Object.entries(built.modules)
+            .filter(([name]) => name.startsWith("app~src~routes~s"))
+            .map(
+              ([, code]) =>
+                /createFileRoute\("(?<path>[^"]*)"\)/u.exec(code)?.groups
+                  ?.path ?? ""
+            )
+        : [];
     });
 
     const transforms = stopping.calls.filter(
@@ -438,6 +453,7 @@ describe("a first pages build of a large App", () => {
         .map(({ files: one }) => one),
       stopped,
       resumed,
+      routes: routes.toSorted(),
       calls: after.calls.map(({ method }) => method),
       // The check is a call of its own: the lease is renewed as it starts,
       // for as long as it may take, so no other request builds it again.
@@ -453,8 +469,13 @@ describe("a first pages build of a large App", () => {
       split: Array.from({ length: count }, () => 1),
       // The build ended before it logged.
       stopped: [],
-      // Nothing transformed again: the stopped build's batches were kept.
+      // Nothing transformed again: the stopped build's batches were kept,
+      // its pages among them, whose routes the generator corrected.
       resumed: [{ batchCalls: 0, batched: 0, compiled: 0, reused: count }],
+      routes: Array.from(
+        { length: 8 },
+        (_, index) => `/s${String(index).padStart(2, "0")}`
+      ),
       // The build's own call, then its one type check, in the checker.
       calls: ["buildIncrementally", "check"],
       leaseHoldsTheCheck: true,

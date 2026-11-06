@@ -80,6 +80,7 @@ import {
   limitErrors,
   computeModuleErrors,
   generatedWorkflowErrors,
+  isPageFile,
   routeTreePath,
 } from "./inputs.ts";
 import {
@@ -573,13 +574,16 @@ export const buildPagesIncrementally = async (
     return done({ ok: false, diagnostics: refused });
   }
   // The pages as the generator left them (`RouteTree.routes`): what the
-  // tree routes is what compiles.
+  // tree routes is what compiles. Each is kept under the key of the file
+  // as written (`moduleKey`): the generator's correction is a function of
+  // the file's path and source, so the file pins down what compiles, as
+  // core works the keys out (`pageIncrementKeys`).
   const tree = await routeTree(app);
   const routed = { ...app, ...tree.routes };
   // Only pages, components and the references they import are
   // compiled, whatever else is passed: what isn't is refused above, and
   // kept out should that ever miss it. Declarations are only types.
-  const { sources, known: paths, typeFiles: typed } = pageSources(routed);
+  const { sources, known: paths, typeFiles: typed } = pageSources(app);
   const known = new Set(paths);
   // What a type may name: the build's files and its declarations.
   const typeFiles = new Set(typed);
@@ -624,7 +628,7 @@ export const buildPagesIncrementally = async (
     }
     const result = transformSource(
       path,
-      source,
+      routed[path] ?? source,
       { known, typeFiles },
       { unparsed, untyped },
       preview
@@ -708,6 +712,12 @@ export const buildPagesIncrementally = async (
  * pages.ts). Only `known` sources are transformed, whatever else is
  * passed. A file that doesn't compile is left out: the build compiles it
  * again and says why, with every gate.
+ *
+ * Its pages compile as the generator corrects them, as the build's do:
+ * the correction of a route file is a function of its path and source,
+ * so the batch's own routes give each the one the whole App's would. A
+ * page the generator gave nothing for (it doesn't parse, or the batch's
+ * routes didn't generate) is left to the build too.
  */
 const transformPages = async (
   batch: Record<string, string>,
@@ -716,11 +726,16 @@ const transformPages = async (
 ): Promise<Record<string, ModuleRecord>> => {
   const sets = { known: new Set(known), typeFiles: new Set(typeFiles) };
   const flags = { unparsed: new Set<string>(), untyped: new Set<string>() };
+  const { routes } = await routeTree(buildFiles(batch));
   const records = await Promise.all(
     Object.entries(batch)
       .filter(([path]) => sets.known.has(path))
       .map(async ([path, source]) => {
-        const result = transformSource(path, source, sets, flags, preview);
+        const compiled = isPageFile(path) ? routes[path] : source;
+        if (compiled === undefined) {
+          return [];
+        }
+        const result = transformSource(path, compiled, sets, flags, preview);
         if (!("record" in result)) {
           return [];
         }
