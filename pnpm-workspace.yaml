@@ -42,6 +42,9 @@ catalog:
   "@types/mdast": 4.0.4
   # Reads the built pages for the hashes of their inline code (apps/docs).
   parse5: 8.1.0
+  # The chat's agent searches the docs' pages (apps/core), as the docs'
+  # own search does (Blume's index is Orama's, this version).
+  "@orama/orama": 3.1.18
   # Signs the release upload to R2's S3 API (scripts/release).
   aws4fetch: 1.0.20
   secretlint: 13.0.5

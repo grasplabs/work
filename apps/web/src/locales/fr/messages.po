@@ -11101,10 +11101,6 @@ msgstr "Recherchez dans vos chats et ouvrez-en un."
 msgid "Searched above. After this, events move to the archive."
 msgstr "Recherché ci-dessus. Ensuite, les événements passent dans l’archive."
 
-#: src/chat/thread.tsx
-msgid "Searched Grasp's reference for {text}"
-msgstr "{text} recherché dans la référence de Grasp"
-
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
 msgstr "A cherché dans les connaissances"
@@ -11120,10 +11116,6 @@ msgstr "A cherché dans le journal d’audit"
 #: src/chat/thread.tsx
 msgid "Searched the brain for {query}"
 msgstr "{query} recherché dans le cerveau"
-
-#: src/chat/thread.tsx
-msgid "Searching Grasp's reference for {text}"
-msgstr "Recherche de {text} dans la référence de Grasp"
 
 #: src/chat/thread.tsx
 msgid "Searching the App's files for {text}"

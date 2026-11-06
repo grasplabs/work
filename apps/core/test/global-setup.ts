@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { writeAgentDocs } from "../build-agent-docs.ts";
 import {
   blueprintsDir,
   testBlueprintsModule,
@@ -48,6 +49,8 @@ const prepare = async (): Promise<void> => {
     [blueprintsDir, path.join(import.meta.dirname, "fixtures/blueprints")],
     testBlueprintsModule
   );
+  // The guides the agent reads, as core's build embeds them.
+  writeAgentDocs();
   await writeTestAssets();
   mkdirSync(path.dirname(connectBundle), { recursive: true });
   writeFileSync(connectBundle, await bundleConnect());
@@ -60,7 +63,8 @@ declare global {
 }
 
 /**
- * Before any test of a project: embeds the built-in blueprints, writes
+ * Before any test of a project: embeds the built-in blueprints and the
+ * docs' guides the agent reads (build-agent-docs.ts), writes
  * the test assets and bundles the connect Worker, which the project's config reads when its pool starts.
  * After the run, removes what it wrote for itself; Vitest tears down only
  * once every project's tests are done. A watch run whose config changed

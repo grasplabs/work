@@ -204,13 +204,6 @@ const useToolSummary = (): ((call: ChatToolCall, done: boolean) => string) => {
         return done ? t`Edited ${path}` : t`Editing ${path}`;
       }
       case "searchFiles": {
-        // Without an App it searches Grasp's reference: the SDK and the
-        // built-in blueprints (agent-tools.ts).
-        if (input.app === undefined && "text" in input) {
-          return done
-            ? t`Searched Grasp's reference for ${text}`
-            : t`Searching Grasp's reference for ${text}`;
-        }
         return done
           ? t`Searched the App's files for ${text}`
           : t`Searching the App's files for ${text}`;

@@ -79,8 +79,8 @@ export const thisRelease: ReleaseFingerprint = {
 
 /**
  * This release's built-ins. Only the singleton loads the blueprints to
- * install them: a few hundred KB of text (GRA-1349), which otherwise only
- * a chat that reads Grasp's reference loads (build-reference.ts).
+ * install them: a few hundred KB of text (GRA-1349), which nothing else
+ * loads.
  */
 export const loadBuiltinRelease = async (): Promise<Release> => {
   const { default: blueprints } = await import("#blueprints");
