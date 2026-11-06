@@ -704,6 +704,42 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     });
   });
 
+  it("keeps the draft's last server code that built when a frame on the App's version runs too, so the draft's frames still reach it once the chat's object starts again", async () => {
+    const { builder, app, chatId, revision, write } = await setUp();
+    const { chats } = builder.api;
+    const titles = await requestFor(
+      builder,
+      { chatId, app, revision },
+      "notes.titles"
+    );
+    await chats.previewFunction(
+      chatId,
+      app,
+      revision,
+      await requestFor(builder, { chatId, app, revision }, "notes.create", {
+        title: "kept",
+      })
+    );
+    // A frame on the App's version runs it too, beside the draft's.
+    const onVersion = outcome(
+      await chats.previewFunction(chatId, app, { appVersion: 1 }, titles)
+    );
+    const broken = await write({ "server/notes.ts": titlesUnbuilt }, revision);
+    // A deploy restarts the object: nothing it held in memory is left.
+    await runInDurableObject(chatsOf(builder), (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    const called = outcome(
+      await chats.previewFunction(chatId, app, broken, titles)
+    );
+    expect({ onVersion, called }).toStrictEqual({
+      onVersion: [],
+      called: ["kept"],
+    });
+  });
+
   it("says the draft's server code doesn't build even of a screen that calls none of it", async () => {
     const { builder, app, chatId, revision, write } = await setUp();
     const { chats } = builder.api;

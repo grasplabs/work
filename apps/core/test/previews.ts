@@ -9,6 +9,8 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
+import { sealDraftRelease } from "../src/app-releases.ts";
+import { draftFiles } from "../src/apps.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { openTestRun } from "./agent-chat.ts";
@@ -80,21 +82,34 @@ const answerSchema = z.object({
 });
 
 /**
- * The call of `path` with `input` as a screen of the draft at `revision`
- * sends it: its reference read from the contracts of the draft release
- * the chat's object keeps, sealed first if it isn't yet.
+ * The contracts of the App's version `appVersion`, sealed as the preview
+ * seals a version a frame shows: kept nowhere (sealed-previews.ts).
  */
-export const requestFor = async (
+const versionContracts = async (
+  app: AppId,
+  appVersion: number
+): Promise<string | undefined> => {
+  const sealed = await sealDraftRelease(
+    env,
+    { app, version: appVersion + 1 },
+    await draftFiles(env, app, { base: appVersion, changes: {} })
+  );
+  const manifest = keptManifestSchema.parse(JSON.parse(sealed.manifest));
+  const sha256 = manifest.artifacts.find(
+    (artifact) => artifact.path === ".grasp/contracts.json"
+  )?.sha256;
+  const bytes = sealed.artifacts.find(
+    (artifact) => artifact.sha256 === sha256
+  )?.bytes;
+  return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+};
+
+/** The contracts of the draft release the chat's object keeps. */
+const keptContracts = async (
   person: Person,
-  {
-    chatId,
-    app,
-    revision,
-  }: { chatId: ChatId; app: AppId; revision: PreviewAt },
-  path: string,
-  input: unknown = {}
-): Promise<string> => {
-  await chatsOf(person).previewReferences(chatId, person.userId, app, revision);
+  chatId: ChatId,
+  app: AppId
+): Promise<string | undefined> => {
   const kept = await runInDurableObject(chatsOf(person), (_instance, state) => {
     const [keptRelease] = state.storage.sql
       .exec<{ manifest: string }>(
@@ -116,9 +131,32 @@ export const requestFor = async (
         sha256 ?? ""
       )
       .toArray();
-    return { version: manifest.resourceVersion, text: contracts?.content };
+    return contracts?.content;
   });
-  const read = contractsSchema.parse(JSON.parse(kept.text ?? "null"));
+  return kept;
+};
+
+/**
+ * The call of `path` with `input` as a screen of the draft at `revision`
+ * sends it: its reference read from the contracts of the draft release
+ * the chat's object keeps, sealed first if it isn't yet.
+ */
+export const requestFor = async (
+  person: Person,
+  {
+    chatId,
+    app,
+    revision,
+  }: { chatId: ChatId; app: AppId; revision: PreviewAt },
+  path: string,
+  input: unknown = {}
+): Promise<string> => {
+  await chatsOf(person).previewReferences(chatId, person.userId, app, revision);
+  const text =
+    typeof revision === "number"
+      ? await keptContracts(person, chatId, app)
+      : await versionContracts(app, revision.appVersion);
+  const read = contractsSchema.parse(JSON.parse(text ?? "null"));
   return JSON.stringify({
     reference: { name: path, kind: read.manifest.operations[path]?.kind },
     input,

@@ -1644,15 +1644,30 @@ export class SealedPreviews {
     version: number,
     server: string
   ): Promise<Release> {
+    // A version of the App's is kept nowhere: sealed and loaded back from
+    // what it sealed, every hash checked, as `readOnlyReferences` does. What
+    // is kept is the draft's alone, its last server code that sealed, for
+    // `#restore`; a version sealed beside it never replaces it, nor deletes
+    // an artifact a load of it is reading.
+    if (draft.revision < 0) {
+      const files = await draftFiles(this.#env, app, draft);
+      const sealed = await sealDraftRelease(this.#env, { app, version }, files);
+      return await loadDraftRelease(
+        { app, version },
+        sealed,
+        async (sha256) =>
+          await Promise.resolve(
+            sealed.artifacts.find((artifact) => artifact.sha256 === sha256)
+              ?.bytes
+          )
+      );
+    }
     const kept = this.#keptRelease(chatId, app);
     if (kept?.revision !== draft.revision || kept.version !== version) {
       const files = await draftFiles(this.#env, app, draft);
       const sealed = await sealDraftRelease(this.#env, { app, version }, files);
       // Replaced while it was sealed: nothing of it is kept.
-      if (
-        this.#places(draft.revision).sealing.get(nameOf(chatId, app))
-          ?.server !== server
-      ) {
+      if (this.#sealing.get(nameOf(chatId, app))?.server !== server) {
         throw appErrors.create("app.preview_outdated");
       }
       this.#ctx.storage.transactionSync(() => {
