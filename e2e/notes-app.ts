@@ -444,7 +444,8 @@ function Notes() {
           {isLoading ? "Loading…" : "Load more"}
         </Button>
       )}
-      {selected === null ? null : <SelectedNote id={selected} />}
+      {/* A note chosen anew mounts afresh: nothing of the one before carries over. */}
+      {selected === null ? null : <SelectedNote id={selected} key={selected} />}
     </main>
   );
 }

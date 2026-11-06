@@ -155,6 +155,20 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps w
   await editor.getByRole("button", { name: "Save changes" }).click();
   await expect(list.getByText("My title", { exact: true })).toBeVisible();
 
+  // Another note chosen after a save opens that note, never the newer one
+  // just saved: what is saved reaches it alone.
+  await reloaded.getByRole("button", { name: "Edit Send the invoice" }).click();
+  await expect(editor.getByLabel("Title")).toHaveValue("Send the invoice");
+  await expect(editor.getByLabel("Body")).toHaveValue("Before Friday");
+  await editor.getByLabel("Title").fill("Send the invoice today");
+  await editor.getByRole("button", { name: "Save changes" }).click();
+  await expect(list.getByRole("listitem")).toHaveText([
+    /Send the invoice today/u,
+    /My title/u,
+  ]);
+  await reloaded.getByRole("button", { name: "Edit My title" }).click();
+  await expect(editor.getByLabel("Title")).toHaveValue("My title");
+
   await draft.getByRole("button", { name: "Save changes" }).click();
   await expect(draft.getByRole("alert")).toContainText("changed since");
   // What they typed survived the refusal, unchanged.
