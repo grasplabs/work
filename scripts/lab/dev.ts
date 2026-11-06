@@ -17,6 +17,7 @@
  */
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import { copyFileSync, existsSync } from "node:fs";
 import path from "node:path";
 
 import { writeRelayedConnectConfig } from "../connect-relay-config.ts";
@@ -28,8 +29,30 @@ export const labConnectConfig = path.join(
   "out/connect/wrangler.json"
 );
 
+const connectDevVars = path.join(
+  import.meta.dirname,
+  "../../apps/connect/.dev.vars"
+);
+
+/**
+ * Connect's config relayed to `origin`, written to `target`, with connect's
+ * local secrets beside it: Wrangler reads `.dev.vars` from the folder of
+ * the config it is given, so without the copy connect starts with no
+ * capability key and no token key, and can't keep an AI provider's key.
+ */
+export const writeLabConnectConfig = (
+  target: string,
+  origin: string,
+  devVars: string = connectDevVars
+): void => {
+  writeRelayedConnectConfig(target, origin);
+  if (existsSync(devVars)) {
+    copyFileSync(devVars, path.join(path.dirname(target), ".dev.vars"));
+  }
+};
+
 if (import.meta.main) {
-  writeRelayedConnectConfig(labConnectConfig, bridgeOrigin);
+  writeLabConnectConfig(labConnectConfig, bridgeOrigin);
   const root = path.join(import.meta.dirname, "../..");
   const start = (script: string, env: NodeJS.ProcessEnv): ChildProcess =>
     spawn(process.execPath, [path.join(root, script)], {
