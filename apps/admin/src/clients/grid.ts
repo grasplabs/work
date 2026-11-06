@@ -15,12 +15,18 @@
 import { log } from "@grasp-os/shared/log";
 import { onboardingSummarySchema } from "@grasp-os/shared/onboarding-summary";
 import { deriveRouterSecret, routerTargetOf } from "@grasp-os/shared/router";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, lte, min } from "drizzle-orm";
 import { z } from "zod";
 
 import { adminDatabase } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
-import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
+import {
+  clientDeploys,
+  clientProvisions,
+  clients,
+  clientWorkers,
+  releases,
+} from "../db/schema.ts";
 import type { Channel } from "../db/schema.ts";
 import { clientDomain, deploySecrets, ifStored } from "../deploy/context.ts";
 import { errorCode } from "../deploy/errors.ts";
@@ -40,10 +46,13 @@ import {
 } from "../live-reads.ts";
 import type { LiveReadLimits } from "../live-reads.ts";
 import { notStartedOf } from "../provision/queries.ts";
+import { targetOf } from "../rollout/desired.ts";
+import type { ChannelReleases } from "../rollout/desired.ts";
 import { driftOf } from "../rollout/drift.ts";
 import type { ManifestOf } from "../rollout/drift.ts";
 import { sharedSecretsStatus, storeCheck } from "../rollout/shared-secrets.ts";
 import type { StoreCheck } from "../rollout/shared-secrets.ts";
+import { channelReleases } from "../rollout/targets.ts";
 import { currentRun, isReplaceable } from "../runners.ts";
 import { coreAddressOf } from "./core-address.ts";
 import type { ClientDispatcher, CoreAddress } from "./core-address.ts";
@@ -108,6 +117,16 @@ export interface GridRow {
     | { state: "unread" }
     | { state: "needs_attention"; reason: AttentionReason }
     | null;
+  /**
+   * Where its rollout stands: its deploy that failed and nobody retried
+   * yet (src/rollout/deploy.ts, `deploy.fail`), and how many imported
+   * releases it is behind the one it should run (its pin, or its
+   * channel's), counted from the oldest any of its Workers runs.
+   */
+  rollout: {
+    failed: { releaseId: string; error: string | null } | null;
+    behind: number;
+  };
 }
 
 /** How long a client's health check, or another request to its core, may take. */
@@ -187,16 +206,81 @@ const recordedClients = async (db: AdminDatabase) => {
     .from(clientWorkers);
   const releasesOf = new Map<string, Set<string | null>>();
   for (const { clientId, releaseId } of workers) {
-    const releases = releasesOf.get(clientId) ?? new Set();
-    releases.add(releaseId);
-    releasesOf.set(clientId, releases);
+    const runs = releasesOf.get(clientId) ?? new Set();
+    runs.add(releaseId);
+    releasesOf.set(clientId, runs);
   }
   return rows.map((row) => {
-    const releases = releasesOf.get(row.id) ?? new Set();
-    const [only = null] = releases.size === 1 ? releases : [];
-    return { ...row, release: only };
+    const runs = releasesOf.get(row.id) ?? new Set();
+    const [only = null] = runs.size === 1 ? runs : [];
+    return {
+      ...row,
+      release: only,
+      running: [...runs].filter((id) => id !== null),
+    };
   });
 };
+
+/**
+ * How many imported releases a client running `running` is behind
+ * `target`: those built after the oldest it runs, up to the target. None
+ * when it runs nothing yet or has no target.
+ */
+const releasesBehind = async (
+  db: AdminDatabase,
+  running: readonly string[],
+  target: string | null
+): Promise<number> => {
+  if (running.length === 0 || target === null) {
+    return 0;
+  }
+  const oldest = db
+    .select({ at: min(releases.builtAt) })
+    .from(releases)
+    .where(inArray(releases.id, [...running]));
+  const targeted = db
+    .select({ at: releases.builtAt })
+    .from(releases)
+    .where(eq(releases.id, target));
+  const [row] = await db
+    .select({ behind: count() })
+    .from(releases)
+    .where(and(gt(releases.builtAt, oldest), lte(releases.builtAt, targeted)));
+  return row?.behind ?? 0;
+};
+
+/** Each client's deploy that failed and nobody retried yet, by client. */
+const failedDeploys = async (
+  db: AdminDatabase
+): Promise<Map<string, GridRow["rollout"]["failed"]>> => {
+  const rows = await db
+    .select({
+      clientId: clientDeploys.clientId,
+      releaseId: clientDeploys.releaseId,
+      error: clientDeploys.error,
+    })
+    .from(clientDeploys)
+    .where(eq(clientDeploys.status, "failed"));
+  return new Map(
+    rows.map(({ clientId, releaseId, error }) => [
+      clientId,
+      { releaseId, error },
+    ])
+  );
+};
+
+/** Where client `row`'s rollout stands (`GridRow["rollout"]`). */
+const rolloutOf = async (
+  db: AdminDatabase,
+  row: Pick<GridRow, "id" | "channel" | "pinnedReleaseId"> & {
+    running: readonly string[];
+  },
+  failed: ReadonlyMap<string, GridRow["rollout"]["failed"]>,
+  targets: ChannelReleases
+): Promise<GridRow["rollout"]> => ({
+  failed: failed.get(row.id) ?? null,
+  behind: await releasesBehind(db, row.running, targetOf(row, targets)),
+});
 
 /**
  * What the router knows of client `clientId`'s core: where it answers (its
@@ -458,12 +542,17 @@ const setupOf = async (
 export const clientGrid = async (env: Env): Promise<GridRow[]> => {
   const domain = clientDomain(env);
   const db = adminDatabase(env.DB);
-  const recorded = await recordedClients(db);
+  const [recorded, failed, targets] = await Promise.all([
+    recordedClients(db),
+    failedDeploys(db),
+    channelReleases(db),
+  ]);
   return await Promise.all(
-    recorded.map(async (row) => ({
+    recorded.map(async ({ running, ...row }) => ({
       ...row,
       hostname: domain === null ? null : `${row.id}.${domain}`,
       setup: await setupOf(env, db, row),
+      rollout: await rolloutOf(db, { ...row, running }, failed, targets),
     }))
   );
 };

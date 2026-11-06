@@ -31,7 +31,12 @@ import { KnowledgeDots, StageBar, Tile } from "../admin/parts.tsx";
 import { ReadinessBanner } from "../admin/readiness-parts.tsx";
 import { fetchReadiness } from "../admin/readiness.ts";
 import { Section } from "../admin/section.tsx";
-import { organizationsOf, unreadWords } from "../admin/views.ts";
+import {
+  organizationsOf,
+  rolloutNeedLine,
+  rolloutNeeds,
+  unreadWords,
+} from "../admin/views.ts";
 import type { Organization } from "../admin/views.ts";
 import {
   contractWords,
@@ -467,17 +472,34 @@ const Portfolio = ({
   );
 };
 
-/** What needs Grasp today, at every answered organization: the most pressing at each first. */
-const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
-  const each = organizations.map(({ admin, view }) =>
-    view === null
+/**
+ * What needs Grasp at one organization, the most pressing first: what its
+ * own platform needs (`rolloutNeeds`, acted on from its Setup), whether
+ * its core answered or not, then what its core's view says.
+ */
+const needsAt = ({ admin, view }: Organization) => {
+  const { id, name } = admin.client;
+  return [
+    ...rolloutNeeds(admin.client).map((need) => ({
+      id,
+      name,
+      text: rolloutNeedLine(need),
+      setup: true,
+    })),
+    ...(view === null
       ? []
       : view.needs.map((need) => ({
-          id: admin.client.id,
-          name: admin.client.name,
+          id,
+          name,
           text: needLine(need, view),
-        }))
-  );
+          setup: false,
+        }))),
+  ];
+};
+
+/** What needs Grasp today, at every organization: the most pressing at each first. */
+const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
+  const each = organizations.map(needsAt);
   // Every organization's most pressing first, then each one's next: in
   // turn, so the first few can't fill the list before the rest are heard.
   const deepest = Math.max(0, ...each.map((needs) => needs.length));
@@ -494,36 +516,48 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
       description="At every organization, the most pressing first."
     >
       <ul className="flex flex-col">
-        {waiting.slice(0, todayItems).map(({ id, name, text }, index) => (
-          <li
-            className="flex items-center justify-between gap-4 border-t px-5 py-3"
-            // The same need can stand twice at one organization, for two teams.
-            key={`${id}-${index}`}
-          >
-            <span className="flex min-w-0 items-start gap-2.5">
-              <span
-                aria-hidden
-                className="bg-status-attention mt-1.5 size-1.5 flex-none rounded-full"
-              />
-              <span className="flex min-w-0 flex-col">
-                <span className="text-muted-foreground text-xs">{name}</span>
-                <span>{text}</span>
-              </span>
-            </span>
-            <Button
-              aria-label={`Open at ${name}: ${text}`}
-              nativeButton={false}
-              render={
-                <Link params={{ clientId: id }} to="/organizations/$clientId" />
-              }
-              size="sm"
-              variant="ghost"
+        {waiting
+          .slice(0, todayItems)
+          .map(({ id, name, text, setup }, index) => (
+            <li
+              className="flex items-center justify-between gap-4 border-t px-5 py-3"
+              // The same need can stand twice at one organization, for two teams.
+              key={`${id}-${index}`}
             >
-              Open
-              <ArrowRightIcon data-icon="inline-end" />
-            </Button>
-          </li>
-        ))}
+              <span className="flex min-w-0 items-start gap-2.5">
+                <span
+                  aria-hidden
+                  className="bg-status-attention mt-1.5 size-1.5 flex-none rounded-full"
+                />
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-muted-foreground text-xs">{name}</span>
+                  <span>{text}</span>
+                </span>
+              </span>
+              <Button
+                aria-label={`Open at ${name}: ${text}`}
+                nativeButton={false}
+                render={
+                  setup ? (
+                    <Link
+                      params={{ clientId: id }}
+                      to="/organizations/$clientId/setup"
+                    />
+                  ) : (
+                    <Link
+                      params={{ clientId: id }}
+                      to="/organizations/$clientId"
+                    />
+                  )
+                }
+                size="sm"
+                variant="ghost"
+              >
+                Open
+                <ArrowRightIcon data-icon="inline-end" />
+              </Button>
+            </li>
+          ))}
       </ul>
       {more > 0 ? (
         <p className="text-muted-foreground border-t px-5 py-3">

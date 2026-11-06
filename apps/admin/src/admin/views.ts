@@ -13,6 +13,7 @@ import type { Need } from "@grasp-os/shared/admin/onboarding-admin";
 
 import type { Billing } from "../billing/billing.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
+import type { GridRow } from "../clients/grid.ts";
 import { formatDate } from "./words.ts";
 
 /** One organization: the client as the admin reads it, and its view when its core answered. */
@@ -120,4 +121,46 @@ export const unreadWhy = (
       ? "It has never answered."
       : `It last answered on ${formatDate(admin.lastAnsweredAt)}.`;
   return `Its Grasp can’t be read now: ${whyWords[admin.error]}. ${since}`;
+};
+
+/**
+ * How many releases a live client may be behind the one it should run
+ * before it needs Grasp: a deploy or two still on their way is normal.
+ */
+export const releasesBehindAllowed = 2;
+
+/**
+ * What a live client's own platform needs of Grasp, from what the admin
+ * recorded, its core answering or not: its deploy failed and nobody
+ * retried it, or it fell behind its release. Both are acted on from its
+ * Setup, where its deploy is retried. They come before anything its core
+ * says: Grasp fixes nothing there while it can't deploy.
+ */
+export type RolloutNeed =
+  | { kind: "deploy_failed"; releaseId: string; error: string | null }
+  | { kind: "behind"; releases: number };
+
+/** What client `client`'s rollout needs of Grasp (`RolloutNeed`). */
+export const rolloutNeeds = (client: GridRow): RolloutNeed[] => {
+  if (client.status !== "active") {
+    return [];
+  }
+  const { failed, behind } = client.rollout;
+  const needs: RolloutNeed[] = [];
+  if (failed !== null) {
+    needs.push({ kind: "deploy_failed", ...failed });
+  }
+  if (behind > releasesBehindAllowed) {
+    needs.push({ kind: "behind", releases: behind });
+  }
+  return needs;
+};
+
+/** A rollout need, said in a sentence. */
+export const rolloutNeedLine = (need: RolloutNeed): string => {
+  if (need.kind === "behind") {
+    return `It runs ${need.releases} releases behind the one it should. Look at its Setup.`;
+  }
+  const why = need.error === null ? "" : ` (${need.error})`;
+  return `Its deploy of ${need.releaseId} failed${why}. Retry it on its Setup once what stopped it is fixed.`;
 };

@@ -17,6 +17,7 @@ const client: GridRow = {
   pinnedReleaseId: null,
   lastDeploy: null,
   setup: null,
+  rollout: { failed: null, behind: 0 },
 };
 
 /** Acme's core answering, `agoMs` ago. */

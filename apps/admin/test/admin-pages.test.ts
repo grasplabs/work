@@ -6,7 +6,8 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { orgSections, sectionTo, sectionWords } from "../src/admin/sections.ts";
 import { formatDate } from "../src/admin/words.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
-import { clients } from "../src/db/schema.ts";
+import { clientDeploys, clients } from "../src/db/schema.ts";
+import { pinClient } from "../src/rollout/channels.ts";
 import { mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { emptyAdminSnapshot } from "./cloudflare-api.ts";
@@ -504,6 +505,69 @@ describe("the admin's frame", () => {
     expect(
       companies.map(({ name }) => listed(`Open at ${name}:`))
     ).toStrictEqual([true, true, true]);
+  });
+
+  it("puts a live organization's failed deploy and its falling behind first in today's list, each opening its Setup", async () => {
+    const failing = await liveClient();
+    failing.core.admin = readySnapshot("Failing");
+    // Its deploy of a newer release failed, and nobody retried it.
+    const next = await placedRelease("feat(core): failed to deploy");
+    const now = new Date();
+    await db.insert(clientDeploys).values({
+      clientId: failing.clientId,
+      releaseId: next,
+      runId: `run-${crypto.randomUUID()}`,
+      status: "failed",
+      error: "attempt_lost: core",
+      startedAt: now,
+      endedAt: now,
+    });
+    // Three releases on, pinned to the last: three behind.
+    await placedRelease("feat(core): one on");
+    const last = await placedRelease("feat(core): three on");
+    await pinClient(env, staff, {
+      clientId: failing.clientId,
+      releaseId: last,
+    });
+    const current = await liveClient();
+    current.core.admin = readySnapshot("Current");
+
+    const { html } = await page("/");
+    const start = html.indexOf("Needs Grasp today");
+    const section = html.slice(start, html.indexOf("</section>", start));
+    // Each item of the list, as its words and where it opens.
+    const items = section
+      .split("<li")
+      .slice(1)
+      .map((item) => ({
+        text: item.replaceAll(tags, " ").replaceAll(spaces, " "),
+        setup: item.includes("/setup"),
+      }));
+    const at = (name: string) =>
+      items.filter(({ text }) => text.includes(`${name} `));
+
+    expect({
+      // Its own platform first, then what its core says; both open its Setup.
+      failing: at(failing.name)
+        .slice(0, 2)
+        .map(({ text, setup }) => ({
+          deploy: text.includes(
+            `Its deploy of ${next} failed (attempt_lost: core). Retry it on its Setup once what stopped it is fixed.`
+          ),
+          behind: text.includes(
+            "It runs 3 releases behind the one it should. Look at its Setup."
+          ),
+          setup,
+        })),
+      // A client on its release has neither.
+      current: at(current.name).some(({ setup }) => setup),
+    }).toStrictEqual({
+      failing: [
+        { deploy: true, behind: false, setup: true },
+        { deploy: false, behind: true, setup: true },
+      ],
+      current: false,
+    });
   });
 
   it("counts only leads who talked, and the days of each company's own plan", async () => {
