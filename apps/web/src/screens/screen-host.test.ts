@@ -1328,7 +1328,11 @@ describe("a screen's navigation, as the page takes it", () => {
 /** A query's answer of one title. */
 const value = (title: string) => ({ ok: true, value: [title] });
 
-const previewOver = (answer: unknown) => {
+const previewOver = (
+  answer: unknown,
+  /** The App's version the frame opens on, in place of the draft. */
+  appVersion?: number
+) => {
   const calls: number[] = [];
   const cancels: number[] = [];
   const reports: string[] = [];
@@ -1361,10 +1365,12 @@ const previewOver = (answer: unknown) => {
     previewWatchQuery: async (
       _chat: string,
       _app: string,
-      revision: number,
+      at: number | { appVersion: number },
       _request: string,
       relay: (push: unknown) => Promise<unknown>
     ) => {
+      // A version of the App counts as its negative, as no revision is.
+      const revision = typeof at === "number" ? at : -at.appVersion;
       const watch = { revision, released: false };
       asked.watches.push(watch);
       relays.push(relay);
@@ -1390,7 +1396,24 @@ const previewOver = (answer: unknown) => {
   const target = previewTarget(
     asLink,
     "chat",
-    { ...bundle, revision: 1, screens: ["home"] },
+    {
+      ...bundle,
+      revision: 1,
+      screens: ["home"],
+      ...(appVersion === undefined
+        ? {}
+        : {
+            refresh: {
+              revision: 1,
+              screen: "home",
+              entry: "entry",
+              modules: {},
+              css: "",
+              kit: [],
+              appVersion,
+            },
+          }),
+    },
     {
       problem: () => {
         problems += 1;
@@ -1493,6 +1516,67 @@ describe("a preview's frame as its draft changes", () => {
       { revision: 5, result: value("c") },
       { revision: 6, result: value("d") },
     ]);
+  });
+
+  it("follows a live query again at once when core refuses it as out of date while the frame shows a version of the App, so its data still comes", async () => {
+    const { target, asked, relays } = previewOver({ result: { ok: true } }, 4);
+    const pushes: unknown[] = [];
+    await target.watchQuery(
+      "{}",
+      new RpcStub(async (push: unknown) => {
+        pushes.push(push);
+        await Promise.resolve();
+      })
+    );
+    // A check of the draft's update took the preview's place for a moment:
+    // the read on version 4 was refused. The frame moves nowhere.
+    await relays[0]?.({
+      revision: 1,
+      result: { ok: false, error: { code: "app.preview_outdated" } },
+    });
+    await vi.waitFor(() => {
+      expect(relays).toHaveLength(2);
+    });
+    await relays[1]?.({ revision: 1, result: value("a") });
+    expect({ watches: asked.watches, pushes }).toStrictEqual({
+      watches: [
+        { revision: -4, released: true },
+        { revision: -4, released: false },
+      ],
+      pushes: [{ revision: 1, result: value("a") }],
+    });
+  });
+
+  it("stops following a version's live query again once core keeps refusing it, rather than asking forever", async () => {
+    const { target, relays } = previewOver({ result: { ok: true } }, 4);
+    await target.watchQuery(
+      "{}",
+      new RpcStub(async () => {
+        await Promise.resolve();
+      })
+    );
+    const outdated = {
+      revision: 1,
+      result: { ok: false, error: { code: "app.preview_outdated" } },
+    };
+    /** Core refuses the latest subscription, which then numbers `asked`. */
+    const refused = async (asked: number): Promise<void> => {
+      await relays.at(-1)?.(outdated);
+      await vi.waitFor(() => {
+        expect(relays).toHaveLength(asked);
+      });
+    };
+    await refused(2);
+    await refused(3);
+    await refused(4);
+    // A fourth refusal in a row is left to wait for the frame's next build.
+    await relays.at(-1)?.(outdated);
+    const later = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      later.resolve(true);
+    }, 50);
+    await later.promise;
+    expect(relays).toHaveLength(4);
   });
 
   it("names the revision the frame shows, and follows its live queries again there, keeping them going", async () => {

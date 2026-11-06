@@ -905,7 +905,27 @@ interface PreviewWatch {
    * frame's client shows only a push numbered past the last it showed.
    */
   handed: number;
+  /**
+   * How many times in a row it was followed again at once, refused as out
+   * of date while the frame shows a version of the App
+   * (`versionRefollows`); none again once a push reaches the frame.
+   */
+  refollowed: number;
 }
+
+/**
+ * How many times in a row a live query of a frame showing a version of
+ * the App is followed again at once when core refuses it as out of date.
+ * Core always serves a version (`previewServes`, chats-rpc.ts), but the
+ * chat's preview runs one build at a time (sealed-previews.ts): a check
+ * of the draft's update that seals its server code takes the place of the
+ * version's for a moment, and a read under way on the version is refused
+ * then. The frame moves to no other build for it (the draft's screen may
+ * not build at all), so waiting for that, as for a revision the draft
+ * moved past, would leave the query unanswered. A few at most, so a core
+ * that kept refusing never spins.
+ */
+const versionRefollows = 3;
 
 /**
  * `push`, the push of a subscription that took another's place, numbered
@@ -933,6 +953,21 @@ const releaseWatch = async (
     await held.release();
   } catch {
     // Gone with its connection, which let go of it in core too.
+  }
+};
+
+/**
+ * Makes `next` `watch`'s subscription, letting go of the one before only
+ * once the new one is asked for, so the screen's data never goes.
+ */
+const replaceSubscription = (
+  watch: PreviewWatch,
+  next: Promise<{ release: () => Promise<void> }>
+): void => {
+  const before = watch.subscription;
+  watch.subscription = next;
+  if (before !== undefined) {
+    void releaseWatch(before);
   }
 };
 
@@ -996,12 +1031,22 @@ export const previewTarget = (
     const relay = Object.assign(
       async (push: unknown): Promise<unknown> => {
         if (outdatedPush(push)) {
+          if (
+            current() &&
+            typeof shows === "object" &&
+            watch.refollowed < versionRefollows
+          ) {
+            watch.refollowed += 1;
+            replaceSubscription(watch, subscribe(watch));
+            return null;
+          }
           watch.outdated ||= current();
           return null;
         }
         if (!current()) {
           return null;
         }
+        watch.refollowed = 0;
         const numbered = renumbered(push, after);
         const at: unknown =
           typeof numbered === "object" && numbered !== null
@@ -1036,11 +1081,7 @@ export const previewTarget = (
     moved: (next) => {
       shows = next;
       for (const watch of watches) {
-        const before = watch.subscription;
-        watch.subscription = subscribe(watch);
-        if (before !== undefined) {
-          void releaseWatch(before);
-        }
+        replaceSubscription(watch, subscribe(watch));
       }
     },
     callFunction: async (request) => {
@@ -1144,6 +1185,7 @@ export const previewTarget = (
         outdated: false,
         ended: false,
         handed: 0,
+        refollowed: 0,
       };
       const subscription = subscribe(watch);
       watch.subscription = subscription;
