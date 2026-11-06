@@ -20,6 +20,7 @@ import type {
   WorkflowResourceVersion,
   WorkflowShareCandidates,
   WorkflowStart,
+  WorkflowState,
   WorkflowStartForm,
   WorkflowVersionSource,
   WorkflowActivity,
@@ -82,6 +83,7 @@ import {
 import { workflowShareCandidates } from "./workflow-share-candidates.ts";
 import { workflowStartForm } from "./workflow-start-form.ts";
 import { startWorkflow } from "./workflow-starts.ts";
+import { readWorkflowState, resetWorkflowState } from "./workflow-state.ts";
 import { WorkflowTriggersRpc } from "./workflow-triggers-rpc.ts";
 import {
   candidateRunFor,
@@ -408,6 +410,20 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await setWorkflowParams(this.#env, person, id, input)
+    );
+  }
+
+  async state(id: string): Promise<WorkflowState> {
+    return await withPerson(
+      this.#check,
+      async (person) => await readWorkflowState(this.#env, person, id)
+    );
+  }
+
+  async resetState(id: string): Promise<WorkflowState> {
+    return await withPerson(
+      this.#check,
+      async (person) => await resetWorkflowState(this.#env, person, id)
     );
   }
 

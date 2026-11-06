@@ -247,6 +247,9 @@ const typeRules: readonly {
   { action: "workflow.wake.repaired", type: "action" },
   { action: "workflow.step", type: "action" },
   { action: "workflow.param", type: "config" },
+  // What a workflow keeps between its runs: a step writing it, a builder
+  // resetting it (core's src/workflow-state.ts).
+  { action: "workflow.state", type: "action" },
   // A schedule stopped after its run kept failing to start.
   { action: "workflow.schedule", type: "action" },
   { action: "platform", type: "platform_update" },

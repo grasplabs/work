@@ -121,6 +121,8 @@ export interface TestEngineOptions {
   runId?: string;
   /** Parameter values people set, by name; missing ones use the default. */
   params?: Record<string, unknown>;
+  /** What the workflow kept between its runs, by key; none when missing. */
+  state?: Record<string, Json>;
   /**
    * Stand-ins for the run's bindings (`env.OUTLOOK`), for steps that run;
    * none when missing, and mocked steps don't need them.
@@ -270,6 +272,8 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
   const engine: WorkflowEngine = {
     runId: runIdSchema.parse(options.runId ?? "run-1"),
     params: options.params ?? {},
+    // A copy: the run freezes what it reads, never the test's own object.
+    state: structuredClone(options.state ?? {}),
     env: options.env ?? {},
     do: async (name, { retries, sideEffect = false, input }, fn) => {
       if (results.has(name)) {

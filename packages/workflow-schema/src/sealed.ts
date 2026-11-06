@@ -1,6 +1,9 @@
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { workflowModulePattern } from "@grasp-os/shared/workflow-modules";
-import { workflowEventTypeSchema } from "@grasp-os/shared/workflow-resources";
+import {
+  workflowEventTypeSchema,
+  workflowStateKeySchema,
+} from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
 import { formatLimits, stepIdPattern } from "./format.ts";
@@ -55,6 +58,20 @@ const templateSchema: z.ZodType<Template> = z.lazy(() =>
     }),
   ])
 );
+
+/** Whether `template` names a sensitive parameter anywhere in it. */
+const namesParam = (template: Template): boolean => {
+  if ("param" in template) {
+    return true;
+  }
+  if ("object" in template) {
+    return template.object.some(([, item]) => namesParam(item));
+  }
+  return "array" in template && template.array.some(namesParam);
+};
+
+/** The most keys one task keeps in its workflow's state. */
+const maxStateKeys = 64;
 
 const aliasSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
 
@@ -176,6 +193,25 @@ const taskBase = {
   scope: z.array(taskIdSchema).max(maxTaskScopes),
   /** The most an attempt of its steps may take, from its `timeout`. */
   timeoutMs: z.int().positive().optional(),
+  /**
+   * What it keeps in its workflow's state once it succeeded, by key: each
+   * value's template, as a call's (its expressions' slots, its literals
+   * exact), which never names a sensitive parameter, as every later run
+   * of the workflow reads it; and the descriptor of the value it takes,
+   * which the host holds it to. Only a call that doesn't wait keeps any
+   * (`keepsState`), on its task step, its record with `state` beside.
+   */
+  state: z
+    .record(
+      workflowStateKeySchema,
+      z.strictObject({ template: templateSchema, value: z.json() })
+    )
+    .refine(
+      (state) =>
+        Object.keys(state).length <= maxStateKeys &&
+        !Object.values(state).some(({ template }) => namesParam(template))
+    )
+    .optional(),
 };
 
 /** One task of the module, as the host checks its steps. */
@@ -235,6 +271,17 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
 
 export type SealedTask = z.infer<typeof sealedTaskSchema>;
 
+/**
+ * Whether `task` may keep state (`SealedTask.state`): a call whose task
+ * step records its result, never a sleep or a decision, whose steps record
+ * their wait, nor any other kind, whose task step, if any, isn't its
+ * result. Its task step is its state step.
+ */
+export const keepsState = (task: SealedTask): boolean =>
+  task.kind === "call" &&
+  task.call.name !== "grasp.sleepUntil" &&
+  task.call.name !== "grasp.decision";
+
 /** One expression of the module, for review: where it is, what it says. */
 const sealedExpressionSchema = z.strictObject({
   slot: z.int().min(0),
@@ -263,7 +310,17 @@ export type SealedExpression = z.infer<typeof sealedExpressionSchema>;
 
 /** The table, as a build seals it (`tasks.json`). */
 export const sealedTableSchema = z.strictObject({
-  tasks: z.array(sealedTaskSchema).max(sealedBuildLimits.tasks),
+  tasks: z
+    .array(sealedTaskSchema)
+    .max(sealedBuildLimits.tasks)
+    .refine((tasks) =>
+      tasks.every(
+        (task) =>
+          task.state === undefined ||
+          Object.keys(task.state).length === 0 ||
+          keepsState(task)
+      )
+    ),
   expressions: z
     .array(sealedExpressionSchema)
     .max(sealedBuildLimits.expressions),

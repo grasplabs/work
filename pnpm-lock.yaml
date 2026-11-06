@@ -664,9 +664,6 @@ importers:
       '@grasp-os/connector-kit':
         specifier: workspace:*
         version: link:../../packages/connector-kit
-      '@grasp-os/open-workflow':
-        specifier: workspace:*
-        version: link:../../packages/open-workflow
       '@grasp-os/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
@@ -1134,22 +1131,6 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 4.6.7
-    devDependencies:
-      '@cloudflare/workers-types':
-        specifier: 'catalog:'
-        version: 5.20261023.1
-
-  packages/open-workflow:
-    dependencies:
-      '@grasp-os/sdk':
-        specifier: workspace:*
-        version: link:../sdk
-      '@grasp-os/shared':
-        specifier: workspace:*
-        version: link:../shared
-      '@grasp-os/workflow-schema':
-        specifier: workspace:*
-        version: link:../workflow-schema
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 'catalog:'

@@ -1901,10 +1901,6 @@ msgstr "Añadir módulo"
 msgid "Add one so invoices are paid when they come."
 msgstr "Añade una para que las facturas se paguen al llegar."
 
-#: src/activity/pending.tsx
-msgid "add records to {tables}"
-msgstr "añadir registros a {tables}"
-
 #: src/projects/project-people.tsx
 msgid "Add someone"
 msgstr "Añadir a alguien"
@@ -3226,6 +3222,7 @@ msgstr "No se puede ofrecer Iniciar: {unread}"
 #: src/settings/stephen-card.tsx
 #: src/settings/teams.tsx
 #: src/workflows/delete-workflow.tsx
+#: src/workflows/kept-state.tsx
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Cancel"
 msgstr "Cancelar"
@@ -6887,11 +6884,16 @@ msgstr "Conservada"
 msgid "Kept access at the provider for an account connected again"
 msgstr "Mantuvo el acceso en el proveedor para una cuenta conectada de nuevo"
 
+#: src/workflows/kept-state.tsx
+msgid "Kept between runs"
+msgstr "Guardado entre ejecuciones"
+
 #: src/activity/audit-words.ts
 msgid "Kept something the chat can no longer read from the model"
 msgstr "Ocultó al modelo algo que el chat ya no puede leer"
 
 #: src/settings/ai-providers.tsx
+#: src/workflows/kept-state.tsx
 msgid "Key"
 msgstr "Clave"
 
@@ -8579,6 +8581,10 @@ msgstr "Aún no hay nada dibujado. Cuéntale a Grasp en el chat cómo funciona e
 msgid "Nothing is due while the plan is not running."
 msgstr "No hay nada pendiente mientras el plan no esté activo."
 
+#: src/workflows/kept-state.tsx
+msgid "Nothing is kept yet."
+msgstr "Todavía no se guarda nada."
+
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Nothing is published yet."
 msgstr "Todavía no hay nada publicado."
@@ -9913,17 +9919,9 @@ msgstr "Leyó las estadísticas de una aplicación"
 msgid "Read an email attachment"
 msgstr "Leyó un adjunto de correo"
 
-#: src/activity/pending.tsx
-msgid "read and change every record of {tables}"
-msgstr "leer y cambiar todos los registros de {tables}"
-
 #: src/chat/builds.tsx
 msgid "Read by <0/>"
 msgstr "Leído por <0/>"
-
-#: src/activity/pending.tsx
-msgid "read every record of {tables}"
-msgstr "leer todos los registros de {tables}"
 
 #: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
@@ -10388,6 +10386,18 @@ msgstr "Solicitudes"
 #: src/workflows/requests/request-detail.tsx
 msgid "Requests over time"
 msgstr "Solicitudes a lo largo del tiempo"
+
+#: src/workflows/kept-state.tsx
+msgid "Reset"
+msgstr "Restablecer"
+
+#: src/workflows/kept-state.tsx
+msgid "Reset what it keeps"
+msgstr "Restablecer lo que guarda"
+
+#: src/workflows/kept-state.tsx
+msgid "Reset what it keeps?"
+msgstr "¿Restablecer lo que guarda?"
 
 #: src/engines/app-workspace.tsx
 msgid "Resize the chat"
@@ -10863,6 +10873,10 @@ msgstr "Ejecuciones iniciadas"
 msgid "Runs started from {from} to {to}."
 msgstr "Ejecuciones iniciadas del {from} al {to}."
 
+#: src/workflows/kept-state.tsx
+msgid "Runs that start after this read nothing kept. Runs already going keep what they read. This can't be undone."
+msgstr "Las ejecuciones que empiecen después no leen nada guardado. Las que ya están en curso conservan lo que leyeron. No se puede deshacer."
+
 #: src/workflows/item-test.tsx
 msgid "Runs the draft on the input of your {most} most recent runs. Nothing is sent or changed: each call it makes is answered from what you give here, by the name of its binding."
 msgstr "Ejecuta el borrador con la entrada de tus {most} ejecuciones más recientes. No se envía ni cambia nada: cada llamada se responde con lo que indiques aquí, con el nombre de su vinculación."
@@ -11295,6 +11309,10 @@ msgstr "Código del servidor"
 #: src/onboarding/hr-leads.tsx
 msgid "Service user ID"
 msgstr "ID del usuario de servicio"
+
+#: src/workflows/kept-state.tsx
+msgid "Set"
+msgstr "Establecido"
 
 #: src/activity/audit-words.ts
 msgid "Set aside entries the audit trail couldn't take"
@@ -12129,18 +12147,6 @@ msgstr "Detenido."
 #: src/activity/pending.tsx
 msgid "Store {store}"
 msgstr "Almacén {store}"
-
-#: src/activity/pending.tsx
-msgid "Store {store}, a workflow's. This can {what}"
-msgstr "Almacén {store} de un flujo de trabajo. Puede {what}"
-
-#: src/activity/pending.tsx
-msgid "Store {store}, a workflow's. What these operations reach can't be shown now"
-msgstr "Almacén {store} de un flujo de trabajo. Ahora no se puede mostrar a qué acceden estas operaciones"
-
-#: src/activity/pending.tsx
-msgid "Store {store}, a workflow's. Whoever owns the records, this can {what}"
-msgstr "Almacén {store} de un flujo de trabajo. Sea quien sea el propietario de los registros, puede {what}"
 
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
@@ -14058,6 +14064,10 @@ msgstr "Usando {tool}"
 msgid "UTC"
 msgstr "UTC"
 
+#: src/workflows/kept-state.tsx
+msgid "Value"
+msgstr "Valor"
+
 #: src/engines/app-data.tsx
 msgid "Values aren't kept: the table is sensitive."
 msgstr "Los valores no se guardan: la tabla es sensible."
@@ -14665,6 +14675,10 @@ msgstr "Con qué se inicia"
 #: src/workflows/item-test.tsx
 msgid "What its calls answer"
 msgstr "Qué responden sus llamadas"
+
+#: src/workflows/kept-state.tsx
+msgid "What its steps keep for later runs, which each run reads as it starts. It uses {used} KB of {cap} KB."
+msgstr "Lo que sus pasos guardan para ejecuciones posteriores, que cada ejecución lee al empezar. Usa {used} KB de {cap} KB."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What its tools do, as its provider declares them. Apps and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."

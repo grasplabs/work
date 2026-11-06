@@ -105,6 +105,7 @@ import type {
   SealedRunKind,
   SentCalls,
 } from "./sealed-run.ts";
+import { snapshotOf } from "./state-snapshots.ts";
 
 // Runs of independent workflows (platform specification 13.1, 14, 24):
 // a start's receipt admits its run, under the receipt's own ID, in the
@@ -284,13 +285,14 @@ export const runOf = async (
     .where(eq(workflowResourceRuns.id, id))
     .get();
 
-/** The input and frozen parameters a run reads from its receipt. */
+/** The input, frozen parameters and state a run reads from its receipt. */
 export const receiptOf = async (env: Env, id: string) =>
   await drizzle(env.DB)
     .select({
       manifestHash: workflowStartReceipts.manifestHash,
       input: workflowStartReceipts.input,
       params: workflowStartReceipts.params,
+      stateHash: workflowStartReceipts.stateHash,
       invokerType: workflowStartReceipts.invokerType,
       invokerId: workflowStartReceipts.invokerId,
     })
@@ -844,9 +846,14 @@ const loadedRun = async (
   if (
     receipt?.manifestHash !== pin.manifest ||
     receipt.input === null ||
-    receipt.params === null
+    receipt.params === null ||
+    receipt.stateHash === null
   ) {
     throw new Error(`Run ${runId}'s receipt doesn't admit it`);
+  }
+  const state = await snapshotOf(env, receipt.stateHash);
+  if (state === undefined) {
+    throw new Error(`Run ${runId}'s snapshot isn't stored`);
   }
   const build = await loadWorkflowBuild(
     env,
@@ -879,6 +886,7 @@ const loadedRun = async (
       principal: row.principalId,
       input: z.json().parse(JSON.parse(receipt.input)),
       params: jsonObjectSchema.parse(JSON.parse(receipt.params)),
+      state,
       createdAt: row.createdAt.getTime(),
       rootRunId: row.rootRunId ?? runId,
       depth: row.depth,

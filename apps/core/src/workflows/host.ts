@@ -1404,6 +1404,14 @@ export interface RunKind {
     cut?: boolean
   ) => Promise<Settled<unknown>>;
   /**
+   * Asked as `attempt`'s step is about to be recorded, its record accepted
+   * (`attemptSettled`) and past every check of the host's, its lease held
+   * and its code done: a sealed run writes what the step keeps in its
+   * workflow's state (sealed-run.ts). The failure it answers fails the
+   * step instead. An App's run records the step as it is.
+   */
+  stepRecording?: (attempt: StepAttempt) => Promise<StepError | undefined>;
+  /**
    * The error `attempt`, of a catch step (`RunHost.caught`), offers its
    * code to decide on, if its catch may take the failure pending; none
    * when it may not, and its code isn't asked.
@@ -2258,6 +2266,12 @@ export class RunHost extends RpcTarget {
         // between the two can't lose it: at least once, as a stop before
         // the result is stored runs the step, and audits it, again.
         if (current) {
+          const refused = await this.#kind.stepRecording?.(attempt);
+          if (refused !== undefined) {
+            failed = refused;
+            this.#kind.attemptFailed?.(attempt, refused);
+            throw toStepError(refused);
+          }
           await this.#audited(step, "completed", { sideEffect });
         }
         return result.value;

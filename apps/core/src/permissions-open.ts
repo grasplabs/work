@@ -32,53 +32,22 @@ const lets = async (check: () => Promise<unknown>): Promise<boolean> => {
   }
 };
 
-/** Who owns a store: an App, or a workflow (`sdk_store_owners`). */
-type StoreOwner = { app: string } | { workflow: string };
-
-/** The owner of each of `stores`, by store. */
+/** The App that owns each of `stores` (`sdk_store_owners`), by store. */
 const storeOwners = async (
   env: Env,
   stores: readonly string[]
-): Promise<Map<string, StoreOwner>> => {
+): Promise<Map<string, string>> => {
   if (stores.length === 0) {
     return new Map();
   }
   const rows = await drizzle(env.DB)
-    .select({
-      store: sdkStoreOwners.storeId,
-      app: sdkStoreOwners.appId,
-      workflow: sdkStoreOwners.workflowId,
-    })
+    .select({ store: sdkStoreOwners.storeId, app: sdkStoreOwners.appId })
     .from(sdkStoreOwners)
     .where(inList(sdkStoreOwners.storeId, [...new Set(stores)]));
+  // A former workflow's store has no App (GRA-1613): it has no owner.
   return new Map(
-    rows.flatMap(({ store, app, workflow }): [string, StoreOwner][] => {
-      if (app !== null) {
-        return [[store, { app }]];
-      }
-      return workflow === null ? [] : [[store, { workflow }]];
-    })
+    rows.flatMap(({ store, app }) => (app === null ? [] : [[store, app]]))
   );
-};
-
-/** The App that owns store `store`, if an App does. */
-const appOwning = (
-  owners: ReadonlyMap<string, StoreOwner>,
-  store: string
-): string | undefined => {
-  const owner = owners.get(store);
-  return owner !== undefined && "app" in owner ? owner.app : undefined;
-};
-
-/** The workflow that owns store `store`, if a workflow does. */
-const workflowOwning = (
-  owners: ReadonlyMap<string, StoreOwner>,
-  store: string
-): string | undefined => {
-  const owner = owners.get(store);
-  return owner !== undefined && "workflow" in owner
-    ? owner.workflow
-    : undefined;
 };
 
 /** Each resource's answer, by its kind and ID, for one listing. */
@@ -86,8 +55,7 @@ type Answers = Map<string, Promise<boolean>>;
 
 /**
  * Whether `by` may see the independent resources `permission` names (its
- * workflow, store or trigger subject; its workflow object, or the workflow
- * that owns its store object): an admin sees
+ * workflow, store or trigger subject; its workflow object): an admin sees
  * every one; anyone else those they have a role in or manage, each as its
  * own registry decides it. Each resource is asked once per listing
  * (`answers`), however many of its permissions are listed, revoked ones
@@ -97,7 +65,6 @@ const resourcesOpen = async (
   env: Env,
   by: Member,
   { subject, object }: Permission,
-  owningWorkflow: string | undefined,
   answers: Answers
 ): Promise<boolean> => {
   if (isAdmin(by.role)) {
@@ -146,14 +113,6 @@ const resourcesOpen = async (
         `workflow:${object.workflowId}`,
         async () =>
           await requireWorkflowRole(env, by, object.workflowId, "user")
-      )
-    );
-  }
-  if (owningWorkflow !== undefined) {
-    checks.push(
-      asked(
-        `workflow:${owningWorkflow}`,
-        async () => await requireWorkflowRole(env, by, owningWorkflow, "user")
       )
     );
   }
@@ -207,10 +166,8 @@ export const permissionsOpenTo = async (
     appsFoundBy(env, by),
     status
   );
-  // A store object names the App or the workflow that owns it
-  // (`listPermissions` lists only those whose App is open or whose
-  // workflow is live): that App must be readable too, and that workflow
-  // open to them (`resourcesOpen`).
+  // A store object names the App that owns it (`listPermissions` lists
+  // only those whose App is open): that App must be readable too.
   const owners = await storeOwners(
     env,
     listed.flatMap(({ object }) =>
@@ -220,9 +177,7 @@ export const permissionsOpenTo = async (
   const named = listed.flatMap(({ subject: of, object }) => [
     ...(of.type === "app" ? [of.appId] : []),
     ...(object.type === "app" ? [object.appId] : []),
-    ...(object.type === "store"
-      ? [appOwning(owners, object.storeId) ?? ""]
-      : []),
+    ...(object.type === "store" ? [owners.get(object.storeId) ?? ""] : []),
   ]);
   const readable = await appsReadableBy(
     env,
@@ -233,20 +188,15 @@ export const permissionsOpenTo = async (
   const answers: Answers = new Map();
   for (const permission of listed) {
     const { subject: of, object } = permission;
-    const ownedBy =
-      object.type === "store"
-        ? workflowOwning(owners, object.storeId)
-        : undefined;
     const appsOpen =
       (of.type !== "app" || readable.has(of.appId)) &&
       (object.type !== "app" || readable.has(object.appId)) &&
       (object.type !== "store" ||
-        ownedBy !== undefined ||
-        readable.has(appOwning(owners, object.storeId) ?? ""));
+        readable.has(owners.get(object.storeId) ?? ""));
     if (
       appsOpen &&
       // oxlint-disable-next-line no-await-in-loop -- each listed permission's own resources
-      (await resourcesOpen(env, by, permission, ownedBy, answers))
+      (await resourcesOpen(env, by, permission, answers))
     ) {
       open.push(permission);
     }

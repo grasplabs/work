@@ -505,14 +505,6 @@ export interface Permission {
    */
   chat: string | null;
   /**
-   * For a store a standalone workflow owns (GRA-682), what each listed
-   * operation reaches, as its owner's current version serves it: its
-   * table, and whether it changes it as well as reading it. Every one of
-   * them reaches every record of its table, whoever owns it: what an
-   * admin consents to. Absent for any other permission.
-   */
-  reach?: StoreReach[];
-  /**
    * For a live trigger holding it, what the trigger is (its kind and what
    * starts it), so whoever decides it knows which trigger asks. Absent for
    * any other permission.
@@ -524,18 +516,6 @@ export interface Permission {
    * is reached. Absent where it names none.
    */
   workflowNames?: Record<string, string>;
-}
-
-/** What one generated operation of a workflow's store reaches. */
-export interface StoreReach {
-  operation: string;
-  table: string;
-  /**
-   * What it does to the table's records: `reads` them (a get or a list),
-   * `adds` records (an insert), or `changes` them, reading them as it does
-   * (a patch).
-   */
-  access: "reads" | "adds" | "changes";
 }
 
 /**

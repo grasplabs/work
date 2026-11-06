@@ -387,9 +387,7 @@ const edgesOf = async (
       // A business store no App owns is a source, not a node: nothing
       // writes into it but whoever holds a grant on it, since a store grant
       // needs a store an App owns (permissions.ts `requireStoreObject`) and
-      // sealing claims the store for its App (`claimStore`). A workflow's
-      // store (store-owners.ts) is one of these until its operations are
-      // served (GRA-682): no grant on it can be asked for yet. Should
+      // sealing claims the store for its App (`claimStore`). Should
       // anything else come to write into one, it must become a node of the
       // graph, so that what one holder wrote reaches the others.
       found

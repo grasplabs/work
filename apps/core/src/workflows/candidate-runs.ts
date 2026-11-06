@@ -57,6 +57,7 @@ import {
   requireWorkflowRole,
 } from "../workflow-resources.ts";
 import { acceptedInput } from "../workflow-starts.ts";
+import { workflowStateOf } from "../workflow-state.ts";
 import { runEngine } from "./engine.ts";
 import type { PinnedCandidateRun } from "./engine.ts";
 import { modelCallLimitOf } from "./host.ts";
@@ -70,6 +71,7 @@ import {
 import type { HostedActivation, ResourceRunMemory } from "./resource-runs.ts";
 import type { EngineStatus } from "./runs.ts";
 import type { HostedResourceRun } from "./sealed-run.ts";
+import { snapshotFrom, snapshotOf, snapshotStored } from "./state-snapshots.ts";
 
 // Test runs of a workflow's draft checkpoint, never published (GRA-815,
 // spec 13.10 and 22.7): a builder runs the exact checkpoint they checked,
@@ -329,6 +331,10 @@ export const startCandidateRun = async (
   );
   const inputText = acceptedInput(JSON.stringify(built.contract.input), given);
   const paramsText = candidateParams(built.contract, params);
+  // What the workflow keeps between its runs, read once and frozen with
+  // the row, as a start's receipt freezes it: the test reads it, and
+  // writes nothing back (sealed-run.ts, `stepRecording`).
+  const snapshot = await snapshotFrom(await workflowStateOf(env, workflow.id));
   const runId = crypto.randomUUID();
   const reservation = reservationOf(workflow.id, runId);
   const manifest = canonicalJson({
@@ -369,6 +375,8 @@ export const startCandidateRun = async (
     await storeBuild(env, { id: reservation, version: 1 }, built.compiled);
     await admit?.();
     await auditedBatch(env, db, [
+      // Its snapshot, before the row that names it.
+      snapshotStored(db, snapshot, createdAt),
       db.insert(workflowCandidateRuns).values({
         id: runId,
         workflowResourceId: allowed,
@@ -380,6 +388,7 @@ export const startCandidateRun = async (
         principalId: by.userId,
         input: inputText,
         params: paramsText,
+        stateHash: snapshot.hash,
         fixtures: canonicalJson(fixtures),
         status: "starting",
         createdAt,
@@ -439,7 +448,7 @@ export const startCandidateRun = async (
 
 /**
  * What an activation of test run `runId` runs, checked against its pin:
- * its row, its build (`loadCandidateBuild`), the input and parameters its
+ * its row, its build (`loadCandidateBuild`), the input, parameters and state its
  * start froze, and a calling context whose every call is answered from its
  * fixtures.
  */
@@ -456,9 +465,14 @@ const loadedCandidateRun = async (
   if (
     row === undefined ||
     row.workflowResourceId !== pin.workflow ||
-    row.manifestHash !== pin.manifest
+    row.manifestHash !== pin.manifest ||
+    row.stateHash === null
   ) {
     throw new Error(`Test run ${runId} doesn't match its record`);
+  }
+  const state = await snapshotOf(env, row.stateHash);
+  if (state === undefined) {
+    throw new Error(`Test run ${runId}'s snapshot isn't stored`);
   }
   if (!unended.includes(row.status)) {
     throw new Error(`Test run ${runId} has ended: ${row.status}`);
@@ -492,6 +506,7 @@ const loadedCandidateRun = async (
       principal: row.principalId,
       input: z.json().parse(JSON.parse(row.input)),
       params: jsonObjectSchema.parse(JSON.parse(row.params)),
+      state,
       createdAt: row.createdAt.getTime(),
       build,
       calling: {
