@@ -263,15 +263,21 @@ export type ProvisionStep = (typeof provisionSteps)[number];
 
 /**
  * The step an operation left running stopped in: the one after the last
- * it finished (`step`, null before the first).
+ * it finished (`step`, null before the first). A recorded step this
+ * release doesn't have (records are never rewritten) is named as it was
+ * recorded: where it stopped can't be told past it.
  */
-export const stepReached = (step: string | null): ProvisionStep => {
+export const stepReached = (step: string | null): string => {
   const steps: readonly (string | null)[] = provisionSteps;
-  return provisionSteps[steps.indexOf(step) + 1] ?? "route";
+  const done = steps.indexOf(step);
+  if (step !== null && done === -1) {
+    return step;
+  }
+  return provisionSteps[done + 1] ?? "route";
 };
 
 /** What a lost attempt is recorded as: its code and the step it reached. */
-export const attemptLostCode = (step: ProvisionStep): string =>
+export const attemptLostCode = (step: string): string =>
   `attempt_lost: ${step}`;
 
 /** What an attempt that finds the one before it lost audits. */

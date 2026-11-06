@@ -326,7 +326,8 @@ const stopCodeOf = async (
 
 const lostDetailSchema = z.object({
   run: z.string(),
-  step: z.enum(provisionSteps),
+  // Any name, as recorded: a release may since have dropped the step.
+  step: z.string(),
 });
 
 /**

@@ -159,6 +159,34 @@ describe("the company pages, in the admin", () => {
     });
   });
 
+  it("names a stopped operation's last step as recorded when this release has no such step, and still shows its Setup", async () => {
+    const release = await importedRelease("feat(core): dropped a step");
+    const client = await recordClient("active", release);
+    const now = new Date();
+    // Recorded by a release that had a step this one doesn't: records are
+    // never rewritten.
+    await db.insert(clientProvisions).values({
+      id: crypto.randomUUID(),
+      clientId: client.id,
+      releaseId: release,
+      status: "running",
+      step: "ignition",
+      runId: `deploy-${crypto.randomUUID().slice(0, 8)}`,
+      startedBy: "system",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const { status, html } = await setupOf(client.id);
+
+    expect({
+      status,
+      named: html.includes(
+        "A try stopped in its ignition step without recording why"
+      ),
+    }).toStrictEqual({ status: 200, named: true });
+  });
+
   it("says why a later run stopped by its own losses, not by an earlier deploy's failure", async () => {
     const release = await importedRelease("feat(core): failed, then applied");
     const client = await recordClient("active", release);
