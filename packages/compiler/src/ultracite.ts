@@ -40,11 +40,6 @@ export interface Ultracite {
    * build says why.
    */
   lintCode: (files: Record<string, string>) => Record<string, Diagnostic[]>;
-  /**
-   * oxc's parser, on the same instance (oxc.ts `Oxc.parse`): what the
-   * isolate's ESLint lints parse with (eslint-parser.ts).
-   */
-  parse: (path: string, source: string) => string;
 }
 
 /**
@@ -108,7 +103,6 @@ export const ultraciteOf = (
     }
   };
   return {
-    parse: oxc.parse,
     tidy: (files) => {
       let answered = 0;
       return Object.fromEntries(

@@ -264,22 +264,16 @@ export const keepModules = async (
 };
 
 /** Where the lint of `path` (`source`) is kept (`lintKey`). */
-const lintCacheKey = async (
-  path: string,
-  source: string,
-  designContext: string
-): Promise<string> =>
-  await cacheKeyOf("lint", [await lintKey(path, source, designContext)]);
+const lintCacheKey = async (path: string, source: string): Promise<string> =>
+  await cacheKeyOf("lint", [await lintKey(path, source)]);
 
 /**
  * What earlier lints found in each of `files` (by path) whose result is
- * kept under the key of its content and, for a page or a component, of
- * the App's others (`designContext`): the rest are linted again.
+ * kept under the key of its content: the rest are linted again.
  */
 export const readLints = async (
   env: CacheEnv,
-  files: Readonly<Record<string, string>>,
-  designContext: string
+  files: Readonly<Record<string, string>>
 ): Promise<Record<string, Diagnostic[]>> => {
   const found: Record<string, Diagnostic[]> = {};
   await mapConcurrently(
@@ -287,7 +281,7 @@ export const readLints = async (
     concurrency,
     async ([path, source]) => {
       const record = lintRecordOf(
-        await readJson(env, await lintCacheKey(path, source, designContext)),
+        await readJson(env, await lintCacheKey(path, source)),
         path
       );
       if (record !== undefined) {
@@ -302,7 +296,6 @@ export const readLints = async (
 export const keepLints = async (
   env: CacheEnv,
   files: Readonly<Record<string, string>>,
-  designContext: string,
   linted: Readonly<Record<string, Diagnostic[]>>
 ): Promise<void> => {
   await mapConcurrently(
@@ -313,7 +306,7 @@ export const keepLints = async (
       if (source !== undefined) {
         await writeCache(
           env,
-          await lintCacheKey(path, source, designContext),
+          await lintCacheKey(path, source),
           JSON.stringify({ path, diagnostics })
         );
       }

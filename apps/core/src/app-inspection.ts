@@ -11,6 +11,7 @@ import type { AppManifest } from "@grasp-os/sdk/host";
 import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
+import { originalPositionFor, TraceMap } from "@jridgewell/trace-mapping";
 
 import { cacheKeyOf, inOrder, readCache, throughCache } from "./build-cache.ts";
 import { hostModules } from "./host-modules.ts";
@@ -82,13 +83,41 @@ const withoutStack = (message: string): string =>
 /** A frame of a stack trace in one of the App's modules: `app~app.js:12:5`. */
 const appFrame = /\b(?<module>app~[^\s:()]+\.js):(?<line>\d+):(?<column>\d+)/u;
 
+/** The source map a module of the App's server code ends with (the compiler's worker.ts). */
+const inlineMap =
+  /\n\/\/# sourceMappingURL=data:application\/json;charset=utf-8;base64,(?<map>[A-Za-z0-9+/=]+)\n?$/u;
+
+/**
+ * The line of the App's file that `line` and `column` (1-based) of its
+ * compiled module `code` stand for, read through the source map the
+ * module ends with; undefined when it has none, or maps nothing there.
+ */
+const sourceLine = (
+  code: string,
+  line: number,
+  column: number
+): number | undefined => {
+  const map = inlineMap.exec(code)?.groups?.map;
+  if (map === undefined) {
+    return undefined;
+  }
+  const json = new TextDecoder().decode(
+    Uint8Array.from(atob(map), (char) => char.codePointAt(0) ?? 0)
+  );
+  const found = originalPositionFor(new TraceMap(json), {
+    line,
+    column: column - 1,
+  });
+  return found.line ?? undefined;
+};
+
 /**
  * Where in the App's own files `error` was thrown, by the first frame of
  * its stack (or of its message, which carries the stack when it crossed
- * from the sandbox host) in one of `modules`: their lines are the
- * source's (`retainLines`, the compiler's compile.ts), so the line is the
- * file's; the column is the compiled code's, so it is left out. Nothing
- * when no frame names one of them.
+ * from the sandbox host) in one of `modules`: its place in the module,
+ * read back to the file's line through the module's source map; the
+ * module's line should it have none. Nothing when no frame names one of
+ * them.
  */
 const thrownAt = (
   error: unknown,
@@ -103,7 +132,13 @@ const thrownAt = (
     if (frame?.module !== undefined && Object.hasOwn(modules, frame.module)) {
       // Server code is TypeScript (`.ts`), each folder a `~` in its name.
       const file = `${frame.module.slice("app~".length, -".js".length).replaceAll("~", "/")}.ts`;
-      return { file, line: Number(frame.line) };
+      const line = Number(frame.line);
+      return {
+        file,
+        line:
+          sourceLine(modules[frame.module] ?? "", line, Number(frame.column)) ??
+          line,
+      };
     }
   }
   return {};

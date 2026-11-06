@@ -3,16 +3,17 @@
  * per build). It has no bindings and no network: it reads the files it is
  * given and what it knows of the kit, nothing else.
  *
- * Each App file becomes one ES module: Babel runs the React Compiler,
- * strips types and turns JSX into calls, then points imports at flat module
- * names (see kit.ts). There is no bundler: the kit's modules are built once
- * per release and shared by every App, and a build says which of them, and
- * which of the App's own, each page loads. The App is type-checked
- * whatever the compile found, so a build names everything there is to fix
- * at once (its lint, the design system's included, is a check of its
- * own: ultracite.ts); once it all passes,
- * Tailwind compiles the CSS for the classes in the App's sources and in the
- * kit modules it loads.
+ * Each App file becomes one ES module: oxc runs the React Compiler,
+ * strips types and turns JSX into calls (oxc.wasm, compile.ts), then its
+ * imports are pointed at flat module names (imports.ts, kit.ts). There is
+ * no bundler: the kit's modules are built once per release and shared by
+ * every App, and a build says which of them, and which of the App's own,
+ * each page loads. The App is type-checked, and its classes checked
+ * against the kit's design system (classes.ts), whatever the compile
+ * found, so a build names everything there is to fix at once (its lint is
+ * a check of its own: ultracite.ts); once it all passes, Tailwind compiles
+ * the CSS for the classes in the App's sources and in the kit modules it
+ * loads.
  */
 import { packageEntrySchema } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -38,17 +39,12 @@ import {
 import { assertNoBindings } from "./authority.ts";
 import { extractCandidates } from "./candidates.ts";
 import type { TypeCheckPlan, Unchecked } from "./checked-build.ts";
-import {
-  compileModule,
-  refreshNames,
-  stripTypes,
-  transformModule,
-} from "./compile.ts";
+import { classProblems, classSitesOf } from "./classes.ts";
+import type { ClassSite } from "./classes.ts";
+import { compileReact, refreshNames, stripTypes } from "./compile.ts";
 import { isError } from "./diagnostic.ts";
 import type { Diagnostic } from "./diagnostic.ts";
 import {
-  collectDirectives,
-  collectImports,
   declarationValueImportError,
   importError,
   codeImportError,
@@ -59,6 +55,7 @@ import {
   generatedWorkflowCode,
   rewriteImports,
   pageTypeImportError,
+  importSitesOf,
 } from "./imports.ts";
 import type { CodeKind, ImportSite, ModuleImports } from "./imports.ts";
 import {
@@ -73,7 +70,7 @@ import type {
   IncrementalBuild,
   ModuleRecord,
 } from "./increments.ts";
-import { collectApiCalls, collectIndexReads } from "./index-uses.ts";
+import { apiCallsOf, indexReadsOf } from "./index-uses.ts";
 import type { IndexRead } from "./index-uses.ts";
 import {
   appCodeLimitErrors,
@@ -82,6 +79,7 @@ import {
   limitErrors,
   computeModuleErrors,
   generatedWorkflowErrors,
+  isDesignLinted,
   routeTreePath,
 } from "./inputs.ts";
 import {
@@ -96,19 +94,27 @@ import {
   pageRuntime,
 } from "./kit.ts";
 import { addressModules } from "./module-addresses.ts";
+import { startOxc } from "./oxc.ts";
+import type { Transformed } from "./oxc.ts";
+import oxcWasm from "./oxc.wasm";
 import { problem, pageRefusals, strayProblems } from "./refusals.ts";
 import type { Location } from "./refusals.ts";
 import { routeTree } from "./route-tree.ts";
 import type { SurfaceManifest } from "./route-tree.ts";
 import { callbackParameters, readsStandIns } from "./stand-ins.ts";
-import { referenceError } from "./steering.ts";
+import { directivesIn, referenceError } from "./steering.ts";
 import type { DirectiveSite } from "./steering.ts";
+import { parsed } from "./syntax.ts";
 import {
   appCodeTarget,
   computeTarget,
   pageTarget,
   typeCheckRequest,
 } from "./type-check.ts";
+
+// oxc's parser and transform, started once per isolate: oxc.wasm is
+// compiled as the isolate loads, and an instance kept for every build.
+startOxc(oxcWasm);
 
 /**
  * What a frame loads to run an App's pages, by flat name: of the App's
@@ -149,51 +155,8 @@ export type PageBuild =
       calls?: Record<string, string[]>;
     };
 
-/** The line a React Compiler error points at in its code frame: `> 3 |`. */
-const framedLine = /^> *(?<line>\d+) \|/mu;
-
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
-
-/** Where Babel says an error is: its syntax errors carry `loc`, columns from 0. */
-const locationOf = (error: unknown): Location => {
-  if (typeof error !== "object" || error === null || !("loc" in error)) {
-    return {};
-  }
-  const { loc } = error;
-  if (
-    typeof loc !== "object" ||
-    loc === null ||
-    !("line" in loc) ||
-    !("column" in loc)
-  ) {
-    return {};
-  }
-  const { line, column } = loc;
-  return typeof line === "number" && typeof column === "number"
-    ? { line, column: column + 1 }
-    : {};
-};
-
-/** Where a compile error is: Babel's location, or the React Compiler's line. */
-const compileErrorAt = (error: unknown, message: string): Location => {
-  const located = locationOf(error);
-  const line = framedLine.exec(message)?.groups?.line;
-  return located.line === undefined && line !== undefined
-    ? { line: Number(line) }
-    : located;
-};
-
-/**
- * Whether Babel's parser refused the source: @babel/core marks what its
- * parser threw `BABEL_PARSE_ERROR`. The file has no syntax tree, so
- * nothing checked past the break is to be trusted. Never a React Compiler
- * error, nor any other of a file that parsed.
- */
-const parseFailed = (error: unknown): boolean =>
-  typeof error === "object" &&
-  error !== null &&
-  Reflect.get(error, "code") === "BABEL_PARSE_ERROR";
 
 /** A compile error's message, in words for whoever fixes the file. */
 const compileMessage = (message: string): string =>
@@ -202,11 +165,35 @@ const compileMessage = (message: string): string =>
     : message;
 
 /**
- * An error's message without the file Babel names in it (as `/<path>`):
- * the diagnostic names it on its own.
+ * Why `transformed` (`file`) failed, each error where it is: a syntax
+ * error, or what the React Compiler refuses, with how to fix it when it
+ * says. A file that doesn't parse is added to `unparsed`.
  */
-const messageIn = (path: string, error: unknown): string =>
-  messageOf(error).replace(`/${path}: `, "").replace(`${path}: `, "");
+const transformErrors = (
+  file: string,
+  transformed: Transformed,
+  unparsed: Set<string>
+): Diagnostic[] => {
+  if (!transformed.parsed) {
+    unparsed.add(file);
+  }
+  return transformed.errors.map(({ message, help, line, column }) => ({
+    ...problem("compile", compileMessage(message), {
+      file,
+      ...(line === undefined ? {} : { line }),
+      ...(column === undefined ? {} : { column }),
+    }),
+    ...(help === undefined ? {} : { fix: help }),
+  }));
+};
+
+/** What `transformed` names of modules, and its directives to the type check. */
+const sitesOf = (
+  transformed: Transformed
+): { imports: ImportSite[]; directives: DirectiveSite[] } => ({
+  imports: importSitesOf(transformed),
+  directives: directivesIn(transformed.comments),
+});
 
 /**
  * What a preview build's module starts with (spec 19.2.1): the names the
@@ -258,38 +245,23 @@ const compileFile = (
   { unparsed, untyped }: { unparsed: Set<string>; untyped: Set<string> },
   refresh = false
 ):
-  | { code: string; imported: ModuleImports; calls: Set<string> }
-  | { errors: Diagnostic[]; calls: string[] } => {
-  const imports: ImportSite[] = [];
-  const directives: DirectiveSite[] = [];
-  const calls = new Set<string>();
-  let compiled: string;
-  try {
-    compiled = compileModule(
-      source,
-      path,
-      [
-        collectImports(imports),
-        collectDirectives(directives),
-        collectApiCalls(calls),
-      ],
-      { refresh }
-    );
-  } catch (error) {
-    if (parseFailed(error)) {
-      unparsed.add(path);
+  | {
+      code: string;
+      imported: ModuleImports;
+      calls: string[];
+      classes: ClassSite[];
     }
-    const message = messageIn(path, error);
-    return {
-      calls: [],
-      errors: [
-        problem("compile", compileMessage(message), {
-          file: path,
-          ...compileErrorAt(error, message),
-        }),
-      ],
-    };
+  | { errors: Diagnostic[]; calls: string[] } => {
+  const transformed = compileReact(path, source, { refresh });
+  // What it calls and the classes it writes, read from its syntax tree:
+  // what it calls is read even when it doesn't compile, as far as it
+  // parses.
+  const tree = transformed.parsed ? parsed(path, source) : undefined;
+  const calls = apiCallsOf(tree);
+  if (transformed.code === null) {
+    return { errors: transformErrors(path, transformed, unparsed), calls };
   }
+  const { imports, directives } = sitesOf(transformed);
   const errors = referenceErrors(path, directives, typeFiles);
   const declarations = new Set(
     [...typeFiles].filter((typeFile) => declarationFile.test(typeFile))
@@ -314,24 +286,28 @@ const compileFile = (
     }
   }
   if (errors.length > 0) {
-    return { errors, calls: [...calls].toSorted() };
+    return { errors, calls };
   }
   const imported: ModuleImports = { app: new Set(), kit: new Set() };
   try {
-    const code = transformModule(compiled, path, [
-      rewriteImports(path, files, kit, imported),
-    ]);
+    const code = rewriteImports(transformed.code, path, files, kit, imported);
+    const classes = isDesignLinted(path) ? classSitesOf(tree) : [];
     if (!refresh) {
-      return { code, imported, calls };
+      return { code, imported, calls, classes };
     }
     imported.kit.add(kitModuleName(previewRefresh));
-    return { code: `${refreshHeader(path)}${code}`, imported, calls };
+    return {
+      code: `${refreshHeader(path)}${code}`,
+      imported,
+      calls,
+      classes,
+    };
   } catch (error) {
     // An import only the compiled code makes, refused: its JSX runtime.
     untyped.add(path);
     return {
-      errors: [problem("imports", messageIn(path, error), { file: path })],
-      calls: [...calls].toSorted(),
+      errors: [problem("imports", messageOf(error), { file: path })],
+      calls,
     };
   }
 };
@@ -347,20 +323,11 @@ const declarationImportErrors = (
   typeFiles: ReadonlySet<string>,
   unparsed: Set<string>
 ): Diagnostic[] => {
-  const imports: ImportSite[] = [];
-  const directives: DirectiveSite[] = [];
-  try {
-    stripTypes(source, path, [
-      collectImports(imports),
-      collectDirectives(directives),
-    ]);
-  } catch (error) {
-    if (parseFailed(error)) {
-      unparsed.add(path);
-    }
-    const message = messageIn(path, error);
-    return [problem("compile", message, { file: path, ...locationOf(error) })];
+  const transformed = stripTypes(path, source);
+  if (transformed.code === null) {
+    return transformErrors(path, transformed, unparsed);
   }
+  const { imports, directives } = sitesOf(transformed);
   return [
     ...referenceErrors(path, directives, typeFiles),
     ...imports.flatMap((site) => {
@@ -409,7 +376,8 @@ const transformSource = (
         path === pageReferences.path || path === routeTreePath
           ? []
           : extractCandidates(source),
-      calls: [...result.calls].toSorted(),
+      calls: result.calls,
+      classes: result.classes,
     },
   };
 };
@@ -556,9 +524,9 @@ const pagesCheck = (
  * is the preview kit's. Every gate is the same.
  *
  * Without `checks`, for a preview's frame only (`preview-frame`), the
- * type check doesn't run: it holds up nothing the frame needs, and the
- * agent hears it from its own check of the draft (`preview-pages`,
- * which has it). Neither is a boundary: what a
+ * type check and the class checks don't run: they hold up nothing the
+ * frame needs, and the agent hears them from its own check of the draft
+ * (`preview-pages`, which has them). Neither is a boundary: what a
  * file may import is held at its compile, which runs either way, and the
  * frame's sandbox and policy hold whatever the code does.
  *
@@ -616,6 +584,7 @@ export const buildPagesIncrementally = async (
   const imports = new Map<string, ModuleImports>();
   const candidates: string[] = [];
   const calls: Record<string, string[]> = {};
+  const records: ModuleRecord[] = [];
   const errors: Diagnostic[] = [];
   // The files the parser refused, whose checks past the break are guesses.
   const unparsed = new Set<string>();
@@ -645,6 +614,7 @@ export const buildPagesIncrementally = async (
     if (record.calls.length > 0) {
       calls[record.path] = record.calls;
     }
+    records.push(record);
   };
   for (const [path, source, key] of keyed) {
     // A transform is reused only under the key this build works out for
@@ -690,6 +660,14 @@ export const buildPagesIncrementally = async (
       take(compiledTree.record);
     } else {
       errors.push(...compiledTree.errors);
+    }
+  }
+  // The design system's checks of every class the pages write, beside
+  // the type check, which a preview's frame skips too (`checks`).
+  if (checks) {
+    for (const record of records) {
+      // oxlint-disable-next-line no-await-in-loop -- the design system loads once, then each is quick
+      errors.push(...(await classProblems(record.path, record.classes)));
     }
   }
   // The App's declarations aren't modules, but they name modules for
@@ -757,22 +735,12 @@ const compileCodeFile = (
   files: ReadonlySet<string>,
   typeFiles: ReadonlySet<string>
 ): { code: string } | { errors: Diagnostic[] } => {
-  const imports: ImportSite[] = [];
-  const directives: DirectiveSite[] = [];
-  let compiled: string;
-  try {
-    compiled = stripTypes(source, path, [
-      collectImports(imports),
-      collectDirectives(directives),
-    ]);
-  } catch (error) {
-    const message = messageIn(path, error);
-    return {
-      errors: [
-        problem("compile", message, { file: path, ...locationOf(error) }),
-      ],
-    };
+  const transformed = stripTypes(path, source);
+  if (transformed.code === null) {
+    return { errors: transformErrors(path, transformed, new Set()) };
   }
+  const compiled = transformed.code;
+  const { imports, directives } = sitesOf(transformed);
   // What would steer the type check of code whose types are checked
   // (`buildComputeModules`) rather than be checked by it: a triple-slash
   // directive reaches the whole program (a module's
@@ -810,14 +778,10 @@ const compileCodeFile = (
     return { errors: [...steering, ...errors] };
   }
   try {
-    return {
-      code: transformModule(compiled, path, [
-        rewriteCodeImports(kind, path, files),
-      ]),
-    };
+    return { code: rewriteCodeImports(compiled, kind, path, files) };
   } catch (error) {
     return {
-      errors: [problem("imports", messageIn(path, error), { file: path })],
+      errors: [problem("imports", messageOf(error), { file: path })],
     };
   }
 };
@@ -1006,26 +970,15 @@ const compileAppCodeFile = (
   /** Where the indexes its functions read are listed. */
   reads: IndexRead[] = []
 ): { code: string } | { errors: Diagnostic[] } => {
-  const imports: ImportSite[] = [];
-  const directives: DirectiveSite[] = [];
-  let compiled: string;
-  try {
-    compiled = stripTypes(source, path, [
-      collectImports(imports),
-      collectDirectives(directives),
-      collectIndexReads(path, reads),
-    ]);
-  } catch (error) {
-    if (parseFailed(error)) {
-      unparsed.add(path);
-    }
-    const message = messageIn(path, error);
-    return {
-      errors: [
-        problem("compile", message, { file: path, ...locationOf(error) }),
-      ],
-    };
+  // With its source map, so a stack trace of the module is read back to
+  // the line of the file to fix (core's app-inspection.ts).
+  const transformed = stripTypes(path, source, { sourceMap: true });
+  if (transformed.code === null) {
+    return { errors: transformErrors(path, transformed, unparsed) };
   }
+  reads.push(...indexReadsOf(path, parsed(path, source)));
+  const { code: compiled, map } = transformed;
+  const { imports, directives } = sitesOf(transformed);
   // What would steer the type check (`checkAppCode`) rather than be
   // checked by it: a triple-slash directive reaches the whole program (a
   // migration's `/// <reference lib="dom" />` would give every operation
@@ -1070,17 +1023,14 @@ const compileAppCodeFile = (
     return { errors: [...steering, ...errors] };
   }
   try {
+    // Pointing imports elsewhere changes no line, so the map holds.
+    const code = rewriteAppCodeImports(compiled, path, files);
     return {
-      code: transformModule(
-        compiled,
-        path,
-        [rewriteAppCodeImports(path, files)],
-        { retainLines: true }
-      ),
+      code: map === undefined ? code : `${code}\n//# sourceMappingURL=${map}\n`,
     };
   } catch (error) {
     return {
-      errors: [problem("imports", messageIn(path, error), { file: path })],
+      errors: [problem("imports", messageOf(error), { file: path })],
     };
   }
 };

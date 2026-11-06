@@ -117,8 +117,8 @@ export const isPageFile = (path: string): boolean =>
 export const rootPage = `${pagesFolder}__root.tsx`;
 
 /**
- * Whether the design system's lint reads `path` (lint.ts): a page or
- * anything else of the App's front end, not a declaration.
+ * Whether the design system's checks read `path`'s classes (classes.ts):
+ * a page or anything else of the App's front end, not a declaration.
  */
 export const isDesignLinted = (path: string): boolean =>
   isLintedCode(path) && sourceCode.isFile(path);

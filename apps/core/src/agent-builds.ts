@@ -1641,7 +1641,7 @@ interface Build {
     file: string | null;
     line: number | null;
     column?: number;
-    /** A TypeScript code (TS2322), a lint rule (shadcn/no-restyle) or a compiler stage. */
+    /** A TypeScript code (TS2322), a lint rule (no-debugger), a class check (design/no-restyle) or a compiler stage. */
     rule?: string;
     severity: "error" | "warning";
     message: string;

@@ -20,7 +20,7 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-/** A page whose button is restyled, which @shadcn/lint refuses. */
+/** A page whose button is restyled, which the design system's class checks refuse. */
 const restyled = `import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@grasp-os/ui/components/button";
 

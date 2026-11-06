@@ -1,4 +1,4 @@
-import { designRuleLevels } from "./design-rules.ts";
+import { pageRuleNames } from "./page-rules.ts";
 
 /**
  * A problem the compiler found in an App's files, for whoever fixes them
@@ -13,7 +13,8 @@ export interface Diagnostic {
   column?: number;
   /**
    * What found it: a TypeScript error code (`TS2322`), a lint rule
-   * (`shadcn/no-restyle`), or a compiler stage (`imports`, `compile`).
+   * (`no-debugger`), a class check (`design/no-restyle`), or a compiler
+   * stage (`imports`, `compile`).
    */
   rule: string;
   severity: "error" | "warning";
@@ -26,11 +27,12 @@ export const isError = (diagnostic: Diagnostic): boolean =>
   diagnostic.severity === "error";
 
 /**
- * Whether `rule` is the design system's (lint.ts): @shadcn/lint's, or
- * one of Grasp's own (design-rules.ts).
+ * Whether `rule` is the design system's: a check of the classes a page
+ * writes (classes.ts), or one of the pages' own lint rules
+ * (page-rules.ts).
  */
 export const isDesignRule = (rule: string): boolean =>
-  rule.startsWith("shadcn/") || Object.hasOwn(designRuleLevels, rule);
+  rule.startsWith("design/") || pageRuleNames.has(rule);
 
 /** What TypeScript names its diagnostics by: `TS` and its code. */
 const typeCode = /^TS\d+$/u;

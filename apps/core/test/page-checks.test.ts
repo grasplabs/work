@@ -1,4 +1,5 @@
 import {
+  isDesignRule,
   startAppCompiler,
   startTypeChecker,
   startUltracite,
@@ -136,28 +137,33 @@ const withLine = (from: string, to: string): Record<string, string> => {
   return { "src/routes/index.tsx": page.replace(from, to) };
 };
 
-/** What the design system's rules are named by: @shadcn/lint's and Grasp's own. */
-const designRule = /^(?:shadcn|grasp)\//u;
-
 /**
- * What the design system's lint finds in `files`, in the lint's isolate
- * (Ultracite's `lint`), with `beside` on disk, and whether it passes.
+ * What the pages' own lint rules (the compiler's page-rules.ts) find in
+ * `files`, in the lint's isolate (Ultracite's `lint`), and whether it
+ * passes.
  */
 const designLint = async (
-  files: Record<string, string>,
-  beside?: Record<string, string>
+  files: Record<string, string>
 ): Promise<{ ok: boolean; diagnostics: Diagnostic[] }> => {
-  const linted = await startUltracite(env.LOADER, env.ASSETS).lint(
-    files,
-    beside
-  );
+  const linted = await startUltracite(env.LOADER, env.ASSETS).lint(files);
   const diagnostics = Object.keys(linted)
     .toSorted()
     .flatMap((path) => linted[path] ?? [])
-    .filter(({ rule }) => designRule.test(rule));
+    .filter(({ rule }) => isDesignRule(rule));
   return {
     ok: diagnostics.every(({ severity }) => severity !== "error"),
     diagnostics,
+  };
+};
+
+/** What a checked build of `files`' pages says of their classes (the compiler's classes.ts). */
+const classChecks = async (
+  files: Record<string, string>
+): Promise<{ ok: boolean; diagnostics: Diagnostic[] }> => {
+  const built = await buildPages(env, files, "app-test");
+  return {
+    ok: built.ok,
+    diagnostics: built.diagnostics.filter(({ rule }) => isDesignRule(rule)),
   };
 };
 
@@ -272,13 +278,13 @@ export const Route = createFileRoute("/server")({ component: Server });
       built.diagnostics.map((diagnostic) => summary(diagnostic))
     ).toStrictEqual([
       expect.stringMatching(
-        /^src\/routes\/index\.tsx:26:40 compile error: Unexpected token/u
+        /^src\/routes\/index\.tsx:26:40 compile error: Expected `,` or `\]` but found `;`/u
       ),
     ]);
     expect(built.diagnostics[0]?.rule).toBe("compile");
   });
 
-  it("fails a compile error and a type error in one build, none hiding another, and leaves a restyle to the lint", async () => {
+  it("fails a compile error and a type error in one build, none hiding another, the classes of what compiles checked", async () => {
     const built = await buildPages(
       env,
       app({
@@ -410,11 +416,11 @@ export const Route = createFileRoute("/writer")({ component: Writer });
   });
 });
 
-// The design system's lint (packages/compiler/src/lint.ts), part of the
-// lint's isolate's: what it finds blocks a proposal, never a build or a
-// preview (agent-builds.test.ts, draft-proposals.test.ts).
-describe("the design system's lint", { timeout: 60_000 }, () => {
-  it("passes the build and the preview of a page it fails", async () => {
+// The design system's checks of a page's classes, in its build's Tailwind
+// step (packages/compiler/src/classes.ts): they fail the checked builds,
+// as the type check does, never the preview's frame.
+describe("the design system's class checks", { timeout: 60_000 }, () => {
+  it("fails the checked builds of a restyled kit component, never the preview's frame", async () => {
     const files = app(
       withLine(
         `<Button size="sm">`,
@@ -422,202 +428,168 @@ describe("the design system's lint", { timeout: 60_000 }, () => {
       )
     );
 
-    const [built, previewed, linted] = await Promise.all([
+    const [built, checked, framed] = await Promise.all([
       buildPages(env, files, "app-test"),
       buildPages(env, files, "app-test", { profile: "preview" }),
-      designLint(files),
+      buildPages(env, files, "app-test", { profile: "preview", checks: false }),
     ]);
 
     expect({
       built: built.ok,
-      previewed: previewed.ok,
-      linted: linted.diagnostics.map(({ file, rule }) => `${file} ${rule}`),
+      checked: checked.ok,
+      framed: framed.ok,
+      found: built.diagnostics
+        .filter(({ rule }) => isDesignRule(rule))
+        .map(({ file, rule }) => `${file} ${rule}`),
     }).toStrictEqual({
-      built: true,
-      previewed: true,
-      linted: ["src/routes/index.tsx shadcn/no-restyle"],
+      built: false,
+      checked: false,
+      framed: true,
+      found: ["src/routes/index.tsx design/no-restyle"],
     });
   });
 
-  it("names a restyle in a page that neither compiles nor type-checks", async () => {
-    const linted = await designLint({
-      "src/routes/when.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { useState } from "react";
-import { Button } from "@grasp-os/ui/components/button";
-
-function When() {
-  const open = window.innerWidth > 0;
-  if (open) {
-    useState(0);
-  }
-  const wrong: number = "one";
-  return <Button className="rounded-full">{wrong}</Button>;
-}
-export const Route = createFileRoute("/when")({ component: When });
-`,
-    });
-
-    expect(
-      linted.diagnostics.map(({ file, rule }) => `${file} ${rule}`)
-    ).toStrictEqual(["src/routes/when.tsx shadcn/no-restyle"]);
-  });
-
-  it("reads a component of the App's own that wraps the kit's, from another call's files", async () => {
-    const wrapper = `import { Button } from "@grasp-os/ui/components/button";
-import type { ComponentProps } from "react";
-
-export const Action = (props: ComponentProps<typeof Button>) => <Button {...props} />;
-`;
-    const page = `import { createFileRoute } from "@tanstack/react-router"; import { Action } from "../components/action";
-
-function Act() {
-  return <Action className="rounded-full">Go</Action>;
-}
-export const Route = createFileRoute("/")({ component: Act });
-`;
-
-    const linted = await designLint(
-      { "src/routes/act.tsx": page },
-      { "src/routes/act.tsx": page, "src/components/action.tsx": wrapper }
-    );
-
-    expect(
-      linted.diagnostics.map(({ file, rule }) => `${file} ${rule}`)
-    ).toStrictEqual(["src/routes/act.tsx shadcn/no-restyle"]);
-  });
-
-  it("fails a restyled component, naming its variants and sizes", async () => {
-    const linted = await designLint(
+  it("fails a restyled component where it is, naming what it owns and its variants", async () => {
+    const checked = await classChecks(
       app(
         withLine(
           `<Button size="sm">`,
-          `<Button size="sm" className="rounded-full px-8">`
+          `<Button size="sm" className="mt-2 rounded-full px-8">`
         )
       )
     );
 
-    expect(linted.ok).toBeFalsy();
+    expect(checked.ok).toBeFalsy();
     expect(
-      linted.diagnostics.map((diagnostic) => summary(diagnostic))
+      checked.diagnostics.map((diagnostic) => summary(diagnostic))
     ).toStrictEqual([
       expect.stringContaining(
-        'src/routes/index.tsx:44:41 shadcn/no-restyle error: "rounded-full" is not allowed on <Button>: <Button> owns its shape. Use a variant: default, outline, secondary, ghost, destructive, link, hint, ask, highlight.'
+        'src/routes/index.tsx:44:47 design/no-restyle error: "rounded-full" is not allowed on <Button>: <Button> owns its shape. Pick one of its variants instead: variant (default, outline, secondary, ghost, destructive, link, hint, ask, highlight); size (default, xs, sm, lg, xl, icon, icon-xs, icon-sm, icon-lg, inline).'
       ),
       expect.stringContaining(
-        'src/routes/index.tsx:44:41 shadcn/no-restyle error: "px-8" is not allowed on <Button>: <Button> owns its spacing. Use a size (default, xs, sm, lg, xl, icon, icon-xs, icon-sm, icon-lg, inline)'
+        'src/routes/index.tsx:44:60 design/no-restyle error: "px-8" is not allowed on <Button>: <Button> owns its spacing.'
       ),
     ]);
   });
 
-  it("knows the kit's own classes and reads disable comments as oxlint does, as an exported App's lint does", async () => {
+  it("knows the kit's own classes, and names the nearest of a misspelt one", async () => {
+    const checked = await classChecks(
+      app({
+        "src/components/kit-classes.tsx": `import { cn } from "@grasp-os/ui/lib/utils";
+
+export const KitClasses = ({ on }: { on: boolean }) => (
+  <p className={cn("flex animate-in fade-in ease-house type-display group", on && "itmes-center")}>
+    Kit
+  </p>
+);
+`,
+      })
+    );
+    // Wherever a class goes: kept in a variable through \`cn\`, an object's
+    // keys, a template's text and its branches.
+    const elsewhere = await classChecks(
+      app({
+        "src/components/tones.tsx": `import { cn } from "@grasp-os/ui/lib/utils";
+
+const tone = cn("flex no-such-base", { "no-such-key": true });
+
+export const Tone = ({ on }: { on: boolean }) => (
+  <span className={\`\${tone} inline-flex \${on ? "gap-1" : "no-such-branch"}\`}>
+    Tone
+  </span>
+);
+`,
+      })
+    );
+
+    // The theme's \`ease-house\`, tw-animate-css's \`animate-in\` and
+    // \`fade-in\` and the kit's own \`type-display\` are classes the kit
+    // has, and \`group\` marks an element for its children's variants.
+    expect(
+      checked.diagnostics.map(({ rule, message, fix }) => ({
+        rule,
+        message,
+        fix,
+      }))
+    ).toStrictEqual([
+      {
+        rule: "design/no-unknown-classes",
+        message:
+          '"itmes-center" is not a class the kit\'s Tailwind knows, so no CSS is generated for it. Did you mean "items-center"?',
+        fix: 'Replace with "items-center".',
+      },
+    ]);
+    expect(
+      elsewhere.diagnostics.map(({ rule, message }) => [
+        rule,
+        message.slice(0, message.indexOf(" is not")),
+      ])
+    ).toStrictEqual([
+      ["design/no-unknown-classes", '"no-such-branch"'],
+      ["design/no-unknown-classes", '"no-such-base"'],
+      ["design/no-unknown-classes", '"no-such-key"'],
+    ]);
+  });
+
+  it("fails a raw colour and an arbitrary value, naming the theme's colours and the scale", async () => {
+    const checked = await classChecks(
+      app(
+        withLine(
+          `<main className="flex flex-col gap-4 p-6">`,
+          `<main className="flex flex-col gap-4 bg-red-500 p-[24px]">`
+        )
+      )
+    );
+
+    expect(checked.ok).toBeFalsy();
+    expect(
+      checked.diagnostics.map((diagnostic) => summary(diagnostic))
+    ).toStrictEqual([
+      expect.stringContaining(
+        "src/routes/index.tsx:31:42 design/no-raw-colors error: \"bg-red-500\" uses Tailwind's palette (red-500), not the kit's theme. Use one of the theme's colours: "
+      ),
+      expect.stringContaining(
+        'src/routes/index.tsx:31:53 design/no-arbitrary-values error: "p-[24px]" hardcodes a value off the kit\'s theme. Use "p-6" instead (the same value, on the scale).'
+      ),
+    ]);
+    expect(checked.diagnostics[0]?.message).toContain("destructive");
+  });
+
+  it("passes classes that only look like a page's own, and strings that aren't classes", async () => {
+    const checked = await classChecks(
+      app({
+        "src/routes/lookalikes.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { cn } from "@grasp-os/ui/lib/utils";
+
+function Lookalikes() {
+  const notice = window.location.hash === "#saved";
+  const style = notice ? "Wow!" : "Plain";
+  return (
+    <section aria-label="Saved!" title={style}>
+      <p className={cn({ "font-bold": notice && "Saved!" }, notice || "gap-2")}>{style}</p>
+      <p className={cn({ "text-muted-foreground": style === "Wow!" })}>{style}!</p>
+    </section>
+  );
+}
+export const Route = createFileRoute("/lookalikes")({ component: Lookalikes });
+`,
+      })
+    );
+
+    expect(checked).toMatchObject({ ok: true, diagnostics: [] });
+  });
+});
+
+// The pages' own lint rules (packages/compiler/src/page-rules.ts), part of
+// Ultracite's lint: what they find blocks a proposal, never a build or a
+// preview (agent-builds.test.ts, draft-proposals.test.ts).
+describe("the pages' lint", { timeout: 60_000 }, () => {
+  it("reads disable comments as oxlint does, as an exported App's lint does", async () => {
     const linted = await designLint(app(designCases));
 
     expect({
       ok: linted.ok,
       found: linted.diagnostics.map(({ file, rule }) => `${file} ${rule}`),
-      // Only the class Tailwind doesn't know: the theme's `ease-house`,
-      // tw-animate-css's `animate-in` and `fade-in` and the kit's own
-      // `type-display` are classes the kit has.
-      unknown: linted.diagnostics.map(({ message }) =>
-        message.slice(0, message.indexOf(" is not"))
-      ),
-    }).toStrictEqual({
-      ok: false,
-      found: designFindings,
-      unknown: ['"foo-bar"'],
-    });
-  });
-
-  it("fails a raw colour, naming the theme token to use", async () => {
-    const linted = await designLint(
-      app(
-        withLine(
-          `<main className="flex flex-col gap-4 p-6">`,
-          `<main className="flex flex-col gap-4 bg-red-500 p-6">`
-        )
-      )
-    );
-
-    expect(linted.ok).toBeFalsy();
-    expect(
-      linted.diagnostics.map((diagnostic) => summary(diagnostic))
-    ).toStrictEqual([
-      expect.stringContaining(
-        'src/routes/index.tsx:31:21 shadcn/no-raw-colors error: "bg-red-500" uses the raw Tailwind palette. Nearest theme tokens: '
-      ),
-    ]);
-    // The theme's nearest red: the warmth of the brain's dots (the
-    // brand's error red is further off).
-    expect(linted.diagnostics[0]?.message).toContain("bg-brain-heat");
-    expect(linted.diagnostics[0]?.fix).toBe('Replace with "bg-brain-heat".');
-  });
-
-  it("fails every other way a page styles itself outside the kit, or loads from outside, saying what to do", async () => {
-    const linted = await designLint(
-      app({
-        "src/routes/escapes.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { cn } from "@grasp-os/ui/lib/utils";
-import { useEffect, useRef } from "react";
-
-function Escapes() {
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (box.current) {
-      box.current.style.color = "red";
-      box.current.style.setProperty("--x", "1");
-      box.current.setAttribute("style", "color: red");
-    }
-    const sheet = document.createElement("style");
-    document.head.append(sheet);
-    document.adoptedStyleSheets = [new CSSStyleSheet()];
-    const elements = { button: document.createElement("button") };
-    elements.button.style.color = "red";
-  }, []);
-  return (
-    <div ref={box}>
-      <link rel="stylesheet" href="https://cdn.example/theme.css" />
-      <img alt="" src="https://cdn.example/logo.png" />
-      <img alt="" srcSet="data:image/png;base64,AAAA 1x,https://cdn.example/logo@2x.png 2x" />
-      <img alt="" srcSet="/local.png (foo(bar),https://cdn.example/image.png 2x" />
-      <div className="!p-2 gap-2" />
-      <div dangerouslySetInnerHTML={{ __html: "<b>hi</b>" }} />
-      <div className={cn("gap-2", [{ "p-4!": true }])} />
-      <div className={\`md:!flex \${["gap", "2"].join("-")}\`} />
-    </div>
-  );
-}
-export const Route = createFileRoute("/")({ component: Escapes });
-`,
-      })
-    );
-
-    expect(linted.ok).toBeFalsy();
-    expect(
-      linted.diagnostics
-        .filter(({ file }) => file === "src/routes/escapes.tsx")
-        .map(({ line, rule }) => `${line} ${rule}`)
-    ).toStrictEqual([
-      "8 grasp/no-style-escapes",
-      "9 grasp/no-style-escapes",
-      "10 grasp/no-style-escapes",
-      "12 grasp/no-style-escapes",
-      "13 grasp/no-style-escapes",
-      "14 grasp/no-style-escapes",
-      "14 grasp/no-style-escapes",
-      "16 grasp/no-style-escapes",
-      "20 grasp/no-remote-resources",
-      "21 grasp/no-remote-resources",
-      "22 grasp/no-remote-resources",
-      "23 grasp/no-remote-resources",
-      "24 grasp/no-important",
-      "25 grasp/no-style-escapes",
-      "26 grasp/no-important",
-      "27 grasp/no-important",
-    ]);
-    // Each says what to do instead.
-    expect(
-      linted.diagnostics.every(({ message }) =>
-        /kit|lucide-react|data: or blob:/u.test(message)
-      )
-    ).toBeTruthy();
+    }).toStrictEqual({ ok: false, found: designFindings });
   });
 
   it("fails a page that names WebRTC or makes a nested document, saying what to do", async () => {
@@ -629,16 +601,14 @@ function Peers() {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const connection = new RTCPeerConnection();
-    const legacy = window.webkitRTCPeerConnection;
-    const channel: RTCDataChannel | undefined = undefined;
-    const quoted = globalThis["RTCIceTransport"];
-    const nested = document.createElement("iframe");
-    const realm = nested.contentWindow;
-    void [connection, legacy, channel, quoted, realm, box];
+    const channel = new RTCDataChannel();
+    const nested = document.querySelector("iframe");
+    const realm = nested?.contentWindow;
+    void [connection, channel, realm, box];
   }, []);
   return (
     <div ref={box}>
-      <iframe title="nested" />
+      <iframe title="nested" sandbox="" />
     </div>
   );
 }
@@ -649,33 +619,31 @@ export const Route = createFileRoute("/peers")({ component: Peers });
 
     expect(linted.ok).toBeFalsy();
     expect(
-      linted.diagnostics
-        .filter(({ rule }) => rule === "grasp/no-peer-connections")
-        .map(({ line, rule }) => `${line} ${rule}`)
+      linted.diagnostics.map(({ line, rule }) => `${line} ${rule}`)
     ).toStrictEqual([
-      "6 grasp/no-peer-connections",
-      "7 grasp/no-peer-connections",
-      "8 grasp/no-peer-connections",
-      "9 grasp/no-peer-connections",
-      "10 grasp/no-peer-connections",
-      "11 grasp/no-peer-connections",
-      "16 grasp/no-peer-connections",
+      "6 no-restricted-globals",
+      "7 no-restricted-globals",
+      "9 no-restricted-properties",
+      "14 react/forbid-elements",
     ]);
     // Each says what to do instead.
     expect(
-      linted.diagnostics
-        .filter(({ rule }) => rule === "grasp/no-peer-connections")
-        .every(({ message }) => message.includes("through its App's functions"))
+      linted.diagnostics.every(({ message, fix }) =>
+        `${message} ${fix ?? ""}`.includes("through its App's functions")
+      )
     ).toBeTruthy();
   });
 
-  it("fails a plain form, which never submits in a page's frame, naming the kit's form", async () => {
+  it("fails a plain form and an inline style, naming the kit's form and its classes", async () => {
     const linted = await designLint(
       app({
-        "src/routes/ask.tsx": `import { createFileRoute } from "@tanstack/react-router"; function Ask() {
+        "src/routes/ask.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Button } from "@grasp-os/ui/components/button";
+
+function Ask() {
   return (
     <form onSubmit={(event) => event.preventDefault()}>
-      <button type="submit">Ask</button>
+      <p style={{ color: "red" }}>Ask</p>
+      <Button style={{ margin: 0 }} type="submit">Ask</Button>
     </form>
   );
 }
@@ -686,23 +654,21 @@ export const Route = createFileRoute("/ask")({ component: Ask });
 
     expect({
       ok: linted.ok,
-      forms: linted.diagnostics
-        .filter(({ rule }) => rule === "grasp/no-bare-forms")
-        .map(({ file, line, column, fix }) => ({
-          file,
-          line,
-          column,
-          kit: fix?.includes("@grasp-os/ui/form"),
-        })),
+      found: linted.diagnostics.map(({ line, column, rule, message, fix }) => ({
+        at: `${line}:${column}`,
+        rule,
+        says: `${message} ${fix ?? ""}`.includes(
+          rule === "react/forbid-elements"
+            ? "@grasp-os/ui/form"
+            : "theme classes"
+        ),
+      })),
     }).toStrictEqual({
       ok: false,
-      forms: [
-        {
-          file: "src/routes/ask.tsx",
-          line: 3,
-          column: 5,
-          kit: true,
-        },
+      found: [
+        { at: "5:6", rule: "react/forbid-elements", says: true },
+        { at: "6:10", rule: "react/forbid-dom-props", says: true },
+        { at: "7:15", rule: "react/forbid-component-props", says: true },
       ],
     });
   });
@@ -730,52 +696,6 @@ function Windowed() {
   );
 }
 export const Route = createFileRoute("/windowed")({ component: Windowed });
-`,
-      })
-    );
-
-    expect(linted).toMatchObject({ ok: true, diagnostics: [] });
-  });
-
-  it("passes a page whose names only look like an escape", async () => {
-    const linted = await designLint(
-      app({
-        "src/routes/lookalikes.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { cn } from "@grasp-os/ui/lib/utils";
-
-const page = { head: "Tickets", style: "compact" };
-
-interface Layout {
-  style: string;
-}
-
-const relayout = (layout: Layout) => {
-  layout.style = "wide";
-};
-
-function Lookalikes() {
-  const { head, style } = page;
-  const list = { head: "first" };
-  list.head = "second";
-  const options = { style: "compact" };
-  options.style = "expanded";
-  const theme = { style: { density: "cosy" } } as const satisfies object;
-  const copy: { style: { density: string } } = { ...theme };
-  copy.style.density = "compact";
-  relayout(options);
-  const notice = list.head === "second";
-  const saved = "Saved!";
-  return (
-    <section aria-label={head} title={saved}>
-      <p className={cn({ "font-bold": notice && "Saved!" }, notice || "gap-2")}>{options.style}</p>
-      <p className={cn({ "text-muted-foreground": style === "Wow!" })}>
-        {style}! {list.head} {String(new Error("Oops!").message)}
-      </p>
-      <img alt="" src="./logo.png" />
-      <img alt="" srcSet="data:image/png;base64,AAAA 1x, blob:x 2x" />
-    </section>
-  );
-}
-export const Route = createFileRoute("/lookalikes")({ component: Lookalikes });
 `,
       })
     );

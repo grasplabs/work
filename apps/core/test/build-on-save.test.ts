@@ -403,7 +403,7 @@ describe("a save's diagnostics", { timeout: 60_000 }, () => {
       version: 1,
       files: {
         "src/routes/index.tsx":
-          'import { createFileRoute } from "@tanstack/react-router"; function Desk() {\n  debugger;\n  return <p className="bg-red-500">desk</p>;\n}\nexport const Route = createFileRoute("/")({ component: Desk });\n',
+          'import { createFileRoute } from "@tanstack/react-router"; function Desk() {\n  debugger;\n  return <form>desk</form>;\n}\nexport const Route = createFileRoute("/")({ component: Desk });\n',
       },
     });
 
@@ -411,10 +411,13 @@ describe("a save's diagnostics", { timeout: 60_000 }, () => {
       linted.diagnostics
         .filter(
           ({ rule }) =>
-            rule === "shadcn/no-raw-colors" || rule === "no-debugger"
+            rule === "react/forbid-elements" || rule === "no-debugger"
         )
         .map(({ rule, category }) => `${rule} ${category}`)
         .toSorted()
-    ).toStrictEqual(["no-debugger code", "shadcn/no-raw-colors design-system"]);
+    ).toStrictEqual([
+      "no-debugger code",
+      "react/forbid-elements design-system",
+    ]);
   });
 });
