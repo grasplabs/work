@@ -18,9 +18,9 @@ import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { PreviewProblem } from "@grasp-os/shared/chat";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import type { ServerLog } from "@grasp-os/shared/pages";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { permissionErrors } from "@grasp-os/shared/permissions";
-import type { ServerLog } from "@grasp-os/shared/screens";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
@@ -62,6 +62,7 @@ import type { DraftInspection } from "./draft-references.ts";
 import { workspace } from "./durable-objects.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
 import type { Resolved } from "./packages/resolve.ts";
+import { admitPreviewCall } from "./pages-rpc.ts";
 import { requireResourceRole } from "./permission-resources.ts";
 import { requestPermission } from "./permissions.ts";
 import { isPlainData } from "./plain-data.ts";
@@ -74,7 +75,6 @@ import {
   draftLintBuild,
   draftServerBuild,
 } from "./save-builds.ts";
-import { admitPreviewCall } from "./screens-rpc.ts";
 import { reviewVersion } from "./version-review.ts";
 import { runEngine } from "./workflows/engine.ts";
 import type { Draft } from "./workspace.ts";
@@ -97,7 +97,7 @@ import type { Draft } from "./workspace.ts";
 // lists.
 //
 // Every write answers with what the whole draft builds to (`draftBuilds`),
-// as a save builds it (screens: compile, type errors,
+// as a save builds it (pages: compile, type errors,
 // @shadcn/lint and the React Compiler) and its server code as its seal
 // type-checks it, every gate at once and none hiding another: sorted by
 // file, each named once (`writtenDiagnostics`). There is no check of its
@@ -159,7 +159,7 @@ const maxReported = 50;
 /**
  * How long a check waits for the side panel's preview to report on the
  * draft's revision at all: a check right after a write would otherwise
- * read nothing yet, and a broken screen could be proposed. A code run has
+ * read nothing yet, and a broken page could be proposed. A code run has
  * 30 seconds.
  */
 const previewWaitMs = 3000;
@@ -381,7 +381,7 @@ export interface DraftCheck {
    * (`error`) doesn't pass either.
    */
   passed: boolean;
-  screens: SavedBuild;
+  pages: SavedBuild;
   /**
    * Its server code of spec 8's layout, type-checked with every gate its
    * seal holds it to, against the references its seal generates, only
@@ -428,7 +428,7 @@ export const draftOf = async (
 /**
  * Whether a build lets a draft through: it built, or had nothing to, and
  * never against stand-ins for references its server code didn't generate
- * (`standIn`): screens checked against those accept any call.
+ * (`standIn`): pages checked against those accept any call.
  */
 const buildPassed = ({ status, standIn }: SavedBuild): boolean =>
   (status === "ok" || status === "none") && standIn !== true;
@@ -499,16 +499,16 @@ const previewOf = async (
   };
 };
 
-/** A draft's builds: its screens, its server code and its lint. */
-export type DraftBuilds = Pick<DraftCheck, "screens" | "server" | "lint">;
+/** A draft's builds: its pages, its server code and its lint. */
+export type DraftBuilds = Pick<DraftCheck, "pages" | "server" | "lint">;
 
 /**
- * Builds a draft's `files` as a save does (`buildOnSave`: screens) and
+ * Builds a draft's `files` as a save does (`buildOnSave`: pages) and
  * its server code as its seal type-checks it (`draftServerBuild`), both at
  * once: every gate of each, none hiding the other. Its server code is inspected once, at most, for both
- * (`inspectDraft`): the screens' references and the server check read the
+ * (`inspectDraft`): the pages' references and the server check read the
  * same registration, so a sandbox that ends one inspection can't check
- * the screens against stand-ins while the server passes.
+ * the pages against stand-ins while the server passes.
  */
 const draftBuilds = async (
   env: Env,
@@ -519,7 +519,7 @@ const draftBuilds = async (
 ): Promise<DraftBuilds> => {
   const version = base ?? 0;
   let inspecting: Promise<DraftInspection> | undefined;
-  // Only once something reads it: a draft with no server code nor screens
+  // Only once something reads it: a draft with no server code nor pages
   // that import its references inspects nothing.
   const inspection = async (): Promise<DraftInspection> => {
     inspecting ??= inspectDraft(env, app, files, {
@@ -537,7 +537,7 @@ const draftBuilds = async (
     draftServerBuild(env, { app, version, files }, signal, inspection),
     draftLintBuild(env, { app, version, files }, signal),
   ]);
-  return { screens: saved.screens, server, lint };
+  return { pages: saved.pages, server, lint };
 };
 
 /** Where a diagnostic is, to sort by: its file (the App's own last), line and column. */
@@ -546,7 +546,7 @@ const placeOf = ({ file, line, column }: BuildDiagnostic): string =>
 
 /**
  * The diagnostics of `builds` as a write answers them: all together,
- * sorted by file, line and column, each said once (the screens' and the
+ * sorted by file, line and column, each said once (the pages' and the
  * server's check may both name a file they share), within
  * {@link maxReported}, errors first where that cuts some off.
  */
@@ -555,7 +555,7 @@ const writtenDiagnostics = (
 ): Pick<DraftWrite, "errors" | "warnings" | "diagnostics" | "leftOut"> => {
   const seen = new Set<string>();
   const all: BuildDiagnostic[] = [];
-  for (const build of [builds.screens, builds.server, builds.lint]) {
+  for (const build of [builds.pages, builds.server, builds.lint]) {
     for (const diagnostic of build.diagnostics) {
       const key = JSON.stringify([
         diagnostic.file,
@@ -614,16 +614,16 @@ export const checkFiles = async (
   signal?.throwIfAborted();
   const builds = await draftBuilds(env, app, base, files, signal);
   signal?.throwIfAborted();
-  const built = [builds.screens, builds.server, builds.lint].every(buildPassed);
-  // The preview runs the draft's screens and server code: a lint finding
+  const built = [builds.pages, builds.server, builds.lint].every(buildPassed);
+  // The preview runs the draft's pages and server code: a lint finding
   // doesn't stop it, so the check still waits for what it runs into, and
   // the agent fixes both at once.
-  const runs = [builds.screens, builds.server].every(buildPassed);
+  const runs = [builds.pages, builds.server].every(buildPassed);
   const preview = await previewOf(env, scope, app, revision, runs);
   return {
     // A warning (React's development warnings, say) shows, never fails.
     passed: built && preview.problems.every(({ kind }) => kind === "warning"),
-    screens: reported(builds.screens),
+    pages: reported(builds.pages),
     server: reported(builds.server),
     lint: reported(builds.lint),
     preview,
@@ -1270,7 +1270,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       Object.fromEntries(files)
     );
     const notChecked: DraftWrite["notChecked"] = {};
-    for (const kind of ["screens", "server", "lint"] as const) {
+    for (const kind of ["pages", "server", "lint"] as const) {
       const { status, error } = builds[kind];
       // Couldn't run, or checked on stand-ins (`standIn`): both say why.
       if (status === "error" || error !== undefined) {
@@ -1489,7 +1489,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   }
 
   /**
-   * Calls the chat's draft of `app` in its preview, as a screen of the
+   * Calls the chat's draft of `app` in its preview, as a page of the
    * draft would: its public function at path `method`, with `args` as its
    * input, on its draft release (sealed-previews.ts), on a store of the
    * preview's own and with no resources. How the draft's code failed, if
@@ -1513,7 +1513,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
             issues: ["A function's path and its input, as plain data."],
           });
         }
-        // Counted as the person's request, as each of a screen's calls is
+        // Counted as the person's request, as each of a page's calls is
         // (chats-rpc.ts), before anything of the draft is read: a loop of
         // the agent's spends their budget too, a refused call included.
         await admitPreviewCall(this.env, by, id);
@@ -1567,9 +1567,9 @@ interface Build {
     /** A change that would fix it, when the check suggests one. */
     fix?: string;
   }[];
-  /** Why it couldn't run or finish, with \`error\`: check again, and tell the person if it still can't. With \`standIn\`, why the screens were checked only in part. */
+  /** Why it couldn't run or finish, with \`error\`: check again, and tell the person if it still can't. With \`standIn\`, why the pages were checked only in part. */
   error?: string;
-  /** Screens checked without the references the server code generates, as it doesn't register: never passes; fix the server code and write again. */
+  /** Pages checked without the references the server code generates, as it doesn't register: never passes; fix the server code and write again. */
   standIn?: true;
 }`;
 
@@ -1582,7 +1582,7 @@ const buildDeclaration = `/**
  * plain words what you're stuck on. Nothing here makes a change live: a
  * builder of the App does that in Grasp.
  *
- * Screens are \`screens/<name>.tsx\` on @grasp-os/ui components with their
+ * Pages are \`pages/<name>.tsx\` on @grasp-os/ui components with their
  * variants and sizes and the theme's tokens: no raw colours, arbitrary
  * values or restyled components (the lint names what to use instead).
  * Don't wire tables and forms by hand:
@@ -1600,7 +1600,7 @@ const buildDeclaration = `/**
  *   read-only. \`bulkActions\` (rows with an \`_id\`) make rows selectable,
  *   \`rowActions\` give each row a menu, and a failed action or edit is
  *   shown. It shows its own empty, loading and failed states.
- *   \`<DataGrid label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, { field: "due", day: true }, { field: "notes", cell: (task) => <RichText value={task.notes} /> }]} search="Search tasks" rowActions={[{ label: "Open", onSelect: async (task) => await navigate(screens.task, { id: task._id }) }]} />\`
+ *   \`<DataGrid label="Tasks" query={api.tasks.list} args={({ search, sort, filters }) => ({ search, status: filters.status, titleOrder: sort?.field === "title" ? sort.direction : undefined })} columns={[{ field: "title", sortable: true, edit: async (task, title) => await rename({ id: task._id, title }) }, { field: "status", filter: { open: "Open", done: "Done" } }, { field: "due", day: true }, { field: "notes", cell: (task) => <RichText value={task.notes} /> }]} search="Search tasks" rowActions={[{ label: "Open", onSelect: async (task) => await navigate(pages.task, { id: task._id }) }]} />\`
  * - A form is \`useForm\` (a mutation's or action's arguments, a record, or a
  *   \`v.object\`) with the fields of \`@grasp-os/ui/form\`, one per kind of
  *   value; each takes \`form\`, \`name\` and \`label\`, and its choices,
@@ -1632,11 +1632,10 @@ const buildDeclaration = `/**
  * \`internal\` forms) exported from files under \`server/\`, Convex's way:
  * the file's path is the API (\`server/tasks.ts\`'s \`list\` is
  * \`api.tasks.list\`), and nothing lists them. They import their builders
- * from \`@server/_generated/server\`; screens call them through
+ * from \`@server/_generated/server\`; pages call them through
  * \`@server/_generated/api\`. A query or mutation that needs fewer tables
  * than their access gives narrows them: \`tables: { notes: { read: true } }\`.
- * Its screens are listed in \`screens.ts\`:
- * \`export default { screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }] }\`.
+ * Its pages are TanStack Router file routes in \`src/routes/\` (\`index.tsx\` is \`/\`).
  * An App holds no workflows,
  * and a write under \`workflows/\` is refused: for something that runs on
  * its own or takes steps, build an independent workflow with
@@ -1648,7 +1647,7 @@ const buildDeclaration = `/**
  *
  * Reading the App's data (\`ctx.db\` in queries and mutations) is bounded:
  * \`take\`/\`collect\` return at most 100 records, so lists page with
- * \`.paginate({ pageSize, cursor })\` (screens: \`usePaginatedQuery\`), through
+ * \`.paginate({ pageSize, cursor })\` (pages: \`usePaginatedQuery\`), through
  * any number of records, ordered along an index (\`.withIndex(name)\`, then
  * \`.order("desc")\`). For a search box, declare
  * a search index (\`addIndex\` with \`search\`, over \`["name", "notes"]\`) and read
@@ -1686,7 +1685,7 @@ const buildDeclaration = `/**
  * only then \`ctx.people\` reads them: \`find(ids)\`,
  * \`search(query, { limit?, cursor? })\` (at least 2 letters or digits)
  * and \`team(teamId, { limit?, cursor? })\`, at most 100 a read, each
- * person \`{ id, name, email, teams }\`; a visitor is refused it. Screens
+ * person \`{ id, name, email, teams }\`; a visitor is refused it. Pages
  * get the same from \`@grasp-os/sdk/react\`: \`useUser()\` (undefined
  * while loading; for showing, never deciding) and \`usePeople()\` (the same
  * three reads). The top-level \`people\` path is the platform's: no
@@ -1697,7 +1696,7 @@ const buildDeclaration = `/**
  * \`ctx.notifyPeople(to, { title, body, link })\` (await sends one at a
  * time) and a mutation \`ctx.afterCommit.notifyPeople(to, { ... })\`,
  * sent once it commits: \`to\` is a person's or a team's ID, \`link\` the
- * name of the App's screen it opens on (optional, never a URL). It reaches
+ * name of the App's page it opens on (optional, never a URL). It reaches
  * their Grasp notifications; only members who can open the App are told
  * (anyone else is skipped), at most 50 people a send and 200 notifications
  * an App an hour, a title of 120 characters and a body of 1000. A
@@ -1750,10 +1749,10 @@ build: {
    * With \`over\`, only over that \`revision\` of \`files\`: refused if the draft moved since.
    * TypeScript is saved fixed and formatted (oxfmt, and what Ultracite's
    * rules fix themselves): read the file again before editing it by text.
-   * Answers with what fails in the whole draft now, its screens and server
+   * Answers with what fails in the whole draft now, its pages and server
    * code checked at once (compile, types, lint, React Compiler), and its
    * TypeScript held to Ultracite's rules (\`lint\`), sorted by file, each
-   * once: fix the errors and write again; proposing needs none. A build that couldn't run now, or screens checked without
+   * once: fix the errors and write again; proposing needs none. A build that couldn't run now, or pages checked without
    * the server code's references while it doesn't register, is in
    * \`notChecked\`: proposing refuses it until a write checks it.
    */
@@ -1765,7 +1764,7 @@ build: {
     diagnostics: Build["diagnostics"];
     /** Diagnostics past the first 50. */
     leftOut: number;
-    notChecked: { screens?: string; server?: string; lint?: string };
+    notChecked: { pages?: string; server?: string; lint?: string };
   }>;
   /**
    * Changes the App's definition in the draft, as the chat's definition
@@ -1796,13 +1795,13 @@ build: {
         warnings: number;
         diagnostics: Build["diagnostics"];
         leftOut: number;
-        notChecked: { screens?: string; server?: string; lint?: string };
+        notChecked: { pages?: string; server?: string; lint?: string };
       }
   >;
   /** Drops the draft: the next write starts again from the App's latest version. */
   discard(app: string): Promise<void>;
   /**
-   * Calls the draft as a screen would, to see it run, in a preview that
+   * Calls the draft as a page would, to see it run, in a preview that
    * never touches the App's live data: \`method\` is a public function's
    * path (\`"notes.create"\`) and \`args\` its input object. It runs on the
    * draft sealed as a release, on a store of its own, which keeps what
@@ -1822,19 +1821,19 @@ build: {
   >;
   /**
    * Proposes the draft for review: checks it over the App's latest version
-   * (its builds, and what its screens ran into so far
+   * (its builds, and what its pages ran into so far
    * in the person's preview (runtime errors)) and, once it passes, makes it the App's next
    * version, pending, with \`message\` (what changed and why, for the
    * reviewer). A builder of the App reviews what it changes and makes it
    * current in Grasp: tell the person so. One that fails isn't proposed:
    * \`version\` is null, and \`check\` says why. A preview problem fails it
    * but a \`warning\` (React's development warnings); \`check.preview.seen\` is
-   * false when nobody has the preview open, so its screens weren't run:
+   * false when nobody has the preview open, so its pages weren't run:
    * say so, or \`call\` the server yourself. A preview reaches nothing
    * outside it: a function's resource call (a connection, another App,
    * Knowledge, a model) rejects with \`resource.unavailable\`, and a
-   * screen's workflow run with \`app.preview_side_effect\`. Handle either
-   * as a failed call, as a screen must live.
+   * page's workflow run with \`app.preview_side_effect\`. Handle either
+   * as a failed call, as a page must live.
    * Once \`version\` is set, it is proposed: don't propose it again. When
    * \`reviewUnavailable\`, its review couldn't be worked out now; the
    * builder reads it in Grasp.
@@ -1843,12 +1842,12 @@ build: {
     version: number | null;
     check: {
       passed: boolean;
-      screens: Build;
+      pages: Build;
       server: Build;
       /** Ultracite's rules, over the draft's TypeScript. */
       lint: Build;
       preview: {
-        problems: { source: "screen" | "server"; at: string; kind: string; message: string; stack?: string }[];
+        problems: { source: "page" | "server"; at: string; kind: string; message: string; stack?: string }[];
         seen: boolean;
         /** The newest lines the draft's server code wrote with \`console\` there, your \`call\`s included: at most 20 and 4,000 characters together. They fail nothing. */
         logs: { at: string; level: string; message: string; method: string | null }[];
@@ -1860,7 +1859,7 @@ build: {
     review: {
       current: number | null;
       files: { path: string; change: "added" | "modified" | "removed" }[];
-      /** How the server code (grasp.config.ts, screens.ts, values.ts, server/) changed: it acts for whoever uses the App. */
+      /** How the server code (grasp.config.ts, values.ts, server/) changed: it acts for whoever uses the App. */
       server: "added" | "modified" | "removed" | null;
       serverFiles: { path: string; change: "added" | "modified" | "removed" }[];
       /** Its migrations new or changed: each reads and rewrites every record of its table, whoever owns it; null when they can't be read. */

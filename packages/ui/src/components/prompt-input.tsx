@@ -10,7 +10,7 @@
 // in the frontend (GRA-775), which hands the textarea its attachments
 // through `PromptInputAttachmentsContext`. Where the kit differs:
 // - its words are English props with defaults, as the kit's other
-//   components have them, since App screens carry no Lingui;
+//   components have them, since App pages carry no Lingui;
 // - the send button's states are the kit's own (`PromptInputStatus`),
 //   not another SDK's chat status;
 // - no hand-written memo: the React Compiler memoises it.

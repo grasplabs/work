@@ -11,9 +11,9 @@ import { CoreConnection } from "./core-connection.ts";
 import { reportError, reportUncaughtErrors } from "./error-reports.ts";
 import { NotFound } from "./frame/page-states.tsx";
 import { startI18n } from "./i18n.ts";
+import { stopDrafts } from "./pages/form-drafts.ts";
 import { RouteError } from "./route-error.tsx";
 import { routeTree } from "./routeTree.gen.ts";
-import { stopDrafts } from "./screens/form-drafts.ts";
 
 // The tab's one connection to core, made once and handed to every route
 // and every App frame. When the person's session ends, the frames stop and
@@ -21,7 +21,7 @@ import { stopDrafts } from "./screens/form-drafts.ts";
 // nobody signed in, and sends them to sign in and back to where they were.
 const core = new CoreConnection({
   onSessionEnded: () => {
-    // The screens' unsaved drafts were that session's person's: none is
+    // The pages' unsaved drafts were that session's person's: none is
     // written from now on, and every one goes before the page reloads.
     stopDrafts();
     window.location.reload();

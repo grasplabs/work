@@ -1029,10 +1029,6 @@ msgstr "{runs, plural, one {de # ejecución} other {de # ejecuciones}}"
 msgid "{said, plural, one {# thing said} other {# things said}}"
 msgstr "{said, plural, one {# cosa dicha} other {# cosas dichas}}"
 
-#: src/screens/screen-frame.tsx
-msgid "{screen} app"
-msgstr "Aplicación {screen}"
-
 #: src/workflows/requests/request-needs.tsx
 msgid "{share} not helpful"
 msgstr "{share} no útil"
@@ -1436,7 +1432,7 @@ msgctxt "memory record kind"
 msgid "A fact"
 msgstr "Un hecho"
 
-#: src/screens/screen-files.ts
+#: src/pages/page-files.ts
 msgid "A file is downloaded only when you ask for it, with a click."
 msgstr "Un archivo solo se descarga cuando lo pides, con un clic."
 
@@ -1524,11 +1520,11 @@ msgstr "Una nueva versión entra en funcionamiento"
 msgid "A new version of {name} is up for review, and you answer for it. It runs once it is made current, under Versions in the App's settings."
 msgstr "Una nueva versión de {name} espera revisión, y tú respondes por ella. Se ejecuta cuando se hace actual, en Versiones en los ajustes de la App."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "A new version of this App is ready"
 msgstr "Hay una nueva versión de esta aplicación lista"
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "A new version of this App is ready. It opens once your changes are saved."
 msgstr "Hay una nueva versión de esta aplicación lista. Se abrirá cuando tus cambios estén guardados."
 
@@ -1545,7 +1541,7 @@ msgctxt "memory record kind"
 msgid "A preference"
 msgstr "Una preferencia"
 
-#: src/screens/screen-files.ts
+#: src/pages/page-files.ts
 msgid "A preview keeps no files."
 msgstr "Una vista previa no guarda archivos."
 
@@ -2282,7 +2278,7 @@ msgstr "Otra aplicación"
 msgid "Another day"
 msgstr "Otro día"
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "Another link is waiting for an answer, or one was just turned down. Try again in a moment."
 msgstr "Otro enlace está esperando una respuesta, o se acaba de rechazar uno. Vuelve a intentarlo en un momento."
 
@@ -2368,6 +2364,7 @@ msgstr "¿Algo más?"
 #: src/dashboard/dependency-requests.tsx
 #: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
+#: src/pages/page-frame.tsx
 #: src/projects/new-item-dialog.tsx
 #: src/routes/_shell.apps.$app_.edit.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
@@ -2403,7 +2400,7 @@ msgstr "Aplicación no encontrada"
 msgid "App or workflow"
 msgstr "App o flujo de trabajo"
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "App page"
 msgstr "Página de la aplicación"
 
@@ -3702,8 +3699,8 @@ msgstr "Borrar filtros"
 #: src/knowledge/new-document.tsx
 #: src/knowledge/purge.tsx
 #: src/onboarding/place-picker.tsx
+#: src/pages/app-panel.tsx
 #: src/routes/_shell.index.tsx
-#: src/screens/app-panel.tsx
 #: src/settings/erasures.tsx
 #: src/settings/stephen-settings.tsx
 #: src/shown-once.tsx
@@ -3728,7 +3725,7 @@ msgstr "Cerrar {name}"
 msgid "Close it"
 msgstr "Cerrarla"
 
-#: src/screens/app-panel.tsx
+#: src/pages/app-panel.tsx
 msgid "Close panel"
 msgstr "Cerrar panel"
 
@@ -5398,7 +5395,7 @@ msgstr "Resuelto el {date} · {up} útil desde entonces"
 msgid "Fixed: “{label}”, asked {times} times since"
 msgstr "Resuelto: «{label}», preguntado {times} veces desde entonces"
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "Fixing a problem…"
 msgstr "Solucionando un problema…"
 
@@ -5706,7 +5703,7 @@ msgstr "Grasp convierte los PDF subidos con {whereItRuns}, usando la clave propi
 msgid "Grasp could not be reached. Try again."
 msgstr "No se pudo contactar con Grasp. Vuelve a intentarlo."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "Grasp couldn't confirm this page's code for you. Reload to try again."
 msgstr "Grasp no pudo confirmar el código de esta página para ti. Recarga para intentarlo de nuevo."
 
@@ -6486,11 +6483,11 @@ msgstr "Ocurrió"
 msgid "It happened: {who}"
 msgstr "Ocurrió: {who}"
 
-#: src/screens/leave-confirm-dialog.tsx
+#: src/pages/leave-confirm-dialog.tsx
 msgid "It has changes that aren't saved, or a change it hasn't heard back about. Leaving loses unsaved changes; anything already saved or running stays."
 msgstr "Tiene cambios sin guardar o un cambio sin respuesta todavía. Al salir se pierden los cambios sin guardar; lo que ya está guardado o en marcha se mantiene."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "It has changes that aren't saved, or a change it hasn't heard back about. Save them first and it switches once they are, or switch now and lose what isn't saved."
 msgstr "Tiene cambios sin guardar o un cambio sin respuesta todavía. Guárdalos primero y cambiará cuando estén guardados, o cambia ahora y pierde lo que no está guardado."
 
@@ -6702,8 +6699,8 @@ msgid "Its code can't be read: it may read the name, email and teams of everyone
 msgstr "No se puede leer su código: puede leer el nombre, el correo electrónico y los equipos de todas las personas de la organización"
 
 #: src/chat/builds.tsx
-msgid "Its code can't be read: its screens and server code may hand files people can read to the workflows it binds"
-msgstr "No se puede leer su código: sus pantallas y su código de servidor pueden pasar archivos que las personas pueden leer a los flujos de trabajo que vincula"
+msgid "Its code can't be read: its pages and server code may hand files people can read to the workflows it binds"
+msgstr "Su código no se puede leer: sus páginas y su código de servidor pueden pasar archivos que las personas pueden leer a los flujos de trabajo que vincula"
 
 #: src/chat/builds.tsx
 msgid "Its code can't be read: its tables may say who sees and changes which rows"
@@ -6778,6 +6775,10 @@ msgstr "Su propia dirección, para quien pueda usarla mientras está publicada."
 msgid "Its owner and the admins always have it. A user follows and starts it; a builder also changes, shares and deletes it."
 msgstr "Su propietario y los administradores siempre lo tienen. Un usuario lo sigue y lo inicia; un creador además lo cambia, lo comparte y lo elimina."
 
+#: src/chat/builds.tsx
+msgid "Its pages and server code may hand files people can read to the workflows it binds"
+msgstr "Sus páginas y su código de servidor pueden pasar archivos que las personas pueden leer a los flujos de trabajo que vincula"
+
 #: src/engines/app-versions.tsx
 msgid "Its pages and workflows run on it from now on. Grasp checks and builds it first, and refuses if the version that runs changed since you looked."
 msgstr "Sus páginas y flujos de trabajo funcionan con ella a partir de ahora. Grasp la comprueba y la compila primero, y lo rechaza si la versión en uso cambió desde que la miraste."
@@ -6797,10 +6798,6 @@ msgstr "Sus ejecuciones no lograban iniciarse, así que no inicia nada más hast
 #: src/inbox/items.ts
 msgid "Its runs kept failing to start, so it starts no more. Fix what stopped them, then turn it on again on the workflow's Triggers tab: it goes on from its next time."
 msgstr "Sus ejecuciones no lograban iniciarse, así que ya no inicia ninguna. Corrige lo que las detuvo y vuelve a activar el disparador en la pestaña Disparadores del flujo de trabajo: seguirá desde su próxima hora."
-
-#: src/chat/builds.tsx
-msgid "Its screens and server code may hand files people can read to the workflows it binds"
-msgstr "Sus pantallas y su código de servidor pueden pasar archivos que las personas pueden leer a los flujos de trabajo que vincula"
 
 #: src/workflows/version-source.tsx
 msgid "Its source files"
@@ -7006,7 +7003,7 @@ msgstr "Responsable habló"
 msgid "Leads get their link {when}. Everyone else right after their lead has talked to me."
 msgstr "Los responsables reciben su enlace {when}. Los demás justo después de que su responsable haya hablado conmigo."
 
-#: src/screens/leave-confirm-dialog.tsx
+#: src/pages/leave-confirm-dialog.tsx
 msgid "Leave"
 msgstr "Salir"
 
@@ -7022,7 +7019,7 @@ msgstr "Omitir"
 msgid "Leave out personnel files and anything about one person."
 msgstr "Deja fuera los expedientes de personal y todo lo que trate de una sola persona."
 
-#: src/screens/leave-confirm-dialog.tsx
+#: src/pages/leave-confirm-dialog.tsx
 msgid "Leave this page?"
 msgstr "¿Salir de esta página?"
 
@@ -7159,7 +7156,7 @@ msgstr "Notas enlazadas"
 msgid "Linked {time}"
 msgstr "Vinculada {time}"
 
-#: src/screens/screen-links.ts
+#: src/pages/page-links.ts
 msgid "Links can't be opened here."
 msgstr "Aquí no se pueden abrir enlaces."
 
@@ -9309,10 +9306,6 @@ msgstr "Paquetes para {workflow}"
 msgid "Packages of {name} were revoked as malware"
 msgstr "Se han revocado paquetes de {name} por malware"
 
-#: src/engines/app-page.tsx
-msgid "Pages"
-msgstr "Páginas"
-
 #: src/routes/_shell.workflows.$workflow.tsx
 msgctxt "tab of a workflow"
 msgid "Parameters"
@@ -9620,19 +9613,15 @@ msgstr "Vista previa"
 msgid "Preview of {name}"
 msgstr "Vista previa de {name}"
 
-#: src/screens/screen-frame.tsx
-msgid "Preview of the {screen} page"
-msgstr "Vista previa de la página {screen}"
-
-#: src/screens/screen-frame.tsx
-msgid "Preview of the draft's first page"
-msgstr "Vista previa de la primera página del borrador"
+#: src/pages/page-frame.tsx
+msgid "Preview of the draft"
+msgstr "Vista previa del borrador"
 
 #: src/knowledge/purge.tsx
 msgid "Preview the purge"
 msgstr "Ver la depuración antes"
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
 msgstr "Vista previa: no cambia nada ni lee datos reales"
 
@@ -10952,7 +10941,7 @@ msgstr "Guardar como blueprint"
 msgid "Save as PDF"
 msgstr "Guardar como PDF"
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "Save first"
 msgstr "Guardar primero"
 
@@ -11281,7 +11270,7 @@ msgid "Sent back: {who}, version {version}."
 msgstr "Devuelta: {who}, versión {version}."
 
 #: src/decision-confirmation.tsx
-msgctxt "what an App's screen sends with an answer to a decision"
+msgctxt "what an App's page sends with an answer to a decision"
 msgid "Sent by the app"
 msgstr "Enviado por la app"
 
@@ -11547,8 +11536,8 @@ msgstr "Se muestra la primera parte de esta ejecución"
 msgid "Shown with the App. It opens the App to nobody: who may use it is who it is shared with."
 msgstr "Se muestra con la aplicación. No la abre a nadie: quien puede usarla es con quien se comparte."
 
+#: src/pages/app-panel.tsx
 #: src/routes/_shell.index.tsx
-#: src/screens/app-panel.tsx
 msgid "Side panel"
 msgstr "Panel lateral"
 
@@ -11748,7 +11737,7 @@ msgstr "Alguien ha cambiado este borrador desde que lo leíste. Tu texto sigue a
 msgid "Someone else"
 msgstr "Otra persona"
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "Someone else signed in on this browser, so this page was stopped. Try again to open it as the person signed in now."
 msgstr "Otra persona inició sesión en este navegador, así que esta página se detuvo. Vuelve a intentarlo para abrirla como la persona que ha iniciado sesión ahora."
 
@@ -11982,7 +11971,7 @@ msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Estado"
 
-#: src/screens/leave-confirm-dialog.tsx
+#: src/pages/leave-confirm-dialog.tsx
 msgid "Stay"
 msgstr "Quedarse"
 
@@ -12175,7 +12164,7 @@ msgstr "Respaldada"
 msgid "Switch a team off and nobody in it gets a link."
 msgstr "Desactiva un equipo y nadie en él recibe un enlace."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "Switch now"
 msgstr "Cambiar ahora"
 
@@ -12454,11 +12443,11 @@ msgstr "Es decir, {who}."
 msgid "That is too long to send in one go. Send it in two parts."
 msgstr "Es demasiado largo para enviarlo de una vez. Envíalo en dos partes."
 
-#: src/screens/screen-files.ts
+#: src/pages/page-files.ts
 msgid "That isn't a file call."
 msgstr "Esa no es una llamada de archivo."
 
-#: src/screens/screen-links.ts
+#: src/pages/page-links.ts
 msgid "That isn't a link that can be opened."
 msgstr "Eso no es un enlace que se pueda abrir."
 
@@ -12795,7 +12784,7 @@ msgstr "Las entrevistas aún no están planificadas. Las planificas al final de 
 msgid "The latest runs, newest first."
 msgstr "Las ejecuciones más recientes, primero las nuevas."
 
-#: src/screens/screen-links.ts
+#: src/pages/page-links.ts
 msgid "The link wasn't opened."
 msgstr "El enlace no se abrió."
 
@@ -12899,7 +12888,7 @@ msgstr "Los paquetes aprobados para los cálculos de este flujo de trabajo. Dalo
 msgid "The packages couldn't be read again, so this list may be out of date: {unread}"
 msgstr "No se pudieron leer de nuevo los paquetes, así que esta lista puede estar desactualizada: {unread}"
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "The page couldn't be loaded."
 msgstr "No se pudo cargar la página."
 
@@ -12955,8 +12944,8 @@ msgstr "El informe tal como está hoy"
 msgid "The request allows nothing until an admin grants it. They see what the app asks for and decide."
 msgstr "La solicitud no permite nada hasta que un administrador la conceda. Ve lo que pide la app y decide."
 
-#: src/screens/screen-files.ts
-#: src/screens/screen-links.ts
+#: src/pages/page-files.ts
+#: src/pages/page-links.ts
 msgid "The request failed."
 msgstr "La solicitud ha fallado."
 
@@ -13048,7 +13037,7 @@ msgstr "No se ha podido crear el equipo. Inténtalo de nuevo."
 msgid "The test didn't work. {model} didn't answer: {why}"
 msgstr "La prueba no ha funcionado. {model} no respondió: {why}"
 
-#: src/screens/screen-files.ts
+#: src/pages/page-files.ts
 msgid "The upload was cancelled."
 msgstr "La subida se ha cancelado."
 
@@ -13118,8 +13107,8 @@ msgid "Their name, on what they did, so it stays traceable"
 msgstr "Su nombre en lo que hizo, para que siga siendo rastreable"
 
 #: src/engines/app-sharing.tsx
-msgid "Their open screens of it stop within seconds, and they can no longer open it. You can share it with them again."
-msgstr "Sus pantallas abiertas se detienen en segundos y ya no pueden abrirlo. Puedes volver a compartirlo con ellos."
+msgid "Their open pages of it stop within seconds, and they can no longer open it. You can share it with them again."
+msgstr "Sus páginas abiertas se detienen en segundos y ya no pueden abrirla. Puedes volver a compartirla con ellos."
 
 #: src/settings/stephen-settings.tsx
 msgid "Their own mail, calendar and files. Runs at once."
@@ -13214,8 +13203,8 @@ msgid "They get this role when they first sign in with your organization’s acc
 msgstr "Recibe este rol la primera vez que inicie sesión con la cuenta de tu organización. Grasp no envía ningún correo electrónico, así que avísale."
 
 #: src/projects/project-people.tsx
-msgid "They lose access to what is shared with everyone in the project, unless it is also shared with them another way. Their open screens of it stop within seconds."
-msgstr "Pierden el acceso a lo que se comparte con todos en el proyecto, salvo que también se comparta con ellos de otra forma. Sus pantallas abiertas se cierran en segundos."
+msgid "They lose access to what is shared with everyone in the project, unless it is also shared with them another way. Their open pages of it stop within seconds."
+msgstr "Pierden el acceso a lo que se comparte con todos en el proyecto, salvo que también se comparta con ellos de otra forma. Sus páginas abiertas se detienen en segundos."
 
 #: src/settings/staff-access.tsx
 msgid "They reach everything their role allows."
@@ -13246,11 +13235,11 @@ msgstr "Esta aplicación ha cambiado. Recarga para ver su versión actual."
 msgid "This App doesn't use a connection yet."
 msgstr "Esta App aún no usa ninguna conexión."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "This App has no such page."
 msgstr "Esta aplicación no tiene esa página."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "This App has no version to run yet."
 msgstr "Esta aplicación aún no tiene ninguna versión que ejecutar."
 
@@ -13271,7 +13260,7 @@ msgstr "Esta App no ofrece opciones."
 msgid "This browser cannot listen. You can type your answers."
 msgstr "Este navegador no puede escuchar. Puedes escribir tus respuestas."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "This browser is too old for App pages. Update it, or open this page in a current Chrome, Edge, Firefox or Safari."
 msgstr "Este navegador es demasiado antiguo para las páginas de aplicaciones. Actualízalo o abre esta página en una versión actual de Chrome, Edge, Firefox o Safari."
 
@@ -13408,10 +13397,6 @@ msgstr "Esto es lo nuevo."
 msgid "This link can’t be used"
 msgstr "Este enlace no se puede usar"
 
-#: src/routes/_shell.links.$app.$surface.tsx
-msgid "This link doesn't open anything you can open"
-msgstr "Este enlace no abre nada que puedas abrir"
-
 #: src/routes/guest.tsx
 #: src/routes/interview.tsx
 msgid "This link doesn't work. Ask whoever sent it for a new one."
@@ -13432,10 +13417,6 @@ msgstr "Este enlace ha caducado. Escribe a Grasp en la aplicación de chat para 
 #: src/settings/chat-accounts.tsx
 msgid "This link isn’t one Grasp sent. Write to Grasp in the chat app for a new one."
 msgstr "Este enlace no lo envió Grasp. Escribe a Grasp en la aplicación de chat para recibir uno nuevo."
-
-#: src/screens/screen-frame.tsx
-msgid "This link opens the page with something it doesn't take. Open the page from its App instead."
-msgstr "Este enlace abre la página con algo que no admite. Abre la página desde su aplicación."
 
 #: src/onboarding/setup-steps.tsx
 msgid "This list is too large. I can take up to {peopleMost} people in up to {teamsMost} teams."
@@ -13466,11 +13447,11 @@ msgstr "No se puede abrir esta nota"
 msgid "This page didn't load"
 msgstr "Esta página no se ha cargado"
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "This page didn't start in time."
 msgstr "Esta página no se inició a tiempo."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "This page doesn't build. Ask a builder to fix it."
 msgstr "Esta página no se compila. Pide a un creador que la arregle."
 
@@ -13478,11 +13459,11 @@ msgstr "Esta página no se compila. Pide a un creador que la arregle."
 msgid "This page is not here"
 msgstr "Esta página no está aquí"
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "This page left its frame and was stopped."
 msgstr "Esta página salió de su marco y se detuvo."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "This page lost its connection to Grasp and was stopped."
 msgstr "Esta página perdió su conexión con Grasp y se detuvo."
 
@@ -13490,7 +13471,7 @@ msgstr "Esta página perdió su conexión con Grasp y se detuvo."
 msgid "This page wants to open another site in a new tab. Open it only if you expected to go there."
 msgstr "Esta página quiere abrir otro sitio en una pestaña nueva. Ábrelo solo si esperabas ir allí."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "El código guardado de esta página ya no coincide con el código publicado, así que no se abrió. Avisa a un administrador."
 
@@ -13526,15 +13507,15 @@ msgstr "Esta versión cambia los datos de la aplicación y el cambio no se puede
 msgid "This version has no files."
 msgstr "Esta versión no tiene archivos."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "This version of the App hasn't been sealed, so it can't be opened. A builder can publish it again."
 msgstr "Esta versión de la aplicación no se ha sellado, así que no se puede abrir. Un creador puede publicarla de nuevo."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "This version of the App was revoked and no longer runs. An admin can make another version current."
 msgstr "Esta versión de la aplicación se revocó y ya no se ejecuta. Un administrador puede hacer actual otra versión."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "This version of the App was revoked, and the page was stopped. An admin can make another version current."
 msgstr "Esta versión de la aplicación se revocó y la página se detuvo. Un administrador puede hacer actual otra versión."
 
@@ -13678,7 +13659,7 @@ msgstr "Mañana"
 msgid "Too large to read"
 msgstr "Demasiado grande para leerlo"
 
-#: src/screens/screen-files.ts
+#: src/pages/page-files.ts
 msgid "Too many files are moving at once. Try again shortly."
 msgstr "Se están transfiriendo demasiados archivos a la vez. Inténtalo de nuevo en un momento."
 
@@ -13767,8 +13748,8 @@ msgstr "Intentar"
 #: src/engines/app-settings.tsx
 #: src/frame/page-states.tsx
 #: src/interview/sound-check.tsx
+#: src/pages/page-frame.tsx
 #: src/routes/_shell.index.tsx
-#: src/screens/screen-frame.tsx
 msgid "Try again"
 msgstr "Reintentar"
 
@@ -14196,7 +14177,7 @@ msgstr "Versión {version}, aún no en producción"
 msgid "Version {version}, which runs now"
 msgstr "Versión {version}, la que se ejecuta ahora"
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "Version {version}: read-only preview"
 msgstr "Versión {version}: vista previa de solo lectura"
 
@@ -15274,7 +15255,7 @@ msgctxt "where a package runs"
 msgid "Workflows"
 msgstr "Flujos de trabajo"
 
-#: src/screens/app-panel.tsx
+#: src/pages/app-panel.tsx
 msgid "Workflows and more"
 msgstr "Flujos de trabajo y más"
 
@@ -15469,7 +15450,7 @@ msgstr "Ya puedes cerrar esta página. Vuelve aquí para ver por dónde voy."
 msgid "You can use the App itself."
 msgstr "Puedes usar la App en sí."
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "You can't open this App's pages: your role doesn't allow it, or the App has read data you can't read."
 msgstr "No puedes abrir las páginas de esta aplicación: tu rol no lo permite, o la aplicación ha leído datos que tú no puedes leer."
 
@@ -15668,7 +15649,7 @@ msgstr "Tu informe de la semana {week} está listo"
 msgid "Your run of version {version} ended: {status}"
 msgstr "Tu ejecución de la versión {version} terminó: {status}"
 
-#: src/screens/screen-frame.tsx
+#: src/pages/page-frame.tsx
 msgid "Your session has ended. Sign in again to go on."
 msgstr "Tu sesión ha terminado. Vuelve a iniciar sesión para continuar."
 

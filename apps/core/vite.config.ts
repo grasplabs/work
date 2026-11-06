@@ -56,11 +56,11 @@ const capabilitySigningKey = "test-capability-signing-key-of-32-chars-or-more";
 /**
  * The tests that run the compiler on whole Apps: the App compiler's,
  * and the App sandbox's, which builds each App's server code. They run as
- * their own project (vite.screens.config.ts), after the others, so their
+ * their own project (vite.pages.config.ts), after the others, so their
  * long compiles don't starve the light tests of CPU.
  */
-export const screenTests = [
-  "test/screen*.test.ts",
+export const pageTests = [
+  "test/page*.test.ts",
   "test/app-releases.test.ts",
   "test/migration-transform.test.ts",
   "test/custom-migration-runs.test.ts",
@@ -246,7 +246,7 @@ export const coreProject = (
             // code is inspected in the test's own workerd, where a busy loop
             // would hold it (src/sandboxed.ts). scripts/workerd-sandbox.test.ts
             // tests the supervisor on plain workerd. The on-prem project
-            // accepts it too, for what no sandbox runs yet (the screen
+            // accepts it too, for what no sandbox runs yet (the page
             // compiler, App tests, an App's server object): wherever one
             // does, a bound SANDBOX_HOST comes first, so App code still runs
             // in its sessions there.
@@ -359,7 +359,7 @@ export default coreProject({
   // with Wrangler, run in Node, in the root config's "scripts" project.
   exclude: [
     ...defaultExclude,
-    ...screenTests,
+    ...pageTests,
     // With the sandbox supervisor bound: vite.on-prem.config.ts.
     "test/on-prem/**",
     // The Brain baseline's larger scale sizes, on request only:

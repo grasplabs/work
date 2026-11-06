@@ -273,7 +273,7 @@ const AtlasPage = () => {
   const atlas = atlasWith(ws, brain, read, readAtlas);
   const { view, groups } = viewOf(search, atlas, brain);
   const { region, group } = view;
-  // The region's neurons, for the keys: as the atlas lays them out in the room it has, where a folder may be folded into one; until it has, as a roomy screen would show them.
+  // The region's neurons, for the keys: as the atlas lays them out in the room it has, where a folder may be folded into one; until it has, as a roomy page would show them.
   const [laid, setLaid] = useState<{
     region?: RegionId;
     group?: string;

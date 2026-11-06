@@ -182,7 +182,7 @@ const RemovePerson = ({
                 <Trans>
                   They lose access to what is shared with everyone in the
                   project, unless it is also shared with them another way. Their
-                  open screens of it stop within seconds.
+                  open pages of it stop within seconds.
                 </Trans>
               )}
             </AlertDialogDescription>

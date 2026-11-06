@@ -10,14 +10,14 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { revocationsOf } from "./access-revocations.ts";
-import { apps, auditOutbox, screenPolicies } from "./db/core/schema.ts";
+import { apps, auditOutbox, pagePolicies } from "./db/core/schema.ts";
 
 // What an App's data is to code Grasp didn't serve (@grasp-os/shared/
 // data-policy): a portable host, with an App token, running code with all
 // the network its browser or app gives it. Its calls carry no lease core
-// signed, so the gate (screen-delivery.ts) hands them the App's data only
+// signed, so the gate (page-delivery.ts) hands them the App's data only
 // once an admin classified it `ordinary` (data-policy-rpc.ts). An App's
-// own screens, which core serves into a sandboxed frame, get it whatever
+// own pages, which core serves into a sandboxed frame, get it whatever
 // this says.
 //
 // An admin classifies the App as it is: a permission granted to it later,
@@ -28,7 +28,7 @@ import { apps, auditOutbox, screenPolicies } from "./db/core/schema.ts";
 
 /** The App's policy generation now, as SQL: 0 until anything changed it. */
 export const generationSql = (app: AppId): SQL =>
-  sql`coalesce((SELECT ${screenPolicies.generation} FROM ${screenPolicies} WHERE ${screenPolicies.appId} = ${app}), 0)`;
+  sql`coalesce((SELECT ${pagePolicies.generation} FROM ${pagePolicies} WHERE ${pagePolicies.appId} = ${app}), 0)`;
 
 /** Who a grant widening Apps' reach was given to: an App or a workflow. */
 export type Grantee =
@@ -102,8 +102,8 @@ export const widenedByGrant = (
   const now = new Date();
   const reaching = sql`WITH RECURSIVE ${reachingSql(grantee)}`;
   const reached = sql`(${reaching} SELECT app_id FROM reaching)`;
-  const ordinary = sql`${screenPolicies.output} = 'ordinary'
-    AND ${screenPolicies.appId} IN ${reached}
+  const ordinary = sql`${pagePolicies.output} = 'ordinary'
+    AND ${pagePolicies.appId} IN ${reached}
     AND ${condition}`;
   const detail = JSON.stringify({
     output: "sensitive",
@@ -115,8 +115,8 @@ export const widenedByGrant = (
     // Each event's ID is made once, then read twice.
     db.insert(auditOutbox).select(sql`${reaching},
       flipped AS MATERIALIZED (
-        SELECT ${uuidSql} AS id, ${screenPolicies.appId} AS app_id
-        FROM ${screenPolicies} WHERE ${ordinary}
+        SELECT ${uuidSql} AS id, ${pagePolicies.appId} AS app_id
+        FROM ${pagePolicies} WHERE ${ordinary}
       )
       SELECT id, json_object(
         'id', id,
@@ -129,16 +129,16 @@ export const widenedByGrant = (
         'detail', json(${detail})
       ), ${now.getTime()}
       FROM flipped`),
-    db.update(screenPolicies).set({ output: "sensitive" }).where(ordinary),
+    db.update(pagePolicies).set({ output: "sensitive" }).where(ordinary),
     db
-      .insert(screenPolicies)
+      .insert(pagePolicies)
       // The table's columns, in its order.
       .select(
         sql`${reaching} SELECT app_id, 'sensitive', 1 FROM reaching WHERE ${condition}`
       )
       .onConflictDoUpdate({
-        target: screenPolicies.appId,
-        set: { generation: sql`${screenPolicies.generation} + 1` },
+        target: pagePolicies.appId,
+        set: { generation: sql`${pagePolicies.generation} + 1` },
       }),
   ];
 };
@@ -163,8 +163,8 @@ export const madeSensitiveByGrant = (
       ? undefined
       : sql`${apps.id} IN (WITH RECURSIVE ${reachingSql(grantee)}
           SELECT app_id FROM reaching WHERE app_id IN (
-            SELECT ${screenPolicies.appId} FROM ${screenPolicies}
-            WHERE ${screenPolicies.output} = 'ordinary'))`,
+            SELECT ${pagePolicies.appId} FROM ${pagePolicies}
+            WHERE ${pagePolicies.output} = 'ordinary'))`,
     null,
     grantee === undefined ? sql`0` : condition
   );
@@ -179,7 +179,7 @@ export const policyOf = async (
     generation: number;
   }>(
     sql`SELECT
-      (SELECT ${screenPolicies.output} FROM ${screenPolicies} WHERE ${screenPolicies.appId} = ${app}) AS output,
+      (SELECT ${pagePolicies.output} FROM ${pagePolicies} WHERE ${pagePolicies.appId} = ${app}) AS output,
       ${generationSql(app)} AS generation`
   );
   return { output: row.output ?? "sensitive", generation: row.generation };

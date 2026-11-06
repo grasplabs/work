@@ -768,7 +768,7 @@ export class FormBinding {
   /**
    * Tells the session client whether this form holds unsaved edits or a
    * submission in flight or of unknown outcome (`GraspClient.guardLeave`),
-   * for the host to confirm leaving the screen while it does.
+   * for the host to confirm leaving the page while it does.
    */
   readonly #leaveGuard:
     | ((holder: object, guarded: boolean) => void)
@@ -952,7 +952,7 @@ export class FormBinding {
   }
 
   /**
-   * Whether leaving the screen would lose something: while mounted, edits
+   * Whether leaving the page would lose something: while mounted, edits
    * not saved (a record form's draft, another form's values changed from
    * where they started), or a submission in flight or of unknown outcome.
    * Told to the client only when it changes.

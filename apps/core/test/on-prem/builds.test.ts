@@ -5,12 +5,12 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { packageBuilder } from "../../src/packages/builder.ts";
+import { buildPages } from "../../src/pages.ts";
 import { builderOwner, platformRunner } from "../../src/platform-sandbox.ts";
 import { sandboxCpuHeader } from "../../src/sandbox-headers.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import { draftLintBuild } from "../../src/save-builds.ts";
-import { buildScreens } from "../../src/screens.ts";
 import { probeModule } from "../isolate-probe.ts";
 
 // The App compiler on-prem: it runs on the sandbox host this project
@@ -18,7 +18,7 @@ import { probeModule } from "../isolate-probe.ts";
 // Loader here throws if a build reaches for it. A type built to recurse
 // holds TypeScript's checker for good: the supervisor ends it at its
 // deadline, and core answers meanwhile. Gone with App workflows: a save
-// compiling its screens and its workflows at once, in the App's part of
+// compiling its pages and its workflows at once, in the App's part of
 // the builders' share; a build waiting for its part is "builds once a
 // place held a moment … comes free" below.
 
@@ -41,12 +41,15 @@ const ANSWER_MS = 500;
 /** Core's env as on-prem, its Loader one a build must never reach. */
 const onPrem = { ...env, LOADER: noLoader };
 
-/** A screen with this code before its component. */
-const screen = (code: string): Record<string, string> => ({
-  "screens/desk.tsx": `${code}
-export default function Desk() {
+/** A page with this code before its component. */
+const page = (code: string): Record<string, string> => ({
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
+${code}
+function Desk() {
   return <p>desk</p>;
 }
+export const Route = createFileRoute("/")({ component: Desk });
 `,
 });
 
@@ -91,9 +94,9 @@ describe("a build task's CPU on-prem", () => {
       connect: host.connect.bind(host),
     };
     const watched = { ...onPrem, SANDBOX_HOST: recording };
-    const built = await buildScreens(
+    const built = await buildPages(
       watched,
-      screen(`// fresh ${crypto.randomUUID()}`),
+      page(`// fresh ${crypto.randomUUID()}`),
       "app-test"
     );
     const compiled = asked.length;
@@ -136,47 +139,51 @@ describe("the App compiler on-prem", () => {
       },
       connect: host.connect.bind(host),
     };
-    // Three screens of this test's own, each larger than a batch sized to
-    // 10 ms of CPU time: a batch each, then the build, then its one type
-    // check, in a session of its own.
+    // Three pages of this test's own, each larger than a batch sized to
+    // 10 ms of CPU time, and the root route the build gives them: a batch
+    // each, then the build, then its one type check, in a session of its
+    // own.
     const tag = crypto.randomUUID();
     const files = Object.fromEntries(
       ["one", "two", "three"].map((name) => [
-        `screens/${name}.tsx`,
-        `// ${tag}
-export default function Screen() {
+        `src/routes/${name}.tsx`,
+        `import { createFileRoute } from "@tanstack/react-router";
+
+// ${tag}
+function Page() {
   return (
     <main>
 ${Array.from({ length: 8 }, (_, line) => `      <p>${name} ${tag} ${line}</p>`).join("\n")}
     </main>
   );
 }
+export const Route = createFileRoute("/${name}")({ component: Page });
 `,
       ])
     );
 
-    const built = await buildScreens(
+    const built = await buildPages(
       { ...onPrem, SANDBOX_HOST: counting, BUILD_BATCH_CPU_MS: "10" },
       files,
       "app-test"
     );
 
-    expect({ ok: built.ok, sessions }).toStrictEqual({ ok: true, sessions: 5 });
+    expect({ ok: built.ok, sessions }).toStrictEqual({ ok: true, sessions: 6 });
   });
 
-  it("builds an App's screens on the sandbox host, not in core", async () => {
-    const built = await buildScreens(onPrem, screen(""), "app-test");
+  it("builds an App's pages on the sandbox host, not in core", async () => {
+    const built = await buildPages(onPrem, page(""), "app-test");
 
     expect({
       ok: built.ok,
-      screen: built.ok && Object.keys(built.screens),
-    }).toStrictEqual({ ok: true, screen: [expect.stringContaining("desk")] });
+      entry: built.ok && built.entry,
+    }).toStrictEqual({ ok: true, entry: "app~src~routeTree.gen.js" });
   });
 
   it("says what fails to type-check, as it does on Cloudflare", async () => {
-    const built = await buildScreens(
+    const built = await buildPages(
       onPrem,
-      screen('export const count: number = "seven";'),
+      page('export const count: number = "seven";'),
       "app-test"
     );
 
@@ -185,11 +192,11 @@ ${Array.from({ length: 8 }, (_, line) => `      <p>${name} ${tag} ${line}</p>`).
     );
   });
 
-  it("stops a screen whose types recurse without end at its deadline, and core answers meanwhile", async () => {
+  it("stops a page whose types recurse without end at its deadline, and core answers meanwhile", async () => {
     const started = Date.now();
-    const building = buildScreens(
+    const building = buildPages(
       { ...onPrem, SANDBOX_DEADLINE_MS: String(DEADLINE_MS) },
-      screen(recursiveTypes),
+      page(recursiveTypes),
       "app-test"
     );
     // Asked while the checker spins on the sandbox host.
@@ -208,7 +215,7 @@ ${Array.from({ length: 8 }, (_, line) => `      <p>${name} ${tag} ${line}</p>`).
     expect(took).toBeLessThan(DEADLINE_MS + 5000);
   });
 
-  it("runs the compiler once for a screen it was stopped on for its own sake, however often it's viewed", async () => {
+  it("runs the compiler once for a page it was stopped on for its own sake, however often it's viewed", async () => {
     // Every build kept: one per time a build ran to an end it keeps. The
     // compiler's transforms are kept besides (module-cache.ts): it ends,
     // and the type checker is what the types stop.
@@ -218,20 +225,20 @@ ${Array.from({ length: 8 }, (_, line) => `      <p>${name} ${tag} ${line}</p>`).
       FILES: {
         get: env.FILES.get.bind(env.FILES),
         put: async (...args: Parameters<R2Bucket["put"]>) => {
-          if (args[0].startsWith("screen-builds/")) {
+          if (args[0].startsWith("page-builds/")) {
             kept += 1;
           }
           return await env.FILES.put(...args);
         },
       },
     };
-    const files = screen(`${recursiveTypes}\n// viewed`);
+    const files = page(`${recursiveTypes}\n// viewed`);
     // Three views at once, then one more once they're done.
     const views = await Promise.all(
-      [1, 2, 3].map(async () => await buildScreens(counting, files, "app-test"))
+      [1, 2, 3].map(async () => await buildPages(counting, files, "app-test"))
     );
     const started = Date.now();
-    const later = await buildScreens(counting, files, "app-test");
+    const later = await buildPages(counting, files, "app-test");
     const tookLater = Date.now() - started;
 
     expect(
@@ -263,14 +270,10 @@ ${Array.from({ length: 8 }, (_, line) => `      <p>${name} ${tag} ${line}</p>`).
         connect: env.ASSETS.connect.bind(env.ASSETS),
       },
     };
-    const first = await buildScreens(
+    const first = await buildPages(counting, page("// first read"), "app-test");
+    const second = await buildPages(
       counting,
-      screen("// first read"),
-      "app-test"
-    );
-    const second = await buildScreens(
-      counting,
-      screen("// second read"),
+      page("// second read"),
       "app-test"
     );
 
@@ -306,7 +309,7 @@ ${Array.from({ length: 8 }, (_, line) => `      <p>${name} ${tag} ${line}</p>`).
     const asked = Date.now();
     let refused: unknown;
     try {
-      await buildScreens(onPrem, screen("// waits for a place"), "app-test");
+      await buildPages(onPrem, page("// waits for a place"), "app-test");
     } catch (error) {
       refused = error;
     }
@@ -350,9 +353,9 @@ ${Array.from({ length: 8 }, (_, line) => `      <p>${name} ${tag} ${line}</p>`).
     // Settled together: the holder ends while the build waits.
     const [held, built] = await Promise.allSettled([
       holding,
-      buildScreens(
+      buildPages(
         onPrem,
-        screen(`// waits a moment ${crypto.randomUUID()}`),
+        page(`// waits a moment ${crypto.randomUUID()}`),
         "app-test"
       ),
     ]);
@@ -385,10 +388,10 @@ ${Array.from({ length: 8 }, (_, line) => `      <p>${name} ${tag} ${line}</p>`).
       },
     };
     const refused = { ...onPrem, SANDBOX_HOST: refusing };
-    const same = screen(`// the same ${crypto.randomUUID()}`);
+    const same = page(`// the same ${crypto.randomUUID()}`);
     await Promise.allSettled([
-      buildScreens(refused, same, "app-a"),
-      buildScreens(refused, same, "app-b"),
+      buildPages(refused, same, "app-a"),
+      buildPages(refused, same, "app-b"),
     ]);
 
     expect({
@@ -397,12 +400,12 @@ ${Array.from({ length: 8 }, (_, line) => `      <p>${name} ${tag} ${line}</p>`).
     }).toStrictEqual({ appAAskedAgain: true, appBAskedItself: true });
   }, 90_000);
 
-  it("builds the same screen again once the sandbox stopped it at its deadline, as that stop isn't cached", async () => {
-    const files = screen(`${recursiveTypes}\n// again`);
+  it("builds the same page again once the sandbox stopped it at its deadline, as that stop isn't cached", async () => {
+    const files = page(`${recursiveTypes}\n// again`);
     const stopped = { ...onPrem, SANDBOX_DEADLINE_MS: "1500" };
-    const first = await buildScreens(stopped, files, "app-test");
+    const first = await buildPages(stopped, files, "app-test");
     const started = Date.now();
-    const second = await buildScreens(stopped, files, "app-test");
+    const second = await buildPages(stopped, files, "app-test");
 
     expect({ first: first.ok, second: second.ok }).toStrictEqual({
       first: false,
@@ -476,7 +479,7 @@ export default class extends WorkerEntrypoint {
       version: 0,
       files: Object.fromEntries(
         Array.from({ length: 4 }, (_, at) => [
-          `components/same-${at}.ts`,
+          `src/components/same-${at}.ts`,
           `export const same${at} = (a: number, b: number) => a == b;\n// ${crypto.randomUUID()}\n`,
         ])
       ),

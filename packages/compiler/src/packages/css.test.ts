@@ -36,7 +36,7 @@ describe("a stylesheet's own URLs, carrying its query", () => {
     const css = [
       "a { background: url(../../../../../api/rpc); }",
       "b { background: url(../other-artifact-hash/file.png); }",
-      'c { background: url("../../../../../screen-modules/kit/x.js"); }',
+      'c { background: url("../../../../../page-modules/kit/x.js"); }',
       "d { background: url(./ok.png); }",
       "e { background: url(../x.png); }",
     ].join("\n");

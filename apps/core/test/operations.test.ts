@@ -437,7 +437,7 @@ const notes = async (): Promise<Fixture> => {
   return { owner, appId, store };
 };
 
-/** Shares the fixture's App with `by`, as a user of its screens. */
+/** Shares the fixture's App with `by`, as a user of its pages. */
 const share = async ({ appId, owner }: Fixture, by: Acting) => {
   await drizzle(env.DB).insert(appMembers).values({
     appId,

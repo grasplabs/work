@@ -173,16 +173,10 @@ describe("a sender's share of an inbox", () => {
       Array.from({ length: maxSenderEvents + 1 }, () => encode(null)),
       false,
       "spam",
-      "screen-a"
+      "page-a"
     );
-    const other = await sendAll(id, [encode(null)], false, "spam", "screen-b");
-    const reserved = await sendAll(
-      id,
-      [encode(null)],
-      true,
-      "spam",
-      "screen-a"
-    );
+    const other = await sendAll(id, [encode(null)], false, "spam", "page-b");
+    const reserved = await sendAll(id, [encode(null)], true, "spam", "page-a");
     const unnamed = await sendAll(id, [encode(null)]);
 
     expect({
@@ -211,14 +205,14 @@ describe("a sender's share of an inbox", () => {
       Array.from({ length: fit + 1 }, () => payloadOf(bytes)),
       false,
       "spam",
-      "screen-a"
+      "page-a"
     );
     const other = await sendAll(
       id,
       [payloadOf(bytes)],
       false,
       "spam",
-      "screen-b"
+      "page-b"
     );
 
     expect({

@@ -91,15 +91,17 @@ import { z } from "zod";
 import { oxcWasmPin } from "../packages/compiler/oxc-wasm/wasm.ts";
 import { designRuleLevels } from "../packages/compiler/src/design-rules.ts";
 import {
+  buildFiles,
   codeExtensions,
-  componentsFolder,
   declarationExtension,
   generatedServerFolder,
   hostGeneratedFolder,
-  screensFolder,
+  routeTreePath,
+  sourceFolder,
 } from "../packages/compiler/src/inputs.ts";
-import { screenReferences } from "../packages/compiler/src/kit.ts";
+import { pageReferences } from "../packages/compiler/src/kit.ts";
 import { designNote } from "../packages/compiler/src/lint.ts";
+import { routeTree } from "../packages/compiler/src/route-tree.ts";
 import {
   appCodeTarget,
   compilerOptions,
@@ -122,7 +124,11 @@ import type { Importer, LockfileInput } from "./package-definition-lockfile.ts";
 const vendored = ["brain", "shared", "sdk", "ui"] as const;
 
 /** The catalog packages every project depends on itself. */
-const projectDependencies = ["react", "react-dom"] as const;
+const projectDependencies = [
+  "@tanstack/react-router",
+  "react",
+  "react-dom",
+] as const;
 /**
  * Its own development tools, each pinned as the catalog pins it: what its
  * check (`grasp/check.ts`) runs as the platform does, the checker App code
@@ -449,8 +455,22 @@ const planApp = async (
   for (const [file, text] of Object.entries(generated)) {
     project.add(`app/${safePath(file, "generated")}`, text);
   }
-  for (const [file, text] of Object.entries(app.files)) {
+  // Its pages as the platform's build routes them (route-tree.ts), their
+  // route tree, and the root route the build gives pages without one of
+  // their own, so the project's pages type-check against the routes they
+  // have.
+  const built = buildFiles(app.files);
+  const tree = await routeTree(built);
+  for (const [file, text] of Object.entries({ ...app.files, ...tree.routes })) {
     project.add(`app/${safePath(file, "app")}`, text);
+  }
+  if (tree.source !== undefined) {
+    project.add(`app/${routeTreePath}`, tree.source);
+  }
+  for (const [file, text] of Object.entries(built)) {
+    if (!Object.hasOwn(app.files, file) && !Object.hasOwn(tree.routes, file)) {
+      project.add(`app/${safePath(file, "app")}`, text);
+    }
   }
 };
 
@@ -741,14 +761,13 @@ const compilerSource = "packages/compiler/src";
 const checkFiles = {
   "grasp/check.ts": "standalone-check.ts",
   "grasp/steering.ts": "steering.ts",
-  // And its design rules for screens, which the project's lint runs.
+  // And its design rules for pages, which the project's lint runs.
   "grasp/design-rules.ts": "design-rules.ts",
 } as const;
 
 /** Server code as spec 8 lays it out, as the platform's check reads it. */
 const serverCodeIncludes = [
   "grasp.config.ts",
-  "screens.ts",
   "values.ts",
   "server/**/*.ts",
   ".grasp/*.ts",
@@ -778,24 +797,23 @@ const kindConfig = (
 /**
  * The project's tsconfigs, one a kind of code, each as the platform checks
  * it, and the root tsconfig.json that lists them (an editor's, and the
- * check's): the App's screens with the DOM and JSX; its server code with
+ * check's): the App's pages with the DOM and JSX; its server code with
  * a worker's lib and no DOM; and each workflow version's compute modules
  * likewise, and the module the host generated from it.
  */
 const planTypeCheck = (project: Plan): void => {
   const configs: Record<string, ReturnType<typeof kindConfig>> = {
-    "app/tsconfig.screens.json": kindConfig(
-      "screens",
-      // Screens resolve whatever the kit holds: the kit's list is the
+    "app/tsconfig.pages.json": kindConfig(
+      "pages",
+      // Pages resolve whatever the kit holds: the kit's list is the
       // compiler's build output, not a module this can read.
       { options: compilerOptions, mapped: new Set() },
       {
         include: [
-          "screens/*.tsx",
-          "components/**/*.ts",
-          "components/**/*.tsx",
+          `${sourceFolder}**/*.ts`,
+          `${sourceFolder}**/*.tsx`,
           "*.d.ts",
-          screenReferences.path,
+          pageReferences.path,
         ],
       }
     ),
@@ -852,6 +870,7 @@ const ignoredGlobs = [
   ...[generatedServerFolder, hostGeneratedFolder].map(
     (folder) => `app/${folder}**`
   ),
+  `app/${routeTreePath}`,
 ];
 
 /**
@@ -862,13 +881,10 @@ const ignoredGlobs = [
 const formatted = `--no-error-on-unmatched-pattern "app/**/*.{${codeExtensions.join(",")}}"`;
 
 /**
- * What the design-system lint holds, as Grasp's screen build lints it
- * (`buildFiles`, compiler worker.ts): the App's screens and components.
+ * What the design-system lint holds, as Grasp's lint does
+ * (`isDesignLinted`, compiler inputs.ts): the App's front end.
  */
-const designLinted = [
-  `app/${screensFolder}*.tsx`,
-  `app/${componentsFolder.folder}**`,
-];
+const designLinted = [`app/${sourceFolder}**`];
 
 /** The compiler's design rules, as the project's oxlint loads them. */
 const designPlugin = "grasp/design-plugin.ts";
@@ -883,14 +899,14 @@ const configData = (value: unknown): string =>
  * as data:
  * - Ultracite's `core`, `react`, `tanstack` and `vitest` presets, less the
  *   rules Grasp leaves out (`leftOut`);
- * - on screens and components, the design system's lint, as the
+ * - on pages and components, the design system's lint, as the
  *   compiler's (lint.ts): @shadcn/lint's rules and its own.
  */
 const oxlintConfigText = (): string => {
   const presets = Object.entries(ultracitePresets);
   return `// Written by Grasp when it exported this App: App code held to what
 // Grasp holds it to. Ultracite's presets, less the rules Grasp leaves
-// out, and the design system's lint on screens and components.
+// out, and the design system's lint on pages and components.
 import { defineConfig } from "oxlint";
 ${presets
   .map(([name]) => `import ${name} from "ultracite/oxlint/${name}";`)
@@ -945,7 +961,7 @@ const planTooling = (project: Plan, repo: string): void => {
   project.add("oxlint.config.ts", oxlintConfigText());
   project.add(
     designPlugin,
-    `// The compiler's design rules for screens (design-rules.ts), as oxlint's
+    `// The compiler's design rules for pages (design-rules.ts), as oxlint's
 // JS plugin.
 import { designRules } from "./design-rules.ts";
 

@@ -9,7 +9,7 @@ import { demos } from "../catalog/demos.ts";
 import { loadExample } from "../catalog/examples.ts";
 
 // The dev-only gallery (apps/web, `/kit`) against what the kit really
-// ships: screens import `@grasp-os/ui/components/<name>`, one module per
+// ships: pages import `@grasp-os/ui/components/<name>`, one module per
 // file of the components directory, and each has a demo there; each file
 // of the examples directory loads by its name.
 

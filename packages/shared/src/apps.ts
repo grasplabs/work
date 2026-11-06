@@ -24,7 +24,7 @@ import { platformLimits } from "./platform-limits.ts";
 
 /**
  * A file's path in an App, relative to its root and `/`-separated, such
- * as `screens/inbox.tsx` or `server/notes.ts`. No absolute paths, no empty,
+ * as `pages/inbox.tsx` or `server/notes.ts`. No absolute paths, no empty,
  * `.` or `..` segments, no backslashes.
  */
 export const appPathSchema = z
@@ -181,8 +181,8 @@ export const reservedAppLinks: ReadonlySet<string> = new Set([
   "package-artifacts",
   "projects",
   "rpc",
-  "screen-frame",
-  "screen-modules",
+  "page-frame",
+  "page-modules",
   "settings",
   "setup",
   "sign-in",
@@ -271,13 +271,14 @@ export interface AgentProposer {
 }
 
 /**
- * What an App's current version offers people: its screens by name (`inbox`
- * for `screens/inbox.tsx`), sorted. Empty while it has no current version.
+ * What an App's current version offers people: whether it has pages to
+ * open (file routes under `src/routes/`). None while it has no current
+ * version.
  */
 export interface AppContents {
   /** The current version; null while it has none. */
   version: number | null;
-  screens: string[];
+  pages: boolean;
 }
 
 /** An App as `AppsApi.list` gives it, with its current version's contents. */
@@ -333,7 +334,7 @@ export interface VersionReview {
   /** Its files that differ from the current version's, by path. */
   files: { path: string; change: ReviewChange }[];
   /**
-   * How its server code (`grasp.config.ts`, `screens.ts`, `values.ts`,
+   * How its server code (`grasp.config.ts`, `values.ts`,
    * `server/`, as its seal builds them) differs, if
    * it does: it runs as whoever uses the App, with every permission the
    * App holds. Its files that differ are `serverFiles`.
@@ -365,12 +366,12 @@ export interface VersionReview {
    * Whether its server code may hand files people can read to the
    * workflows it binds (GRA-976): it declares a files resource with
    * `read` and a bound workflow whose input can hold a file. Its
-   * screens' and server code's starts then copy the person's file into
+   * pages' and server code's starts then copy the person's file into
    * the run, as they may read it. Null when its manifest can't be read.
    */
   handsFilesToWorkflows: boolean | null;
   /**
-   * Whether its server code and screens read the organization's people
+   * Whether its server code and pages read the organization's people
    * (`permissions: { people: true }`, GRA-1474): every member's name, email and
    * teams, for whoever uses it. No admin approves it; its reviewer sees
    * it. Null when its manifest can't be read.
@@ -439,12 +440,12 @@ export interface SavedBuild {
   status: "ok" | "failed" | "none" | "error";
   diagnostics: BuildDiagnostic[];
   /**
-   * Why a build couldn't run, with `error`; or why screens were checked
+   * Why a build couldn't run, with `error`; or why pages were checked
    * only in part (`standIn`).
    */
   error?: string;
   /**
-   * Screens checked against stand-ins for the references their server code
+   * Pages checked against stand-ins for the references their server code
    * generates, because it doesn't build or register: never `ok` (`error`
    * when nothing else failed, `failed` when something did), with why in
    * `error`. Check again once the server code registers.
@@ -455,7 +456,7 @@ export interface SavedBuild {
 /** A committed version, with how its builds went (`AppFilesApi.commit`). */
 export interface CommittedVersion extends AppVersion {
   builds: {
-    screens: SavedBuild;
+    pages: SavedBuild;
   };
 }
 
@@ -468,7 +469,7 @@ export interface AppFilesApi {
   read: (app: string, version?: number) => Promise<AppFiles>;
   /**
    * Commits `changes` over the App's latest version as its next version,
-   * and builds its screens, so the version opens without building.
+   * and builds its pages, so the version opens without building.
    * Answers once they are done with how they went (`builds`).
    * A build never fails the commit. Files under `app/` (the v1 server's,
    * `appV1ServerFolder`) do: the commit is refused with `app.v1_server`,
@@ -595,7 +596,7 @@ export interface AppVersionsApi {
 }
 
 /**
- * A role in one App: a `user` works in its screens; a `builder` also
+ * A role in one App: a `user` works in its pages; a `builder` also
  * changes its code, its settings and whom it is shared with. The person's
  * role in the organization is a ceiling: someone whose role there is
  * `user` never builds, whatever an App's members say.
@@ -683,7 +684,7 @@ export interface AppMembersApi {
    */
   add: (app: string, member: NewAppMember) => Promise<AppMember>;
   /**
-   * Stops sharing the App with them. Their open screens of it stop at
+   * Stops sharing the App with them. Their open pages of it stop at
    * once, or within a few seconds, as every push checks their role again.
    */
   remove: (app: string, member: AppMemberRef) => Promise<void>;
@@ -805,7 +806,7 @@ export interface AppBlueprintsApi {
 /**
  * The App registry and each App's code. An App is open to its owner, the
  * organization's admins and the people and teams it is shared with
- * (`members`): its users call what its screens use, its builders the
+ * (`members`): its users call what its pages use, its builders the
  * rest.
  */
 /**
@@ -824,11 +825,11 @@ export interface AppsApi {
   /** The Apps the person has a role in, oldest first, each with that role. */
   list: () => Promise<ViewedApp[]>;
   get: (app: string) => Promise<ViewedApp>;
-  /** The screens and workflows of the App's current version. */
+  /** The pages and workflows of the App's current version. */
   contents: (app: string) => Promise<AppContents>;
   /**
    * The Apps `list` gives, each with what `contents` says of it, in one
-   * read: the Apps page's tiles, each App's screens its pages.
+   * read: the Apps page's tiles, each App's pages its pages.
    */
   overview: () => Promise<AppOverview[]>;
   /**
@@ -892,11 +893,11 @@ export interface AppsApi {
   ) => Promise<AppVisitorGrants>;
   /**
    * Takes a published App back to a draft, for its builders: the people
-   * it is shared with as users lose it, their open screens cleared.
+   * it is shared with as users lose it, their open pages cleared.
    */
   unpublish: (app: string) => Promise<App>;
   /**
-   * Archives the App, for its builders: nobody opens its screens or calls
+   * Archives the App, for its builders: nobody opens its pages or calls
    * it, its triggers stop, and its unfinished runs are cancelled, each
    * audited. Its data, members and grants are kept for `restore`.
    */
@@ -1067,7 +1068,7 @@ export const appCallLimits = {
  * The most an App's error carries to its caller besides its code (its
  * details: the version, the method and the App's own message), as UTF-8
  * JSON, in bytes. The App's message is cut to fit, never sent whole: an
- * error reaches a screen, which is held to what it may receive whatever
+ * error reaches a page, which is held to what it may receive whatever
  * the App throws.
  */
 export const appErrorDetailsBytes = 16 * 1024;

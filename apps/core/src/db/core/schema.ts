@@ -814,7 +814,7 @@ export const appWebhookDeliveries = sqliteTable(
 );
 
 /**
- * The forms an App's screens sent that its webhooks were told of
+ * The forms an App's pages sent that its webhooks were told of
  * (src/app-webhook-queue.ts): one per submission, whoever sent it to
  * whichever function under whichever key, in whichever run (`id`, a hash
  * of all of it), so each run is told once. `told_at` is when; `claim`
@@ -836,7 +836,7 @@ export const appFormSubmissions = sqliteTable(
 /**
  * Revocations an App's host couldn't be told of (src/access-revocations.ts):
  * told again by the clock until it takes them, so a host away for
- * longer than its retries still clears the screens of whoever lost a
+ * longer than its retries still clears the pages of whoever lost a
  * role. `user_ids` is null for everyone the host knows of. A null
  * `app_id` is a revocation for every App (an admin's role lost), kept as
  * one row so the change's batch stays one row however many Apps there
@@ -898,7 +898,11 @@ export const appMembers = sqliteTable(
  * change of `output` and every grant widening the App's reach. A
  * classification lands only under the generation its admin read.
  */
-export const screenPolicies = sqliteTable("screen_policies", {
+// Still the table the previous release named for screens: a data
+// policy is the one thing here a release serving next to this one may
+// still write while both run (the admin migrates before it uploads), and
+// two tables could disagree on it. Renamed once no release reads it.
+export const pagePolicies = sqliteTable("screen_policies", {
   appId: text("app_id")
     .primaryKey()
     .references(() => apps.id),
@@ -1013,15 +1017,22 @@ export const appVersions = sqliteTable(
      */
     approved: integer(),
     /**
-     * The names of the version's screens (JSON, `screensIn`), written when
-     * it is committed: so listing every App someone can open, with its
-     * pages, is one query and reads no files (`listAppOverviews`). A row
-     * the previous release writes gets none (the default).
+     * The previous release's names of the version's screens (JSON). Read
+     * by nothing here: kept while that release may still serve next to
+     * this one, and dropped once none does (expand, then contract).
      */
     screens: text({ mode: "json" })
       .$type<string[]>()
       .notNull()
       .default(sql`'[]'`),
+    /**
+     * Whether the version has pages (`hasPages`), written when it is
+     * committed: so listing every App someone can open is one query and
+     * reads no files (`listAppOverviews`). Migration 0218 sets it from
+     * `screens`; a version the previous release commits while both serve
+     * gets none (the default) until its next version.
+     */
+    pages: integer({ mode: "boolean" }).notNull().default(false),
     /**
      * The chat's agent that wrote and proposed it, for `author_id` (JSON,
      * `AgentProposer`); null for a version a person committed. A row the
@@ -1200,7 +1211,7 @@ export const sdkReleaseTombstones = sqliteTable(
 
 /**
  * What keeps a sealed release past its retention (spec 16.3): an open
- * screen's lease, which lapses 15 minutes after its last renewal, or a
+ * page's lease, which lapses 15 minutes after its last renewal, or a
  * run, a compatible migration, a pinned trigger or a legal hold, held
  * until released.
  */
@@ -1771,7 +1782,7 @@ export const workflowRuns = sqliteTable(
     // Runs across Apps, newest first: the Workflows page's Runs tab
     // (src/workflows/overview.ts).
     index("workflow_runs_created_idx").on(table.createdAt, table.id),
-    // An App's runs of one workflow, newest first: what its screens list.
+    // An App's runs of one workflow, newest first: what its pages list.
     index("workflow_runs_app_workflow_idx").on(
       table.appId,
       table.workflowId,
@@ -3210,12 +3221,16 @@ export const notifications = sqliteTable(
     stopReason: text("stop_reason", { enum: ["refused", "failed"] }),
     /**
      * What an `app_message` row's App told the person
-     * (app-notifications.ts): its title, its body (null for none) and the
-     * App's screen it opens on (null for the App's first); its `app_id` is
-     * the App.
+     * (app-notifications.ts): its title and its body (null for none); its
+     * `app_id` is the App, which it opens.
      */
     title: text(),
     body: text(),
+    /**
+     * The previous release's screen a message opened on. Neither read
+     * nor written here: kept while that release may still serve next to
+     * this one, and dropped once none does (expand, then contract).
+     */
     screen: text(),
   },
   (table) => [
@@ -4077,13 +4092,13 @@ export const workflowResourceRuns = sqliteTable(
      */
     stopTakenAt: timestamp("stop_taken_at"),
     /**
-     * The newest control generation a screen's pause, resume or cancel took
-     * (screen-workflows.ts): each admitted one takes the next, and goes to
+     * The newest control generation a page's pause, resume or cancel took
+     * (page-workflows.ts): each admitted one takes the next, and goes to
      * the engine with it, which ignores one older than the newest it took.
      */
     controlGeneration: integer("control_generation").notNull().default(0),
     /**
-     * Moves on with every write that changes what a screen's snapshot of the
+     * Moves on with every write that changes what a page's snapshot of the
      * run shows (its status, a control admitted or settled), in the write's
      * own statement: the snapshot's revision is read from it.
      */
@@ -4091,7 +4106,7 @@ export const workflowResourceRuns = sqliteTable(
     /**
      * While the engine rolls the run back (its steps' compensations), why:
      * a JSON object of its cause (`failure` or `cancellation`) and, for a
-     * failure, the code the run failed with. What a screen's snapshot shows
+     * failure, the code the run failed with. What a page's snapshot shows
      * of its compensation (spec 10.7.3); kept once it ended.
      */
     compensation: text(),
@@ -4314,7 +4329,7 @@ export const workflowResourceRunTerminations = sqliteTable(
 
 /**
  * The controls a person asked of an independent run through an App's
- * screen (screen-workflows.ts): one receipt per run and kind, whatever
+ * page (page-workflows.ts): one receipt per run and kind, whatever
  * key asked for it, so a request sent again while its answer was lost,
  * or asked again under another key, answers the same receipt rather than
  * ask twice. `admitted` until the run's stop is asked of the engine, then
@@ -4382,8 +4397,8 @@ export const workflowResourceRunControls = sqliteTable(
 );
 
 /**
- * The keys a screen's pause or resume of an independent run was asked
- * under (screen-workflows.ts), each with the receipt it was answered: its
+ * The keys a page's pause or resume of an independent run was asked
+ * under (page-workflows.ts), each with the receipt it was answered: its
  * own, or, for one that joined a pause or resume already unresolved, that
  * one's. One per run, kind and key, so a request sent again under a key
  * is answered the receipt it was first, never decided anew: a retry of a

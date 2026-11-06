@@ -7,7 +7,7 @@
  * strips types and turns JSX into calls, then points imports at flat module
  * names (see kit.ts). There is no bundler: the kit's modules are built once
  * per release and shared by every App, and a build says which of them, and
- * which of the App's own, each screen loads. The App is type-checked
+ * which of the App's own, each page loads. The App is type-checked
  * whatever the compile found, so a build names everything there is to fix
  * at once (its lint, the design system's included, is a check of its
  * own: ultracite.ts); once it all passes,
@@ -58,14 +58,14 @@ import {
   computeCodeWith,
   generatedWorkflowCode,
   rewriteImports,
-  screenTypeImportError,
+  pageTypeImportError,
 } from "./imports.ts";
 import type { CodeKind, ImportSite, ModuleImports } from "./imports.ts";
 import {
   moduleKey,
   moduleRecordOf,
   noIncrements,
-  screenSources,
+  pageSources,
 } from "./increments.ts";
 import type {
   BuildMetrics,
@@ -80,7 +80,7 @@ import {
   limitErrors,
   computeModuleErrors,
   generatedWorkflowErrors,
-  screenFile,
+  routeTreePath,
 } from "./inputs.ts";
 import {
   appModuleName,
@@ -90,45 +90,51 @@ import {
   ownEntry,
   previewRefresh,
   previewRuntime,
-  screenReferences,
-  screenRuntime,
+  pageReferences,
+  pageRuntime,
 } from "./kit.ts";
 import { addressModules } from "./module-addresses.ts";
-import { problem, screenRefusals, strayProblems } from "./refusals.ts";
+import { problem, pageRefusals, strayProblems } from "./refusals.ts";
 import type { Location } from "./refusals.ts";
+import { routeTree } from "./route-tree.ts";
+import type { SurfaceManifest } from "./route-tree.ts";
 import { callbackParameters, readsStandIns } from "./stand-ins.ts";
 import { referenceError } from "./steering.ts";
 import type { DirectiveSite } from "./steering.ts";
 import {
   appCodeTarget,
   computeTarget,
-  screenTarget,
+  pageTarget,
   typeCheckRequest,
 } from "./type-check.ts";
 
 /**
- * What a page loads to run one screen, by flat name: of the App's modules,
- * the screen's and what it imports, directly or through others; of the
- * kit's, what those import, and the screen runtime.
+ * What a frame loads to run an App's pages, by flat name: of the App's
+ * modules, the route tree's and what it imports, directly or through
+ * others; of the kit's, what those import, and the page runtime.
  */
-export interface ScreenClosure {
+export interface PageClosure {
   modules: string[];
   kitModules: string[];
 }
 
 /**
- * An App's modules by flat name, what each screen loads of them and of the
- * kit's, by its module's name, and the CSS they use; or why it failed.
- * Errors fail a build; warnings don't.
+ * An App's modules by flat name, what its pages load of them and of the
+ * kit's from their route tree's module, the surfaces they declare and the
+ * CSS they use; or why it failed. Errors fail a build; warnings don't.
  */
-export type ScreenBuild =
+export type PageBuild =
   | {
       ok: true;
       /** Each importing the others by address (module-addresses.ts). */
       modules: Record<string, string>;
       /** Each module's address, by flat name: where a frame loads it. */
       addresses: Record<string, string>;
-      screens: Record<string, ScreenClosure>;
+      /** The route tree's module, which the frame's runtime routes by. */
+      entry: string;
+      /** What the frame loads, from `entry`. */
+      closure: PageClosure;
+      surfaces: SurfaceManifest[];
       css: string;
       diagnostics: Diagnostic[];
     }
@@ -213,7 +219,7 @@ const directiveAt = (
 };
 
 /**
- * What a screen's or a declaration's triple-slash directives reach beyond
+ * What a page's or a declaration's triple-slash directives reach beyond
  * the App's files (steering.ts `referenceError`), each refused where it is.
  */
 const referenceErrors = (
@@ -275,7 +281,7 @@ const compileFile = (
     // A type may also name the App's declarations (`typeFiles`); a value
     // never does, as they compile to nothing.
     const message = site.typeOnly
-      ? screenTypeImportError(site, path, typeFiles, kit)
+      ? pageTypeImportError(site, path, typeFiles, kit)
       : (declarationValueImportError(site, path, { files, declarations }) ??
         importError(site, path, files, kit));
     if (message !== undefined) {
@@ -314,8 +320,8 @@ const compileFile = (
 
 /**
  * Why an App's declaration file (`*.d.ts`) can't import what it does:
- * all it imports is types, held to what a screen's types may name
- * (`screenTypeImportError`) among `typeFiles`.
+ * all it imports is types, held to what a page's types may name
+ * (`pageTypeImportError`) among `typeFiles`.
  */
 const declarationImportErrors = (
   path: string,
@@ -341,7 +347,7 @@ const declarationImportErrors = (
     ...referenceErrors(path, directives, typeFiles),
     ...imports.flatMap((site) => {
       const { line } = site;
-      const message = screenTypeImportError(site, path, typeFiles, kit);
+      const message = pageTypeImportError(site, path, typeFiles, kit);
       return message === undefined
         ? []
         : [
@@ -356,7 +362,7 @@ const declarationImportErrors = (
 };
 
 /**
- * The transform of the screen source `path`, as a build keeps it, or why
+ * The transform of the page source `path`, as a build keeps it, or why
  * it can't be (`compileFile`), in a build whose modules are `known` and
  * whose types may name `typeFiles`.
  */
@@ -380,9 +386,11 @@ const transformSource = (
       code: result.code,
       app: [...result.imported.app],
       kit: [...result.imported.kit],
-      // The references' classes are the host's, never a screen's.
+      // The references' and the route tree's classes are the host's.
       candidates:
-        path === screenReferences.path ? [] : extractCandidates(source),
+        path === pageReferences.path || path === routeTreePath
+          ? []
+          : extractCandidates(source),
     },
   };
 };
@@ -405,7 +413,7 @@ const closureOf = (
 
 /**
  * The kit's modules these import, and every kit module those import. The
- * runtime renders the screens: a page needs it for any of them.
+ * runtime renders the pages: a page needs it for any of them.
  */
 const kitModulesFor = (
   imported: Iterable<string>,
@@ -413,30 +421,30 @@ const kitModulesFor = (
 ): string[] =>
   preview
     ? closureOf(
-        // The preview runtime loads the screen runtime by name, once
+        // The preview runtime loads the page runtime by name, once
         // React Fast Refresh is in (sdk/src/preview-runtime.ts).
         [
           ...imported,
           kitModuleName(previewRuntime),
-          kitModuleName(screenRuntime),
+          kitModuleName(pageRuntime),
         ],
         (name) => ownEntry(kit.previewModuleImports, name) ?? []
       )
     : closureOf(
-        [...imported, kitModuleName(screenRuntime)],
+        [...imported, kitModuleName(pageRuntime)],
         (name) => ownEntry(kit.moduleImports, name) ?? []
       );
 
 /**
- * What a page loads for the screen in the module `entry`, given what each
- * of the App's modules imports: not the App's other screens, nor what only
- * they use of the kit.
+ * What a frame loads from the module `entry`, the route tree, given what
+ * each of the App's modules imports: what nothing a page reaches uses,
+ * of the App's or the kit's, stays out.
  */
-const screenClosure = (
+const pageClosure = (
   entry: string,
   imports: ReadonlyMap<string, ModuleImports>,
   preview = false
-): ScreenClosure => {
+): PageClosure => {
   const modules = closureOf([entry], (name) => imports.get(name)?.app ?? []);
   return {
     modules,
@@ -473,11 +481,11 @@ const buildCss = async (
 };
 
 /**
- * What a screen's type check resolves an App file's imports to by name:
+ * What a page's type check resolves an App file's imports to by name:
  * the kit's modules, its icons, and the JSX runtime the compile names.
  * Nothing else of the kit, however a file names it (type-check.ts).
  */
-const screensTarget = screenTarget(
+const pagesTarget = pageTarget(
   new Set([...kit.imports, "lucide-react", "react/jsx-runtime"])
 );
 
@@ -486,12 +494,12 @@ const ownRecord = (record: Record<string, unknown>, key: string): unknown =>
   Object.hasOwn(record, key) ? record[key] : undefined;
 
 /**
- * The type check of the App's screens against the kit's types, which core
- * runs in the checker's isolate (checked-build.ts): `buildScreens`' last
+ * The type check of the App's pages against the kit's types, which core
+ * runs in the checker's isolate (checked-build.ts): `buildPages`' last
  * gate, beside its compile and import checks.
  */
-const screensCheck = (
-  files: Record<string, string>,
+const pagesCheck = (
+  app: Record<string, string>,
   {
     found,
     unparsed,
@@ -501,30 +509,29 @@ const screensCheck = (
     unparsed: ReadonlySet<string>;
     untyped: ReadonlySet<string>;
   }
-): TypeCheckPlan => {
-  const app = buildFiles(files);
-  return {
-    request: typeCheckRequest(app, screensTarget),
-    found,
-    unparsed: [...unparsed],
-    untyped: [...untyped],
-    lenient: readsStandIns(app) ? callbackParameters(app) : [],
-    carries: true,
-  };
-};
+): TypeCheckPlan => ({
+  request: typeCheckRequest(app, pagesTarget),
+  found,
+  unparsed: [...unparsed],
+  untyped: [...untyped],
+  lenient: readsStandIns(app) ? callbackParameters(app) : [],
+  carries: true,
+});
 
 /**
- * Builds an App's screens: `screens/*.tsx`, the `components/` they use and
- * the declarations (`*.d.ts`) at the App's root and among its components,
- * which are types alone and never modules.
+ * Builds an App's pages: its file routes under `src/routes/`, the rest
+ * of `src/` they use, and the declarations (`*.d.ts`) at the App's root
+ * and under `src/`, which are types alone and never modules. Their route
+ * tree is TanStack's generator's (route-tree.ts), made afresh by every
+ * build: one file, and what the frame's runtime routes by.
  *
  * With `preview`, for a chat's draft (spec 19.2.1): each module is
- * instrumented for React Fast Refresh, and what a screen loads of the kit
+ * instrumented for React Fast Refresh, and what a page loads of the kit
  * is the preview kit's. Every gate is the same.
  *
  * Without `checks`, for a preview's frame only (`preview-frame`), the
  * type check doesn't run: it holds up nothing the frame needs, and the
- * agent hears it from its own check of the draft (`preview-screens`,
+ * agent hears it from its own check of the draft (`preview-pages`,
  * which has it). Neither is a boundary: what a
  * file may import is held at its compile, which runs either way, and the
  * frame's sandbox and policy hold whatever the code does.
@@ -538,20 +545,20 @@ const screensCheck = (
  * says what it checks (`Unchecked`), and core puts the two together
  * (checked-build.ts `withTypeCheck`).
  */
-export const buildScreensIncrementally = async (
+export const buildPagesIncrementally = async (
   files: Record<string, string>,
   {
     preview = false,
     checks = true,
     reuse = noIncrements(),
   }: { preview?: boolean; checks?: boolean; reuse?: Handed } = {}
-): Promise<IncrementalBuild<Unchecked<ScreenBuild>>> => {
+): Promise<IncrementalBuild<Unchecked<PageBuild>>> => {
   const fresh = noIncrements();
   const metrics: BuildMetrics = { compiled: 0, reused: 0 };
   const done = (
-    built: ScreenBuild,
+    built: PageBuild,
     typeCheck?: TypeCheckPlan
-  ): IncrementalBuild<Unchecked<ScreenBuild>> => ({
+  ): IncrementalBuild<Unchecked<PageBuild>> => ({
     built: typeCheck === undefined ? { built } : { built, typeCheck },
     fresh,
     metrics,
@@ -561,14 +568,18 @@ export const buildScreensIncrementally = async (
   if (tooMuch.length > 0) {
     return done({ ok: false, diagnostics: tooMuch });
   }
-  const refused = screenRefusals(app);
+  const refused = pageRefusals(app);
   if (refused.length > 0) {
     return done({ ok: false, diagnostics: refused });
   }
-  // Only screens, components and the references they import are
+  // The pages as the generator left them (`RouteTree.routes`): what the
+  // tree routes is what compiles.
+  const tree = await routeTree(app);
+  const routed = { ...app, ...tree.routes };
+  // Only pages, components and the references they import are
   // compiled, whatever else is passed: what isn't is refused above, and
   // kept out should that ever miss it. Declarations are only types.
-  const { sources, known: paths, typeFiles: typed } = screenSources(app);
+  const { sources, known: paths, typeFiles: typed } = pageSources(routed);
   const known = new Set(paths);
   // What a type may name: the build's files and its declarations.
   const typeFiles = new Set(typed);
@@ -626,10 +637,28 @@ export const buildScreensIncrementally = async (
       errors.push(...result.errors);
     }
   }
+  // The route tree, compiled afresh: it changes with the pages' paths,
+  // never on its own, and takes a moment to compile. What is wrong with
+  // it fails the build beside what the files' own checks find.
+  errors.push(...tree.diagnostics);
+  if (tree.source !== undefined) {
+    const compiledTree = transformSource(
+      routeTreePath,
+      tree.source,
+      { known: new Set([...known, routeTreePath]), typeFiles },
+      { unparsed, untyped },
+      preview
+    );
+    if ("record" in compiledTree) {
+      take(compiledTree.record);
+    } else {
+      errors.push(...compiledTree.errors);
+    }
+  }
   // The App's declarations aren't modules, but they name modules for
-  // their types: held to what a screen must never reach, as a screen's
+  // their types: held to what a page must never reach, as a page's
   // own types are.
-  for (const [path, source] of Object.entries(app)) {
+  for (const [path, source] of Object.entries(routed)) {
     if (declarationFile.test(path)) {
       errors.push(
         ...declarationImportErrors(path, source, typeFiles, unparsed)
@@ -641,7 +670,12 @@ export const buildScreensIncrementally = async (
   // left out (`together`). A preview's frame skips it (`checks`): its
   // compile errors still fail it.
   const typeCheck = checks
-    ? screensCheck(files, { found: errors, unparsed, untyped })
+    ? pagesCheck(
+        tree.source === undefined
+          ? routed
+          : { ...routed, [routeTreePath]: tree.source },
+        { found: errors, unparsed, untyped }
+      )
     : undefined;
   if (errors.some((diagnostic) => isError(diagnostic))) {
     return done({ ok: false, diagnostics: errors }, typeCheck);
@@ -650,17 +684,14 @@ export const buildScreensIncrementally = async (
     [...imports.values()].flatMap(({ kit: imported }) => [...imported])
   );
   const css = await buildCss(candidates, kitModules);
-  const screens: Record<string, ScreenClosure> = Object.fromEntries(
-    paths
-      .filter((path) => screenFile.test(path))
-      .map((path) => appModuleName(path))
-      .map((entry) => [entry, screenClosure(entry, imports, preview)])
-  );
+  const entry = appModuleName(routeTreePath);
   return done(
     {
       ok: true,
       ...(await addressModules(modules)),
-      screens,
+      entry,
+      closure: pageClosure(entry, imports, preview),
+      surfaces: tree.surfaces,
       css,
       diagnostics: errors,
     },
@@ -669,16 +700,16 @@ export const buildScreensIncrementally = async (
 };
 
 /**
- * Transforms part of a screens build's sources (`batch`), in a build whose
+ * Transforms part of a pages build's sources (`batch`), in a build whose
  * modules are `known` and whose types may name `typeFiles`: each as
- * `buildScreensIncrementally` would, under the key it would work out for
+ * `buildPagesIncrementally` would, under the key it would work out for
  * it, so the build reuses it. What a first build of a large App does a
  * part at a time, each part one call within a call's CPU time (core's
- * screens.ts). Only `known` sources are transformed, whatever else is
+ * pages.ts). Only `known` sources are transformed, whatever else is
  * passed. A file that doesn't compile is left out: the build compiles it
  * again and says why, with every gate.
  */
-const transformScreens = async (
+const transformPages = async (
   batch: Record<string, string>,
   { known, typeFiles }: { known: string[]; typeFiles: string[] },
   preview: boolean
@@ -706,19 +737,19 @@ const transformScreens = async (
   return Object.fromEntries(records.flat());
 };
 
-/** Builds an App's screens with nothing reused (`buildScreensIncrementally`). */
-export const buildScreens = async (
+/** Builds an App's pages with nothing reused (`buildPagesIncrementally`). */
+export const buildPages = async (
   files: Record<string, string>,
   {
     preview = false,
     checks = true,
   }: { preview?: boolean; checks?: boolean } = {}
-): Promise<Unchecked<ScreenBuild>> => {
-  const { built } = await buildScreensIncrementally(files, { preview, checks });
+): Promise<Unchecked<PageBuild>> => {
+  const { built } = await buildPagesIncrementally(files, { preview, checks });
   return built;
 };
 
-/** Compiles one file of code that runs outside the screens, or says why it can't be. */
+/** Compiles one file of code that runs outside the pages, or says why it can't be. */
 const compileCodeFile = (
   kind: CodeKind,
   path: string,
@@ -1074,7 +1105,7 @@ const buildAppCodeNoting = (
     };
   }
   // The entry the host runs the App from, made from its file list: its
-  // config, schema and screens with every server module's functions and
+  // config and schema with every server module's functions and
   // every migration. Built as the
   // host's own code, never type-checked as the App's.
   code[serverEntryPath] = serverEntrySource(Object.keys(code));
@@ -1159,7 +1190,7 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
     };
   }
   // The entry the host runs the App from, made from its file list: its
-  // config, schema and screens with every server module's functions and
+  // config and schema with every server module's functions and
   // every migration. Built as the
   // host's own code, never type-checked as the App's.
   code[serverEntryPath] = serverEntrySource(Object.keys(code));
@@ -1239,13 +1270,13 @@ export const checkAppCode = (
 };
 
 /**
- * What the compiler builds: an App's screens, its server code of spec
+ * What the compiler builds: an App's pages, its server code of spec
  * 8's layout (`app`), its tests, a JSON workflow's generated module and
  * its compute modules.
  */
 export type CompileTarget =
-  | "screens"
-  | "preview-screens"
+  | "pages"
+  | "preview-pages"
   | "preview-frame"
   | "app"
   | "app-tests"
@@ -1254,9 +1285,9 @@ export type CompileTarget =
 
 /** What a build of each target answers, once its type check is in (`Unchecked`). */
 export interface TargetBuilds {
-  screens: ScreenBuild;
-  "preview-screens": ScreenBuild;
-  "preview-frame": ScreenBuild;
+  pages: PageBuild;
+  "preview-pages": PageBuild;
+  "preview-frame": PageBuild;
   app: AppCodeBuild;
   "app-tests": AppCodeBuild;
   "generated-workflow": GeneratedWorkflowBuild;
@@ -1275,16 +1306,15 @@ const targetBuilds: {
     | Unchecked<TargetBuilds[Target]>
     | Promise<Unchecked<TargetBuilds[Target]>>;
 } = {
-  screens: async (files) => await buildScreens(files),
-  // A chat's draft (spec 19.2.1): every gate of `screens`, instrumented
+  pages: async (files) => await buildPages(files),
+  // A chat's draft (spec 19.2.1): every gate of `pages`, instrumented
   // for React Fast Refresh, on the preview kit.
-  "preview-screens": async (files) =>
-    await buildScreens(files, { preview: true }),
+  "preview-pages": async (files) => await buildPages(files, { preview: true }),
   // What a preview's frame runs, and each of its updates: built as
-  // `preview-screens` is, without the type check and lint that would
-  // hold it up (`buildScreensIncrementally`).
+  // `preview-pages` is, without the type check and lint that would
+  // hold it up (`buildPagesIncrementally`).
   "preview-frame": async (files) =>
-    await buildScreens(files, { preview: true, checks: false }),
+    await buildPages(files, { preview: true, checks: false }),
   app: checkAppCode,
   "app-tests": (files) => ({ built: buildAppTests(files) }),
   "generated-workflow": buildGeneratedWorkflow,
@@ -1334,8 +1364,8 @@ const knownTarget = <Target extends string>(
 
 /** The targets built reusing earlier builds' parts, and how each builds. */
 const incrementalTargets = {
-  screens: { preview: false, checks: true },
-  "preview-screens": { preview: true, checks: true },
+  pages: { preview: false, checks: true },
+  "preview-pages": { preview: true, checks: true },
   "preview-frame": { preview: true, checks: false },
 } as const;
 
@@ -1386,7 +1416,7 @@ export default class AppCompiler extends WorkerEntrypoint {
   }
 
   /**
-   * Builds the screens (`target`: `screens`, or a preview's) from `files`
+   * Builds the pages (`target`: `pages`, or a preview's) from `files`
    * as `build` does, every gate the same, reusing what earlier builds
    * kept (`reuse`, increments.ts) where its key says it is what this
    * build would make; with what it makes now, for core to keep, and how
@@ -1396,18 +1426,18 @@ export default class AppCompiler extends WorkerEntrypoint {
     target: IncrementalTarget,
     files: Record<string, string>,
     reuse: unknown
-  ): Promise<IncrementalBuild<Unchecked<ScreenBuild>>> {
+  ): Promise<IncrementalBuild<Unchecked<PageBuild>>> {
     assertNoBindings(this.env, this.ctx.props, "The App compiler");
     const known = knownTarget(incrementalTargets, target, "buildIncrementally");
-    return await buildScreensIncrementally(files, {
+    return await buildPagesIncrementally(files, {
       ...incrementalTargets[known],
       reuse: incrementsOf(reuse),
     });
   }
 
   /**
-   * Transforms part of a screens build's sources (`target`: `screens`, or
-   * a preview's) as `buildIncrementally` would (`transformScreens`): the
+   * Transforms part of a pages build's sources (`target`: `pages`, or
+   * a preview's) as `buildIncrementally` would (`transformPages`): the
    * records it makes, by key, for core to keep and the build to reuse.
    */
   async transform(
@@ -1417,7 +1447,7 @@ export default class AppCompiler extends WorkerEntrypoint {
   ): Promise<Record<string, ModuleRecord>> {
     assertNoBindings(this.env, this.ctx.props, "The App compiler");
     const known = knownTarget(incrementalTargets, target, "transform");
-    return await transformScreens(
+    return await transformPages(
       batch,
       paths,
       incrementalTargets[known].preview

@@ -2,7 +2,7 @@ import { peopleReferences } from "@grasp-os/sdk/host";
 import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { screenLimits } from "@grasp-os/shared/screens";
+import { pageLimits } from "@grasp-os/shared/pages";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -12,8 +12,8 @@ import { loadRelease } from "../src/app-releases.ts";
 import { deliveredToVisitor } from "../src/app-visitors.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { leasedBuild } from "../src/page-delivery.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { leasedBuild } from "../src/screen-delivery.ts";
 import { appDefinition } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -140,9 +140,12 @@ export const shout = action({
 });
 `,
 
-  "screens/portal.tsx": `export default function Portal() {
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Portal() {
   return <p>Portal</p>;
 }
+
+export const Route = createFileRoute("/")({ component: Portal });
 `,
 });
 
@@ -214,7 +217,7 @@ const toOf = (message: EmailMessageBuilder): string => {
 };
 
 const visitSchema = z.object({
-  screen: z.object({ lease: z.string() }).loose().nullable(),
+  page: z.object({ lease: z.string() }).loose().nullable(),
 });
 
 const sessionSchema = z.object({ token: z.string() });
@@ -238,8 +241,8 @@ const visitor = async (
   const signedInAs = await post({ action: "sign_in", link, address, code });
   const { token } = sessionSchema.parse(await signedInAs.json());
   const opened = await post({ action: "open", token });
-  const { screen } = visitSchema.parse(await opened.json());
-  return { token, lease: screen?.lease ?? "" };
+  const { page } = visitSchema.parse(await opened.json());
+  return { token, lease: page?.lease ?? "" };
 };
 
 const answerSchema = z.object({
@@ -282,7 +285,7 @@ const call = async (
 };
 
 /**
- * What a visitor's screen reads through `useUser` or `usePeople`
+ * What a visitor's page reads through `useUser` or `usePeople`
  * (`reference`) answers: its value, or the code it was refused with.
  */
 const read = async (
@@ -326,7 +329,7 @@ const visitorCallerOf = (answer: unknown): unknown => {
   return { ...caller, id: caller.id.replace(/:.*$/u, ":") };
 };
 
-/** The visitor's ID a function or screen was told, or null. */
+/** The visitor's ID a function or page was told, or null. */
 const visitorIdOf = (answer: unknown): string | null => {
   const parsed: unknown =
     typeof answer === "string" && answer.startsWith("{")
@@ -426,7 +429,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     });
   });
 
-  it("are told who they are, and refused the organization's people, from the server and the screen, each refusal audited", async () => {
+  it("are told who they are, and refused the organization's people, from the server and the page, each refusal audited", async () => {
     const domain = newDomain();
     const { builder, app, link, version } = await portal(domain);
     const mail = await mailbox();
@@ -435,11 +438,11 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
 
     let server: unknown;
     let looked: unknown;
-    let screen: { caller: unknown; search: unknown } | undefined;
+    let page: { caller: unknown; search: unknown } | undefined;
     const events = await auditedDuring(async () => {
       server = await call(app, version, ana, "portal.who");
       looked = await call(app, version, ana, "portal.look");
-      screen = {
+      page = {
         caller: await read(ana, peopleReferences.user, {}),
         search: await read(ana, peopleReferences.search, { query: "a" }),
       };
@@ -447,13 +450,13 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     expect({
       server: visitorCallerOf(server),
       looked,
-      screen: screen && {
-        caller: visitorCallerOf(screen.caller),
-        search: screen.search,
+      page: page && {
+        caller: visitorCallerOf(page.caller),
+        search: page.search,
       },
       sameVisitor:
         visitorIdOf(server) !== null &&
-        visitorIdOf(server) === visitorIdOf(screen?.caller),
+        visitorIdOf(server) === visitorIdOf(page?.caller),
       refused: events
         .filter(({ action }) => action === "app.visitor_refused")
         .map(({ detail }) => detail),
@@ -466,7 +469,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       },
       looked: "visitor.not_granted",
       sameVisitor: true,
-      screen: {
+      page: {
         caller: {
           id: "visitor:",
           name: `ana@${domain}`,
@@ -599,7 +602,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     const ana = await visitor(mail, link, `ana@${domain}`);
     const ben = await visitor(mail, link, `ben@${domain}`);
     const host = appHost(env, appIdSchema.parse(app));
-    const { burst } = screenLimits.requests;
+    const { burst } = pageLimits.requests;
     const session = async (token: string) =>
       await env.DB.prepare(
         "SELECT id FROM app_visitor_sessions WHERE app_id = ? ORDER BY created_at"
@@ -795,7 +798,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     });
   });
 
-  it("take a call as large as a member's screen may send, past the 4 KiB the other requests get", async () => {
+  it("take a call as large as a member's page may send, past the 4 KiB the other requests get", async () => {
     const domain = newDomain();
     const { builder, app, link, version } = await portal(domain);
     const mail = await mailbox();
@@ -810,7 +813,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     }).toStrictEqual({ added: null, mine: [text] });
   });
 
-  it("hand over neither answer nor error once the screen's release is revoked while the call runs, and audit it", async () => {
+  it("hand over neither answer nor error once the page's release is revoked while the call runs, and audit it", async () => {
     // Each on a fresh Portal: its release is revoked inside the run, after
     // it was admitted, so only the check before handing over can refuse
     // it.
@@ -866,8 +869,8 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     const expected = {
       leased: true,
       ran: true,
-      refused: "screen.revoked",
-      audited: [{ reason: "screen_revoked", stage: "delivery" }],
+      refused: "page.revoked",
+      audited: [{ reason: "page_revoked", stage: "delivery" }],
     };
 
     expect({

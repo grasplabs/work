@@ -46,8 +46,8 @@ import {
   sdkReleaseArtifacts,
   workflowResourceVersions,
 } from "./db/core/schema.ts";
+import { buildGeneratedWorkflow, withinBuildWait } from "./pages.ts";
 import { releaseReservations } from "./release-retention.ts";
-import { buildGeneratedWorkflow, withinBuildWait } from "./screens.ts";
 import { sealedUse } from "./workflow-modules.ts";
 import type { ComputeContract, CompiledModules } from "./workflow-modules.ts";
 import { manifestPackagesSchema } from "./workflows/package-seal.ts";
@@ -227,7 +227,7 @@ export const compileWorkflow = async (
   const generated = generateWorkflow(checked, "workflow");
   // A build that runs past the build wait, or whose isolate gave up (its
   // CPU on a large module, or any stop of the sandbox host's: CPU, memory,
-  // a crash, its deadline, never cached, screens.ts), is the platform's to
+  // a crash, its deadline, never cached, pages.ts), is the platform's to
   // finish, never the definition's fault: the publication is refused as
   // one to try again (`workflow.build_slow`), and a late build runs on and
   // is cached for it.

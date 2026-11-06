@@ -68,7 +68,6 @@ const tell = action({
     await ctx.notifyPeople(args.to, {
       title: args.title,
       body: "Order 42 waits for your approval.",
-      link: "approvals",
     }),
 });
 
@@ -246,7 +245,7 @@ const fixture = async (): Promise<Fixture> => {
   };
 };
 
-/** Calls `path` through `invocation`, as a screen would. */
+/** Calls `path` through `invocation`, as a page would. */
 const callWith = async (
   invocation: Invocation,
   path: keyof typeof kinds,
@@ -296,7 +295,6 @@ const toldTo = async (by: Identity) => {
             appName: notification.appName,
             title: notification.title,
             body: notification.body,
-            screen: notification.screen,
             read: notification.read,
           },
         ]
@@ -402,7 +400,7 @@ const entryOf = (
 });
 
 describe("an action's ctx.notifyPeople", () => {
-  it("reaches a member's notifications, opening the App on its screen, and audits the send without its words", async () => {
+  it("reaches a member's notifications, opening the App, and audits the send without its words", async () => {
     const fx = await fixture();
     const sent = await call(fx, fx.bob, "orders.tell", {
       to: fx.bob.userId,
@@ -420,7 +418,6 @@ describe("an action's ctx.notifyPeople", () => {
           appName: "Orders",
           title: "Approve order 42",
           body: "Order 42 waits for your approval.",
-          screen: "approvals",
           read: false,
         },
       ],
@@ -680,7 +677,6 @@ describe("a mutation's ctx.afterCommit.notifyPeople", () => {
           appName: "Orders",
           title: "An order was placed",
           body: null,
-          screen: null,
           read: false,
         },
       ],

@@ -40,7 +40,7 @@ import {
 //   serves `statistics.read` alone, its query checked by the platform's
 //   own schema (`statisticQuerySchema`) as it is read.
 // - The wrong caller: every read acts for the invocation's authority, as
-//   core resolved it (the screen's person, the agent's delegate, the run's
+//   core resolved it (the page's person, the agent's delegate, the run's
 //   person), never anything App code sends, and counts only Apps whose runs
 //   that person may see (statistics.ts).
 // - Flooding: reads are bounded per invocation (`counts`) and per App

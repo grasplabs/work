@@ -31,7 +31,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { activeChat, appSlot, setActiveChat } from "../chat/active-chat.ts";
-import { socketsTo } from "../screens/test-socket.ts";
+import { socketsTo } from "../pages/test-socket.ts";
 import { AppWorkspace } from "./app-workspace.tsx";
 
 // An App's workspace against core's `apps` as the page reaches it over
@@ -70,7 +70,7 @@ const reviewOf = (version: number): VersionReview => ({
   },
   proposedBy: null,
   current: 1,
-  files: [{ path: "screens/list.tsx", change: "modified" }],
+  files: [{ path: "src/routes/index.tsx", change: "modified" }],
   server: null,
   serverFiles: [],
   migrations: [],
@@ -374,7 +374,7 @@ const says = (text: string): boolean =>
 const draftOf = (app: string): ChatDraft => ({
   app,
   base: 1,
-  changed: ["screens/list.tsx"],
+  changed: ["src/routes/index.tsx"],
   deleted: [],
   revision: 1,
   updatedAt: "2026-10-20T08:00:00.000Z",
@@ -436,13 +436,10 @@ const deskOfVersion1: PreviewBundle = {
   app: appIdSchema.parse("invoice-desk"),
   name: "Invoices",
   revision: 0,
-  screens: ["desk"],
-  screen: "desk",
   artifact: "a".repeat(64),
   frameToken: "token",
   refresh: {
     revision: 0,
-    screen: "desk",
     entry: "b".repeat(64),
     modules: {},
     css: "",
@@ -791,7 +788,7 @@ describe(AppWorkspace, () => {
       label: true,
       said: false,
       frame: {
-        title: "Preview of the draft's first page",
+        title: "Preview of the draft",
         sandbox: "allow-scripts",
       },
       review: "Publish version 2",
@@ -823,7 +820,7 @@ describe(AppWorkspace, () => {
     const frame = document.querySelector("iframe");
 
     // The agent's first write changes `desk`, the page the frame shows.
-    drafts = [{ ...draftOf("invoice-desk"), changed: ["screens/desk.tsx"] }];
+    drafts = [{ ...draftOf("invoice-desk"), changed: ["src/routes/desk.tsx"] }];
     await act(async () => {
       send?.({
         messages: [],
@@ -845,55 +842,9 @@ describe(AppWorkspace, () => {
     }).toStrictEqual({ sameFrame: true, opens: 1 });
   });
 
-  it("asks for the page the person picks from then on when it is the one the frame shows in place of a broken one, keeping the frame", async () => {
-    const fake = fakeApps("published");
-    // The draft's `board` doesn't build: core shows the App's `desk`.
-    const core = new PreviewingCore(undefined, {
-      ...deskOfVersion1,
-      revision: 1,
-      fallback: true,
-    });
-    socketsTo(core);
-    const drafts = [
-      {
-        ...draftOf("invoice-desk"),
-        changed: ["screens/board.tsx", "screens/desk.tsx"],
-      },
-    ];
-    await opened(
-      fake.apps,
-      identityOf(false),
-      "chat-drafting",
-      async () => await Promise.resolve(watching()),
-      undefined,
-      async () => await Promise.resolve(drafts)
-    );
-    await act(async () => {
-      await core.reached;
-    });
-    await settled();
-    const frame = document.querySelector("iframe");
-    const before = frame?.getAttribute("title");
-
-    await press(button("desk"));
-
-    expect({
-      before,
-      // The page its updates ask for from now on, named on the frame.
-      after: document.querySelector("iframe")?.getAttribute("title"),
-      sameFrame: document.querySelector("iframe") === frame,
-      opens: core.asked.map((args) => args[2]),
-    }).toStrictEqual({
-      before: "Preview of the board page",
-      after: "Preview of the desk page",
-      sameFrame: true,
-      opens: ["board"],
-    });
-  });
-
   it("says a proposed version with no page to show is ready to publish, rather than failing its preview", async () => {
-    // An App with no screens: core has no page of it to build.
-    const core = new PreviewingCore("screen.not_found");
+    // An App with no pages: core has no page of it to build.
+    const core = new PreviewingCore("page.not_found");
     socketsTo(core);
     await opened(
       fakeApps("published", { pendingVersion: 2 }).apps,
@@ -1109,7 +1060,7 @@ describe(AppWorkspace, () => {
               {
                 app: "invoice-desk",
                 base: 1,
-                changed: ["screens/list.tsx"],
+                changed: ["src/routes/index.tsx"],
                 deleted: [],
                 revision: 1,
                 updatedAt: "2026-10-20T08:00:00.000Z",

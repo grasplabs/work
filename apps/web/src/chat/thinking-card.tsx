@@ -101,8 +101,8 @@ const ShapeNeuron = ({
   letters: number;
 }) => {
   // Printed again only when its size on screen changes by a few pixels.
-  const onScreen = Math.round((neuron.r * text) / 3) * 3;
-  const dots = printed(neuron, onScreen);
+  const onPage = Math.round((neuron.r * text) / 3) * 3;
+  const dots = printed(neuron, onPage);
   const { hours } = neuron;
   let tone = "text-foreground";
   if (warm) {

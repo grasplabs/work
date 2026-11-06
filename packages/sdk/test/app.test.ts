@@ -5,19 +5,14 @@ import { databaseWriter } from "../src/database.ts";
 import { inspectApp, readAppManifest, registerApp } from "../src/host.ts";
 import type { ServerModules } from "../src/host.ts";
 import { AppError, defineApp, permission } from "../src/index.ts";
-import type {
-  AppConfig,
-  ScreenDefinition,
-  SurfaceDefinition,
-  WorkflowEventReference,
-} from "../src/index.ts";
+import type { AppConfig, WorkflowEventReference } from "../src/index.ts";
 import { readPermissionDeclaration } from "../src/permissions.ts";
 import { runFunction } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
 
-// How an App registers itself from its parts (its config, schema and
-// screens, and the server functions its modules under `server/` export),
+// How an App registers itself from its parts (its config and schema, and
+// the server functions its modules under `server/` export),
 // and what inspection makes of them (spec 7.1, 7.4, 7.5): pure checks of
 // a declaration, so unit tests.
 // That the host enforces the result is tested through the host
@@ -55,11 +50,8 @@ const secret = server.internalQuery({
   handler: () => null,
 });
 
-/** Notes' config and screens, as one registration to vary. */
-interface Registration extends AppConfig {
-  readonly screens?: readonly ScreenDefinition[];
-  readonly surfaces?: readonly SurfaceDefinition[];
-}
+/** Notes' config, as one registration to vary. */
+type Registration = AppConfig;
 
 // SAFETY: deliberately ill-typed views, for declarations the types refuse.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -89,16 +81,14 @@ const registration: Registration = { name: "Notes" };
 /** Notes' server modules: `server/notes.ts`. */
 const notesModules: ServerModules = { notes: { list, create, send } };
 
-/** Registers `config`, `screens` and `modules` as the host's entry does. */
+/** Registers `config` and `modules` as the host's entry does. */
 const registerParts = (
   config: ReturnType<typeof defineApp>,
-  { screens, surfaces }: Partial<Registration>,
   modules: ServerModules
 ) =>
   registerApp({
     config,
     schema,
-    screens: { screens: screens ?? [], surfaces: surfaces ?? [] },
     modules,
     migrations: [],
   });
@@ -111,24 +101,13 @@ const notes = (
   changes: Partial<Registration> = {},
   modules: ServerModules = notesModules
 ) => {
-  const {
-    screens: _screens,
-    surfaces: _surfaces,
-    ...config
-  } = {
-    ...registration,
-    ...changes,
-  };
-  return registerParts(defineApp(config), changes, modules);
+  const config = { ...registration, ...changes };
+  return registerParts(defineApp(config), modules);
 };
 
 /** Registers Notes, and its functions, with `changes` the types refuse. */
 const looseNotes = (changes: object) =>
-  registerParts(
-    looseDefineApp({ ...registration, ...changes }),
-    {},
-    notesModules
-  );
+  registerParts(looseDefineApp({ ...registration, ...changes }), notesModules);
 
 /**
  * A connector declaration of `contract`, read back as the host reads a
@@ -724,7 +703,7 @@ describe("uses", () => {
       stage: manifest.operations["notes.stage"]?.uses,
       declared: manifest.workflows.followUp?.input,
       declaredOutput: manifest.workflows.followUp?.output,
-      // A workflow is neither an action's permission nor a screen's.
+      // A workflow is neither an action's permission nor a page's.
       resources: Object.keys(manifest.resources),
       readBack:
         canonicalText(readAppManifest(JSON.stringify(manifest))) ===
@@ -1044,7 +1023,7 @@ describe(AppError, () => {
       "connection.not_offered",
       "platform's `connection`",
     ],
-    ["the screens' namespace", "screen.invalid", "platform's `screen`"],
+    ["the pages' namespace", "page.invalid", "platform's `page`"],
     [
       "the resources' namespace",
       "resource.unavailable",

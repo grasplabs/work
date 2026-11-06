@@ -57,7 +57,7 @@
       ],
     },
     {
-      groupName: "screen checks",
+      groupName: "page checks",
       matchPackageNames: ["eslint", "@typescript-eslint/**"],
     },
     {

@@ -5,7 +5,7 @@ import type { FrameLinkMessage } from "./app-link-limits.ts";
 import { defineErrorFamily } from "./errors.ts";
 
 // An App's external links (spec 10.7.7, 32.3), as core, the page around a
-// screen's frame and the SDK say them to each other: the refusals, and the
+// page's frame and the SDK say them to each other: the refusals, and the
 // messages of the frame's link port read as what they are. The rules for
 // which URL may open are in app-link-limits.ts, with nothing imported.
 

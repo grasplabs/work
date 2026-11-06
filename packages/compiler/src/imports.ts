@@ -1,15 +1,13 @@
-import {
-  appCodeImport,
-  screenImportError,
-  typeImportError,
-} from "./app-code.ts";
+import { appCodeImport, pageImportError, typeImportError } from "./app-code.ts";
+import { routeTreePath } from "./inputs.ts";
 import {
   appModuleName,
   kitModuleName,
   ownEntry,
   packageModuleName,
-  screenReferences,
-  screenRootNames,
+  pageReferences,
+  pageRootNames,
+  routerSpecifier,
   sdkRoot,
 } from "./kit.ts";
 import type { Kit } from "./kit.ts";
@@ -350,7 +348,7 @@ const typeSuffixes = [
 const scriptExtension = /\.(?:js|jsx)$/u;
 
 /**
- * The App file a screen's type import names, if there is one: resolved
+ * The App file a page's type import names, if there is one: resolved
  * as TypeScript would (`./types` for `types.d.ts` or `types/index.d.ts`,
  * `./x.js` for `x.ts`), but only ever among `files`, the build's own, so
  * no path, folder or extension reaches anything else.
@@ -380,7 +378,7 @@ const resolveTypeFile = (
 const pathSpecifier = /^(?:\.\.?(?:\/|$)|\/)/u;
 
 /**
- * Why a type import of App code that isn't a screen's names a path that
+ * Why a type import of App code that isn't a page's names a path that
  * isn't one of the App's files (`files`, everything the build was given),
  * or undefined when it names a module or one of them. By name, a type
  * reaches only the modules its check gives its kind (type-check.ts);
@@ -399,23 +397,29 @@ export const typeFileError = (
     : undefined;
 
 /**
- * Why a type-only import in a screen, component or declaration file isn't
+ * Why a type-only import in a page, component or declaration file isn't
  * allowed, or undefined when it is: held to what its values may import,
  * but for the names they may take (a type of the SDK root's beyond
  * `{ v }`, any lucide-react name). An allowlist, so no path reaches what
  * the kit doesn't list: nothing under node_modules, nothing absolute,
  * only the build's own files and the kit's modules by name.
  */
-export const screenTypeImportError = (
+export const pageTypeImportError = (
   { specifier, ambient }: Pick<ImportSite, "specifier" | "ambient">,
   file: string,
   files: ReadonlySet<string>,
   kit: Kit
 ): string | undefined => {
+  // The route tree the host generates registers the App's routes with
+  // TanStack Router as TanStack's own generator writes it: augmenting the
+  // router's registry, never declaring a module of its own.
+  if (ambient && file === routeTreePath && specifier === routerSpecifier) {
+    return undefined;
+  }
   if (ambient) {
     return specifier === undefined
-      ? "declare global is never in a screen's files: it would declare globals the page doesn't give the App."
-      : `declare module "${specifier}" is never in a screen's files: it would declare, or shadow, a module the kit doesn't give the App. Import what the kit has instead.`;
+      ? "declare global is never in a page's files: it would declare globals the page doesn't give the App."
+      : `declare module "${specifier}" is never in a page's files: it would declare, or shadow, a module the kit doesn't give the App. Import what the kit has instead.`;
   }
   if (specifier === undefined) {
     return "import() must name a module in quotes.";
@@ -426,27 +430,27 @@ export const screenTypeImportError = (
   }
   if (isRelative(specifier)) {
     return resolveTypeFile(file, specifier, files) === undefined
-      ? `"${specifier}" is not a file of this App's screens.`
+      ? `"${specifier}" is not a file of this App's pages.`
       : undefined;
   }
-  if (specifier === screenReferences.specifier) {
-    return files.has(screenReferences.path)
+  if (specifier === pageReferences.specifier) {
+    return files.has(pageReferences.path)
       ? undefined
       : `"${specifier}" holds the references the host generates from the App's server code (grasp.config.ts, server/), which this App doesn't have yet.`;
   }
   return specifier === "lucide-react" || kit.imports.includes(specifier)
     ? undefined
-    : `"${specifier}" is outside the kit. Screens can import the App's own files and ${packagesOf(kit)}.`;
+    : `"${specifier}" is outside the kit. Pages can import the App's own files and ${packagesOf(kit)}.`;
 };
 
 /**
- * Why a screen's value import of `specifier` names a declaration file
+ * Why a page's value import of `specifier` names a declaration file
  * among `declarations` (`declarationFile`), or undefined when it names
  * none: a declaration holds types alone and is never a module, so a value
  * import of one would be undefined at run time. Resolved among `files`
  * and `declarations` together, in TypeScript's order (`x.tsx` before
  * `x.d.ts`, `x.d.ts` before `x/index.ts`), so the file the type check
- * reads is the file the screen runs, or the import is refused.
+ * reads is the file the page runs, or the import is refused.
  */
 export const declarationValueImportError = (
   { specifier, typeOnly }: Pick<ImportSite, "specifier" | "typeOnly">,
@@ -472,7 +476,7 @@ export const declarationValueImportError = (
     : undefined;
 };
 
-/** Why a screen's import isn't allowed, or undefined when it is. */
+/** Why a page's import isn't allowed, or undefined when it is. */
 export const importError = (
   { specifier, names, typeOnly, ambient }: ImportSite,
   file: string,
@@ -480,12 +484,12 @@ export const importError = (
   kit: Kit
 ): string | undefined => {
   if (typeOnly) {
-    return screenTypeImportError({ specifier, ambient }, file, files, kit);
+    return pageTypeImportError({ specifier, ambient }, file, files, kit);
   }
   if (specifier === undefined) {
     return "import() must name a module in quotes.";
   }
-  const server = screenImportError(file, specifier);
+  const server = pageImportError(file, specifier);
   if (server !== undefined) {
     return server;
   }
@@ -494,8 +498,8 @@ export const importError = (
       ? `"${specifier}" is not a file in this App.`
       : undefined;
   }
-  if (specifier === screenReferences.specifier) {
-    return files.has(screenReferences.path)
+  if (specifier === pageReferences.specifier) {
+    return files.has(pageReferences.path)
       ? undefined
       : `"${specifier}" holds the references the host generates from the App's server code (grasp.config.ts, server/), which this App doesn't have yet.`;
   }
@@ -504,13 +508,13 @@ export const importError = (
   }
   if (
     specifier === sdkRoot &&
-    (names === undefined || names.some((name) => !screenRootNames.has(name)))
+    (names === undefined || names.some((name) => !pageRootNames.has(name)))
   ) {
-    return `Screens import only { v } from ${sdkRoot}, and its types: the rest is the App's server code.`;
+    return `Pages import only { v } from ${sdkRoot}, and its types: the rest is the App's server code.`;
   }
   return kit.imports.includes(specifier)
     ? undefined
-    : `"${specifier}" is outside the kit. Screens can import the App's own files and ${packagesOf(kit)}.`;
+    : `"${specifier}" is outside the kit. Pages can import the App's own files and ${packagesOf(kit)}.`;
 };
 
 /**
@@ -581,10 +585,10 @@ export const rewriteImports =
     };
     const moduleFor = (specifier: string): string => {
       if (
-        specifier === screenReferences.specifier &&
-        files.has(screenReferences.path)
+        specifier === pageReferences.specifier &&
+        files.has(pageReferences.path)
       ) {
-        const module = appModuleName(screenReferences.path);
+        const module = appModuleName(pageReferences.path);
         imported.app.add(module);
         return module;
       }
@@ -647,7 +651,7 @@ export const rewriteImports =
   };
 
 /**
- * Code built here that runs outside the screens: a JSON workflow's
+ * Code built here that runs outside the pages: a JSON workflow's
  * generated module and its compute modules. Each imports its own files
  * and a few of the platform's modules, by the flat name each is loaded
  * under.

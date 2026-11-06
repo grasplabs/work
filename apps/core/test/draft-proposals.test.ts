@@ -20,8 +20,9 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-/** A screen whose button is restyled, which @shadcn/lint refuses. */
-const restyled = `import { Button } from "@grasp-os/ui/components/button";
+/** A page whose button is restyled, which @shadcn/lint refuses. */
+const restyled = `import { createFileRoute } from "@tanstack/react-router";
+import { Button } from "@grasp-os/ui/components/button";
 
 const Desk = () => (
   <main className="flex flex-col gap-4 p-6">
@@ -29,23 +30,23 @@ const Desk = () => (
   </main>
 );
 
-export default Desk;
+export const Route = createFileRoute("/")({ component: Desk });
 `;
 
-/** The same screen with the button's own variant: what the lint asks for. */
+/** The same page with the button's own variant: what the lint asks for. */
 const fixed = restyled.replace(
   '<Button className="rounded-full">',
   '<Button variant="outline">'
 );
 
-/** A builder's App at version 1, live, and the builder's chat with a draft of `screen`. */
-const drafted = async (screen: string) => {
+/** A builder's App at version 1, live, and the builder's chat with a draft of `page`. */
+const drafted = async (page: string) => {
   const builder = await signedInApi(idp, "builder");
   const { id } = await builder.api.apps.create({ name: `Desk ${unique()}` });
   await release(builder, id, { "AGENTS.md": "# Desk\n" });
   const app = appIdSchema.parse(id);
   const { chatId } = await chatWithDraft(builder, app, {
-    "screens/desk.tsx": screen,
+    "src/routes/index.tsx": page,
   });
   return { builder, app, chatId };
 };
@@ -89,7 +90,7 @@ describe("a person proposing a chat's draft", { timeout: 180_000 }, () => {
         author: builder.userId,
         message: "A desk",
         proposedBy: null,
-        files: [{ path: "screens/desk.tsx", change: "added" }],
+        files: [{ path: "src/routes/index.tsx", change: "added" }],
       },
       // Kept, changing nothing: its preview shows the version proposed.
       drafts: [{ app, changed: [] }],

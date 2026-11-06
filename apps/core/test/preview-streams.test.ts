@@ -20,7 +20,7 @@ import { signedInApi } from "./sign-in.ts";
 
 // Streaming actions (spec 10.7.6) in a chat's preview of its draft of an
 // App of spec 8's layout (sealed-previews.ts, preview-stream-relay.ts),
-// through the page's own connection, as a preview's screen follows one.
+// through the page's own connection, as a preview's page follows one.
 // These tests start from the ways it can fail (the threat model on
 // GRA-663): the stream reaches the App's data or an outside system,
 // outlives its preview or who may follow it, escapes its budgets, or a
@@ -203,7 +203,7 @@ const streamRequest = async (
   });
 };
 
-/** Follows a preview stream as a preview's screen does: its frames, and its end. */
+/** Follows a preview stream as a preview's page does: its frames, and its end. */
 const follow = async (
   person: Person,
   { chatId, app, revision }: Seat,
@@ -1014,7 +1014,7 @@ describe(
       await expect(reread.ended).resolves.toBe("ok");
     });
 
-    it("keeps a stream on the last server code that built running across a write of the draft's screens alone, while its own server code doesn't build", async () => {
+    it("keeps a stream on the last server code that built running across a write of the draft's pages alone, while its own server code doesn't build", async () => {
       const { builder, app, chatId, revision, write } = await setUp();
       // Sealed, then server code that fails its type check, which the
       // preview runs on the server code before in place of.
@@ -1037,12 +1037,17 @@ describe(
       );
       const followed = await follow(builder, seat, "stream", request);
       await progressed(followed.frames);
-      // A write of a screen alone: the server code the stream runs on is
+      // A write of a page alone: the server code the stream runs on is
       // still what the preview runs.
       const page = await write(
         {
-          "screens/desk.tsx":
-            "export default function Desk() {\n  return <main>Desk</main>;\n}\n",
+          "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Desk() {
+  return <main>Desk</main>;
+}
+
+export const Route = createFileRoute("/")({ component: Desk });
+`,
         },
         broken
       );

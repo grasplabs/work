@@ -127,9 +127,12 @@ export const pay = mutation({
 });
 `,
 
-  "screens/notes.tsx": `export default function Notes() {
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Notes() {
   return <p>Notes</p>;
 }
+
+export const Route = createFileRoute("/")({ component: Notes });
 `,
 };
 
@@ -151,7 +154,7 @@ const notesApp = async () => {
 type Notes = Awaited<ReturnType<typeof notesApp>>;
 
 /**
- * Calls `path` of the App as `by` (a screen's call), or as an agent acting
+ * Calls `path` of the App as `by` (a page's call), or as an agent acting
  * for them: what it answered.
  */
 const call = async (
@@ -782,7 +785,7 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
     expect(new TextDecoder().decode(header.value)).toContain("_id,");
     await release(builder, app, {
       ...files,
-      "screens/notes.tsx": `${files["screens/notes.tsx"] ?? ""}\n// v2\n`,
+      "src/routes/index.tsx": `${files["src/routes/index.tsx"] ?? ""}\n// v2\n`,
     });
     await expect(reader.read()).rejects.toThrow(/This App changed/u);
   });
@@ -798,7 +801,7 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
     expect(version).toBe(notes.version);
     await release(builder, app, {
       ...files,
-      "screens/notes.tsx": `${files["screens/notes.tsx"] ?? ""}\n// v2\n`,
+      "src/routes/index.tsx": `${files["src/routes/index.tsx"] ?? ""}\n// v2\n`,
     });
     const { data } = builder.api.apps;
     const refusals = await Promise.all([

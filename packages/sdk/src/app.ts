@@ -6,7 +6,6 @@ import {
   operationSegmentPattern,
 } from "@grasp-os/shared/operation-limits";
 
-import { assignable } from "./descriptor-assignable.ts";
 import { isMigration } from "./migration.ts";
 import type { Migration, MigrationManifest } from "./migration.ts";
 import {
@@ -43,7 +42,6 @@ import type {
 } from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
-import { validateValue } from "./value-interpreter.ts";
 import { descriptorOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
 
@@ -55,12 +53,13 @@ import type { AnySchema } from "./value-schema.ts";
 //   preferences, answers })`, generated from the App's definition;
 // - its schema, `server/schema.ts`, each table with its access
 //   (`.access`), generated from the definition too;
-// - its screens, `screens.ts`: `{ screens, surfaces }`, each screen a
-//   named route to a screen file;
 // - its server functions: as in Convex, each an export of a module under
 //   `server/`, whose path is its API (`server/tasks.ts`'s `list` is
 //   `tasks.list`);
 // - its migrations: the default export of each `server/migrations/*.ts`.
+//
+// Its pages aren't registered: they are its file routes under
+// `src/routes/`, which the compiler reads (route-tree.ts).
 //
 // Registering grants nothing: every requirement here becomes usable only
 // once the host authorizes it, and the host intersects it with the
@@ -89,11 +88,9 @@ import type { AnySchema } from "./value-schema.ts";
 //   (spec 8), resolved here by its path: one whose visibility or kind
 //   doesn't match what is registered there is refused, so a stale or
 //   forged reference names nothing;
-// - screens (spec 8) are a list of named routes, each a screen file and
-//   the route input its parameters are validated with, and `preferences`
-//   (spec 10.7.7), when declared, is a strict object; the top-level path
-//   segments `preferences`, `workflows` and `people` are the platform's,
-//   so no function registers under them;
+// - `preferences` (spec 10.7.7), when declared, is a strict object; the
+//   top-level path segments `preferences`, `workflows` and `people` are
+//   the platform's, so no function registers under them;
 // - migrations (spec 17.2, migration.ts) are `migration` declarations,
 //   each named once, one a table, of a table the schema has, whose
 //   `output` declares exactly that table's fields.
@@ -109,49 +106,6 @@ import type { AnySchema } from "./value-schema.ts";
 export type ServerModules = Readonly<
   Record<string, Readonly<Record<string, unknown>>>
 >;
-
-/** One of an App's screens: a named route to a screen file. */
-export interface ScreenDefinition {
-  /** Its name in the generated `screens`: an identifier. */
-  readonly name: string;
-  /** Its route: `/`, or segments, each a lower-case name or a `:parameter`. */
-  readonly path: string;
-  /** Its file, `screens/<file>.tsx`. */
-  readonly source: string;
-  /**
-   * What its route input is: an object with a string field for each of
-   * the route's parameters. A route without parameters may leave it out,
-   * for a strict empty object.
-   */
-  readonly input?: AnySchema;
-}
-
-/** Where the host places a surface (spec 34.1). */
-export type SurfaceKind = "sidebar" | "panel" | "settings" | "deepLink";
-
-/**
- * One of an App's surfaces (spec 34.1): a place the host opens one of its
- * screens, with input of its own, which must be assignable to the screen's.
- */
-export interface SurfaceDefinition {
-  /** Its name, unique in the App: an identifier. */
-  readonly name: string;
-  readonly kind: SurfaceKind;
-  /** The name of the screen it opens. */
-  readonly screen: string;
-  /** What the host calls it, 1 to 100 characters. */
-  readonly title: string;
-  /** What it is opened with: a required `v.object`. */
-  readonly input: AnySchema;
-}
-
-/** An App's screens: `screens.ts`'s default export. */
-export interface AppScreens {
-  /** Its screens (spec 8): named routes, each to a screen file. */
-  readonly screens: readonly ScreenDefinition[];
-  /** Where the host places its screens besides their routes (spec 34.1). */
-  readonly surfaces?: readonly SurfaceDefinition[];
-}
 
 /** What an App's config (`grasp.config.ts`) declares. */
 export interface AppConfig {
@@ -177,7 +131,7 @@ export interface AppConfig {
 
 /**
  * An App's permissions, by kind (permissions.ts): what its actions reach
- * through `ctx`, the workflows its functions start, what its screens may
+ * through `ctx`, the workflows its functions start, what its pages may
  * do with files and link to, and whether it reads the organization's
  * people.
  */
@@ -200,11 +154,11 @@ export interface AppPermissions {
    * refused. Who calls (`ctx.auth.getUser()`) needs nothing.
    */
   readonly people?: boolean;
-  /** What its screens may do with files. */
+  /** What its pages may do with files. */
   readonly files?: FilesPermission;
   /** Guest chats (`ctx.guests`). */
   readonly guests?: GuestsPermission;
-  /** The exact HTTPS origins its screens may link to; no network access. */
+  /** The exact HTTPS origins its pages may link to; no network access. */
   readonly links?: LinksPermission;
 }
 
@@ -223,8 +177,6 @@ export interface AppParts {
   readonly config: App;
   /** `server/schema.ts`'s default export. */
   readonly schema: SchemaDefinition;
-  /** `screens.ts`'s default export, when the App has one. */
-  readonly screens?: unknown;
   /** Each module under `server/` but the schema, `_generated/` and `migrations/`. */
   readonly modules: ServerModules;
   /** The default export of each `server/migrations/*.ts`, in path order. */
@@ -279,25 +231,6 @@ export interface OperationManifest {
   readonly tables: Readonly<Record<string, TableVerbs>>;
 }
 
-/** One screen, as data. */
-export interface ScreenManifest {
-  readonly name: string;
-  readonly path: string;
-  readonly source: string;
-  /** The strict object its route input is validated with. */
-  readonly input: ValueDescriptor;
-}
-
-/** One surface, as data. */
-export interface SurfaceManifest {
-  readonly name: string;
-  readonly kind: SurfaceKind;
-  readonly screen: string;
-  readonly title: string;
-  /** The strict object its input is validated with. */
-  readonly input: ValueDescriptor;
-}
-
 /** A registered App, as data. */
 export interface AppManifest {
   readonly name: string;
@@ -307,14 +240,10 @@ export interface AppManifest {
   readonly operations: Readonly<Record<string, OperationManifest>>;
   /** The permissions its actions reach, by alias. */
   readonly resources: Readonly<Record<string, AnyPermission>>;
-  /** The permissions its screens use (files, links), by alias. */
+  /** The permissions its pages use (files, links), by alias. */
   readonly browserResources: Readonly<Record<string, BrowserPermission>>;
   /** The workflows its functions start, by alias. */
   readonly workflows: Readonly<Record<string, WorkflowPermission>>;
-  /** Its screens, by name, in the order declared. */
-  readonly screens: Readonly<Record<string, ScreenManifest>>;
-  /** Its surfaces, by name, in the order declared. */
-  readonly surfaces: Readonly<Record<string, SurfaceManifest>>;
   /** Its preferences' strict object, or null when it declares none. */
   readonly preferences: ValueDescriptor | null;
   /** Present when it reads the organization's people (`permissions.people`). */
@@ -625,296 +554,6 @@ const permissionsOf = (given: unknown): PermissionsOf => {
   }
   requireFixedAliases({ actions, browser, workflows });
   return { actions, browser, workflows, people: permissions.people === true };
-};
-
-/** A screen's or a route parameter's name: an identifier. */
-const screenNamePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
-
-/** A screen's file: `screens/<file>.tsx`. */
-const screenSourcePattern = /^screens\/[\w-]{1,64}\.tsx$/u;
-
-/** One literal segment of a route: lower-case letters, digits and dashes. */
-const routeSegmentPattern = /^[a-z0-9][a-z0-9-]{0,63}$/u;
-
-/** One parameter of a route, `:name`. */
-const routeParameterPattern = /^:(?<name>[A-Za-z][A-Za-z0-9_]{0,63})$/u;
-
-/** The most screens an App declares, and the longest route. */
-export const screenLimits = { screens: 64, pathLength: 200, segments: 16 };
-
-/** The descriptor kinds a route parameter's field may be: strings. */
-const parameterKinds: ReadonlySet<string> = new Set(["string", "id", "enum"]);
-
-/** A strict empty object, the input of a route without parameters. */
-const emptyInput: ValueDescriptor = Object.freeze({
-  descriptorVersion: 1,
-  kind: "object",
-  presence: "required",
-  nullable: false,
-  fields: Object.freeze({}),
-});
-
-/** The parameters of route `path`, checked: refuses a route that isn't one. */
-const routeParameters = (path: unknown, name: string): string[] => {
-  if (
-    typeof path !== "string" ||
-    !path.startsWith("/") ||
-    path.length > screenLimits.pathLength
-  ) {
-    return refuse(
-      `Screen \`${name}\`'s \`path\` is a route starting with \`/\`, at most ${screenLimits.pathLength} characters.`
-    );
-  }
-  if (path === "/") {
-    return [];
-  }
-  const segments = path.slice(1).split("/");
-  if (segments.length > screenLimits.segments) {
-    return refuse(
-      `Screen \`${name}\`'s route has more than ${screenLimits.segments} segments.`
-    );
-  }
-  const parameters: string[] = [];
-  for (const segment of segments) {
-    const parameter = routeParameterPattern.exec(segment)?.groups?.name;
-    if (parameter !== undefined) {
-      if (parameters.includes(parameter)) {
-        refuse(`Screen \`${name}\`'s route names \`:${parameter}\` twice.`);
-      }
-      parameters.push(parameter);
-    } else if (!routeSegmentPattern.test(segment)) {
-      refuse(
-        `Screen \`${name}\`'s route has a segment that is neither a lower-case name nor a \`:parameter\`.`
-      );
-    }
-  }
-  return parameters;
-};
-
-/** The input descriptor of a screen whose route has `parameters`. */
-const screenInput = (
-  input: unknown,
-  parameters: readonly string[],
-  name: string
-): ValueDescriptor => {
-  if (input === undefined) {
-    if (parameters.length > 0) {
-      refuse(
-        `Screen \`${name}\`'s route has parameters: declare its \`input\`, with a field for each.`
-      );
-    }
-    return emptyInput;
-  }
-  // Throws for anything but a `v` schema.
-  const descriptor = descriptorOf(input);
-  if (
-    descriptor.kind !== "object" ||
-    descriptor.nullable ||
-    descriptor.presence !== "required"
-  ) {
-    return refuse(`Screen \`${name}\`'s \`input\` is a required \`v.object\`.`);
-  }
-  for (const parameter of parameters) {
-    const field = Object.hasOwn(descriptor.fields, parameter)
-      ? descriptor.fields[parameter]
-      : undefined;
-    if (
-      field === undefined ||
-      !parameterKinds.has(field.kind) ||
-      field.nullable ||
-      field.presence !== "required"
-    ) {
-      refuse(
-        `Screen \`${name}\`'s \`input\` has no required string, ID or enum field \`${parameter}\` for its route parameter.`
-      );
-    }
-  }
-  return descriptor;
-};
-
-/** The App's screens, by name, in the order declared, each checked. */
-const screensOf = (screens: unknown): Record<string, ScreenManifest> => {
-  if (!Array.isArray(screens) || screens.length > screenLimits.screens) {
-    return refuse(
-      `An App's \`screens\` is a list of at most ${screenLimits.screens} routes.`
-    );
-  }
-  const declared: readonly unknown[] = screens;
-  const byName: Record<string, ScreenManifest> = {};
-  const paths = new Set<string>();
-  for (const screen of declared) {
-    if (
-      !isPlainObject(screen) ||
-      !Object.keys(screen).every((key) =>
-        ["name", "path", "source", "input"].includes(key)
-      )
-    ) {
-      refuse("A screen is `{ name, path, source, input? }`.");
-      continue;
-    }
-    const { name, path, source, input } = screen;
-    if (typeof name !== "string" || !screenNamePattern.test(name)) {
-      refuse("A screen's `name` is an identifier, at most 64 characters.");
-      continue;
-    }
-    if (Object.hasOwn(byName, name)) {
-      refuse(`Two screens are named \`${name}\`.`);
-    }
-    const parameters = routeParameters(path, name);
-    // Parameter names don't make two routes different: `/notes/:id` and
-    // `/notes/:noteId` are the same route.
-    const route = String(path).replaceAll(/:[A-Za-z0-9_]+/gu, ":");
-    if (paths.has(route)) {
-      refuse(`Two screens have route \`${String(path)}\`.`);
-    }
-    paths.add(route);
-    if (typeof source !== "string" || !screenSourcePattern.test(source)) {
-      refuse(`Screen \`${name}\`'s \`source\` is \`screens/<file>.tsx\`.`);
-    }
-    Object.defineProperty(byName, name, {
-      enumerable: true,
-      value: {
-        name,
-        path: String(path),
-        source: String(source),
-        input: screenInput(input, parameters, name),
-      },
-    });
-  }
-  return byName;
-};
-
-/** The kinds a surface may be, until file and mention surfaces come. */
-const surfaceKinds: ReadonlySet<unknown> = new Set<SurfaceKind>([
-  "sidebar",
-  "panel",
-  "settings",
-  "deepLink",
-]);
-
-/** The kinds the host opens with nothing: their input takes `{}`. */
-const openedEmpty: ReadonlySet<SurfaceKind> = new Set<SurfaceKind>([
-  "sidebar",
-  "settings",
-]);
-
-/** The most surfaces an App declares. */
-export const surfaceLimits = { surfaces: 32, titleLength: 100 };
-
-/** One surface's input: a required strict object its screen takes. */
-const surfaceInput = (
-  input: unknown,
-  kind: SurfaceKind,
-  screen: ScreenManifest,
-  name: string
-): ValueDescriptor => {
-  if (input === undefined) {
-    return refuse(
-      `Surface \`${name}\` declares its \`input\`, a \`v.object\`.`
-    );
-  }
-  // Throws for anything but a `v` schema.
-  const descriptor = descriptorOf(input);
-  if (
-    descriptor.kind !== "object" ||
-    descriptor.nullable ||
-    descriptor.presence !== "required"
-  ) {
-    return refuse(
-      `Surface \`${name}\`'s \`input\` is a required \`v.object\`.`
-    );
-  }
-  if (!assignable(descriptor, screen.input)) {
-    return refuse(
-      `Surface \`${name}\`'s \`input\` isn't one screen \`${screen.name}\` takes.`
-    );
-  }
-  if (openedEmpty.has(kind) && !("value" in validateValue(descriptor, {}))) {
-    return refuse(
-      `Surface \`${name}\` is a ${kind}, which opens with nothing: its \`input\` takes \`{}\`.`
-    );
-  }
-  return descriptor;
-};
-
-/** The App's surfaces, by name, in the order declared, each checked. */
-const surfacesOf = (
-  surfaces: unknown,
-  screens: Readonly<Record<string, ScreenManifest>>
-): Record<string, SurfaceManifest> => {
-  if (surfaces === undefined) {
-    return {};
-  }
-  if (!Array.isArray(surfaces) || surfaces.length > surfaceLimits.surfaces) {
-    return refuse(
-      `An App's \`surfaces\` is a list of at most ${surfaceLimits.surfaces}.`
-    );
-  }
-  const declared: readonly unknown[] = surfaces;
-  const byName: Record<string, SurfaceManifest> = {};
-  let settings = 0;
-  for (const surface of declared) {
-    if (
-      !isPlainObject(surface) ||
-      !Object.keys(surface).every((key) =>
-        ["name", "kind", "screen", "title", "input"].includes(key)
-      )
-    ) {
-      refuse("A surface is `{ name, kind, screen, title, input }`.");
-      continue;
-    }
-    const { name, kind, screen, title, input } = surface;
-    if (typeof name !== "string" || !screenNamePattern.test(name)) {
-      refuse("A surface's `name` is an identifier, at most 64 characters.");
-      continue;
-    }
-    if (Object.hasOwn(byName, name)) {
-      refuse(`Two surfaces are named \`${name}\`.`);
-    }
-    if (!surfaceKinds.has(kind)) {
-      refuse(
-        `Surface \`${name}\`'s \`kind\` is \`sidebar\`, \`panel\`, \`settings\` or \`deepLink\`.`
-      );
-      continue;
-    }
-    // SAFETY: checked against the kinds just above.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    const surfaceKind = kind as SurfaceKind;
-    if (surfaceKind === "settings") {
-      settings += 1;
-      if (settings > 1) {
-        refuse("An App declares at most one `settings` surface.");
-      }
-    }
-    if (
-      typeof title !== "string" ||
-      title.trim().length === 0 ||
-      title.length > surfaceLimits.titleLength
-    ) {
-      refuse(
-        `Surface \`${name}\`'s \`title\` is 1 to ${surfaceLimits.titleLength} characters.`
-      );
-    }
-    const target =
-      typeof screen === "string" && Object.hasOwn(screens, screen)
-        ? screens[screen]
-        : undefined;
-    if (target === undefined) {
-      refuse(`Surface \`${name}\` opens a screen the App doesn't declare.`);
-      continue;
-    }
-    Object.defineProperty(byName, name, {
-      enumerable: true,
-      value: {
-        name,
-        kind: surfaceKind,
-        screen: target.name,
-        title: String(title),
-        input: surfaceInput(input, surfaceKind, target, name),
-      },
-    });
-  }
-  return byName;
 };
 
 /** The App's preferences' descriptor, or null: a strict required object. */
@@ -1255,28 +894,6 @@ export const defineApp = (config: AppConfig): App => {
   return made;
 };
 
-/** `screens.ts`'s default export, checked: `{ screens, surfaces? }`. */
-const screensPartOf = (
-  screens: unknown
-): {
-  screens: Record<string, ScreenManifest>;
-  surfaces: Record<string, SurfaceManifest>;
-} => {
-  if (screens === undefined) {
-    return { screens: {}, surfaces: {} };
-  }
-  if (
-    !isPlainObject(screens) ||
-    !Object.keys(screens).every(
-      (key) => key === "screens" || key === "surfaces"
-    )
-  ) {
-    return refuse("screens.ts's default export is `{ screens, surfaces? }`.");
-  }
-  const byName = screensOf(screens.screens);
-  return { screens: byName, surfaces: surfacesOf(screens.surfaces, byName) };
-};
-
 /**
  * Registers an App from its parts (see the header), checked whole: what
  * `inspectApp` reads. The host calls it from the entry it generates for
@@ -1300,7 +917,6 @@ export const registerApp = (parts: AppParts): App => {
   const { config, resources, workflows } = checked;
   // Throws for a schema `defineSchema` didn't make.
   const manifest = schemaManifest(parts.schema);
-  const { screens, surfaces } = screensPartOf(parts.screens);
   const { manifests: migrations, byName: migrationsByName } = migrationsOf(
     parts.migrations,
     manifest
@@ -1339,8 +955,6 @@ export const registerApp = (parts: AppParts): App => {
       resources: Object.fromEntries(resources),
       browserResources: Object.fromEntries(checked.browser),
       workflows: Object.fromEntries(workflows),
-      screens,
-      surfaces,
       preferences: checked.preferences,
       ...(checked.people ? { people: true } : {}),
       migrations,

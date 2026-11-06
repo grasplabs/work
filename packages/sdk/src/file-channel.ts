@@ -10,17 +10,17 @@ import type {
   FileType,
 } from "@grasp-os/shared/app-file-limits";
 import {
-  screenLeaseHeader,
-  screenPersonHeader,
-} from "@grasp-os/shared/screen-limits";
+  pageLeaseHeader,
+  pagePersonHeader,
+} from "@grasp-os/shared/page-limits";
 
 import type { TransferProgress } from "./client-files.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
 // The page's side of core's file channel (core's app-file-route.ts): what
-// the trusted page around a screen's frame does with the files the frame
+// the trusted page around a page's frame does with the files the frame
 // hands it, and what a host's own bootstrap would do. It speaks to core
-// for one App's screen, under that screen's lease, and never hands the
+// for one App's page, under that page's lease, and never hands the
 // frame anything but the outcome: no URL, no lease, no request.
 //
 // An upload declares its name, type, size and hash before any byte,
@@ -35,7 +35,7 @@ import { isPlainObject } from "./value-descriptor.ts";
 /** How the channel reaches core: a path on its origin, and the request. */
 export type CoreFetch = (path: string, init: RequestInit) => Promise<Response>;
 
-/** One App's screen's file channel, under its lease. */
+/** One App's page's file channel, under its lease. */
 export interface FileChannelOptions {
   readonly app: string;
   readonly lease: string;
@@ -111,7 +111,7 @@ const isLost = (error: unknown): boolean => {
   return (
     code === undefined ||
     code === "internal.unexpected" ||
-    code === "screen.rate_limited" ||
+    code === "page.rate_limited" ||
     // Its body took core too long to read: sent again, or resumed.
     code === "request.timeout"
   );
@@ -291,7 +291,7 @@ const following = (response: Response, watch: StallWatch): Response => {
   });
 };
 
-/** The file channel of one App's screen (see the header). */
+/** The file channel of one App's page (see the header). */
 export const fileChannel = ({
   app,
   lease,
@@ -305,12 +305,12 @@ export const fileChannel = ({
   /** One request; core's refusal thrown with its code, a lost one without. */
   const send = async (path: string, init: ChannelInit): Promise<Response> => {
     const headers = new Headers(init.headers);
-    headers.set(screenLeaseHeader, lease);
+    headers.set(pageLeaseHeader, lease);
     // The person can wait on a connection coming back: the request's cancel
     // and time limit stop that wait too, not only the fetch after it.
     // A request stopped before it starts asks for no one.
     init.signal?.throwIfAborted();
-    headers.set(screenPersonHeader, await unlessAborted(person(), init.signal));
+    headers.set(pagePersonHeader, await unlessAborted(person(), init.signal));
     const { json, ...rest } = init;
     if (json !== undefined) {
       headers.set("content-type", "application/json");
@@ -805,5 +805,5 @@ export const fileChannel = ({
   };
 };
 
-/** One App's screen's file channel. */
+/** One App's page's file channel. */
 export type FileChannel = ReturnType<typeof fileChannel>;

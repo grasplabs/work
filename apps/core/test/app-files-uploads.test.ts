@@ -1,8 +1,8 @@
 import { fileChannel } from "@grasp-os/sdk/host";
 import { appFilesPath, fileLimits } from "@grasp-os/shared/app-file-limits";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { screenPersonHeader } from "@grasp-os/shared/screen-limits";
-import { screenLeaseHeader } from "@grasp-os/shared/screens";
+import { pagePersonHeader } from "@grasp-os/shared/page-limits";
+import { pageLeaseHeader } from "@grasp-os/shared/pages";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -21,7 +21,7 @@ import {
   png,
   rawChannel,
   permissions,
-  screenOf,
+  pageOf,
   sha256,
   statusOf,
   storedObjects,
@@ -36,21 +36,21 @@ import { clientOrigin } from "./sign-in-config.ts";
 import { routed } from "./sign-in.ts";
 
 // An App's files (spec 9.6, 10.7.5, 32.5), uploaded through core's file
-// channel as a running screen's page reaches it, attached and read through
+// channel as a running page's page reaches it, attached and read through
 // the App's own functions; and, from the threat model (core's file-host.ts
 // and app-file-route.ts), every way an upload should fail: another
 // person's upload, another App's, a guessed ID, a request without the
-// screen's lease or from another site, a type or content that isn't what
+// page's lease or from another site, a type or content that isn't what
 // it says, a chunk that isn't the one it says, an answer lost on the way.
 
 const { personApi, releasedApp, openedApp, colleagueOf } = appsOf(mockIdp());
 
 describe("an App's files", { timeout: 120_000 }, () => {
   it("uploads a file in chunks, reporting the bytes core holds", async () => {
-    const { screen } = await openedApp();
+    const { page } = await openedApp();
     const progress: unknown[] = [];
     const bytes = png(fileLimits.chunkBytes + 100);
-    const id = await screen.channel.upload(
+    const id = await page.channel.upload(
       "files",
       blobOf(bytes, "image/png"),
       "Plan.png",
@@ -74,7 +74,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
         bytesTotal: bytes.length,
       },
     ]);
-    await expect(screen.channel.describe("files", id)).resolves.toStrictEqual({
+    await expect(page.channel.describe("files", id)).resolves.toStrictEqual({
       id,
       name: "Plan.png",
       mimeType: "image/png",
@@ -83,8 +83,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("attaches a file to a note under its revision, and downloads it only as an attachment", async () => {
-    const { client, api, screen, downloads } = await openedApp();
-    const id = await upload(screen.channel, blobOf(png(), "image/png"));
+    const { client, api, page, downloads } = await openedApp();
+    const id = await upload(page.channel, blobOf(png(), "image/png"));
     const note = await client.mutation(api.create, { title: "Plan" });
     await expect(
       client.mutation(api.attachFile, {
@@ -105,7 +105,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     ).resolves.toBe("data.conflict");
     await client.files.download(permissions.files, { id });
     expect(downloads.get(id)).toStrictEqual(png());
-    const response = await screen.channel.content("files", id);
+    const response = await page.channel.content("files", id);
     await response.body?.cancel();
     expect({
       disposition: response.headers.get("content-disposition"),
@@ -119,18 +119,18 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("keeps an unattached upload its uploader's alone, whatever another person asks", async () => {
-    const { builder, app, api, screen } = await openedApp();
+    const { builder, app, api, page } = await openedApp();
     const colleague = await colleagueOf(builder, app);
-    const id = await upload(screen.channel, blobOf(png(), "image/png"));
+    const id = await upload(page.channel, blobOf(png(), "image/png"));
     const theirNote = await colleague.client.mutation(api.create, {
       title: "Theirs",
     });
     // The same answer for their upload as for an ID that doesn't exist.
     await expect(
       Promise.all([
-        codeOf(colleague.screen.channel.describe("files", id)),
-        codeOf(colleague.screen.channel.describe("files", crypto.randomUUID())),
-        codeOf(colleague.screen.channel.delete("files", id)),
+        codeOf(colleague.page.channel.describe("files", id)),
+        codeOf(colleague.page.channel.describe("files", crypto.randomUUID())),
+        codeOf(colleague.page.channel.delete("files", id)),
         codeOf(
           colleague.client.mutation(api.attachFile, {
             id: theirNote,
@@ -148,9 +148,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("lets another person read a file while a note they may read holds it, and never delete it", async () => {
-    const { builder, app, client, api, screen } = await openedApp();
+    const { builder, app, client, api, page } = await openedApp();
     const colleague = await colleagueOf(builder, app);
-    const id = await upload(screen.channel, blobOf(png(), "image/png"));
+    const id = await upload(page.channel, blobOf(png(), "image/png"));
     const note = await client.mutation(api.create, { title: "Shared" });
     await client.mutation(api.attachFile, {
       id: note,
@@ -160,7 +160,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await colleague.client.files.download(permissions.files, { id });
     expect(colleague.downloads.get(id)).toStrictEqual(png());
     await expect(
-      codeOf(colleague.screen.channel.delete("files", id))
+      codeOf(colleague.page.channel.delete("files", id))
     ).resolves.toBe("file.not_found");
     // Detached again: theirs to read no longer.
     await client.mutation(api.detachFile, {
@@ -169,14 +169,14 @@ describe("an App's files", { timeout: 120_000 }, () => {
       file: { id },
     });
     await expect(
-      codeOf(colleague.screen.channel.describe("files", id))
+      codeOf(colleague.page.channel.describe("files", id))
     ).resolves.toBe("file.not_found");
   });
 
   it("keeps each App's files to it, and each use to the operations its resource declares", async () => {
     const one = await openedApp();
     const other = await openedApp();
-    const id = await upload(other.screen.channel, blobOf(png(), "image/png"));
+    const id = await upload(other.page.channel, blobOf(png(), "image/png"));
     const note = await one.client.mutation(one.api.create, { title: "One" });
     await expect(
       Promise.all([
@@ -187,17 +187,17 @@ describe("an App's files", { timeout: 120_000 }, () => {
             file: { id },
           })
         ),
-        codeOf(one.screen.channel.describe("files", id)),
+        codeOf(one.page.channel.describe("files", id)),
         // Neither `photos` nor `nothing` is the App's files permission.
         codeOf(
           upload(
-            one.screen.channel,
+            one.page.channel,
             blobOf(png(), "image/png"),
             "a.png",
             "photos"
           )
         ),
-        codeOf(one.screen.channel.describe("nothing", id)),
+        codeOf(one.page.channel.describe("nothing", id)),
       ])
     ).resolves.toStrictEqual([
       "file.not_found",
@@ -207,16 +207,16 @@ describe("an App's files", { timeout: 120_000 }, () => {
     ]);
   });
 
-  it("refuses a request without the screen's lease, or from another site", async () => {
+  it("refuses a request without the page's lease, or from another site", async () => {
     const { app, builder } = await openedApp();
-    const { lease } = await builder.api.screens.open(app, "notes");
+    const { lease } = await builder.api.pages.open(app);
     const path = `${appFilesPath}/${app}/files/files/${crypto.randomUUID()}`;
     const statuses = await Promise.all(
       [
         new Headers({ cookie: builder.session }),
         new Headers({
           cookie: builder.session,
-          [screenLeaseHeader]: lease,
+          [pageLeaseHeader]: lease,
           "sec-fetch-site": "cross-site",
         }),
       ].map(async (headers) => await statusOf(routed(path, { headers })))
@@ -224,15 +224,15 @@ describe("an App's files", { timeout: 120_000 }, () => {
     expect(statuses).toStrictEqual([403, 403]);
   });
 
-  it("refuses a change from no Origin or another site's, though its lease and session are the screen's", async () => {
-    const { builder, app, screen } = await openedApp();
-    const id = await upload(screen.channel, blobOf(png(), "image/png"));
+  it("refuses a change from no Origin or another site's, though its lease and session are the page's", async () => {
+    const { builder, app, page } = await openedApp();
+    const id = await upload(page.channel, blobOf(png(), "image/png"));
     const base = `${appFilesPath}/${app}/files`;
     const sent = async (path: string, body: unknown, origin?: string) => {
       const headers = new Headers({
         cookie: builder.session,
-        [screenLeaseHeader]: screen.lease,
-        [screenPersonHeader]: builder.userId,
+        [pageLeaseHeader]: page.lease,
+        [pagePersonHeader]: builder.userId,
         "content-type": "application/json",
       });
       if (origin !== undefined) {
@@ -253,12 +253,12 @@ describe("an App's files", { timeout: 120_000 }, () => {
       await sent(deletion, deleting, "https://elsewhere.example"),
     ]).toStrictEqual([403, 403, 403, 403]);
     // The file is still there: nothing of either reached the store.
-    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+    await expect(page.channel.describe("files", id)).resolves.toMatchObject({
       id,
     });
   });
 
-  it("serves a new screen's file requests with nobody approving its build, and refuses them once its release is revoked", async () => {
+  it("serves a new page's file requests with nobody approving its build, and refuses them once its release is revoked", async () => {
     const builder = await personApi("builder");
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
     await publishedApp(app);
@@ -269,9 +269,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
     );
     await builder.api.apps.versions.setCurrent(app, version);
     // Made current, its App's data sensitive, and no admin looked at it.
-    const screen = await screenOf(builder, app);
-    const id = await upload(screen.channel, blobOf(png(), "image/png"));
-    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+    const page = await pageOf(builder, app);
+    const id = await upload(page.channel, blobOf(png(), "image/png"));
+    await expect(page.channel.describe("files", id)).resolves.toMatchObject({
       id,
     });
     await revokeRelease(
@@ -281,14 +281,14 @@ describe("an App's files", { timeout: 120_000 }, () => {
       "Leaks data"
     );
     expect([
-      await codeOf(screen.channel.describe("files", id)),
-      await codeOf(upload(screen.channel, blobOf(png(), "image/png"))),
-    ]).toStrictEqual(["screen.revoked", "screen.revoked"]);
+      await codeOf(page.channel.describe("files", id)),
+      await codeOf(upload(page.channel, blobOf(png(), "image/png"))),
+    ]).toStrictEqual(["page.revoked", "page.revoked"]);
   });
 
   it("refuses a request whose lease doesn't verify for its person, though the App's data is ordinary", async () => {
-    const { builder, app, screen } = await openedApp();
-    const id = await upload(screen.channel, blobOf(png(), "image/png"));
+    const { builder, app, page } = await openedApp();
+    const id = await upload(page.channel, blobOf(png(), "image/png"));
     // Ordinary data: code core didn't serve runs without a valid lease
     // elsewhere.
     const admin = await personApi("admin");
@@ -296,12 +296,12 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await admin.api.dataPolicy.classify(app, "ordinary", generation);
     const colleague = await colleagueOf(builder, app);
     const described = async (lease: string) =>
-      await screen.fetch(`${appFilesPath}/${app}/files/files/${id}`, {
-        headers: { [screenLeaseHeader]: lease },
+      await page.fetch(`${appFilesPath}/${app}/files/files/${id}`, {
+        headers: { [pageLeaseHeader]: lease },
       });
     const refused = await Promise.all(
       // Forged; then a real lease, but signed for someone else.
-      [`${"0".repeat(64)}.${"A".repeat(43)}`, colleague.screen.lease].map(
+      [`${"0".repeat(64)}.${"A".repeat(43)}`, colleague.page.lease].map(
         async (lease) => {
           const response = await described(lease);
           return [response.status, await answerOf(response)];
@@ -312,11 +312,11 @@ describe("an App's files", { timeout: 120_000 }, () => {
       [403, "request.forbidden"],
       [403, "request.forbidden"],
     ]);
-    await expect(statusOf(described(screen.lease))).resolves.toBe(200);
+    await expect(statusOf(described(page.lease))).resolves.toBe(200);
   });
 
   it("refuses a request naming someone other than the person signed in, or nobody, before it starts anything", async () => {
-    const { builder, app, release, screen } = await openedApp();
+    const { builder, app, release, page } = await openedApp();
     const colleague = await colleagueOf(builder, app);
     const begin = async (named?: string) =>
       await routed(`${appFilesPath}/${app}/files/uploads`, {
@@ -325,8 +325,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
           origin: clientOrigin,
           cookie: builder.session,
           "content-type": "application/json",
-          [screenLeaseHeader]: screen.lease,
-          ...(named === undefined ? {} : { [screenPersonHeader]: named }),
+          [pageLeaseHeader]: page.lease,
+          ...(named === undefined ? {} : { [pagePersonHeader]: named }),
         },
         body: JSON.stringify(declaration()),
       });
@@ -338,14 +338,14 @@ describe("an App's files", { timeout: 120_000 }, () => {
     );
     expect(refused).toStrictEqual([
       [401, "auth.principal_changed"],
-      [403, "screen.reload_required"],
+      [403, "page.reload_required"],
     ]);
     // A channel whose frame is someone else's starts nothing either.
     const theirs = fileChannel({
       app,
-      lease: screen.lease,
-      person: colleague.screen.named,
-      fetch: screen.fetch,
+      lease: page.lease,
+      person: colleague.page.named,
+      fetch: page.fetch,
     });
     await expect(
       codeOf(upload(theirs, blobOf(png(), "image/png")))
@@ -354,8 +354,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("refuses an upload past its limits, or of a type a browser runs, before any byte", async () => {
-    const { app, screen } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, page } = await openedApp();
+    const raw = rawChannel(page, app);
     const refused = await Promise.all(
       [
         { ...declaration(), size: fileLimits.bytes + 1 },
@@ -375,13 +375,13 @@ describe("an App's files", { timeout: 120_000 }, () => {
     );
     // The page refuses such a file before asking core at all.
     await expect(
-      codeOf(upload(screen.channel, blobOf(png(), "image/svg+xml"), "a.svg"))
+      codeOf(upload(page.channel, blobOf(png(), "image/svg+xml"), "a.svg"))
     ).resolves.toBe("file.type_unsupported");
   });
 
   it("keeps a chunk only if it is the one its place and hash say", async () => {
-    const { app, screen } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, page } = await openedApp();
+    const raw = rawChannel(page, app);
     const file = await begunFile(await raw.begin(declaration()));
     const first = png(fileLimits.chunkBytes);
     const short = first.slice(0, 100);
@@ -402,8 +402,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("refuses other bytes sent for a chunk it holds, though of the same size", async () => {
-    const { app, screen } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, page } = await openedApp();
+    const raw = rawChannel(page, app);
     const bytes = png(100);
     const sha = await sha256(bytes);
     const file = await begunFile(
@@ -419,8 +419,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("rejects a whole that isn't the file declared, and lets the uploader start another", async () => {
-    const { app, screen } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, page } = await openedApp();
+    const raw = rawChannel(page, app);
     const file = await begunFile(await raw.begin(declaration()));
     const first = png(fileLimits.chunkBytes);
     const last = first.slice(0, 10);
@@ -443,12 +443,12 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("checks a file's bytes against its type when it is finished", async () => {
-    const { screen } = await openedApp();
+    const { page } = await openedApp();
     const text = async (content: Uint8Array<ArrayBuffer>) =>
-      await upload(screen.channel, blobOf(content, "text/plain"), "notes.txt");
+      await upload(page.channel, blobOf(content, "text/plain"), "notes.txt");
     await expect(
       Promise.all([
-        codeOf(upload(screen.channel, blobOf(utf8("not a png"), "image/png"))),
+        codeOf(upload(page.channel, blobOf(utf8("not a png"), "image/png"))),
         // Text that isn't UTF-8, or holds a NUL, isn't text.
         codeOf(text(new Uint8Array([0x68, 0x69, 0xff, 0xfe]))),
         codeOf(text(new Uint8Array([0x68, 0x00, 0x69]))),
@@ -466,12 +466,12 @@ describe("an App's files", { timeout: 120_000 }, () => {
   it("resumes an upload whose answers were lost under the same upload, never a fresh one", async () => {
     const builder = await personApi("builder");
     const { app, release } = await releasedApp(builder);
-    const screen = await screenOf(builder, app);
+    const page = await pageOf(builder, app);
     // The network loses the answers to the start, the second chunk and
     // the first finish: all three reached core.
     const sent = { begins: 0, chunks: 0, finishes: 0 };
     const lossy = async (path: string, init: RequestInit) => {
-      const response = await screen.fetch(path, init);
+      const response = await page.fetch(path, init);
       if (path.endsWith("/uploads")) {
         sent.begins += 1;
       }
@@ -492,15 +492,15 @@ describe("an App's files", { timeout: 120_000 }, () => {
     };
     const channel = fileChannel({
       app,
-      lease: screen.lease,
-      person: screen.named,
+      lease: page.lease,
+      person: page.named,
       fetch: lossy,
     });
     const bytes = png(2 * fileLimits.chunkBytes + 5);
     const id = await upload(channel, blobOf(bytes, "image/png"));
     // Each chunk sent once: core said it held the one whose answer was lost.
     expect(sent).toStrictEqual({ begins: 2, chunks: 3, finishes: 2 });
-    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+    await expect(page.channel.describe("files", id)).resolves.toMatchObject({
       size: bytes.length,
     });
     // One upload, its three chunks, nothing else: the start sent again
@@ -514,7 +514,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     });
     expect(uploads).toBe(1);
     // A key is one upload's: another declaration under it is a conflict.
-    const raw = rawChannel(screen, app);
+    const raw = rawChannel(page, app);
     const declared = declaration();
     const first = await begunFile(await raw.begin(declared));
     const again = await begunFile(await raw.begin(declared));
@@ -525,11 +525,11 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("goes on past answers lost on one chunk after another, each recovered", async () => {
-    const { app, screen } = await openedApp();
+    const { app, page } = await openedApp();
     // The answer to every chunk but the first is lost, once each.
     const lostOnce = new Set<string>();
     const lossy = async (path: string, init: RequestInit) => {
-      const response = await screen.fetch(path, init);
+      const response = await page.fetch(path, init);
       const chunk = /\/chunks\/(?<index>\d+)$/u.exec(path)?.groups?.index;
       if (chunk !== undefined && chunk !== "0" && !lostOnce.has(chunk)) {
         lostOnce.add(chunk);
@@ -540,26 +540,26 @@ describe("an App's files", { timeout: 120_000 }, () => {
     };
     const channel = fileChannel({
       app,
-      lease: screen.lease,
-      person: screen.named,
+      lease: page.lease,
+      person: page.named,
       fetch: lossy,
     });
     const bytes = png(6 * fileLimits.chunkBytes);
     const id = await upload(channel, blobOf(bytes, "image/png"));
     expect(lostOnce.size).toBe(5);
-    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+    await expect(page.channel.describe("files", id)).resolves.toMatchObject({
       size: bytes.length,
     });
   });
 
   it("sends a chunk again whose body core took too long to read, and finishes the upload", async () => {
-    const { app, release, screen } = await openedApp();
+    const { app, release, page } = await openedApp();
     // The first chunk's body reaches core too slowly: it answers so.
     const slow = { first: true };
     const channel = fileChannel({
       app,
-      lease: screen.lease,
-      person: screen.named,
+      lease: page.lease,
+      person: page.named,
       fetch: async (path, init) => {
         if (path.includes("/chunks/") && slow.first) {
           slow.first = false;
@@ -570,36 +570,33 @@ describe("an App's files", { timeout: 120_000 }, () => {
             )
           );
         }
-        return await screen.fetch(path, init);
+        return await page.fetch(path, init);
       },
     });
     const bytes = png(100);
     const id = await upload(channel, blobOf(bytes, "image/png"));
-    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+    await expect(page.channel.describe("files", id)).resolves.toMatchObject({
       size: bytes.length,
     });
     await expect(fileStates(release)).resolves.toStrictEqual(["published:"]);
   });
 
   it("answers a body that stops arriving as one that took too long, for the page to send again", async () => {
-    const { app, screen } = await openedApp();
+    const { app, page } = await openedApp();
     // A start whose body never ends: core gives up reading it.
     const body = new ReadableStream<Uint8Array>({
       start: (controller) => {
         controller.enqueue(new TextEncoder().encode("{"));
       },
     });
-    const response = await screen.fetch(
-      `${appFilesPath}/${app}/files/uploads`,
-      {
-        method: "POST",
-        headers: {
-          [screenLeaseHeader]: screen.lease,
-          "content-type": "application/json",
-        },
-        body,
-      }
-    );
+    const response = await page.fetch(`${appFilesPath}/${app}/files/uploads`, {
+      method: "POST",
+      headers: {
+        [pageLeaseHeader]: page.lease,
+        "content-type": "application/json",
+      },
+      body,
+    });
     expect({
       status: response.status,
       answer: await response.json(),

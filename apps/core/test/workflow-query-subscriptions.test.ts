@@ -28,7 +28,7 @@ import { mockIdp } from "./idp.ts";
 import { appWith, queryReference, seal } from "./sealed-apps.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
-// A screen's live workflow queries (`workflows.<alias>.queries.runs`,
+// A page's live workflow queries (`workflows.<alias>.queries.runs`,
 // workflow-reference-queries.ts), followed through a frame's `watchQuery` as
 // a page follows any live query (query-subscriptions.ts). They read no
 // store, so no write tells core to read them again: a run the App starts
@@ -70,13 +70,12 @@ export const kickOff = action({
 });
 `,
 
-  "screens.ts": `export default {
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-};
-`,
-  "screens/desk.tsx": `export default function Desk() {
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Desk() {
   return <main>Requests</main>;
 }
+
+export const Route = createFileRoute("/")({ component: Desk });
 `,
 });
 
@@ -181,12 +180,12 @@ const latestRuns = (
 };
 
 /**
- * The Requests App sealed and current, its screen opened by
+ * The Requests App sealed and current, its page opened by
  * its builder, `followUp` bound with the App's `start` grant; and the
- * builder's screen following their runs of it, once its first push came.
+ * builder's page following their runs of it, once its first push came.
  */
 const followingRuns = async (
-  /** Called with the App's ID before its screen follows. */
+  /** Called with the App's ID before its page follows. */
   beforeFollow?: (app: string) => Promise<void>
 ) => {
   const admin = await signedIn("admin");
@@ -220,13 +219,13 @@ const followingRuns = async (
     rolesOf(builder.acting)
   );
   await grantPermission(env, admin.acting, asked.id, { version: 1 });
-  const { lease } = await builder.api.screens.open(fixture.app, "desk");
+  const { lease } = await builder.api.pages.open(fixture.app);
   const release = await loadRelease(env, fixture.app, 1);
 
   await beforeFollow?.(fixture.app);
-  // The screen follows the person's runs: none yet.
+  // The page follows the person's runs: none yet.
   const follower = pageFollower();
-  const subscription = await builder.api.screens
+  const subscription = await builder.api.pages
     .frame(fixture.app, lease)
     .watchQuery(
       JSON.stringify({
@@ -311,17 +310,17 @@ const latestDecisions = (
     : decisionsPageSchema.parse(latest.value).items.map(({ wait }) => wait.id);
 };
 
-describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
+describe("a page's live workflow queries", { timeout: 120_000 }, () => {
   it("show a run the App starts for the person, then each change of its status, with no subscribing again", async () => {
     const { builder, workflow, app, follower, subscription } =
       await followingRuns();
     const before = latestRuns(follower.received);
 
-    // The App starts one for them: the screen shows it running, pushed to
+    // The App starts one for them: the page shows it running, pushed to
     // the same subscription.
     const runId = await kickOff(builder, app);
     await showing(follower, [`${runId}: running`]);
-    // Cancelled while it waits: the screen shows that too.
+    // Cancelled while it waits: the page shows that too.
     await terminateResourceRun(env, builder, workflow, runId);
     await showing(follower, [`${runId}: cancelled`]);
     await subscription.release();
@@ -443,11 +442,11 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
     )
       .bind(fixture.app, admin.userId, builder.userId, Date.now())
       .run();
-    const { lease } = await admin.api.screens.open(fixture.app, "desk");
+    const { lease } = await admin.api.pages.open(fixture.app);
     const release = await loadRelease(env, fixture.app, 1);
-    // The admin's screen follows their inbox: nothing in it yet.
+    // The admin's page follows their inbox: nothing in it yet.
     const follower = pageFollower();
-    const subscription = await admin.api.screens
+    const subscription = await admin.api.pages
       .frame(fixture.app, lease)
       .watchQuery(
         JSON.stringify({
@@ -560,11 +559,11 @@ describe("a screen's live workflow queries", { timeout: 120_000 }, () => {
         "INSERT INTO team_members (id, team_id, user_id, created_at) VALUES (?, ?, ?, ?)"
       ).bind(membership, team, admin.userId, Date.now()),
     ]);
-    const { lease } = await admin.api.screens.open(fixture.app, "desk");
+    const { lease } = await admin.api.pages.open(fixture.app);
     const release = await loadRelease(env, fixture.app, 1);
-    // The admin's screen follows their inbox: nothing in it yet.
+    // The admin's page follows their inbox: nothing in it yet.
     const follower = pageFollower();
-    const subscription = await admin.api.screens
+    const subscription = await admin.api.pages
       .frame(fixture.app, lease)
       .watchQuery(
         JSON.stringify({

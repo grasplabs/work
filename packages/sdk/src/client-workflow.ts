@@ -34,7 +34,7 @@ import { readDescriptor } from "./value-read.ts";
 import { descriptorOf } from "./value-schema.ts";
 import { v } from "./values.ts";
 
-// Workflow runs on a screen (spec 10.4–10.4.7, 10.7.2, 10.7.3): what
+// Workflow runs on a page (spec 10.4–10.4.7, 10.7.2, 10.7.3): what
 // `useWorkflow` (react.ts) shows and does, on the session client's own
 // transport. One channel per client follows runs and bindings, shared by
 // every hook that shows them; one store per hook keeps that hook's
@@ -93,7 +93,7 @@ import { v } from "./values.ts";
 //   with it arrive in one snapshot, shown whole or not at all; a push older
 //   than the one shown is dropped.
 // - Stale permission after a lost connection: the last snapshot stays on
-//   screen, but every capability is off until a fresh push arrives.
+//   page, but every capability is off until a fresh push arrives.
 // - Data outlives access: a refusal of the person or the build fences the
 //   whole client (client-core.ts), which clears every run shown here. A
 //   run refused as unavailable for now (its alias bound elsewhere, say)
@@ -876,8 +876,8 @@ const endsFollowing = (code: string): boolean =>
   code.startsWith("contract.") ||
   (code.startsWith("workflow.") && code !== unavailableRun) ||
   code === "app.not_running" ||
-  code === "screen.too_many_queries" ||
-  code === "screen.invalid";
+  code === "page.too_many_queries" ||
+  code === "page.invalid";
 
 const runKey = (read: ReadWorkflow, runId: string): string =>
   canonicalJson(["run", read.key, runId]);

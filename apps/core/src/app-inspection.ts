@@ -14,6 +14,15 @@ import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 
 import { keySchema, readVerified } from "./build-cache.ts";
 import { hostModules } from "./host-modules.ts";
+import {
+  buildAppCode,
+  buildKey,
+  checkAppCode,
+  inspectionsPrefix,
+  leaseSlackMs,
+  throughKeptCache,
+} from "./pages.ts";
+import type { BuildOptions, BuildProfile } from "./pages.ts";
 import { platformRunner } from "./platform-sandbox.ts";
 import {
   callSandboxed,
@@ -22,21 +31,12 @@ import {
   sandboxWaitMs,
 } from "./sandboxed.ts";
 import type { SandboxedEnv } from "./sandboxed.ts";
-import {
-  buildAppCode,
-  buildKey,
-  checkAppCode,
-  inspectionsPrefix,
-  leaseSlackMs,
-  throughKeptCache,
-} from "./screens.ts";
-import type { BuildOptions, BuildProfile } from "./screens.ts";
 
 // Inspecting an App's code of spec 8's layout (spec 8, 16): building it
 // and reading its registration in an isolate of its own, never in core.
-// Sealing a release does it twice (app-releases.ts); a version's screens
+// Sealing a release does it twice (app-releases.ts); a version's pages
 // and a draft's check read the manifest of what they build through it
-// (screen-references.ts). It reaches nothing of an App's records, so it
+// (page-references.ts). It reaches nothing of an App's records, so it
 // can serve both without depending on either.
 
 /**
@@ -46,7 +46,7 @@ import type { BuildOptions, BuildProfile } from "./screens.ts";
 const inspectionMaxLength = appManifestMaxBytes;
 
 // Sealing, the sidebar and a draft's check take an inspected manifest as
-// what the App registers (its permissions, server methods, screens), so
+// what the App registers (its permissions, server methods, pages), so
 // only one core inspected is read back: its bytes must hash to the receipt
 // core wrote in its own database (build-cache.ts). Whoever can write to
 // R2 but not to that database can't have a manifest of theirs taken as
@@ -256,7 +256,7 @@ const symbolicCode = (
 
 /**
  * Where the manifest inspected from `code` with SDK `sdkVersion` for
- * `profile` is cached: by what decides it, as builds are (screens.ts
+ * `profile` is cached: by what decides it, as builds are (pages.ts
  * `cachedBuild`), so the same code, compiler and SDK register the same.
  */
 const inspectionKey = async (

@@ -3,13 +3,13 @@ import { GraspError } from "@grasp-os/sdk/client";
 import { clientInternals, GraspClient } from "@grasp-os/sdk/host";
 import type { ClientTransport } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
-import type { Role } from "@grasp-os/shared/roles";
 import {
   appFunctionPath,
   rateLimitedRetryMs,
-  screenLeaseHeader,
-  screenPersonHeader,
-} from "@grasp-os/shared/screens";
+  pageLeaseHeader,
+  pagePersonHeader,
+} from "@grasp-os/shared/pages";
+import type { Role } from "@grasp-os/shared/roles";
 import { liveWindowMaxItems } from "@grasp-os/shared/store-limits";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -27,7 +27,7 @@ import { clientOrigin } from "./sign-in-config.ts";
 import { openRpc, routed, signedInApi } from "./sign-in.ts";
 
 // Live paginated lists (spec 10.6, 11.6) through the session client and
-// core, as a screen's `usePaginatedQuery` reads them: a window of a
+// core, as a page's `usePaginatedQuery` reads them: a window of a
 // Notes App's list that stays one server-order prefix while notes are
 // inserted, deleted and moved between Load Mores and while it is shown;
 // Load Mores that join; a window that is never pushed torn while writes
@@ -93,7 +93,7 @@ export const touchOldest = mutation({
 
 /**
  * A builder's Notes App, made current and opened: the release, the
- * screen's lease, and the builder's session.
+ * page's lease, and the builder's session.
  */
 const openedApp = async () => {
   const builder = await personApi("builder");
@@ -101,7 +101,7 @@ const openedApp = async () => {
   const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
   await builder.api.apps.publish(id);
-  const { lease } = await builder.api.screens.open(id, "notes");
+  const { lease } = await builder.api.pages.open(id);
   const release = await loadRelease(env, id, version);
   return {
     app: id,
@@ -110,7 +110,7 @@ const openedApp = async () => {
     userId: builder.userId,
     release,
     builder,
-    screens: builder.api.screens,
+    pages: builder.api.pages,
   };
 };
 
@@ -118,8 +118,8 @@ type Opened = Awaited<ReturnType<typeof openedApp>>;
 
 /**
  * What the page does with what the frame sends (apps/web's
- * screen-host.ts): a call posted to core's function route under the
- * screen's lease, a refusal rejected with its code; a query followed over
+ * page-host.ts): a call posted to core's function route under the
+ * page's lease, a refusal rejected with its code; a query followed over
  * the page's connection to core, the callback's disposal telling the
  * client core let go of it.
  */
@@ -130,7 +130,7 @@ const pageTransport = (
     cookie,
     userId,
   }: Pick<Opened, "app" | "lease" | "cookie" | "userId">,
-  screens: Opened["screens"],
+  pages: Opened["pages"],
   counts: { follows: number }
 ): ClientTransport => ({
   watch: async (request, onSnapshot, onLost) => {
@@ -141,7 +141,7 @@ const pageTransport = (
       },
       { [Symbol.dispose]: onLost }
     );
-    const subscription = await screens
+    const subscription = await pages
       .frame(app, lease)
       .watchQuery(request, callback);
     return {
@@ -159,8 +159,8 @@ const pageTransport = (
         origin: clientOrigin,
         "content-type": "application/json",
         cookie,
-        [screenLeaseHeader]: lease,
-        [screenPersonHeader]: userId,
+        [pageLeaseHeader]: lease,
+        [pagePersonHeader]: userId,
       },
       body: request,
     });
@@ -174,13 +174,10 @@ const pageTransport = (
 });
 
 /** A client over the page's transport, as the frame's runtime mounts it. */
-const clientFor = (
-  opened: Opened,
-  screens: Opened["screens"] = opened.screens
-) => {
+const clientFor = (opened: Opened, pages: Opened["pages"] = opened.pages) => {
   const counts = { follows: 0 };
   return {
-    client: new GraspClient(pageTransport(opened, screens, counts)),
+    client: new GraspClient(pageTransport(opened, pages, counts)),
     counts,
   };
 };
@@ -188,8 +185,8 @@ const clientFor = (
 /** Another tab of the opened App's builder: its own connection to core. */
 const otherTab = async (opened: Opened) => {
   const { core } = await openRpc(opened.cookie);
-  const { screens } = core.authenticate();
-  return clientFor(opened, screens).client;
+  const { pages } = core.authenticate();
+  return clientFor(opened, pages).client;
 };
 
 /** The code a promise rejected with. */
@@ -225,7 +222,7 @@ const noteSchema = z.object({
 });
 
 /**
- * A screen's paginated list of `reference`, as `usePaginatedQuery`
+ * A page's paginated list of `reference`, as `usePaginatedQuery`
  * subscribes: its snapshots as they come, and its controls.
  */
 const listing = (
@@ -267,7 +264,7 @@ const allTitles = async (
   return page.items.map(({ title }) => title);
 };
 
-/** A call of `path` as a screen's client sends it, raw, with a window. */
+/** A call of `path` as a page's client sends it, raw, with a window. */
 const windowRequest = (
   opened: Opened,
   path: string,
@@ -667,7 +664,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       const loadMore = await codeOf(list.pager.loadMore(60));
       // A window that showed nothing yet: refused as its last push.
       const follower = pageFollower();
-      await opened.screens
+      await opened.pages
         .frame(opened.app, opened.lease)
         .watchQuery(
           windowRequest(opened, "notes.list", {}, { extent: 160 }),
@@ -677,7 +674,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
         expect(follower.state.released).toBeTruthy();
       });
       // Through the function route as well.
-      const { call } = pageTransport(opened, opened.screens, { follows: 0 });
+      const { call } = pageTransport(opened, opened.pages, { follows: 0 });
       const throughRoute = answerOf(
         await call(windowRequest(opened, "notes.list", {}, { extent: 160 }))
       );
@@ -762,13 +759,13 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     );
     try {
       const first = pageFollower();
-      await opened.screens
+      await opened.pages
         .frame(opened.app, opened.lease)
         .watchQuery(request, first.callback);
       // The first read is on its way, between its pages.
       await scheduler.wait(1000);
       const second = pageFollower();
-      await opened.screens
+      await opened.pages
         .frame(opened.app, opened.lease)
         .watchQuery(request, second.callback);
       await eventually(() => {
@@ -789,7 +786,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     await seeded(opened, client);
     const request = windowRequest(opened, "notes.list", {}, { extent: 160 });
     const first = pageFollower();
-    await opened.screens
+    await opened.pages
       .frame(opened.app, opened.lease)
       .watchQuery(request, first.callback);
     await eventually(() => {
@@ -798,7 +795,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     const restore = await writeBetweenPages(opened, Number.POSITIVE_INFINITY);
     try {
       const second = pageFollower();
-      await opened.screens
+      await opened.pages
         .frame(opened.app, opened.lease)
         .watchQuery(request, second.callback);
       await eventually(() => {
@@ -824,7 +821,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     // The page's network holds back every push of the first follow of
     // the two-record window, as a slow delivery would.
     const counts = { follows: 0 };
-    const page = pageTransport(opened, opened.screens, counts);
+    const page = pageTransport(opened, opened.pages, counts);
     const held = { first: true, pushes: 0 };
     const client = new GraspClient({
       call: page.call,
@@ -923,7 +920,7 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       titles: ["Note 4", "Note 3", "Note 2", "Note 1"],
       error: "contract.invalid_args",
     });
-    // The screen shows another list, then this one again, well within
+    // The page shows another list, then this one again, well within
     // the time a list is kept for.
     first.stop();
     const other = listing(client, api.list, 3);
@@ -966,12 +963,12 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       }
     );
     try {
-      const { call } = pageTransport(opened, opened.screens, { follows: 0 });
+      const { call } = pageTransport(opened, opened.pages, { follows: 0 });
       const answered = answerOf(
         await call(windowRequest(opened, "notes.list", {}, { extent: 300 }))
       );
       expect({ answered, laterPages }).toStrictEqual({
-        answered: "screen.answer_too_large",
+        answered: "page.answer_too_large",
         laterPages: 1,
       });
     } finally {
@@ -1089,7 +1086,7 @@ describe(
       const at = nextCursor.indexOf(".") + 2;
       const edited = `${nextCursor.slice(0, at)}${nextCursor[at] === "A" ? "B" : "A"}${nextCursor.slice(at + 1)}`;
 
-      // A member of the App, with their own screen: the builder's cursor
+      // A member of the App, with their own page: the builder's cursor
       // isn't theirs to page with.
       const member = await personApi("builder");
       await opened.builder.api.apps.members.add(opened.app, {
@@ -1097,13 +1094,13 @@ describe(
         id: member.userId,
         role: "user",
       });
-      const { lease } = await member.api.screens.open(opened.app, "notes");
+      const { lease } = await member.api.pages.open(opened.app);
       const theirs = clientFor(
         { ...opened, lease, cookie: member.session, userId: member.userId },
-        member.api.screens
+        member.api.pages
       ).client;
 
-      const { call } = pageTransport(opened, opened.screens, { follows: 0 });
+      const { call } = pageTransport(opened, opened.pages, { follows: 0 });
       const raw = async (request: string): Promise<unknown> =>
         answerOf(await call(request));
       const second = await client.query(api.list, {
@@ -1176,7 +1173,7 @@ describe(
       const api = apiOf(opened.release);
       const { client } = clientFor(opened);
       await seeded(opened, client);
-      const { call } = pageTransport(opened, opened.screens, { follows: 0 });
+      const { call } = pageTransport(opened, opened.pages, { follows: 0 });
       const ask = async (request: string): Promise<string> => {
         try {
           const answered = answerOf(await call(request));
@@ -1218,7 +1215,7 @@ describe(
 
     it("counts a window as the pages it reads against the person's requests", async () => {
       const opened = await openedApp();
-      const { call } = pageTransport(opened, opened.screens, { follows: 0 });
+      const { call } = pageTransport(opened, opened.pages, { follows: 0 });
       const ask = async (): Promise<string> => {
         try {
           await call(
@@ -1248,7 +1245,7 @@ describe(
           // oxlint-disable-next-line no-await-in-loop -- one after the other
           answers.push(await ask());
         }
-        expect(answers).toStrictEqual(["ok", "ok", "screen.rate_limited"]);
+        expect(answers).toStrictEqual(["ok", "ok", "page.rate_limited"]);
       } finally {
         vi.useRealTimers();
       }
@@ -1256,7 +1253,7 @@ describe(
 
     it("counts a window followed through a frame as the pages it reads, and says to wait for all of them", async () => {
       const opened = await openedApp();
-      const frame = await opened.screens.frame(opened.app, opened.lease);
+      const frame = await opened.pages.frame(opened.app, opened.lease);
       const window = windowRequest(
         opened,
         "notes.list",
@@ -1298,7 +1295,7 @@ describe(
           first: "ok",
           plains: true,
           refused: {
-            code: "screen.rate_limited",
+            code: "page.rate_limited",
             retryAfterMs: rateLimitedRetryMs * windowPages(liveWindowMaxItems),
           },
         });
@@ -1309,7 +1306,7 @@ describe(
 
     it("refuses an action sent with a window, under a key or not, before it runs", async () => {
       const opened = await openedApp();
-      const { call } = pageTransport(opened, opened.screens, { follows: 0 });
+      const { call } = pageTransport(opened, opened.pages, { follows: 0 });
       const reference = referenceTo<unknown, unknown, "action">(
         opened.release,
         "notes.echo"
@@ -1339,14 +1336,14 @@ describe(
         id: member.userId,
         role: "builder",
       });
-      const { lease } = await member.api.screens.open(opened.app, "notes");
+      const { lease } = await member.api.pages.open(opened.app);
       const theirs = {
         ...opened,
         lease,
         cookie: member.session,
         userId: member.userId,
       };
-      const { client } = clientFor(theirs, member.api.screens);
+      const { client } = clientFor(theirs, member.api.pages);
       await seeded(opened, client);
       // Just as the window's first page is read, the member becomes a
       // user: the second page is read under other roles than the cursor
@@ -1363,7 +1360,7 @@ describe(
         }
       );
       try {
-        const { call } = pageTransport(theirs, member.api.screens, {
+        const { call } = pageTransport(theirs, member.api.pages, {
           follows: 0,
         });
         const window = z
@@ -1394,10 +1391,10 @@ describe(
         ...them,
         role: "user",
       });
-      const { lease } = await member.api.screens.open(opened.app, "notes");
+      const { lease } = await member.api.pages.open(opened.app);
       const theirs = clientFor(
         { ...opened, lease, cookie: member.session, userId: member.userId },
-        member.api.screens
+        member.api.pages
       ).client;
       await theirs.mutation(api.create, { title: "Mine" });
       await theirs.mutation(api.create, { title: "Also mine" });

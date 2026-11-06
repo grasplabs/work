@@ -10,13 +10,13 @@ import {
 } from "../db/core/schema.ts";
 import { appHost } from "../durable-objects.ts";
 
-// Run status, live, on an App's screens: each time a run an App started
+// Run status, live, on an App's pages: each time a run an App started
 // starts, waits for a decision, has it answered or closed, or ends, core
 // tells the App's host, whose live queries of that workflow read again
 // (`tellQueryFollowers`). A push says only that something changed: the
-// screen's query reads it again, as its person, with what they may see of
+// page's query reads it again, as its person, with what they may see of
 // it. Reading again, rather than taking a status from the push, also means
-// pushes that overtake each other can't leave a screen showing an older
+// pushes that overtake each other can't leave a page showing an older
 // status than the one it read last.
 
 /**
@@ -29,7 +29,7 @@ import { appHost } from "../durable-objects.ts";
  * through (query-subscriptions.ts). The signal names no run and carries
  * nothing: what a read answers is what the person may see now. Best
  * effort, after the change is written: it never fails what changed the
- * run, and a screen not told keeps what it shows until it follows again.
+ * run, and a page not told keeps what it shows until it follows again.
  */
 export const tellQueryFollowers = async (
   env: Env,

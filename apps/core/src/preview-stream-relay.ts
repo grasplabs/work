@@ -1,15 +1,11 @@
 import { errorFields, log } from "@grasp-os/shared/log";
-import {
-  jsonBytes,
-  screenErrors,
-  screenLimits,
-} from "@grasp-os/shared/screens";
+import { jsonBytes, pageErrors, pageLimits } from "@grasp-os/shared/pages";
 
 import { refusalOf } from "./app-functions.ts";
 
 // The relay of a streaming action's invocation in a draft's preview
 // (sealed-previews.ts) to the page that follows it, over the page's own
-// connection (chats-rpc.ts), as a live screen's relay does over its
+// connection (chats-rpc.ts), as a live page's relay does over its
 // request (app-function-route.ts). Threat model, and how each is closed:
 //
 // - Progress reaches someone who no longer gets the preview: the relay
@@ -17,15 +13,15 @@ import { refusalOf } from "./app-functions.ts";
 //   person's, that they still build the App and that the draft is still
 //   at the stream's revision: every `streamRecheckMs` on a timer, frames
 //   or not; before a progress frame when the last check is older than
-//   that; and always before the result, as a live screen's relay does. A
+//   that; and always before the result, as a live page's relay does. A
 //   refusal cancels the invocation at once, then ends the relay with a
 //   `refused` frame carrying it, never waiting on the page to cancel.
 // - The page is flooded, or holds core: frames go one at a time, the next
 //   read only once the page took the last, and the invocation's reader
 //   sends the newest progress it hasn't seen when asked (whole
 //   snapshots), so nothing queues.
-// - A result larger than a screen takes in one answer: refused here
-//   (`screen.answer_too_large`), as a screen's call is.
+// - A result larger than a page takes in one answer: refused here
+//   (`page.answer_too_large`), as a page's call is.
 // - The relay outlives who follows it: releasing it (or the page's
 //   connection going) stops reading, which lets go of the invocation's
 //   reader; one nobody follows is cancelled by the preview after its idle
@@ -208,8 +204,8 @@ export const relayPreviewStream = (
       }
       stop();
       const fits =
-        jsonBytes(frame.result, screenLimits.answerBytes) <=
-        screenLimits.answerBytes;
+        jsonBytes(frame.result, pageLimits.answerBytes) <=
+        pageLimits.answerBytes;
       // oxlint-disable-next-line no-await-in-loop -- the last
       await deliver(
         fits
@@ -220,7 +216,7 @@ export const relayPreviewStream = (
               result: {
                 ok: false,
                 error: refusalOf(
-                  screenErrors.create("screen.answer_too_large"),
+                  pageErrors.create("page.answer_too_large"),
                   requestId
                 ),
               },

@@ -48,18 +48,15 @@ export default defineConfig({
       // (the seal strips types without checking them), and
       // builtin-blueprints.test.ts covers what they do at runtime.
       "apps/core/test/fixtures/blueprints/*/files/**",
-      // The screens of a built-in of spec 8's layout, for the same reason:
-      // they import `@server/_generated/api`, generated from the App's manifest. The screen
+      // The front end of a built-in of spec 8's layout, for the same reason:
+      // they import `@server/_generated/api`, generated from the App's manifest. The page
       // build type-checks them and lints them against the kit, with the
       // references the host generated (builtin-blueprints.test.ts builds
       // them). Its server code and workflows are linted here
       // (each built-in's own tsconfig.json).
-      "apps/core/blueprints/intake/files/screens/**",
-      "apps/core/blueprints/intake/files/components/**",
-      "apps/core/blueprints/workflow-map/files/screens/**",
-      "apps/core/blueprints/workflow-map/files/components/**",
-      "apps/core/blueprints/board-page/files/screens/**",
-      "apps/core/blueprints/board-page/files/components/**",
+      "apps/core/blueprints/intake/files/src/**",
+      "apps/core/blueprints/workflow-map/files/src/**",
+      "apps/core/blueprints/board-page/files/src/**",
     ],
     jsPlugins: [
       ...(shadcn.jsPlugins ?? []),
@@ -189,7 +186,7 @@ export default defineConfig({
         },
       },
       {
-        // A target a browser or a screen calls must hold what its methods
+        // A target a browser or a page calls must hold what its methods
         // get to the session's limits: Cap'n Web bounds each message, not
         // a value built from several (@grasp-os/shared/rpc-target). In
         // workerd, Cap'n Web's RpcTarget is workerd's own.
@@ -299,7 +296,7 @@ export default defineConfig({
       "apps/*",
       "!apps/admin",
       "apps/admin/vite.test.config.ts",
-      "apps/core/vite.screens.config.ts",
+      "apps/core/vite.pages.config.ts",
       "apps/core/vite.on-prem.config.ts",
       "apps/core/vite.brain.config.ts",
       "apps/core/vite.stephen.config.ts",

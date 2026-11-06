@@ -20,6 +20,7 @@ import {
 } from "node:fs";
 import { builtinModules, createRequire } from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   EXIT_CRASHED,
@@ -64,8 +65,9 @@ import {
   previewRefresh,
   previewRuntime,
   referenceOf,
-  screenRuntime,
-  screenSdk,
+  routerSpecifier,
+  pageRuntime,
+  pageSdk,
   sdkRoot,
 } from "./src/kit.ts";
 import type { Kit, KitModules } from "./src/kit.ts";
@@ -125,7 +127,7 @@ const exportsOf = (dir: string) => manifestOf(dir).exports ?? {};
 
 /**
  * A test or a declaration among the kit's sources: no part of a release.
- * It is never a module of the kit, so never sent to a screen, and the
+ * It is never a module of the kit, so never sent to a page, and the
  * compiler doesn't read it either: adding or changing one builds the same
  * release.
  */
@@ -145,7 +147,7 @@ interface Entry {
 
 /**
  * `@grasp-os/ui`'s exports that are one module each, not a folder of them:
- * the form helpers (`Form`, `TextField`, …) screens render the SDK's
+ * the form helpers (`Form`, `TextField`, …) pages render the SDK's
  * forms with.
  */
 const uiSingleExports: ReadonlySet<string> = new Set(["./form"]);
@@ -181,13 +183,13 @@ const uiEntries = (): Entry[] =>
   });
 
 /**
- * `@grasp-os/sdk`'s screen modules: the React SDK and the legacy hooks
- * App code imports, and the runtime that renders a screen in its frame
+ * `@grasp-os/sdk`'s page modules: the React SDK and the legacy hooks
+ * App code imports, and the runtime that renders a page in its frame
  * and mounts the session client (see kit.ts). They share the client's
  * module, so the provider the runtime mounts is the one the hooks read.
  */
 const sdkEntries = (extra: readonly string[] = []): Entry[] =>
-  [sdkRoot, screenSdk, screenRuntime, ...extra].map((specifier) => {
+  [sdkRoot, pageSdk, pageRuntime, ...extra].map((specifier) => {
     const target =
       exportsOf(sdk)[`.${specifier.slice("@grasp-os/sdk".length)}`];
     if (typeof target !== "string") {
@@ -245,7 +247,7 @@ const development = {
   "process.env.NODE_ENV": JSON.stringify("development"),
 };
 
-/** Which kit a build is of: the one every screen loads, or a preview's. */
+/** Which kit a build is of: the one every page loads, or a preview's. */
 type KitProfile = "production" | "preview";
 
 /**
@@ -317,9 +319,9 @@ export default m;`;
 /**
  * Packages whose `browser` build touches the DOM as it loads, by the build
  * without it. A kit module must load without a document: wherever it is
- * evaluated before a page exists (a check in a worker, a screen's module
+ * evaluated before a page exists (a check in a worker, a page's module
  * graph before its frame renders), a module that reads `document` at load
- * fails, and every screen that imports it with it. Markdown's decoder
+ * fails, and every page that imports it with it. Markdown's decoder
  * (`decode-named-character-reference`, under react-markdown's micromark)
  * makes an element at load to decode entities with `innerHTML`; its own
  * build decodes them from a table instead.
@@ -403,13 +405,19 @@ const flatModules = (chunks: Rolldown.OutputChunk[]): FlatModules => {
 };
 
 /**
- * What every screen shares one instance of: React and what renders with it.
+ * What every page shares one instance of: React and what renders with it.
  * A page loads each kit module once, by its flat name, and the bundler puts
  * each file in one module, so there is one of each unless a dependency
  * brings a second copy from another directory. That fails the build, like
  * two versions of one package in the kit's types.
  */
-const singlePackages = ["react", "react-dom", "scheduler"];
+const singlePackages = [
+  "react",
+  "react-dom",
+  "scheduler",
+  "@tanstack/react-router",
+  "@tanstack/router-core",
+];
 
 const assertSinglePackages = (sources: FlatModules["sources"]): void => {
   for (const name of singlePackages) {
@@ -497,7 +505,7 @@ const buildKitModules = async (
         ),
         preserveEntrySignatures: "strict",
         // Base UI marks its modules "use client", for React Server
-        // Components; screens only render on the client.
+        // Components; pages only render on the client.
         onLog: (level, log, handle) => {
           if (log.code !== "MODULE_LEVEL_DIRECTIVE") {
             handle(level, log);
@@ -523,7 +531,7 @@ const buildKitModules = async (
 
 /**
  * The SDK's modules for `specifiers`, which code runs with outside
- * screens: what a workflow's or an App test's isolate loads (`sdkImports`
+ * pages: what a workflow's or an App test's isolate loads (`sdkImports`
  * and the JSON workflows' own), or what an App's server isolate loads
  * (`serverSdkImports`), each a set
  * of its own, so each isolate carries only what it uses. One module per
@@ -618,7 +626,7 @@ const importing = (specifiers: readonly string[]): string =>
 /**
  * How the kit is loaded at build time: the options App code is checked
  * with, and the worker lib too, what an App's server code is checked
- * against (type-check.ts `serverTarget`), which no screen is. Third-party
+ * against (type-check.ts `serverTarget`), which no page is. Third-party
  * declarations can have errors that don't matter here.
  */
 const { paths: _appPaths, ...checkOptions } = compilerOptions;
@@ -1561,6 +1569,46 @@ const oneModule = async (
 };
 
 /**
+ * What TanStack's route generator (src/route-tree.ts) imports but never
+ * calls in the compiler: Prettier, for a route tree's formatting
+ * (`enableRouteTreeFormatting` is off), jiti, for a virtual routes config
+ * file (an App has none), and babel-dead-code-elimination, which
+ * TanStack's router-utils re-exports for the router plugin's code splitting
+ * and which loads @babel/traverse with a runtime `require`. Each stands in
+ * as a module that throws if anything calls it, so a generator release
+ * that starts to fails its first build here, never silently.
+ */
+const routeGeneratorStandIns: Record<string, string[]> = {
+  prettier: ["format"],
+  jiti: ["createJiti"],
+  "babel-dead-code-elimination": [
+    "deadCodeElimination",
+    "findReferencedIdentifiers",
+  ],
+};
+
+const standInPrefix = "\0route-generator-stand-in:";
+
+const routeGeneratorStandIn: Plugin = {
+  name: "route-generator-stand-in",
+  enforce: "pre",
+  resolveId: (id) =>
+    Object.hasOwn(routeGeneratorStandIns, id) ? `${standInPrefix}${id}` : null,
+  load: (id) => {
+    if (!id.startsWith(standInPrefix)) {
+      return null;
+    }
+    const name = id.slice(standInPrefix.length);
+    const exported = routeGeneratorStandIns[name] ?? [];
+    const stub = `() => { throw new Error(${JSON.stringify(`The route generator called ${name}, which the compiler leaves out (build.ts)`)}); }`;
+    return [
+      ...exported.map((each) => `export const ${each} = ${stub};`),
+      "export default {};",
+    ].join("\n");
+  },
+};
+
+/**
  * The compiler's main module. It imports what it knows of the kit (`#kit`)
  * as a module of its own, `kit.json`, which the isolate is started with:
  * most of it is the type check's declarations, which the compiler's code
@@ -1568,7 +1616,9 @@ const oneModule = async (
  */
 const buildCompiler = async (): Promise<string> =>
   await oneModule(
-    isolateBuild("src/worker.ts", compilerAssets.source, []),
+    isolateBuild("src/worker.ts", compilerAssets.source, [
+      routeGeneratorStandIn,
+    ]),
     "The compiler"
   );
 
@@ -1711,7 +1761,7 @@ const writeRelease = (
  * How many releases a build leaves in the assets, the newest first. A dev
  * server reads the release it started on until it has reloaded, about a
  * second after a build writes a new version, and removing that release
- * fails its screen builds. Three covers a server that hasn't reloaded while
+ * fails its page builds. Three covers a server that hasn't reloaded while
  * two more builds finished: the watcher's (watch.ts), or core's own build
  * as the server starts next to it. Every build keeps as many, so no build
  * has to know whether a server is running. What a release ships is the one
@@ -1765,12 +1815,18 @@ const buildAppCompiler = async (
     specifier,
     id: `${virtualEntry}${specifier}`,
   }));
+  const router = {
+    specifier: routerSpecifier,
+    // Its ES module build, as the kit bundles every entry: its exports named.
+    id: fileURLToPath(import.meta.resolve(routerSpecifier)),
+  };
   const {
     code: kitCode,
     imports: moduleImports,
     sources,
   } = await buildKitModules([
     ...react,
+    router,
     ...components,
     ...icons,
     ...sdkEntries(),
@@ -1781,6 +1837,7 @@ const buildAppCompiler = async (
     await buildKitModules(
       [
         ...react,
+        router,
         ...components,
         ...icons,
         ...sdkEntries([previewRefresh, previewRuntime]),
@@ -1789,8 +1846,9 @@ const buildAppCompiler = async (
     );
   const imports = [
     ...reactImports,
+    routerSpecifier,
     ...components.map(({ specifier }) => specifier),
-    screenSdk,
+    pageSdk,
     sdkRoot,
   ];
   const stylesheets = collectStylesheets();

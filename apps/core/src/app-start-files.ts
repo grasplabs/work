@@ -12,14 +12,14 @@ import { memberRole } from "./auth/identity.ts";
 import { storeFiles } from "./data-stores.ts";
 import type { StartFiles } from "./workflows/start-files.ts";
 
-// The App files an App's start may hand its run: a screen's start
+// The App files an App's start may hand its run: a page's start
 // (GRA-885) and its server code's, an action's made as it runs and a
 // commit's dispatched later (GRA-976). Those of the App's own store, each
 // read as the person the start acts for may read it at the moment it is
 // read: their organization role and their roles in the App read again
 // then, never taken from the call, under the release of the App version
 // whose code made the start, through a files resource that release
-// declares with `read`, as the screen's own download of it would be
+// declares with `read`, as the page's own download of it would be
 // (app-file-route.ts). Anything else, a file still uploading, another
 // person's unattached upload, a record they no longer see or a person no
 // longer a member, answers `file.not_found`, the same however it isn't
@@ -27,7 +27,7 @@ import type { StartFiles } from "./workflows/start-files.ts";
 
 /**
  * The App files a start acting for `principal` through App `app` may hand
- * its run, under `release` (the release of the App version whose screen
+ * its run, under `release` (the release of the App version whose page
  * or code made the start): none an App without a store keeps.
  */
 export const appStartFiles = (
@@ -37,12 +37,12 @@ export const appStartFiles = (
   /** The release, loaded only once a start holds a file. */
   release: Release | (() => Promise<Release>),
   /**
-   * What chose the files, for the audit log: the App's screen, its
+   * What chose the files, for the audit log: the App's page, its
    * action's code or its commit's, and the agent whose call made it, if
    * any. The person stays who the start acts for.
    */
   via: {
-    readonly kind: "screen" | "action" | "commit";
+    readonly kind: "page" | "action" | "commit";
     readonly agent: string | null;
   }
 ): StartFiles => {

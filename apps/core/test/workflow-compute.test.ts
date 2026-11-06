@@ -12,8 +12,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
+import { buildComputeModules } from "../src/pages.ts";
 import { sandboxCpuHeader } from "../src/sandbox-headers.ts";
-import { buildComputeModules } from "../src/screens.ts";
 import { loadWorkflowBuild } from "../src/workflow-builds.ts";
 import {
   editWorkflowDraft,
@@ -1058,7 +1058,7 @@ describe("a JSON workflow's compute modules, type-checked as they are built", ()
       'export const kept = (): string | null => localStorage.getItem("x");\n',
     ],
     [
-      "a module of the kit's screens, for its types",
+      "a module of the kit's pages, for its types",
       'import type { ReactNode } from "react";\nexport type Reached = ReactNode;\n',
     ],
     [

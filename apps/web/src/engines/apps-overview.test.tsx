@@ -18,18 +18,18 @@ import { AppsOverview } from "./apps-overview.tsx";
 
 // The Apps page as people read it, from the Apps core lists
 // (`apps.overview`): each App one card that opens the live App, however
-// many screens it has, the newest first, with where it stands; a search
+// many pages it has, the newest first, with where it stands; a search
 // over their names; New App for who builds.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 let root: Root | undefined;
 
-/** An App made at `createdAt`, standing at `status`, with `screens`. */
+/** An App made at `createdAt`, standing at `status`, with pages or not. */
 const overview = (
   name: string,
   createdAt: string,
-  screens: string[],
+  pages: boolean,
   status: AppStatus = "published"
 ): AppOverview => ({
   app: {
@@ -41,7 +41,7 @@ const overview = (
     audience: null,
     process: null,
     blueprint: null,
-    currentVersion: screens.length === 0 ? null : 1,
+    currentVersion: pages ? 1 : null,
     pendingVersion: null,
     status,
     link: null,
@@ -49,8 +49,8 @@ const overview = (
     role: "builder",
   },
   contents: {
-    version: screens.length === 0 ? null : 1,
-    screens,
+    version: pages ? 1 : null,
+    pages,
   },
 });
 
@@ -117,19 +117,19 @@ describe(AppsOverview, () => {
     const invoices = overview(
       "Invoices",
       "2026-10-01T08:00:00.000Z",
-      ["home", "invoice"],
+      true,
       "published"
     );
     const holidays = overview(
       "Holidays",
       "2026-10-20T08:00:00.000Z",
-      [],
+      false,
       "draft"
     );
     const old = overview(
       "Old desk",
       "2026-09-01T08:00:00.000Z",
-      ["home"],
+      true,
       "archived"
     );
     await shown([invoices, old, holidays]);
@@ -150,9 +150,9 @@ describe(AppsOverview, () => {
 
   it("narrows the Apps to those whose name has what is searched, and says when none has", async () => {
     await shown([
-      overview("Invoices", "2026-10-01T08:00:00.000Z", ["home"]),
-      overview("Invoice archive", "2026-10-02T08:00:00.000Z", ["home"]),
-      overview("Holidays", "2026-10-03T08:00:00.000Z", ["home"]),
+      overview("Invoices", "2026-10-01T08:00:00.000Z", true),
+      overview("Invoice archive", "2026-10-02T08:00:00.000Z", true),
+      overview("Holidays", "2026-10-03T08:00:00.000Z", true),
     ]);
 
     await search("invoice");

@@ -71,7 +71,7 @@ const playFarewell = (
   const box = element.getBoundingClientRect();
   const width = box.width - 2 * ROOM;
   const height = box.height - 2 * ROOM;
-  // As sharp as the screen is dense, read when it is drawn.
+  // As sharp as the page is dense, read when it is drawn.
   const sharp = Math.min(window.devicePixelRatio || 1, 2);
   element.width = Math.round(box.width * sharp);
   element.height = Math.round(box.height * sharp);

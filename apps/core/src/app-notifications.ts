@@ -52,7 +52,7 @@ import type { CallingAgent } from "./workflow-start-intents.ts";
 // Apps telling people (`ctx.notifyPeople` of an action,
 // `ctx.afterCommit.notifyPeople` of a mutation): a notification in the person's Grasp notifications
 // (notifications.ts, `app_message`), which their inbox lists and which
-// opens the App, on a screen of it if the App named one. It is the one
+// opens the App. It is the one
 // channel the platform tells people through; nothing here sends mail or
 // chat messages. Threat model, and how each is closed:
 //
@@ -79,9 +79,8 @@ import type { CallingAgent } from "./workflow-start-intents.ts";
 //   that hour, and this send's), so a send's rows all go in or none do,
 //   and two sends at once can't both pass it. A send past it is refused
 //   whole (`resource.limit_reached`).
-// - A link out: a notification opens the App's own page, and at most
-//   names a screen of it by name (`?screen=`), which the page opens only
-//   if the App has it. No URL is ever kept.
+// - A link out: a notification opens the App's own page, on its first
+//   route, and names nothing else. No URL is ever kept.
 // - Told twice: an action's send is keyed by its call's key and its place
 //   among its sends, a commit's by its outbox entry, and each person's row
 //   by that key, so the same send made again tells nobody again; its
@@ -352,12 +351,12 @@ const deliver = async (
   const limit = withinLimit(send.app, now - hourMs, ids);
   // This attempt's own rows, by its time: none for one made again.
   const mine = sql`(SELECT count(*) FROM ${notifications} WHERE ${inList(notifications.id, ids)} AND ${notifications.createdAt} = ${now})`;
-  const { title, body, link } = send.notification;
+  const { title, body } = send.notification;
   const [first, ...rest] = rows.map(({ id, userId }) =>
     db
       .insert(notifications)
       .select(
-        sql`SELECT ${id}, ${userId}, 'app_message', ${send.app}, NULL, NULL, ${now}, ${now}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ${title}, ${body ?? null}, ${link ?? null} WHERE ${activeMember(userId)} AND ${limit}`
+        sql`SELECT ${id}, ${userId}, 'app_message', ${send.app}, NULL, NULL, ${now}, ${now}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ${title}, ${body ?? null}, NULL WHERE ${activeMember(userId)} AND ${limit}`
       )
       .onConflictDoNothing({ target: notifications.id })
   );

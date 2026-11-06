@@ -6,7 +6,7 @@
 // - with reduced motion nothing moves: the height and the content change
 //   at once;
 // - `FadeIn` is a component rather than props to spread on motion's own,
-//   so screens need no motion import of their own.
+//   so pages need no motion import of their own.
 import { cn } from "@grasp-os/ui/lib/utils";
 import { motion, useReducedMotion } from "motion/react";
 import { useLayoutEffect, useRef, useState } from "react";

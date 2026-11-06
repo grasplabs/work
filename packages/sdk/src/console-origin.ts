@@ -1,10 +1,10 @@
 /**
- * Whose code called `console.error` in a screen's frame, read from the
- * call's stack: the App's own modules (in the directory of the screen's
+ * Whose code called `console.error` in a page's frame, read from the
+ * call's stack: the App's own modules (in the directory of the page's
  * own module, where core serves every App module of the frame, a
  * preview's later ones too) or anything else, the kit's (React's
  * development warnings, a UI library's), which core serves from a
- * directory of its own. What the screen runtime reports App code's calls
+ * directory of its own. What the page runtime reports App code's calls
  * as a problem by, and the rest as a warning, which shows but fails
  * nothing (spec 22.7: only errors block a draft's check).
  *
@@ -26,7 +26,7 @@ const frameAddresses = (stack: string): string[] =>
 /**
  * Whether the call whose `stack` this is came from the App's own code:
  * its first frame outside `own` is in `appDirectory`, the directory of the
- * screen's own module.
+ * page's own module.
  */
 export const calledByApp = (
   stack: string | undefined,

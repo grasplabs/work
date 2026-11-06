@@ -18,8 +18,9 @@ import { signedInApi } from "./sign-in.ts";
 
 export const appName = "Invoice desk";
 
-/** A screen the lint lets through. */
-export const desk = `import { Button } from "@grasp-os/ui/components/button";
+/** A page the lint lets through. */
+export const desk = `import { createFileRoute } from "@tanstack/react-router";
+import { Button } from "@grasp-os/ui/components/button";
 
 const Desk = () => (
   <main className="flex flex-col gap-4 p-6">
@@ -27,10 +28,10 @@ const Desk = () => (
   </main>
 );
 
-export default Desk;
+export const Route = createFileRoute("/")({ component: Desk });
 `;
 
-/** The screen with its button restyled, which @shadcn/lint refuses. */
+/** The page with its button restyled, which @shadcn/lint refuses. */
 export const restyled = desk.replace(
   '<Button variant="outline">',
   '<Button className="rounded-full">'
@@ -49,7 +50,7 @@ export const returned = (text: string | undefined): unknown =>
 /** Creates the App, writes a draft that passes, and submits its proposal. */
 export const submitProposal = `export default async (self, env) => {
   const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-  await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": desk })});
+  await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": desk })});
   return await env.build.submit(app.id, { kind: "propose", message: "An invoice desk" });
 };`;
 
@@ -155,7 +156,7 @@ export const writtenMeanwhile = async (
     id,
     app,
     draft.base,
-    { ...draft.changes, "screens/note.tsx": desk },
+    { ...draft.changes, "src/routes/note.tsx": desk },
     [],
     draft.revision,
     run
@@ -164,15 +165,15 @@ export const writtenMeanwhile = async (
 };
 
 /**
- * A job's check, reading the draft's screens' build: held where it reads
+ * A job's check, reading the draft's pages' build: held where it reads
  * a build the draft's write read or kept first (every write builds the
  * draft, so its own read and keeping go through). Made anew for each
  * hold, as it remembers what was read.
  */
-export const screenBuilds = (): ((method: string, key: unknown) => boolean) => {
+export const pageBuilds = (): ((method: string, key: unknown) => boolean) => {
   const seen = new Set<string>();
   return (method, key) => {
-    if (typeof key !== "string" || !key.startsWith("screen-builds/")) {
+    if (typeof key !== "string" || !key.startsWith("page-builds/")) {
       return false;
     }
     const again = seen.has(key);

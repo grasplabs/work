@@ -68,7 +68,7 @@ import { unique } from "./sign-in.ts";
 // - a builder taking a run's replies by naming an email trigger after a
 //   reply address: that shape is refused;
 // - a contract claiming replies in a shape core doesn't deliver, or for a
-//   screen's type too: refused as it is published.
+//   page's type too: refused as it is published.
 //
 // Each run here is a real start of a real published workflow, its inbox
 // read by a real isolate running a module of the test's own on the run
@@ -478,7 +478,7 @@ describe("a run's inboxes", { timeout: 120_000 }, () => {
     ).rejects.toMatchObject({ code: "workflow.email_taken" });
   });
 
-  it("refuses a contract whose replies aren't the platform's, or that a screen sends too", async () => {
+  it("refuses a contract whose replies aren't the platform's, or that a page sends too", async () => {
     const { admin } = sealed;
     const refusal = async (events: Record<string, unknown>) => {
       try {
@@ -498,7 +498,7 @@ describe("a run's inboxes", { timeout: 120_000 }, () => {
       otherData: await refusal({
         "acme.reply": { data: note, browser: false, ingress: "email" },
       }),
-      screenToo: await refusal({
+      pageToo: await refusal({
         "acme.reply": { data: emailReplyData, browser: true, ingress: "email" },
       }),
       twoFromOutside: await refusal({
@@ -522,7 +522,7 @@ describe("a run's inboxes", { timeout: 120_000 }, () => {
       }),
     }).toStrictEqual({
       otherData: "workflow.contract_invalid",
-      screenToo: "workflow.contract_invalid",
+      pageToo: "workflow.contract_invalid",
       twoFromOutside: "workflow.contract_invalid",
       platformReplies: "published",
     });

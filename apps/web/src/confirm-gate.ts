@@ -1,8 +1,8 @@
 // When a confirmation in Grasp's own dialog may count (link-confirmation.tsx):
-// pure logic, so tested on its own. A screen can't make the person confirm
+// pure logic, so tested on its own. A page can't make the person confirm
 // what they didn't mean to:
 //
-// - A click or key already on its way as the dialog opens, which a screen
+// - A click or key already on its way as the dialog opens, which a page
 //   could time its request for, confirms nothing: the confirm button is
 //   enabled only `delayMs` after the dialog opened, and every pointer press
 //   or key in that time starts the delay again, so a person clicking or

@@ -58,7 +58,8 @@ const setUp = async (
   const person = await signedInApi(idp, role);
   const { id: ledger } = await owner.api.apps.create({ name: "Ledger" });
   const version = await release(owner, ledger, {
-    "screens/desk.tsx": "export default () => null;\n",
+    "src/routes/index.tsx":
+      'import { createFileRoute } from "@tanstack/react-router"; export const Route = createFileRoute("/")({ component: () => null });\n',
   });
   const { collectionId } = await collectionWithNote(admin.api, {
     name: "Handbook",

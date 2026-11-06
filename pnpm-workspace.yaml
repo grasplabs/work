@@ -85,7 +85,7 @@ catalog:
   # Bundles an App's approved npm packages in the package builder's isolate
   # (packages/compiler/src/packages): the browser build, run on workerd.
   esbuild-wasm: 0.28.2
-  # The import specifiers of an App's compiled screen modules, which the
+  # The import specifiers of an App's compiled page modules, which the
   # compiler points at each module's content-hashed address: Vite's lexer.
   es-module-lexer: 3.0.4
   # Text of uploaded files, extracted in core: PDF, Word and Excel.
@@ -172,13 +172,16 @@ catalog:
   "@tanstack/react-router": 1.170.46
   "@tanstack/react-start": 1.169.4
   "@tanstack/router-plugin": 1.168.48
+  # The route tree of an App's pages, made in the compiler's isolate
+  # (route-tree.ts). Keep it on the version @tanstack/router-plugin uses.
+  "@tanstack/router-generator": 1.167.46
   # TanStack Start's wire format for server functions: the admin's tests
   # call them through the Worker's entry as its pages do. Keep it on the
   # version @tanstack/react-start uses.
   seroval: 1.7.5
   "@types/react": 19.3.0
   "@types/react-dom": 19.3.0
-  # The design-system lint's parser in the screen compiler's isolate, with
+  # The design-system lint's parser in the page compiler's isolate, with
   # oxc's (oxc.wasm): typescript-eslint's scope analysis and visitor keys,
   # which need no TypeScript (packages/compiler/src/eslint-parser.ts).
   "@typescript-eslint/scope-manager": 8.72.1

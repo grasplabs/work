@@ -6,11 +6,11 @@ import { connectionCallbackPath } from "@grasp-os/shared/connect";
 import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { labPath } from "@grasp-os/shared/lab";
-import { appTokenPath } from "@grasp-os/shared/portable";
 import {
-  screenLeaseHeader,
-  screenPersonHeader,
-} from "@grasp-os/shared/screen-limits";
+  pageLeaseHeader,
+  pagePersonHeader,
+} from "@grasp-os/shared/page-limits";
+import { appTokenPath } from "@grasp-os/shared/portable";
 import { uploadOriginalPath } from "@grasp-os/shared/uploads";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 import { createExecutionContext } from "cloudflare:test";
@@ -18,8 +18,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import worker from "../src/index.ts";
+import { PageFrameRpc } from "../src/pages-rpc.ts";
 import { CoreRpcTarget } from "../src/rpc-target.ts";
-import { ScreenFrameRpc } from "../src/screens-rpc.ts";
 import { SessionRpc } from "../src/session-rpc.ts";
 import { staffAudited } from "../src/staff-audit.ts";
 import { mockIdp } from "./idp.ts";
@@ -168,7 +168,7 @@ describe("Grasp staff's views, audited", () => {
         "app.files",
         async () =>
           await routed(`${appFilesPath}/${app}/notes/files/f1`, {
-            headers: { cookie: session, [screenLeaseHeader]: "lease" },
+            headers: { cookie: session, [pageLeaseHeader]: "lease" },
           }),
       ],
       [
@@ -180,7 +180,7 @@ describe("Grasp staff's views, audited", () => {
               cookie: session,
               origin: clientOrigin,
               "content-type": "application/json",
-              [screenLeaseHeader]: "lease",
+              [pageLeaseHeader]: "lease",
             },
             body: JSON.stringify({}),
           }),
@@ -283,7 +283,7 @@ describe("Grasp staff's views, audited", () => {
               cookie: session,
               origin: clientOrigin,
               "content-type": "application/json",
-              [screenPersonHeader]: userId,
+              [pagePersonHeader]: userId,
             },
             body: JSON.stringify({}),
           }),
@@ -435,7 +435,7 @@ describe("Grasp staff's views, audited", () => {
     const check = staffAudited(env, async () => await Promise.resolve(staff));
     const frames = [crypto.randomUUID(), crypto.randomUUID()].map(
       (app) =>
-        new ScreenFrameRpc({
+        new PageFrameRpc({
           env,
           check,
           userId: staff.userId,
@@ -468,8 +468,8 @@ describe("Grasp staff's views, audited", () => {
       staffViews(events).map(({ detail }) => detail.surface)
     ).toStrictEqual([
       "knowledge.getDocument",
-      "screenFrame.delivery",
-      "screenFrame.delivery",
+      "pageFrame.delivery",
+      "pageFrame.delivery",
     ]);
   });
 
@@ -554,10 +554,10 @@ describe("Grasp staff's views, audited", () => {
     expect({ unaudited, naming }).toStrictEqual({ unaudited: [], naming: [] });
   });
 
-  it("write an entry for a call of every method of a target a call hands out: a screen's frame", async () => {
+  it("write an entry for a call of every method of a target a call hands out: a page's frame", async () => {
     const session = await signedIn(idp, "grasp-staff", staffPerson());
     const staff = await whoami(session);
-    const frame = new ScreenFrameRpc({
+    const frame = new PageFrameRpc({
       env,
       check: staffAudited(env, async () => await Promise.resolve(staff)),
       userId: staff.userId,

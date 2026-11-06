@@ -7,9 +7,9 @@ import type {
   ViewedApp,
 } from "@grasp-os/shared/apps";
 import type { OfferedCatalog } from "@grasp-os/shared/connect";
+import type { SurfaceSummary } from "@grasp-os/shared/pages";
 import { canBuild, isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import type { SurfaceSummary } from "@grasp-os/shared/screens";
 import { Button, buttonVariants } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import {
@@ -45,11 +45,7 @@ import { formatDateTime } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { ScreenFrame } from "../screens/screen-frame.tsx";
-import {
-  usePushNavigate,
-  useScreenOpening,
-} from "../screens/screen-navigate.ts";
+import { PageFrame } from "../pages/page-frame.tsx";
 import {
   SettingsBody,
   SettingsRow,
@@ -86,7 +82,7 @@ import type { AppRead } from "./use-app-read.ts";
 // plainly, a section at a time: what it is called and where it stands
 // (General), whom it is shared with (Sharing), its versions, its
 // connections (with the workflows it binds), webhooks, the npm packages
-// approved for it, and the settings screen the App
+// approved for it, and the settings page the App
 // declares itself (Options). Its builders reach it beside the chat in
 // the App's workspace (app-workspace.tsx); anyone else who opens the
 // App, from the App's own bar (_shell.apps.$app_.settings.tsx). Each
@@ -896,7 +892,7 @@ const Packages = ({ app }: { app: ViewedApp }) => <AppPackages app={app.id} />;
 // --- Options -------------------------------------------------------------
 
 const readSurfaces = async (session: Session, app: string) =>
-  await session.screens.surfaces(app);
+  await session.pages.surfaces(app);
 
 /** The App's settings surface (spec 34.1), if it declares one. */
 const optionsOf = (
@@ -907,9 +903,9 @@ const optionsOf = (
     : undefined;
 
 /**
- * The App's own settings screen: its settings surface, opened with
- * nothing, as any of its screens, with the person's own access and no
- * more. Its navigation opens routes in the main pane, as new entries.
+ * The App's own settings: its pages, at its settings surface's route,
+ * with the person's own access and no more. Its router moves within the
+ * frame; the settings page stays where it is.
  */
 const Options = ({
   app,
@@ -917,30 +913,11 @@ const Options = ({
 }: {
   app: string;
   surface: SurfaceSummary;
-}) => {
-  const navigate = usePushNavigate(app);
-  // What a navigation to the settings asked for, as core resolved it; a
-  // visit by its address opens with nothing.
-  const opening = useScreenOpening(app, surface.screen);
-  const input =
-    opening !== undefined && opening.surface === surface.name
-      ? opening.input
-      : "{}";
-  return (
-    <div className="flex min-h-96 flex-col">
-      <ScreenFrame
-        app={app}
-        embedded
-        input={input}
-        key={input}
-        onNavigate={navigate}
-        route={surface.route}
-        screen={surface.screen}
-        surface={surface.name}
-      />
-    </div>
-  );
-};
+}) => (
+  <div className="flex min-h-96 flex-col">
+    <PageFrame app={app} at={surface.path} embedded key={surface.path} />
+  </div>
+);
 
 // --- The settings --------------------------------------------------------
 
@@ -977,7 +954,7 @@ const shownSections = (
   return appSettingsSections.filter((section) => shown[section]);
 };
 
-/** Options: the App's own settings screen, once core says it declares one. */
+/** Options: the App's own settings page, once core says it declares one. */
 const OptionsSection = ({
   app,
   options,

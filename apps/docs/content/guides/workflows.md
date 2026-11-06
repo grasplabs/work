@@ -79,11 +79,12 @@ Grasp checks every start's input against the workflow's, so a start the workflow
 
 `useWorkflow` starts and follows a run from a Page. It shows the run of its latest start, or the run you give it by ID, and updates as the run goes on:
 
-```tsx screens/tasks.tsx
+```tsx src/routes/index.tsx
 import { useQuery, useWorkflow } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { api, workflows } from "@server/_generated/api";
+import { createFileRoute } from "@tanstack/react-router";
 
 const Tasks = () => {
   const tasks = useQuery(api.tasks.list, { done: true });
@@ -110,7 +111,7 @@ const Tasks = () => {
   );
 };
 
-export default Tasks;
+export const Route = createFileRoute("/")({ component: Tasks });
 ```
 
 Before its first start, `useWorkflow` is `idle`, and `loading` while the run you gave it by ID loads. A run is `queued`, `running`, `waiting` (for time, an event or a decision) or `paused`; `compensating` while it undoes its work after a failure or a cancellation; and it ends `completed` with its output, `failed` with its error, or `cancelled`. A run the person may no longer see, such as one whose decision someone else answered, is `unavailable`.

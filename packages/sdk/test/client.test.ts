@@ -12,10 +12,10 @@ import { api } from "./notes/server/_generated/api.ts";
 
 // The session client against the network and the page it reaches through:
 // what it does with what comes back, where core's own route isn't what
-// is tested (apps/core/test/screen-client*.test.ts go through that).
+// is tested (apps/core/test/page-client*.test.ts go through that).
 // The page refuses for the person's request budget; core answers a call's
 // result, or a failure; and a connection loses answers. Each case is one
-// a screen meets: a budget used up by re-reads, a sandbox that went away
+// a page meets: a budget used up by re-reads, a sandbox that went away
 // mid-call, a release revoked while a read is under way, a network that
 // never comes back.
 
@@ -37,7 +37,7 @@ const categoryOf = (code: string): string =>
 /** What the page rejects a call with when the person's budget is used up. */
 const rateLimited = () =>
   Object.assign(new Error("Too much at once."), {
-    code: "screen.rate_limited",
+    code: "page.rate_limited",
     details: { retryAfterMs: 20 },
   });
 
@@ -59,7 +59,7 @@ const network = (
         atOnce -= 1;
       }
     },
-    // Live queries are core's own test (screen-client-live.test.ts): these
+    // Live queries are core's own test (page-client-live.test.ts): these
     // cases only make calls.
     watch: async () => {
       await Promise.resolve();
@@ -589,7 +589,7 @@ describe("the session client and lost access", () => {
         return failedWith("operation.sandbox_lost", "uncertain");
       }
       // The page relays core's refusal: the browser's session is someone
-      // else's than the screen's now.
+      // else's than the page's now.
       throw Object.assign(new Error("Someone else signed in."), {
         code: "auth.principal_changed",
       });
@@ -690,7 +690,7 @@ describe("the session client and lost access", () => {
             category: "domain",
             retryable: false,
             requestId: "r",
-            details: { refusal: "screen.revoked" },
+            details: { refusal: "page.revoked" },
           },
         },
       };
@@ -722,7 +722,7 @@ describe("the session client and lost access", () => {
             category: "uncertain",
             retryable: false,
             requestId: "r",
-            details: { idempotencyKey: "k", refusal: "screen.revoked" },
+            details: { idempotencyKey: "k", refusal: "page.revoked" },
           },
         },
       };
@@ -732,10 +732,10 @@ describe("the session client and lost access", () => {
       failureOf(client.action(api.notes.tally))
     ).resolves.toMatchObject({
       code: "submission.outcome_unknown",
-      details: { refusal: "screen.revoked" },
+      details: { refusal: "page.revoked" },
     });
     release(null);
-    await expect(reading).resolves.toMatchObject({ code: "screen.revoked" });
+    await expect(reading).resolves.toMatchObject({ code: "page.revoked" });
   });
 });
 
@@ -779,7 +779,7 @@ describe("the session client following a query", () => {
         follows += 1;
         await Promise.resolve();
         throw Object.assign(new Error("Too much at once."), {
-          code: "screen.rate_limited",
+          code: "page.rate_limited",
           details: { retryAfterMs: 2000 },
         });
       },
@@ -824,7 +824,7 @@ describe("the session client and a streaming action's cancel", () => {
       notRunning: "acknowledged",
       unreadable: "operation.unreachable",
       lost: "operation.unreachable",
-      refused: "screen.rate_limited",
+      refused: "page.rate_limited",
     });
   });
 });

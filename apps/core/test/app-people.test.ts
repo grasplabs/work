@@ -30,7 +30,7 @@ import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 // Who calls an App, and the organization's people (app-people.ts), from
 // its threat model: who calls comes from core, for a builder, a user, a
 // workflow run's person, an agent's person and a visitor
-// (app-visitor-calls.test.ts) alike; a screen can't name someone else; a
+// (app-visitor-calls.test.ts) alike; a page can't name someone else; a
 // removed person is refused; only an App that declares it reads the
 // directory, which answers only members, at most 100 a read, each read
 // recorded as whoever made it.
@@ -194,7 +194,7 @@ const newTeam = async (name: string): Promise<{ id: string; name: string }> => {
   return { id, name };
 };
 
-/** The request of `path` of the App with `input`, as a screen sends it. */
+/** The request of `path` of the App with `input`, as a page sends it. */
 const requestOf = (release: Release, path: string, input: unknown): string =>
   JSON.stringify({
     reference: {
@@ -204,7 +204,7 @@ const requestOf = (release: Release, path: string, input: unknown): string =>
     input,
   });
 
-/** What `by` gets calling `path` of the App with `input`, as a screen sends it. */
+/** What `by` gets calling `path` of the App with `input`, as a page sends it. */
 const call = async (
   { app, release }: Sealed,
   by: Caller,
@@ -222,7 +222,7 @@ const call = async (
 
 type PeopleReference = (typeof peopleReferences)[keyof typeof peopleReferences];
 
-/** The request a screen's `useUser` or `usePeople` read sends. */
+/** The request a page's `useUser` or `usePeople` read sends. */
 const readRequestOf = (
   reference: PeopleReference,
   input: unknown,
@@ -233,13 +233,13 @@ const readRequestOf = (
     input,
   });
 
-/** What a screen's `useUser` or `usePeople` read answers `by`. */
+/** What a page's `useUser` or `usePeople` read answers `by`. */
 const read = async (
   { app }: Sealed,
   by: Caller,
   reference: PeopleReference,
   input: unknown,
-  /** What the screen sends of the reference in place of the SDK's. */
+  /** What the page sends of the reference in place of the SDK's. */
   forged: Record<string, unknown> = {}
 ): Promise<OperationResult> => {
   const { result } = await callAppFunction(
@@ -340,7 +340,7 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
     });
   });
 
-  it("are core's to say: a name or role the caller's identity claims, or a screen's reference, makes it nobody else", async () => {
+  it("are core's to say: a name or role the caller's identity claims, or a page's reference, makes it nobody else", async () => {
     const app = await directoryApp();
     const ana = await member(`Ana ${unique()}`);
     await share(app, ana);
@@ -354,7 +354,7 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
 
     expect({
       fromServer: callerOf(await call(app, claimed, "dir.me")),
-      fromScreen: callerOf(await read(app, claimed, peopleReferences.user, {})),
+      fromPage: callerOf(await read(app, claimed, peopleReferences.user, {})),
       // Another App and version named: a reference is a name, and nothing
       // more is read.
       otherApp: valueOf(
@@ -388,14 +388,14 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
       ),
     }).toStrictEqual({
       fromServer: anaAs,
-      fromScreen: anaAs,
+      fromPage: anaAs,
       otherApp: "contract.invalid_request",
       naming: "contract.invalid_args",
       otherContract: "contract.invalid_request",
     });
   });
 
-  it("refuse someone an admin removed, on the server and in a screen", async () => {
+  it("refuse someone an admin removed, on the server and in a page", async () => {
     const app = await directoryApp();
     const ben = await member(`Ben ${unique()}`);
     await share(app, ben);
@@ -409,11 +409,11 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
     expect({
       before: typeof before === "object" ? "answered" : before,
       server: valueOf(await call(app, ben, "dir.me")),
-      screen: valueOf(await read(app, ben, peopleReferences.user, {})),
+      page: valueOf(await read(app, ben, peopleReferences.user, {})),
     }).toStrictEqual({
       before: "answered",
       server: "permission.person_inactive",
-      screen: "permission.person_inactive",
+      page: "permission.person_inactive",
     });
   });
 
@@ -453,7 +453,7 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
         server: answerOf(
           await call(app, ana, "dir.search", { query: "Ana", limit: 5 })
         ),
-        screen: valueOf(
+        page: valueOf(
           await read(app, ana, peopleReferences.search, { query: "Ana" })
         ),
       };
@@ -466,7 +466,7 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
         email: ana.email,
       },
       server: "permission.denied",
-      screen: "permission.denied",
+      page: "permission.denied",
       recorded: [
         {
           action: "app.people.refused",
@@ -475,7 +475,7 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
         },
         {
           action: "app.people.refused",
-          actor: "screen",
+          actor: "page",
           detail: { person: ana.userId, read: "search", reason: "undeclared" },
         },
       ],
@@ -609,7 +609,7 @@ describe("who calls an App, and its people", { timeout: 120_000 }, () => {
         },
         {
           action: "app.people.read",
-          actor: "screen",
+          actor: "page",
           detail: { person: first.userId, read: "search", count: 2 },
         },
       ],

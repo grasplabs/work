@@ -1,6 +1,6 @@
 // oxlint-disable max-classes-per-file -- the fake live connection: its socket, its two targets and a subscription
 import { toBase64Url } from "@grasp-os/shared/encoding";
-import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
+import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
 import { RpcSession, RpcTarget } from "capnweb";
 import type { RpcStub, RpcTransport } from "capnweb";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";

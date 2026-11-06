@@ -28,17 +28,12 @@ export const addOne = mutation({
 });
 `;
 
-/** The counter's screens: its one screen `screen`. */
-const screensOf = (screen: string): string => `export default {
-  screens: [{ name: "${screen}", path: "/", source: "screens/${screen}.tsx" }],
-};
-`;
-
-const screen = `import { useMutation, useQuery } from "@grasp-os/sdk/react";
+const appPage = `import { createFileRoute } from "@tanstack/react-router";
+import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { api } from "@server/_generated/api";
 
-export default function Counter() {
+function Counter() {
   const count = useQuery(api.counter.count, {});
   const addOne = useMutation(api.counter.addOne);
   return (
@@ -49,10 +44,11 @@ export default function Counter() {
     </main>
   );
 }
+export const Route = createFileRoute("/")({ component: Counter });
 `;
 
-/** The counter App's code: its schema, functions and one screen, `name`. */
-const counterApp = (name = "counter"): Record<string, string> => ({
+/** The counter App's code: its definition, functions and one page, its `/`. */
+const counterApp = (): Record<string, string> => ({
   ...appDefinition({
     name: "Counter",
     tables: {
@@ -63,9 +59,7 @@ const counterApp = (name = "counter"): Record<string, string> => ({
     },
   }),
   "server/counter.ts": operations,
-
-  "screens.ts": screensOf(name),
-  [`screens/${name}.tsx`]: screen,
+  "src/routes/index.tsx": appPage,
 });
 
 /** Runs `run` with `person`'s API over `/rpc`, closed after. */
@@ -101,16 +95,25 @@ const newApp = async (
     return id;
   });
 
-/** A counter screen on the page, once it has built. */
-const counterScreen = async (page: Page, title = "counter app") => {
-  const frame = page.frameLocator(`iframe[title="${title}"]`);
-  // The first open builds the screen, which on a loaded machine takes a
-  // while (screens.e2e.ts).
+/** A counter page on the page, once it has built. */
+const counterPage = async (page: Page) => {
+  const frame = page.frameLocator('iframe[title="App"]');
+  // The first open builds the page, which on a loaded machine takes a
+  // while (pages.e2e.ts).
   await expect(frame.getByRole("heading", { name: "Counter" })).toBeVisible({
     timeout: 20_000,
   });
   return frame;
 };
+
+/** The counter with a second page, `/home`, of the counter's code. */
+const twoPages = (): Record<string, string> => ({
+  ...counterApp(),
+  "src/routes/home.tsx": appPage.replace(
+    'createFileRoute("/")',
+    'createFileRoute("/home")'
+  ),
+});
 
 let builder: Person;
 let user: Person;
@@ -122,17 +125,7 @@ test.beforeAll(async () => {
   ({ builder, user, admin } = peopleIn("apps"));
   // Builders see every App, other tests' too: this one's name is its own.
   name = `Counter ${crypto.randomUUID()}`;
-  app = await newApp(builder, name);
-});
-
-/** An App with two screens, `home` and `counter`, of the counter's code. */
-const twoScreens = (): Record<string, string> => ({
-  ...counterApp(),
-  "screens.ts": screensOf("counter").replace(
-    'screens: [{ name: "counter"',
-    'screens: [{ name: "home", path: "/home", source: "screens/home.tsx" }, { name: "counter"'
-  ),
-  "screens/home.tsx": screen,
+  app = await newApp(builder, name, twoPages());
 });
 
 test("a builder finds an App in the list, opens it and uses its page with live data", async ({
@@ -140,7 +133,7 @@ test("a builder finds an App in the list, opens it and uses its page with live d
 }) => {
   // Seven more Apps of this run's own: five published, two drafts, so the
   // Apps page offers its search and tabs. One of them, `books`, has two
-  // screens: it is one App with two pages, never two apps. Their names
+  // pages: it is one App with two pages, never two apps. Their names
   // carry `run`, which no other test's do.
   const run = Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) =>
     String.fromCodePoint(97 + (byte % 26))
@@ -154,7 +147,7 @@ test("a builder finds an App in the list, opens it and uses its page with live d
         await release(
           api,
           id,
-          each === "books" ? twoScreens() : counterApp(),
+          each === "books" ? twoPages() : counterApp(),
           "First"
         );
         return [each, id] as const;
@@ -181,23 +174,20 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   const search = page.getByRole("textbox", { name: "Search the Apps" });
 
   // A search by name finds this run's Apps, one card each whatever their
-  // screens, each saying where it stands.
+  // pages, each saying where it stands.
   await search.fill(run);
   await expect(cards).toHaveCount(7);
   await expect(cards.filter({ hasText: "Published" })).toHaveCount(5);
   await expect(cards.filter({ hasText: "Draft" })).toHaveCount(2);
 
-  // The App with two screens is one card; opened, its two pages are tabs
-  // in its bar.
+  // The App with two pages is one card; opened, it shows its first, `/`.
   await search.fill(`books ${run}`);
   await expect(cards).toHaveCount(1);
   await cards.getByRole("link", { name: `books ${run}` }).click();
   await expect(page).toHaveURL(
     new RegExp(`/apps/${ids.get("books") ?? ""}$`, "u")
   );
-  await expect(
-    page.getByRole("navigation", { name: "Pages" }).getByRole("link")
-  ).toHaveText(["counter", "home"]);
+  await counterPage(page);
   await page.goBack();
 
   // A search nothing matches says so, and lists nothing.
@@ -211,7 +201,7 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   // Each App's card opens it, on its first page.
   await cards.filter({ hasText: name }).getByRole("link", { name }).click();
   await expect(page).toHaveURL(new RegExp(`/apps/${app}$`, "u"));
-  const counter = await counterScreen(page);
+  const counter = await counterPage(page);
   // One page heading: the App's bar names it.
   await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
   await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
@@ -226,7 +216,7 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await page.getByRole("button", { name: `More for ${name}` }).click();
   await expect(
     page.getByRole("menuitem", { name: "Open full page" })
-  ).toHaveAttribute("href", `/apps/${app}/full?screen=counter`);
+  ).toHaveAttribute("href", new RegExp(`^/apps/${app}/full/?$`, "u"));
   await page.keyboard.press("Escape");
 
   // Its settings, beside the chat in its workspace: what it is, its
@@ -360,21 +350,19 @@ test("a link to an app, opened signed out, leads through sign-in to the app in t
   page,
   pageOf,
 }) => {
-  await page.goto(`/apps/${app}?screen=counter`);
+  await page.goto(`/apps/${app}/pages/home`);
   await expect(
     page.getByText("Use your organization’s account to go on.")
   ).toBeVisible();
   const returnTo = new URL(page.url()).searchParams.get("returnTo");
-  expect(returnTo).toBe(`/apps/${app}?screen=counter`);
+  expect(returnTo).toBe(`/apps/${app}/pages/home`);
 
   const signedIn = await pageOf(builder);
   await signedIn.goto(
     `/sign-in?returnTo=${encodeURIComponent(returnTo ?? "")}`
   );
-  await expect(signedIn).toHaveURL(
-    new RegExp(`/apps/${app}\\?screen=counter$`, "u")
-  );
-  await counterScreen(signedIn);
+  await expect(signedIn).toHaveURL(new RegExp(`/apps/${app}/pages/home$`, "u"));
+  await counterPage(signedIn);
 });
 
 test("someone with the user role finds no App to open", async ({ pageOf }) => {
@@ -411,29 +399,30 @@ test("signing in goes back to the page asked for, and only to a page of this sit
   }
 });
 
-test("loading a page again after a new version shows that version, and the App's first page when the one open is gone", async ({
+test("loading a page again after a new version shows that version, and the App's not-found page when the one open is gone", async ({
   pageOf,
 }) => {
   const swapped = await newApp(
     builder,
     `Swap ${crypto.randomUUID()}`,
-    counterApp()
+    twoPages()
   );
   const page = await pageOf(builder);
-  await page.goto(`/apps/${swapped}?screen=counter`);
-  await counterScreen(page);
+  await page.goto(`/apps/${swapped}/pages/home`);
+  await counterPage(page);
 
   await withApi(builder, async (api) => {
     await release(
       api,
       swapped,
-      { ...counterApp("tally"), "screens/counter.tsx": null },
-      "Rename the screen"
+      { ...twoPages(), "src/routes/home.tsx": null },
+      "Drop the second page"
     );
   });
-  // Told over the tab's connection, the screen holds nothing unsaved, so
+  // Told over the tab's connection, the page holds nothing unsaved, so
   // it loads again by itself: no timer, and nothing to click. The page
-  // asked for is gone, so the App opens on its first.
-  await counterScreen(page, "tally app");
-  await expect(page.getByRole("navigation", { name: "Pages" })).toHaveCount(0);
+  // asked for is gone, so the App's router says so, where it was.
+  const frame = page.frameLocator('iframe[title="App"]');
+  await expect(frame.getByText("Not Found")).toBeVisible({ timeout: 20_000 });
+  await expect(page).toHaveURL(new RegExp(`/apps/${swapped}/pages/home$`, "u"));
 });

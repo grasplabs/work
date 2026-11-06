@@ -17,8 +17,8 @@
   // No platform line per invocation, and query strings stay out of logs and
   // traces: the router sees every client's full URLs, OAuth callbacks'
   // code and state included (threat model R17, RT2), and the tokens of
-  // screen modules and package artifacts, which ride in the query so that
-  // this redacts them (core's screen-frame.ts): these traces sit in Grasp's
+  // page modules and package artifacts, which ride in the query so that
+  // this redacts them (core's page-frame.ts): these traces sit in Grasp's
   // account.
   // Which stage this Worker serves (@grasp-os/shared/names): production
   // here, staging in `env.staging`, which repeats every binding under its

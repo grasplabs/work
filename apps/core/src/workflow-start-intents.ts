@@ -101,9 +101,9 @@ const handleOf = (start: WorkflowStart) => ({
   version: start.version,
 });
 
-/** The start key core derives, for an action's start, a commit's or a screen's. */
+/** The start key core derives, for an action's start, a commit's or a page's. */
 export const coreStartKey = (
-  kind: "action" | "after-commit" | "screen",
+  kind: "action" | "after-commit" | "page",
   key: string
 ): string => `${coreStartKeyPrefix}${kind}:${key}`;
 

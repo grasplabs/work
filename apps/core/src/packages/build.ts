@@ -57,7 +57,7 @@ import {
 import type { Admitted } from "../dependencies/requests.ts";
 import { builtSubject } from "../dependencies/subject-builders.ts";
 import { auditTargetOf, ofSubject } from "../dependencies/subjects.ts";
-import { windowedAccessEnd } from "../screen-frame.ts";
+import { windowedAccessEnd } from "../page-frame.ts";
 import { packageArtifactAddress } from "./address.ts";
 import { builderFailure, packageBuilder } from "./builder.ts";
 import type { PackageBuilderRun } from "./builder.ts";

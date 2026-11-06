@@ -113,7 +113,7 @@ const maxCapabilities = 32;
 const maxChunkedModules = 8;
 
 /**
- * The most bytes a call's chunked modules may have together: the screen
+ * The most bytes a call's chunked modules may have together: the page
  * compiler and what it knows of the kit, or the package builder and
  * esbuild's WebAssembly, with room to grow.
  */

@@ -67,13 +67,13 @@ import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelEfforts, modelErrors } from "@grasp-os/shared/models";
 import { operationErrors } from "@grasp-os/shared/operations";
+import type { PageProblem, ServerLog } from "@grasp-os/shared/pages";
 import {
   bindingNameSchema,
   permissionActionSchema,
   permissionErrors,
 } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
-import type { ScreenProblem, ServerLog } from "@grasp-os/shared/screens";
 import { customWidgetsMax } from "@grasp-os/shared/widgets";
 import type { CustomWidgetId, WidgetSpec } from "@grasp-os/shared/widgets";
 import { DurableObject } from "cloudflare:workers";
@@ -4203,7 +4203,7 @@ export class Workspace extends DurableObject<Env> {
       // The preview of the revision before is over once changed server
       // code seals, its database with it; until then, and for good while
       // that code doesn't seal, the preview runs on as it was, as after a
-      // write of screens alone, store and all (sealed-previews.ts). Its
+      // write of pages alone, store and all (sealed-previews.ts). Its
       // problems are not the new revision's either way
       // (preview-reports.ts).
       this.#sealedPreviews.revised(chatId, appId, this.draft(chatId, appId));
@@ -4413,7 +4413,7 @@ export class Workspace extends DurableObject<Env> {
   /**
    * What `personId`'s own chat previews of App `appId` (`#draftToPreview`),
    * which they have open in the side panel now: its draft, or (`fallback`)
-   * the App's latest version in place of a draft whose screen doesn't
+   * the App's latest version in place of a draft whose page doesn't
    * build.
    */
   async previewDraft(
@@ -4493,7 +4493,7 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * What `build` answers, a build of `what` (the kind of ask and its
-   * screen) of `personId`'s own chat's preview of App `appId`, at
+   * page) of `personId`'s own chat's preview of App `appId`, at
    * `revision` (the draft's now when not named): one build per revision,
    * shared by every ask for it while it runs (preview-builds.ts);
    * `app.preview_outdated` for a revision the draft moved past. The
@@ -4522,7 +4522,7 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Whether a screen of the chat's preview of App `appId` showing `at`
+   * Whether a page of the chat's preview of App `appId` showing `at`
    * still reaches it: for what follows it outside this object, a live
    * query or a stream (chats-rpc.ts). A version of the App always does,
    * as it runs that version's own code; the draft at a revision while
@@ -4552,7 +4552,7 @@ export class Workspace extends DurableObject<Env> {
   /**
    * The App's latest version, which the chat's preview of App `appId`
    * shows while its draft changes nothing, and (`fallback`) in place of a
-   * draft whose screen doesn't build (`#draftToPreview`): null when it has
+   * draft whose page doesn't build (`#draftToPreview`): null when it has
    * none; undefined, not looked up, for the draft's own changes. Read from
    * core's database as a preview opens or takes an update: a frame's calls
    * name the version they run on (`PreviewAt`). Only of an App the chat
@@ -4640,7 +4640,7 @@ export class Workspace extends DurableObject<Env> {
    * preview always shows the App, and the draft's next write comes into
    * the frame showing it, as any write does. With `fallback`, the App's
    * latest version whatever the draft holds: what a preview shows while
-   * the draft's screen doesn't build. A frame's calls name that version,
+   * the draft's page doesn't build. A frame's calls name that version,
    * so they run on its own server code (`#servedBuild`).
    * `app.not_running` only for an App with no version and no changes,
    * with nothing to show; `app.preview_outdated` for a draft whose changes
@@ -4673,11 +4673,11 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Keeps `problem`, what the preview of `personId`'s own chat's draft of
-   * App `appId` at `at` reported on `screen`, for the agent's next
+   * App `appId` at `at` reported on `page`, for the agent's next
    * check (preview-reports.ts): only of the draft's own revision, which a
-   * frame names for what that revision's screen ran into, an update of it
+   * frame names for what that revision's page ran into, an update of it
    * the frame tried and rolled back too (@grasp-os/sdk's
-   * preview-updates.ts). Dropped for any other: an earlier screen's
+   * preview-updates.ts). Dropped for any other: an earlier page's
    * problems decide nothing of the draft now. Never kept for a frame
    * showing a version of the App, or a version of the draft opened
    * read-only: nothing it reports is its draft's.
@@ -4687,8 +4687,8 @@ export class Workspace extends DurableObject<Env> {
     personId: string,
     appId: string,
     at: unknown,
-    screen: string,
-    problem: ScreenProblem
+    path: string,
+    problem: PageProblem
   ): void {
     const { id } = this.#ownChat(chatId, personId);
     const draft = this.draft(id, appId);
@@ -4696,8 +4696,8 @@ export class Workspace extends DurableObject<Env> {
       return;
     }
     this.#previewReports.report(id, appId, draft.revision, {
-      source: "screen",
-      at: screen,
+      source: "page",
+      at: path,
       ...problem,
     });
   }
@@ -4708,7 +4708,7 @@ export class Workspace extends DurableObject<Env> {
    * draft (agent-builds.ts): while the person has it open in the side
    * panel, waiting up to `waitMs` for it to report on that revision at
    * all, as a check may come right after the write. `seen` is false when
-   * it didn't: nobody has it open (answered at once), or its screens
+   * it didn't: nobody has it open (answered at once), or its pages
    * neither called the server nor failed.
    */
   async previewReports(
@@ -4746,9 +4746,9 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Calls the function `request` names (its text, as a screen sends it)
+   * Calls the function `request` names (its text, as a page sends it)
    * in the preview of `personId`'s own chat's draft of App `appId`, as a
-   * screen showing `at` does (`#servedBuild`, sealed-previews.ts). A
+   * page showing `at` does (`#servedBuild`, sealed-previews.ts). A
    * failure that is the draft's to fix is kept for the agent's next
    * check. Answers the
    * call's result, a refusal included, and what a query read, as JSON
@@ -4780,13 +4780,13 @@ export class Workspace extends DurableObject<Env> {
       }
       this.#previewReports.saw(id, appId, served.draft.revision);
     }
-    // A screen of the draft's own revision: only what it ran into decides
-    // the draft's check. A frame still on an earlier screen of the same
+    // A page of the draft's own revision: only what it ran into decides
+    // the draft's check. A frame still on an earlier page of the same
     // server code, or on a version of the App, is answered, but what it
     // saw is never the draft's: it marks nothing seen and fails nothing.
     try {
       // What the draft's code threw, for the agent's check alone: the
-      // screen's answer stays `internal.unexpected`, with no message.
+      // page's answer stays `internal.unexpected`, with no message.
       let thrown: string | undefined;
       const answered = await this.#sealedPreviews.call(
         id,
@@ -4796,7 +4796,7 @@ export class Workspace extends DurableObject<Env> {
         request,
         {
           ...options,
-          // What its function logs is that screen's.
+          // What its function logs is that page's.
           revision,
           draftFailure: (message) => {
             thrown = message;
@@ -4818,8 +4818,8 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Starts, joins or (`attach`) reads again `personId`'s invocation of the
-   * streaming action `request` names (its text, as a screen sends it) in
-   * the preview of their own chat's draft of App `appId`, as a screen
+   * streaming action `request` names (its text, as a page sends it) in
+   * the preview of their own chat's draft of App `appId`, as a page
    * showing `at` does (`#servedBuild`, sealed-previews.ts). Answers its
    * frames, as JSON lines: progress, then its result.
    */
@@ -4841,7 +4841,7 @@ export class Workspace extends DurableObject<Env> {
       draft,
       request,
       attach,
-      // What the stream logs is that screen's.
+      // What the stream logs is that page's.
       revision
     );
   }
@@ -4869,7 +4869,7 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * The `@server/_generated/api` references the screens of the build
+   * The `@server/_generated/api` references the pages of the build
    * `personId`'s own chat's preview of App `appId` shows at `at` import
    * (`#servedBuild`): generated from its release, sealed now if it isn't
    * yet; null when it generates none. Of the draft, only at its own
@@ -5042,7 +5042,7 @@ export class Workspace extends DurableObject<Env> {
       input,
     });
     // What the draft's code threw, for the agent's own call: as data in
-    // its tool's result, never in any screen's answer.
+    // its tool's result, never in any page's answer.
     let thrown: string | undefined;
     const { answer } = await this.#sealedPreviews.call(
       id,

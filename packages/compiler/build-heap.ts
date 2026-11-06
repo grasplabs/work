@@ -10,7 +10,7 @@
  *   (apps/core/src/draft-references.ts).
  *   It loads the SDK and the App's code, so it runs without the cap.
  * - `node --max-heap-size=<MB> build-heap.ts build <release> <files.json>`
- *   builds each blueprint's screens, its preview and its server code in
+ *   builds each blueprint's pages, its preview and its server code in
  *   one compiler, as a shared isolate builds them one after another,
  *   each then type-checked by the release's checker, as core has it
  *   check them (src/checked-build.ts), and prints each build's outcome
@@ -30,7 +30,6 @@ import {
   isServerModule,
   migrationsFolder,
   schemaPath,
-  screensPath,
 } from "./src/app-code.ts";
 import { withTypeCheck } from "./src/checked-build.ts";
 import type { Unchecked } from "./src/checked-build.ts";
@@ -55,7 +54,7 @@ const blueprintsSchema = z.record(z.string(), z.record(z.string(), z.string()));
 
 /**
  * Each blueprint's files, by path relative to the App, and the modules
- * the host generates for it, by its config, schema and screens with the
+ * the host generates for it, by its config and schema with the
  * functions its server modules export (`registerApp`, as the host's
  * entry registers them). Its server code imports
  * `@server/_generated/server`, which resolves to the blueprint's
@@ -128,8 +127,6 @@ const blueprintFiles = async (
       config: await defaultOf(dir, configPath),
       // oxlint-disable-next-line no-await-in-loop -- as above
       schema: await defaultOf(dir, schemaPath),
-      // oxlint-disable-next-line no-await-in-loop -- as above
-      screens: await defaultOf(dir, screensPath),
       modules,
       migrations,
     } as Parameters<typeof registerApp>[0];
@@ -226,11 +223,11 @@ const hookRelease = (release: string): void => {
   Reflect.set(globalThis, "self", globalThis);
 };
 
-/** What each target builds of a blueprint's files: a screen build has only `#grasp` of what the host generates. */
+/** What each target builds of a blueprint's files: a page build has only `#grasp` of what the host generates. */
 const targets: Record<string, (file: string) => boolean> = {
-  screens: (file) =>
+  pages: (file) =>
     !file.startsWith(".grasp/") || file === ".grasp/references.ts",
-  "preview-screens": (file) =>
+  "preview-pages": (file) =>
     !file.startsWith(".grasp/") || file === ".grasp/references.ts",
   app: () => true,
 };

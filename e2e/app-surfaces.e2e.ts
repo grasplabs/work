@@ -1,15 +1,14 @@
 import { expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { navigationFiles, surfaceFiles } from "./notes-app.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 
-// An App's surfaces (spec 34.1) in a real browser: the same screen as a
-// route and in the shell's panel, the panel staying open while a screen
-// in it opens a route in the main pane, closing it, the App's sidebar
-// entries and settings tab, and a deep link opened signed out, which
-// opens nothing until the person signed in and core checked it. What core
-// refuses is core's own tests (screen-surfaces.test.ts).
+// An App's surfaces (spec 34.1) in a real browser: a page as a panel in
+// the shell, moving within itself while the page under it stays, asking
+// before it closes on edits, the App's sidebar entries and its settings
+// page. What core refuses is core's own tests (page-surfaces.test.ts).
 
 const surfacedApp = async () => {
   const { builder } = peopleIn("appSurfaces");
@@ -25,18 +24,27 @@ const surfacedApp = async () => {
   }
 };
 
-test("a screen opens in the shell's panel and as a route alike, and the panel stays while the main pane navigates until it is closed", async ({
-  pageOf,
-}) => {
-  const { builder, name, app, chat } = await surfacedApp();
-  const page = await pageOf(builder);
-  await page.setViewportSize({ width: 1600, height: 900 });
+/**
+ * Opens the App `name`'s panel from the chat's side panel, beside the
+ * chat on a wide window, a sheet over it on a narrow one.
+ */
+const openPanel = async (page: Page, chat: string, name: string) => {
   await page.goto(`/?chat=${chat}`);
   await page.getByRole("button", { name: "Side panel" }).click();
   await page
     .getByRole("complementary", { name: "Side panel" })
+    .or(page.getByRole("dialog", { name: "Side panel" }))
     .getByRole("button", { name })
     .click();
+};
+
+test("a page opens in the shell's panel, moves within it while the page stays, and asks before it closes on edits", async ({
+  pageOf,
+}) => {
+  const { builder, name, chat } = await surfacedApp();
+  const page = await pageOf(builder);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await openPanel(page, chat, name);
 
   // The App's panel surface, in the shell's panel, in place of the chat's:
   // one panel at a time.
@@ -45,94 +53,55 @@ test("a screen opens in the shell's panel and as a route alike, and the panel st
     panel.getByRole("heading", { name: "Start beside" })
   ).toBeVisible();
   await expect(panel).toHaveCount(1);
-  const beside = panel.frameLocator('iframe[title="home app"]');
+  const beside = panel.frameLocator('iframe[title="App"]');
   await expect(beside.getByRole("heading", { name: "Start" })).toBeVisible({
     timeout: 20_000,
   });
 
-  // A route from the panel opens in the main pane; the panel stays.
-  await beside
-    .getByRole("button", { name: "Open note n42", exact: true })
-    .click();
-  await expect(page).toHaveURL(new RegExp(`/apps/${app}\\?screen=note$`, "u"));
-  const main = page.getByRole("main").frameLocator('iframe[title="note app"]');
-  await expect(main.getByRole("heading", { name: "Note n42" })).toBeVisible({
+  // A link in it moves the App in the panel; the page stays where it is.
+  await beside.getByRole("link", { name: "Open note n42" }).click();
+  await expect(beside.getByRole("heading", { name: "Note n42" })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(beside.getByRole("heading", { name: "Start" })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/\\?chat=${chat}$`, "u"));
 
-  // A screen opens another of its surfaces in the panel, in place of the first.
-  await beside.getByRole("button", { name: "Peek at note n9" }).click();
-  await expect(panel.getByRole("heading", { name: "Peek" })).toBeVisible();
-  const peek = panel.frameLocator('iframe[title="note app"]');
-  await expect(peek.getByRole("heading", { name: "Note n9" })).toBeVisible({
-    timeout: 20_000,
-  });
-  await expect(page.locator('iframe[title="home app"]')).toHaveCount(0);
-
-  // Unsaved edits in the panel hold up nothing of the page's own: the main
-  // pane goes on, the panel and its edits stay.
-  await peek.getByLabel("Title").fill("Groceries");
+  // Closing it on unsaved edits asks first; staying keeps it and its edits.
+  await beside.getByLabel("Title").fill("Groceries");
+  // The frame tells the page of its edit over its channel, a moment after
+  // the keystroke; a person never closes faster than that.
+  await page.waitForTimeout(500);
   const leave = page.getByRole("alertdialog", { name: "Leave this page?" });
-  await main.getByRole("button", { name: "Back to start" }).click();
-  await expect(
-    page
-      .getByRole("main")
-      .frameLocator('iframe[title="home app"]')
-      .getByRole("heading", { name: "Start" })
-  ).toBeVisible({ timeout: 20_000 });
-  await expect(leave).toHaveCount(0);
-  await expect(peek.getByLabel("Title")).toHaveValue("Groceries");
-
-  // Closing the panel then asks first; staying keeps it and its edits.
   await panel.getByRole("button", { name: "Close panel" }).click();
   await expect(leave).toBeVisible();
   await leave.getByRole("button", { name: "Stay" }).click();
-  await expect(peek.getByLabel("Title")).toHaveValue("Groceries");
+  await expect(beside.getByLabel("Title")).toHaveValue("Groceries");
 
-  // Closed, its frame goes; the main pane's screen stays.
+  // The window narrowing doesn't start it again, losing the edit: it stays
+  // beside the page while its page holds edits.
+  await page.setViewportSize({ width: 600, height: 900 });
+  await expect(beside.getByLabel("Title")).toHaveValue("Groceries");
+  await expect(page.getByRole("dialog", { name: "Side panel" })).toHaveCount(0);
+
+  // Closed, its frame goes.
   await panel.getByRole("button", { name: "Close panel" }).click();
   await leave.getByRole("button", { name: "Leave" }).click();
   await expect(panel).toHaveCount(0);
-  await expect(
-    page
-      .getByRole("main")
-      .frameLocator('iframe[title="home app"]')
-      .getByRole("heading", { name: "Start" })
-  ).toBeVisible();
-});
+  await expect(page.locator('iframe[title="App"]')).toHaveCount(0);
 
-test("a panel's screen goes nowhere on the person's act elsewhere on the page", async ({
-  pageOf,
-}) => {
-  const { builder, name, app, chat } = await surfacedApp();
-  const page = await pageOf(builder);
-  await page.setViewportSize({ width: 1600, height: 900 });
-  await page.goto(`/?chat=${chat}`);
-  await page.getByRole("button", { name: "Side panel" }).click();
-  await page
-    .getByRole("complementary", { name: "Side panel" })
-    .getByRole("button", { name })
-    .click();
-  const panel = page.getByRole("complementary", { name: "Side panel" });
-  const beside = panel.frameLocator('iframe[title="home app"]');
-  const later = beside.getByRole("button", { name: "Open note n77 later" });
-
-  // Asked a moment after the person's click in the panel: it goes.
-  await later.click({ timeout: 20_000 });
-  const main = page.getByRole("main").frameLocator('iframe[title="note app"]');
-  await expect(main.getByRole("heading", { name: "Note n77" })).toBeVisible({
-    timeout: 20_000,
-  });
-
-  // Asked after the person went on to click elsewhere on the page: the
-  // act the browser still remembers is theirs on the page, not the
-  // panel's, so it goes nowhere.
-  await beside.getByRole("button", { name: "Open the list later" }).click();
-  await main.getByRole("heading", { name: "Note n77" }).click();
-  await page.waitForTimeout(2500);
-  await expect(page).toHaveURL(new RegExp(`/apps/${app}\\?screen=note$`, "u"));
-  await expect(page.locator('iframe[title="notes app"]')).toHaveCount(0);
+  // Opened on a narrow window, it is a sheet: its own close asks too.
+  await openPanel(page, chat, name);
+  const sheet = page.getByRole("dialog", { name: "Side panel" });
+  const inSheet = sheet.frameLocator('iframe[title="App"]');
+  await inSheet
+    .getByRole("link", { name: "Open note n42" })
+    .click({ timeout: 20_000 });
+  await inSheet.getByLabel("Title").fill("Groceries", { timeout: 20_000 });
+  await page.waitForTimeout(500);
+  // The sheet's own close, not the panel's.
+  await sheet.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(leave).toBeVisible();
+  await leave.getByRole("button", { name: "Leave" }).click();
+  await expect(page.locator('iframe[title="App"]')).toHaveCount(0);
 });
 
 test("the panel closes once its App is no longer shared with the person", async ({
@@ -163,26 +132,22 @@ test("the panel closes once its App is no longer shared with the person", async 
   const page = await pageOf(user);
   await page.clock.install();
   await page.setViewportSize({ width: 1600, height: 900 });
-  await page.goto(`/?chat=${chat}`);
-  await page.getByRole("button", { name: "Side panel" }).click();
-  await page
-    .getByRole("complementary", { name: "Side panel" })
-    .getByRole("button", { name })
-    .click();
+  await openPanel(page, chat, name);
   const panel = page.getByRole("complementary", { name: "Side panel" });
-  const beside = panel.frameLocator('iframe[title="home app"]');
+  const beside = panel.frameLocator('iframe[title="App"]');
   await expect(beside.getByRole("heading", { name: "Start" })).toBeVisible({
     timeout: 20_000,
   });
-  // A screen of it in the main pane too.
-  await beside
-    .getByRole("button", { name: "Open note n42", exact: true })
+  // A page of it in the main pane too, from its sidebar entry.
+  await page
+    .getByRole("list", { name: "App shortcuts" })
+    .getByRole("link", { name: "All notes" })
     .click();
-  const main = page.locator('main iframe[title="note app"]');
+  const main = page.locator('main iframe[title="App"]');
   await expect(
     page
-      .frameLocator('main iframe[title="note app"]')
-      .getByRole("heading", { name: "Note n42" })
+      .frameLocator('main iframe[title="App"]')
+      .getByRole("heading", { name: "Notes" })
   ).toBeVisible({ timeout: 20_000 });
 
   const again = apiOf(builder);
@@ -195,19 +160,14 @@ test("the panel closes once its App is no longer shared with the person", async 
     again.core[Symbol.dispose]();
   }
   // Unshared: the App's version subscription refuses the person, and the
-  // page stops its screens, with no timer to wait for.
-  await expect(page.locator('iframe[title="home app"]')).toHaveCount(0, {
-    timeout: 20_000,
-  });
-  await expect(panel.getByRole("button", { name: "Close panel" })).toHaveCount(
-    0
-  );
-  // The main pane's screen stopped too: its frame emptied, no code of it
+  // page stops its pages, with no timer to wait for: the panel goes.
+  await expect(panel).toHaveCount(0, { timeout: 20_000 });
+  // The main pane's page stopped too: its frame emptied, no code of it
   // running on behind the message.
   await expect(main).not.toHaveAttribute("src");
 });
 
-test("an App's sidebar entry opens its screen, and its settings screen is its settings' Options", async ({
+test("an App's sidebar entry opens its page, and its settings page is its settings' Options", async ({
   pageOf,
 }) => {
   const { builder, name, app } = await surfacedApp();
@@ -217,35 +177,18 @@ test("an App's sidebar entry opens its screen, and its settings screen is its se
   await expect(shortcuts.getByRole("link", { name })).toBeVisible();
   const sections = page.getByRole("navigation", { name: "Settings sections" });
   await sections.getByRole("link", { name: "Options" }).click();
-  // Opened by its address, with nothing: its defaults.
-  const settings = page.frameLocator('iframe[title="prefs app"]');
+  const settings = page.frameLocator('iframe[title="App"]');
   await expect(
-    settings.getByRole("heading", { name: "Preferences general" })
-  ).toBeVisible({
-    timeout: 20_000,
-  });
+    settings.getByRole("heading", { name: "Preferences" })
+  ).toBeVisible({ timeout: 20_000 });
 
   await shortcuts
     .getByRole("listitem")
     .filter({ hasText: name })
     .getByRole("link", { name: "All notes" })
     .click();
-  await expect(page).toHaveURL(new RegExp(`/apps/${app}\\?screen=notes$`, "u"));
-  await expect(page.locator('iframe[title="notes app"]')).toHaveCount(1);
-
-  // A screen's navigation to the App's settings opens their Options.
-  await page.goto(`/apps/${app}?screen=home`);
-  await page
-    .frameLocator('iframe[title="home app"]')
-    .getByRole("button", { name: "Open preferences" })
-    .click();
-  await expect(page).toHaveURL(
-    new RegExp(`/apps/${app}/settings\\?section=options$`, "u")
-  );
-  await expect(sections.getByRole("link", { name: "Options" })).toHaveAttribute(
-    "aria-current",
-    "page"
-  );
+  await expect(page).toHaveURL(new RegExp(`/apps/${app}$`, "u"));
+  await expect(page.locator('iframe[title="App"]')).toHaveCount(1);
 
   // An App without settings, its Options asked for by address: none to
   // list, and it says so.
@@ -268,207 +211,4 @@ test("an App's sidebar entry opens its screen, and its settings screen is its se
   await expect(general).toHaveAttribute("aria-current", "page");
   await page.goto(`/apps/${app}/settings?section=1`);
   await expect(general).toHaveAttribute("aria-current", "page");
-});
-
-test("a deep link opened signed out leads through sign-in, then to its screen with its input once core checked it", async ({
-  page,
-  pageOf,
-}) => {
-  const { builder, app } = await surfacedApp();
-  const link = `/links/${app}/shared?input=${encodeURIComponent(JSON.stringify({ id: "n7" }))}`;
-  // A refused sign-in's error on the link isn't carried back to it.
-  await page.goto(`${link}&error=forbidden`);
-  await expect(
-    page.getByText("Use your organization’s account to go on.")
-  ).toBeVisible();
-  const returnTo = new URL(page.url()).searchParams.get("returnTo");
-  expect(returnTo).toBe(link);
-  // Nothing of the App ran for someone signed out.
-  await expect(page.locator("iframe")).toHaveCount(0);
-
-  const signedIn = await pageOf(builder);
-  await signedIn.goto(
-    `/sign-in?returnTo=${encodeURIComponent(returnTo ?? "")}`
-  );
-  await expect(signedIn).toHaveURL(
-    new RegExp(`/apps/${app}\\?screen=note$`, "u")
-  );
-  const note = signedIn.frameLocator('iframe[title="note app"]');
-  await expect(note.getByRole("heading", { name: "Note n7" })).toBeVisible({
-    timeout: 20_000,
-  });
-  // Loaded again, the entry still opens it as core resolved it.
-  await signedIn.reload();
-  await expect(note.getByRole("heading", { name: "Note n7" })).toBeVisible({
-    timeout: 20_000,
-  });
-
-  // An address written to open a screen with input of its own choosing
-  // opens it with its default input only: the input comes from what the
-  // page itself resolved with core, never from the address.
-  await signedIn.goto(
-    `/apps/${app}?screen=note&route=note&input=${encodeURIComponent(JSON.stringify({ id: "n666" }))}&surface=peek`
-  );
-  await expect(
-    signedIn.getByText(
-      "This link opens the page with something it doesn't take. Open the page from its App instead."
-    )
-  ).toBeVisible({ timeout: 20_000 });
-  await expect(note.getByRole("heading", { name: "Note n666" })).toHaveCount(0);
-
-  // A surface the App doesn't declare as a deep link opens nothing.
-  await signedIn.goto(`/links/${app}/start`);
-  await expect(
-    signedIn.getByRole("heading", {
-      name: "This link doesn't open anything you can open",
-    })
-  ).toBeVisible();
-  await expect(signedIn.locator("iframe")).toHaveCount(0);
-});
-
-test("a navigation to an App's settings opens them with its input, again after the person chose another section", async ({
-  pageOf,
-}) => {
-  const { builder, name, app, chat } = await surfacedApp();
-  const page = await pageOf(builder);
-  await page.setViewportSize({ width: 1600, height: 900 });
-  await page.goto(`/?chat=${chat}`);
-  await page.getByRole("button", { name: "Side panel" }).click();
-  await page
-    .getByRole("complementary", { name: "Side panel" })
-    .getByRole("button", { name })
-    .click();
-  const beside = page
-    .getByRole("complementary", { name: "Side panel" })
-    .frameLocator('iframe[title="home app"]');
-  const billing = beside.getByRole("button", {
-    name: "Open billing preferences",
-  });
-  await billing.click({ timeout: 20_000 });
-  await expect(page).toHaveURL(
-    new RegExp(`/apps/${app}/settings\\?section=options$`, "u")
-  );
-  const settings = page.frameLocator('main iframe[title="prefs app"]');
-  await expect(
-    settings.getByRole("heading", { name: "Preferences billing" })
-  ).toBeVisible({ timeout: 20_000 });
-
-  // The person picks another section; the panel's screen asks for the
-  // settings again: they show again.
-  const sections = page.getByRole("navigation", { name: "Settings sections" });
-  await sections.getByRole("link", { name: "Sharing" }).click();
-  await billing.click();
-  await expect(sections.getByRole("link", { name: "Options" })).toHaveAttribute(
-    "aria-current",
-    "page"
-  );
-  await expect(
-    settings.getByRole("heading", { name: "Preferences billing" })
-  ).toBeVisible({ timeout: 20_000 });
-});
-
-test("closing the panel, or opening another in its place, asks first while its screen holds edits", async ({
-  pageOf,
-}) => {
-  const { builder, app } = await surfacedApp();
-  const page = await pageOf(builder);
-  await page.setViewportSize({ width: 1600, height: 900 });
-  await page.goto(`/apps/${app}?screen=home`);
-  const home = page.frameLocator('main iframe[title="home app"]');
-  // The note's panel, with an edit in it.
-  await home
-    .getByRole("button", { name: "Peek at note n9" })
-    .click({ timeout: 20_000 });
-  await expect(home.getByText("Peek opened")).toBeVisible();
-  const panel = page.getByRole("complementary", { name: "Side panel" });
-  const peek = panel.frameLocator('iframe[title="note app"]');
-  await peek.getByLabel("Title").fill("Groceries", { timeout: 20_000 });
-  const leave = page.getByRole("alertdialog", { name: "Leave this page?" });
-  // The screen tells the page of its edit over its channel, a moment after
-  // the keystroke; a person never closes faster than that.
-  await page.waitForTimeout(500);
-
-  // Another panel asked for in its place: asked first; staying keeps it,
-  // and the screen that asked is told it didn't open.
-  await home.getByRole("button", { name: "Peek at note n9" }).click();
-  await expect(leave).toBeVisible();
-  await leave.getByRole("button", { name: "Stay" }).click();
-  await expect(home.getByText("Peek refused")).toBeVisible();
-  await expect(peek.getByLabel("Title")).toHaveValue("Groceries");
-
-  // The window narrowing doesn't start it again, losing the edit: it stays
-  // beside the page while its screen holds edits.
-  await page.setViewportSize({ width: 600, height: 900 });
-  await expect(peek.getByLabel("Title")).toHaveValue("Groceries");
-  await expect(page.getByRole("dialog", { name: "Side panel" })).toHaveCount(0);
-  await panel.getByRole("button", { name: "Close panel" }).click();
-  await expect(leave).toBeVisible();
-  await leave.getByRole("button", { name: "Leave" }).click();
-  await expect(panel).toHaveCount(0);
-
-  // Opened on a narrow window, it is a sheet: its own close asks too.
-  await page.setViewportSize({ width: 1600, height: 900 });
-  await page.goto(`/apps/${app}?screen=home`);
-  await page.setViewportSize({ width: 600, height: 900 });
-  await home
-    .getByRole("button", { name: "Peek at note n9" })
-    .click({ timeout: 20_000 });
-  const sheet = page.getByRole("dialog", { name: "Side panel" });
-  const inSheet = sheet.frameLocator('iframe[title="note app"]');
-  await inSheet.getByLabel("Title").fill("Groceries", { timeout: 20_000 });
-  await page.waitForTimeout(500);
-  // The sheet's own close, not the panel's.
-  await sheet.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(leave).toBeVisible();
-  await leave.getByRole("button", { name: "Leave" }).click();
-  await expect(sheet).toHaveCount(0);
-});
-
-test("one click or one held key in the panel's screen is one act of the person's: a navigation on its release or on a repeat goes nowhere", async ({
-  pageOf,
-}) => {
-  const { builder, name, app, chat } = await surfacedApp();
-  const page = await pageOf(builder);
-  await page.setViewportSize({ width: 1600, height: 900 });
-  await page.goto(`/?chat=${chat}`);
-  await page.getByRole("button", { name: "Side panel" }).click();
-  await page
-    .getByRole("complementary", { name: "Side panel" })
-    .getByRole("button", { name })
-    .click();
-  const beside = page
-    .getByRole("complementary", { name: "Side panel" })
-    .frameLocator('iframe[title="home app"]');
-  await expect(beside.getByRole("heading", { name: "Start" })).toBeVisible({
-    timeout: 20_000,
-  });
-  const main = page.getByRole("main").frameLocator('iframe[title="note app"]');
-
-  // One slow click: its press goes, as the person's act; a navigation its
-  // release asks for once that went is no act of theirs, and beside the
-  // page nothing goes without one.
-  await beside.getByRole("button", { name: "Press and lift" }).hover();
-  await page.mouse.down();
-  await expect(page).toHaveURL(new RegExp(`/apps/${app}\\?screen=note$`, "u"));
-  await expect(main.getByRole("heading", { name: "Note down" })).toBeVisible({
-    timeout: 20_000,
-  });
-  await page.mouse.up();
-  await page.waitForTimeout(3000);
-  await expect(main.getByRole("heading", { name: "Note down" })).toBeVisible();
-
-  // One held key: its first press goes; what its repeats ask for doesn't.
-  await beside.getByRole("textbox", { name: "Keys" }).click();
-  await page.waitForTimeout(500);
-  await page.keyboard.down("a");
-  await expect(main.getByRole("heading", { name: "Note pressed" })).toBeVisible(
-    { timeout: 20_000 }
-  );
-  await page.keyboard.down("a");
-  await page.keyboard.down("a");
-  await page.keyboard.up("a");
-  await page.waitForTimeout(3000);
-  await expect(
-    main.getByRole("heading", { name: "Note pressed" })
-  ).toBeVisible();
 });

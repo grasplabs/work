@@ -241,7 +241,7 @@ const MoreApps = ({
 }) => {
   const { t } = useLingui();
   const [drawn, setDrawn] = useState(step);
-  // The end of what is drawn: once it is near the screen, well before it
+  // The end of what is drawn: once it is near the page, well before it
   // shows, more is drawn. It is a new mark after every step, so it is
   // looked at again. Measured against the part of the page that scrolls,
   // which is not the window.
@@ -356,7 +356,7 @@ const emptyTextOf = (
 const labelOf = (choice: Choice): string =>
   `${choice.label} · ${formatNumber(choice.count)}`;
 
-/** The filters, as one control: a row of them would be several screens wide. */
+/** The filters, as one control: a row of them would be several pages wide. */
 const FilterSelect = ({
   choices,
   filter,
@@ -401,7 +401,7 @@ const FilterSelect = ({
 };
 
 /**
- * The success screen for the connection a flow just made, once core sent
+ * The success page for the connection a flow just made, once core sent
  * the browser back here with it. Only a connection the page lists: anyone
  * can put an ID in a link.
  */

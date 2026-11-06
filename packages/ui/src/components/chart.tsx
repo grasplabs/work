@@ -441,7 +441,7 @@ export {
   chartColors,
 };
 
-// Screens import only the kit's modules, never recharts itself, so the chart
+// Pages import only the kit's modules, never recharts itself, so the chart
 // module hands on recharts' charts and their parts.
 export {
   Area,

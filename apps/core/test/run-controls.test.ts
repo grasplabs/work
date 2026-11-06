@@ -20,7 +20,7 @@ import {
   outcomeOf,
   wireOf,
   runFor,
-  screenOf,
+  pageOf,
   settles,
   staged,
   startCommand,
@@ -38,12 +38,12 @@ import {
 import { auditedDuring } from "./sign-in.ts";
 
 // Pausing, resuming and cancelling an independent JSON workflow's run from
-// an App's screen, as the host admits each request with a durable receipt
-// and settles it from the engine's own fenced word (screen-workflows.ts,
+// an App's page, as the host admits each request with a durable receipt
+// and settles it from the engine's own fenced word (page-workflows.ts,
 // workflows/resource-runs.ts). The everyday paths (receipts answered again
 // under their key, joins, conflicts, a cancel superseding a pause, the
 // repair applying a stalled one, other people's and other Apps' runs) are
-// in screen-typed-workflows.test.ts. What could still go wrong, tried
+// in page-typed-workflows.test.ts. What could still go wrong, tried
 // below: a pause that stops time; a pause of a run still starting that
 // ends the run, gets lost, or outlives a start given up; a resume judged
 // by a row that lags behind the engine; a control of a run the engine has
@@ -68,13 +68,13 @@ const pastFirstRepair = (): Date => new Date(Date.now() + 2 * 60_000);
 /** Past the longest a run may say `starting` before its start is given up. */
 const pastStarting = (): Date => new Date(Date.now() + 7 * 3_600_000);
 
-/** A screen of `person`'s on `app`, and what it asks of the workflow. */
-const screenAsking = async (
+/** A page of `person`'s on `app`, and what it asks of the workflow. */
+const pageAsking = async (
   person: Person,
   app: string,
   reference: WorkflowReference
 ) => {
-  const lease = await screenOf(person, app);
+  const lease = await pageOf(person, app);
   return {
     start: async (): Promise<string> =>
       startedOf(await called(person, app, lease, startCommand(reference)))
@@ -150,38 +150,38 @@ const holdDeadline = async (run: string): Promise<number | undefined> =>
 /** A run of the workflow, asleep in its hold of an hour. */
 const holding = async () => {
   const bound = await boundApp({ hold: "1 hour" });
-  const screen = await screenAsking(bound.builder, bound.app, bound.reference);
-  const runId = await screen.start();
+  const page = await pageAsking(bound.builder, bound.app, bound.reference);
+  const runId = await page.start();
   await sleeping(runId, "hold:task");
-  return { ...bound, screen, runId };
+  return { ...bound, page, runId };
 };
 
 /** A run of the workflow whose start the engine never took: still starting. */
 const neverStarted = async () => {
   const bound = await boundApp({ hold: "1 hour" });
-  const screen = await screenAsking(bound.builder, bound.app, bound.reference);
+  const page = await pageAsking(bound.builder, bound.app, bound.reference);
   const runId = await whileEngineRefuses(
     () => true,
-    async () => await screen.start()
+    async () => await page.start()
   );
-  return { ...bound, screen, runId };
+  return { ...bound, page, runId };
 };
 
 describe(
-  "controls of a JSON workflow's run from an App's screen",
+  "controls of a JSON workflow's run from an App's page",
   { timeout: 60_000 },
   () => {
     afterEach(endLiveResourceRuns);
 
     it("keeps a hold's deadline where it was across a pause and its resume, so time passes while the run is paused", async () => {
-      const { screen, runId } = await holding();
+      const { page, runId } = await holding();
       await until(async () => (await holdDeadline(runId)) !== undefined);
       const deadline = await holdDeadline(runId);
 
-      const paused = await screen.control("pause", runId);
+      const paused = await page.control("pause", runId);
       await until(async () => (await liveStatus(runId)) === "paused");
       await scheduler.wait(50);
-      const resumed = await screen.control("resume", runId);
+      const resumed = await page.control("resume", runId);
 
       expect({
         paused: staged(paused),
@@ -197,9 +197,9 @@ describe(
     });
 
     it("keeps a pause of a run still starting admitted, never ending the run, and applies it once the run started", async () => {
-      const { screen, runId } = await neverStarted();
+      const { page, runId } = await neverStarted();
 
-      const pause = await screen.control("pause", runId);
+      const pause = await page.control("pause", runId);
       const whileStarting = {
         row: await env.DB.prepare(
           "SELECT status, ended_at IS NOT NULL AS ended FROM workflow_resource_runs WHERE id = ?"
@@ -230,8 +230,8 @@ describe(
     });
 
     it("supersedes a pause of a run still starting the moment its start is given up, leaving none admitted behind the failed run", async () => {
-      const { builder, workflow, screen, runId } = await neverStarted();
-      await screen.control("pause", runId);
+      const { builder, workflow, page, runId } = await neverStarted();
+      await page.control("pause", runId);
 
       // The engine never takes the start: the repair gives it up, and
       // settles the pause with it, no other repair after.
@@ -247,8 +247,8 @@ describe(
     });
 
     it("resumes a run the engine has paused though its row still says running, judged by the engine", async () => {
-      const { screen, runId } = await holding();
-      await screen.control("pause", runId);
+      const { page, runId } = await holding();
+      await page.control("pause", runId);
       await until(async () => (await liveStatus(runId)) === "paused");
       // The row behind the engine, as while its notification is on the way.
       await env.DB.prepare(
@@ -257,7 +257,7 @@ describe(
         .bind(runId)
         .run();
 
-      const resumed = await screen.control("resume", runId);
+      const resumed = await page.control("resume", runId);
 
       expect({
         resumed: staged(resumed),
@@ -274,7 +274,7 @@ describe(
     });
 
     it("refuses a pause or a resume of a run the engine has ended, its row still to hear of it, keeping no receipt", async () => {
-      const { builder, workflow, screen, runId } = await holding();
+      const { builder, workflow, page, runId } = await holding();
       // The row deaf to the engine's notifications from now on, as while
       // they are on the way; then the engine ends the run.
       await env.DB.prepare(
@@ -287,8 +287,8 @@ describe(
 
       expect({
         row: await rowStatus(builder, workflow, runId),
-        pause: await screen.control("pause", runId),
-        resume: await screen.control("resume", runId),
+        pause: await page.control("pause", runId),
+        resume: await page.control("resume", runId),
         receipts: await receiptStates(runId),
       }).toStrictEqual({
         row: "running",
@@ -299,10 +299,10 @@ describe(
     });
 
     it("leaves a run unpaused when a pause older than its resume reaches the engine late", async () => {
-      const { screen, runId } = await holding();
-      await screen.control("pause", runId);
+      const { page, runId } = await holding();
+      await page.control("pause", runId);
       await until(async () => (await liveStatus(runId)) === "paused");
-      await screen.control("resume", runId);
+      await page.control("resume", runId);
       const pause = await env.DB.prepare(
         "SELECT generation FROM workflow_resource_run_controls WHERE run_id = ? AND kind = 'pause'"
       )
@@ -325,16 +325,16 @@ describe(
     });
 
     it("settles no pause the engine hasn't taken, from a read of the run paused before it or a late notification of it paused", async () => {
-      const { screen, runId } = await holding();
-      await screen.control("pause", runId);
+      const { page, runId } = await holding();
+      await page.control("pause", runId);
       await until(async () => (await liveStatus(runId)) === "paused");
       // Read while it is paused, and handed on late.
       const read = await runEngine(env).controlState(runId);
-      await screen.control("resume", runId);
+      await page.control("resume", runId);
       // A newer pause admitted, its call to the engine failing.
       const newer = await whileEngineRefuses(
         (method) => method === "pause",
-        async () => await screen.control("pause", runId)
+        async () => await page.control("pause", runId)
       );
 
       // A "paused" from before it, delivered late, the row taking it.
@@ -368,8 +368,8 @@ describe(
     });
 
     it("refuses a control verb the host doesn't know as invalid, keeping no receipt and auditing nothing of the run", async () => {
-      const { builder, app, reference, screen, runId } = await holding();
-      const lease = await screenOf(builder, app);
+      const { builder, app, reference, page, runId } = await holding();
+      const lease = await pageOf(builder, app);
       let answer: unknown;
       const events = await auditedDuring(async () => {
         answer = outcomeOf(
@@ -392,8 +392,8 @@ describe(
         receipts: await receiptStates(runId),
         audited: events.filter(({ target }) => target?.id === runId),
         stillPaused: await pausedInEngine(runId),
-        // The screen's real controls still work after it.
-        pause: staged(await screen.control("pause", runId)),
+        // The page's real controls still work after it.
+        pause: staged(await page.control("pause", runId)),
       }).toStrictEqual({
         answer: "contract.invalid_request",
         receipts: [],
@@ -405,8 +405,8 @@ describe(
 
     it("supersedes at the repair a pause and a resume of a run that has ended, sending neither to the engine", async () => {
       const { builder, app, reference, workflow } = await boundApp();
-      const screen = await screenAsking(builder, app, reference);
-      const runId = await screen.start();
+      const page = await pageAsking(builder, app, reference);
+      const runId = await page.start();
       await endedRun(builder, workflow, runId);
       // Receipts admitted under the run's newest generation, never
       // overtaken, left behind its end and due at the repair.
@@ -464,7 +464,7 @@ describe(
 
     it("reaches a live run's stalled pause within two repairs, past more receipts that never settle than one repair takes", async () => {
       const stuck = await neverStarted();
-      const { screen, runId } = await holding();
+      const { page, runId } = await holding();
       const { app, builder } = stuck;
       // Receipts of a run the engine has no record of, so none ever
       // settles, each due before the live run's.
@@ -487,7 +487,7 @@ describe(
       // The live run's pause admitted, the engine's answer lost.
       const lost = await whileEngineRefuses(
         (method) => method === "pause",
-        async () => await screen.control("pause", runId)
+        async () => await page.control("pause", runId)
       );
       await env.DB.prepare(
         "UPDATE workflow_resource_run_controls SET next_at = ? WHERE run_id = ?"

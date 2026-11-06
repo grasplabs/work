@@ -1,8 +1,8 @@
 {
   // The workflow map's server code, checked as core's is, with
   // `@server/_generated/server` resolved to what the host generates for it
-  // (server-types.ts). Its screens import `@server/_generated/api`, generated from its
-  // manifest, so the screen build checks them (../tsconfig.json leaves
+  // (server-types.ts). Its pages import `@server/_generated/api`, generated from its
+  // manifest, so the page build checks them (../tsconfig.json leaves
   // them out).
   "extends": "../../tsconfig.json",
   "compilerOptions": {

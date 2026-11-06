@@ -2,14 +2,14 @@ import type { PreviewProblem } from "@grasp-os/shared/chat";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { isDraftFault } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
-import type { ServerLog } from "@grasp-os/shared/screens";
+import type { ServerLog } from "@grasp-os/shared/pages";
 
 // What a chat's preview of its draft ran into (preview.ts), for the
 // agent's next check of the draft (agent-builds.ts): a plain list, read as
 // it is when the check runs, and failing it while it has anything. The
-// side panel adds what the preview's screen reported (uncaught errors,
+// side panel adds what the preview's page reported (uncaught errors,
 // unhandled rejections, `console.error` calls); core adds what the draft's
-// server code failed with on the screen's calls. The agent's own calls
+// server code failed with on the page's calls. The agent's own calls
 // (`env.build.call`) answer it directly and add nothing here. Next to the
 // problems, what the draft's server code wrote with `console`, on anyone's
 // calls (server-logs.ts): for the agent to read, failing nothing.
@@ -17,7 +17,7 @@ import type { ServerLog } from "@grasp-os/shared/screens";
 // Only the draft's current revision's problems are kept, in memory: a
 // write starts the list afresh, and a restart loses it. With them, whether
 // the side panel reported on that revision at all (a problem, or a server
-// call of its screen; never the agent's calls or logs): a check right
+// call of its page; never the agent's calls or logs): a check right
 // after a write waits a moment for the preview to catch up
 // (agent-builds.ts), and says when it didn't. It waits only while the
 // person has the preview open in the side panel (loaded, called or

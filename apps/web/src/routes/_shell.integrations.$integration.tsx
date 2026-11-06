@@ -65,7 +65,7 @@ import type { Loaded } from "../load-from-core.tsx";
 // made to it: who connected it, when, signing in again and
 // disconnecting). A flow comes back here from the provider, through
 // core's callback, with `connection=<id>` (and `again=1` when it signed in
-// again), and opens the success screen.
+// again), and opens the success page.
 
 type Tab = "overview" | "workflows" | "account";
 

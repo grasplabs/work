@@ -156,7 +156,7 @@ export type DecisionReview =
  * A one-use confirmation of one answer: minted by the trusted host
  * decision UI once the person confirmed it, for them, that decision, its
  * review context and that answer, and taken by the answer that uses it.
- * Never handed to an App's screen.
+ * Never handed to an App's page.
  */
 export interface DecisionConfirmation {
   confirmation: string;

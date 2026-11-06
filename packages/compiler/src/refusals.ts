@@ -1,9 +1,10 @@
 import type { Diagnostic } from "./diagnostic.ts";
-import { screenSources } from "./increments.ts";
+import { pageSources } from "./increments.ts";
 import type { CodeFolder } from "./inputs.ts";
 import {
-  componentsFolder,
-  screenFile,
+  isPageFile,
+  pagesFolder,
+  sourceCode,
   strayFileMessage,
   strayFilesIn,
 } from "./inputs.ts";
@@ -11,7 +12,7 @@ import { appModuleName } from "./kit.ts";
 
 // What refuses a build before anything compiles: checks of paths alone,
 // light enough for core to run before it starts a large App's first build
-// in batches (core's screens.ts), as the compiler runs them first.
+// in batches (core's pages.ts), as the compiler runs them first.
 
 /** Where in a file a diagnostic points. */
 export interface Location {
@@ -62,23 +63,39 @@ const nameClashes = (paths: readonly string[]): Diagnostic[] => {
 };
 
 /**
- * Why a screens build of `app` (its build files) is refused before
- * anything compiles, or nothing: a stray file among its components, no
- * screen, or two files that would share a module name, in that order.
+ * Why a pages build of `app` (its build files) is refused before
+ * anything compiles, or nothing: a stray file in its front end, no
+ * page, or two files that would share a module name, in that order.
  */
-export const screenRefusals = (
+export const pageRefusals = (
   app: Readonly<Record<string, string>>
 ): Diagnostic[] => {
-  const strays = strayProblems(app, [componentsFolder], "screens");
+  const strays = strayProblems(app, [sourceCode], "pages");
   if (strays.length > 0) {
     return strays;
   }
-  const { known } = screenSources(app);
-  if (!known.some((path) => screenFile.test(path))) {
+  // TanStack reads a `__virtual.ts` in the routes as a config of routes
+  // of its own, files elsewhere among them: an App's routes are its files
+  // under the routes folder, and nothing else decides them.
+  const virtual = Object.keys(app).filter(
+    (path) =>
+      path.startsWith(pagesFolder) && path.split("/").at(-1) === "__virtual.ts"
+  );
+  if (virtual.length > 0) {
+    return virtual.map((file) =>
+      problem(
+        "pages",
+        "An App's routes are its files: a virtual route config is never read.",
+        { file }
+      )
+    );
+  }
+  const { known } = pageSources(app);
+  if (!known.some((path) => isPageFile(path))) {
     return [
       problem(
-        "screens",
-        "The App has no screens: add one as screens/<name>.tsx."
+        "pages",
+        `The App has no pages: add one as ${pagesFolder}index.tsx.`
       ),
     ];
   }

@@ -74,7 +74,7 @@ import { QueryBoundary } from "../internal/query-boundary.tsx";
 export type { DataGridText } from "../internal/data-grid-text.ts";
 
 // A table of an App's records, read page by page from one of its queries
-// (`usePaginatedQuery`): what a screen would otherwise wire by hand around
+// (`usePaginatedQuery`): what a page would otherwise wire by hand around
 // `Table`. The grid owns what a person does to the table (search, sort,
 // filters, which columns show, which rows are selected) and hands the
 // first three to the query through `args`, so the App's query does the
@@ -92,7 +92,7 @@ export type { DataGridText } from "../internal/data-grid-text.ts";
 //   failure keeps the editor open with what was typed, and says why.
 // - An action failing unseen: a row's or bulk action's failure is shown
 //   above the table, as an edit's is in its cell.
-// - A failed query blanking the screen: the grid shows the failure in its
+// - A failed query blanking the page: the grid shows the failure in its
 //   place, with Try again, and the search and filters stay usable.
 
 /** A query a grid reads its records with: one that answers pages. */
@@ -998,7 +998,7 @@ export interface DataGridProps<Reference extends AnyQuery> {
   readonly bulkActions?: BulkActionsOf<PageItemOf<Reference>>;
   /** What it says, besides its title, when there are no records. */
   readonly empty?: ReactNode;
-  /** What it says, in the screen's language (the page's otherwise). */
+  /** What it says, in the page's language (the page's otherwise). */
   readonly text?: Partial<DataGridText>;
 }
 
@@ -1029,7 +1029,7 @@ const noActions: readonly never[] = [];
  *   ]}
  *   search="Search customers"
  *   bulkActions={[{ label: "Archive", onSelect: async (rows) => await archive({ ids: rows.map((row) => row._id) }) }]}
- *   rowActions={[{ label: "Open", onSelect: async (row) => await navigate(screens.customer, { id: row._id }) }]}
+ *   rowActions={[{ label: "Open", onSelect: async (row) => await navigate(pages.customer, { id: row._id }) }]}
  * />
  * ```
  */

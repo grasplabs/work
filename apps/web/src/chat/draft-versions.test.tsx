@@ -32,7 +32,7 @@ let root: Root | undefined;
 const draftAt = (revision: number, app = "app-1"): ChatDraft => ({
   app,
   base: 1,
-  changed: ["screens/desk.tsx"],
+  changed: ["src/routes/index.tsx"],
   deleted: [],
   revision,
   updatedAt: "2026-10-22T10:00:00.000Z",

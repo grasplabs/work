@@ -28,10 +28,11 @@ const idp = mockIdp();
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
-/** The Desk screen, saying `marker`. */
+/** The Desk page, saying `marker`. */
 const desk = (
   marker: string
-): string => `import { useQuery } from "@grasp-os/sdk/react";
+): string => `import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 
 const Desk = () => {
@@ -39,10 +40,10 @@ const Desk = () => {
   return <main>${marker}: {titles?.join(", ")}</main>;
 };
 
-export default Desk;
+export const Route = createFileRoute("/")({ component: Desk });
 `;
 
-/** An App of spec 8's layout whose one screen says `marker` and reads its notes. */
+/** An App of spec 8's layout whose one page says `marker` and reads its notes. */
 const deskFiles = (marker: string): Record<string, string> => ({
   ...appDefinition({
     name: "Desk",
@@ -65,12 +66,7 @@ export const titles = query({
   },
 });
 `,
-
-  "screens.ts": `export default {
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-};
-`,
-  "screens/desk.tsx": desk(marker),
+  "src/routes/index.tsx": desk(marker),
 });
 
 /** What each of the chat's drafts changes, and at which revision. */
@@ -83,10 +79,10 @@ const twoVersions = async (builder: Person) => {
   await release(builder, id, deskFiles("Released"));
   const app = appIdSchema.parse(id);
   const draft = await chatWithDraft(builder, app, {
-    "screens/desk.tsx": desk("One"),
+    "src/routes/index.tsx": desk("One"),
   });
   const revision = await draft.write(
-    { "screens/desk.tsx": desk("Two") },
+    { "src/routes/index.tsx": desk("Two") },
     draft.revision
   );
   return { app, chatId: draft.chatId, write: draft.write, revision };
@@ -128,7 +124,8 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
         chats.restoreDraftVersion(chatId, app, 1),
       ]),
       failure(
-        async () => await write({ "screens/desk.tsx": desk("Three") }, revision)
+        async () =>
+          await write({ "src/routes/index.tsx": desk("Three") }, revision)
       ),
     ]);
     const versions = await chats.draftVersions(chatId, app);
@@ -178,9 +175,9 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
     const { chats } = builder.api;
 
     const now = await chats.preview(chatId, app);
-    const first = await chats.preview(chatId, app, undefined, 1);
-    const second = await chats.preview(chatId, app, undefined, 2);
-    // Calls of a version's screen, the latest's (the draft as it is
+    const first = await chats.preview(chatId, app, 1);
+    const second = await chats.preview(chatId, app, 2);
+    // Calls of a version's page, the latest's (the draft as it is
     // now) too: refused, as nothing a version opened read-only runs.
     const request = await requestFor(
       builder,
@@ -200,16 +197,14 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
     const restored = await chats.preview(chatId, app);
 
     expect({
-      first: { revision: first.revision, screens: first.screens },
+      first: first.revision,
       differs: first.artifact !== now.artifact,
       secondIsNow: second.artifact === now.artifact,
       calls,
       restoredIsFirst: restored.artifact === first.artifact,
-      missing: await failure(
-        async () => await chats.preview(chatId, app, undefined, 9)
-      ),
+      missing: await failure(async () => await chats.preview(chatId, app, 9)),
     }).toStrictEqual({
-      first: { revision: readOnlyRevision, screens: ["desk"] },
+      first: readOnlyRevision,
       differs: true,
       secondIsNow: true,
       calls: ["app.preview_outdated", "app.preview_outdated"],
@@ -251,7 +246,6 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       drafts: changesOf(await chats.drafts(chatId)),
       latest: {
         revision: latest.revision,
-        screens: latest.screens,
         appVersion: latest.refresh?.appVersion,
         at: latestAt,
         titles: outcome(
@@ -277,7 +271,6 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       drafts: [{ changed: [], revision: revision + 1 }],
       latest: {
         revision: revision + 1,
-        screens: ["desk"],
         appVersion: 2,
         at: { appVersion: 2 },
         titles: [],
@@ -298,7 +291,8 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
     const after = await chats.draftVersions(chatId, app);
     // The agent's write that read the draft before it was discarded.
     const stale = await failure(
-      async () => await write({ "screens/desk.tsx": desk("Three") }, revision)
+      async () =>
+        await write({ "src/routes/index.tsx": desk("Three") }, revision)
     );
     const afterStale = await chats.drafts(chatId);
     const restored = await chats.restoreDraftVersion(chatId, app, 2);
@@ -328,7 +322,7 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       staleLanded: false,
       afterStale: [{ changed: [], revision: revision + 1 }],
       restored: 2,
-      back: [{ changed: ["screens/desk.tsx"], revision: revision + 2 }],
+      back: [{ changed: ["src/routes/index.tsx"], revision: revision + 2 }],
       audited: [{ by: builder.userId, app }],
     });
   });
@@ -352,7 +346,7 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       });
     }
     const { chatId } = await chatWithDraft(builder, app, {
-      "screens/desk.tsx": desk("One"),
+      "src/routes/index.tsx": desk("One"),
     });
     /** How each way in to the chat's versions went for `person`. */
     const outcomes = async (person: Person) => ({
@@ -360,7 +354,7 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
         async () => await person.api.chats.draftVersions(chatId, app)
       ),
       preview: await failure(
-        async () => await person.api.chats.preview(chatId, app, undefined, 1)
+        async () => await person.api.chats.preview(chatId, app, 1)
       ),
       restore: await failure(
         async () => await person.api.chats.restoreDraftVersion(chatId, app, 1)
@@ -405,7 +399,7 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
     const builder = await signedInApi(idp, "builder");
     const { app, chatId } = await twoVersions(builder);
     const kept = await chatWithDraft(builder, app, {
-      "screens/desk.tsx": desk("Elsewhere"),
+      "src/routes/index.tsx": desk("Elsewhere"),
     });
     const before = await keptRows(builder, chatId);
 

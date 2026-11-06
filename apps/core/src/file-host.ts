@@ -69,7 +69,7 @@ import { recordFiles } from "./store-references.ts";
 //   the reader's current roles, through the resource the file was
 //   uploaded through. Missing, deleted, someone else's and unreadable
 //   answer the same `file.not_found`. No URL carries the right to read:
-//   the channel takes the person's session and their screen's lease on
+//   the channel takes the person's session and their page's lease on
 //   every request.
 // - A record holds a file its writer may not use: a commit that adds a
 //   file to a record checks it is published, the writer's own upload, and

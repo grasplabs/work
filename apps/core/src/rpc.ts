@@ -5,10 +5,10 @@ import {
   toOpaqueError,
 } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { pageLimits } from "@grasp-os/shared/pages";
 import type { CoreApi, Identity, SignInOption } from "@grasp-os/shared/rpc";
 import { accountedTransport } from "@grasp-os/shared/rpc-accounting";
 import type { RpcAccountingLimits } from "@grasp-os/shared/rpc-accounting";
-import { screenLimits } from "@grasp-os/shared/screens";
 import { RpcSession, WebSocketTransport } from "capnweb";
 
 import { oidcProviders, signInConfig } from "./auth/config.ts";
@@ -227,7 +227,7 @@ export const browserApi = async (
 /**
  * Serves `api` over the accepted socket `server` with Cap'n Web, for a
  * browser's connection (`/rpc`, or a portable host's live connection,
- * portable-live.ts). What a browser sends is untrusted, a screen's calls
+ * portable-live.ts). What a browser sends is untrusted, a page's calls
  * among it, and it may be reachable before anyone signed in: bound it
  * before Cap'n Web expands it. The accountant wraps the transport: it
  * refuses a message longer than `browserMessageSize` or of too many nodes
@@ -236,7 +236,7 @@ export const browserApi = async (
  * the connection once what the messages copy or hold would outgrow one
  * message's budget or the connection's (`accounting`). What a value held
  * by a target gets is bounded again where it lands (rpc-target.ts), and a
- * screen's call to its bytes (screens-rpc.ts). Every connection of the
+ * page's call to its bytes (pages-rpc.ts). Every connection of the
  * isolate together holds no more than `isolateRpcHeld`.
  */
 export const serveRpc = (
@@ -261,8 +261,8 @@ export const serveRpc = (
   // transport keep it reachable for as long as the connection is open.
   const connection = new RpcSession(transport, api, {
     limits: {
-      maxDepth: screenLimits.rpc.maxDepth,
-      maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
+      maxDepth: pageLimits.rpc.maxDepth,
+      maxBigIntDigits: pageLimits.rpc.maxBigIntDigits,
     },
     onSendError: (error) => {
       // Every call of the tab goes over this one connection, so each

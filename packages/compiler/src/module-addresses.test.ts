@@ -8,7 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { addressModules } from "./module-addresses.ts";
 import type { AddressedModules } from "./module-addresses.ts";
 
-// An App's screen modules at the addresses of their content: written to
+// An App's page modules at the addresses of their content: written to
 // a directory under those addresses and imported from it with Node's own
 // module loader, as a frame imports them from core. What can go wrong: a
 // changed module leaves an importer at its old address (the frame keeps
@@ -19,32 +19,32 @@ import type { AddressedModules } from "./module-addresses.ts";
 
 /** Modules as the compiler emits them: ES modules, importing by flat name. */
 const modules = {
-  "app~screens~desk.js": `import { label } from "app~components~label.js";
-import { ping } from "app~components~ping.js";
+  "app~src~routes~desk.js": `import { label } from "app~src~components~label.js";
+import { ping } from "app~src~components~ping.js";
 import { basename } from "node:path";
 export default async () => {
-  const later = await import("app~components~later.js");
-  return [label(), ping(), later.default, basename("/a/b"), "app~components~label.js"];
+  const later = await import("app~src~components~later.js");
+  return [label(), ping(), later.default, basename("/a/b"), "app~src~components~label.js"];
 };`,
-  "app~components~label.js": `import shared from "app~components~shared.js";
+  "app~src~components~label.js": `import shared from "app~src~components~shared.js";
 export const label = () => "Desk " + shared.id;`,
-  "app~components~shared.js": "export default { id: 7 };",
+  "app~src~components~shared.js": "export default { id: 7 };",
   // Two modules importing each other.
-  "app~components~ping.js": `import { pong } from "app~components~pong.js";
+  "app~src~components~ping.js": `import { pong } from "app~src~components~pong.js";
 export const ping = () => "ping " + pong();
 export const name = () => "ping";`,
-  "app~components~pong.js": `import { name } from "app~components~ping.js";
+  "app~src~components~pong.js": `import { name } from "app~src~components~ping.js";
 export const pong = () => "pong of " + name();`,
-  "app~components~later.js": `export default "later";`,
+  "app~src~components~later.js": `export default "later";`,
 };
 
-const desk = "app~screens~desk.js";
+const desk = "app~src~routes~desk.js";
 
-/** What the test's screen module exports: a function to run. */
-const isScreen = (value: unknown): value is () => Promise<unknown> =>
+/** What the test's page module exports: a function to run. */
+const isPage = (value: unknown): value is () => Promise<unknown> =>
   typeof value === "function";
 
-/** What the desk screen answers, its modules written at their addresses. */
+/** What the desk page answers, its modules written at their addresses. */
 const ran = async ({
   modules: code,
   addresses,
@@ -57,11 +57,11 @@ const ran = async ({
   );
   const entry = path.join(directory, `${addresses[desk]}.js`);
   const loaded: unknown = await import(pathToFileURL(entry).href);
-  const screen: unknown =
+  const page: unknown =
     typeof loaded === "object" && loaded !== null && "default" in loaded
       ? loaded.default
       : undefined;
-  return isScreen(screen) ? await screen() : screen;
+  return isPage(page) ? await page() : page;
 };
 
 /** The names of the modules whose address differs between `one` and `other`. */
@@ -78,19 +78,19 @@ describe("an App's modules at their addresses", () => {
       "ping pong of ping",
       "later",
       "b",
-      "app~components~label.js",
+      "app~src~components~label.js",
     ]);
   });
 
-  it("move a changed module and every module importing it, up to its screen, and nothing else", async () => {
+  it("move a changed module and every module importing it, up to its page, and nothing else", async () => {
     const before = await addressModules(modules);
     const after = await addressModules({
       ...modules,
-      "app~components~shared.js": "export default { id: 8 };",
+      "app~src~components~shared.js": "export default { id: 8 };",
     });
     const cycle = await addressModules({
       ...modules,
-      "app~components~pong.js": `import { name } from "app~components~ping.js";
+      "app~src~components~pong.js": `import { name } from "app~src~components~ping.js";
 export const pong = () => "pong to " + name();`,
     });
     expect({
@@ -99,21 +99,21 @@ export const pong = () => "pong to " + name();`,
       runs: await ran(after),
     }).toStrictEqual({
       leaf: [
-        "app~components~label.js",
-        "app~components~shared.js",
-        "app~screens~desk.js",
+        "app~src~components~label.js",
+        "app~src~components~shared.js",
+        "app~src~routes~desk.js",
       ],
       cycle: [
-        "app~components~ping.js",
-        "app~components~pong.js",
-        "app~screens~desk.js",
+        "app~src~components~ping.js",
+        "app~src~components~pong.js",
+        "app~src~routes~desk.js",
       ],
       runs: [
         "Desk 8",
         "ping pong of ping",
         "later",
         "b",
-        "app~components~label.js",
+        "app~src~components~label.js",
       ],
     });
   });

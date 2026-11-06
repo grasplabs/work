@@ -9,12 +9,12 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { ConnectedDialog } from "./connected-dialog.tsx";
 
-// The success screen a flow ends on, once the provider sent the person
+// The success page a flow ends on, once the provider sent the person
 // back: what was connected, whether again, what was chosen, and Close.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
-// Someone who asked for less motion: the screen stands still, and the test
+// Someone who asked for less motion: the page stands still, and the test
 // reads it without waiting on animations the test DOM can't run.
 Reflect.set(window, "matchMedia", (query: string) => ({
   matches: query.includes("reduce"),
@@ -47,7 +47,7 @@ const connection = (
 
 let root: Root | undefined;
 
-/** The screen for `shown`, counting how often it was closed. */
+/** The page for `shown`, counting how often it was closed. */
 const opened = async (
   shown?: ListedConnection,
   { app = "Microsoft 365", again = false } = {}
@@ -77,7 +77,7 @@ const opened = async (
 const dialog = (): HTMLElement | null =>
   document.querySelector('[role="dialog"]');
 
-describe("the screen a connection ends on", () => {
+describe("the page a connection ends on", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();

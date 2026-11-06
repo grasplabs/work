@@ -1,5 +1,5 @@
 // The namespaces (first segments) of the platform's error codes, apart and
-// with nothing imported, so the SDK's root module (what screens import) can
+// with nothing imported, so the SDK's root module (what pages import) can
 // refuse an App's error code in one of them without loading every error
 // family and Zod with it.
 //
@@ -58,6 +58,7 @@ export const familyNamespaces = [
   "org_settings",
   "organization",
   "package",
+  "page",
   "permission",
   "place",
   "project",
@@ -65,7 +66,6 @@ export const familyNamespaces = [
   "request",
   "resource",
   "role",
-  "screen",
   "signal",
   "speech",
   "statistics",

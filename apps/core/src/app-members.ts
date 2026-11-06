@@ -417,7 +417,7 @@ export const addMember = async (
       }),
     outboxedEventWhere(db, event, sql`changes() > 0`),
     // Shared in the lowest role: a builder may have just become a user,
-    // whose open screens must stop showing what only builders read. Kept
+    // whose open pages must stop showing what only builders read. Kept
     // with the change, so a database away after it loses nothing.
     revocationsOf(
       db,
@@ -445,9 +445,9 @@ export const addMember = async (
 
 /**
  * Stops sharing an App with a person or team. Their next call is refused,
- * and their open screens of it stop: at once, as the App's server code
+ * and their open pages of it stop: at once, as the App's server code
  * restarts and lets go of their subscriptions, and within seconds anyway,
- * as every push checks their role again (screens-rpc.ts); their live
+ * as every push checks their role again (pages-rpc.ts); their live
  * queries are cleared as soon as the App's host tells their connections
  * (access-revocations.ts), with no commit needed. Unsharing with
  * someone it isn't shared with changes, records and restarts nothing.

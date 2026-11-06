@@ -11,14 +11,14 @@ import { isPlainObject } from "./value-descriptor.ts";
 // handle on it, no response and no network access, only whether the host
 // accepted. Failure modes, and how each is closed:
 //
-// - A screen names a resource its App didn't declare, or a URL outside
+// - A page names a resource its App didn't declare, or a URL outside
 //   it: the reference is read as data here and the URL sent as given;
 //   core decides from the App's sealed release (the reference grants
 //   nothing), and the refusal comes back with its code.
-// - A screen passes off a page load as the host's word, or the reverse:
+// - A page passes off a page load as the host's word, or the reverse:
 //   the promise settles when the host accepted (or refused) the open,
 //   never when or whether the page loads.
-// - A screen opens anything else through it: it takes a links reference
+// - A page opens anything else through it: it takes a links reference
 //   and a URL only; no target, features, opener or navigation of the
 //   shell's.
 

@@ -118,20 +118,14 @@ const host = (answer: (sent: Sent) => Answer | Promise<Answer>) => {
       return { result: { ok: true, value: answered.value } };
     },
     // These cases only make calls; live queries are core's own test
-    // (screen-client-live.test.ts).
+    // (page-client-live.test.ts).
     watch: async () => {
       await Promise.resolve();
       throw new Error("Nothing here follows a query.");
     },
-    // What the host is told of leaving the screen (spec 10.7.7).
-    navigation: {
-      navigate: async () => {
-        await Promise.resolve();
-        throw new Error("Nothing here navigates.");
-      },
-      leaveGuard: (guarded) => {
-        guards.push(guarded);
-      },
+    // What the host is told of leaving the App (spec 10.7.7).
+    leaveGuard: (guarded) => {
+      guards.push(guarded);
     },
   };
   return { client: new GraspClient(transport), sent, guards };
@@ -611,7 +605,7 @@ describe("a form's callbacks", () => {
   });
 });
 
-describe("leaving a screen with a form", () => {
+describe("leaving a page with a form", () => {
   it("is confirmed by the host while the form holds unsaved edits, or a submission whose outcome is unknown, and no longer once it doesn't", async () => {
     const { client, guards } = host(({ contractId }) =>
       contractId === "notes.tally" ? "unknown" : { value: 3 }

@@ -17,7 +17,7 @@ type Builder = Parameters<typeof release>[0];
 
 /**
  * The sample App, of spec 8's layout, that a run test's workflows call
- * (`env.APP.callFunction`) and the test reads through a screen's call
+ * (`env.APP.callFunction`) and the test reads through a page's call
  * (`sampleCall`):
  * - `counter.hit` counts how often a step's code really ran, and answers
  *   that count. Each run of the step's code names itself with an ID of
@@ -189,7 +189,7 @@ export const hitCall = (name: string): string =>
 
 /**
  * What `by` gets calling the sample App's function `path` of `app`'s
- * current version with `input`, as a screen calls it: its value, or the
+ * current version with `input`, as a page calls it: its value, or the
  * code it was refused with.
  */
 export const sampleCall = async (

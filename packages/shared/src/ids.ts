@@ -44,7 +44,7 @@ const idSchema = <Brand extends string>() => identifierSchema.brand<Brand>();
 export const storeIdSchema = idSchema<"StoreId">();
 export type StoreId = z.infer<typeof storeIdSchema>;
 
-/** An App: its screens, workflows and permissions, installed as one unit. */
+/** An App: its pages, workflows and permissions, installed as one unit. */
 export const appIdSchema = idSchema<"AppId">();
 export type AppId = z.infer<typeof appIdSchema>;
 

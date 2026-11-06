@@ -8,13 +8,7 @@ import {
   inspectApp,
   registerApp,
 } from "./app.ts";
-import type {
-  AppConfig,
-  AppManifest,
-  AppScreens,
-  ScreenDefinition,
-  SurfaceDefinition,
-} from "./app.ts";
+import type { AppConfig, AppManifest } from "./app.ts";
 import { migration } from "./migration.ts";
 import type { Migration } from "./migration.ts";
 import {
@@ -285,49 +279,6 @@ const place = (
   Object.defineProperty(target, name, { enumerable: true, value });
 };
 
-/** The screens of the manifest, as a declaration lists them. */
-const screensFrom = (input: unknown): ScreenDefinition[] =>
-  entriesOf(input, "screens").map(([name, screen]) => {
-    if (!hasExactly(screen, ["name", "path", "source", "input"])) {
-      return refuse(
-        `Screen \`${name}\` isn't a screen as a manifest holds one.`
-      );
-    }
-    if (screen.name !== name) {
-      return refuse(`Screen \`${name}\` is filed under another name.`);
-    }
-    // SAFETY: `registerApp` checks each part as it checks a declaration's.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return {
-      name,
-      path: screen.path,
-      source: screen.source,
-      input: schemaFrom(screen.input),
-    } as ScreenDefinition;
-  });
-
-/** The surfaces of the manifest, as a declaration lists them. */
-const surfacesFrom = (input: unknown): SurfaceDefinition[] =>
-  entriesOf(input, "surfaces").map(([name, surface]) => {
-    if (!hasExactly(surface, ["name", "kind", "screen", "title", "input"])) {
-      return refuse(
-        `Surface \`${name}\` isn't a surface as a manifest holds one.`
-      );
-    }
-    if (surface.name !== name) {
-      return refuse(`Surface \`${name}\` is filed under another name.`);
-    }
-    // SAFETY: `registerApp` checks each part as it checks a declaration's.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return {
-      name,
-      kind: surface.kind,
-      screen: surface.screen,
-      title: surface.title,
-      input: schemaFrom(surface.input),
-    } as SurfaceDefinition;
-  });
-
 /**
  * A manifest's fixtures as a declaration lists them: `expect` left out
  * where the manifest records null. Anything else is passed on as it is,
@@ -474,8 +425,6 @@ export const readAppManifest = (text: string): AppManifest => {
     "resources",
     "browserResources",
     "workflows",
-    "screens",
-    "surfaces",
     "preferences",
     "migrations",
   ];
@@ -491,7 +440,7 @@ export const readAppManifest = (text: string): AppManifest => {
     ])
   ) {
     return refuse(
-      "An App's manifest is `{ name, schema, operations, resources, browserResources, workflows, screens, surfaces, preferences, people?, migrations, answers? }`."
+      "An App's manifest is `{ name, schema, operations, resources, browserResources, workflows, preferences, people?, migrations, answers? }`."
     );
   }
   const { schema } = readSchemaManifest(JSON.stringify(data.schema));
@@ -506,7 +455,7 @@ export const readAppManifest = (text: string): AppManifest => {
     data.browserResources,
     "browser resources",
     isBrowserPermission,
-    "a screens' permission"
+    "a pages' permission"
   );
   const workflows = declaredFrom(
     data.workflows,
@@ -542,10 +491,6 @@ export const readAppManifest = (text: string): AppManifest => {
       ...(answers ? { answers: data.answers } : {}),
     } as AppConfig
   );
-  const screens: AppScreens = {
-    screens: screensFrom(data.screens),
-    surfaces: surfacesFrom(data.surfaces),
-  };
   const migrations = migrationsFrom(data.migrations);
 
   /** The registration, each function narrowed by `narrowed`'s `tables`. */
@@ -568,9 +513,8 @@ export const readAppManifest = (text: string): AppManifest => {
         ])
       );
     }
-    return inspectApp(
-      registerApp({ config, schema, screens, modules, migrations })
-    ).manifest;
+    return inspectApp(registerApp({ config, schema, modules, migrations }))
+      .manifest;
   };
 
   // A function whose verbs aren't what its kind and its tables' access

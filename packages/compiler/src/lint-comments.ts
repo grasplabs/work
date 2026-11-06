@@ -1,6 +1,6 @@
 /**
  * App code's comments that steer the design system's lint (lint.ts), read
- * by ESLint, which Grasp's compiler lints screens with, as oxlint reads
+ * by ESLint, which Grasp's compiler lints pages with, as oxlint reads
  * them, which an exported App lints them with: oxlint's own disable
  * comments (`oxlint-disable…`) as ESLint's, and inline config comments,
  * which oxlint doesn't read, by neither. Its rules are JS plugins' in

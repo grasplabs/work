@@ -15,7 +15,7 @@ import {
   accessQuery,
   accessTokenParameter,
   hasFrameAccess,
-} from "../screen-frame.ts";
+} from "../page-frame.ts";
 import { artifactSubject } from "./address.ts";
 import type { ArtifactRef } from "./address.ts";
 import { forgetArtifact, keptDescription, keptFile, lockOf } from "./build.ts";
@@ -30,7 +30,7 @@ import { forgetArtifact, keptDescription, keptFile, lockOf } from "./build.ts";
 // file's code does once it runs (a worker made from a computed name,
 // `importScripts`, a fetch, CSS set from script) is the browser's to stop,
 // under that policy wherever a file is opened on its own, and under the
-// screen frame's where a screen runs it. What could go wrong here, and
+// page frame's where a page runs it. What could go wrong here, and
 // what stops it:
 //
 // - Serving what is no longer approved, or other bytes than were built.
@@ -57,7 +57,7 @@ import { forgetArtifact, keptDescription, keptFile, lockOf } from "./build.ts";
 //   and artifact, which holds at most six hours (address.ts). It is in the
 //   query, never the path: Workers redact the query from the router's and
 //   core's traces and core's request log keeps paths only, while a path
-//   would sit in the router's traces in Grasp's account (screen-frame.ts
+//   would sit in the router's traces in Grasp's account (page-frame.ts
 //   says why a session can't carry it instead). Every answer says
 //   `Referrer-Policy: no-referrer`, so it never travels as a Referer
 //   either. A relative URL drops the query, so a stylesheet is served with

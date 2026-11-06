@@ -19,7 +19,7 @@ import { waitKeyOf } from "./host.ts";
 import { sealedStepOf } from "./sealed-steps.ts";
 import type { SealedSteps } from "./sealed-steps.ts";
 
-// What an independent run waits on now, as its screens are shown it (spec
+// What an independent run waits on now, as its pages are shown it (spec
 // 10.7.2), read from the engine's journal (workerflow's `pendingWaits`),
 // never guessed from its definition or status. The run host (sealed-run.ts)
 // names its steps `<task>:<kind>` with each loop's index after `@`
@@ -52,7 +52,7 @@ import type { SealedSteps } from "./sealed-steps.ts";
 // a person may answer a decision here is the reference's to say
 // (`canRespond` is false). Read after the run's row, whose revision a
 // snapshot carries: a wait opened or closed since moves that revision on
-// (resource-runs.ts, `projectResourceRun`), so the screen reads it again.
+// (resource-runs.ts, `projectResourceRun`), so the page reads it again.
 
 /** A decision wait, as `withRespond` reads one. */
 const decisionWaitSchema = z
@@ -81,7 +81,7 @@ const holdStep = new RegExp(
 /** Any of core's own steps of a wait, by the key of the step it is of. */
 const coreWaitStep = new RegExp(`^${waitPrefix}(?<key>[0-9a-f]{16}):`, "u");
 
-/** What each kind of hold is, as a screen reads it. */
+/** What each kind of hold is, as a page reads it. */
 const holds = {
   held: {
     reason: "policy",
@@ -357,7 +357,7 @@ const sealedWaitsOf = (
 };
 
 /**
- * The waits a screen is shown of `pending`, the engine's list of a run's
+ * The waits a page is shown of `pending`, the engine's list of a run's
  * open waits, read against its build and release (`context`): each of a
  * kind it names (see the header), nothing else, as its name could be
  * made of what the run read.
@@ -467,7 +467,7 @@ const keyedTasks = async (
 };
 
 /**
- * What run `run` waits on now, as a screen's snapshot lists it (see the
+ * What run `run` waits on now, as a page's snapshot lists it (see the
  * header), for the release's binding of its workflow (`declared`): none
  * while it has no record in the engine, or while the engine can't say
  * (logged: the rest of the snapshot is still worth showing).
@@ -522,7 +522,7 @@ export interface WaitViewer {
   readonly staff?: boolean;
   /**
    * Whether the run's restricted mode is the App's: only then is a
-   * decision of it the App's screen's to answer (screen-decisions.ts,
+   * decision of it the App's page's to answer (page-decisions.ts,
    * `appDecision`).
    */
   readonly sameRestriction: boolean;

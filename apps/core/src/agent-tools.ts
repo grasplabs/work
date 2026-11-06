@@ -199,7 +199,7 @@ const appParameter = Type.String({
 const pathParameter = Type.String({
   minLength: 1,
   maxLength: maxNameChars,
-  description: "The file's path in the App, such as `screens/desk.tsx`.",
+  description: "The file's path in the App, such as `src/routes/index.tsx`.",
 });
 
 /**
@@ -217,7 +217,7 @@ const readAppParameter = Type.Optional(
 
 /** What the tools that read say of Grasp's reference, where to start. */
 const referenceStart =
-  "Start with a complete App: blueprints/board-page/definition.json (what it is, which the definition tools change), the grasp.config.ts and server/schema.ts generated from it, its functions in server/, screens.ts and screens/.";
+  "Start with a complete App: blueprints/board-page/definition.json (what it is, which the definition tools change), the grasp.config.ts and server/schema.ts generated from it, its functions in server/, its pages in src/routes/ and its components in src/components/.";
 
 /** What `writeFile` and `editFile` say of what they answer with (`env.build.write`). */
 const answersWithDiagnostics =

@@ -12,8 +12,8 @@ definition.json     What the App is: its name, tables, access and permissions
 grasp.config.ts     The App's config, generated from definition.json
 server/schema.ts    Its tables, generated from definition.json
 server/             Its server functions, one module or more
-screens.ts          Its Pages: each one's name, route and file
-screens/            Its Pages, one React component each
+src/routes/         Its Pages, one file route each
+src/components/     Its own components, and src/lib/ its own code
 tests/              Its tests
 server/_generated/  What Grasp generates from the App; never edited
 ```
@@ -104,9 +104,9 @@ A function's name is its module and export: these are `tasks.list`, `tasks.add` 
 
 ## A Page
 
-A Page is a React component in `screens/`. It calls server functions through `api`, which Grasp generates from them:
+A Page is a file in `src/routes/`, a [TanStack Router](https://tanstack.com/router) file route: `index.tsx` is the App's first Page, at `/`. It calls server functions through `api`, which Grasp generates from them:
 
-```tsx screens/tasks.tsx
+```tsx src/routes/index.tsx
 import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -117,6 +117,7 @@ import {
 } from "@grasp-os/ui/components/page-header";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { api } from "@server/_generated/api";
+import { createFileRoute } from "@tanstack/react-router";
 
 const Tasks = () => {
   const tasks = useQuery(api.tasks.list, { done: false });
@@ -146,18 +147,10 @@ const Tasks = () => {
   );
 };
 
-export default Tasks;
+export const Route = createFileRoute("/")({ component: Tasks });
 ```
 
-## The Pages
-
-`screens.ts` lists the App's Pages, each with a name, a route and its file:
-
-```ts screens.ts
-export default {
-  screens: [{ name: "tasks", path: "/", source: "screens/tasks.tsx" }],
-};
-```
+The App's Pages aren't listed anywhere: the files in `src/routes/` are its routes. [Pages](/guides/pages) covers them in full.
 
 ## What Grasp generates
 

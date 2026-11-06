@@ -1,7 +1,7 @@
 // Compile-time guarantees of a workflow declaration (`permission.workflow`,
 // spec 7.4, 10.4.1) and the reference generated from it: the App declares
 // the output a run gives beside the input it takes, both required; and the
-// reference its screens get (`workflows.<alias>` in `@server/_generated/api`, generated
+// reference its pages get (`workflows.<alias>` in `@server/_generated/api`, generated
 // from the Notes fixture's declarations) takes and gives exactly what the
 // declaration does. Type-checked by `vp check`, never run: every
 // `@ts-expect-error` must stay an error.
@@ -53,7 +53,7 @@ permission.workflow("followUp", { output: v.null() });
 // @ts-expect-error -- an output is a value schema, not a descriptor or a type
 permission.workflow("followUp", { input: v.object({}), output: "null" });
 
-// A screen follows the generated reference, never the declaration itself.
+// A page follows the generated reference, never the declaration itself.
 export const UseDeclaration = (): null => {
   // @ts-expect-error -- a declaration isn't a reference: it pins no release
   useWorkflow(summarizeNote);

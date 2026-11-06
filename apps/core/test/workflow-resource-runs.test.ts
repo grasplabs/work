@@ -1003,7 +1003,7 @@ const holdNotifications = async (
 describe("whose word a run's row takes, and whose clock", () => {
   afterEach(endLiveResourceRuns);
 
-  it("audits a control settled once, though a screen and the engine settle it in the same millisecond", async () => {
+  it("audits a control settled once, though a page and the engine settle it in the same millisecond", async () => {
     const by = await builder();
     const waiting = await waitingWorkflow(by);
     const { runId } = await start(by, waiting.id);
@@ -1033,7 +1033,7 @@ describe("whose word a run's row takes, and whose clock", () => {
     const revision = async (): Promise<unknown> =>
       await runColumn(runId, "summary_revision");
     const before = await revision();
-    // Both settlers read the same clock: the screen's apply and the
+    // Both settlers read the same clock: the page's apply and the
     // engine's notification, landing together.
     vi.useFakeTimers({ toFake: ["Date"], now });
     try {

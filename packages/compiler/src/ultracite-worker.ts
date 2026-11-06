@@ -67,12 +67,12 @@ export default class UltraciteLinter extends WorkerEntrypoint {
 
   /**
    * What each of `files`' TypeScript files, by path, is found to break,
-   * in its place: Ultracite's rules, the design system's of a screen or a
+   * in its place: Ultracite's rules, the design system's of a page or a
    * component (lint.ts), and the server code's (server-lint.ts), as an
    * exported App's oxlint runs them all. A check of its own, beside the
    * builds, each file's result kept by core; what it finds blocks a
    * proposal alone, never a build or a preview. `app` is the App's
-   * screens and components, which the design lint reads beside a screen
+   * pages and components, which the design lint reads beside a page
    * (the App's own components it wraps the kit's in): `files`' own when
    * not given.
    */

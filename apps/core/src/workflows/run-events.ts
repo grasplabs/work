@@ -26,7 +26,7 @@ import { runOf } from "./resource-runs.ts";
 // one run, through one of the event bindings its start froze, as the host
 // makes it: the run's engine object keeps it, in order, until a wait that
 // matches it takes it, once (`waitForMatch`, @grasp-os/workerflow). Who
-// may send is the caller's to decide (an App's screen or a committed
+// may send is the caller's to decide (an App's page or a committed
 // mutation, GRA-420): nothing here is reachable by RPC, and this module
 // decides only what the run itself takes.
 //
@@ -116,13 +116,13 @@ export interface RunEventDelivery {
   readonly key: string;
   /**
    * Who sends it, as a URI the caller derives from its own authority
-   * (say, the App and person a screen's send acts for): never the
+   * (say, the App and person a page's send acts for): never the
    * sender's input.
    */
   readonly source: string;
   /**
    * Who sends it, for its share of the run's inbox: the same for every
-   * delivery of one sender (say, the App and person a screen's send acts
+   * delivery of one sender (say, the App and person a page's send acts
    * for, whatever release), derived as `source` is, never from the input.
    */
   readonly sender: string;

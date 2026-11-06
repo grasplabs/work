@@ -37,7 +37,7 @@ import type { SharedRole } from "./sharing.ts";
 //
 // The person's role in the organization caps their role in an App: only
 // admins and builders build, so someone whose role there is `user` works
-// in an App's screens at most, even their own App's or one shared with
+// in an App's pages at most, even their own App's or one shared with
 // them as a builder. Everyone else has no role in the App, and it doesn't
 // exist for them (`app.not_found`), just as an App that isn't there.
 // Someone an App is shared with is refused too, with `app.unreadable`,
@@ -84,7 +84,7 @@ const openInItsStatus = (by: Person): SQL => {
 /**
  * Refuses an archived App with `app.archived`: what its builders may
  * still read of it doesn't make it usable. For whatever opens its
- * screens, calls it or starts its runs.
+ * pages, calls it or starts its runs.
  */
 export const requireNotArchived = (app: Pick<App, "status">): void => {
   if (app.status === "archived") {

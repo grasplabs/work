@@ -61,8 +61,9 @@ import { Route as KitExamplesNameRouteImport } from './routes/kit_.examples.$nam
 import { Route as ShellAppsAppEditRouteImport } from './routes/_shell.apps.$app_.edit'
 import { Route as ShellAppsAppSettingsRouteImport } from './routes/_shell.apps.$app_.settings'
 import { Route as ShellBrainSectionsSectionIdRouteImport } from './routes/_shell.brain.sections.$sectionId'
-import { Route as ShellLinksAppSurfaceRouteImport } from './routes/_shell.links.$app.$surface'
 import { Route as ShellSettingsPackagesIndexRouteImport } from './routes/_shell.settings.packages.index'
+import { Route as AppsAppFullSplatRouteImport } from './routes/apps.$app.full.$'
+import { Route as ShellAppsAppPagesSplatRouteImport } from './routes/_shell.apps.$app.pages.$'
 import { Route as ShellSettingsPackagesWorkflowsWorkflowRouteImport } from './routes/_shell.settings.packages.workflows.$workflow'
 
 const ShellRoute = ShellRouteImport.update({
@@ -328,17 +329,22 @@ const ShellBrainSectionsSectionIdRoute =
     path: '/sections/$sectionId',
     getParentRoute: () => ShellBrainRoute,
   } as any)
-const ShellLinksAppSurfaceRoute = ShellLinksAppSurfaceRouteImport.update({
-  id: '/links/$app/$surface',
-  path: '/links/$app/$surface',
-  getParentRoute: () => ShellRoute,
-} as any)
 const ShellSettingsPackagesIndexRoute =
   ShellSettingsPackagesIndexRouteImport.update({
     id: '/packages/',
     path: '/packages/',
     getParentRoute: () => ShellSettingsRoute,
   } as any)
+const AppsAppFullSplatRoute = AppsAppFullSplatRouteImport.update({
+  id: '/$',
+  path: '/$',
+  getParentRoute: () => AppsAppFullRoute,
+} as any)
+const ShellAppsAppPagesSplatRoute = ShellAppsAppPagesSplatRouteImport.update({
+  id: '/pages/$',
+  path: '/pages/$',
+  getParentRoute: () => ShellAppsAppRoute,
+} as any)
 const ShellSettingsPackagesWorkflowsWorkflowRoute =
   ShellSettingsPackagesWorkflowsWorkflowRouteImport.update({
     id: '/packages/workflows/$workflow',
@@ -362,7 +368,7 @@ export interface FileRoutesByFullPath {
   '/inbox': typeof ShellInboxRoute
   '/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
-  '/apps/$app': typeof ShellAppsAppRoute
+  '/apps/$app': typeof ShellAppsAppRouteWithChildren
   '/apps/new': typeof ShellAppsNewRoute
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/brain/activity': typeof ShellBrainActivityRoute
@@ -385,7 +391,7 @@ export interface FileRoutesByFullPath {
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/workflows/requests': typeof ShellWorkflowsRequestsRoute
-  '/apps/$app/full': typeof AppsAppFullRoute
+  '/apps/$app/full': typeof AppsAppFullRouteWithChildren
   '/kit/components/$name': typeof KitComponentsNameRoute
   '/kit/examples/$name': typeof KitExamplesNameRoute
   '/apps/': typeof ShellAppsIndexRoute
@@ -398,8 +404,9 @@ export interface FileRoutesByFullPath {
   '/apps/$app/edit': typeof ShellAppsAppEditRoute
   '/apps/$app/settings': typeof ShellAppsAppSettingsRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
-  '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
+  '/apps/$app/full/$': typeof AppsAppFullSplatRoute
   '/settings/packages/': typeof ShellSettingsPackagesIndexRoute
+  '/apps/$app/pages/$': typeof ShellAppsAppPagesSplatRoute
   '/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
 }
 export interface FileRoutesByTo {
@@ -416,7 +423,7 @@ export interface FileRoutesByTo {
   '/inbox': typeof ShellInboxRoute
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/': typeof ShellIndexRoute
-  '/apps/$app': typeof ShellAppsAppRoute
+  '/apps/$app': typeof ShellAppsAppRouteWithChildren
   '/apps/new': typeof ShellAppsNewRoute
   '/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/brain/activity': typeof ShellBrainActivityRoute
@@ -439,7 +446,7 @@ export interface FileRoutesByTo {
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/workflows/requests': typeof ShellWorkflowsRequestsRoute
-  '/apps/$app/full': typeof AppsAppFullRoute
+  '/apps/$app/full': typeof AppsAppFullRouteWithChildren
   '/kit/components/$name': typeof KitComponentsNameRoute
   '/kit/examples/$name': typeof KitExamplesNameRoute
   '/apps': typeof ShellAppsIndexRoute
@@ -452,8 +459,9 @@ export interface FileRoutesByTo {
   '/apps/$app/edit': typeof ShellAppsAppEditRoute
   '/apps/$app/settings': typeof ShellAppsAppSettingsRoute
   '/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
-  '/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
+  '/apps/$app/full/$': typeof AppsAppFullSplatRoute
   '/settings/packages': typeof ShellSettingsPackagesIndexRoute
+  '/apps/$app/pages/$': typeof ShellAppsAppPagesSplatRoute
   '/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
 }
 export interface FileRoutesById {
@@ -474,7 +482,7 @@ export interface FileRoutesById {
   '/_shell/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
   '/_shell/': typeof ShellIndexRoute
-  '/_shell/apps/$app': typeof ShellAppsAppRoute
+  '/_shell/apps/$app': typeof ShellAppsAppRouteWithChildren
   '/_shell/apps/new': typeof ShellAppsNewRoute
   '/_shell/brain/$noteId': typeof ShellBrainNoteIdRoute
   '/_shell/brain/activity': typeof ShellBrainActivityRoute
@@ -497,7 +505,7 @@ export interface FileRoutesById {
   '/_shell/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/_shell/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
   '/_shell/workflows/requests': typeof ShellWorkflowsRequestsRoute
-  '/apps/$app/full': typeof AppsAppFullRoute
+  '/apps/$app/full': typeof AppsAppFullRouteWithChildren
   '/kit_/components/$name': typeof KitComponentsNameRoute
   '/kit_/examples/$name': typeof KitExamplesNameRoute
   '/_shell/apps/': typeof ShellAppsIndexRoute
@@ -510,8 +518,9 @@ export interface FileRoutesById {
   '/_shell/apps/$app_/edit': typeof ShellAppsAppEditRoute
   '/_shell/apps/$app_/settings': typeof ShellAppsAppSettingsRoute
   '/_shell/brain/sections/$sectionId': typeof ShellBrainSectionsSectionIdRoute
-  '/_shell/links/$app/$surface': typeof ShellLinksAppSurfaceRoute
+  '/apps/$app/full/$': typeof AppsAppFullSplatRoute
   '/_shell/settings/packages/': typeof ShellSettingsPackagesIndexRoute
+  '/_shell/apps/$app/pages/$': typeof ShellAppsAppPagesSplatRoute
   '/_shell/settings/packages/workflows/$workflow': typeof ShellSettingsPackagesWorkflowsWorkflowRoute
 }
 export interface FileRouteTypes {
@@ -568,8 +577,9 @@ export interface FileRouteTypes {
     | '/apps/$app/edit'
     | '/apps/$app/settings'
     | '/brain/sections/$sectionId'
-    | '/links/$app/$surface'
+    | '/apps/$app/full/$'
     | '/settings/packages/'
+    | '/apps/$app/pages/$'
     | '/settings/packages/workflows/$workflow'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -622,8 +632,9 @@ export interface FileRouteTypes {
     | '/apps/$app/edit'
     | '/apps/$app/settings'
     | '/brain/sections/$sectionId'
-    | '/links/$app/$surface'
+    | '/apps/$app/full/$'
     | '/settings/packages'
+    | '/apps/$app/pages/$'
     | '/settings/packages/workflows/$workflow'
   id:
     | '__root__'
@@ -679,8 +690,9 @@ export interface FileRouteTypes {
     | '/_shell/apps/$app_/edit'
     | '/_shell/apps/$app_/settings'
     | '/_shell/brain/sections/$sectionId'
-    | '/_shell/links/$app/$surface'
+    | '/apps/$app/full/$'
     | '/_shell/settings/packages/'
+    | '/_shell/apps/$app/pages/$'
     | '/_shell/settings/packages/workflows/$workflow'
   fileRoutesById: FileRoutesById
 }
@@ -694,7 +706,7 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRoute
   StaffRoute: typeof StaffRoute
   DecisionsDecisionRoute: typeof DecisionsDecisionRoute
-  AppsAppFullRoute: typeof AppsAppFullRoute
+  AppsAppFullRoute: typeof AppsAppFullRouteWithChildren
   KitComponentsNameRoute: typeof KitComponentsNameRoute
   KitExamplesNameRoute: typeof KitExamplesNameRoute
 }
@@ -1065,19 +1077,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellBrainSectionsSectionIdRouteImport
       parentRoute: typeof ShellBrainRoute
     }
-    '/_shell/links/$app/$surface': {
-      id: '/_shell/links/$app/$surface'
-      path: '/links/$app/$surface'
-      fullPath: '/links/$app/$surface'
-      preLoaderRoute: typeof ShellLinksAppSurfaceRouteImport
-      parentRoute: typeof ShellRoute
-    }
     '/_shell/settings/packages/': {
       id: '/_shell/settings/packages/'
       path: '/packages'
       fullPath: '/settings/packages/'
       preLoaderRoute: typeof ShellSettingsPackagesIndexRouteImport
       parentRoute: typeof ShellSettingsRoute
+    }
+    '/apps/$app/full/$': {
+      id: '/apps/$app/full/$'
+      path: '/$'
+      fullPath: '/apps/$app/full/$'
+      preLoaderRoute: typeof AppsAppFullSplatRouteImport
+      parentRoute: typeof AppsAppFullRoute
+    }
+    '/_shell/apps/$app/pages/$': {
+      id: '/_shell/apps/$app/pages/$'
+      path: '/pages/$'
+      fullPath: '/apps/$app/pages/$'
+      preLoaderRoute: typeof ShellAppsAppPagesSplatRouteImport
+      parentRoute: typeof ShellAppsAppRoute
     }
     '/_shell/settings/packages/workflows/$workflow': {
       id: '/_shell/settings/packages/workflows/$workflow'
@@ -1152,6 +1171,18 @@ const ShellSettingsRouteWithChildren = ShellSettingsRoute._addFileChildren(
   ShellSettingsRouteChildren,
 )
 
+interface ShellAppsAppRouteChildren {
+  ShellAppsAppPagesSplatRoute: typeof ShellAppsAppPagesSplatRoute
+}
+
+const ShellAppsAppRouteChildren: ShellAppsAppRouteChildren = {
+  ShellAppsAppPagesSplatRoute: ShellAppsAppPagesSplatRoute,
+}
+
+const ShellAppsAppRouteWithChildren = ShellAppsAppRoute._addFileChildren(
+  ShellAppsAppRouteChildren,
+)
+
 interface ShellRouteChildren {
   ShellSplatRoute: typeof ShellSplatRoute
   ShellBrainRoute: typeof ShellBrainRouteWithChildren
@@ -1160,7 +1191,7 @@ interface ShellRouteChildren {
   ShellInboxRoute: typeof ShellInboxRoute
   ShellSettingsRoute: typeof ShellSettingsRouteWithChildren
   ShellIndexRoute: typeof ShellIndexRoute
-  ShellAppsAppRoute: typeof ShellAppsAppRoute
+  ShellAppsAppRoute: typeof ShellAppsAppRouteWithChildren
   ShellAppsNewRoute: typeof ShellAppsNewRoute
   ShellIntegrationsIntegrationRoute: typeof ShellIntegrationsIntegrationRoute
   ShellKnowledgeCollectionRoute: typeof ShellKnowledgeCollectionRoute
@@ -1174,7 +1205,6 @@ interface ShellRouteChildren {
   ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
   ShellAppsAppEditRoute: typeof ShellAppsAppEditRoute
   ShellAppsAppSettingsRoute: typeof ShellAppsAppSettingsRoute
-  ShellLinksAppSurfaceRoute: typeof ShellLinksAppSurfaceRoute
 }
 
 const ShellRouteChildren: ShellRouteChildren = {
@@ -1185,7 +1215,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellInboxRoute: ShellInboxRoute,
   ShellSettingsRoute: ShellSettingsRouteWithChildren,
   ShellIndexRoute: ShellIndexRoute,
-  ShellAppsAppRoute: ShellAppsAppRoute,
+  ShellAppsAppRoute: ShellAppsAppRouteWithChildren,
   ShellAppsNewRoute: ShellAppsNewRoute,
   ShellIntegrationsIntegrationRoute: ShellIntegrationsIntegrationRoute,
   ShellKnowledgeCollectionRoute: ShellKnowledgeCollectionRoute,
@@ -1199,10 +1229,21 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
   ShellAppsAppEditRoute: ShellAppsAppEditRoute,
   ShellAppsAppSettingsRoute: ShellAppsAppSettingsRoute,
-  ShellLinksAppSurfaceRoute: ShellLinksAppSurfaceRoute,
 }
 
 const ShellRouteWithChildren = ShellRoute._addFileChildren(ShellRouteChildren)
+
+interface AppsAppFullRouteChildren {
+  AppsAppFullSplatRoute: typeof AppsAppFullSplatRoute
+}
+
+const AppsAppFullRouteChildren: AppsAppFullRouteChildren = {
+  AppsAppFullSplatRoute: AppsAppFullSplatRoute,
+}
+
+const AppsAppFullRouteWithChildren = AppsAppFullRoute._addFileChildren(
+  AppsAppFullRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   ShellRoute: ShellRouteWithChildren,
@@ -1214,7 +1255,7 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRoute,
   StaffRoute: StaffRoute,
   DecisionsDecisionRoute: DecisionsDecisionRoute,
-  AppsAppFullRoute: AppsAppFullRoute,
+  AppsAppFullRoute: AppsAppFullRouteWithChildren,
   KitComponentsNameRoute: KitComponentsNameRoute,
   KitExamplesNameRoute: KitExamplesNameRoute,
 }

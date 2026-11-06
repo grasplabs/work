@@ -10,14 +10,14 @@ import { platformLimits } from "./platform-limits.ts";
 /**
  * The most bytes of one operation's input, as UTF-8 JSON: the public
  * operation input limit of spec 18.1, checked on the input as sent, before
- * it is validated, for a call from a screen, an agent, a workflow or
+ * it is validated, for a call from a page, an agent, a workflow or
  * another of the App's functions alike. A store's own bound on one
  * transaction (`commitMaxInputBytes`) is larger and separate.
  */
 export const operationInputMaxBytes = platformLimits.operationInputBytes;
 
 /**
- * The most bytes of one call's request as a screen or agent sends it, as
+ * The most bytes of one call's request as a page or agent sends it, as
  * UTF-8 JSON: the input's own bound and room for the reference and options
  * around it. Every transport reads no more than this before parsing.
  */
@@ -51,7 +51,7 @@ export const stagedReadMaxBytes = 16 * 1024 * 1024;
 
 /**
  * The most bytes of an `AppError`'s details, as UTF-8 JSON (spec 32.6):
- * an error reaches a screen, which is held to what it may receive.
+ * an error reaches a page, which is held to what it may receive.
  */
 export const appErrorDetailsMaxBytes = 16 * 1024;
 
@@ -139,7 +139,7 @@ export { searchQueryMaxLength as knowledgeSearchMaxLength } from "@grasp-os/brai
 /**
  * The most bytes of one progress snapshot, as UTF-8 JSON: what an
  * operation may return (`operationResultMaxBytes`), since a snapshot is
- * delivered to a screen as an answer is.
+ * delivered to a page as an answer is.
  */
 export const streamProgressMaxBytes = operationResultMaxBytes;
 
@@ -151,7 +151,7 @@ export const streamProgressMaxBytes = operationResultMaxBytes;
 export const streamMaxEmits = 1000;
 
 /**
- * How long a running stream waits, once no screen follows it, before the
+ * How long a running stream waits, once no page follows it, before the
  * host asks it to stop: long enough to reconnect, never long enough to
  * turn it into background work.
  */
@@ -159,7 +159,7 @@ export const streamIdleCancelMs = 10_000;
 
 /**
  * How long a finished stream's terminal receipt (its result, and the last
- * progress) is kept for a screen that lost its connection to read again.
+ * progress) is kept for a page that lost its connection to read again.
  */
 export const streamRetentionMs = 15 * 60_000;
 
@@ -178,11 +178,11 @@ export const streamTombstoneMs = 24 * 60 * 60_000;
 
 /**
  * The most streaming actions one person runs at once in one App, beyond
- * which a start is refused (`operation.stream_limit`). A screen follows
+ * which a start is refused (`operation.stream_limit`). A page follows
  * one or two at a time (a draft, an export); each holds a sandbox run for
  * up to a server invocation's wall time (60 s) and an object with its
- * receipt, so four leaves room for a screen and a second tab while a
- * screen that starts them in a loop can't hold more of the deployment's
+ * receipt, so four leaves room for a page and a second tab while a
+ * page that starts them in a loop can't hold more of the deployment's
  * sandbox than that. The request rate limit alone would let it hold
  * dozens.
  */
@@ -193,16 +193,16 @@ export const streamMaxRunning = 4;
  * App through its invocation objects, beyond which a start is refused
  * (`operation.action_limit`). Such a run outlives the request that
  * started it, so its caller can come back for its receipt, and no idle
- * cancel ends it: this, with its deadline, is its only bound. A screen
+ * cancel ends it: this, with its deadline, is its only bound. A page
  * and a second tab firing actions from a form, a list's row buttons or a
- * bulk edit stay well within sixteen; a screen that fires them in a loop
+ * bulk edit stay well within sixteen; a page that fires them in a loop
  * can't hold more of the App's sandbox than that, leaving its other
  * members room (the on-prem sandbox caps sessions per App).
  */
 export const actionMaxRunning = 16;
 
 /**
- * How long a plain action's invocation may run: as long as a screen's
+ * How long a plain action's invocation may run: as long as a page's
  * direct call (core's app-function-route.ts), never the 60 s a streaming
  * action, which someone follows, gets.
  */

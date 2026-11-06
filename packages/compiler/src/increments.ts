@@ -3,14 +3,13 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { Diagnostic } from "./diagnostic.ts";
 import {
   buildFiles,
-  componentsFolder,
   declarationFile,
   isDesignLinted,
-  screenFile,
+  sourceCode,
 } from "./inputs.ts";
-import { screenReferences } from "./kit.ts";
+import { pageReferences } from "./kit.ts";
 
-// What a screens build keeps of each of its files, so the next build of
+// What a pages build keeps of each of its files, so the next build of
 // files that changed only in part reuses it (spec 19.2, GRA-958): each
 // module's transform. Core keeps them as it
 // keeps whole builds, served only as the build that made them wrote them
@@ -52,7 +51,7 @@ export interface Increments {
  * How much of a build was done now and how much reused: counts, as the
  * compiler's isolate can't time its own work (a Worker's clock stands
  * still while it computes). Core times what it can: putting the build
- * together from what it kept, and the compiler's run (screens.ts).
+ * together from what it kept, and the compiler's run (pages.ts).
  */
 export interface BuildMetrics {
   /** Modules transformed now, and reused. */
@@ -108,12 +107,13 @@ export const moduleKey = async ({
   ]);
 
 /**
- * What a screens build compiles of `app` (its build files): its screens,
- * components and the references they import, never a declaration (only
- * types); the paths they may import (`known`); and what their types may
- * name (`typeFiles`), the build's files and its declarations.
+ * What a pages build compiles of `app` (its build files): its front
+ * end under `src/` and the references it imports, never a declaration
+ * (only types), nor the route tree, which every build makes afresh
+ * (route-tree.ts); the paths they may import (`known`); and what their
+ * types may name (`typeFiles`), the build's files and its declarations.
  */
-export const screenSources = (
+export const pageSources = (
   app: Readonly<Record<string, string>>
 ): {
   sources: [string, string][];
@@ -121,12 +121,7 @@ export const screenSources = (
   typeFiles: string[];
 } => {
   const sources = Object.entries(app)
-    .filter(
-      ([path]) =>
-        screenFile.test(path) ||
-        componentsFolder.isFile(path) ||
-        path === screenReferences.path
-    )
+    .filter(([path]) => sourceCode.isFile(path) || path === pageReferences.path)
     .filter(([path]) => !declarationFile.test(path));
   return {
     sources,
@@ -136,8 +131,8 @@ export const screenSources = (
 };
 
 /**
- * What the design lint of a screen or a component reads beside it
- * (`lintKey`): the App's screens and components (`app`, those
+ * What the design lint of a page or a component reads beside it
+ * (`lintKey`): the App's pages and components (`app`, those
  * `isDesignLinted` reads), as one key.
  */
 export const designContextKey = async (
@@ -150,9 +145,9 @@ export const designContextKey = async (
 
 /**
  * The key Ultracite's lint of `path` (`source`) is kept under (`lint`,
- * ultracite.ts): its result reads that file alone, and, of a screen or a
+ * ultracite.ts): its result reads that file alone, and, of a page or a
  * component, the App's others (`designContext`, `designContextKey`),
- * which a screen may wrap the kit's components in. The compiler's
+ * which a page may wrap the kit's components in. The compiler's
  * version, which every cache key holds, stands for the rules.
  */
 export const lintKey = async (
@@ -230,13 +225,13 @@ export const lintRecordOf = (
     ? { path, diagnostics: value.diagnostics }
     : undefined;
 
-/** The keys of what a screens build of `files` may reuse: each module's transform, by its path. */
-export const screenIncrementKeys = async (
+/** The keys of what a pages build of `files` may reuse: each module's transform, by its path. */
+export const pageIncrementKeys = async (
   files: Readonly<Record<string, string>>,
   preview: boolean
 ): Promise<{ modules: Record<string, string> }> => {
   const app = buildFiles({ ...files });
-  const { sources, known, typeFiles } = screenSources(app);
+  const { sources, known, typeFiles } = pageSources(app);
   const modules = await Promise.all(
     sources.map(
       async ([path, source]) =>

@@ -467,7 +467,7 @@ describe("a list shared again while the plan runs", () => {
     const linksBefore = await links();
     const saved = await api.onboarding.saveRoster(sharedAgain);
     const beforeConfirmed = await store.releaseDue(now);
-    // On the confirm screen the admin picks Oli to lead Ops.
+    // On the confirm page the admin picks Oli to lead Ops.
     const confirmed = await api.onboarding.confirmRoster({
       ...sharedAgain,
       teams: sharedAgain.teams.map((team) =>

@@ -224,7 +224,7 @@ const run = async (
   return await result();
 };
 
-/** The App's notes, as its builder's screen would read them. */
+/** The App's notes, as its builder's page would read them. */
 const titlesOf = async ({
   builder,
   app,

@@ -59,7 +59,7 @@ const opensSource = async (
 };
 
 /**
- * A signed-in person's `decisions`: for screens, the decision's page and
+ * A signed-in person's `decisions`: for pages, the decision's page and
  * the inbox.
  * Every call checks the session first and hands the
  * identity that check returned, with its role and teams read now, to the
@@ -67,7 +67,7 @@ const opensSource = async (
  *
  * `confirm` is the trusted host decision UI's alone: the page calls it
  * once the person confirmed an answer in Grasp's own dialog, and an App's
- * screen, whose bridge reaches `screens` only, never can.
+ * page, whose bridge reaches `pages` only, never can.
  */
 export class DecisionsRpc extends CoreRpcTarget implements DecisionsApi {
   readonly #env: Env;

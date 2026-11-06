@@ -60,7 +60,7 @@ export const hostileName = "hostile-widget";
  * a worker made from a computed name, `importScripts` and a fetch
  * elsewhere. It posts each policy violation the browser reports to it as
  * it comes, and what happened to each attempt once the last one settled.
- * In a page it does nothing: a screen can't load it (the screen test).
+ * In a page it does nothing: a page can't load it (the page test).
  */
 const entryCode = (attacker: string): string => `"use strict";
 (() => {

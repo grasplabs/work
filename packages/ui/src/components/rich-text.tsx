@@ -12,18 +12,18 @@ import type { Components } from "react-markdown";
 // (react-markdown's default URL transform: http, https, mailto and the
 // like, never `javascript:`), and an image shows as its words, never
 // loaded from its address. Headings read as bold paragraphs: formatted
-// text inside a screen never outranks the screen's own headings.
+// text inside a page never outranks the page's own headings.
 //
-// An App's screen runs in a frame that opens nothing itself: it opens a
+// An App's page runs in a frame that opens nothing itself: it opens a
 // URL through one of the App's links resources (`client.links.open`). So
 // given the resource (`links`), a link is a button that opens its address
 // through it; without one, the link's words show with their address
 // beside them, to read.
 
-/** The links resource a link's address opens through, if the screen gave one. */
+/** The links resource a link's address opens through, if the page gave one. */
 const Links = createContext<LinksReference | undefined>(undefined);
 
-/** A link that opens its address through the screen's links resource. */
+/** A link that opens its address through the page's links resource. */
 const OpeningLink = ({
   links,
   href,

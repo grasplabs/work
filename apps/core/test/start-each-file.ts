@@ -75,7 +75,7 @@ await Promise.all([
   import("../src/app-tests.ts"),
   import("../src/app-activation.ts"),
   import("../src/app-releases.ts"),
-  import("../src/screen-references.ts"),
+  import("../src/page-references.ts"),
 ]);
 
 /** Migrations, read by vite.config.ts into bindings. */

@@ -6,9 +6,9 @@ import {
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import {
   appFunctionPath,
-  screenLeaseHeader,
-  screenPersonHeader,
-} from "@grasp-os/shared/screens";
+  pageLeaseHeader,
+  pagePersonHeader,
+} from "@grasp-os/shared/pages";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -64,7 +64,7 @@ const visitedApp = async (
   return { builder, app: id, link };
 };
 
-/** A Notes App's files: one function, one screen. */
+/** A Notes App's files: one function, one page. */
 const notesFiles: Record<string, string> = {
   ...appDefinition({
     name: "Notes",
@@ -85,39 +85,12 @@ export const titles = query({
 });
 `,
 
-  "screens/notes.tsx": `export default function Notes() {
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Notes() {
   return <p>Notes</p>;
 }
-`,
-};
 
-/**
- * The Notes App routed: `detail` at `/items/:id`, which sorts first and
- * needs an ID, and `home` at `/`, which needs nothing.
- */
-const routedNotesFiles: Record<string, string> = {
-  ...notesFiles,
-  "screens.ts": `import { v } from "@grasp-os/sdk";
-
-export default {
-  screens: [
-    {
-      name: "detail",
-      path: "/items/:id",
-      source: "screens/detail.tsx",
-      input: v.object({ id: v.string() }),
-    },
-    { name: "home", path: "/", source: "screens/home.tsx" },
-  ],
-};
-`,
-  "screens/detail.tsx": `export default function Detail() {
-  return <p>Detail</p>;
-}
-`,
-  "screens/home.tsx": `export default function Home() {
-  return <p>Home</p>;
-}
+export const Route = createFileRoute("/")({ component: Notes });
 `,
 };
 
@@ -172,10 +145,7 @@ const signIn = async (
 const visitSchema = z.object({
   app: z.string(),
   name: z.string(),
-  screen: z
-    .object({ app: z.string(), lease: z.string(), screen: z.string() })
-    .loose()
-    .nullable(),
+  page: z.object({ app: z.string(), lease: z.string() }).loose().nullable(),
 });
 
 /** Opens with `token`: what it opens, or the refusal's code. */
@@ -527,7 +497,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
     });
   });
 
-  it("opens only its own App's first screen, never another App, and calls none of the App's functions", async () => {
+  it("opens only its own App's first page, never another App, and calls none of the App's functions", async () => {
     const domain = newDomain();
     const first = await visitedApp([{ kind: "domain", value: domain }]);
     const second = await visitedApp([{ kind: "domain", value: domain }]);
@@ -547,8 +517,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
     // Its lease is for the visitor, whom no member's session is: a call
     // with it, signed out or as a member, is refused before it runs.
     const member = await signedInApi(idp, "admin");
-    const lease =
-      typeof opened === "string" ? "" : (opened.screen?.lease ?? "");
+    const lease = typeof opened === "string" ? "" : (opened.page?.lease ?? "");
     const call = async (as?: Person) =>
       await answerOf(
         await routed(`${appFunctionPath}/${first.app}`, {
@@ -556,10 +525,10 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
           headers: {
             origin: clientOrigin,
             "content-type": "application/json",
-            [screenLeaseHeader]: lease,
+            [pageLeaseHeader]: lease,
             ...(as === undefined
               ? {}
-              : { cookie: as.session, [screenPersonHeader]: as.userId }),
+              : { cookie: as.session, [pagePersonHeader]: as.userId }),
           },
           body: "{}",
         })
@@ -574,7 +543,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
           : {
               app: opened.app,
               name: opened.name,
-              screen: opened.screen?.screen,
+              opens: opened.page?.app === opened.app,
               leased: lease.length > 0,
             },
       forged,
@@ -584,7 +553,7 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
       opened: {
         app: first.app,
         name: "Client portal",
-        screen: "notes",
+        opens: true,
         leased: true,
       },
       forged: "visitor.signed_out",
@@ -592,8 +561,8 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
         // No member's session: refused before anything is read.
         { status: 401, code: "auth.unauthenticated" },
         // A member, with the visitor's lease: it isn't theirs, so the
-        // screen is code core didn't serve them, and refused.
-        { status: 403, code: "screen.unreviewed" },
+        // page is code core didn't serve them, and refused.
+        { status: 403, code: "page.unreviewed" },
       ],
     });
   });
@@ -877,25 +846,6 @@ describe("an App's visitors", { timeout: 120_000 }, () => {
       listed: expected.listed,
       unlisted: expected.unlisted,
     });
-  });
-
-  it("opens a visitor at the route that needs no input, whichever screen sorts first", async () => {
-    const domain = newDomain();
-    const { builder, app, link } = await visitedApp([
-      { kind: "domain", value: domain },
-    ]);
-    await releasedNotes(builder, app, routedNotesFiles);
-    const mail = await mailbox();
-    const visitor = `ro@${domain}`;
-    await ask(link, visitor);
-    const token = await signIn(link, visitor, await lastCode(mail, visitor));
-    const opened = await open(token);
-
-    expect(
-      typeof opened === "string"
-        ? opened
-        : { screen: opened.screen?.screen, route: opened.screen?.route }
-    ).toStrictEqual({ screen: "home", route: "home" });
   });
 
   it("never keep a session past an unpublish: ending them fails the unpublish, and a sign-in that lands after one opens nothing", async () => {

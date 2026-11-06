@@ -74,7 +74,7 @@ import {
 //   grants; and a request asks for a permission for the workflow it
 //   names, never for the agent (`subject` is set here, whatever the code
 //   passes).
-// - Code nobody reviewed going live. An App's screens start only the
+// - Code nobody reviewed going live. An App's pages start only the
 //   version their sealed release pinned, so a new binding reaches them
 //   only through an App version a builder makes current. An App's server
 //   code starts what the alias binds as it starts (app-workflow-bindings.ts),

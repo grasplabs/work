@@ -18,7 +18,7 @@ import {
   withEventWaits,
   withLoops,
 } from "../../../packages/workflow-schema/test/fixtures.ts";
-import { buildGeneratedWorkflow } from "../src/screens.ts";
+import { buildGeneratedWorkflow } from "../src/pages.ts";
 
 // grasp-workflow/1's generated code, held to the compiler's own type
 // check against the SDK's real declarations, as the host's generated

@@ -22,7 +22,7 @@ import type {
 // App's release and its generated `@server/_generated/api` references, and runs each suite
 // with `runAppSuite` over a host it passes in: every call a test principal
 // makes crosses back into core, which runs it through the real operation
-// host on a fixture store of the test's own, as it runs a screen's call.
+// host on a fixture store of the test's own, as it runs a page's call.
 // Nothing here stands in for core; what a test asserts is what the App
 // answered.
 
@@ -54,7 +54,7 @@ export type PublicReference<Kind extends ReferenceKind> = Callable<
 export const maxBufferedSnapshots = 100;
 
 /**
- * A live query a principal follows (`subscribe`), as a screen follows
+ * A live query a principal follows (`subscribe`), as a page follows
  * one: core reads it again after every write that changed what it read,
  * as the principal, and pushes each result in order.
  */
@@ -73,7 +73,7 @@ export interface LiveQuery<Value> {
 /**
  * A fixture principal (`t.as`): someone with the role in the App the
  * suite's fixture gives them. Each call goes to core, which resolves the
- * reference against the App's release as it resolves a screen's, and
+ * reference against the App's release as it resolves a page's, and
  * runs the function through the operation host. A call answers the
  * function's value; a failure fails the test, unless the test expects it
  * with `t.rejectsCode`.
@@ -95,7 +95,7 @@ export interface TestPrincipal {
    * outside systems aren't the tests' to touch.
    */
   action: <Reference extends PublicReference<"action">>(
-    // A streaming action runs only for a screen following it (spec
+    // A streaming action runs only for a page following it (spec
     // 10.7.6), never through a call that answers once: its type is
     // refused here, as the host refuses it (`operation.mode_mismatch`),
     // and so is a union any member of which streams (not distributed).
@@ -104,7 +104,7 @@ export interface TestPrincipal {
   ) => Promise<ReturnOf<Reference>>;
   /**
    * Follows one of the App's public queries, through the realtime
-   * subscription a screen follows one through. A test that doesn't
+   * subscription a page follows one through. A test that doesn't
    * `close` it has it closed as it ends.
    */
   subscribe: <Reference extends PublicReference<"query">>(
@@ -113,7 +113,7 @@ export interface TestPrincipal {
   ) => Promise<LiveQuery<ReturnOf<Reference>>>;
   /**
    * Starts a run of one of the workflows the App binds (`workflows` from
-   * `@server/_generated/api`), as a screen's `useWorkflow` starts one: the same version,
+   * `@server/_generated/api`), as a page's `useWorkflow` starts one: the same version,
    * run on the real engine, with nothing of the organization's around it.
    * A model call answers what the fixture gives its binding
    * (`workflows.<alias>.models.<binding>`): no model is ever asked. A store
@@ -416,7 +416,7 @@ export interface AppTestSession {
   principal: (name: string) => Promise<string | undefined>;
   /**
    * Calls a function as principal `name`: `request` is the call's JSON
-   * text (`{ reference, input }`), as a screen sends it, and the answer
+   * text (`{ reference, input }`), as a page sends it, and the answer
    * the JSON text of what the call answered (an `OperationResult`).
    */
   call: (name: string, request: string) => Promise<string>;
@@ -434,7 +434,7 @@ export interface AppTestSession {
     onLost: () => void
   ) => Promise<{ subscription: AppTestSubscription } | { refusal: string }>;
   /**
-   * Starts a workflow as principal `name`: `request` is a screen's start's
+   * Starts a workflow as principal `name`: `request` is a page's start's
    * JSON text (`{ workflow, command: "start", input, idempotencyKey }`),
    * and the answer the JSON text of an `OperationResult` holding the run's
    * number in the session (`{ run }`).
@@ -614,7 +614,7 @@ const readPush = (
  * How many times in a row core may let go of a live query, with no
  * snapshot in between, before the test fails: on that loss, it does. Core
  * lets go of one it can't keep fresh for now (a read that met a
- * concurrent write, a store that restarted), and a screen follows it
+ * concurrent write, a store that restarted), and a page follows it
  * again from a fresh read; so does a test, but one core can't keep
  * following at all fails it.
  */
@@ -631,7 +631,7 @@ interface Attempt {
 /**
  * Follows `reference` with `args` as principal `name` (`subscribe`): the
  * snapshots core pushes, one at a time and in order, are kept until
- * `next` takes them. Lost, it follows again, as a screen does, from a
+ * `next` takes them. Lost, it follows again, as a page does, from a
  * fresh read: a new subscription, whose predecessor's late pushes are
  * dropped.
  */
@@ -882,13 +882,13 @@ const numberOf = (test: RunningTest, run: unknown): number => {
   return started.number;
 };
 
-/** A key for one start, as a screen makes one: 16 random bytes in hex. */
+/** A key for one start, as a page makes one: 16 random bytes in hex. */
 const startKey = (): string =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
     byte.toString(16).padStart(2, "0")
   ).join("");
 
-/** The start request for `reference` with `input`, as a screen sends it. */
+/** The start request for `reference` with `input`, as a page sends it. */
 const startRequestFor = (reference: unknown, input: unknown): string => {
   if (!isRecord(reference) || reference.kind !== "workflow") {
     throw new TestAssertionError(

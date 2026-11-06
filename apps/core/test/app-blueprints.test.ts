@@ -88,13 +88,16 @@ const notesOf = async (person: Person, app: string): Promise<unknown> =>
 /** A copy has every file of it but AGENTS.md, which starts as a stub. */
 const v1 = {
   ...notesCode,
-  "screens/notes.tsx": `import { useQuery } from "@grasp-os/sdk/react";
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 
-export default function Notes() {
+function Notes() {
   const notes = useQuery(api.notes.list, {});
   return <p>{notes?.join(", ")}</p>;
 }
+
+export const Route = createFileRoute("/")({ component: Notes });
 `,
   "AGENTS.md": "# Notes\n",
 };

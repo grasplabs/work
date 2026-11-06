@@ -1,8 +1,8 @@
 import { appDefinition } from "../apps/core/test/app-definitions.ts";
 
 /**
- * Apps whose screens attack the page around their frame, for
- * screen-attacks.e2e.ts: one leaves for the attacker's address, one for
+ * Apps whose pages attack the page around their frame, for
+ * page-attacks.e2e.ts: one leaves for the attacker's address, one for
  * another address of the page's own origin, one never renders and says it
  * did, one tries to make a document of its own and reach WebRTC, and one
  * tries to run code that isn't its
@@ -15,7 +15,7 @@ import { query } from "@server/_generated/server";
 
 export const secret = query({ args: {}, returns: v.string(), handler: () => "fictional-marker-7f3a" });
 
-// HTML as a function might answer it for a screen to show, an email's body
+// HTML as a function might answer it for a page to show, an email's body
 // say, carrying a script of its own.
 export const html = query({
   args: {},
@@ -24,27 +24,18 @@ export const html = query({
 });
 `;
 
-/** The screens of an App of `screens`, each `screens/<name>.tsx`. */
-const screensOf = (
-  screens: readonly string[]
-): string => `import { v } from "@grasp-os/sdk";
-
-export default {
-  screens: [${screens.map((name) => `{ name: "${name}", path: "/${name}", source: "screens/${name}.tsx", input: v.object({ note: v.string().optional() }) }`).join(", ")}],
-};
-`;
-
 /**
  * Renders, then sends its own frame to `attacker`, with what its App's
  * query answered in the address: a sandboxed frame may navigate itself.
  */
-const leavingScreen = (
+const leavingPage = (
   attacker: string
-): string => `import { useQuery } from "@grasp-os/sdk/react";
+): string => `import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@grasp-os/sdk/react";
 import { useEffect } from "react";
 import { api } from "@server/_generated/api";
 
-export default function Leaving() {
+function Leaving() {
   const secret = useQuery(api.attacks.secret, {});
   useEffect(() => {
     if (secret !== undefined) {
@@ -53,6 +44,7 @@ export default function Leaving() {
   }, [secret]);
   return <main><h1>Leaving</h1></main>;
 }
+export const Route = createFileRoute("/")({ component: Leaving });
 `;
 
 /**
@@ -60,63 +52,72 @@ export default function Leaving() {
  * load the page never started: the one place the page's policy lets a
  * frame go.
  */
-const wanderingScreen = `import { useEffect } from "react";
+const wanderingPage = `import { createFileRoute } from "@tanstack/react-router";
+import { useEffect } from "react";
 
-export default function Wandering() {
+function Wandering() {
   useEffect(() => {
-    location.href = "/screen-frame?load=a-load-of-its-own";
+    location.href = "/page-frame?load=a-load-of-its-own";
   }, []);
   return <main><h1>Wandering</h1></main>;
 }
+export const Route = createFileRoute("/")({ component: Wandering });
 `;
 
 /**
  * Renders, then sends more in one message than the page takes over the
  * frame's port. The SDK's client bounds a function's request before it
- * sends it, so this opens a screen with input its route takes, whose
- * request crosses the port before anything reads it.
+ * sends it, so this moves its router to an address of that size, which
+ * the frame tells the page of before anything reads it.
  */
-const oversizedScreen = `import { useNavigate } from "@grasp-os/sdk/react";
+const oversizedPage = `import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { screens } from "@server/_generated/api";
 
-export default function Oversized() {
+function Oversized() {
   const navigate = useNavigate();
   useEffect(() => {
-    void navigate(screens.oversized, { note: "x".repeat(300_000) }).catch(() => undefined);
+    void navigate({ to: "/oversized", hash: "x".repeat(300_000) });
   }, [navigate]);
   return <main><h1>Oversized</h1></main>;
 }
+export const Route = createFileRoute("/")({ component: Oversized });
 `;
 
 /**
- * Never renders: it throws instead. Before that, as its module loads, it
- * tells the page it has mounted, every way a screen can make that up: it
+ * Never renders: its route's loader never settles. Before that, as its
+ * module loads, it
+ * tells the page it has mounted, every way a page can make that up: it
  * can read its frame's load from its own address, but was never told the
  * hash of its code or the page's name for this start.
  */
-const stuckScreen = `const load = new URLSearchParams(location.search).get("load");
+const stuckPage = `import { createFileRoute } from "@tanstack/react-router";
+
+const load = new URLSearchParams(location.search).get("load");
 const made = (text: string): string => text.repeat(64);
 const forged = [
-  { type: "grasp:screen-mounted", load, artifact: made("0"), generation: crypto.randomUUID() },
-  { type: "grasp:screen-mounted", load, artifact: made("a"), generation: load },
-  { type: "grasp:screen-mounted", load },
-  { type: "grasp:screen-mounted", load, artifact: made("0"), generation: "1", trusted: true, approved: true },
-  { type: "grasp:screen-ready", load },
-  "grasp:screen-mounted",
+  { type: "grasp:page-mounted", load, artifact: made("0"), generation: crypto.randomUUID() },
+  { type: "grasp:page-mounted", load, artifact: made("a"), generation: load },
+  { type: "grasp:page-mounted", load },
+  { type: "grasp:page-mounted", load, artifact: made("0"), generation: "1", trusted: true, approved: true },
+  { type: "grasp:page-ready", load },
+  "grasp:page-mounted",
 ];
 for (const message of forged) {
   parent.postMessage(message, "*");
 }
 document.body.dataset.forged = String(forged.length);
 
-export default function Stuck(): never {
-  throw new Error("This screen never renders");
+function Stuck() {
+  return <main><h1>Stuck</h1></main>;
 }
+export const Route = createFileRoute("/")({
+  loader: async () => await new Promise<never>(() => undefined),
+  component: Stuck,
+});
 `;
 
 /**
- * Tries every way a screen could make a document of its own, each a
+ * Tries every way a page could make a document of its own, each a
  * realm with its own WebRTC and network, past the compiler (the names it
  * refuses are spelled so it can't read them): the HTML parser's sinks, a
  * namespace prefix, a tag name that changes between two conversions,
@@ -127,13 +128,14 @@ export default function Stuck(): never {
  * `preconnect`, `prefetch`). Says what each did, and how many windows the
  * frame holds after it.
  */
-const turnScreen = ({
+const turnPage = ({
   attacker,
   turn,
 }: {
   attacker: string;
   turn: string;
-}): string => `import { useEffect, useState } from "react";
+}): string => `import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 const unread = (...parts: string[]): string => parts.join("");
 const scope: Record<string | number, unknown> = globalThis as never;
@@ -329,7 +331,7 @@ const routes = (): Record<string, string> => {
   });
   // An address slipped in through Array.prototype, for a lock that reads
   // its arguments from an array: a missing index reads, and a write to it
-  // calls, whatever the screen put there.
+  // calls, whatever the page put there.
   results.linkArrayPrototype = (() => {
     const link = document.createElementNS(XHTML, unread("li", "nk"));
     link.setAttribute("rel", "preconnect");
@@ -372,7 +374,7 @@ const routes = (): Record<string, string> => {
   return results;
 };
 
-export default function Turn() {
+function Turn() {
   const [outcome, setOutcome] = useState("");
   useEffect(() => {
     setOutcome(JSON.stringify(routes()));
@@ -384,16 +386,18 @@ export default function Turn() {
     </main>
   );
 }
+export const Route = createFileRoute("/")({ component: Turn });
 `;
 
 /**
- * Its build lets in code that isn't part of it, every way a screen's own
+ * Its build lets in code that isn't part of it, every way a page's own
  * code can: it writes HTML its App's query answered (with an `onerror`
  * attribute) into the page, adds an inline script and modules from
  * `data:` and `blob:` addresses, and evaluates text. Says what each did;
  * whatever ran marks the frame's body.
  */
-const injectingScreen = `import { useQuery } from "@grasp-os/sdk/react";
+const injectingPage = `import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@grasp-os/sdk/react";
 import { useEffect, useState } from "react";
 import { api } from "@server/_generated/api";
 
@@ -446,7 +450,7 @@ const inject = async (html: string): Promise<Record<string, string>> => {
   };
 };
 
-export default function Injecting() {
+function Injecting() {
   const html = useQuery(api.attacks.html, {});
   const [tried, setTried] = useState("");
   useEffect(() => {
@@ -463,15 +467,17 @@ export default function Injecting() {
     </main>
   );
 }
+export const Route = createFileRoute("/")({ component: Injecting });
 `;
 
 /**
  * Editable fields, for markup pasted into them: what a person pastes from
  * anywhere may hold a nested document. One in the document, one inside an
- * open shadow root and one inside a closed one, whose text the screen
+ * open shadow root and one inside a closed one, whose text the page
  * says itself (nothing outside reaches a closed root).
  */
-const pastingScreen = `import { useEffect, useRef, useState } from "react";
+const pastingPage = `import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
 
 const shadowField = (host: HTMLElement, mode: "open" | "closed"): HTMLElement => {
   const field = document.createElement("div");
@@ -484,7 +490,7 @@ const shadowField = (host: HTMLElement, mode: "open" | "closed"): HTMLElement =>
   return field;
 };
 
-export default function Pasting() {
+function Pasting() {
   const open = useRef<HTMLDivElement>(null);
   const closed = useRef<HTMLDivElement>(null);
   const [closedText, setClosedText] = useState("");
@@ -540,9 +546,10 @@ export default function Pasting() {
     </main>
   );
 }
+export const Route = createFileRoute("/")({ component: Pasting });
 `;
 
-/** The attacking App's files: a screen for each attack. */
+/** The attacking App's files: a page for each attack. */
 export const attackAppFiles = ({
   attacker,
   turn,
@@ -550,34 +557,31 @@ export const attackAppFiles = ({
   attacker: string;
   turn: string;
 }): Record<string, string> => {
-  const screens: Record<string, string> = {
-    leaving: leavingScreen(attacker),
-    wandering: wanderingScreen,
-    oversized: oversizedScreen,
-    stuck: stuckScreen,
-    turn: turnScreen({ attacker, turn }),
-    pasting: pastingScreen,
-    injecting: injectingScreen,
+  const pages: Record<string, string> = {
+    leaving: leavingPage(attacker),
+    wandering: wanderingPage,
+    oversized: oversizedPage,
+    stuck: stuckPage,
+    turn: turnPage({ attacker, turn }),
+    pasting: pastingPage,
+    injecting: injectingPage,
   };
   return {
     ...appDefinition({ name: "Attacks", tables: {} }),
     "server/attacks.ts": operations,
-
-    "screens.ts": screensOf(Object.keys(screens)),
     ...Object.fromEntries(
-      Object.entries(screens).map(([name, code]) => [
-        `screens/${name}.tsx`,
-        code,
+      Object.entries(pages).map(([name, code]) => [
+        `src/routes/${name}.tsx`,
+        // Each its own route, `/<name>`.
+        code.replace('createFileRoute("/")', `createFileRoute("/${name}")`),
       ])
     ),
   };
 };
 
-/** The attacking App with only its injecting screen. */
+/** The attacking App with only its injecting page. */
 export const injectingAppFiles = (): Record<string, string> => ({
   ...appDefinition({ name: "Attacks", tables: {} }),
   "server/attacks.ts": operations,
-
-  "screens.ts": screensOf(["injecting"]),
-  "screens/injecting.tsx": injectingScreen,
+  "src/routes/index.tsx": injectingPage,
 });

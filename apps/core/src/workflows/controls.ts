@@ -176,7 +176,7 @@ const writeReceipt = async (
   row: RunRow,
   kind: ControlKind,
   done: boolean,
-  via?: "screen",
+  via?: "page",
   cancelledAt?: number
 ): Promise<string | undefined> => {
   const db = drizzle(env.DB);
@@ -429,7 +429,7 @@ const control = async (
   by: Requester,
   run: RunRow,
   kind: ControlKind,
-  via?: "screen"
+  via?: "page"
 ): Promise<RunControl> => {
   let row = run;
   // Once more each time another request was admitted for the run between
@@ -623,7 +623,7 @@ export const cancelRunsOf = async (
       }
     })
   );
-  // And the independent runs the App started, from its screens or its
+  // And the independent runs the App started, from its pages or its
   // code, within what is left of the limit: archived, the App acts on
   // nobody's behalf any more.
   const started = await stopRunsStartedBy(

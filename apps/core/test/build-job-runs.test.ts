@@ -31,7 +31,7 @@ import {
   envOf,
   storedTrees,
   writtenMeanwhile,
-  screenBuilds,
+  pageBuilds,
   submittedJob,
   endedJob,
   noticed,
@@ -73,7 +73,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       says("The invoice desk is proposed for review."),
     ]);
 
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     let job: z.infer<typeof jobRowSchema>;
     let run: { ended_at: number | null } | undefined;
     const answering = chat.ask("Build an invoice desk for invoices@");
@@ -168,7 +168,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       says("The invoice desk is proposed for review."),
     ]);
 
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     let job: z.infer<typeof jobRowSchema>;
     const answering = chat.ask("Build an invoice desk for invoices@");
     // The chat's object refuses the first notice, as one out of reach
@@ -202,7 +202,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       says("The invoice desk is proposed for review."),
     ]);
 
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     let job: z.infer<typeof jobRowSchema>;
     void chat.ask("Build an invoice desk for invoices@").catch(() => "cut");
     try {
@@ -271,7 +271,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       later.reply,
     ]);
 
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     let answering: ReturnType<typeof chat.ask>;
     let job: z.infer<typeof jobRowSchema>;
     try {
@@ -315,7 +315,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     const waiting = pausedReply(says("I'll say once the build is done."), 3);
     const { chat } = await setUp([building.reply, waiting.reply]);
 
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     void chat.ask("Build an invoice desk for invoices@").catch(() => "cut");
     const woken = workspace(env, chat.id);
     let job: z.infer<typeof jobRowSchema>;
@@ -365,7 +365,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       waiting.reply,
     ]);
 
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     const answering = chat.ask("Build an invoice desk for invoices@");
     let job: z.infer<typeof jobRowSchema>;
     try {
@@ -396,7 +396,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       codeStep("export default async () => { await scheduler.wait(30_000); };"),
     ]);
 
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     const answering = chat.ask("Build an invoice desk for invoices@");
     let job: z.infer<typeof jobRowSchema>;
     try {
@@ -462,7 +462,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     const { chat } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": desk })});
+        await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": desk })});
         return await Promise.all([1, 2, 3, 4].map(() =>
           env.build.submit(app.id, { kind: "check" }).then(({ job }) => job, (error) => error.message)
         ));
@@ -471,7 +471,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       says("Checking."),
     ]);
     const exhausted = agentErrors.create("agent.jobs_exhausted").message;
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     let submitted: unknown;
     let fifth: unknown;
     let ended: Awaited<ReturnType<typeof endedJob>>;
@@ -522,7 +522,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     await published(shared);
     const { builder, chat } = await setUp([
       codeStep(`export default async (self, env) => {
-        await env.build.write(${JSON.stringify(shared)}, ${JSON.stringify({ "screens/desk.tsx": desk })});
+        await env.build.write(${JSON.stringify(shared)}, ${JSON.stringify({ "src/routes/index.tsx": desk })});
         return await env.build.submit(${JSON.stringify(shared)}, { kind: "check" });
       };`),
       says("Submitted."),
@@ -532,7 +532,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       id: builder.userId,
       role: "builder",
     });
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     let job: z.infer<typeof jobRowSchema>;
     try {
       await chat.ask("Check the shared App");
@@ -605,7 +605,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     await published(shared);
     const { builder, chat } = await setUp([
       codeStep(`export default async (self, env) => {
-        await env.build.write(${JSON.stringify(shared)}, ${JSON.stringify({ "screens/desk.tsx": desk })});
+        await env.build.write(${JSON.stringify(shared)}, ${JSON.stringify({ "src/routes/index.tsx": desk })});
         return await env.build.submit(${JSON.stringify(shared)}, { kind: "check" });
       };`),
       says("Submitted."),
@@ -645,12 +645,12 @@ describe("build jobs", { timeout: 180_000 }, () => {
     const { builder, chat } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": desk })});
+        await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": desk })});
         return await env.build.submit(app.id, { kind: "check" });
       };`),
       says("Submitted."),
     ]);
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     let job: z.infer<typeof jobRowSchema>;
     try {
       await chat.ask("Check an invoice desk");
@@ -757,7 +757,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       codeStep(submitProposal),
       says("Submitted."),
     ]);
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     let job: z.infer<typeof jobRowSchema>;
     let { stub } = chat;
     try {
@@ -792,7 +792,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     const { admin, chat } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": desk })});
+        await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": desk })});
         return await env.build.submit(app.id, { kind: "check" });
       };`),
       says("Submitted."),
@@ -806,7 +806,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       admin,
       readCollection(chat.agent, collectionId, "HANDBOOK")
     );
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     let job: z.infer<typeof jobRowSchema>;
     try {
       await chat.ask("Check an invoice desk");

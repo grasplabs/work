@@ -10,13 +10,13 @@ import {
   waitBackoff,
 } from "../src/build-cache.ts";
 
-// The build cache's lease, called as screens.ts calls it, with core's D1
+// The build cache's lease, called as pages.ts calls it, with core's D1
 // and R2: a holder that outlived its lease and finished late never
 // replaces what the build that took the lease over kept (build-cache.ts).
 
 describe("the build cache's lease", { timeout: 30_000 }, () => {
   it("keeps nothing of a holder that lost its lease over the build that took it over", async () => {
-    const key = `screen-builds/test/${crypto.randomUUID()}.json`;
+    const key = `page-builds/test/${crypto.randomUUID()}.json`;
     const late = Promise.withResolvers<boolean>();
     const building = Promise.withResolvers<boolean>();
     // A lease shorter than this build: it runs out while it builds.
@@ -60,7 +60,7 @@ describe("the build cache's lease", { timeout: 30_000 }, () => {
   });
 
   it("holds the lease through a build of many calls longer than the lease, and only that build runs", async () => {
-    const key = `screen-builds/test/${crypto.randomUUID()}.json`;
+    const key = `page-builds/test/${crypto.randomUUID()}.json`;
     const leaseMs = 1000;
     let builders = 0;
     const started = Promise.withResolvers<boolean>();
@@ -109,7 +109,7 @@ describe("the build cache's lease", { timeout: 30_000 }, () => {
   });
 
   it("gives a build's renewed lease up a lease's time after its holder last renewed it", async () => {
-    const key = `screen-builds/test/${crypto.randomUUID()}.json`;
+    const key = `page-builds/test/${crypto.randomUUID()}.json`;
     const leaseMs = 300;
     const renewed = Promise.withResolvers<number>();
     const never = Promise.withResolvers<never>();
@@ -159,7 +159,7 @@ describe("the build cache's lease", { timeout: 30_000 }, () => {
   });
 
   it("never lets a holder that lost its lease renew it back, nor keep its build", async () => {
-    const key = `screen-builds/test/${crypto.randomUUID()}.json`;
+    const key = `page-builds/test/${crypto.randomUUID()}.json`;
     const aStarted = Promise.withResolvers<boolean>();
     const bBuilding = Promise.withResolvers<boolean>();
     // A: its lease ends while it builds; once B holds the lease, A renews
@@ -216,7 +216,7 @@ describe("the build cache's lease", { timeout: 30_000 }, () => {
   });
 
   it("waits for another holder backing off, not polling core's database at a fixed rate", async () => {
-    const key = `screen-builds/test/${crypto.randomUUID()}.json`;
+    const key = `page-builds/test/${crypto.randomUUID()}.json`;
     await env.DB.prepare(
       "INSERT INTO build_receipts (key, holder, lease_expires_at) VALUES (?, 'elsewhere', ?)"
     )

@@ -4,7 +4,7 @@ import type { CallerCtx } from "@server/_generated/server";
 
 // Whether the person using the page may take a snapshot and write its
 // narrative: the App's builders (an admin is one on every App), as
-// `ctx.auth.getUser()` tells. The screen shows those controls only then;
+// `ctx.auth.getUser()` tells. The page shows those controls only then;
 // the store still checks every write, whatever this answers.
 
 /** Whether the caller is one of the App's builders. */

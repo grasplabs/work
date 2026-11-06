@@ -1,11 +1,8 @@
 import { errorFields, log } from "@grasp-os/shared/log";
-import {
-  querySubscriptionLimits,
-  screenErrors,
-} from "@grasp-os/shared/screens";
+import { querySubscriptionLimits, pageErrors } from "@grasp-os/shared/pages";
 
 // The live queries a business store's object tells of its writes
-// (data-store.ts): each one core is keeping fresh for a screen
+// (data-store.ts): each one core is keeping fresh for a page
 // (query-subscriptions.ts), by the tables its last read read and the
 // generation it read each at. Every write that moves a table's generation
 // (a commit, a migration or backfill batch) is told here once its
@@ -26,7 +23,7 @@ import {
 //   the telling is needed.
 // - A telling twice, or late: a watch is told only of a table it read at
 //   an older generation than the one named.
-// - Screens gone without a word fill the object with watches: core holds
+// - Pages gone without a word fill the object with watches: core holds
 //   a page to its subscriptions; this object holds each person to
 //   `querySubscriptionLimits.perPerson` and the store to
 //   `storeMaxWatches`. Before refusing one, it lets go of every watch
@@ -34,11 +31,11 @@ import {
 //   everyone's at the store's (each at most once per `sweepGapMs`), and
 //   everyone's from the alarm (`sweep`). A watcher that fails to take a
 //   telling is let go at once. A refusal at the store's bound is one core
-//   tries again later, never one that stops a screen for good.
-// - One slow screen holds up the rest: each telling goes on by itself.
+//   tries again later, never one that stops a page for good.
+// - One slow page holds up the rest: each telling goes on by itself.
 // - Telling leaks data: a telling carries table names only, to core,
 //   which reads the query again as its person before anything reaches a
-//   screen.
+//   page.
 
 /**
  * Core's watcher of one live query, as the store keeps it: called with
@@ -110,7 +107,7 @@ export class StoreWatches {
    * generations. Answers the watch's ID, and whether `current` (the
    * store's generations now, read with nothing awaited since) has moved
    * past any of them already; or refuses with
-   * `screen.too_many_queries`, for core to try again later.
+   * `page.too_many_queries`, for core to try again later.
    */
   async watch(
     principal: string,
@@ -133,7 +130,7 @@ export class StoreWatches {
       this.#countOf(principal) >= querySubscriptionLimits.perPerson ||
       this.#watches.size >= storeMaxWatches
     ) {
-      throw screenErrors.create("screen.too_many_queries");
+      throw pageErrors.create("page.too_many_queries");
     }
     const id = crypto.randomUUID();
     this.#watches.set(id, { principal, watcher: watcher.dup(), readSet });

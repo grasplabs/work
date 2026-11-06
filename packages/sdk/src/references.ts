@@ -4,8 +4,8 @@ import type { PaginationResult } from "./database.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 
-// References (spec 8, 32.1): how code names one of an App's functions, a
-// browser-facing resource or a screen, without holding any of them. A
+// References (spec 8, 32.1): how code names one of an App's functions or
+// a browser-facing resource, without holding any of them. A
 // function's reference is its name and kind, nothing more: core resolves
 // the name in the release that answers the call (the App's current one,
 // for a page) and checks the call's arguments with that function's own
@@ -14,7 +14,7 @@ import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 // arguments its validator accepts.
 //
 // The generated modules hold them: `@server/_generated/api` the public
-// `api`, the browser resources, the screens and the preferences (two
+// `api`, the browser resources and the preferences (two
 // function references, preference-operations.ts);
 // `@server/_generated/internal` the `internal` tree, for the App's own
 // server code. Their types come from the functions' descriptors, through
@@ -101,7 +101,7 @@ interface SubmissionFields<Kind extends ReferenceKind> {
 
 /**
  * A streaming action (spec 10.7.6), as App code declares it (its
- * progress schema in `stream`). It runs only for a screen following it
+ * progress schema in `stream`). It runs only for a page following it
  * (`useStream`, `client.stream`): wherever a call answers once
  * (`client.action`, `ctx.runAction`, a test's `action`), its type is
  * refused, as the host refuses the call (`operation.mode_mismatch`). A
@@ -209,92 +209,6 @@ export interface LinksReference<
   readonly kind: "links";
   readonly alias: Alias;
   readonly origins: Origins;
-}
-
-declare const screenInputType: unique symbol;
-declare const surfaceInputType: unique symbol;
-
-/** One of a screen's declared surfaces, as its reference carries it. */
-export interface ScreenSurfaceData {
-  readonly kind: "sidebar" | "panel" | "settings" | "deepLink";
-  /** The descriptor the surface's input is validated with. */
-  readonly input: ValueDescriptor;
-}
-
-/**
- * A generated reference to one of the App's screens. `Surfaces` maps each
- * surface the App declares for it (spec 34.1) to that surface's input.
- */
-export interface ScreenReference<
-  Name extends string = string,
-  Input = unknown,
-  Output = Input,
-  Surfaces extends Readonly<Record<string, unknown>> = Readonly<
-    Record<never, never>
-  >,
-> {
-  readonly name: Name;
-  /** Its route, e.g. `/notes/:id`. */
-  readonly path: string;
-  /** The descriptor its route input is validated with. */
-  readonly input: ValueDescriptor;
-  /** Its declared surfaces, by name. */
-  readonly surfaces: {
-    readonly [Surface in keyof Surfaces]: ScreenSurfaceData;
-  };
-  /** Types only: never set. */
-  readonly [argsType]?: Input;
-  /** Types only: never set. */
-  readonly [screenInputType]?: Output;
-  /** Types only: never set. */
-  readonly [surfaceInputType]?: Surfaces;
-}
-
-/** The route input of `Screen`, as a caller passes it. */
-export type ScreenInputOf<Screen> =
-  Screen extends ScreenReference<string, infer Input> ? Input : never;
-
-/** The names of the surfaces declared for `Screen`. */
-export type SurfaceNameOf<Screen> =
-  Screen extends ScreenReference<string, unknown, unknown, infer Surfaces>
-    ? Extract<keyof Surfaces, string>
-    : never;
-
-/** The input `Screen`'s surface `Surface` is opened with, as a caller passes it. */
-export type SurfaceInputOf<Screen, Surface extends string> =
-  Screen extends ScreenReference<string, unknown, unknown, infer Surfaces>
-    ? Surface extends keyof Surfaces
-      ? Surfaces[Surface]
-      : never
-    : never;
-
-/**
- * The route input `Screen` gets, as its route's schema normalized it
- * (defaults filled in): what the host hands the screen.
- */
-export type ScreenOutputOf<Screen> =
-  Screen extends ScreenReference<string, unknown, infer Output>
-    ? Output
-    : never;
-
-/**
- * The props the host renders `Screen`'s component with (spec 10.7.7):
- * its route input, validated and normalized by the host.
- *
- * The input comes from the page's address, which anyone can put in a
- * link: valid in shape, never proof the person meant it. Read with it;
- * don't change anything on mount because of it (save, start, delete).
- * Changes wait for the person's own click.
- *
- * ```tsx
- * const Note = ({ input }: ScreenProps<typeof screens.note>) => {
- *   const note = useQuery(api.notes.get, { id: input.id });
- *   …
- * };
- * ```
- */
-export interface ScreenProps<Screen> {
-  readonly input: ScreenOutputOf<Screen>;
 }
 
 declare const waitType: unique symbol;

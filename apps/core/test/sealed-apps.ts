@@ -90,7 +90,7 @@ export const seal = async (
 ): Promise<Release> =>
   await sealRelease(env, { app, version, store, by: owner });
 
-/** A public function of an App's release, as a screen names it. */
+/** A public function of an App's release, as a page names it. */
 export interface FunctionName {
   /** Its name, `<module>.<export>`, as its server modules lay it out. */
   readonly name: string;
@@ -98,7 +98,7 @@ export interface FunctionName {
 }
 
 /**
- * What `by` gets calling `name` of App `app` with `input`, as a screen
+ * What `by` gets calling `name` of App `app` with `input`, as a page
  * calls it (`callAppFunction`): by its name, answered by the release of
  * the App's current version.
  */

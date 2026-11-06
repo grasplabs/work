@@ -109,7 +109,7 @@ import type { ReviewContext } from "./confirmations.ts";
 //   exactly that answer, against exactly the review context they saw,
 //   given in the trusted host decision UI (confirmations.ts, GRA-624):
 //   the answer's update requires it, and the same batch takes it. An App's
-//   screen never holds one, and agents never reach this service: it is
+//   page never holds one, and agents never reach this service: it is
 //   answered through a person's session only. A context that changed
 //   since it was reviewed is a `decision.conflict`, never an approval.
 // - An independent workflow's run (a JSON workflow's decision step,
@@ -165,7 +165,7 @@ const ofRun = (run: DecisionRun): SQL =>
  * Tells, for an independent run an App started, the App's connections
  * following its decision queries that it changed.
  */
-const tellRunScreens = async (env: Env, run: DecisionRun): Promise<void> => {
+const tellRunPages = async (env: Env, run: DecisionRun): Promise<void> => {
   if (isResource(run)) {
     await tellDecisionFollowers(env, run.runId);
   }
@@ -240,16 +240,16 @@ const notFound = () => decisionErrors.create("decision.not_found");
 /** The audit entry of something that happened to a decision. */
 /**
  * Where a person answered when not on the decision's own page: on one of
- * App `app`'s screens. The audit log names that App, an independent run's
+ * App `app`'s pages. The audit log names that App, an independent run's
  * decision having none of its own.
  */
-export interface ScreenVia {
+export interface PageVia {
   readonly app: string;
 }
 
 /** What an audit entry's detail says of `via`. */
-const viaDetail = (via: ScreenVia | undefined): Record<string, string> =>
-  via === undefined ? {} : { via: "screen", app: via.app };
+const viaDetail = (via: PageVia | undefined): Record<string, string> =>
+  via === undefined ? {} : { via: "page", app: via.app };
 
 const decisionEntry = (
   actor: AuditActor,
@@ -291,7 +291,7 @@ export const stillOpen = (decisions: DecisionColumns, now: Date): SQL =>
 /**
  * That the independent run `id` names goes on, as a condition: it hasn't
  * ended, paused or not (a paused run takes a timely answer, which it reads
- * once resumed), and no cancel of it was admitted (screen-workflows.ts),
+ * once resumed), and no cancel of it was admitted (page-workflows.ts),
  * which the engine applies later, the run showing as running until then.
  */
 const resourceRunGoesOn = (id: SQL | SQLiteColumn | string): SQL => sql`EXISTS (
@@ -436,7 +436,7 @@ export const openDecision = async (
   // The run now waits for it; a step run again after a crash opened
   // nothing, and tells no one.
   if (inserted) {
-    await tellRunScreens(env, run);
+    await tellRunPages(env, run);
   }
   const opened = await db
     .select({
@@ -934,7 +934,7 @@ export const decisionOutcome = async (
       summaryChanged(db, run),
     ]);
     if (closed) {
-      await tellRunScreens(env, run);
+      await tellRunPages(env, run);
     }
   }
   const row = close ? await runDecision(env, run, decision) : found;
@@ -1343,7 +1343,7 @@ const auditRefusal = async (
   by: Identity,
   found: DecisionWithRun,
   code: RefusalCode,
-  where: { via?: ScreenVia; stage?: "confirm" }
+  where: { via?: PageVia; stage?: "confirm" }
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const { run } = found;
@@ -1473,7 +1473,7 @@ export const confirmDecision = async (
   decision: unknown,
   revision: unknown,
   answer: unknown,
-  via?: ScreenVia
+  via?: PageVia
 ): Promise<DecisionConfirmation> => {
   const found = await decisionWithRun(env, decision);
   const where = via === undefined ? {} : { via };
@@ -1571,8 +1571,8 @@ const refusalOf = async (
  * decision, and needs no confirmation. The answer's update requires the
  * confirmation, and the same batch takes it, audits the answer and owes
  * the run its wake: all of them, or none. `via` says where they answered,
- * when not on the decision's own page: on one of the App's screens
- * (`screen`). The audit log says so.
+ * when not on the decision's own page: on one of the App's pages
+ * (`page`). The audit log says so.
  */
 export const answerDecision = async (
   env: Env,
@@ -1580,7 +1580,7 @@ export const answerDecision = async (
   decision: unknown,
   answer: unknown,
   confirmation: unknown,
-  via?: ScreenVia
+  via?: PageVia
 ): Promise<DecisionView> => {
   const found = await decisionWithRun(env, decision);
   const refuse = async (code: RefusalCode) => {
@@ -1720,7 +1720,7 @@ export const answerDecision = async (
     return await notTaken(matching);
   }
   await sendWake(env, wake.id);
-  await tellRunScreens(env, run);
+  await tellRunPages(env, run);
   return await toView(env, {
     ...found,
     decision: answered,

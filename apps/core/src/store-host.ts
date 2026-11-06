@@ -577,7 +577,7 @@ const purgePage = 1000;
  * `~preferences/<person>`, whose generation is that person's revision
  * (`sdk_preferences.revision`, 0 for none). Per person, so one person's
  * write tells only the reads of their own preferences: nobody else's
- * screen hears of it, or spends its budget reading again. `~` starts no
+ * page hears of it, or spends its budget reading again. `~` starts no
  * table name an author can give (`tableNameSchema`), so it never names one.
  */
 const preferencesWatchPrefix = "~preferences/";

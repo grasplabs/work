@@ -101,7 +101,7 @@ export interface PackageRevokedNotification {
 
 /**
  * What an App's server code told the person (`ctx.notifyPeople`, core's
- * app-notifications.ts): its title, body and the screen it opens on.
+ * app-notifications.ts): its title and body; it opens the App.
  * Listed while they can still open the App, by its name now.
  */
 export interface AppMessageNotification {
@@ -111,8 +111,6 @@ export interface AppMessageNotification {
   appName: string;
   title: string;
   body: string | null;
-  /** The App's screen it opens on; null for the App's first. */
-  screen: string | null;
   /** When it was sent (ISO 8601). */
   at: string;
   read: boolean;
@@ -186,18 +184,14 @@ export const appNotificationMaxRecipients = 50;
  */
 export const appNotificationsPerHour = 200;
 
-/** A screen's name, as the App's page opens it (`?screen=`). */
-const screenSchema = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_./-]{0,127}$/u);
-
 /**
- * What App code sends: a title, a body if it has one, and the App's screen
+ * What App code sends: a title, a body if it has one, and the App's page
  * to open on (`link`), the App's first when it names none or one the App
  * doesn't have. Never a URL: a notification opens the App, nothing else.
  */
 export const appNotificationMessageSchema = z.strictObject({
   title: z.string().trim().min(1).max(appNotificationTitleMax),
   body: z.string().trim().max(appNotificationBodyMax).optional(),
-  link: screenSchema.optional(),
 });
 
 export type AppNotificationMessage = z.infer<

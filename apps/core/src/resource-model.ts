@@ -189,7 +189,7 @@ const generate = async (
         Math.max(1, Math.floor(context.deadline - Date.now()))
       ),
       purpose: "app.resource",
-      // The App for a screen's call; the run for a workflow's, whose
+      // The App for a page's call; the run for a workflow's, whose
       // workflow and run lineage then count it too, as they do for a call
       // made, through other Apps, from a run's: its requests are the
       // run's, besides the called App's binding.

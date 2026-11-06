@@ -2,7 +2,7 @@ import { platformLimits } from "./platform-limits.ts";
 
 // The constants and message types of App files (app-files.ts), apart and
 // with nothing but the platform's limits imported: the runtime in every
-// screen's frame carries them, and can't bring Zod along.
+// page's frame carries them, and can't bring Zod along.
 
 /** Where core's file channel is: `<path>/<app>/<resource alias>/…`. */
 export const appFilesPath = "/api/app-files";
@@ -40,7 +40,7 @@ export const fileLimits = {
    */
   resources: 64,
   /**
-   * Transfers the page runs for one frame at once: a screen that starts
+   * Transfers the page runs for one frame at once: a page that starts
    * more is refused, so one frame never floods the page.
    */
   frameTransfers: 4,
@@ -53,7 +53,7 @@ export const fileLimits = {
 } as const;
 
 /**
- * The types a file may be, and whether a screen may preview one in its
+ * The types a file may be, and whether a page may preview one in its
  * frame. Only types whose bytes show what they are (`typeOfBytes`), and
  * none a browser runs: no HTML, SVG or script, which would need an
  * isolated viewer the platform doesn't have. A preview is a raster image.
@@ -209,9 +209,9 @@ const gifSubBlocksEnd = (bytes: Uint8Array, start: number): number => {
 };
 
 /**
- * The canvas a GIF needs: its logical screen, grown to hold every image
+ * The canvas a GIF needs: its logical page, grown to hold every image
  * it describes, as a browser's decoder grows it for an image larger than
- * the screen; and how many images it describes. Undefined for a block it
+ * the page; and how many images it describes. Undefined for a block it
  * doesn't know.
  */
 const gifSize = (bytes: Uint8Array): Declared | undefined => {

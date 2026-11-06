@@ -5,7 +5,7 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
 
-// The SDK's value schemas check what a person types in a screen before the
+// The SDK's value schemas check what a person types in a page before the
 // host checks it again, so they must give the same answers in a browser as
 // in workerd. This runs the SDK's own conformance cases
 // (packages/sdk/test/value-cases.ts, which workerd runs through

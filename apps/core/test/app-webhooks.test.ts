@@ -6,12 +6,12 @@ import {
 import { toHex } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
 import { streamRetentionMs } from "@grasp-os/shared/operation-limits";
-import type { Role } from "@grasp-os/shared/roles";
 import {
   appFunctionPath,
-  screenLeaseHeader,
-  screenPersonHeader,
-} from "@grasp-os/shared/screens";
+  pageLeaseHeader,
+  pagePersonHeader,
+} from "@grasp-os/shared/pages";
+import type { Role } from "@grasp-os/shared/roles";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -145,9 +145,12 @@ export const add = action({
 });
 `,
 
-  "screens/notes.tsx": `export default function Notes() {
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Notes() {
   return <p>Notes</p>;
 }
+
+export const Route = createFileRoute("/")({ component: Notes });
 `,
 };
 
@@ -165,8 +168,8 @@ const notesApp = async (builder: Person) => {
 };
 
 /**
- * A builder's Notes App, published, and its screen open:
- * a screen that can send its forms.
+ * A builder's Notes App, published, and its page open:
+ * a page that can send its forms.
  */
 const openNotes = async () => {
   const [builder, admin] = await Promise.all([
@@ -175,14 +178,14 @@ const openNotes = async () => {
   ]);
   const { app, version } = await notesApp(builder);
   await published(app);
-  const { lease } = await builder.api.screens.open(app, "notes");
+  const { lease } = await builder.api.pages.open(app);
   const release = await loadRelease(env, app, version);
   return { builder, admin, app, lease, release };
 };
 
 type Open = Awaited<ReturnType<typeof openNotes>>;
 
-/** Who sends a form: a person, with the screen they opened. */
+/** Who sends a form: a person, with the page they opened. */
 interface Sender {
   builder: Person;
   lease: string;
@@ -251,8 +254,8 @@ const sentOnly = async (
       origin: clientOrigin,
       "content-type": "application/json",
       cookie: sender.builder.session,
-      [screenPersonHeader]: sender.builder.userId,
-      [screenLeaseHeader]: sender.lease,
+      [pagePersonHeader]: sender.builder.userId,
+      [pageLeaseHeader]: sender.lease,
     },
     body: JSON.stringify({
       reference: { name: path, kind: release.app.operations[path]?.kind },
@@ -268,8 +271,8 @@ const sentOnly = async (
 };
 
 /**
- * Sends `input` to `path` as the open screen does, under `key` if given:
- * as its builder, or as `by` with the screen they opened. A mutation's
+ * Sends `input` to `path` as the open page does, under `key` if given:
+ * as its builder, or as `by` with the page they opened. A mutation's
  * form is handed over by its store before it answers.
  */
 const sent = async (
@@ -288,7 +291,7 @@ const sent = async (
 
 /**
  * Streams `input` to the streaming action `path` under `key` as the open
- * screen does, starting or joining its run (`stream`) or reading it again
+ * page does, starting or joining its run (`stream`) or reading it again
  * (`attach`): its result, as the last line says it.
  */
 const streamed = async (
@@ -304,8 +307,8 @@ const streamed = async (
       origin: clientOrigin,
       "content-type": "application/json",
       cookie: builder.session,
-      [screenPersonHeader]: builder.userId,
-      [screenLeaseHeader]: lease,
+      [pagePersonHeader]: builder.userId,
+      [pageLeaseHeader]: lease,
     },
     body: JSON.stringify({
       reference: { name: path, kind: release.app.operations[path]?.kind },
@@ -322,7 +325,7 @@ const streamed = async (
     : undefined;
 };
 
-/** The reference of `path` in the open screen's release. */
+/** The reference of `path` in the open page's release. */
 const referenceOf = ({ release }: Open, path: string) => ({
   name: path,
   kind: release.app.operations[path]?.kind ?? "action",
@@ -903,7 +906,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       id: user.userId,
       role: "user",
     });
-    const { lease } = await user.api.screens.open(open.app, "notes");
+    const { lease } = await user.api.pages.open(open.app);
     const url = receiver();
     await open.builder.api.apps.webhooks.add(open.app, {
       url,
@@ -1275,7 +1278,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     });
   });
 
-  it("tells a streamed form once its run succeeds, though its screen went away before the result", async () => {
+  it("tells a streamed form once its run succeeds, though its page went away before the result", async () => {
     const open = await openNotes();
     const url = receiver();
     await open.builder.api.apps.webhooks.add(open.app, {
@@ -1290,8 +1293,8 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
         origin: clientOrigin,
         "content-type": "application/json",
         cookie: open.builder.session,
-        [screenPersonHeader]: open.builder.userId,
-        [screenLeaseHeader]: open.lease,
+        [pagePersonHeader]: open.builder.userId,
+        [pageLeaseHeader]: open.lease,
       },
       body: JSON.stringify({
         reference: referenceOf(open, "notes.write"),
@@ -1299,7 +1302,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
         idempotencyKey: "gone-s",
       }),
     });
-    // Its first progress read, then the screen closes.
+    // Its first progress read, then the page closes.
     const reader = response.body?.getReader();
     const first = await reader?.read();
     await reader?.cancel();
@@ -1354,7 +1357,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       teams: [],
     };
 
-    // Started as the screen's keyed action is, its answer never read.
+    // Started as the page's keyed action is, its answer never read.
     const frames = await env.ACTION_INVOCATIONS.getByName(name).open({
       by,
       access: await accessOf(env, by, open.app),
@@ -1729,7 +1732,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       teams: [],
     };
     const input = { title: "Resolved" };
-    // Started as a screen's keyed action is, given only its key: what it
+    // Started as a page's keyed action is, given only its key: what it
     // sends to is the run's own to resolve.
     const started = async (named: string, key: string) => {
       const call = {

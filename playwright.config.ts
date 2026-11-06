@@ -19,10 +19,10 @@ import {
 
 /**
  * What the browser's own sandbox and policy hold, run in every browser
- * engine: a screen's attacks on its frame, and the product page's refusal
- * of screen modules and package files.
+ * engine: a page's attacks on its frame, and the product page's refusal
+ * of page modules and package files.
  */
-const browserPolicyTests = /(?:screen-attacks|product-page-scripts)\.e2e\.ts$/u;
+const browserPolicyTests = /(?:page-attacks|product-page-scripts)\.e2e\.ts$/u;
 /**
  * Grasp's go (e2e/onboarding.e2e.ts): taking it back closes the deployment,
  * which signs out everyone the other tests signed in. So it runs last, in
@@ -83,7 +83,7 @@ const parallelProjects: Project[] = [
     testMatch: packageApprovalTests,
     workers: 1,
   },
-  // A screen's frame and the product page are held by the browser's own
+  // A page's frame and the product page are held by the browser's own
   // sandbox and policy, so what they can't do is shown in each engine:
   // only those files, as the rest tests the product, not the browser.
   {

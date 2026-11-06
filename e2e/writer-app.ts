@@ -1,7 +1,7 @@
 import { appDefinition } from "../apps/core/test/app-definitions.ts";
 
 /**
- * A Writer App whose one screen follows a streaming action (spec 10.7.6)
+ * A Writer App whose one page follows a streaming action (spec 10.7.6)
  * through `useStream`: a draft written a word at a time, each word a
  * whole progress snapshot, then its result; a run the person can cancel,
  * and an outline to switch to.
@@ -39,17 +39,13 @@ export const outline = action({
 });
 `;
 
-const screens = `export default {
-  screens: [{ name: "writer", path: "/", source: "screens/writer.tsx" }],
-};
-`;
-
-const screen = `import { useStream } from "@grasp-os/sdk/react";
+const appPage = `import { createFileRoute } from "@tanstack/react-router";
+import { useStream } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
 import { api } from "@server/_generated/api";
 
-export default function Writer() {
+function Writer() {
   const [outlining, setOutlining] = useState(false);
   const draft = useStream(outlining ? api.writer.outline : api.writer.draft);
   const [finished, setFinished] = useState(0);
@@ -96,6 +92,7 @@ export default function Writer() {
     </main>
   );
 }
+export const Route = createFileRoute("/")({ component: Writer });
 `;
 
 /** The Writer App's files. */
@@ -110,7 +107,5 @@ export const writerAppFiles = (): Record<string, string> => ({
     },
   }),
   "server/writer.ts": operations,
-
-  "screens.ts": screens,
-  "screens/writer.tsx": screen,
+  "src/routes/index.tsx": appPage,
 });

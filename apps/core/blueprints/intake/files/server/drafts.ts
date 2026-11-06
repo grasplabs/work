@@ -18,7 +18,7 @@ import {
 /** Most drafts the review lists: the newest. */
 const listed = 100;
 
-/** Most saved sources the screen lists: the newest. */
+/** Most saved sources the page lists: the newest. */
 const savedListed = 50;
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/u;
@@ -61,7 +61,7 @@ const tagsInOrder = <Tag extends string>(tags: readonly Tag[]): Tag[] => [
 /**
  * Whether the caller may review drafts: true, or refused by the store
  * (`data.access_denied`) for anyone but the App's builders. The intake's
- * actions check it first (chats.ts), and the screen asks it through them.
+ * actions check it first (chats.ts), and the page asks it through them.
  */
 export const reviewer = query({
   args: {},
@@ -101,7 +101,7 @@ export const get = query({
   handler: async (ctx, args) => await ctx.db.get("drafts", args.id),
 });
 
-/** A saved source as the screen lists it: without its notes. */
+/** A saved source as the page lists it: without its notes. */
 const savedSummary = v.object({
   id: v.id("sources"),
   title: v.string(),
@@ -113,7 +113,7 @@ const savedSummary = v.object({
 });
 
 /**
- * The sources saved most recently, newest first, as the screen lists
+ * The sources saved most recently, newest first, as the page lists
  * them: their notes, 30,000 characters each at most, are left out, so a
  * list of them stays within what a query may answer. `source` reads one
  * whole.
@@ -157,7 +157,7 @@ export const statementsOf = query({
       .take(statementsMax),
 });
 
-/** Starts a draft by hand, with what the screen typed. */
+/** Starts a draft by hand, with what the page typed. */
 export const create = mutation({
   args: draftArgs,
   returns: v.id("drafts"),
@@ -176,7 +176,7 @@ export const create = mutation({
 
 /**
  * Keeps, for review, what a run of `extract` found: in notes, or in a
- * stakeholder's chat (`guest`), whose words are untrusted. The screen
+ * stakeholder's chat (`guest`), whose words are untrusted. The page
  * proposes it once the run is done, as the builder reviewing it; called
  * by anyone else who may write drafts (a builder), it keeps a draft as
  * theirs to review, as `create` does. `guest` records where the draft

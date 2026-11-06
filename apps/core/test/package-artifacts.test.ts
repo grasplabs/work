@@ -693,7 +693,7 @@ describe("serving an App's built packages", () => {
       return [response.status, response.headers.get("vary")];
     };
 
-    // Only screens' frames load these, from an opaque origin: cross-site
+    // Only pages' frames load these, from an opaque origin: cross-site
     // to a browser. The product page's own requests are same-origin,
     // whatever token they carry. Each answer varies on the header, so a
     // copy a frame's load left in the browser's cache never answers the
@@ -717,7 +717,7 @@ describe("serving an App's built packages", () => {
       [
         `/package-builds/${built.hash}/${module}`,
         `/package-builds/${built.hash}.json`,
-        `/screen-modules/${built.hash}.js`,
+        `/page-modules/${built.hash}.js`,
         `/api/package-builds/${built.hash}/${module}`,
         `/Package-Artifacts/${built.hash}/${module}`,
       ].map(async (path) => await seen(await routed(path)))

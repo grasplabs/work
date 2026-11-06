@@ -8,8 +8,8 @@ import { keepAuditEvent } from "./audit-outbox.ts";
 import { issueAppToken } from "./auth/app-tokens.ts";
 import { signedInSession } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
+import { admitted } from "./pages-rpc.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import { admitted } from "./screens-rpc.ts";
 import { routeMember } from "./staff-audit.ts";
 
 // `POST /api/app-tokens/<app>`: the person's own session gets a token for

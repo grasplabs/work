@@ -17,7 +17,7 @@ import type { CallingRun } from "./resource-authority.ts";
 // (`ingress`): replies to mail the run sent, at `reply-<token>@<host>`
 // (the deployment's own hostname, which the router already sends its mail
 // to), which the workflow gives that mail as Reply-To. The workflow reads
-// it as `inbox.<alias>`. What arrives is admitted as an App screen's event
+// it as `inbox.<alias>`. What arrives is admitted as an App page's event
 // is (run-events.ts, `admitRunEvent`): through that binding, as its
 // contract's type, its data checked, its authority read again. Threat
 // model, written before the code, and how each is closed:
@@ -44,7 +44,7 @@ import type { CallingRun } from "./resource-authority.ts";
 //   is the contract's to say (`ingress`), and the admin approving the
 //   binding is told (workflow-binding-requests.ts). Each reply is
 //   audited with its run and binding, and fills only its binding's share
-//   of the run's inbox (`inbox:<alias>`), never an App screen's. The From
+//   of the run's inbox (`inbox:<alias>`), never an App page's. The From
 //   header is a claim: a reply carries what Email Routing found of SPF,
 //   DKIM and DMARC (`emailReplyData`, authentication-results.ts), for the
 //   workflow to check; core refuses none on it.

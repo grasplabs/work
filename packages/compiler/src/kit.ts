@@ -1,10 +1,10 @@
 /**
- * The kit: what App screens can import. `build.ts` builds it once per
+ * The kit: what App pages can import. `build.ts` builds it once per
  * release, as ES modules (`KitModules`) and as what the compiler needs to
  * check and rewrite imports and to build CSS (`Kit`).
  *
  * Every module, the kit's and an App's, has a flat name such as `react.js`,
- * `@grasp-os~ui~components~button.js` or `app~screens~desk.js`, and imports
+ * `@grasp-os~ui~components~button.js` or `app~src~routes~desk.js`, and imports
  * others by that name. Flat names are bare specifiers, so a browser page can
  * map them to `data:` URLs with an import map, and they resolve as they are
  * between modules loaded into a Worker.
@@ -134,43 +134,43 @@ export const kitModule = "kit.json";
 export const typesModule = "types.json";
 
 /**
- * The React SDK screens use (spec 10.1, 10.7.1): the platform's session
+ * The React SDK pages use (spec 10.1, 10.7.1): the platform's session
  * client and the App's queries, mutations and actions through `@server/_generated/api`.
  */
-export const screenSdk = "@grasp-os/sdk/react";
+export const pageSdk = "@grasp-os/sdk/react";
 
 /**
  * The SDK's root module: its types, which the generated `@server/_generated/api`
  * references import (`OperationReference`, `Id`, …), and its native
- * values (`v`), which a screen's local form validates with (spec 10.2.4).
- * Nothing else of it: the rest is server code (`screenRootNames`).
+ * values (`v`), which a page's local form validates with (spec 10.2.4).
+ * Nothing else of it: the rest is server code (`pageRootNames`).
  */
 export const sdkRoot = "@grasp-os/sdk";
 
-/** What screens may import of the SDK's root module, besides its types. */
-export const screenRootNames: ReadonlySet<string> = new Set(["v"]);
+/** What pages may import of the SDK's root module, besides its types. */
+export const pageRootNames: ReadonlySet<string> = new Set(["v"]);
 
 /**
  * The references the host generates for an App's server code, which its
- * screens import as `@server/_generated/api` (spec 8), as Convex's pages
- * import theirs: `api`, `screens` and the browser resources, data only.
+ * pages import as `@server/_generated/api` (spec 8), as Convex's pages
+ * import theirs: `api`, `pages` and the browser resources, data only.
  * A build has them when the host put them among its files (core does for
  * a version of spec 8's layout).
  */
-export const screenReferences = {
+export const pageReferences = {
   specifier: "@server/_generated/api",
   path: "server/_generated/api.ts",
 } as const;
 
 /**
- * What renders a screen in its frame. App code doesn't import it, but every
- * screen needs it (`ScreenClosure.kitModules`).
+ * What renders a page in its frame. App code doesn't import it, but every
+ * page needs it (`PageClosure.kitModules`).
  */
-export const screenRuntime = "@grasp-os/sdk/screen-runtime";
+export const pageRuntime = "@grasp-os/sdk/page-runtime";
 
 /**
- * What runs a chat's preview in its frame in place of `screenRuntime`:
- * the screen runtime with React Fast Refresh (spec 22.7). Only the
+ * What runs a chat's preview in its frame in place of `pageRuntime`:
+ * the page runtime with React Fast Refresh (spec 22.7). Only the
  * preview kit has it.
  */
 export const previewRuntime = "@grasp-os/sdk/preview-runtime";
@@ -181,6 +181,13 @@ export const previewRuntime = "@grasp-os/sdk/preview-runtime";
  * itself (the compiler adds the import).
  */
 export const previewRefresh = "@grasp-os/sdk/preview-refresh";
+
+/**
+ * TanStack Router, which an App's pages route with: its file routes'
+ * `createFileRoute`, `Link`, `useNavigate` and the rest. The page
+ * runtime creates the router from the route tree (route-tree.ts).
+ */
+export const routerSpecifier = "@tanstack/react-router";
 
 /** The kit's stylesheet, by the id its content is filed under in `stylesheets`. */
 export const kitStylesheet = "@grasp-os/ui/styles.css";
@@ -216,6 +223,6 @@ export const packageModuleName = (entry: string): string =>
  */
 export const computePackagesFile = ".grasp/packages.json";
 
-/** The flat name of an App file's module, e.g. `app~screens~desk.js`. */
+/** The flat name of an App file's module, e.g. `app~src~routes~desk.js`. */
 export const appModuleName = (path: string): string =>
   `app~${path.replace(typescriptExtension, "").replaceAll("/", "~")}.js`;

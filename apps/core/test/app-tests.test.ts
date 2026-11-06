@@ -33,7 +33,7 @@ import { person } from "./sealed-apps.ts";
 // through the real operation host on a fixture store of the test's own.
 // What the tests here check is what that host did: the App's access
 // rules held between principals and roles, a store per test, refusals a
-// screen's call would get, failures named as people read them, the
+// page's call would get, failures named as people read them, the
 // limits on a run, and nothing left in the App's own store or behind in
 // fixture stores.
 
@@ -148,7 +148,7 @@ export default appTest({
       const owner = await t.as("note-owner");
       await t.rejectsCode(owner.action(api.notes.searchHelp, { text: "leave" }), "resource.unavailable");
     },
-    "the host refuses what a screen's call is refused": async (t) => {
+    "the host refuses what a page's call is refused": async (t) => {
       const owner = await t.as("note-owner");
       const internal = { ...api.notes.titles, name: "notes.count" };
       await t.rejectsCode(owner.query(internal, {}), "operation.not_found");

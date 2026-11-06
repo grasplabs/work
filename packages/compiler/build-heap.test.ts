@@ -7,7 +7,7 @@ import { z } from "zod";
 import { build, removeScratch, scratch, versionIn } from "./build-harness.ts";
 import { compilerAssets } from "./src/kit.ts";
 
-// Every built-in blueprint's screens, its preview and its server code,
+// Every built-in blueprint's pages, its preview and its server code,
 // built one after another in one release's compiler, as a shared isolate
 // builds them (build-heap.ts), under Node, whose V8 is workerd's, in a
 // heap of `heapMb`; then each type-checked in the release's checker alone,
@@ -53,9 +53,7 @@ const harnessRun = (args: string[]): string =>
 
 const every = <T>(each: (blueprint: string, target: string) => T): T[] =>
   ["board-page", "intake", "workflow-map"].flatMap((blueprint) =>
-    ["screens", "preview-screens", "app"].map((target) =>
-      each(blueprint, target)
-    )
+    ["pages", "preview-pages", "app"].map((target) => each(blueprint, target))
   );
 
 describe("a release's compiler and type checker", { timeout: 300_000 }, () => {
@@ -77,7 +75,7 @@ describe("a release's compiler and type checker", { timeout: 300_000 }, () => {
 
   afterAll(removeScratch);
 
-  it(`builds every blueprint's screens, preview and server code in ${heapMb} MB, then checks each in ${checkMb} MB of heap and WebAssembly`, () => {
+  it(`builds every blueprint's pages, preview and server code in ${heapMb} MB, then checks each in ${checkMb} MB of heap and WebAssembly`, () => {
     const built = linesOf(
       harnessRun(["build", release, files, answers]),
       z.object({ blueprint: z.string(), target: z.string(), ok: z.boolean() })

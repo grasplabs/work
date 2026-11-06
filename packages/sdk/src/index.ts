@@ -6,14 +6,7 @@
 
 export * from "./values.ts";
 export { defineApp } from "./app.ts";
-export type {
-  App,
-  AppConfig,
-  AppPermissions,
-  AppScreens,
-  ScreenDefinition,
-  SurfaceDefinition,
-} from "./app.ts";
+export type { App, AppConfig, AppPermissions } from "./app.ts";
 export type { TableNarrowing, TableVerbs } from "./server.ts";
 export { AppError } from "./app-error.ts";
 export { migration } from "./migration.ts";
@@ -81,13 +74,6 @@ export type {
   ReferenceVisibility,
   ReturnOf,
   RunHandle,
-  ScreenInputOf,
-  ScreenSurfaceData,
-  SurfaceInputOf,
-  SurfaceNameOf,
-  ScreenOutputOf,
-  ScreenProps,
-  ScreenReference,
   WorkflowDecisionDetail,
   WorkflowDecisionInboxItem,
   WorkflowDecisionReference,

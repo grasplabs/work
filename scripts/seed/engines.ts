@@ -68,7 +68,7 @@ export interface WorkflowSeed {
   id: string;
   /** The alias its domain App binds it under: `workflows.<alias>`. */
   alias: string;
-  /** What its domain App's screen calls it. */
+  /** What its domain App's page calls it. */
   title: string;
   /**
    * Who owns it, as in the prototype, when not its domain's owner: a
@@ -83,7 +83,7 @@ export interface WorkflowSeed {
   declared: { input: string; output: string };
   /** Its `workflowTest` suite, in the App's `tests/`. */
   tests: string;
-  /** What its screen starts a run with. */
+  /** What its page starts a run with. */
   sample: Input;
   /**
    * Its schedule started its runs, each on a Monday morning, rather than

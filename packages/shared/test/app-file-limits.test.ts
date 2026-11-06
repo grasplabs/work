@@ -79,7 +79,7 @@ describe("the pixels an image declares", () => {
         ])
       ),
       imagePixels("image/gif", bytesOf(13, [[6, [0x00, 0x02, 0x00, 0x01]]])),
-      // A 1 by 1 screen, a control extension, then an image of 4096 by
+      // A 1 by 1 page, a control extension, then an image of 4096 by
       // 2048 at (16, 8): the canvas grows to hold it.
       imagePixels(
         "image/gif",

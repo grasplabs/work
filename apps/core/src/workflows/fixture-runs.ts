@@ -16,7 +16,7 @@ import {
   pinOf,
   readWorkflowRequest,
   resolveIn,
-} from "../screen-workflows.ts";
+} from "../page-workflows.ts";
 import { loadWorkflowBuild } from "../workflow-builds.ts";
 import { fixtureParams } from "../workflow-params.ts";
 import { versionContract } from "../workflow-resources.ts";
@@ -43,7 +43,7 @@ import type { HostedActivation, ResourceRunMemory } from "./resource-runs.ts";
 //   and the engine runs it under a pin of its own (`fixture`), which no
 //   reader of runs, notification or control of the organization's knows.
 // - It starts what the release doesn't bind: the reference is resolved
-//   against the release under test exactly as a screen's against the
+//   against the release under test exactly as a page's against the
 //   current release (`resolveIn`), to the workflow version its seal pinned,
 //   and nothing else; input is checked against the declaration and the
 //   version's contract, as a start's.
@@ -75,7 +75,7 @@ import type { HostedActivation, ResourceRunMemory } from "./resource-runs.ts";
 //   values the organization saved (`fixtureParams`); a failure reaches the
 //   test only as a code the platform defines, in its own words
 //   (`failureOf`), and an output only as the App's declaration projects it
-//   (`outputOf`), as a screen is shown them.
+//   (`outputOf`), as a page is shown them.
 // - It runs past its test: its record holds the test's deadline, past which
 //   no activation runs it, and from which the sweep removes it.
 
@@ -168,9 +168,9 @@ export interface FixtureRunStarted {
 }
 
 /**
- * Starts the run of the workflow `request` (a screen's start's text)
+ * Starts the run of the workflow `request` (a page's start's text)
  * names, as `principal` of the test of `release`: its run's ID. Refused as
- * a screen's start would be, for anything the release doesn't bind. A
+ * a page's start would be, for anything the release doesn't bind. A
  * start that fails once its run is recorded removes the run again.
  */
 export const startFixtureRun = async (
@@ -349,7 +349,7 @@ export const runFixtureWorkflow = async (
 
 /**
  * How a test's run ended, as `t.runs.untilTerminal` answers it: a failure
- * as a screen is told one (`failureOf`), an output as the App declares it
+ * as a page is told one (`failureOf`), an output as the App declares it
  * (`outputOf`).
  */
 export type FixtureRunOutcome =

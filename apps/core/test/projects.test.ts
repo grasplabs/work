@@ -55,13 +55,17 @@ const workflowOf = async (owner: Person): Promise<string> => {
   return created.id;
 };
 
-/** A published App `owner` creates, with one screen. */
+/** A published App `owner` creates, with one page. */
 const appOf = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `Desk ${unique()}` });
   await release(owner, id, {
     ...appDefinition({ name: "Desk", tables: {} }),
 
-    "screens/desk.tsx": "export default () => <p>Desk</p>;\n",
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => <p>Desk</p>;
+
+export const Route = createFileRoute("/")({ component: Page });
+`,
   });
   return id;
 };

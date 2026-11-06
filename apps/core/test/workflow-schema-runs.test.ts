@@ -11,8 +11,8 @@ import { env } from "cloudflare:workers";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { buildGeneratedWorkflow } from "../src/pages.ts";
 import { releaseContracts } from "../src/release-contracts.ts";
-import { buildGeneratedWorkflow } from "../src/screens.ts";
 import {
   approveWorkflowBinding,
   revokeWorkflowBinding,
@@ -1301,7 +1301,7 @@ describe("a grasp-workflow/1 decision's generated code on the run host", () => {
 const received = "grasp.reply.received";
 const bounced = "grasp.reply.bounced";
 
-/** Where `eventWorkflow`'s events come from: an App, as its screen sends. */
+/** Where `eventWorkflow`'s events come from: an App, as its page sends. */
 const fromApp = "https://grasp.test/apps/replies";
 
 /**

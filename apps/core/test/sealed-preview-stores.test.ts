@@ -28,7 +28,7 @@ import { openRpc, signedInApi } from "./sign-in.ts";
 
 // A chat's preview of its draft of an App of spec 8's layout
 // (sealed-previews.ts): the draft sealed into a draft release, and every
-// call of its screens, its live queries and the chat's agent run on it
+// call of its pages, its live queries and the chat's agent run on it
 // through the operation host, on a store of the preview's own. These
 // tests start from the ways it can fail (the threat model on GRA-652):
 // the draft reads or writes the App's data, reaches an outside system,

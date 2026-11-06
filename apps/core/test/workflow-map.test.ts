@@ -57,7 +57,7 @@ const numbers = (frequency: number, minutes: number, people: number) => ({
   people: { value: people, basis: "estimated" },
 });
 
-/** A drawn workflow, as the map's screen saves it. */
+/** A drawn workflow, as the map's page saves it. */
 const drawn = {
   title: "Pay supplier invoices",
   state: "drawn",

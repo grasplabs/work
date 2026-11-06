@@ -19,7 +19,7 @@ function InputGroup({
    * box, as the prototype's bottom right: rounder, with the same room on
    * every side of what is in it, 12 pixels beside the text, its button as
    * far from the right edge as from the top and foot, and rounder too. `lg`: an interview's answer
-   * box at the bottom of the screen, tall and round, with room around what
+   * box at the bottom of the page, tall and round, with room around what
    * is typed, so it reads at once as the place to talk or type. Its buttons
    * (`lg`, `icon-lg`) are 40 pixels in a bar of 56, in the middle of one
    * line, and at the foot of the box once what is typed runs to more lines.

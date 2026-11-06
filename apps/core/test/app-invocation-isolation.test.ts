@@ -20,7 +20,7 @@ import { signedInApi } from "./sign-in.ts";
 // What App code keeps of one invocation never acts in another (GRA-383,
 // GRA-387), through the real Loader: every invocation runs in a fresh
 // isolate of its own, and its channel stops working when it ends, on a
-// screen's calls and, below, on a chat's preview of its draft
+// page's calls and, below, on a chat's preview of its draft
 // (sealed-previews.ts), across two people's chats. The
 // held-call reproduction from GRA-383, the channel kept past its call,
 // and state one caller leaves for the next. A call cut short at its
@@ -53,7 +53,7 @@ const sealedApp = async (): Promise<Sealed & { other: Caller }> => {
   return { ...fixture, release, other };
 };
 
-/** Calls `path` of the App for `by`, as a screen sends it. */
+/** Calls `path` of the App for `by`, as a page sends it. */
 const call = async (
   { app, release }: Sealed,
   by: Caller,

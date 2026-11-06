@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { whilePending } from "../blueprints/board-page/files/components/pending.ts";
+import { whilePending } from "../blueprints/board-page/files/src/components/pending.ts";
 
 // The board page's pending state (its buttons disabled while a call runs):
 // pure logic, so tested on its own. What can go wrong: a call that fails

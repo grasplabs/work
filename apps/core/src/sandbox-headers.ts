@@ -11,7 +11,7 @@ export const sandboxCpuHeader = "x-grasp-sandbox-cpu-ms";
 
 /**
  * The resident memory a session may use, in MiB, where it needs more than
- * the supervisor gives App code: core's own platform code (the screen
+ * the supervisor gives App code: core's own platform code (the page
  * compiler, the package builder), never an App's. The supervisor holds it
  * to its most.
  */

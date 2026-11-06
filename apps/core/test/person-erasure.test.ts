@@ -423,13 +423,12 @@ const appWithPreferences = async () => {
         tables: {},
       }),
 
-      "screens.ts": `export default {
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-};
-`,
-      "screens/desk.tsx": `export default function Desk() {
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Desk() {
   return <main>Desk</main>;
 }
+
+export const Route = createFileRoute("/")({ component: Desk });
 `,
     },
     "Desk"

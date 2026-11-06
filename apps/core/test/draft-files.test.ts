@@ -20,9 +20,9 @@ const idp = mockIdp();
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
-/** Version 1 of the App: its registration, schema and one screen. */
+/** Version 1 of the App: its registration, schema and one page. */
 const released = deskFiles("Released");
-const { "screens/desk.tsx": _screen, ...unscreened } = released;
+const { "src/routes/index.tsx": _page, ...unpageed } = released;
 
 /** The App's definition, as a builder's second version renames it. */
 const renamed = redefined(released, (definition) => ({
@@ -46,7 +46,7 @@ describe("a chat's draft files, for the App's code view", () => {
     const app = await deskOf(builder);
     const { chatId, revision, write } = await chatWithDraft(builder, app, {
       "server/notes.ts": notes(10),
-      "screens/desk.tsx": null,
+      "src/routes/index.tsx": null,
     });
     const { chats } = builder.api;
 
@@ -59,8 +59,8 @@ describe("a chat's draft files, for the App's code view", () => {
     const latest = await chats.draftFiles(empty.id, app);
 
     expect({ first, second, before, latest }).toStrictEqual({
-      first: { ...unscreened, "server/notes.ts": notes(10) },
-      second: { ...unscreened, "server/notes.ts": notes(25) },
+      first: { ...unpageed, "server/notes.ts": notes(10) },
+      second: { ...unpageed, "server/notes.ts": notes(25) },
       before: released,
       latest: renamed,
     });

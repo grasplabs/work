@@ -98,7 +98,7 @@ describe("a link's confirmation", () => {
   it("opens nothing for a pointer's click whose press began while Open was disabled", async () => {
     const confirmed = await opened({ origin: "https://help.example.com" });
     // Pressed while Open was disabled, released once it was enabled: the
-    // click a screen could time its request for.
+    // click a page could time its request for.
     await act(async () => {
       openButton().dispatchEvent(
         new PointerEvent("pointerdown", { bubbles: true })

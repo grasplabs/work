@@ -33,10 +33,13 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
-/** The App's one screen: what a version changes to differ from the last. */
-const deskScreen = `export default function Desk() {
+/** The App's one page: what a version changes to differ from the last. */
+const deskPage = `import { createFileRoute } from "@tanstack/react-router";
+
+function Desk() {
   return <main>Desk</main>;
 }
+export const Route = createFileRoute("/")({ component: Desk });
 `;
 
 /**
@@ -79,7 +82,7 @@ const mailFor = (app: AppId, binding: string): PermissionRequest => ({
 const builtBy = async (builder: Person, admin: Person): Promise<AppId> => {
   const { id } = await builder.api.apps.create({ name: `Map ${unique()}` });
   const app = appIdSchema.parse(id);
-  await release(builder, id, { "screens/desk.tsx": deskScreen });
+  await release(builder, id, { "src/routes/index.tsx": deskPage });
   for (const request of [guestsFor(app), collectionFor(app)]) {
     // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
     const { id: permission } = await builder.api.permissions.request(request);
@@ -96,7 +99,7 @@ const changedBy = async (
   change: string
 ): Promise<void> => {
   await release(by, app, {
-    "screens/desk.tsx": `${deskScreen}\n// ${change}\n`,
+    "src/routes/index.tsx": `${deskPage}\n// ${change}\n`,
   });
 };
 
@@ -285,7 +288,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const { version } = await builder.api.apps.files.commit(
       app,
       {
-        "screens/desk.tsx": `${deskScreen}\n// Asks for more.\n`,
+        "src/routes/index.tsx": `${deskPage}\n// Asks for more.\n`,
       },
       "More"
     );
@@ -377,7 +380,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const source = appIdSchema.parse(id);
     const { version } = await builder.api.apps.files.commit(
       source,
-      { "screens/desk.tsx": deskScreen },
+      { "src/routes/index.tsx": deskPage },
       "Never run"
     );
     await builder.api.permissions.request(guestsFor(source));
@@ -424,7 +427,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const { version } = await builder.api.apps.files.commit(
       app,
       {
-        "screens/desk.tsx": `${deskScreen}\n// Reviewed.\n`,
+        "src/routes/index.tsx": `${deskPage}\n// Reviewed.\n`,
       },
       "Reviewed"
     );
@@ -467,7 +470,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     const { version } = await builder.api.apps.files.commit(
       app,
       {
-        "screens/desk.tsx": `${deskScreen}\n// Demoted.\n`,
+        "src/routes/index.tsx": `${deskPage}\n// Demoted.\n`,
       },
       "Demoted"
     );

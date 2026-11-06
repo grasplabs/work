@@ -39,15 +39,15 @@ export const platformLimits = {
   persistedRowBytes: 128 * kib,
 
   // Time.
-  /** Each stage of a screen's start: its bootstrap, then its mount. */
-  screenStageMs: 10 * second,
+  /** Each stage of a page's start: its bootstrap, then its mount. */
+  pageStageMs: 10 * second,
   /** One server invocation's CPU time. */
   serverInvocationCpuMs: 10 * second,
   /** One server invocation's wall time. */
   serverInvocationWallMs: 60 * second,
   /**
    * One compiler task's CPU time: a ceiling that only stops a failure,
-   * never what a build is sized to (core's screens.ts sizes a first build's
+   * never what a build is sized to (core's pages.ts sizes a first build's
    * batches to a few seconds each). The risk it takes: App code built to
    * hold the type checker (a type that recurses without end) now burns up
    * to this much CPU per call before it is stopped. Still bounded, and
@@ -126,14 +126,14 @@ export const platformLimits = {
 
   // App files (spec 10.7.5). Spec 18.1 sets no figure for them: these are
   // this release's starting ceilings, held by core and the page alike.
-  /** One file an App's screen uploads. */
+  /** One file an App's page uploads. */
   appFileBytes: 25 * mib,
   /** One chunk of an upload, as the page sends it and core keeps it. */
   appFileChunkBytes: 1 * mib,
-  /** A file a screen previews in its frame: larger ones have no preview. */
+  /** A file a page previews in its frame: larger ones have no preview. */
   appFilePreviewBytes: 4 * mib,
   /**
-   * The pixels of an image a screen previews, as its header declares them:
+   * The pixels of an image a page previews, as its header declares them:
    * a few megabytes can declare an image that decodes to gigabytes, so a
    * larger one has no preview. Room for a phone camera's photo.
    */
@@ -157,7 +157,7 @@ export const platformLimits = {
   /** Bytes of files one App's store keeps, everyone's together. */
   appFileStoreBytes: 20 * 1024 * mib,
   /**
-   * Chunk requests one person's screens of an App may send: their own
+   * Chunk requests one person's pages of an App may send: their own
    * budget, apart from the request budget, enough for a 25 MB file and its
    * resends in a burst, and 300 MB a minute after.
    */

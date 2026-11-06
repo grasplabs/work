@@ -8,7 +8,7 @@ import {
 import type {
   Diagnostic,
   Increments,
-  screenIncrementKeys,
+  pageIncrementKeys,
 } from "@grasp-os/compiler";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { mapConcurrently } from "@grasp-os/shared/release";
@@ -23,19 +23,19 @@ import {
 } from "./build-cache.ts";
 import type { CacheEnv } from "./build-cache.ts";
 
-// What a screens build keeps of each file for the next (GRA-958): each
+// What a pages build keeps of each file for the next (GRA-958): each
 // module's transform (the compiler's increments.ts); and each file's
 // Ultracite lint, which a draft's lint build keeps (save-builds.ts). They
 // are kept as whole builds are (build-cache.ts): in
 // R2 under a key of their content, each served only as its receipt says
 // its build wrote it, written by one build at a time under the key's
 // lease, quarantined after repeated integrity failures, swept like builds
-// once unused (screens.ts `sweepBuilds`). The compiler uses one only
+// once unused (pages.ts `sweepBuilds`). The compiler uses one only
 // under the key it works out itself; here they are only fetched and kept.
 
 /** Where each part's records are kept: swept with the builds. */
 export const incrementPrefixes = {
-  modules: "screen-modules/",
+  modules: "page-modules/",
   lints: "lint-results/",
 } as const;
 
@@ -84,14 +84,14 @@ const readRecord = async (
 };
 
 /**
- * The keys of what a screens build may reuse and keep, by path
- * (`screenIncrementKeys`): worked out once per build, as they hash every
+ * The keys of what a pages build may reuse and keep, by path
+ * (`pageIncrementKeys`): worked out once per build, as they hash every
  * file, and handed to each read and write of its records.
  */
-export type IncrementKeys = Awaited<ReturnType<typeof screenIncrementKeys>>;
+export type IncrementKeys = Awaited<ReturnType<typeof pageIncrementKeys>>;
 
 /**
- * What earlier builds kept that a screens build whose records have `keys`
+ * What earlier builds kept that a pages build whose records have `keys`
  * may reuse, as records by content key: each one its receipt vouches for
  * and shaped as a record of its own file. One written longer ago than
  * `refreshAfterMs` is written again, as a build in use is.
@@ -119,7 +119,7 @@ export const readIncrements = async (
 };
 
 /**
- * Keeps what a screens build whose records have `keys` made now
+ * Keeps what a pages build whose records have `keys` made now
  * (`fresh`), each under its key's lease, held for `leaseMs`: only a record
  * of one of the build's own files under the key `keys` gives it, so
  * nothing is kept under a key it doesn't stand for. How many were kept.
@@ -154,7 +154,7 @@ export const keepIncrements = async (
 
 /**
  * What earlier lints found in each of `files` (by path), for those whose
- * result is kept under the key of their content and, for a screen or a
+ * result is kept under the key of their content and, for a page or a
  * component, of the App's others (`designContext`, `lintKey`): the rest
  * are linted again.
  */

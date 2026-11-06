@@ -4,13 +4,13 @@ import type { PreferenceOperationName } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { OperationResult } from "@grasp-os/shared/operations";
-import type { Role } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
 import {
   appFunctionPath,
-  screenLeaseHeader,
-  screenPersonHeader,
-} from "@grasp-os/shared/screens";
+  pageLeaseHeader,
+  pagePersonHeader,
+} from "@grasp-os/shared/pages";
+import type { Role } from "@grasp-os/shared/roles";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -37,9 +37,9 @@ import { routed, signedInApi } from "./sign-in.ts";
 // An App's preferences (spec 10.7.7, app-preferences.ts): `preferences.get`
 // and `preferences.update`, answered by core for the signed-in person from
 // the App's own store, through the same call path as any function a
-// screen calls. Then the ways a caller could reach someone else's, write
+// page calls. Then the ways a caller could reach someone else's, write
 // what the App didn't declare, lose an update, or keep reading once their
-// access is gone; and a screen following them live.
+// access is gone; and a page following them live.
 
 const idp = mockIdp();
 
@@ -66,13 +66,12 @@ const filesWith = (
       : {},
     ...(preferences === "" ? {} : { preferences }),
   }),
-  "screens.ts": `export default {
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-};
-`,
-  "screens/desk.tsx": `export default function Desk() {
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Desk() {
   return <main>Desk</main>;
 }
+
+export const Route = createFileRoute("/")({ component: Desk });
 `,
 });
 
@@ -122,7 +121,7 @@ const referenceTo = (release: Release, name: PreferenceOperationName) => {
   return { name: operation.path, kind: operation.kind };
 };
 
-/** What `by` gets calling the reference with `input`, as a screen calls it. */
+/** What `by` gets calling the reference with `input`, as a page calls it. */
 const callWith = async (
   { app }: Sealed,
   by: Pick<Identity, "userId" | "role" | "teams">,
@@ -324,7 +323,7 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
     await share(desk, colleague);
     const storeId = storeIdSchema.parse(desk.release.store?.storeId);
     const store = inJurisdiction(env, env.DATA_STORES).getByName(storeId);
-    // A watch of the owner's preferences, as their screen's live read
+    // A watch of the owner's preferences, as their page's live read
     // keeps one.
     const told: string[][] = [];
     await store.watch(
@@ -867,16 +866,16 @@ const signedIn = async (role: Role) => {
 };
 
 /**
- * The Desk App sealed and current, opened by its builder, and that screen following the builder's preferences, once the
+ * The Desk App sealed and current, opened by its builder, and that page following the builder's preferences, once the
  * first push came.
  */
 const followingDesk = async () => {
   const admin = await signedIn("admin");
   const builder = await signedIn("builder");
   const desk = await sealedDesk(filesWith(declared), builder.acting);
-  const bundle = await builder.api.screens.open(desk.app, "desk");
+  const bundle = await builder.api.pages.open(desk.app);
   const follower = pageFollower();
-  const subscription = await builder.api.screens
+  const subscription = await builder.api.pages
     .frame(desk.app, bundle.lease)
     .watchQuery(
       JSON.stringify({
@@ -902,7 +901,7 @@ const followingDesk = async () => {
   return { admin, builder, desk, bundle, follower, subscription, latest };
 };
 
-/** What `person`'s screen gets calling `get` through core's function route. */
+/** What `person`'s page gets calling `get` through core's function route. */
 const routedGet = async (
   caller: Awaited<ReturnType<typeof signedIn>>,
   desk: Sealed,
@@ -914,8 +913,8 @@ const routedGet = async (
       origin: clientOrigin,
       "content-type": "application/json",
       cookie: caller.session,
-      [screenPersonHeader]: caller.userId,
-      [screenLeaseHeader]: lease,
+      [pagePersonHeader]: caller.userId,
+      [pageLeaseHeader]: lease,
     },
     body: JSON.stringify({
       reference: referenceTo(desk.release, "get"),
@@ -941,7 +940,7 @@ const routedGet = async (
 };
 
 describe(
-  "a screen following its person's preferences",
+  "a page following its person's preferences",
   { timeout: 120_000 },
   () => {
     it("shows each update they make, pushed to the same subscription", async () => {
@@ -974,14 +973,14 @@ describe(
       await subscription.release();
     });
 
-    it("follows a refused read to its repair: once the person replaces a value that no longer fits, the screen gets the document", async () => {
+    it("follows a refused read to its repair: once the person replaces a value that no longer fits, the page gets the document", async () => {
       const builder = await signedIn("builder");
       const desk = await sealedDesk(filesWith(declared), builder.acting);
       // What they stored no longer fits.
       await planted(desk, builder.userId, { theme: "blue" });
-      const bundle = await builder.api.screens.open(desk.app, "desk");
+      const bundle = await builder.api.pages.open(desk.app);
       const follower = pageFollower();
-      const subscription = await builder.api.screens
+      const subscription = await builder.api.pages
         .frame(desk.app, bundle.lease)
         .watchQuery(
           JSON.stringify({
@@ -1021,15 +1020,15 @@ describe(
         "Leaks"
       );
       await expect(routedGet(builder, desk, bundle.lease)).resolves.toBe(
-        "screen.revoked"
+        "page.revoked"
       );
-      // Their write from elsewhere reaches the revoked screen as the
+      // Their write from elsewhere reaches the revoked page as the
       // refusal, never as their preferences.
       await update(desk, builder.acting, 0, { compact: true });
       await vi.waitFor(() => {
         const last = follower.received.at(-1)?.result;
         expect(last?.ok === false ? last.error.code : "ok").toBe(
-          "screen.revoked"
+          "page.revoked"
         );
       }, pushWait);
       expect(

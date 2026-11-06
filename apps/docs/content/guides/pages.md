@@ -5,37 +5,26 @@ sidebar:
   order: 4
 ---
 
-A Page is what people see of your App: a React component in `screens/`, which Grasp renders inside the product. A Page reads and writes only through your App's server functions: it has no network of its own and no access to anything else.
+A Page is what people see of your App: a route of its own small React app, which Grasp runs inside the product. A Page reads and writes only through your App's server functions: it has no network of its own and no access to anything else.
 
-## Declaring a Page
+## Routes are files
 
-Each Page is a file that exports its component as the default, listed in `screens.ts` with a name and a route:
+Each Page is a [TanStack Router](https://tanstack.com/router) file route in `src/routes/`. Its file name is its address, and it exports its `Route`:
 
-```ts screens.ts
-import { v } from "@grasp-os/sdk";
-
-export default {
-  screens: [
-    { name: "tasks", path: "/", source: "screens/tasks.tsx" },
-    {
-      name: "task",
-      path: "/tasks/:id",
-      source: "screens/task.tsx",
-      input: v.object({ id: v.id("tasks") }),
-    },
-  ],
-};
+```text
+src/routes/__root.tsx         The layout around every Page (optional)
+src/routes/index.tsx          /
+src/routes/tasks.$taskId.tsx  /tasks/$taskId, with the task's ID as a parameter
 ```
 
-A route's parameters are the Page's `input`, typed by its schema.
+Grasp generates the route tree from these files, as TanStack does in any project, so a route's parameters are typed. The App's own components go in `src/components/`, and the rest of its code in `src/lib/`.
 
 ## Reading data
 
 `useQuery` subscribes to a query. It returns `undefined` while the query loads, then the query's result, and renders again whenever that result changes: nobody refreshes a Page in Grasp.
 
-```tsx screens/task.tsx
+```tsx src/routes/tasks.$taskId.tsx
 import { useMutation, useQuery } from "@grasp-os/sdk/react";
-import type { ScreenProps } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   PageHeader,
@@ -45,10 +34,12 @@ import {
 } from "@grasp-os/ui/components/page-header";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { api } from "@server/_generated/api";
-import type { screens } from "@server/_generated/api";
+import type { Id } from "@server/_generated/dataModel";
+import { createFileRoute } from "@tanstack/react-router";
 
-const Task = ({ input }: ScreenProps<typeof screens.task>) => {
-  const task = useQuery(api.details.get, { id: input.id });
+const Task = () => {
+  const { taskId } = Route.useParams();
+  const task = useQuery(api.details.get, { id: taskId });
   const complete = useMutation(api.tasks.complete);
   if (task === undefined) {
     return <Skeleton className="m-6 h-9 w-64" />;
@@ -77,7 +68,12 @@ const Task = ({ input }: ScreenProps<typeof screens.task>) => {
   );
 };
 
-export default Task;
+export const Route = createFileRoute("/tasks/$taskId")({
+  // A task's ID, read from the address as text: the server checks it is
+  // a task's, and one the person may read, on every call.
+  params: { parse: ({ taskId }) => ({ taskId: taskId as Id<"tasks"> }) },
+  component: Task,
+});
 ```
 
 ```ts server/details.ts
@@ -99,37 +95,52 @@ Pass `"skip"` instead of the arguments to read nothing yet. A query that fails t
 
 ## Moving between Pages
 
-`useNavigate` opens another of the App's Pages, by its name in `screens` and with its input:
+Pages link to each other with TanStack's `Link`, and move in code with its `useNavigate`, typed by the routes the App has:
 
-```tsx screens/tasks.tsx
-import { useNavigate, useQuery } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
+```tsx src/routes/index.tsx
+import { useQuery } from "@grasp-os/sdk/react";
 import { Spinner } from "@grasp-os/ui/components/spinner";
-import { api, screens } from "@server/_generated/api";
+import { api } from "@server/_generated/api";
+import { createFileRoute, Link } from "@tanstack/react-router";
 
 const Tasks = () => {
   const tasks = useQuery(api.tasks.list, { done: false });
-  const navigate = useNavigate();
   if (tasks === undefined) {
     return <Spinner className="m-6" />;
   }
   return (
     <main className="flex flex-col gap-2 p-6">
       {tasks.map((task) => (
-        <Button
-          key={task._id}
-          variant="ghost"
-          onClick={async () => await navigate(screens.task, { id: task._id })}
-        >
+        <Link key={task._id} params={{ taskId: task._id }} to="/tasks/$taskId">
           {task.title}
-        </Button>
+        </Link>
       ))}
     </main>
   );
 };
 
-export default Tasks;
+export const Route = createFileRoute("/")({ component: Tasks });
 ```
+
+Where the App is shows in Grasp's address, so Back, Forward, a reload and a shared link all land on the same Page. Only a person's own click or key adds to their history: a Page that moves on its own takes the place of the one it was on.
+
+Anyone the App is shared with can open any of its routes from a link, with any parameters. So a Page changes nothing as it loads, in its component, an effect or a loader: it writes, sends or starts something only when the person acts on it. Who may do what is decided in your server functions, on every call.
+
+## Where Grasp shows a Page
+
+A Page without parameters can also show elsewhere in Grasp: as an entry in the sidebar, in the side panel beside a chat, or as the App's own settings. Its file says so:
+
+```tsx src/routes/settings.tsx
+import { createFileRoute } from "@tanstack/react-router";
+
+export const surface = { kind: "settings", title: "Options" };
+
+const Settings = () => <main className="p-6">Options</main>;
+
+export const Route = createFileRoute("/settings")({ component: Settings });
+```
+
+`kind` is `sidebar`, `panel` or `settings`, and both values are written out: Grasp reads them without running your code.
 
 ## Who is using it
 

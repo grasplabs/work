@@ -181,7 +181,6 @@ export type {
   CatalogAction,
   ReleaseIdentity,
 } from "./generate.ts";
-export type { ScreenManifest } from "./app.ts";
 export { workflowReferenceLimits } from "./references.ts";
 export { workflowQueries } from "./workflow-queries.ts";
 export type { WorkflowQueryName } from "./workflow-queries.ts";
@@ -219,14 +218,14 @@ export { jsonSchemaOf } from "./json-schema.ts";
 export type { JsonSchema, JsonSchemaOptions } from "./json-schema.ts";
 
 // The session client as a host makes it (spec 10.7.1): over the host's own
-// transport, one per App session, mounted for the screens it serves. App
+// transport, one per App session, mounted for the pages it serves. App
 // code never makes one; it gets the platform's from `useClient()`.
-// `clientInternals` is what the screen runtime and the React hooks reach
+// `clientInternals` is what the page runtime and the React hooks reach
 // of it: a component's reading of a query, as `useQuery` subscribes.
 export { clientInternals, GraspClient } from "./client-core.ts";
 export type { ClientTransport, StreamLink } from "./client-core.ts";
 // The workflow channel the typed `useWorkflow` speaks over a client, for
-// core's own tests of the side of it core serves (screen-workflows.ts).
+// core's own tests of the side of it core serves (page-workflows.ts).
 export { readWorkflowReference, workflowChannel } from "./client-workflow.ts";
 export type {
   BindingSnapshot,
@@ -238,7 +237,7 @@ export type { FileTransport, TransferProgress } from "./client-files.ts";
 export type { LinkTransport } from "./client-links.ts";
 
 // The page's side of core's file channel (spec 10.7.5): what moves a
-// screen's files' bytes, which never travel in a JSON call.
+// page's files' bytes, which never travel in a JSON call.
 export { fileChannel } from "./file-channel.ts";
 export { linkChannel } from "./link-channel.ts";
 export type {

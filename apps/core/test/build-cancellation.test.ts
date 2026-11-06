@@ -56,9 +56,13 @@ const watchingFiles = async (
   }
 };
 
-/** A screen no one built yet: unique, so no build of it is cached. */
-const freshScreen = (): Record<string, string> => ({
-  "screens/fresh.tsx": `export default function Fresh() {\n  return <main>${crypto.randomUUID()}</main>;\n}\n`,
+/** A page no one built yet: unique, so no build of it is cached. */
+const freshPage = (): Record<string, string> => ({
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Fresh() {\n  return <main>${crypto.randomUUID()}</main>;\n}\n
+
+export const Route = createFileRoute("/")({ component: Fresh });
+`,
 });
 
 describe("a build given up on", { timeout: 60_000 }, () => {
@@ -70,7 +74,7 @@ describe("a build given up on", { timeout: 60_000 }, () => {
           {
             app: appIdSchema.parse(crypto.randomUUID()),
             version: 0,
-            files: freshScreen(),
+            files: freshPage(),
           },
           { profile: "production", signal: lost() }
         )
@@ -83,7 +87,7 @@ describe("a build given up on", { timeout: 60_000 }, () => {
     });
   });
 
-  it("starts no compile for a screen's references when it is given up on during their cache read", async () => {
+  it("starts no compile for a page's references when it is given up on during their cache read", async () => {
     const giveUp = new AbortController();
     const touched: string[] = [];
     const { FILES: files, DB: db } = env;
@@ -129,11 +133,15 @@ describe("a build given up on", { timeout: 60_000 }, () => {
         app,
         0,
         {
-          // The App layout, its screen importing its references, its code
+          // The App layout, its page importing its references, its code
           // new, so nothing of it is cached.
           ...appDefinition({ name: `Desk ${crypto.randomUUID()}` }),
-          "screens/desk.tsx":
-            'import { references } from "@server/_generated/api";\nexport default () => String(references);\n',
+          "src/routes/desk.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { references } from "@server/_generated/api";
+const Page = () => String(references);
+
+export const Route = createFileRoute("/desk")({ component: Page });
+`,
         },
         { signal: giveUp.signal }
       );

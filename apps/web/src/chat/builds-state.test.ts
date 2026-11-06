@@ -3,10 +3,8 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  changedScreens,
   migrationFixturesText,
   pendingToShow,
-  previewedScreen,
   readyToMakeCurrent,
   serverFileLabels,
   serverFileOf,
@@ -122,64 +120,6 @@ describe("the Being built section", () => {
         before: "Runs now",
         after: "Would run after approval",
       },
-    });
-  });
-});
-
-describe("the screen a draft's preview shows", () => {
-  it("is the one picked while the draft still changes it, otherwise the first it changes", () => {
-    const changed = changedScreens({
-      changed: [
-        "server/notes.ts",
-        "screens/zeta.tsx",
-        "screens/alpha.tsx",
-        "screens/lib/format.ts",
-      ],
-      deleted: [],
-    });
-
-    expect({
-      changed,
-      unpicked: previewedScreen(changed),
-      picked: previewedScreen(changed, "alpha"),
-      // A later write no longer changes the picked screen.
-      gone: previewedScreen(["zeta"], "alpha"),
-      none: previewedScreen([], "alpha"),
-      // An earlier version may not have the screen picked, nor the latest's
-      // first: core shows that version's first.
-      version: previewedScreen(changed, "alpha", 1),
-    }).toStrictEqual({
-      changed: ["zeta", "alpha"],
-      unpicked: "zeta",
-      picked: "alpha",
-      gone: "zeta",
-      none: undefined,
-      version: undefined,
-    });
-  });
-
-  it("is never a screen the draft deletes", () => {
-    const paths = ["screens/alpha.tsx", "screens/beta.tsx", "screens/zeta.tsx"];
-    const kept = changedScreens({
-      changed: paths,
-      deleted: ["screens/alpha.tsx"],
-    });
-    const none = changedScreens({ changed: paths, deleted: paths });
-
-    expect({
-      kept,
-      first: previewedScreen(kept),
-      // Picked before the write that deleted it.
-      picked: previewedScreen(kept, "alpha"),
-      none,
-      // Core shows the draft's first screen, from the version it is over.
-      noneLeft: previewedScreen(none, "alpha"),
-    }).toStrictEqual({
-      kept: ["beta", "zeta"],
-      first: "beta",
-      picked: "beta",
-      none: [],
-      noneLeft: undefined,
     });
   });
 });

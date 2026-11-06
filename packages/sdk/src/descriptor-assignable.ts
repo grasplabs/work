@@ -2,7 +2,7 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
 
 // Whether every value one descriptor normalizes to is one another accepts:
-// how a surface's input is checked against its screen's (spec 34.1). It is
+// how a surface's input is checked against its page's (spec 34.1). It is
 // conservative on purpose: a pair it can't prove is refused, never let
 // through. What it proves, it proves structurally, from the descriptors
 // alone, without running anything.
@@ -31,7 +31,7 @@ const fieldAssignable = (
   check: Check
 ): boolean => {
   if (from === undefined) {
-    // Left out, the screen fills it in or goes without.
+    // Left out, the page fills it in or goes without.
     return to.presence !== "required";
   }
   // An optional field may be left out, which a required one refuses; a
@@ -42,7 +42,7 @@ const fieldAssignable = (
   return check(from, to);
 };
 
-/** Objects: the screen's are strict, so no field it doesn't know. */
+/** Objects: the page's are strict, so no field it doesn't know. */
 const objectAssignable = (
   from: Extract<ValueDescriptor, { kind: "object" }>,
   to: ValueDescriptor,

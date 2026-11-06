@@ -2,7 +2,7 @@
  * `vp run dev`: builds the compiler again whenever what it is built from
  * changes, into the assets the dev server serves. Core's own build runs
  * once, when the server starts; without this a change to `@grasp-os/ui`
- * shows in the frontend, which Vite reloads, but not in App screens,
+ * shows in the frontend, which Vite reloads, but not in App pages,
  * which the compiler goes on checking and building against the kit as it
  * was when the server started.
  *
@@ -78,7 +78,7 @@ const rebuild = (): void => {
     building = false;
     if (code !== 0) {
       console.error(
-        "The App compiler didn't build: screens keep the kit as it was."
+        "The App compiler didn't build: pages keep the kit as it was."
       );
     }
     if (changedSince) {

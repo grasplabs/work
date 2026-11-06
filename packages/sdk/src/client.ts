@@ -2,7 +2,7 @@
 // outside Grasp's shell makes, `new GraspClient({ url, getToken })`, and
 // mounts with `GraspProvider`; the type `useClient()` answers; and the
 // structured error its calls reject with. Inside Grasp, the platform
-// makes the client and mounts it around every screen (screen-runtime.ts).
+// makes the client and mounts it around every page (page-runtime.ts).
 // Generated App code never imports this module, and the App compiler
 // refuses it there.
 //

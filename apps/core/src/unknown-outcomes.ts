@@ -59,7 +59,7 @@ const resolutionCapability = async (
   // person can't read what "it didn't happen" would let go out again, and
   // it still could, under the same key and input, from any caller of the
   // same scope that repeats it (a run's wait gave up long before, at its
-  // 7-day deadline, but an App's screen or agent may repeat a call). The
+  // 7-day deadline, but an App's page or agent may repeat a call). The
   // key frees nothing worth having then either: anything still wanted is
   // asked for anew, under a key of its own. So only "it happened" is said.
   if (choice === "not_happened" && found.input === null) {

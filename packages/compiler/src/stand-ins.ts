@@ -4,7 +4,7 @@ import { symbolicModules } from "@grasp-os/sdk/host";
 import { parserPlugins } from "./steering.ts";
 
 // While an App's server code doesn't register, the modules generated from
-// it are stand-ins typed `any` (the SDK's `symbolicModules`): a screen or
+// it are stand-ins typed `any` (the SDK's `symbolicModules`): a page or
 // a workflow is checked against them for everything else, and the one
 // reason the server code doesn't register is the one error. A callback
 // over what a stand-in answers (`rows.map((row) => …)`) then has nothing

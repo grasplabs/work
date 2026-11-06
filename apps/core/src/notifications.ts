@@ -262,7 +262,6 @@ interface ListedRow {
   stopReason: "refused" | "failed" | null;
   title: string | null;
   body: string | null;
-  screen: string | null;
   updatedAt: Date;
   readAt: Date | null;
 }
@@ -330,7 +329,6 @@ const appMessageOf = (row: ListedRow): Notification[] => {
           appName,
           title,
           body: row.body,
-          screen: row.screen,
           at: row.updatedAt.toISOString(),
           read: row.readAt !== null,
         },
@@ -448,9 +446,6 @@ export const listNotifications = async (
         // Named, as the workflow's: `body` is the gap's record's too.
         title: sql<string | null>`${notifications.title}`.as("message_title"),
         body: sql<string | null>`${notifications.body}`.as("message_body"),
-        screen: sql<string | null>`${notifications.screen}`.as(
-          "message_screen"
-        ),
         updatedAt: notifications.updatedAt,
         readAt: notifications.readAt,
       })

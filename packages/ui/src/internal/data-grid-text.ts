@@ -1,6 +1,6 @@
 import type { Texts } from "./language.ts";
 
-/** What the data grid says, in the page's language unless the screen says otherwise. */
+/** What the data grid says, in the page's language unless the page says otherwise. */
 export interface DataGridText {
   readonly search: string;
   readonly columns: string;

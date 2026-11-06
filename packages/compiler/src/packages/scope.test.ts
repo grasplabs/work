@@ -25,7 +25,7 @@ describe("a package's stylesheet", () => {
     expect(own.flatMap((css) => unscopedInCss(css))).toStrictEqual([]);
   });
 
-  it("may not style the whole screen: the root, the page, every element, or the kit's own controls", () => {
+  it("may not style the whole page: the root, the body, every element, or the kit's own controls", () => {
     const css = `*, ::before { box-sizing: border-box; }
 html { font-size: 20px; }
 body{margin:0}
@@ -61,7 +61,7 @@ h1,
     expect(unscopedInCss(css)).toStrictEqual(["body", "button", "h1"]);
   });
 
-  it("may style any element inside an @scope rooted at its own class, but not one rooted at the screen", () => {
+  it("may style any element inside an @scope rooted at its own class, but not one rooted at the page", () => {
     const css = `@scope (.pkg) { button { color: red; } @media (min-width: 1px) { a, :scope { margin: 0; } } }
 @scope (.pkg, #chart) to (.pkg-slot) { * { box-sizing: border-box; } }
 @scope (body) { p { margin: 0; } }

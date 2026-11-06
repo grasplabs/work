@@ -6,14 +6,14 @@ import {
   draftProblem,
   draftOf,
   toSave,
-} from "../blueprints/workflow-map/files/components/record.ts";
-import { recordOf } from "../blueprints/workflow-map/files/components/store.ts";
-import type { Workflow } from "../blueprints/workflow-map/files/components/store.ts";
-import { expectedGain } from "../blueprints/workflow-map/files/components/totals.ts";
+} from "../blueprints/workflow-map/files/src/components/record.ts";
+import { recordOf } from "../blueprints/workflow-map/files/src/components/store.ts";
+import type { Workflow } from "../blueprints/workflow-map/files/src/components/store.ts";
+import { expectedGain } from "../blueprints/workflow-map/files/src/components/totals.ts";
 import type {
   Step,
   WorkflowRecord,
-} from "../blueprints/workflow-map/files/components/totals.ts";
+} from "../blueprints/workflow-map/files/src/components/totals.ts";
 
 // What the workflow map's editor saves from what it holds: pure logic, so
 // tested on its own. What can go wrong: a field cleared in the editor

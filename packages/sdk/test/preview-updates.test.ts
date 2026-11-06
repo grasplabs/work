@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import type { PreviewLoad } from "../src/page-runtime.ts";
 import {
   ModuleNotLoadedError,
   notLoaded,
   previewReceiver,
 } from "../src/preview-updates.ts";
 import type { PreviewFrame } from "../src/preview-updates.ts";
-import type { PreviewLoad } from "../src/screen-runtime.ts";
 
 // A chat's preview's frame taking its draft's updates: the ways it can
 // fail, from its threat model (preview-updates.ts): a version that names
@@ -26,20 +26,18 @@ const address = (what: string): string =>
 /** What each address renders. */
 const rendered = new Map(renders.map((what) => [address(what), what]));
 
-/** A version of the screen whose module renders `what`, as the page sends one. */
+/** A version of the pages whose module renders `what`, as the page sends one. */
 const load = (what: string, visit = 0): PreviewLoad => ({
   entry: address(what),
   visit,
   css: `.${what}{}`,
 });
 
-const screen = (): null => null;
-
 /** A frame whose modules render what their address says. */
 const fakeFrame = () => {
   const imported: string[] = [];
   const reported: string[] = [];
-  const seen = { screen: "opened", css: ".opened{}", imported, reported };
+  const seen = { page: "opened", css: ".opened{}", imported, reported };
   let staged = "";
   let failures = 0;
   const frame: PreviewFrame = {
@@ -51,14 +49,14 @@ const fakeFrame = () => {
         throw new SyntaxError("Unexpected token");
       }
       staged = what;
-      return { default: screen };
+      return { routeTree: what };
     },
     commit: () => {
       if (staged.startsWith("throw")) {
         failures += 1;
-        seen.screen = "error boundary";
+        seen.page = "error boundary";
       } else if (staged !== "") {
-        seen.screen = staged;
+        seen.page = staged;
       }
       staged = "";
     },
@@ -66,7 +64,8 @@ const fakeFrame = () => {
       staged = "";
     },
     refresh: () => true,
-    show: () => {},
+    route: (module) =>
+      typeof module === "object" && module !== null && "routeTree" in module,
     renderFailures: () => failures,
     settle: async () => {
       await Promise.resolve();
@@ -90,7 +89,7 @@ describe("a preview's frame taking its draft's updates", () => {
     expect({ answers, seen }).toStrictEqual({
       answers: ["applied", "applied"],
       seen: {
-        screen: "two",
+        page: "two",
         css: ".two{}",
         imported: [`0/${address("one")}`, `3/${address("two")}`],
         reported: [],
@@ -126,12 +125,12 @@ describe("a preview's frame taking its draft's updates", () => {
     const broken = await receive(load("syntax error"));
     expect({
       broken,
-      screen: seen.screen,
+      page: seen.page,
       css: seen.css,
       reported: seen.reported,
     }).toStrictEqual({
       broken: "failed",
-      screen: "one",
+      page: "one",
       css: ".one{}",
       reported: ["Unexpected token"],
     });
@@ -143,10 +142,10 @@ describe("a preview's frame taking its draft's updates", () => {
     await receive(load("one"));
     const failing = await receive(load("throw"));
     const back = await receive(load("one", 1));
-    expect({ failing, back, screen: seen.screen }).toStrictEqual({
+    expect({ failing, back, page: seen.page }).toStrictEqual({
       failing: "broken",
       back: "applied",
-      screen: "one",
+      page: "one",
     });
   });
 
@@ -163,19 +162,19 @@ describe("a preview's frame taking its draft's updates", () => {
       // As after hours open: core refuses the frame's expired token.
       evaluate: async () => {
         await Promise.resolve();
-        throw new ModuleNotLoadedError("The screen's module didn't load.");
+        throw new ModuleNotLoadedError("The page's module didn't load.");
       },
     });
     await receive(load("one"));
     const answer = await receive(load("two"));
     expect({ answer, seen }).toStrictEqual({
       answer: "reset",
-      seen: { screen: "opened", css: ".opened{}", imported: [], reported: [] },
+      seen: { page: "opened", css: ".opened{}", imported: [], reported: [] },
     });
   });
 
-  it("tells a module that didn't load, in each engine's words, from the screen's own code throwing", () => {
-    const directory = `https://acme.grasp.test/screen-modules/${"d".repeat(64)}/`;
+  it("tells a module that didn't load, in each engine's words, from the page's own code throwing", () => {
+    const directory = `https://acme.grasp.test/page-modules/${"d".repeat(64)}/`;
     const imported = `${directory}${"e".repeat(64)}.js?token=1.x`;
     expect({
       chromium: notLoaded(

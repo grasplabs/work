@@ -585,7 +585,7 @@ const leavingOutput = (
       ),
       ...unscopedInCss(text, limit).map(
         (selector) =>
-          `the stylesheet ${path} styles every "${selector}" on the screen, the kit's own included: scope its rules under the package's own classes`
+          `the stylesheet ${path} styles every "${selector}" on the page, the kit's own included: scope its rules under the package's own classes`
       ),
     ].slice(0, limit);
   }

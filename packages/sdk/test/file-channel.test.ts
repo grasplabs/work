@@ -2,10 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { fileChannel } from "../src/file-channel.ts";
 
-// A screen's file channel, through the page's own fetch: its requests stop
+// A page's file channel, through the page's own fetch: its requests stop
 // when they're cancelled, also while they wait for the person to name.
 
-describe("a screen's file channel", () => {
+describe("a page's file channel", () => {
   it("stops a request that waits for its person once it's cancelled, sending nothing", async () => {
     const sent: string[] = [];
     const never = Promise.withResolvers<string>();
@@ -32,7 +32,7 @@ describe("a screen's file channel", () => {
     const channel = fileChannel({
       app: "app",
       lease: "lease",
-      // The screen has closed: its link refuses to name anyone.
+      // The page has closed: its link refuses to name anyone.
       person: async () => {
         asked += 1;
         return await Promise.reject(new Error("The link is closed."));

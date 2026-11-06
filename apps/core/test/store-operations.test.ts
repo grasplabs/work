@@ -50,7 +50,7 @@ import { outcome, unique } from "./sign-in.ts";
 // binding, a revoked grant still working, the store owner's privilege
 // carried to the caller, and one consumer's data or keys reaching
 // another. Each consumer goes in through what it really uses: an App's
-// action through its declared store resource, called as a screen calls
+// action through its declared store resource, called as a page calls
 // it; a workflow's approval through the admin's RPC function, and its
 // call through the function its runs call.
 
@@ -218,7 +218,7 @@ const authorityOf = (sealed: Sealed): Authority => ({
 const contextOf = (sealed: Sealed) =>
   ({ type: "app", appId: appIdSchema.parse(sealed.app) }) as const;
 
-/** What `by` gets calling `path` of `sealed`'s current release, as a screen calls it. */
+/** What `by` gets calling `path` of `sealed`'s current release, as a page calls it. */
 const call = async (
   by: Person,
   sealed: Sealed,
@@ -433,7 +433,7 @@ describe("a store operation's receipts", () => {
         }
       );
     }
-    // The same key from the CRM's own screen is the CRM's own receipt.
+    // The same key from the CRM's own page is the CRM's own receipt.
     await expect(call(crm.owner, crm, "contacts.list")).resolves.toStrictEqual([
       "Ada",
       "Ada",

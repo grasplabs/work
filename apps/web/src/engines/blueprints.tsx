@@ -28,7 +28,7 @@ import { useCoreAction } from "../use-core-action.ts";
 // of an App saved to start new Apps from, and picking one to start a new
 // App as a copy of it. Core names a blueprint after its App as it was
 // saved, so saving asks for no name. The prototype's picture of each
-// blueprint's screen isn't here: core has no picture of a version's screen.
+// blueprint's page isn't here: core has no picture of a version's page.
 
 /** One blueprint: its name, what it is for, who saved it, and the way to remove it. */
 const BlueprintCard = ({

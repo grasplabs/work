@@ -85,15 +85,15 @@ const intakeFor = async (admin: Person): Promise<string> => {
   }
 };
 
-/** The intake's screen in `page`, once it shows. */
+/** The intake's page in `page`, once it shows. */
 const openIntake = async (page: Page, app: string) => {
-  await page.goto(`/apps/${app}/full?screen=intake`);
-  const screen = page.frameLocator('iframe[title="intake app"]');
-  // The first open builds the screen, which takes a while on a loaded machine.
-  await expect(screen.getByRole("heading", { name: "Intake" })).toBeVisible({
+  await page.goto(`/apps/${app}/full`);
+  const appPage = page.frameLocator('iframe[title="App"]');
+  // The first open builds the page, which takes a while on a loaded machine.
+  await expect(appPage.getByRole("heading", { name: "Intake" })).toBeVisible({
     timeout: 20_000,
   });
-  return screen;
+  return appPage;
 };
 
 test("an admin takes an interview as a draft, reviews it again, and saves its tagged statements", async ({
@@ -104,32 +104,32 @@ test("an admin takes an interview as a draft, reviews it again, and saves its ta
   const title = `Interview ${tag}`;
   const app = await intakeFor(admin);
   const page = await pageOf(admin);
-  const screen = await openIntake(page, app);
+  const appPage = await openIntake(page, app);
 
-  await screen.getByRole("button", { name: "New source" }).click();
-  await screen.getByLabel("Source title").fill(title);
-  await screen.getByLabel("Date").fill("2026-09-21");
-  await screen.getByLabel("From").fill("Anna, controller");
-  await screen.getByRole("button", { name: "Add a statement" }).click();
-  await screen
+  await appPage.getByRole("button", { name: "New source" }).click();
+  await appPage.getByLabel("Source title").fill(title);
+  await appPage.getByLabel("Date").fill("2026-09-21");
+  await appPage.getByLabel("From").fill("Anna, controller");
+  await appPage.getByRole("button", { name: "Add a statement" }).click();
+  await appPage
     .getByLabel("Statement 1", { exact: true })
     .fill("Closing takes three days.");
   // Not kept until every statement has a tag.
-  await expect(screen.getByText("Tag statement 1.")).toBeVisible();
-  await screen
+  await expect(appPage.getByText("Tag statement 1.")).toBeVisible();
+  await appPage
     .getByRole("checkbox", { name: "Time sink, statement 1" })
     .click();
-  await screen.getByRole("button", { name: "Add a statement" }).click();
-  await screen
+  await appPage.getByRole("button", { name: "Add a statement" }).click();
+  await appPage
     .getByLabel("Statement 2", { exact: true })
     .fill("Close should take a day.");
-  await screen.getByRole("checkbox", { name: "Goal, statement 2" }).click();
-  await screen.getByRole("button", { name: "Keep as a draft" }).click();
-  await expect(screen.getByRole("heading", { name: "Review" })).toBeVisible();
+  await appPage.getByRole("checkbox", { name: "Goal, statement 2" }).click();
+  await appPage.getByRole("button", { name: "Keep as a draft" }).click();
+  await expect(appPage.getByRole("heading", { name: "Review" })).toBeVisible();
 
   // Back to the list, and reviewed again from it.
-  await screen.getByRole("button", { name: "Back" }).click();
-  const drafts = screen.getByRole("table", { name: "Drafts" });
+  await appPage.getByRole("button", { name: "Back" }).click();
+  const drafts = appPage.getByRole("table", { name: "Drafts" });
   const row = drafts.getByRole("row").filter({ hasText: title });
   await expect(row.getByRole("cell")).toHaveText([
     title,
@@ -139,18 +139,20 @@ test("an admin takes an interview as a draft, reviews it again, and saves its ta
     "Review",
   ]);
   await row.getByRole("button", { name: `Review ${title}` }).click();
-  await expect(screen.getByLabel("Statement 2", { exact: true })).toHaveValue(
+  await expect(appPage.getByLabel("Statement 2", { exact: true })).toHaveValue(
     "Close should take a day."
   );
-  await screen.getByRole("checkbox", { name: "Handover, statement 1" }).click();
-  await screen.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(screen.getByRole("status")).toHaveText(
+  await appPage
+    .getByRole("checkbox", { name: "Handover, statement 1" })
+    .click();
+  await appPage.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(appPage.getByRole("status")).toHaveText(
     "Saved: 2 statements and their source."
   );
   await expect(drafts.getByRole("row").filter({ hasText: title })).toHaveCount(
     0
   );
-  const saved = screen
+  const saved = appPage
     .getByRole("table", { name: "Saved sources" })
     .getByRole("row")
     .filter({ hasText: title });
@@ -172,13 +174,13 @@ test("an admin sends notes to be read, and sees the reading wait while the AI pr
   // (e2e/model-fake.ts), so the reading's model call fails on the
   // organization's key.
   const page = await pageOf(admin);
-  const screen = await openIntake(page, app);
+  const appPage = await openIntake(page, app);
 
-  await screen.getByRole("button", { name: "Read notes" }).click();
-  const start = screen.getByRole("button", { name: "Take out statements" });
+  await appPage.getByRole("button", { name: "Read notes" }).click();
+  const start = appPage.getByRole("button", { name: "Take out statements" });
   await expect(start).toBeDisabled();
-  await screen.getByLabel("Source title").fill(title);
-  await screen
+  await appPage.getByLabel("Source title").fill(title);
+  await appPage
     .getByLabel("Notes", { exact: true })
     .fill("Closing the month takes three days.");
   await start.click();
@@ -187,7 +189,7 @@ test("an admin sends notes to be read, and sees the reading wait while the AI pr
   // the organization's provider refuses its key, and goes on by itself once
   // an admin replaces it (the banner that tells admins so is the web's
   // tests', apps/web/src/frame/ai-key-banner.test.tsx).
-  const reading = screen.getByRole("region", { name: "Notes being read" });
+  const reading = appPage.getByRole("region", { name: "Notes being read" });
   const item = reading.getByRole("listitem").filter({ hasText: title });
   await expect(item).toContainText("Waiting its turn to read the notes", {
     timeout: 30_000,
@@ -204,9 +206,9 @@ test("an admin invites a stakeholder, who opens the link without an account, wri
   const name = `Ben ${crypto.randomUUID().slice(0, 8)}`;
   const app = await intakeFor(admin);
   const page = await pageOf(admin);
-  const screen = await openIntake(page, app);
+  const appPage = await openIntake(page, app);
 
-  const chats = screen;
+  const chats = appPage;
   await chats.getByLabel("Name").fill(name);
   await chats.getByRole("button", { name: "Invite" }).click();
   const linkField = chats.getByLabel(`Link for ${name}`);

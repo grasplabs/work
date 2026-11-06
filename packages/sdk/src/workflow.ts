@@ -676,7 +676,7 @@ export interface WorkflowContext<P extends Params, Input> {
 
 /**
  * What starts a run, besides a person starting it by hand. Triggers only
- * ever start workflows: screens can't declare them. They take effect when
+ * ever start workflows: pages can't declare them. They take effect when
  * the App's version is made current, and stop when another version that
  * doesn't declare them is. A run a trigger starts acts for the App's
  * owner, and fails if the owner has left the organization.

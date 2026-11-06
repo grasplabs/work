@@ -1,7 +1,7 @@
 // The shape of a business store's schema that both sides check: the SDK
 // when an App declares its tables (`defineSchema`), and the store's host
 // when it is handed a schema or a commit. Kept apart from stores.ts, and
-// free of dependencies, because the SDK's root module (what screens import
+// free of dependencies, because the SDK's root module (what pages import
 // for `v`) can't bring Zod along.
 
 /**
@@ -93,7 +93,7 @@ export const cursorMaxLength = 4096;
  * at every change (spec 11.6), page by page within `queryMaxResults`. A
  * Load More past it fails as `query.window_limit` rather than keep
  * growing what core reads and pushes; the window's bytes are bounded on
- * their own, as any push is (`screenLimits.answerBytes`).
+ * their own, as any push is (`pageLimits.answerBytes`).
  */
 export const liveWindowMaxItems = 1000;
 

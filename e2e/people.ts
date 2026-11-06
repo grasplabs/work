@@ -288,16 +288,16 @@ const cast = {
   platformWarmUp: { builder: "builder" },
   apps: { builder: "builder", user: "user", admin: "admin" },
   appPage: { builder: "builder", user: "user", colleague: "builder" },
-  screens: { one: "builder", two: "builder" },
-  screenAttacks: { builder: "builder" },
-  screenBoundWorkflow: { builder: "builder", admin: "admin" },
-  screenDecisionForm: {
+  pages: { one: "builder", two: "builder" },
+  pageAttacks: { builder: "builder" },
+  pageBoundWorkflow: { builder: "builder", admin: "admin" },
+  pageDecisionForm: {
     builder: "builder",
     admin: "admin",
     colleague: "user",
   },
   notesApp: { builder: "builder" },
-  screenNavigation: { builder: "builder" },
+  pageNavigation: { builder: "builder" },
   appSurfaces: { builder: "builder", user: "user" },
   notesAppSwitch: { first: "builder", next: "user" },
   notesAppTwoTabs: { first: "builder", next: "user" },
@@ -517,7 +517,7 @@ export const peopleIn = <S extends Scene>(
 };
 
 /**
- * Carries a page's `/rpc` connection, and its screens' function calls
+ * Carries a page's `/rpc` connection, and its pages' function calls
  * (`/api/app-functions/`, plain requests, not the socket), through Node,
  * which adds the person's session cookie. Only for WebKit, which keeps a
  * Secure cookie from `http://localhost` where Chromium and Firefox send
@@ -588,8 +588,8 @@ export const signInTo = async (
 };
 
 /**
- * Revokes the App's newest release, as the configured admin: its screens
- * get none of the App's data from then on, the screens already running
+ * Revokes the App's newest release, as the configured admin: its pages
+ * get none of the App's data from then on, the pages already running
  * included.
  */
 export const revokeNewestRelease = async (app: string): Promise<void> => {

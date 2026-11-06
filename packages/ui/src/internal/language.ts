@@ -1,7 +1,7 @@
 // The kit's own few words follow the page's language: a document's `lang`,
-// which the frame of an App's screen takes from the page around it. The
-// kit stays free of Lingui (App screens share it), so each part keeps its
-// words here in the languages the frontend speaks, and a screen can still
+// which the frame of an App's page takes from the page around it. The
+// kit stays free of Lingui (App pages share it), so each part keeps its
+// words here in the languages the frontend speaks, and a page can still
 // say them otherwise through the part's `text` prop.
 
 /** The languages the kit speaks besides English. */
@@ -12,7 +12,7 @@ export type Texts<Text> = { readonly en: Text } & Readonly<
   Record<OtherLanguage, Text>
 >;
 
-/** The language of the document a screen runs in: English outside one. */
+/** The language of the document a page runs in: English outside one. */
 export const documentLanguage = (): string =>
   typeof document === "undefined" ? "en" : document.documentElement.lang;
 

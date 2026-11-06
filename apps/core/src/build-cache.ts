@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { buildReceipts } from "./db/core/schema.ts";
 
 // The compiler's builds, kept in R2 and served again only as the build
-// that passed its gates wrote them (screens.ts `cachedBuild`). Core's D1
+// that passed its gates wrote them (pages.ts `cachedBuild`). Core's D1
 // holds the trusted record of each (`build_receipts`): the SHA-256 and
 // size of its bytes, and the key's lease, so builds of the same files run
 // once whichever isolate asks.
@@ -23,7 +23,7 @@ import { buildReceipts } from "./db/core/schema.ts";
 // - Different inputs under one key: the key is the build's kind and
 //   compiler call, a key schema (`keySchema`), the compiler's version (its
 //   kit, SDKs and policy) and the SHA-256 of the exact files the build
-//   reads (screens.ts `buildKey`).
+//   reads (pages.ts `buildKey`).
 // - Repeated integrity failure: a kept build whose bytes fail their check
 //   is counted once on the receipt, however many read it; at
 //   `quarantineAfter` such builds, the key is quarantined, its bad bytes are kept
@@ -36,7 +36,7 @@ import { buildReceipts } from "./db/core/schema.ts";
 //   receipt whose bytes are good is served whether or not the lease was
 //   given back.
 // - Cached bytes granting anything: a compile build holds App code alone.
-//   Package bytes reach a screen, server or workflow through admission
+//   Package bytes reach a page, server or workflow through admission
 //   where they are served or sealed (packages/serve.ts,
 //   workflows/sealed-packages.ts), never through this cache.
 
@@ -49,7 +49,7 @@ export const quarantineAfter = 3;
 /**
  * How long a build waiting for another's receipt waits before it looks
  * again: from the first, doubling to the most, so waiters on a cold cache
- * (a new compiler, every screen building) don't hammer core's database.
+ * (a new compiler, every page building) don't hammer core's database.
  */
 export const waitBackoff = { firstMs: 250, mostMs: 4000 } as const;
 

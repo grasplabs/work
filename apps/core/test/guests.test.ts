@@ -191,7 +191,7 @@ const callerOf = async (userId: string) => {
 
 /**
  * Calls `guests.<method>` of `app`'s current release as `userId`, with
- * `input`, as a screen would: what the action answered, read back, or the
+ * `input`, as a page would: what the action answered, read back, or the
  * call's own refusal.
  */
 const call = async (

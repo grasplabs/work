@@ -15,7 +15,7 @@ import {
   withTimeout,
 } from "./core.ts";
 import type { Session } from "./core.ts";
-import { stopDraftsFor, sweepDrafts } from "./screens/form-drafts.ts";
+import { stopDraftsFor, sweepDrafts } from "./pages/form-drafts.ts";
 
 /** Why the person's session ended under the page. */
 export type SessionEnded = "signed-out" | "principal-changed";
@@ -95,7 +95,7 @@ const onPageBack = (back: () => void): void => {
  * How a caller waits for the connection. A person waiting (the shell's
  * calls, which give up in a few seconds) cuts a reconnect pause short; an
  * App frame is patient: it waits for the next attempt the backoff makes,
- * so however often a screen asks during an outage, it never adds one.
+ * so however often a page asks during an outage, it never adds one.
  */
 export interface Waiting {
   patient?: boolean;
@@ -117,10 +117,10 @@ export interface CoreConnectionOptions {
 /**
  * The tab's one connection to core (spec 11.2), which everything the page
  * asks of core goes over: loaders, actions, its status, followed chats,
- * notifications, and the App frames it runs (screens/tab-link.ts), each
+ * notifications, and the App frames it runs (pages/tab-link.ts), each
  * of which reaches its App through a capability of its own on it (core's
- * `screens.frame`). (A draft's preview alone keeps a connection of its
- * own, screens/core-link.ts.) It opens when first used (a guest's page
+ * `pages.frame`). (A draft's preview alone keeps a connection of its
+ * own, pages/core-link.ts.) It opens when first used (a guest's page
  * never uses it) and connects again whenever it drops, for as long as it
  * takes, after a pause of up to 1 to 30 s (`reconnectDelay`), cut short
  * when the page comes back to the tab or online, or a person asks for it
@@ -504,9 +504,9 @@ const askCoreStatus = async (
     signedInAs(core, signal),
   ]);
   if (pong === "pong") {
-    // Core says who is signed in: the screens' drafts of anyone else, or
+    // Core says who is signed in: the pages' drafts of anyone else, or
     // all of them when nobody is, and every expired one, go now, so a tab
-    // the browser restored holds none (screens/form-drafts.ts).
+    // the browser restored holds none (pages/form-drafts.ts).
     sweepDrafts(identity?.userId);
   }
   return { connected: pong === "pong", signInOptions, identity };
@@ -677,7 +677,7 @@ const confirmSignedIn = async (core: CoreConnection): Promise<void> => {
  * App frame on it and loads the page again, signed out (`onSessionEnded`).
  */
 export const signOut = async (core: CoreConnection): Promise<void> => {
-  // The unsaved drafts of the Apps' screens were this person's: no frame
+  // The unsaved drafts of the Apps' pages were this person's: no frame
   // writes one from now on, and every one goes once core signed them out.
   try {
     await stopDraftsFor(async () => {

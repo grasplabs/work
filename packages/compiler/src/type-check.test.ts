@@ -5,7 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   diagnosticsOfRun,
-  screenTarget,
+  pageTarget,
   typeCheck,
   typeCheckRequest,
 } from "./type-check.ts";
@@ -45,7 +45,7 @@ const kit: KitTypes = {
   },
 };
 
-const given = screenTarget(new Set(["given"]));
+const given = pageTarget(new Set(["given"]));
 
 /** `files` checked for `target`, as `file:line:column rule`. */
 const checked = (
@@ -86,7 +86,7 @@ describe("what an App file's types resolve to", () => {
     expect({
       // A relative path to where the check hides the kit resolves: each
       // file's compile refuses a type's path that isn't an App file
-      // (imports.ts `typeFileError`, `screenTypeImportError`), and a
+      // (imports.ts `typeFileError`, `pageTypeImportError`), and a
       // compile error fails the build whatever the check says.
       given: checked(reaching, given),
       // Without the bound, TypeScript resolves all of the kit by name and
@@ -261,7 +261,7 @@ describe("unused names in App code", () => {
       kit,
       typeCheckRequest(
         {
-          "components/total.ts": `import type { Given } from "given";
+          "src/components/total.ts": `import type { Given } from "given";
 
 export const total = (ctx: number, row: number, spare: number): number => {
   const left = 1;

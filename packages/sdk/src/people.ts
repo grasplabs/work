@@ -6,10 +6,10 @@ import type { Infer, InferInput } from "./values.ts";
 
 // Who calls an App, and the organization's people (GRA-1474): what an
 // App's server functions read as `ctx.auth.getUser()` and `ctx.people`,
-// and its screens as `useUser()` and `usePeople()`, as Convex's read
+// and its pages as `useUser()` and `usePeople()`, as Convex's read
 // `ctx.auth`. Core answers both itself, from its own record of who is
-// signed in and who is a member, never from anything a screen or App code
-// sends: a screen that makes up a user fools only itself, and every
+// signed in and who is a member, never from anything a page or App code
+// sends: a page that makes up a user fools only itself, and every
 // decision that matters is the server's.
 //
 // The directory is read-only and bounded, and only an App that declares it
@@ -151,7 +151,7 @@ export const peopleOperations: Readonly<
   team: described("team"),
 });
 
-/** The reference a screen reads `Name` through. */
+/** The reference a page reads `Name` through. */
 type PeopleReference<Name extends PeopleOperationName> = OperationReference<
   InferInput<(typeof contracts)[Name]["args"]>,
   Infer<(typeof contracts)[Name]["returns"]>,
@@ -165,10 +165,10 @@ const referenceTo = <Name extends PeopleOperationName>(
   Object.freeze({ name: peopleOperations[read].path });
 
 /**
- * The references a screen reads through (`useUser`, `usePeople`). They
- * name no App: the screen's page binds its calls to its own App, and core
+ * The references a page reads through (`useUser`, `usePeople`). They
+ * name no App: the page's page binds its calls to its own App, and core
  * answers them for that App and the person signed in there, whatever a
- * reference says. So they work in Grasp's own screens only; a portable
+ * reference says. So they work in Grasp's own pages only; a portable
  * host reads who calls through one of the App's functions.
  */
 export const peopleReferences = Object.freeze({

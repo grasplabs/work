@@ -281,7 +281,7 @@ export const mindAfterV2 = (
 
 const hearsV2 = `You read the end of an interview: the person's lines and the interviewer's last reply. Say for that last reply only:
 - "plainWord": it tells the person plainly that their answer was not usable, or that he needs a real answer, or asks them to answer for real.
-- "purpose": the person had asked what this is for or who reads it, and the reply itself says so plainly (not only pointing to a screen, not only saying it is a fair question).
+- "purpose": the person had asked what this is for or who reads it, and the reply itself says so plainly (not only pointing to a page, not only saying it is a fair question).
 - "wrongParaphrase": it says back what the person said, in other words, and gets something of it wrong: another number, another step, another person, or something they did not say.
 - "concreteCase": it asks about one real case: the last time, one particular one, what they did with a recent one. A question about how it goes in general is not.
 Each is false unless the reply clearly does it.`;

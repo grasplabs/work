@@ -160,7 +160,7 @@ describe("retention", { timeout: 120_000 }, () => {
     await expect(loadedHash(app, 2)).resolves.toBe(second.manifestHash);
   });
 
-  it("keeps a version an open screen leases, for as long as it renews", async () => {
+  it("keeps a version an open page leases, for as long as it renews", async () => {
     const start = new Date();
     const { app, first } = await twoVersions(start);
     const key = { app, version: 1 };
@@ -169,7 +169,7 @@ describe("retention", { timeout: 120_000 }, () => {
     await leaseRelease(env, key, "frame-1", past);
     // Leased: not marked while the lease holds; marked once it lapses.
     await sweepsAt(past, after(past, 10 * minute), after(past, 20 * minute));
-    // The screen comes back within the grace and renews: the next sweep
+    // The page comes back within the grace and renews: the next sweep
     // finds it held again, and the grace starts over once it lapses.
     await leaseRelease(env, key, "frame-1", after(past, 30 * minute));
     const renewedLapse = after(past, 20 * minute + releaseGraceMs + minute);

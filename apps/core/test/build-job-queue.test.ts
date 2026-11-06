@@ -134,7 +134,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
         },
         appIdSchema.parse(crypto.randomUUID()),
         { base: null, revision: 1 },
-        { "screens/desk.tsx": desk },
+        { "src/routes/index.tsx": desk },
         lost.signal
       );
       stopped = "built";

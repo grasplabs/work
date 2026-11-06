@@ -1,4 +1,5 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import type { AppVersionPush } from "@grasp-os/shared/pages";
 /**
  * Drives sign-in the way a browser on the client's page does, through the
  * router: requests go to core's own address with the router secret.
@@ -6,7 +7,6 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import type { Role } from "@grasp-os/shared/roles";
 import { routerSecretHeader } from "@grasp-os/shared/router";
 import type { CoreApi } from "@grasp-os/shared/rpc";
-import type { AppVersionPush } from "@grasp-os/shared/screens";
 import type { EndedSession } from "@grasp-os/shared/sign-in";
 import { newWebSocketRpcSession } from "capnweb";
 import { createExecutionContext } from "cloudflare:test";
@@ -371,7 +371,7 @@ export const outcome = async (promise: Promise<unknown>): Promise<string> => {
 };
 
 /**
- * Follows an App's current version as a page does (`screens.watchVersion`,
+ * Follows an App's current version as a page does (`pages.watchVersion`,
  * through `follow`): each push in turn as core sends it (`next`), and the
  * hold to let go of (`release`).
  */

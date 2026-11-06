@@ -24,7 +24,7 @@ import { brainOf } from "./knowledge/ports.ts";
 // core observes its own execution boundaries, decides what is eligible and
 // whose experience it is, and records each outcome through the Brain's
 // host-only runtime API (`recordOutcome`), never through anything an App,
-// a screen or a model can call.
+// a page or a model can call.
 //
 // Durable at the owning boundary: the write that settles a task writes
 // its capture intent with it. A workflow run's intent goes in core's

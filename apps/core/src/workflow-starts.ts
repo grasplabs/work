@@ -433,7 +433,7 @@ const appGrantHoldsSql = (
  * `person` now, as SQL: the App's own grant, from a version the App has
  * (one no admin approved changes nothing) whose release isn't revoked,
  * for someone who may use the App now. What a start by the App is
- * admitted on, and what a screen is told it may do (screen-workflows.ts),
+ * admitted on, and what a page is told it may do (page-workflows.ts),
  * so the two never differ.
  */
 export const appStartHoldsSql = (
@@ -1154,7 +1154,7 @@ export const decideWorkflowStart = async (
   id: unknown,
   request: unknown,
   /**
-   * The files the start may hand its run: an App's, for its screen's or
+   * The files the start may hand its run: an App's, for its page's or
    * code's start; a message's attachments, for its email trigger's.
    */
   files?: StartFiles
@@ -1635,7 +1635,7 @@ export const startWorkflow = async (
    */
   beforeAdmit?: () => void,
   /**
-   * The files the start may hand its run: an App's, for its screen's or
+   * The files the start may hand its run: an App's, for its page's or
    * code's start; a message's attachments, for its email trigger's.
    */
   files?: StartFiles

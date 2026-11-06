@@ -81,7 +81,7 @@ import type { Mark } from "./internal/rich-text-marks.ts";
 // submission is in flight, focus on the first invalid field, and the
 // submission itself.
 //
-// An App's screen runs in a frame sandboxed without forms, where the
+// An App's page runs in a frame sandboxed without forms, where the
 // browser submits nothing and fires no `submit` event: the submit button
 // submits on its own click, which Enter in a field also fires.
 
@@ -165,7 +165,7 @@ const errorOf = (
 
 /**
  * The names of a form's fields whose value is `Value`: what each field
- * helper binds, so a field of another type is a type error in the screen.
+ * helper binds, so a field of another type is a type error in the page.
  */
 type FieldNameOf<Values, Value> = {
   [Name in DeepKeys<Values>]: DeepValue<Values, Name> extends Value
@@ -190,7 +190,7 @@ type FileFieldName<Values> = FieldNameOf<
   { readonly id: string } | null | undefined
 >;
 
-/** What the fields say themselves, in the page's language unless the screen says otherwise. */
+/** What the fields say themselves, in the page's language unless the page says otherwise. */
 interface FieldText {
   /** A select's choice of nothing. */
   readonly choose: string;
@@ -205,7 +205,7 @@ interface FieldText {
   readonly tryAgain: string;
   /** Takes a file off its field (never deletes it). */
   readonly remove: string;
-  /** A file the field held before the screen opened. */
+  /** A file the field held before the page opened. */
   readonly attached: string;
   readonly uploading: string;
   /** The rich text toolbar, and its buttons. */
@@ -1022,7 +1022,7 @@ interface RelationProps<
   optionLabel: (record: RecordOf<Reference>) => string;
   /** What the input shows while nothing is typed. */
   placeholder?: string;
-  /** What it says, in the screen's language. */
+  /** What it says, in the page's language. */
   text?: Partial<FieldText>;
 }
 
@@ -1334,7 +1334,7 @@ const FileUpload = <Reference extends FilesReference>({
         }}
         // A file dropped on the field is taken here: a page's frame
         // cancels the browser's own handling of every drop (core's
-        // screen-frame.ts), which is what would otherwise hand it over.
+        // page-frame.ts), which is what would otherwise hand it over.
         onDrop={(event) => {
           event.preventDefault();
           const [file] = event.dataTransfer.files;
@@ -1394,7 +1394,7 @@ const FileField = <Values, Reference extends FilesReference>({
   resource: Declaring<Reference, "upload">;
   /** The kinds of file the picker offers, as an input's `accept`. */
   accept?: string;
-  /** What it says, in the screen's language. */
+  /** What it says, in the page's language. */
   text?: Partial<FieldText>;
 }): React.JSX.Element => (
   <FieldShell
@@ -1438,7 +1438,7 @@ const RichTextField = <Values,>({
   ...props
 }: FieldProps<Values, TextFieldName<Values>> &
   ControlProps<"textarea"> & {
-    /** What it says, in the screen's language. */
+    /** What it says, in the page's language. */
     text?: Partial<FieldText>;
   }): React.JSX.Element => {
   const editor = useRef<HTMLTextAreaElement>(null);

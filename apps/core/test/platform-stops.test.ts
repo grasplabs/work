@@ -9,12 +9,12 @@ import {
   localExtractor,
 } from "../src/knowledge/extract.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
+import { buildPages } from "../src/pages.ts";
 import {
   sandboxCallIdHeader,
   sandboxCpuHeader,
 } from "../src/sandbox-headers.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
-import { buildScreens } from "../src/screens.ts";
 import { mockIdp } from "./idp.ts";
 import { failure, intentFor, named, plain, publish } from "./npm.ts";
 import { signedInApi, unique } from "./sign-in.ts";
@@ -24,12 +24,12 @@ import { signedInApi, unique } from "./sign-in.ts";
 // from its threat model:
 // - A stop the load caused (the shared machine's processes killed, waits
 //   pushing it past its deadline) is kept as the input's own verdict: a
-//   screen pinned as "the compiler was stopped" until the next release, or
+//   page pinned as "the compiler was stopped" until the next release, or
 //   packages refused, that a free machine would have built.
 // - A stop the input reaches whatever the load (its CPU time, its memory,
-//   an answer too large) isn't kept, and every view of a screen that holds
+//   an answer too large) isn't kept, and every view of a page that holds
 //   the type checker runs the compiler again, at its CPU bound each time.
-// - The same screen is judged one way on Cloudflare (the runtime stops a
+// - The same page is judged one way on Cloudflare (the runtime stops a
 //   Loader isolate) and another on-prem (the supervisor's verdict).
 // - Builds that find no place in the sandbox are reported as having maybe
 //   run, so a caller can't safely try again.
@@ -106,23 +106,26 @@ const countingFiles = () => {
   return { files, kept: () => kept };
 };
 
-/** A screen no other build has. */
-const freshScreen = (): Record<string, string> => ({
-  "screens/desk.tsx": `// ${unique()}
-export default function Desk() {
+/** A page no other build has. */
+const freshPage = (): Record<string, string> => ({
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
+// ${unique()}
+function Desk() {
   return <p>desk</p>;
 }
+export const Route = createFileRoute("/")({ component: Desk });
 `,
 });
 
-/** How each of two builds of the same screen ended: built, or why not. */
-const twoBuilds = async (buildEnv: Parameters<typeof buildScreens>[0]) => {
-  const files = freshScreen();
+/** How each of two builds of the same page ended: built, or why not. */
+const twoBuilds = async (buildEnv: Parameters<typeof buildPages>[0]) => {
+  const files = freshPage();
   const ended = [];
   for (const _ of [1, 2]) {
     // One after the other: the second finds what the first kept, or not.
     // oxlint-disable-next-line no-await-in-loop
-    const built = await buildScreens(buildEnv, files, "app-test");
+    const built = await buildPages(buildEnv, files, "app-test");
     ended.push(
       built.ok ? "built" : (built.diagnostics[0]?.message.slice(0, 44) ?? "")
     );
@@ -210,10 +213,14 @@ export default class extends WorkerEntrypoint {
         return env.LOADER.load(code);
       },
     };
-    const built = await buildScreens(
+    const built = await buildPages(
       { ...env, LOADER: loader, RUNTIME_PROFILE: "cloudflare" },
       {
-        "screens/desk.tsx": `// ${crypto.randomUUID()}\nexport const wrong: number = "x";\nexport default function Desk() {\n  return <p>desk</p>;\n}\n`,
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
+// ${crypto.randomUUID()}\nexport const wrong: number = "x";\nfunction Desk() {\n  return <p>desk</p>;\n}\n
+export const Route = createFileRoute("/")({ component: Desk });
+`,
       },
       "app-test"
     );
@@ -224,8 +231,8 @@ export default class extends WorkerEntrypoint {
   });
 });
 
-describe("a screen the sandbox stops the compiler on", () => {
-  it("is kept as failed when the screen stopped it itself, and never compiled again", async () => {
+describe("a page the sandbox stops the compiler on", () => {
+  it("is kept as failed when the page stopped it itself, and never compiled again", async () => {
     for (const verdict of ["cpu", "memory", "refused"]) {
       const { host, sessions } = sandboxStopping({ verdict });
       const { files, kept } = countingFiles();
@@ -296,7 +303,7 @@ describe("a screen the sandbox stops the compiler on", () => {
   it("is built in a fresh isolate on Cloudflare when the shared one was stopped, as another App's build beside it can do", async () => {
     const { loader, compiles } = compilers({
       shared: throwing("Worker exceeded memory limit."),
-      fresh: "return { ok: true, modules: {}, screens: {}, css: '' };",
+      fresh: "return { ok: true, modules: {}, pages: {}, css: '' };",
     });
     const { files, kept } = countingFiles();
 
@@ -317,7 +324,7 @@ describe("a screen the sandbox stops the compiler on", () => {
     const { files, kept } = countingFiles();
 
     await expect(
-      buildScreens(onCloudflare(loader, files), freshScreen(), "app-test")
+      buildPages(onCloudflare(loader, files), freshPage(), "app-test")
     ).rejects.toThrow("Can't read src/exceeded memory limit.ts");
     expect(kept()).toBe(0);
   });
@@ -327,9 +334,9 @@ describe("a screen the sandbox stops the compiler on", () => {
     const { files, kept } = countingFiles();
     let refused: unknown;
     try {
-      await buildScreens(
+      await buildPages(
         { ...env, SANDBOX_HOST: host, FILES: files },
-        freshScreen(),
+        freshPage(),
         "app-test"
       );
     } catch (error) {

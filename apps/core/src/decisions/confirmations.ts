@@ -8,7 +8,7 @@ import type { Json } from "@grasp-os/shared/json";
 // on GRA-624). The UI shows the decision's review context and the answer
 // as core will record it; the person's click there mints a confirmation
 // bound to them, the decision, that context and that answer. Only the
-// host page reaches the mint (the `decisions` namespace): an App's screen
+// host page reaches the mint (the `decisions` namespace): an App's page
 // asks the page to answer, and never holds a confirmation.
 //
 // What is bound is fingerprinted, never kept: the context as the

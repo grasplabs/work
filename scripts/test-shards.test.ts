@@ -35,8 +35,8 @@ const suite: ShardFile[] = [
   file("core fair-admission", 230),
   file("core brain-baseline", 155),
   file("core agent", 90),
-  file("screens client", 180, { group: 1 }),
-  file("screens stream", 75, { group: 1 }),
+  file("pages client", 180, { group: 1 }),
+  file("pages stream", 75, { group: 1 }),
   file("on-prem runs", 95, { group: 2, serial: true }),
   file("on-prem calls", 20, { group: 2, serial: true }),
   ...Array.from({ length: 120 }, (_, index) =>
@@ -142,7 +142,7 @@ describe("splitting the test files between shards", () => {
 
   it("adds a shard's groups up, as it runs them one after another", () => {
     expect(
-      shardSeconds([file("core", 100), file("screens", 100, { group: 1 })])
+      shardSeconds([file("core", 100), file("pages", 100, { group: 1 })])
     ).toBe(2 * projectStartSeconds + 200);
   });
 
@@ -217,7 +217,7 @@ describe("choosing how many shards a run takes", () => {
 
   it("gives each group a shard, however short", () => {
     expect(
-      shardCountFor([file("sdk a", 1), file("screens a", 1, { group: 1 })])
+      shardCountFor([file("sdk a", 1), file("pages a", 1, { group: 1 })])
     ).toBe(2);
   });
 

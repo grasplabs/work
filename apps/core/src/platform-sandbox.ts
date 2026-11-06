@@ -51,7 +51,7 @@ import {
 //   wherever it ran) as a `PlatformBoundError`, and keeps serving
 //   meanwhile, as nothing of it ran in core's process.
 // - A stop the load caused is taken for the input's fault, and kept: a
-//   screen pinned as failed until the next release, a package refused.
+//   page pinned as failed until the next release, a package refused.
 //   Only `cpu`, `memory` and `refused` are the input's own, whatever the
 //   load (`PlatformBoundError.own`); a `deadline` (waits for the shared
 //   machine count) or a `crashed` process (the kernel's OOM killer, which
@@ -60,11 +60,11 @@ import {
 //   `memory`: the supervisor tells the two apart by how it died.
 // - On Cloudflare an App's builds share one warm isolate (one per App and
 //   release, so another App's builds never share its limits), and one of
-//   its heavy builds could get another of its screens kept as failed. A
+//   its heavy builds could get another of its pages kept as failed. A
 //   stop there is tried once more in a fresh isolate of the build's own,
 //   and only that is kept.
 // - The input is made to stop the same way on Cloudflare and on-prem but
-//   is judged differently, so one path recompiles a screen on every view
+//   is judged differently, so one path recompiles a page on every view
 //   at 60 s of CPU, or refuses a package the other accepts. Both run
 //   through one runner (`platformRunner`), whose stops map to the same
 //   verdicts.
@@ -79,7 +79,7 @@ import {
 //   full, the call is refused as the sandbox unavailable, before it
 //   started (`noPlaceOf`), never as the input's fault.
 // - One App's builds take the whole builder's share (many distinct
-//   screens, or builds that run to their deadline, which isn't cached),
+//   pages, or builds that run to their deadline, which isn't cached),
 //   so every other App's are refused as busy. Each build names whose it
 //   is (`platformRunner`'s `whose`, the App or independent workflow, from
 //   core's own record), sent as the session's sub-owner; the supervisor
@@ -119,7 +119,7 @@ export const builderOwner = "platform:builder";
  * The resident memory a build's process may use, in MiB: what the
  * supervisor allows at most by default. TypeScript's checker, on plain
  * workerd with no heap limit to collect against, grows well past the
- * 128 MB Cloudflare's isolate holds it to: about 400 MB for one screen.
+ * 128 MB Cloudflare's isolate holds it to: about 400 MB for one page.
  */
 const builderMemoryMib = 1024;
 
@@ -277,7 +277,7 @@ export type PlatformProgram =
  * The wall-clock time a call of each program may take on the sandbox host,
  * loading it included: past its CPU time (`compilerTaskCpuMs`, 60 s, for
  * each), which bounds the work. The compiler's, the type checker's and
- * Ultracite's are past the build wait too (screens.ts), so a late build
+ * Ultracite's are past the build wait too (pages.ts), so a late build
  * still lands in the cache; the builder's takes in the reads of its
  * tarballs and the writes of its artifact.
  */
@@ -474,7 +474,7 @@ const sessionArgs = (args: readonly unknown[]): SessionArgument[] =>
 /**
  * How long a build asks again for a place in the builder's share while it
  * has none (`noPlaceOf`): as long as a caller waits for a build at most
- * (screens.ts, `buildWaitMs`), so a compile its own App's other builds
+ * (pages.ts, `buildWaitMs`), so a compile its own App's other builds
  * hold up waits its turn rather than fail.
  */
 const placeWaitMs = 15_000;

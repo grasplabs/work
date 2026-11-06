@@ -1,4 +1,4 @@
-import type { AppContents, ViewedApp } from "@grasp-os/shared/apps";
+import type { ViewedApp } from "@grasp-os/shared/apps";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { buttonVariants, Button } from "@grasp-os/ui/components/button";
 import {
@@ -15,7 +15,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
-import { cn } from "@grasp-os/ui/lib/utils";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import {
@@ -32,50 +31,11 @@ import { StatusBadge } from "./app-status.tsx";
 
 // An App as its people use it (/apps/$app): the live App, its current
 // version, full width, under a slim bar with its name and its pages
-// (core's screens) as tabs. Nothing here builds it: its builders get Edit,
+// (core's pages) as tabs. Nothing here builds it: its builders get Edit,
 // which opens its workspace (/apps/$app/edit, app-workspace.tsx), where the
 // chat builds a preview and Publish makes it live. Its settings, under
 // "…", are for everyone who opens it, each section as they may see it
 // (app-settings.tsx).
-
-/** The App's pages (its screens) as tabs in its bar, the open one marked; none for one. */
-const ScreenTabs = ({
-  app,
-  screens,
-  open,
-}: {
-  app: string;
-  screens: readonly string[];
-  open: string | undefined;
-}) => {
-  const { t } = useLingui();
-  if (screens.length < 2) {
-    return null;
-  }
-  return (
-    <nav aria-label={t`Pages`} className="flex flex-wrap gap-1">
-      {screens.map((screen) => (
-        <Link
-          aria-current={screen === open ? "page" : undefined}
-          className={cn(
-            buttonVariants({
-              size: "sm",
-              variant: screen === open ? "secondary" : "ghost",
-            }),
-            "capitalize"
-          )}
-          key={screen}
-          params={{ app }}
-          replace
-          search={{ screen }}
-          to="/apps/$app"
-        >
-          {screen}
-        </Link>
-      ))}
-    </nav>
-  );
-};
 
 /** "…": the open page at full size, and the App's settings. */
 const MoreMenu = ({
@@ -178,22 +138,20 @@ const NoPage = ({
 );
 
 /**
- * The live App: its bar, then its open screen (`children`), or that it
+ * The live App: its bar, then its open page (`children`), or that it
  * has none. Only one who builds it (`buildsApp`, by their role in this
  * App) gets Edit.
  */
 export const AppPage = ({
   app,
-  contents,
-  open,
+  opens,
   identity,
   fullPage,
   children,
 }: {
   app: ViewedApp;
-  contents: AppContents;
-  /** The screen open, of `contents.screens`; none while it has none. */
-  open: string | undefined;
+  /** Whether its pages open: it has some, and isn't archived. */
+  opens: boolean;
   identity: Pick<Identity, "staff">;
   /** "Open full page", as a menu item, while a page is open. */
   fullPage: ReactNode;
@@ -218,7 +176,6 @@ export const AppPage = ({
             <StatusBadge status={app.status} />
           )}
         </span>
-        <ScreenTabs app={app.id} open={open} screens={contents.screens} />
         <span className="ml-auto flex items-center gap-1">
           {builds ? (
             <Link
@@ -238,10 +195,10 @@ export const AppPage = ({
           />
         </span>
       </div>
-      {open === undefined ? (
-        <NoPage app={app.id} archived={archived} editable={builds} />
-      ) : (
+      {opens ? (
         <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+      ) : (
+        <NoPage app={app.id} archived={archived} editable={builds} />
       )}
     </div>
   );

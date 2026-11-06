@@ -2,14 +2,14 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { parse } from "es-module-lexer/js";
 
-// Where each of an App's screen modules is served: an address of its
+// Where each of an App's page modules is served: an address of its
 // content, the way Vite's dev server serves a module, so a browser that
 // loaded one never loads it again, and a write loads only what it changed.
 // Each module imports the App's others by their addresses, relative to
 // its own (`./<address>.js`), so a changed file changes its address and
-// that of every module importing it, up to its screen, and nothing else:
+// that of every module importing it, up to its page, and nothing else:
 // a chat's preview loads only that chain for each write (core's
-// screen-frame.ts). The kit's modules keep their flat names, which the
+// page-frame.ts). The kit's modules keep their flat names, which the
 // frame's import map resolves.
 //
 // Modules may import each other in a cycle, which no address can hold of

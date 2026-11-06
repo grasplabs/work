@@ -1,10 +1,10 @@
-import { jsonBytes } from "@grasp-os/shared/screens";
+import { jsonBytes } from "@grasp-os/shared/pages";
 import { RpcStub } from "capnweb";
 
 import { holdsBigInt, isPlainData } from "./plain-data.ts";
 
 // Callbacks a page passes over `/rpc` for an object to keep and call later:
-// a screen's for its App (screens-rpc.ts), a chat page's for the chat's
+// a page's for its App (pages-rpc.ts), a chat page's for the chat's
 // Workspace object (chats-rpc.ts). The object gets a function that passes
 // plain data on and nothing back, and that checks before each push that
 // the person may still have it.

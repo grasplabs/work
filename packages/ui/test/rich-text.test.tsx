@@ -3,9 +3,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { RichText } from "../src/components/rich-text.tsx";
 
-// What a person's formatted text can put on a screen: what it means to
+// What a person's formatted text can put on a page: what it means to
 // (bold, lists, a link's words and address), and nothing that runs, loads
-// or leaves the screen: no script, no handler, no unsafe address, no
+// or leaves the page: no script, no handler, no unsafe address, no
 // image fetched from elsewhere.
 
 const shown = (value: string): string =>
@@ -47,7 +47,7 @@ describe("rich text", () => {
     );
   });
 
-  it("shows a link's address as text when the screen gives no links resource", () => {
+  it("shows a link's address as text when the page gives no links resource", () => {
     expect(shown("See [the plan](https://example.com/plan).")).toContain(
       "the plan (https://example.com/plan)"
     );

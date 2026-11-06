@@ -325,7 +325,7 @@ const withFailure = (
     ? { ...entry, detail: { ...entry.detail, failureCode } }
     : entry;
 
-/** A screen's control of a run, as its receipt keeps it. */
+/** A page's control of a run, as its receipt keeps it. */
 export type ResourceControlRow =
   typeof workflowResourceRunControls.$inferSelect;
 
@@ -333,7 +333,7 @@ export type ResourceControlRow =
  * Settles `control` of run `run` as `state`, if it is still admitted,
  * audited as it settles (by the system, naming the person who asked):
  * while the run hasn't ended, its snapshot moves on with it, in the same
- * batch, and the run's screens read it again. The screen's apply and the
+ * batch, and the run's pages read it again. The page's apply and the
  * engine's notification can settle the same control at once: only the one
  * whose update changed the row audits it and moves the snapshot on.
  */
@@ -392,13 +392,13 @@ export const settleControl = async (
 };
 
 /**
- * Settles run `row`'s admitted controls (a screen's, screen-workflows.ts)
+ * Settles run `row`'s admitted controls (a page's, page-workflows.ts)
  * by how it ended: its cancel `applied` when it was cancelled after the
  * receipt asked its stop, `superseded` when it ended otherwise first (on
  * its own, or by a builder's terminate before the receipt's stop went
  * out); a pause or resume still admitted, overtaken by the end. A run
  * that hasn't ended settles none. A cancel applied is audited as the
- * screen's termination now, once, with its receipt: only a stop the engine
+ * page's termination now, once, with its receipt: only a stop the engine
  * took and that ended the run is recorded as one (`applyCancel`).
  */
 const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
@@ -437,7 +437,7 @@ const settleCancels = async (env: Env, row: RunRow): Promise<void> => {
             actor: {
               type: "app",
               appId: appIdSchema.parse(control.appId),
-              part: "screen",
+              part: "page",
             },
             detail: { ...entry.detail, onBehalfOf: control.principalId },
           }
@@ -586,7 +586,7 @@ const startAbandoned = async (
     }),
     owedTermination(db, row.id, "failed", now),
   ]);
-  // A screen's pause, resume or cancel of it, superseded by the failed end
+  // A page's pause, resume or cancel of it, superseded by the failed end
   // now, as any end settles them (`settleCancels`): none stays admitted
   // behind a run that never started until the next repair.
   const ended = await runOf(env, row.id);
@@ -1340,7 +1340,7 @@ export const projectResourceRun = async (
       .set({
         status,
         // Every status the engine takes: a wait opened or closed is one,
-        // and a screen's snapshot shows its waits (run-waits.ts).
+        // and a page's snapshot shows its waits (run-waits.ts).
         summaryRevision: sql`${workflowResourceRuns.summaryRevision} + 1`,
         ...(engine.sequence === undefined
           ? {}
@@ -1371,7 +1371,7 @@ export const projectResourceRun = async (
           ),
         ]),
   ]);
-  // A screen's controls of it, settled by how it ended.
+  // A page's controls of it, settled by how it ended.
   const now = ended ? await runOf(env, id) : undefined;
   if (now !== undefined) {
     await settleCancels(env, now);
@@ -1535,7 +1535,7 @@ const cancelStarting = async (
     owedTermination(db, row.id, "cancelled", now),
   ]);
   if (cancelled.length > 0) {
-    // A screen's cancel of it settled, and audited, by how it ended.
+    // A page's cancel of it settled, and audited, by how it ended.
     const ended = await runOf(env, row.id);
     if (ended !== undefined) {
       await settleCancels(env, ended);
@@ -1562,7 +1562,7 @@ const sendTermination = async (env: Env, runId: string): Promise<void> => {
 /**
  * Stops run `row`, which hasn't ended, as `actor` asks, audited under
  * them: whoever asks has been decided already (`terminateResourceRun`, a
- * builder's; a screen's cancel, screen-workflows.ts, the run's person's).
+ * builder's; a page's cancel, page-workflows.ts, the run's person's).
  * See `terminateResourceRun` for how a run still starting is ended.
  */
 const stopResourceRun = async (
@@ -1570,7 +1570,7 @@ const stopResourceRun = async (
   actor: AuditActor,
   row: RunRow,
   /**
-   * Whether this stop audits itself: a screen's cancel is audited once, as
+   * Whether this stop audits itself: a page's cancel is audited once, as
    * its receipt settles (`settleCancels`), however often it is applied.
    */
   audited = true
@@ -1617,7 +1617,7 @@ const stopResourceRun = async (
     });
     // Nothing terminated yet: the stop is audited as asked, under whoever
     // asked, and the termination as it happens, when the object ends the
-    // run and its end is told (`workflow.run.cancelled`). A screen's
+    // run and its end is told (`workflow.run.cancelled`). A page's
     // cancel is audited as its receipt settles.
     if (audited) {
       const db = drizzle(env.DB);
@@ -1704,7 +1704,7 @@ const stopDue = (): SQL =>
 
 /**
  * Stops the unfinished runs of independent workflows that App `app`'s
- * screens or code started (their start receipt names the App as invoker),
+ * pages or code started (their start receipt names the App as invoker),
  * created by `before`, while the App is archived (app-status.ts): at most
  * `limit`, oldest first, each as a builder's stop is, audited under
  * `actor`. A stop that fails is logged and left to the next pass. Answers
@@ -1886,7 +1886,7 @@ export const stopsUnsettled = async (
 
 /**
  * Asks the engine to stop run `runId` for cancel receipt `receiptId` (a
- * screen's, screen-workflows.ts), as `actor`, unless it ended already,
+ * page's, page-workflows.ts), as `actor`, unless it ended already,
  * then settles the receipt once the run has ended (`settleCancels`); one
  * whose end isn't told yet stays admitted until it is. Stopping is
  * idempotent, so a cancel whose answer was lost, or whose stop failed, is
@@ -1906,7 +1906,7 @@ export const applyCancel = async (
     const actor: AuditActor = {
       type: "app",
       appId: appIdSchema.parse(receipt.appId),
-      part: "screen",
+      part: "page",
     };
     // Noted as asked before the engine is, so the run's end, which the
     // engine may tell before this call goes on, finds the receipt asked
@@ -2002,7 +2002,7 @@ export const settleResourceControls = async (
 };
 
 /**
- * Sends an admitted pause or resume (a screen's, screen-workflows.ts) to
+ * Sends an admitted pause or resume (a page's, page-workflows.ts) to
  * the engine with its generation, which the engine takes only if no newer
  * control reached the run (engine.ts), and settles it from what the
  * engine then says it took (`settleResourceControls`). One a newer control
@@ -2040,8 +2040,8 @@ export const applyResourceControl = async (
 };
 
 /**
- * How long a screen's cancel stays admitted before the repair first applies
- * it (its `next_at` as written, screen-workflows.ts): the request that
+ * How long a page's cancel stays admitted before the repair first applies
+ * it (its `next_at` as written, page-workflows.ts): the request that
  * admitted it applies it at once, unless its stop failed.
  */
 export const cancelRepairAfterMs = 60_000;
@@ -2050,7 +2050,7 @@ export const cancelRepairAfterMs = 60_000;
 const cancelsPerRepair = 20;
 
 /**
- * Applies again the screen controls left admitted (a cancel whose stop
+ * Applies again the page controls left admitted (a cancel whose stop
  * failed, a pause or resume the engine hasn't confirmed, or whose request
  * ended first), those due first, as the App asked them:
  * each claimed by its count and backing off on its own as its stop keeps
@@ -2110,7 +2110,7 @@ const repairAdmittedCancels = async (env: Env, now: Date): Promise<void> => {
 const terminationsPerRepair = 50;
 
 /**
- * Applies the screen cancels left admitted (`repairAdmittedCancels`), then
+ * Applies the page cancels left admitted (`repairAdmittedCancels`), then
  * sends again the terminations core still owes the engine, those due
  * first, each backing off on its own as the engine refuses it (claimed by
  * its count, so two repairs never send one at once). Never given up: an

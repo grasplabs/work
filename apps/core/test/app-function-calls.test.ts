@@ -392,7 +392,7 @@ const nextVersion = async (
 
 type Person = Awaited<ReturnType<typeof person>>;
 
-/** What `by` gets calling `path` of `sealed`'s current release, as a screen calls it. */
+/** What `by` gets calling `path` of `sealed`'s current release, as a page calls it. */
 const call = async (
   by: Person,
   sealed: Sealed,
@@ -431,11 +431,11 @@ const call = async (
 
 /**
  * The action `path` of `sealed`'s current release, started for `by` as a
- * screen sends it, under an idempotency key: through its action
+ * page sends it, under an idempotency key: through its action
  * invocation object (action-invocation.ts), not `callAppFunction`. Its
  * object's name, and what it answers.
  */
-const startScreenAction = async (
+const startPageAction = async (
   by: Person,
   sealed: Sealed,
   path: string,
@@ -467,14 +467,14 @@ const startScreenAction = async (
   return { name, result };
 };
 
-/** What `by` gets running the action `path` of `sealed` as a screen sends it. */
-const screenAction = async (
+/** What `by` gets running the action `path` of `sealed` as a page sends it. */
+const pageAction = async (
   by: Person,
   sealed: Sealed,
   path: string,
   input: unknown
 ): Promise<unknown> => {
-  const { result } = await startScreenAction(by, sealed, path, input);
+  const { result } = await startPageAction(by, sealed, path, input);
   return await result;
 };
 
@@ -620,30 +620,27 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
     });
   });
 
-  it("reach them from a screen's keyed action, as the browser sends it", async () => {
+  it("reach them from a page's keyed action, as the browser sends it", async () => {
     const admin = await person("admin");
     const crm = await sealedApp(crmFiles(), "CRM");
     const desk = await sealedApp(deskFiles(), "Desk");
     await bind(admin, desk, crm.app);
     await expect(
-      screenAction(admin, desk, "desk.shout", { text: "hi" })
+      pageAction(admin, desk, "desk.shout", { text: "hi" })
       // Desk's answer: the CRM's, as JSON.
     ).resolves.toStrictEqual({ ok: true, value: '"HI"' });
   });
 
-  it("stop calling another App once the person cancels the screen's action", async () => {
+  it("stop calling another App once the person cancels the page's action", async () => {
     const admin = await person("admin");
     const crm = await sealedApp(crmFiles(), "CRM");
     const desk = await sealedApp(deskFiles(), "Desk");
     await bind(admin, desk, crm.app);
     // The CRM's action waits before it keeps its note; the person cancels
     // Desk's action meanwhile.
-    const { name, result } = await startScreenAction(
-      admin,
-      desk,
-      "desk.later",
-      { text: "after the cancel" }
-    );
+    const { name, result } = await startPageAction(admin, desk, "desk.later", {
+      text: "after the cancel",
+    });
     await scheduler.wait(500);
     const cancelled = await actionInvocation(env, name).cancel(admin.userId);
     await result;
@@ -928,7 +925,7 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
     });
   });
 
-  it("never invite a guest through another App from a screen's call", async () => {
+  it("never invite a guest through another App from a page's call", async () => {
     // The company connected an AI provider: a guest chat needs a model.
     await fakeProvider();
     const builder = await signedInApi(idp, "builder");
@@ -964,7 +961,7 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
       id: builder.userId,
       role: "user",
     });
-    // The Asker calls the Inviter's invite, from a screen.
+    // The Asker calls the Inviter's invite, from a page.
     const { id } = await builder.api.apps.create({ name: "Asker" });
     await published(id);
     await release(builder, id, askerFiles("inviter.invite"));
@@ -987,14 +984,14 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
       teams: [],
     };
     const direct = await call(asBuilder, inviter, "inviter.invite");
-    const fromScreen = await call(asBuilder, askerSealed, "asker.go");
+    const fromPage = await call(asBuilder, askerSealed, "asker.go");
     expect({
       // The person's own call invites.
       direct,
-      fromScreen,
+      fromPage,
     }).toStrictEqual({
       direct: "invited",
-      fromScreen: "error:resource.not_allowed",
+      fromPage: "error:resource.not_allowed",
     });
   });
 });

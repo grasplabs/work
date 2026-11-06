@@ -81,7 +81,7 @@ export interface UnansweredQuestion {
     queryKey: string;
     searches: number;
     /**
-     * How many different people, agents, App parts (screens or server
+     * How many different people, agents, App parts (pages or server
      * code) or runs searched it.
      */
     askers: number;

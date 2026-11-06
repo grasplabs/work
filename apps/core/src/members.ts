@@ -143,7 +143,7 @@ const membershipOf = async (
  * The Apps `userId` has a role in as a member in role `role`, with the
  * teams they are in when the statement runs, as a condition on `apps`
  * (`revocationsOf`): what lowering their role can take away, for those
- * Apps' hosts to tell their open screens (access-revocations.ts). Every
+ * Apps' hosts to tell their open pages (access-revocations.ts). Every
  * App for an admin; a role that isn't ours reaches nothing.
  */
 const reachedAs = (userId: string, role: string): SQL | undefined => {

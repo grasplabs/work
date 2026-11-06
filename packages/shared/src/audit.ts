@@ -51,7 +51,7 @@ const legacyStaff = identifierSchema.optional();
 
 /**
  * Who did something: a person, an agent acting for one, part of an App (its
- * screens or server code), a workflow run, the platform itself, or Grasp
+ * pages or server code), a workflow run, the platform itself, or Grasp
  * staff (whose access is always logged).
  */
 export const auditActorSchema = z.discriminatedUnion("type", [
@@ -78,7 +78,7 @@ export const auditActorSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("app"),
     appId: appIdSchema,
-    part: z.enum(["screen", "server"]),
+    part: z.enum(["page", "server"]),
     staff: legacyStaff,
   }),
   z.object({

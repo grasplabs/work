@@ -1,5 +1,5 @@
 import { appErrors } from "@grasp-os/shared/apps";
-import { screenLimits } from "@grasp-os/shared/screens";
+import { pageLimits } from "@grasp-os/shared/pages";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
@@ -10,7 +10,7 @@ import {
 // The relay of a preview's streaming action to its page
 // (preview-stream-relay.ts), on frames made here: how often it checks the
 // person may still have the stream, that a refusal cancels the run before
-// it waits on the page, and that a result too large for a screen is
+// it waits on the page, and that a result too large for a page is
 // refused.
 
 /** JSON lines of `frames`, as the invocation's reader sends them. */
@@ -139,14 +139,14 @@ describe("a preview stream's relay", () => {
     ]);
   });
 
-  it("refuses a result larger than a screen takes in one answer", async () => {
+  it("refuses a result larger than a page takes in one answer", async () => {
     const delivered: unknown[] = [];
     relayPreviewStream(
       linesOf([
         {
           type: "result",
           seq: 1,
-          result: { ok: true, value: "x".repeat(screenLimits.answerBytes) },
+          result: { ok: true, value: "x".repeat(pageLimits.answerBytes) },
         },
       ]),
       {
@@ -163,7 +163,7 @@ describe("a preview stream's relay", () => {
     );
     await vi.waitFor(() => {
       expect(delivered.map(shapeOf)).toStrictEqual([
-        { type: "result", code: "screen.answer_too_large" },
+        { type: "result", code: "page.answer_too_large" },
       ]);
     });
   });

@@ -51,26 +51,26 @@ const mapFor = async (admin: Person): Promise<string> => {
   }
 };
 
-/** The map's screen in `page`, once it shows. */
+/** The map's page in `page`, once it shows. */
 const openMap = async (page: Page, app: string) => {
-  await page.goto(`/apps/${app}/full?screen=map`);
-  const screen = page.frameLocator('iframe[title="map app"]');
-  // The first open builds the screen, which takes a while on a loaded machine.
+  await page.goto(`/apps/${app}/full`);
+  const appPage = page.frameLocator('iframe[title="App"]');
+  // The first open builds the page, which takes a while on a loaded machine.
   await expect(
-    screen.getByRole("heading", { name: "Workflow map" })
+    appPage.getByRole("heading", { name: "Workflow map" })
   ).toBeVisible({ timeout: 20_000 });
-  return screen;
+  return appPage;
 };
 
 /** Draws a workflow called `title` with no steps, and goes back to the list. */
-const draw = async (screen: FrameLocator, title: string): Promise<void> => {
-  await screen.getByRole("button", { name: "Draw a workflow" }).click();
-  await screen.getByLabel("Title", { exact: true }).fill(title);
-  await screen.getByRole("button", { name: "Save" }).click();
-  await expect(screen.getByText("Version 1")).toBeVisible();
-  await screen.getByRole("button", { name: "All workflows" }).click();
+const draw = async (appPage: FrameLocator, title: string): Promise<void> => {
+  await appPage.getByRole("button", { name: "Draw a workflow" }).click();
+  await appPage.getByLabel("Title", { exact: true }).fill(title);
+  await appPage.getByRole("button", { name: "Save" }).click();
+  await expect(appPage.getByText("Version 1")).toBeVisible();
+  await appPage.getByRole("button", { name: "All workflows" }).click();
   await expect(
-    screen.getByRole("button", { name: title, exact: true })
+    appPage.getByRole("button", { name: title, exact: true })
   ).toBeVisible();
 };
 
@@ -81,27 +81,27 @@ test("an admin copies the workflow map, draws a workflow and sees its totals, th
   const title = `Pay supplier invoices ${crypto.randomUUID().slice(0, 8)}`;
   const app = await mapFor(admin);
   const page = await pageOf(admin);
-  const screen = await openMap(page, app);
+  const appPage = await openMap(page, app);
 
-  await screen.getByRole("button", { name: "Draw a workflow" }).click();
-  await screen.getByLabel("Title", { exact: true }).fill(title);
-  await screen.getByRole("button", { name: "Add a step" }).click();
-  await screen.getByLabel("Name, step 1").fill("Match the invoice");
-  await screen.getByLabel("Who, step 1").fill("Controller");
-  await screen.getByRole("checkbox", { name: "Handover, step 1" }).click();
+  await appPage.getByRole("button", { name: "Draw a workflow" }).click();
+  await appPage.getByLabel("Title", { exact: true }).fill(title);
+  await appPage.getByRole("button", { name: "Add a step" }).click();
+  await appPage.getByLabel("Name, step 1").fill("Match the invoice");
+  await appPage.getByLabel("Who, step 1").fill("Controller");
+  await appPage.getByRole("checkbox", { name: "Handover, step 1" }).click();
   // 30 times a week, 10 minutes, 2 people: 10 hours a week.
-  await screen.getByLabel("Times a week, step 1").fill("30");
-  await screen.getByLabel("Minutes, step 1").fill("10");
-  await screen.getByLabel("People, step 1").fill("2");
-  const totals = screen.getByRole("definition");
+  await appPage.getByLabel("Times a week, step 1").fill("30");
+  await appPage.getByLabel("Minutes, step 1").fill("10");
+  await appPage.getByLabel("People, step 1").fill("2");
+  const totals = appPage.getByRole("definition");
   await expect(totals).toHaveText(["10 h", "1", "1", "estimated"]);
 
-  await screen.getByRole("button", { name: "Save" }).click();
-  await expect(screen.getByText("Version 1")).toBeVisible();
+  await appPage.getByRole("button", { name: "Save" }).click();
+  await expect(appPage.getByText("Version 1")).toBeVisible();
 
   // Listed with its totals.
-  await screen.getByRole("button", { name: "All workflows" }).click();
-  const row = screen.getByRole("row").filter({ hasText: title });
+  await appPage.getByRole("button", { name: "All workflows" }).click();
+  const row = appPage.getByRole("row").filter({ hasText: title });
   await expect(row.getByRole("cell")).toHaveText([
     title,
     "drawn",
@@ -113,18 +113,18 @@ test("an admin copies the workflow map, draws a workflow and sees its totals, th
 
   // Designed beside the drawn version, it shows the hours it saves.
   await row.getByRole("button", { name: title }).click();
-  await screen.getByRole("button", { name: "Design it" }).click();
-  await expect(screen.getByText("Version 2")).toBeVisible();
-  await expect(screen.getByText("Drawn (version 1)")).toBeVisible();
-  await screen.getByLabel("Minutes, step 1").fill("1");
-  await expect(screen.getByLabel("Expected gain")).toHaveText(
+  await appPage.getByRole("button", { name: "Design it" }).click();
+  await expect(appPage.getByText("Version 2")).toBeVisible();
+  await expect(appPage.getByText("Drawn (version 1)")).toBeVisible();
+  await appPage.getByLabel("Minutes, step 1").fill("1");
+  await expect(appPage.getByLabel("Expected gain")).toHaveText(
     "Expected gain: 9 h a week"
   );
-  await screen.getByRole("button", { name: "Save" }).click();
-  await expect(screen.getByText("Version 3")).toBeVisible();
-  await screen.getByRole("button", { name: "All workflows" }).click();
+  await appPage.getByRole("button", { name: "Save" }).click();
+  await expect(appPage.getByText("Version 3")).toBeVisible();
+  await appPage.getByRole("button", { name: "All workflows" }).click();
   await expect(
-    screen.getByRole("row").filter({ hasText: title }).getByRole("cell")
+    appPage.getByRole("row").filter({ hasText: title }).getByRole("cell")
   ).toHaveText([title, "designed", "1 h", "1", "1", "9 h"]);
 
   // Shared with someone who isn't one of its builders: they read it, and
@@ -140,8 +140,8 @@ test("an admin copies the workflow map, draws a workflow and sees its totals, th
     core[Symbol.dispose]();
   }
   const readerPage = await pageOf(reader);
-  const readerScreen = await openMap(readerPage, app);
-  const listed = readerScreen.getByRole("row").filter({ hasText: title });
+  const readerMap = await openMap(readerPage, app);
+  const listed = readerMap.getByRole("row").filter({ hasText: title });
   await expect(listed.getByRole("cell")).toHaveText([
     title,
     "designed",
@@ -151,20 +151,14 @@ test("an admin copies the workflow map, draws a workflow and sees its totals, th
     "9 h",
   ]);
   await expect(
-    readerScreen.getByRole("button", { name: "Draw a workflow" })
+    readerMap.getByRole("button", { name: "Draw a workflow" })
   ).toHaveCount(0);
   await listed.getByRole("button", { name: title }).click();
   await expect(
-    readerScreen.getByText(
-      "You can read this workflow, but not change it here."
-    )
+    readerMap.getByText("You can read this workflow, but not change it here.")
   ).toBeVisible();
-  await expect(
-    readerScreen.getByLabel("Title", { exact: true })
-  ).toBeDisabled();
-  await expect(readerScreen.getByRole("button", { name: "Save" })).toHaveCount(
-    0
-  );
+  await expect(readerMap.getByLabel("Title", { exact: true })).toBeDisabled();
+  await expect(readerMap.getByRole("button", { name: "Save" })).toHaveCount(0);
 });
 
 test("keeps numbers within the map's limits, and never drops what is typed while saving, linking or going back", async ({
@@ -189,65 +183,65 @@ test("keeps numbers within the map's limits, and never drops what is typed while
       }
     });
   });
-  const screen = await openMap(page, app);
-  const save = screen.getByRole("button", { name: "Save" });
-  const why = screen.getByLabel("Why it can't be saved");
+  const appPage = await openMap(page, app);
+  const save = appPage.getByRole("button", { name: "Save" });
+  const why = appPage.getByLabel("Why it can't be saved");
 
-  await screen.getByRole("button", { name: "Draw a workflow" }).click();
-  await screen.getByLabel("Title", { exact: true }).fill(title);
-  await screen.getByRole("button", { name: "Add a step" }).click();
-  await screen.getByLabel("Name, step 1").fill("Match the invoice");
-  await screen.getByLabel("Times a week, step 1").fill("10000");
+  await appPage.getByRole("button", { name: "Draw a workflow" }).click();
+  await appPage.getByLabel("Title", { exact: true }).fill(title);
+  await appPage.getByRole("button", { name: "Add a step" }).click();
+  await appPage.getByLabel("Name, step 1").fill("Match the invoice");
+  await appPage.getByLabel("Times a week, step 1").fill("10000");
   // A number the map doesn't take says so, and isn't sent.
-  await screen.getByLabel("Minutes, step 1").fill("20000");
+  await appPage.getByLabel("Minutes, step 1").fill("20000");
   await expect(why).toHaveText("Each number is between 0 and 10,000.");
   await expect(save).toBeDisabled();
   // 10,000 times a week, 600 minutes, 2 people: 200,000 hours a week.
-  await screen.getByLabel("Minutes, step 1").fill("600");
-  await screen.getByLabel("People, step 1").fill("2");
+  await appPage.getByLabel("Minutes, step 1").fill("600");
+  await appPage.getByLabel("People, step 1").fill("2");
   await expect(why).toHaveCount(0);
 
   // While the save is on its way, nothing can be typed: the saved version
   // replaces the editor once it is open.
   held = [];
   await save.click();
-  await expect(screen.getByLabel("Title", { exact: true })).toBeDisabled();
-  await expect(screen.getByLabel("Name, step 1")).toBeDisabled();
+  await expect(appPage.getByLabel("Title", { exact: true })).toBeDisabled();
+  await expect(appPage.getByLabel("Name, step 1")).toBeDisabled();
   const answers = held;
   held = undefined;
   for (const answer of answers) {
     answer();
   }
-  await expect(screen.getByText("Version 1")).toBeVisible();
-  await expect(screen.getByLabel("Title", { exact: true })).toBeEnabled();
+  await expect(appPage.getByText("Version 1")).toBeVisible();
+  await expect(appPage.getByLabel("Title", { exact: true })).toBeEnabled();
 
   // Designed with no time left, it would save more than the map takes: it
   // says so instead of failing the save.
-  await screen.getByRole("button", { name: "Design it" }).click();
-  await expect(screen.getByText("Version 2")).toBeVisible();
-  await screen.getByLabel("Minutes, step 1").fill("0");
+  await appPage.getByRole("button", { name: "Design it" }).click();
+  await expect(appPage.getByText("Version 2")).toBeVisible();
+  await appPage.getByLabel("Minutes, step 1").fill("0");
   await expect(why).toHaveText(
     "The expected gain is over 100,000 hours a week, more than the map takes: check the numbers."
   );
   await expect(save).toBeDisabled();
 
   // Unsaved edits hold the link back, and going back says it drops them.
-  await screen.getByLabel("Minutes, step 1").fill("599");
+  await appPage.getByLabel("Minutes, step 1").fill("599");
   await expect(why).toHaveCount(0);
-  await screen.getByLabel("App ID").fill("app-1");
-  await screen.getByLabel("Workflow ID").fill("pay");
-  await expect(screen.getByRole("button", { name: "Link" })).toBeDisabled();
-  await expect(screen.getByText("Save first, then link it.")).toBeVisible();
+  await appPage.getByLabel("App ID").fill("app-1");
+  await appPage.getByLabel("Workflow ID").fill("pay");
+  await expect(appPage.getByRole("button", { name: "Link" })).toBeDisabled();
+  await expect(appPage.getByText("Save first, then link it.")).toBeVisible();
   await expect(
-    screen.getByRole("button", { name: "Discard changes and go back" })
+    appPage.getByRole("button", { name: "Discard changes and go back" })
   ).toBeVisible();
   await save.click();
-  await expect(screen.getByText("Version 3")).toBeVisible();
-  await expect(screen.getByLabel("Expected gain")).toHaveText(
+  await expect(appPage.getByText("Version 3")).toBeVisible();
+  await expect(appPage.getByLabel("Expected gain")).toHaveText(
     "Expected gain: 333.3 h a week"
   );
   await expect(
-    screen.getByRole("button", { name: "All workflows" })
+    appPage.getByRole("button", { name: "All workflows" })
   ).toBeVisible();
 });
 
@@ -274,16 +268,18 @@ test("an answer to an earlier open, arriving late, never replaces the workflow o
     }
     await route.continue();
   });
-  const screen = await openMap(page, app);
-  await draw(screen, first);
-  await draw(screen, second);
+  const appPage = await openMap(page, app);
+  await draw(appPage, first);
+  await draw(appPage, second);
 
   holding = true;
-  await screen.getByRole("button", { name: first, exact: true }).click();
+  await appPage.getByRole("button", { name: first, exact: true }).click();
   await expect.poll(() => held.length).toBeGreaterThan(0);
   holding = false;
-  await screen.getByRole("button", { name: second, exact: true }).click();
-  await expect(screen.getByLabel("Title", { exact: true })).toHaveValue(second);
+  await appPage.getByRole("button", { name: second, exact: true }).click();
+  await expect(appPage.getByLabel("Title", { exact: true })).toHaveValue(
+    second
+  );
 
   // The first answer lands, then one to a call after it: by then the map
   // has had the first, and still shows the second workflow.
@@ -291,13 +287,15 @@ test("an answer to an earlier open, arriving late, never replaces the workflow o
     release();
   }
   const team = `Team ${run}`;
-  await screen.getByLabel("New team").fill(team);
+  await appPage.getByLabel("New team").fill(team);
   // A double click adds the team once.
-  await screen.getByRole("button", { name: "Add team" }).dblclick();
-  await expect(screen.getByRole("combobox", { name: "Team" })).toContainText(
+  await appPage.getByRole("button", { name: "Add team" }).dblclick();
+  await expect(appPage.getByRole("combobox", { name: "Team" })).toContainText(
     team
   );
-  await expect(screen.getByLabel("Title", { exact: true })).toHaveValue(second);
-  await screen.getByRole("combobox", { name: "Team" }).click();
-  await expect(screen.getByRole("option", { name: team })).toHaveCount(1);
+  await expect(appPage.getByLabel("Title", { exact: true })).toHaveValue(
+    second
+  );
+  await appPage.getByRole("combobox", { name: "Team" }).click();
+  await expect(appPage.getByRole("option", { name: team })).toHaveCount(1);
 });

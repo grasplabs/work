@@ -6,9 +6,9 @@ import { waitKeyOf, waitStep } from "../src/workflows/host.ts";
 import { shownWaits, tasksByKey } from "../src/workflows/run-waits.ts";
 import type { Pending, WaitContext } from "../src/workflows/run-waits.ts";
 
-// Which of a run's open waits a screen is shown, by the steps its build's
+// Which of a run's open waits a page is shown, by the steps its build's
 // table of tasks names (sealed-steps.ts): names the run's code chose are
-// never shown, so nothing it read reaches a screen through one.
+// never shown, so nothing it read reaches a page through one.
 
 const openedAt = 1000;
 const deadline = 61_000;
@@ -66,7 +66,7 @@ const sealedContext: WaitContext = {
   ]),
 };
 
-describe("the waits a screen is shown of a run on the run host", () => {
+describe("the waits a page is shown of a run on the run host", () => {
   it("shows a fixed wait's, a deadline's and a loop item's sleep, and a retry of a step in nested items", () => {
     expect(
       shownWaits(

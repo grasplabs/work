@@ -56,7 +56,7 @@ const seedDecision = async (
 };
 
 /**
- * A cancel of the run `run` by `principal`, through an App's screen, in
+ * A cancel of the run `run` by `principal`, through an App's page, in
  * `state`: admitted until the engine stops the run, or superseded when the
  * run went on to end otherwise first.
  */

@@ -110,7 +110,7 @@ export const queuedWebhookDeliveries = (
 };
 
 /**
- * A form a screen sent, as core answered it: a keyed mutation, or a keyed
+ * A form a page sent, as core answered it: a keyed mutation, or a keyed
  * action, of App `app`, by `userId`, to the public function `operation`,
  * in the run that started at `startedAt` (its receipt's, its invocation's:
  * the same for every repeat of that run, new for a fresh run under the
@@ -137,7 +137,7 @@ export type FormSubmission = z.infer<typeof formSubmissionSchema>;
 const valuesMaxBytes = appWebhookLimits.bodyBytes - 1024;
 
 /**
- * The intent a screen's keyed mutation commits with its writes (its
+ * The intent a page's keyed mutation commits with its writes (its
  * store's outbox), so its form is told once it committed, and never
  * unless it did: `dispatchFormSent` hands it over.
  */

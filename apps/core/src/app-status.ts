@@ -46,7 +46,7 @@ import { stopsUnsettled } from "./workflows/resource-runs.ts";
 // - A transition by someone who lost their role: the role is read for the
 //   call, and the write only applies to the status read (`app.conflict`
 //   otherwise). Each transition is audited with the change itself.
-// - An old screen still open after a restore: a restore lands in draft,
+// - An old page still open after a restore: a restore lands in draft,
 //   so users stay out until a builder publishes it again.
 
 /** A transition: the statuses it starts from, and where it goes. */
@@ -270,7 +270,7 @@ export const changeStatus = async (
   }
   const app = toApp(changed);
   if (found.status === "published" || to === "archived") {
-    // Open screens look again (access-revocations.ts), and stop where the
+    // Open pages look again (access-revocations.ts), and stop where the
     // status no longer serves them.
     await tellKept(env, revocations);
   }

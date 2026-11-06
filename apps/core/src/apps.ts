@@ -1,4 +1,4 @@
-import { isAppLayout, isAppTestSuite } from "@grasp-os/compiler";
+import { isAppLayout, isAppTestSuite, isPageFile } from "@grasp-os/compiler";
 import { definitionPath } from "@grasp-os/sdk/definition";
 import type { AppDefinition } from "@grasp-os/sdk/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
@@ -30,7 +30,6 @@ import type { AppId, BlueprintId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { screenPath } from "@grasp-os/shared/screens";
 import { dataErrors } from "@grasp-os/shared/stores";
 import { waitUntil } from "cloudflare:workers";
 import { and, asc, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
@@ -103,7 +102,8 @@ import { liveStoreSql } from "./store-deletion.ts";
 // number, and the database keeps one; the other is refused as a conflict.
 
 export type AppRow = typeof apps.$inferSelect;
-export type VersionRow = typeof appVersions.$inferSelect;
+/** A version as this release writes it: never the previous release's `screens`. */
+export type VersionRow = Omit<typeof appVersions.$inferSelect, "screens">;
 
 /** A tree as `commitFiles` stores it. */
 const storedTreeSchema = z.record(z.string(), z.string());
@@ -261,7 +261,7 @@ export const appFor = async (
 
 /**
  * The App `input` names, for `by` with at least `needed` in it, to use:
- * open its screens, call it or start its runs. An archived App is
+ * open its pages, call it or start its runs. An archived App is
  * refused (`app.archived`), its builders' too (app-access.ts).
  */
 export const usableApp = async (
@@ -674,24 +674,11 @@ export const getApp = async (
   return { ...found, role };
 };
 
-/** The names `nameOf` finds in `paths`, in their order. */
-const namesIn = (
-  paths: string[],
-  nameOf: (path: string) => string | undefined
-): string[] =>
-  paths.flatMap((path) => {
-    const name = nameOf(path);
-    return name === undefined ? [] : [name];
-  });
+/** Whether an App's files have pages: file routes under `src/routes/`. */
+export const hasPages = (files: ReadonlyMap<string, string>): boolean =>
+  [...files.keys()].some((path) => isPageFile(path));
 
-/** The names of the screens in an App's files (`screens/<name>.tsx`), sorted. */
-export const screensIn = (files: ReadonlyMap<string, string>): string[] =>
-  namesIn(
-    [...files.keys()].toSorted(),
-    (path) => screenPath.exec(path)?.groups?.name
-  );
-
-/** The screens of an App's current version. */
+/** The pages of an App's current version. */
 export const appContents = async (
   env: Env,
   by: Person,
@@ -699,21 +686,21 @@ export const appContents = async (
 ): Promise<AppContents> => {
   const { id, currentVersion } = await appFor(env, by, app, "user");
   if (currentVersion === null) {
-    return { version: null, screens: [] };
+    return { version: null, pages: false };
   }
   const files = new Map(
     Object.entries(await versionFiles(env, id, currentVersion))
   );
   return {
     version: currentVersion,
-    screens: screensIn(files),
+    pages: hasPages(files),
   };
 };
 
 /**
  * The Apps `by` has a role in, as `listApps` gives them, each with what
  * `appContents` says of it: one query, from its current version's row
- * (`app_versions.screens`), so no files are read.
+ * (`app_versions.pages`), so no files are read.
  */
 export const listAppOverviews = async (
   env: Env,
@@ -722,7 +709,7 @@ export const listAppOverviews = async (
   const rows = await drizzle(env.DB)
     .select({
       app: apps,
-      screens: appVersions.screens,
+      pages: appVersions.pages,
     })
     .from(apps)
     .leftJoin(
@@ -740,12 +727,12 @@ export const listAppOverviews = async (
     by,
     found.map(({ app }) => app.id)
   );
-  return found.map(({ app, screens }) => ({
+  return found.map(({ app, pages }) => ({
     app: { ...app, role: builds.has(app.id) ? "builder" : "user" },
     // None without a current version, whose row the join doesn't find.
     contents: {
       version: app.currentVersion,
-      screens: (screens ?? []).toSorted(),
+      pages: pages ?? false,
     },
   }));
 };
@@ -904,7 +891,7 @@ export const commitFiles = async (
     message: text,
     createdAt: new Date(),
     approved: null,
-    screens: screensIn(files),
+    pages: hasPages(files),
     proposedBy: null,
   };
   const db = drizzle(env.DB);
@@ -963,8 +950,8 @@ export const commitFiles = async (
     },
     { profile: "production" }
   );
-  // The pages open on the App hear of it (spec 11.5): their screens show
-  // a new version ready, and switch to it (screens-rpc.ts, `watchVersion`).
+  // The pages open on the App hear of it (spec 11.5): their pages show
+  // a new version ready, and switch to it (pages-rpc.ts, `watchVersion`).
   waitUntil(versionMadeCurrent(env, appId));
   return { ...toVersion(row), builds };
 };
@@ -1091,7 +1078,7 @@ export const proposeDraft = async (
     message: text,
     createdAt: new Date(),
     approved: null,
-    screens: screensIn(files),
+    pages: hasPages(files),
     proposedBy: by.via ?? null,
   };
   const db = drizzle(env.DB);
@@ -1770,8 +1757,8 @@ export const makeCurrent = async (
     // is left is a conflict: the base moved, or the candidate ended.
     throw appErrors.create("app.conflict");
   }
-  // The pages open on the App hear of it (spec 11.5): their screens show
-  // a new version ready, and switch to it (screens-rpc.ts, `watchVersion`).
+  // The pages open on the App hear of it (spec 11.5): their pages show
+  // a new version ready, and switch to it (pages-rpc.ts, `watchVersion`).
   waitUntil(versionMadeCurrent(env, appId));
   return toApp(changed);
 };

@@ -60,7 +60,7 @@ import type { StoreWatcher } from "./store-watches.ts";
  * the store's RPC surface, and take nothing a caller could choose to bend
  * time or delivery with.
  */
-/** How often the alarm sweeps the watches of screens gone without a word. */
+/** How often the alarm sweeps the watches of pages gone without a word. */
 const watchSweepMs = 5 * 60 * 1000;
 
 /** The key a discarded fixture store keeps, alone (`discardFixture`). */

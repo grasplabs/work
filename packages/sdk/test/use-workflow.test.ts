@@ -470,7 +470,7 @@ describe("what a hook shows", () => {
     const page = host();
     page.refuseNextWatch(
       Object.assign(new Error("Too much at once."), {
-        code: "screen.rate_limited",
+        code: "page.rate_limited",
         details: { retryAfterMs: 20_000 },
       })
     );
@@ -485,7 +485,7 @@ describe("what a hook shows", () => {
     const page = host();
     await showing(page);
     const subscription = page.one("run-1");
-    subscription.refuse(2, "screen.rate_limited", "operational", {
+    subscription.refuse(2, "page.rate_limited", "operational", {
       retryAfterMs: 40_000,
     });
     subscription.lose();
@@ -499,7 +499,7 @@ describe("what a hook shows", () => {
     const page = host();
     const hook = await showing(page, snapshotOf(), 3);
     const subscription = page.one("run-1");
-    subscription.refuse(3, "screen.rate_limited", "operational", {
+    subscription.refuse(3, "page.rate_limited", "operational", {
       retryAfterMs: 1000,
     });
     const refused = hook.view();
@@ -1403,7 +1403,7 @@ describe("controlling the selected run", () => {
     await cancelled;
   });
 
-  it("shows another screen's admitted cancel over this hook's own pause", async () => {
+  it("shows another page's admitted cancel over this hook's own pause", async () => {
     const page = host();
     const pauseAnswer = Promise.withResolvers<Reply>();
     page.answer(async () => await pauseAnswer.promise);
@@ -1434,7 +1434,7 @@ describe("losing access", () => {
   });
 
   it.each([
-    ["screen.revoked", "binding"],
+    ["page.revoked", "binding"],
     ["auth.session_expired", "run"],
   ] as const)(
     "clears every run and permits nothing once %s arrives on a %s",
@@ -1470,8 +1470,8 @@ describe("losing access", () => {
   it("hears a revocation pushed at the revision already shown", async () => {
     const page = host();
     const hook = await showing(page, snapshotOf(), 7);
-    page.one("run-1").refuse(7, "screen.revoked", "authorization");
-    expect(hook.error()?.code).toBe("screen.revoked");
+    page.one("run-1").refuse(7, "page.revoked", "authorization");
+    expect(hook.error()?.code).toBe("page.revoked");
     expect(hook.view()).toMatchObject({ status: "loading", canCancel: false });
   });
 
@@ -1502,8 +1502,8 @@ describe("losing access", () => {
     const hook = await showing(page, snapshotOf(), 10);
     page.one("run-1").lose();
     await vi.advanceTimersByTimeAsync(31_000);
-    page.one("run-1").refuse(1, "screen.revoked", "authorization");
-    expect(hook.error()?.code).toBe("screen.revoked");
+    page.one("run-1").refuse(1, "page.revoked", "authorization");
+    expect(hook.error()?.code).toBe("page.revoked");
     expect(hook.view()).toMatchObject({ status: "loading", canCancel: false });
   });
 

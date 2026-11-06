@@ -7,9 +7,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { sealDraftRelease } from "../src/app-releases.ts";
-import { frameKey } from "../src/screen-frame.ts";
+import { frameKey } from "../src/page-frame.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { loadFrame, servedAll } from "./page-frames.ts";
+import type { LoadedFrame } from "./page-frames.ts";
 import { livePushes, notesFiles, previewDraftsOf } from "./preview-drafts.ts";
 import {
   chatsOf,
@@ -19,18 +21,16 @@ import {
   requestFor,
   refreshed,
 } from "./previews.ts";
-import { loadFrame, servedFrom } from "./screen-frames.ts";
-import type { LoadedFrame } from "./screen-frames.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // A chat's preview taking each write of its draft in the frame it has
-// open (chats.previewUpdate, spec 19.2.1): the screen as one module for
+// open (chats.previewUpdate, spec 19.2.1): the page as one module for
 // React Fast Refresh, built without staging a frame or sealing anything
-// when only screens changed. The ways it can fail, from the threat model
-// in core's screen-frame.ts: the frame handed another App's module, or
+// when only pages changed. The ways it can fail, from the threat model
+// in core's page-frame.ts: the frame handed another App's module, or
 // another revision's; someone who doesn't build the App getting the
 // draft's code; the policy of a production frame loosened to take
-// updates; a write of a screen throwing away what the preview's store
+// updates; a write of a page throwing away what the preview's store
 // holds, or sealing the draft again; a frame kept on the last version
 // that worked losing its server calls and live data; a preview opened
 // from someone else's chat; builds started for every ask; and a write
@@ -54,26 +54,26 @@ const sealedManifestSchema = z
   })
   .loose();
 
-/** An update of `app`'s preview at `revision`, its screen's module `entry`, as a build answers one. */
+/** An update of `app`'s preview at `revision`, its page's module `entry`, as a build answers one. */
 const builtAt = (
   app: AppId,
   revision: number,
   entry: string
 ): PreviewUpdate => ({
   app,
-  refresh: { revision, screen: "desk", entry, modules: {}, css: "", kit: [] },
+  refresh: { revision, entry, modules: {}, css: "", kit: [] },
 });
 
-/** The screen's module of what a build answered, an update. */
+/** The page's module of what a build answered, an update. */
 const entryBuilt = (built: PreviewBundle | PreviewUpdate): string =>
   "refresh" in built ? (built.refresh?.entry ?? "") : "";
 
 /** What the test reads of a staged frame's manifest. */
 const stagedFrameSchema = z.object({ preview: z.boolean() }).loose();
 
-/** The desk screen of the notes App, saying `word` before its titles. */
+/** The desk page of the notes App, saying `word` before its titles. */
 const deskSaying = (word: string): string =>
-  (notesFiles("drafted")["screens/desk.tsx"] ?? "").replace(
+  (notesFiles("drafted")["src/routes/index.tsx"] ?? "").replace(
     'titles.join(", ")',
     `"${word} " + titles.join(", ")`
   );
@@ -140,48 +140,45 @@ const sealedAt = async (
   );
 
 describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
-  it("answers the screen of the draft now by its module's address, staging only the modules the write changed where the open frame loads them, within the kit it loaded", async () => {
+  it("answers the page of the draft now by its module's address, staging only the modules the write changed where the open frame loads them, within the kit it loaded", async () => {
     const { builder, app, chatId, revision, write } = await setUp();
     const { chats } = builder.api;
-    const opened = await chats.preview(chatId, app, "desk");
+    const opened = await chats.preview(chatId, app);
     const frame = await loadFrame(opened);
     const next = await write(
-      { "screens/desk.tsx": deskSaying("Hot") },
+      { "src/routes/index.tsx": deskSaying("Hot") },
       revision
     );
     // Warm, as the person's next write finds it: measured each time.
     const started = performance.now();
-    const updated = await chats.previewUpdate(chatId, app, next, {
-      screen: "desk",
-    });
+    const updated = await chats.previewUpdate(chatId, app, next, {});
     const updateMs = performance.now() - started;
     const again = await write(
-      { "screens/desk.tsx": deskSaying("Again") },
+      { "src/routes/index.tsx": deskSaying("Again") },
       next
     );
     const secondStarted = performance.now();
-    const second = await chats.previewUpdate(chatId, app, again, {
-      screen: "desk",
-    });
+    const second = await chats.previewUpdate(chatId, app, again, {});
     const secondMs = performance.now() - secondStarted;
     console.info(
-      `preview update after a screen write: ${Math.round(updateMs)} ms, then ${Math.round(secondMs)} ms`
+      `preview update after a page write: ${Math.round(updateMs)} ms, then ${Math.round(secondMs)} ms`
     );
     const refresh = refreshed(updated);
     const before = Object.keys(opened.refresh?.modules ?? {});
-    const entry = await servedFrom(frame, refresh.entry);
-    const secondEntry = await servedFrom(frame, refreshed(second).entry);
+    const entry = await servedAll(frame, refresh);
+    const secondEntry = await servedAll(frame, refreshed(second));
     expect({
       app: updated.app,
       revision: refresh.revision,
-      screen: refresh.screen,
       says: entry.code.includes('"Hot "'),
       served: entry.status,
-      // The screen's module alone changed: its components are where the
-      // frame loaded them.
+      // The page's module changed, and the route tree, which imports it
+      // at its address: the other components are where the frame loaded
+      // them.
       changed: Object.keys(refresh.modules).filter(
         (address) => !before.includes(address)
-      ),
+      ).length,
+      treeChanged: !before.includes(refresh.entry),
       css: refresh.css.length > 0,
       withinKit: refresh.kit.every((name) =>
         (opened.refresh?.kit ?? []).includes(name)
@@ -194,10 +191,10 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     }).toStrictEqual({
       app,
       revision: next,
-      screen: "desk",
       says: true,
       served: 200,
-      changed: [refresh.entry],
+      changed: 2,
+      treeChanged: true,
       css: true,
       withinKit: true,
       opened: revision,
@@ -214,29 +211,18 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     expect({
       // An App this chat neither changes nor is the chat of.
       otherApp: await codeOf(
-        builder.api.chats.previewUpdate(chatId, other.id, revision, {
-          screen: "desk",
-        })
+        builder.api.chats.previewUpdate(chatId, other.id, revision, {})
       ),
       colleague: await codeOf(
-        colleague.api.chats.previewUpdate(chatId, app, revision, {
-          screen: "desk",
-        })
-      ),
-      // A screen the draft hasn't: the frame opens afresh, on its first.
-      noScreen: await codeOf(
-        builder.api.chats.previewUpdate(chatId, app, revision, {
-          screen: "nowhere",
-        })
+        colleague.api.chats.previewUpdate(chatId, app, revision, {})
       ),
     }).toStrictEqual({
       otherApp: "app.not_in_chat",
       colleague: "app.not_found",
-      noScreen: { app, restart: true },
     });
   });
 
-  it("keeps what the preview's store holds, and seals nothing again, across writes of its screens", async () => {
+  it("keeps what the preview's store holds, and seals nothing again, across writes of its pages", async () => {
     const { builder, app, chatId, revision, write } = await setUp();
     const { chats } = builder.api;
     const call = async (at: number, path: string, input: unknown = {}) =>
@@ -252,10 +238,10 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     const sealedBefore = await sealedAt(builder, chatId);
     const storesBefore = await previewStores(builder, chatId, app);
     const next = await write(
-      { "screens/desk.tsx": deskSaying("Changed") },
+      { "src/routes/index.tsx": deskSaying("Changed") },
       revision
     );
-    await chats.previewUpdate(chatId, app, next, { screen: "desk" });
+    await chats.previewUpdate(chatId, app, next, {});
     const kept = await call(next, "notes.titles");
     const sealedAfter = await sealedAt(builder, chatId);
     const storesAfter = await previewStores(builder, chatId, app);
@@ -285,36 +271,32 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     });
   });
 
-  it("lets only a preview's frame take updates as modules of its own, the published screen's policy as it was", async () => {
+  it("lets only a preview's frame take updates as modules of its own, the published page's policy as it was", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id } = await builder.api.apps.create({ name: "Desk" });
     const app = appIdSchema.parse(id);
-    const screen = `export default function Desk() {
+    const page = `import { createFileRoute } from "@tanstack/react-router";
+
+function Desk() {
   return <main>Desk</main>;
 }
+export const Route = createFileRoute("/")({ component: Desk });
 `;
-    await release(builder, app, { "screens/desk.tsx": screen });
-    const published = await loadFrame(
-      await builder.api.screens.open(app, "desk")
-    );
+    await release(builder, app, { "src/routes/index.tsx": page });
+    const published = await loadFrame(await builder.api.pages.open(app));
     const { chatId } = await chatWithDraft(builder, app, {
-      "screens/desk.tsx": screen.replace("Desk<", "Drafted<"),
+      "src/routes/index.tsx": page.replace("Desk<", "Drafted<"),
     });
-    const opened = await builder.api.chats.preview(chatId, app, "desk");
+    const opened = await builder.api.chats.preview(chatId, app);
     const preview = await loadFrame(opened);
     // Its first version, opened read-only: the very same build, which
     // takes no updates, so its policy allows none.
-    const readOnlyOpened = await builder.api.chats.preview(
-      chatId,
-      app,
-      "desk",
-      1
-    );
+    const readOnlyOpened = await builder.api.chats.preview(chatId, app, 1);
     const readOnly = await loadFrame(readOnlyOpened);
     /** Whether `frame`'s policy runs any module of its own directory. */
     const takesUpdates = (frame: LoadedFrame | null): boolean =>
       scripts(frame).includes(
-        new URL("./", frame?.screen.entry ?? "https://core/").href
+        new URL("./", frame?.page.entry ?? "https://core/").href
       );
     expect({
       sameBuild: readOnlyOpened.artifact === opened.artifact,
@@ -344,7 +326,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
   it("keeps a frame on the last version that worked calling the draft's code, following its data and reporting, until changed server code builds", async () => {
     const { builder, app, chatId, revision, write } = await setUp();
     const { chats } = builder.api;
-    // What a screen's call sends: its reference, the same for every
+    // What a page's call sends: its reference, the same for every
     // revision of the same server code.
     const titles = await requestFor(
       builder,
@@ -359,10 +341,10 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
         title: "still here",
       })
     );
-    // The agent writes a screen that doesn't build: the frame keeps the
+    // The agent writes a page that doesn't build: the frame keeps the
     // version at `revision`, and calls from there.
     const broken = await write(
-      { "screens/desk.tsx": "export default function Desk( {" },
+      { "src/routes/index.tsx": "export default function Desk( {" },
       revision
     );
     const calls = outcome(
@@ -374,14 +356,14 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       expect(latest?.result).toStrictEqual({ ok: true, value: ["still here"] });
     });
     // What the frame met trying the broken update is filed under the
-    // revision it tried; what the earlier screen it shows meets, nowhere.
-    await chats.previewReport(chatId, app, broken, "desk", {
+    // revision it tried; what the earlier page it shows meets, nowhere.
+    await chats.previewReport(chatId, app, broken, "/", {
       kind: "error",
       message: "The fix didn't render.",
     });
-    await chats.previewReport(chatId, app, revision, "desk", {
+    await chats.previewReport(chatId, app, revision, "/", {
       kind: "error",
-      message: "The earlier screen failed.",
+      message: "The earlier page failed.",
     });
     const reported = await chatsOf(builder).previewReports(
       chatId,
@@ -397,11 +379,12 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     const server = await write(
       {
         "server/notes.ts": notesFiles("changed")["server/notes.ts"] ?? "",
-        "screens/desk.tsx": notesFiles("drafted")["screens/desk.tsx"] ?? "",
+        "src/routes/index.tsx":
+          notesFiles("drafted")["src/routes/index.tsx"] ?? "",
       },
       broken
     );
-    await chats.previewUpdate(chatId, app, server, { screen: "desk" });
+    await chats.previewUpdate(chatId, app, server, {});
     const afterServer = await codeOf(
       chats.previewFunction(chatId, app, revision, "{}")
     );
@@ -418,7 +401,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     });
   });
 
-  it("decides a revision's check only by what that revision's screen ran into, never an earlier screen's", async () => {
+  it("decides a revision's check only by what that revision's page ran into, never an earlier page's", async () => {
     const { builder, app, chatId, revision, write } = await setUp();
     const { chats } = builder.api;
     const object = chatsOf(builder);
@@ -432,20 +415,20 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       { chatId, app, revision },
       "notes.broken"
     );
-    // A false pass: the agent writes the screen again, and before the
-    // frame takes it, the screen still on `revision` calls fine. The new
+    // A false pass: the agent writes the page again, and before the
+    // frame takes it, the page still on `revision` calls fine. The new
     // revision is no more seen than before.
     const next = await write(
-      { "screens/desk.tsx": deskSaying("Unseen") },
+      { "src/routes/index.tsx": deskSaying("Unseen") },
       revision
     );
     await chats.previewFunction(chatId, app, revision, titles);
     const unseen = await object.previewReports(chatId, app, next, 0);
-    // A false failure: the earlier screen's call fails through the
-    // draft's code, which the new revision's screen never called.
+    // A false failure: the earlier page's call fails through the
+    // draft's code, which the new revision's page never called.
     await chats.previewFunction(chatId, app, revision, broken);
     const notFailed = await object.previewReports(chatId, app, next, 0);
-    // Its own screen's calls decide it, a failure included.
+    // Its own page's calls decide it, a failure included.
     await chats.previewFunction(chatId, app, next, broken);
     const own = await object.previewReports(chatId, app, next, 0);
     expect({
@@ -470,12 +453,15 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     const { id } = await builder.api.apps.create({ name: "Desk" });
     const app = appIdSchema.parse(id);
     await release(builder, app, {
-      "screens/desk.tsx": `export default function Desk() {
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
+function Desk() {
   return <main>Desk</main>;
 }
+export const Route = createFileRoute("/")({ component: Desk });
 `,
     });
-    const opened = await builder.api.screens.open(app, "desk");
+    const opened = await builder.api.pages.open(app);
     const staged = await env.FILES.get(frameKey(opened.artifact));
     const current = stagedFrameSchema.parse(await staged?.json());
     // As a deploy before this format left it: no `preview`, at the key of
@@ -483,10 +469,10 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     const { preview: _preview, ...earlier } = current;
     await env.FILES.delete(frameKey(opened.artifact));
     await env.FILES.put(
-      `screen-frames/${opened.artifact}.json`,
+      `page-frames/${opened.artifact}.json`,
       JSON.stringify(earlier)
     );
-    const again = await builder.api.screens.open(app, "desk");
+    const again = await builder.api.pages.open(app);
     const frame = await loadFrame(again);
     expect({
       sameBuild: again.artifact === opened.artifact,
@@ -503,7 +489,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       return await Promise.resolve(builtAt(app, at, String(at)));
     };
     const next = await write(
-      { "screens/desk.tsx": deskSaying("Newer") },
+      { "src/routes/index.tsx": deskSaying("Newer") },
       revision
     );
     const newer = await object.previewBuild(
@@ -567,14 +553,12 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     // met by that look first.
     await scheduler.wait(1100);
     // The agent changes the server code alone: the frame takes the build
-    // of the next revision, its screen as it was.
+    // of the next revision, its page as it was.
     const next = await write(
       { "server/notes.ts": titlesSaying("new code") },
       revision
     );
-    const update = refreshed(
-      await chats.previewUpdate(chatId, app, next, { screen: "desk" })
-    );
+    const update = refreshed(await chats.previewUpdate(chatId, app, next, {}));
     await before.until((latest) => {
       expect(latest?.result).toMatchObject({ ok: false });
     });
@@ -594,7 +578,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     });
   });
 
-  it("shows the draft's screens on the last server code that built while its own doesn't, keeping what the preview's store holds, then takes its server code once it builds", async () => {
+  it("shows the draft's pages on the last server code that built while its own doesn't, keeping what the preview's store holds, then takes its server code once it builds", async () => {
     const { builder, app, chatId, revision, write } = await setUp();
     const { chats } = builder.api;
     const titles = await requestFor(
@@ -610,18 +594,16 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
         title: "kept",
       })
     );
-    // Server code that fails its type check, then a write of the screen.
+    // Server code that fails its type check, then a write of the page.
     const broken = await write({ "server/notes.ts": titlesUnbuilt }, revision);
     const atBroken = refreshed(
-      await chats.previewUpdate(chatId, app, broken, { screen: "desk" })
+      await chats.previewUpdate(chatId, app, broken, {})
     );
     const page = await write(
-      { "screens/desk.tsx": deskSaying("Changed") },
+      { "src/routes/index.tsx": deskSaying("Changed") },
       broken
     );
-    const atPage = refreshed(
-      await chats.previewUpdate(chatId, app, page, { screen: "desk" })
-    );
+    const atPage = refreshed(await chats.previewUpdate(chatId, app, page, {}));
     const onPage = outcome(
       await chats.previewFunction(chatId, app, page, titles)
     );
@@ -636,7 +618,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       page
     );
     const atFixed = refreshed(
-      await chats.previewUpdate(chatId, app, fixed, { screen: "desk" })
+      await chats.previewUpdate(chatId, app, fixed, {})
     );
     const onFixed = outcome(
       await chats.previewFunction(chatId, app, fixed, titles)
@@ -679,7 +661,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     );
     const broken = await write({ "server/notes.ts": titlesUnbuilt }, revision);
     const before = refreshed(
-      await chats.previewUpdate(chatId, app, broken, { screen: "desk" })
+      await chats.previewUpdate(chatId, app, broken, {})
     );
     // A deploy restarts the object: nothing it held in memory is left.
     await runInDurableObject(chatsOf(builder), (_instance, state) => {
@@ -690,9 +672,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     const called = outcome(
       await chats.previewFunction(chatId, app, broken, titles)
     );
-    const after = refreshed(
-      await chats.previewUpdate(chatId, app, broken, { screen: "desk" })
-    );
+    const after = refreshed(await chats.previewUpdate(chatId, app, broken, {}));
     expect({
       before: before.serverUnbuilt,
       called,
@@ -740,28 +720,32 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     });
   });
 
-  it("says the draft's server code doesn't build even of a screen that calls none of it", async () => {
+  it("says the draft's server code doesn't build even of a page that calls none of it", async () => {
     const { builder, app, chatId, revision, write } = await setUp();
     const { chats } = builder.api;
     const broken = await write(
       {
         "server/notes.ts": titlesUnbuilt,
-        "screens/desk.tsx": `export default function Desk() {
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
+function Desk() {
   return <main>Static</main>;
 }
+
+export const Route = createFileRoute("/")({ component: Desk });
 `,
       },
       revision
     );
     const update = refreshed(
-      await chats.previewUpdate(chatId, app, broken, { screen: "desk" })
+      await chats.previewUpdate(chatId, app, broken, {})
     );
     const fixed = await write(
       { "server/notes.ts": titlesSaying("fixed") },
       broken
     );
     const afterFix = refreshed(
-      await chats.previewUpdate(chatId, app, fixed, { screen: "desk" })
+      await chats.previewUpdate(chatId, app, fixed, {})
     );
     expect({
       broken: update.serverUnbuilt,
@@ -769,13 +753,13 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     }).toStrictEqual({ broken: true, fixed: undefined });
   });
 
-  it("seals the same release whatever the draft's screens and components hold, but not its server code", async () => {
+  it("seals the same release whatever the draft's pages and components hold, but not its server code", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id } = await builder.api.apps.create({ name: "Notes" });
     const app = appIdSchema.parse(id);
     const base = {
       ...notesFiles("sealed"),
-      "components/badge.tsx": `export const Badge = () => <span>One</span>;
+      "src/components/badge.tsx": `export const Badge = () => <span>One</span>;
 `,
     };
     /**
@@ -815,13 +799,13 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
         ),
       };
     };
-    const [before, screensOnly, server] = await Promise.all([
+    const [before, pagesOnly, server] = await Promise.all([
       sealedOf(base),
       sealedOf({
         ...base,
-        "components/badge.tsx": `export const Badge = () => <span>Two</span>;
+        "src/components/badge.tsx": `export const Badge = () => <span>Two</span>;
 `,
-        "screens/desk.tsx": "export default function Desk( {",
+        "src/routes/index.tsx": "export default function Desk( {",
       }),
       sealedOf({
         ...base,
@@ -831,9 +815,9 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     // Only the whole tree's hash, provenance, tells the first two apart:
     // every module, generated file and the rest of the identity are one.
     expect({
-      screensOnly,
+      pagesOnly,
       server:
         JSON.stringify(server.contents) === JSON.stringify(before.contents),
-    }).toStrictEqual({ screensOnly: before, server: false });
+    }).toStrictEqual({ pagesOnly: before, server: false });
   });
 });

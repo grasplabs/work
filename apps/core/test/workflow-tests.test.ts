@@ -1028,7 +1028,7 @@ export const notify = action({
     });
   });
 
-  it("refuse a run's output that is more than the App declares, as a screen is shown it", async () => {
+  it("refuse a run's output that is more than the App declares, as a page is shown it", async () => {
     const { release } = await requestsApp(async (by) => {
       const workflow = await createWorkflowResource(
         env,

@@ -24,12 +24,12 @@ import { OnboardingRpc } from "./onboarding/rpc.ts";
 import { OrgSettingsRpc } from "./org-settings.ts";
 import { OrganizationRpc } from "./organization.ts";
 import { SessionsRpc } from "./own-sessions.ts";
+import { PagesRpc } from "./pages-rpc.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
 import { ProjectsRpc } from "./projects.ts";
 import { ResourceBindingsRpc } from "./resource-bindings-rpc.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
-import { ScreensRpc } from "./screens-rpc.ts";
 import { fullAccess, withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
@@ -71,7 +71,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #decisions: DecisionsRpc;
   readonly #heldStarts: HeldStartsRpc;
   readonly #dependencies: DependenciesRpc;
-  readonly #screens: ScreensRpc;
+  readonly #pages: PagesRpc;
   readonly #dataPolicy: DataPolicyRpc;
   readonly #members: MembersRpc;
   readonly #organization: OrganizationRpc;
@@ -118,7 +118,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#decisions = new DecisionsRpc(env, full);
     this.#heldStarts = new HeldStartsRpc(env, full);
     this.#dependencies = new DependenciesRpc(env, full);
-    this.#screens = new ScreensRpc(env, full);
+    this.#pages = new PagesRpc(env, full);
     this.#dataPolicy = new DataPolicyRpc(env, full);
     this.#members = new MembersRpc(env, full);
     this.#organization = new OrganizationRpc(env, full);
@@ -257,8 +257,8 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#dependencies;
   }
 
-  get screens(): ScreensRpc {
-    return this.#screens;
+  get pages(): PagesRpc {
+    return this.#pages;
   }
 
   get dataPolicy(): DataPolicyRpc {

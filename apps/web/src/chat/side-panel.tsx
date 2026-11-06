@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { useAppPanel } from "../screens/app-panel-context.tsx";
+import { useAppPanel } from "../pages/app-panel-context.tsx";
 import { useCore } from "../use-core.ts";
 import { ChatBuilds } from "./builds.tsx";
 import type { ChatBuildsRead } from "./builds.tsx";
@@ -34,9 +34,9 @@ const OpeningNote = ({ opening }: { opening: Loaded<string> }) =>
 /**
  * The side panel: the versions of what the chat's agent built that wait
  * for review (`builds`, which the chat page reads), and the person's
- * Apps. Opening one opens its panel surface (spec 34.1) in the shell's
- * panel slot (screens/app-panel.tsx), or its first screen when it declares
- * none: there it stays while the page navigates. The Apps are read each
+ * Apps. Opening one opens it at its panel surface (spec 34.1) in the
+ * shell's panel slot (pages/app-panel.tsx), or at its `/` when it
+ * declares none: there it stays while the page navigates. The Apps are read each
  * time the panel opens.
  */
 export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
@@ -68,7 +68,7 @@ export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
     const found = await loadFromCore(core, async (session) => {
       const [contents, surfaces] = await Promise.all([
         session.apps.contents(app.id),
-        session.screens.surfaces(app.id),
+        session.pages.surfaces(app.id),
       ]);
       return { contents, surfaces };
     });
@@ -80,24 +80,13 @@ export const SidePanel = ({ builds }: { builds: ChatBuildsRead }) => {
       return;
     }
     const { contents, surfaces } = found.data;
-    // Opened from here with nothing: a panel surface that takes nothing.
-    const surface = surfaces.find(
-      ({ kind, opensEmpty }) => kind === "panel" && opensEmpty
-    );
-    const [first] = contents.screens;
+    const surface = surfaces.find(({ kind }) => kind === "panel");
     if (surface !== undefined) {
       setOpening(undefined);
-      void panel?.open({
-        app: app.id,
-        screen: surface.screen,
-        title: surface.title,
-        route: surface.route,
-        input: "{}",
-        surface: surface.name,
-      });
-    } else if (first !== undefined && contents.version !== null) {
+      void panel?.open({ app: app.id, title: surface.title, at: surface.path });
+    } else if (contents.pages && contents.version !== null) {
       setOpening(undefined);
-      void panel?.open({ app: app.id, screen: first, title: app.name });
+      void panel?.open({ app: app.id, title: app.name, at: "/" });
     } else {
       const { name } = app;
       setOpening({ state: "ready", data: t`${name} has no page to show.` });

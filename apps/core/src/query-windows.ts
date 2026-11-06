@@ -1,11 +1,7 @@
 import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
-import {
-  jsonBytes,
-  screenErrors,
-  screenLimits,
-} from "@grasp-os/shared/screens";
+import { jsonBytes, pageErrors, pageLimits } from "@grasp-os/shared/pages";
 import {
   liveWindowMaxItems,
   queryMaxResults,
@@ -23,13 +19,13 @@ import type {
 
 // A paginated list's window (spec 10.6, 11.6): what `usePaginatedQuery`
 // shows, the first `extent` records of a public query that takes the
-// reserved `pagination` argument and answers pages (spec 9.2). The screen
+// reserved `pagination` argument and answers pages (spec 9.2). The page
 // asks for a window by its extent only; core reads it here, from the
 // start, page after page through the query's own handler, each page's
 // cursor handed straight to the next, and answers the records with
 // whether more follow. A live list is read whole again at every change
 // (query-subscriptions.ts), and a Load More is a larger window read whole,
-// never a page appended to what the screen holds.
+// never a page appended to what the page holds.
 //
 // Threat model, and how each is closed:
 //
@@ -54,7 +50,7 @@ import type {
 //   a window's cursors never leave core, so a live list has none to
 //   forge; each is the store's own sealed statement, bound to the person,
 //   their roles, the App, its version and the query (store-cursors.ts),
-//   opened by the store before the next page is read. A screen's own
+//   opened by the store before the next page is read. A page's own
 //   foreground page reads (`client.query` with `pagination`) carry a
 //   cursor the store checks the same way.
 // - A window reaches records the person can't read: every page runs as
@@ -72,7 +68,7 @@ import type {
 //   the person's requests (or, for a read a write caused, of their live
 //   reads) before the window is read, and `charge` is asked for every
 //   page past those, every read again included; once it refuses, the
-//   window is refused as `screen.rate_limited`, the caller's refusal: on
+//   window is refused as `page.rate_limited`, the caller's refusal: on
 //   a request, with how long to wait; on a live list, a wait for the
 //   budget that keeps the window shown and watched
 //   (query-subscriptions.ts).
@@ -210,7 +206,7 @@ export interface WindowRequest {
   /**
    * Charges `pages` more pages to the person's budget, past the
    * `windowPages(extent)` the caller paid: throws the caller's own
-   * refusal (`screen.rate_limited`) once it is spent, saying to wait for
+   * refusal (`page.rate_limited`) once it is spent, saying to wait for
    * `whole`, what reading the window again from its start costs.
    */
   readonly charge: (pages: number, whole: number) => Promise<void>;
@@ -272,7 +268,7 @@ const readOnce = async (
   const items: Json[] = [];
   // What the items taken so far come to as JSON: past what one answer may
   // be, the window is refused at once, never held whole only to be
-  // refused once read (`screen.answer_too_large`, as its push would be).
+  // refused once read (`page.answer_too_large`, as its push would be).
   let bytes = 0;
   const readSet: Record<string, number> = {};
   let cursor: string | null = null;
@@ -316,9 +312,9 @@ const readOnce = async (
     // extent, more following.
     const room = extent - items.length;
     for (const item of answered.items.slice(0, room)) {
-      bytes += jsonBytes(item, screenLimits.answerBytes + 1);
-      if (bytes > screenLimits.answerBytes) {
-        throw screenErrors.create("screen.answer_too_large");
+      bytes += jsonBytes(item, pageLimits.answerBytes + 1);
+      if (bytes > pageLimits.answerBytes) {
+        throw pageErrors.create("page.answer_too_large");
       }
       items.push(item);
     }

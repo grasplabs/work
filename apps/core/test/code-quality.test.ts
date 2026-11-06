@@ -28,7 +28,7 @@ const findings = (
 describe("tidying App code", { timeout: 60_000 }, () => {
   it("formats TypeScript as Ultracite's oxfmt config does, and fixes what fixes itself", async () => {
     const tidied = await ultracite().tidy({
-      "components/total.ts":
+      "src/components/total.ts":
         "var rate = 2\nexport const total = (n: number) => { return n*rate }\n",
     });
 
@@ -36,7 +36,7 @@ describe("tidying App code", { timeout: 60_000 }, () => {
       // `var` that never changes is a `const` (no-var, prefer-const), a
       // body that only returns is the arrow's expression (arrow-body-style),
       // and the code is formatted: semicolons, spacing.
-      "components/total.ts":
+      "src/components/total.ts":
         "const rate = 2;\nexport const total = (n: number) => n * rate;\n",
     });
   });
@@ -58,15 +58,17 @@ describe("tidying App code", { timeout: 60_000 }, () => {
       "",
     ].join("\n");
 
-    const tidied = await ultracite().tidy({ "components/settle.ts": source });
+    const tidied = await ultracite().tidy({
+      "src/components/settle.ts": source,
+    });
 
-    expect(tidied["components/settle.ts"]).toMatch(
+    expect(tidied["src/components/settle.ts"]).toMatch(
       /promise\.then\(\s*\(value\) => \(\{ value \}\),\s*\(error: unknown\) => \(\{ error \}\)\s*\)/u
     );
-    expect(tidied["components/settle.ts"]).toContain(
+    expect(tidied["src/components/settle.ts"]).toContain(
       "isNaN(text as never) || !isFinite(text as never)"
     );
-    expect(tidied["components/settle.ts"]).toContain("a == b");
+    expect(tidied["src/components/settle.ts"]).toContain("a == b");
   });
 
   it("makes no fix of a rule an inline config comment turns on, as the agent might write it", async () => {
@@ -85,9 +87,11 @@ describe("tidying App code", { timeout: 60_000 }, () => {
       "",
     ].join("\n");
 
-    const tidied = await ultracite().tidy({ "components/inline.ts": source });
+    const tidied = await ultracite().tidy({
+      "src/components/inline.ts": source,
+    });
 
-    expect(tidied).toStrictEqual({ "components/inline.ts": source });
+    expect(tidied).toStrictEqual({ "src/components/inline.ts": source });
   });
 
   it("leaves what an oxlint disable comment turns off as it is, and keeps the comment as written", async () => {
@@ -102,10 +106,10 @@ describe("tidying App code", { timeout: 60_000 }, () => {
       "",
     ].join("\n");
 
-    const tidied = await ultracite().tidy({ "components/kept.ts": source });
+    const tidied = await ultracite().tidy({ "src/components/kept.ts": source });
 
     expect(tidied).toStrictEqual({
-      "components/kept.ts": [
+      "src/components/kept.ts": [
         "// oxlint-disable-next-line no-var -- kept as written",
         "var kept = 1;",
         "/* oxlint-disable arrow-body-style */",
@@ -122,7 +126,7 @@ describe("tidying App code", { timeout: 60_000 }, () => {
 
   it("leaves code that doesn't parse, and files that aren't TypeScript, as they are", async () => {
     const files = {
-      "screens/broken.tsx": "export const Broken = () => <div>\n",
+      "src/routes/index.tsx": "export const Broken = () => <div>\n",
       "app.json": '{"name":"Tickets"}',
       "server.d.ts": "export type  Id=string",
     };
@@ -134,9 +138,9 @@ describe("tidying App code", { timeout: 60_000 }, () => {
 describe("linting App code", { timeout: 60_000 }, () => {
   it("reports every Ultracite rule at its own level, by oxlint's names", async () => {
     const linted = await ultracite().lint({
-      "components/flags.ts":
+      "src/components/flags.ts":
         "export const flags = (list: number[]) => list.filter((n) => n > 0).length > 0;\n",
-      "components/sum.ts":
+      "src/components/sum.ts":
         "export const sum = (a: number, b: number) => a == b;\nexport const noop = () => {};\n",
     });
 
@@ -147,10 +151,10 @@ describe("linting App code", { timeout: 60_000 }, () => {
     ).toStrictEqual(
       expect.arrayContaining([
         // ESLint's own, by its own name.
-        { file: "components/sum.ts", rule: "eqeqeq", severity: "error" },
+        { file: "src/components/sum.ts", rule: "eqeqeq", severity: "error" },
         // A rule oxlint has under ESLint's name, as oxlint names it.
         {
-          file: "components/sum.ts",
+          file: "src/components/sum.ts",
           rule: "no-empty-function",
           severity: "error",
         },
@@ -184,11 +188,13 @@ describe("linting App code", { timeout: 60_000 }, () => {
       "",
     ].join("\n");
 
-    const linted = await ultracite().lint({ "components/quiet.ts": source });
+    const linted = await ultracite().lint({
+      "src/components/quiet.ts": source,
+    });
 
     expect(findings(linted)).toStrictEqual([
-      { file: "components/quiet.ts", line: 13, column: 50, rule: "eqeqeq" },
-      { file: "components/quiet.ts", line: 14, column: 95, rule: "eqeqeq" },
+      { file: "src/components/quiet.ts", line: 13, column: 50, rule: "eqeqeq" },
+      { file: "src/components/quiet.ts", line: 14, column: 95, rule: "eqeqeq" },
     ]);
   });
 
@@ -202,14 +208,16 @@ describe("linting App code", { timeout: 60_000 }, () => {
       "",
     ].join("\n");
 
-    const linted = await ultracite().lint({ "components/plain.ts": source });
+    const linted = await ultracite().lint({
+      "src/components/plain.ts": source,
+    });
 
-    expect(linted).toStrictEqual({ "components/plain.ts": [] });
+    expect(linted).toStrictEqual({ "src/components/plain.ts": [] });
   });
 
   it("runs the rules only oxlint has: oxc's own, and vitest's on a test", async () => {
     const linted = await ultracite().lint({
-      "components/merge.ts":
+      "src/components/merge.ts":
         "export const merge = (items: Record<string, number>[]) =>\n  items.reduce((all, item) => ({ ...all, ...item }), {});\n",
       "tests/count.test.ts":
         'import { describe, expect, it } from "vitest";\n\ndescribe("count", () => {\n  it("counts", () => {\n    expect([1].length).toBe(1);\n  });\n});\n',
@@ -219,7 +227,7 @@ describe("linting App code", { timeout: 60_000 }, () => {
       findings(linted).map(({ file, rule }) => `${file} ${rule}`)
     ).toStrictEqual(
       expect.arrayContaining([
-        "components/merge.ts oxc/no-accumulating-spread",
+        "src/components/merge.ts oxc/no-accumulating-spread",
         "tests/count.test.ts vitest/prefer-to-have-length",
       ])
     );
@@ -246,35 +254,39 @@ export const isNumber = (value: unknown, extra: unknown): extra is number =>
   typeof value === "number";
 `;
 
-    const tidied = await ultracite().tidy({ "components/total.ts": source });
-    const linted = await ultracite().lint({ "components/total.ts": source });
+    const tidied = await ultracite().tidy({
+      "src/components/total.ts": source,
+    });
+    const linted = await ultracite().lint({
+      "src/components/total.ts": source,
+    });
 
     expect({
-      kept: tidied["components/total.ts"] === source,
+      kept: tidied["src/components/total.ts"] === source,
       found: findings(linted),
     }).toStrictEqual({
       kept: true,
       found: [
         {
-          file: "components/total.ts",
+          file: "src/components/total.ts",
           line: 1,
           column: 10,
           rule: "no-unused-vars",
         },
         {
-          file: "components/total.ts",
+          file: "src/components/total.ts",
           line: 6,
           column: 51,
           rule: "no-unused-vars",
         },
         {
-          file: "components/total.ts",
+          file: "src/components/total.ts",
           line: 7,
           column: 9,
           rule: "no-unused-vars",
         },
         {
-          file: "components/total.ts",
+          file: "src/components/total.ts",
           line: 13,
           column: 42,
           rule: "no-unused-vars",
@@ -286,21 +298,22 @@ export const isNumber = (value: unknown, extra: unknown): extra is number =>
   it("says nothing of code that doesn't parse: the build says why", async () => {
     await expect(
       ultracite().lint({
-        "screens/broken.tsx": "export const Broken = () => <div>\n",
+        "src/routes/index.tsx": "export const Broken = () => <div>\n",
       })
-    ).resolves.toStrictEqual({ "screens/broken.tsx": [] });
+    ).resolves.toStrictEqual({ "src/routes/index.tsx": [] });
   });
 
   it("fails only a file nested too deep for oxc, and lints and tidies the files after it, any App's", async () => {
     // Nested deeper than oxc's recursion has stack for: oxc.wasm traps on
     // it, in the isolate every App's lint shares.
     const tidied = await ultracite().tidy({
-      "components/deep.ts": deep(5000),
-      "components/after.ts": "export const after = 1\n",
+      "src/components/deep.ts": deep(5000),
+      "src/components/after.ts": "export const after = 1\n",
     });
     const linted = await ultracite().lint({
-      "components/deep.ts": deep(1000),
-      "components/after.ts": "export const after = (a: number) => a == 1;\n",
+      "src/components/deep.ts": deep(1000),
+      "src/components/after.ts":
+        "export const after = (a: number) => a == 1;\n",
     });
 
     // Another App's write and check, in the same isolate.
@@ -314,24 +327,24 @@ export const isNumber = (value: unknown, extra: unknown): extra is number =>
     }).toStrictEqual({
       // Saved as written.
       tidied: {
-        "components/deep.ts": null,
-        "components/after.ts": "export const after = 1;\n",
+        "src/components/deep.ts": null,
+        "src/components/after.ts": "export const after = 1;\n",
       },
-      linted: ["components/deep.ts lint", "components/after.ts eqeqeq"],
+      linted: ["src/components/deep.ts lint", "src/components/after.ts eqeqeq"],
       other: { "b/clean.ts": [] },
       tidiedOther: { "b/clean.ts": "export const a = 1;\n" },
     });
   });
 
-  it("lints and tidies a flat screen of a thousand rows, as native oxlint and oxfmt do", async () => {
+  it("lints and tidies a flat page of a thousand rows, as native oxlint and oxfmt do", async () => {
     const table = `export const Table = () => (\n  <table>\n    <tbody>\n${"      <tr>\n        <td>Name</td>\n        <td>Value</td>\n      </tr>\n".repeat(1000)}    </tbody>\n  </table>\n);\n`;
 
-    const linted = await ultracite().lint({ "screens/table.tsx": table });
-    const tidied = await ultracite().tidy({ "screens/table.tsx": table });
+    const linted = await ultracite().lint({ "src/routes/table.tsx": table });
+    const tidied = await ultracite().tidy({ "src/routes/table.tsx": table });
 
     expect({
-      linted: linted["screens/table.tsx"]?.map(({ rule }) => rule),
-      tidied: typeof tidied["screens/table.tsx"],
+      linted: linted["src/routes/table.tsx"]?.map(({ rule }) => rule),
+      tidied: typeof tidied["src/routes/table.tsx"],
     }).toStrictEqual({ linted: [], tidied: "string" });
   });
 
@@ -345,8 +358,8 @@ export const isNumber = (value: unknown, extra: unknown): extra is number =>
     ).join("\n");
 
     await expect(
-      ultracite().tidy({ "components/grows.ts": grows })
-    ).resolves.toStrictEqual({ "components/grows.ts": null });
+      ultracite().tidy({ "src/components/grows.ts": grows })
+    ).resolves.toStrictEqual({ "src/components/grows.ts": null });
   });
 });
 
@@ -354,7 +367,7 @@ export const isNumber = (value: unknown, extra: unknown): extra is number =>
 const manyFiles = (count: number): Record<string, string> =>
   Object.fromEntries(
     Array.from({ length: count }, (_, at) => [
-      `components/file-${at}.ts`,
+      `src/components/file-${at}.ts`,
       `export const same${at} = (a: number, b: number) => a == b;\n// ${crypto.randomUUID()}\n`,
     ])
   );
@@ -480,8 +493,8 @@ describe("a draft's lint", { timeout: 120_000 }, () => {
   it("lints only the files that changed, keeping each file's result by its content", async () => {
     const app = appIdSchema.parse(crypto.randomUUID());
     const files = {
-      "components/same.ts": `export const same = (a: number, b: number) => a == b;\n// ${crypto.randomUUID()}\n`,
-      "components/sum.ts": `export const sum = (a: number, b: number) => a + b;\n// ${crypto.randomUUID()}\n`,
+      "src/components/same.ts": `export const same = (a: number, b: number) => a == b;\n// ${crypto.randomUUID()}\n`,
+      "src/components/sum.ts": `export const sum = (a: number, b: number) => a + b;\n// ${crypto.randomUUID()}\n`,
     };
     const first = await draftLintBuild(env, { app, version: 0, files });
 
@@ -501,7 +514,7 @@ describe("a draft's lint", { timeout: 120_000 }, () => {
       const changed = await draftLintBuild(env, {
         app,
         version: 0,
-        files: { ...files, "components/new.ts": "export const one = 1;\n" },
+        files: { ...files, "src/components/new.ts": "export const one = 1;\n" },
       });
       expect({
         first: [first.status, first.diagnostics.map(({ rule }) => rule)],
@@ -528,7 +541,7 @@ describe("a draft's lint", { timeout: 120_000 }, () => {
       files: {
         "server/_generated/api.ts": unused,
         ".grasp/references.ts": unused,
-        "components/own.ts": unused,
+        "src/components/own.ts": unused,
       },
     });
 
@@ -537,7 +550,7 @@ describe("a draft's lint", { timeout: 120_000 }, () => {
       found: linted.diagnostics.map(({ file, rule }) => ({ file, rule })),
     }).toStrictEqual({
       status: "failed",
-      found: [{ file: "components/own.ts", rule: "no-unused-vars" }],
+      found: [{ file: "src/components/own.ts", rule: "no-unused-vars" }],
     });
   });
 });

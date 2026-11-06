@@ -643,7 +643,7 @@ export interface DependencyImpactArtifact {
  * person deciding to read first: every approval of the graph that would
  * end, and the artifacts built from it. Retiring keeps those artifacts
  * working and builds nothing new; revoking stops them all. No release,
- * screen or workflow loads packages yet, so these are all there is.
+ * page or workflow loads packages yet, so these are all there is.
  */
 export interface DependencyImpact {
   /** The policy generation now: a decision names the one it was read under. */

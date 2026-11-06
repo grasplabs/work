@@ -7,12 +7,12 @@ import {
 import type { ClientTransport } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import type { Role } from "@grasp-os/shared/roles";
 import {
   appFunctionPath,
-  screenLeaseHeader,
-  screenPersonHeader,
-} from "@grasp-os/shared/screens";
+  pageLeaseHeader,
+  pagePersonHeader,
+} from "@grasp-os/shared/pages";
+import type { Role } from "@grasp-os/shared/roles";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
@@ -34,12 +34,12 @@ import { routed, signedInApi, unique } from "./sign-in.ts";
 // alias the App's app.ts declares, the App's version made current, its
 // `start` grant asked for by its builder and granted by an admin, and
 // its runs started, followed and controlled by a
-// person or by the App's screen over core's function route. What replaces
+// person or by the App's page over core's function route. What replaces
 // an App's own workflow (workflow-apps.ts) in a test:
 //
 //   const { signedIn, boundApp } = jsonWorkflowAppsOf(idp);
 //   const { builder, app, workflow, reference } = await boundApp({ hold: "1 hour" });
-//   const lease = await screenOf(builder, app);
+//   const lease = await pageOf(builder, app);
 //   const { runId } = startedOf(await called(builder, app, lease, startCommand(reference)));
 //   await called(builder, app, lease, controlCommand(reference, "pause", runId));
 //   const run = await runFor(builder, workflow, runId);
@@ -319,7 +319,7 @@ export const endLiveResourceRuns = async (): Promise<void> => {
   );
 };
 
-/** The App every bound workflow here is bound to: one screen, one alias. */
+/** The App every bound workflow here is bound to: one page, one alias. */
 const boundAppFiles = (alias: string): Record<string, string> => ({
   ...appDefinition({
     name: "Requests",
@@ -337,19 +337,18 @@ const boundAppFiles = (alias: string): Record<string, string> => ({
 
 export const ${alias} = permissions.${alias};
 `,
-  "screens.ts": `export default {
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-};
-`,
-  "screens/desk.tsx": `export default function Desk() {
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Desk() {
   return <main>Requests</main>;
 }
+
+export const Route = createFileRoute("/")({ component: Desk });
 `,
 });
 
 /**
  * The reference to `alias` that the `@server/_generated/api` generator writes into the
- * screens' references of version 1 of `app`, from its sealed release.
+ * pages' references of version 1 of `app`, from its sealed release.
  */
 const workflowReference = async (app: string, alias: string) => {
   const sealed = await loadRelease(env, appIdSchema.parse(app), 1);
@@ -369,7 +368,7 @@ const workflowReference = async (app: string, alias: string) => {
   );
 };
 
-/** A workflow reference, as `@server/_generated/api` generates it for a screen. */
+/** A workflow reference, as `@server/_generated/api` generates it for a page. */
 export type WorkflowReference = Awaited<ReturnType<typeof workflowReference>>;
 
 /** A reference as the SDK sends it. */
@@ -384,7 +383,7 @@ export const wireOf = (reference: WorkflowReference) => ({
 /** A fresh command key, as the SDK makes one. */
 export const keyOf = (): string => crypto.randomUUID().replaceAll("-", "");
 
-/** A screen's start of the workflow `reference` names, under `key`. */
+/** A page's start of the workflow `reference` names, under `key`. */
 export const startCommand = (
   reference: WorkflowReference,
   input?: unknown,
@@ -397,7 +396,7 @@ export const startCommand = (
     idempotencyKey: key,
   });
 
-/** A screen's pause, resume or cancel of run `runId`, under `key`. */
+/** A page's pause, resume or cancel of run `runId`, under `key`. */
 export const controlCommand = (
   reference: WorkflowReference,
   command: "pause" | "resume" | "cancel",
@@ -422,7 +421,7 @@ export const outcomeOf = (answer: unknown): unknown => {
   return result.ok ? result.value : result.error.code;
 };
 
-/** The run a screen's start answered with. */
+/** The run a page's start answered with. */
 export const startedOf = (answer: unknown) =>
   z
     .object({
@@ -432,7 +431,7 @@ export const startedOf = (answer: unknown) =>
     })
     .parse(outcomeOf(answer));
 
-/** A control's receipt as a screen's command answered it, without its revision. */
+/** A control's receipt as a page's command answered it, without its revision. */
 export const staged = (receipt: unknown) => {
   const { kind, state } = z
     .object({ kind: z.string(), state: z.string(), revision: z.number() })
@@ -469,7 +468,7 @@ export const jsonWorkflowAppsOf = (idp: Idp) => {
     await signedInAs(idp, role);
 
   /**
-   * An App sealed and current, its screen approved, with `alias` bound to
+   * An App sealed and current, its page approved, with `alias` bound to
    * version 1 of a workflow and the App's `start` grant on it: a greeting
    * that waits `hold` first, or the definition `definition` makes of its
    * name; or, `sharing` another fixture's people and workflow, that one.
@@ -527,12 +526,9 @@ export const jsonWorkflowAppsOf = (idp: Idp) => {
   return { signedIn, boundApp };
 };
 
-/** A screen of `person`'s on the App, opened: its frame's lease. */
-export const screenOf = async (
-  person: Person,
-  app: string
-): Promise<string> => {
-  const { lease } = await person.api.screens.open(app, "desk");
+/** A page of `person`'s on the App, opened: its frame's lease. */
+export const pageOf = async (person: Person, app: string): Promise<string> => {
+  const { lease } = await person.api.pages.open(app);
   return lease;
 };
 
@@ -549,8 +545,8 @@ export const called = async (
       origin: clientOrigin,
       "content-type": "application/json",
       cookie: person.session,
-      [screenLeaseHeader]: lease,
-      [screenPersonHeader]: person.userId,
+      [pageLeaseHeader]: lease,
+      [pagePersonHeader]: person.userId,
     },
     body: request,
   });
@@ -563,11 +559,11 @@ export const called = async (
 };
 
 /**
- * A session client of `person`'s screen, as the frame's own: its calls
+ * A session client of `person`'s page, as the frame's own: its calls
  * over core's function route, its live queries over its frame
- * (`screens.frame`). Hand it to `workflowChannel` for the SDK's view.
+ * (`pages.frame`). Hand it to `workflowChannel` for the SDK's view.
  */
-export const screenClient = (
+export const pageClient = (
   person: Person,
   app: string,
   lease: string
@@ -585,7 +581,7 @@ export const screenClient = (
           },
         }
       );
-      const subscription = await person.api.screens
+      const subscription = await person.api.pages
         .frame(app, lease)
         .watchQuery(request, callback);
       return {
@@ -598,7 +594,7 @@ export const screenClient = (
   return new GraspClient(transport);
 };
 
-/** Follows `request` raw on `person`'s screen: what reached the page. */
+/** Follows `request` raw on `person`'s page: what reached the page. */
 export const following = async (
   person: Person,
   app: string,
@@ -622,7 +618,7 @@ export const following = async (
       },
     }
   );
-  const subscription = await person.api.screens
+  const subscription = await person.api.pages
     .frame(app, lease)
     .watchQuery(JSON.stringify(request), callback);
   return { received, subscription };

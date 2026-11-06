@@ -1,4 +1,4 @@
-import { screenFramePath, screenModulePath } from "@grasp-os/shared/screens";
+import { pageFramePath, pageModulePath } from "@grasp-os/shared/pages";
 import { expect } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
 
@@ -42,8 +42,8 @@ const cspReport = /content[ -]security[ -]policy/iu;
 
 /**
  * Whether a console report at `url` is the product page's own: from one
- * of its documents or scripts, not a screen's frame or module, and not
- * from where Chromium gives none (a screen's frame has an opaque origin).
+ * of its documents or scripts, not a page's frame or module, and not
+ * from where Chromium gives none (a page's frame has an opaque origin).
  */
 const fromProductPage = (url: string): boolean => {
   if (url === "") {
@@ -51,14 +51,14 @@ const fromProductPage = (url: string): boolean => {
   }
   const { pathname } = new URL(url);
   return (
-    pathname !== screenFramePath && !pathname.startsWith(`${screenModulePath}/`)
+    pathname !== pageFramePath && !pathname.startsWith(`${pageModulePath}/`)
   );
 };
 
 /**
  * Adds to `violations` what violates the product page's own policy on
  * every page of `context`: from the `securitypolicyviolation` event of each
- * page's top document, and from the console. Not its screens' frames: they
+ * page's top document, and from the console. Not its pages' frames: they
  * have a policy of their own, which journeys break on purpose to show that
  * it holds.
  */

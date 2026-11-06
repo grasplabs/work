@@ -3,12 +3,10 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { frameAccess, frameKey, stageFrame } from "../src/page-frame.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { frameAccess, frameKey, stageFrame } from "../src/screen-frame.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { deskDraft, deskFiles } from "./preview-drafts.ts";
-import { chatsOf, chatWithDraft, refreshed } from "./previews.ts";
 import {
   frameDocument,
   loadFrame,
@@ -17,8 +15,10 @@ import {
   modulePath,
   pathOf,
   routed,
-} from "./screen-frames.ts";
-import type { LoadedFrame, ModuleParts } from "./screen-frames.ts";
+} from "./page-frames.ts";
+import type { LoadedFrame, ModuleParts } from "./page-frames.ts";
+import { deskDraft, deskFiles } from "./preview-drafts.ts";
+import { chatsOf, chatWithDraft, refreshed } from "./previews.ts";
 import { person as actingPerson } from "./sealed-apps.ts";
 import {
   auditedDuring,
@@ -29,7 +29,7 @@ import {
   staffPerson,
 } from "./sign-in.ts";
 
-// A screen's modules on content-hashed addresses (core's screen-frame.ts),
+// A page's modules on content-hashed addresses (core's page-frame.ts),
 // from its threat model. A frame is sandboxed with an opaque origin, so its
 // module requests carry no cookie: what lets one in is a token core made
 // for one scope of modules (a preview's, or a published build's), which
@@ -64,13 +64,14 @@ const framed = async (open: {
 }): Promise<LoadedFrame> => {
   const frame = await loadFrame(open);
   if (frame === null) {
-    throw new Error("An opened screen has a frame");
+    throw new Error("An opened page has a frame");
   }
   return frame;
 };
 
-/** The address of `frame`'s screen module. */
-const screenModuleOf = (frame: LoadedFrame): string => frame.screen.entry;
+/** The address of `frame`'s page module. */
+const pageModuleOf = (frame: LoadedFrame): string =>
+  frame.addresses["app~src~routes~index.js"] ?? "";
 
 /** What core answers for the module at `scope`, under `token`, by its `hash`. */
 const asked = async (parts: ModuleParts): Promise<number> => {
@@ -91,17 +92,19 @@ const before = async <T>(ago: number, run: () => Promise<T>): Promise<T> => {
 const minute = 60 * 1000;
 const hour = 60 * minute;
 
-/** A screen that imports a component of its App, which `marker` names. */
+/** A page that imports a component of its App, which `marker` names. */
 const withComponent = (marker: string): Record<string, string> => ({
-  "components/badge.tsx": `export function Badge() {
+  "src/components/badge.tsx": `export function Badge() {
   return <strong>${marker}</strong>;
 }
 `,
-  "screens/desk.tsx": `import { Badge } from "../components/badge";
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { Badge } from "../components/badge";
 
-export default function Desk() {
+function Desk() {
   return <main><Badge /></main>;
 }
+export const Route = createFileRoute("/")({ component: Desk });
 `,
 });
 
@@ -109,11 +112,11 @@ const appImport = /\.\/[0-9a-f]{64}\.js[^"'\s]*/gu;
 
 /**
  * Where `frame` names a module and the token it names it with: every
- * address in its document (import map, integrity, its screen module) and
+ * address in its document (import map, integrity, its page module) and
  * every import of the App's modules it loads, as a browser resolves them.
  */
 const namedAddresses = (frame: LoadedFrame): string[] => [
-  frame.screen.entry,
+  frame.page.entry,
   ...Object.values(frame.addresses),
   ...Object.keys(frame.integrity),
   ...Object.entries(frame.modules)
@@ -139,7 +142,7 @@ const staffSurfaces = (events: readonly AuditEvent[]): unknown[] =>
     .map(({ detail }) => detail.surface);
 
 describe(
-  "a screen's modules on content-hashed addresses",
+  "a page's modules on content-hashed addresses",
   { timeout: 180_000 },
   () => {
     it("carries a module's token in the query alone: in no path the router or core logs", async () => {
@@ -147,22 +150,20 @@ describe(
       const { id } = await builder.api.apps.create({ name: "Desk" });
       const app = appIdSchema.parse(id);
       await release(builder, app, { ...deskFiles(), ...withComponent("Live") });
-      const published = await framed(
-        await builder.api.screens.open(app, "desk")
-      );
+      const published = await framed(await builder.api.pages.open(app));
       const { chatId } = await chatWithDraft(
         builder,
         app,
         withComponent("Draft")
       );
       const preview = await framed(
-        await builder.api.chats.preview(chatId, app, "desk")
+        await builder.api.chats.preview(chatId, app)
       );
       const info = vi.spyOn(console, "info").mockReturnValue();
       let lines: string[] = [];
       try {
-        await routed(pathOf(published.screen.entry));
-        await routed(pathOf(preview.screen.entry));
+        await routed(pathOf(published.page.entry));
+        await routed(pathOf(preview.page.entry));
         lines = info.mock.calls.map((call) => JSON.stringify(call));
       } finally {
         info.mockRestore();
@@ -202,28 +203,24 @@ describe(
       };
       expect(checked).toStrictEqual([expected, expected]);
       expect(
-        lines.filter((line) => line.includes("/screen-modules/"))
+        lines.filter((line) => line.includes("/page-modules/"))
       ).toHaveLength(2);
     });
 
     it("refuses a module asked with no token, one that isn't core's, or one for another scope", async () => {
       const builder = await signedInApi(idp, "builder");
       const { app, chatId } = await deskDraft(builder);
-      const frame = await framed(
-        await builder.api.chats.preview(chatId, app, "desk")
-      );
-      const own = modulePartsOf(screenModuleOf(frame));
+      const frame = await framed(await builder.api.chats.preview(chatId, app));
+      const own = modulePartsOf(pageModuleOf(frame));
       const [expires = ""] = own.token.split(".");
       const kitAddress = Object.values(frame.addresses).find((address) =>
-        new URL(address).pathname.startsWith("/screen-modules/kit/")
+        new URL(address).pathname.startsWith("/page-modules/kit/")
       );
       const kit = modulePartsOf(kitAddress ?? "");
-      const noToken = await routed(
-        `/screen-modules/${own.scope}/${own.hash}.js`
-      );
+      const noToken = await routed(`/page-modules/${own.scope}/${own.hash}.js`);
       // A token for this scope, in the path as it once was.
       const inPath = await routed(
-        `/screen-modules/${own.scope}/${own.token}/${own.hash}.js`
+        `/page-modules/${own.scope}/${own.token}/${own.hash}.js`
       );
       expect({
         own: await asked(own),
@@ -247,17 +244,15 @@ describe(
       const previewAt = async (ago: number): Promise<ModuleParts> =>
         await before(ago, async () =>
           modulePartsOf(
-            screenModuleOf(
-              await framed(await builder.api.chats.preview(chatId, app, "desk"))
+            pageModuleOf(
+              await framed(await builder.api.chats.preview(chatId, app))
             )
           )
         );
       const publishedAt = async (ago: number): Promise<ModuleParts> =>
         await before(ago, async () =>
           modulePartsOf(
-            screenModuleOf(
-              await framed(await builder.api.screens.open(app, "desk"))
-            )
+            pageModuleOf(await framed(await builder.api.pages.open(app)))
           )
         );
       expect({
@@ -278,25 +273,22 @@ describe(
     it("reads only modules of its own preview's scope: not another App's, nor another chat's draft's, by their hashes", async () => {
       const builder = await signedInApi(idp, "builder");
       const { app, chatId } = await deskDraft(builder);
-      const own = await framed(
-        await builder.api.chats.preview(chatId, app, "desk")
-      );
+      const own = await framed(await builder.api.chats.preview(chatId, app));
       // Another App of the same builder, published.
       const { id: otherId } = await builder.api.apps.create({ name: "Other" });
       await release(builder, otherId, deskFiles("Other"));
-      const otherApp = await framed(
-        await builder.api.screens.open(otherId, "desk")
-      );
+      const otherApp = await framed(await builder.api.pages.open(otherId));
       // Another chat's draft of the same App.
       const { chatId: otherChat } = await chatWithDraft(builder, app, {
-        "screens/desk.tsx": deskFiles("Elsewhere")["screens/desk.tsx"] ?? "",
+        "src/routes/index.tsx":
+          deskFiles("Elsewhere")["src/routes/index.tsx"] ?? "",
       });
       const otherDraft = await framed(
-        await builder.api.chats.preview(otherChat, app, "desk")
+        await builder.api.chats.preview(otherChat, app)
       );
-      const mine = modulePartsOf(screenModuleOf(own));
+      const mine = modulePartsOf(pageModuleOf(own));
       const theirs = [otherApp, otherDraft].map((frame) =>
-        modulePartsOf(screenModuleOf(frame))
+        modulePartsOf(pageModuleOf(frame))
       );
       expect({
         own: await asked(mine),
@@ -322,7 +314,7 @@ describe(
       const { id } = await builder.api.apps.create({ name: "Desk" });
       const app = appIdSchema.parse(id);
       await release(builder, app, deskFiles("First"));
-      const first = await framed(await builder.api.screens.open(app, "desk"));
+      const first = await framed(await builder.api.pages.open(app));
       await release(builder, app, deskFiles("Second"));
       await revokeRelease(
         env,
@@ -330,9 +322,9 @@ describe(
         { app, version: 1 },
         "Leaks data"
       );
-      const second = await framed(await builder.api.screens.open(app, "desk"));
-      const revoked = modulePartsOf(screenModuleOf(first));
-      const current = modulePartsOf(screenModuleOf(second));
+      const second = await framed(await builder.api.pages.open(app));
+      const revoked = modulePartsOf(pageModuleOf(first));
+      const current = modulePartsOf(pageModuleOf(second));
       expect({
         current: await asked(current),
         underCurrentScope: await asked({ ...current, hash: revoked.hash }),
@@ -351,15 +343,16 @@ describe(
     it("serves no module whose bytes were changed in R2, or moved there from another scope, and stages it again at the next update", async () => {
       const builder = await signedInApi(idp, "builder");
       const { app, chatId, revision } = await deskDraft(builder);
-      const opened = await builder.api.chats.preview(chatId, app, "desk");
+      const opened = await builder.api.chats.preview(chatId, app);
       const frame = await framed(opened);
       const { chatId: otherChat } = await chatWithDraft(builder, app, {
-        "screens/desk.tsx": deskFiles("Elsewhere")["screens/desk.tsx"] ?? "",
+        "src/routes/index.tsx":
+          deskFiles("Elsewhere")["src/routes/index.tsx"] ?? "",
       });
       const other = await framed(
-        await builder.api.chats.preview(otherChat, app, "desk")
+        await builder.api.chats.preview(otherChat, app)
       );
-      const address = screenModuleOf(frame);
+      const address = pageModuleOf(frame);
       const key = moduleKeyOf(address);
       const staged = await env.FILES.get(key);
       const original = await staged?.text();
@@ -386,8 +379,8 @@ describe(
       const tampered = await routed(pathOf(address));
       const removed = (await env.FILES.head(key)) === null;
       // Or moves another chat's module into this scope, with its MAC.
-      const elsewhere = await env.FILES.get(moduleKeyOf(screenModuleOf(other)));
-      const otherHash = modulePartsOf(screenModuleOf(other)).hash;
+      const elsewhere = await env.FILES.get(moduleKeyOf(pageModuleOf(other)));
+      const otherHash = modulePartsOf(pageModuleOf(other)).hash;
       const moved = modulePath({ ...modulePartsOf(address), hash: otherHash });
       await env.FILES.put(
         moduleKeyOf(`https://core${moved}`),
@@ -401,7 +394,7 @@ describe(
         chatId,
         app,
         revision,
-        { screen: "desk" }
+        {}
       );
       const healed = await routed(pathOf(address));
       expect({
@@ -412,7 +405,9 @@ describe(
         },
         removed,
         moved: movedServed,
-        sameModule: refreshed(updated).entry === modulePartsOf(address).hash,
+        sameModule: Object.keys(refreshed(updated).modules).includes(
+          modulePartsOf(address).hash
+        ),
         healed: { status: healed.status, code: await healed.text() },
       }).toStrictEqual({
         atOpen: {
@@ -434,25 +429,30 @@ describe(
       const { app, chatId, revision, write } = await deskDraft(builder);
       const frame = await before(
         61 * minute,
-        async () =>
-          await framed(await builder.api.chats.preview(chatId, app, "desk"))
+        async () => await framed(await builder.api.chats.preview(chatId, app))
       );
       const next = await write(
-        { "screens/desk.tsx": deskFiles("Later")["screens/desk.tsx"] ?? "" },
+        {
+          "src/routes/index.tsx":
+            deskFiles("Later")["src/routes/index.tsx"] ?? "",
+        },
         revision
       );
-      const updated = await builder.api.chats.previewUpdate(chatId, app, next, {
-        screen: "desk",
-      });
+      const updated = await builder.api.chats.previewUpdate(
+        chatId,
+        app,
+        next,
+        {}
+      );
       const hash = refreshed(updated).entry;
       // What the page does on the frame's `reset`: opens it again.
       const reopened = await framed(
-        await builder.api.chats.preview(chatId, app, "desk")
+        await builder.api.chats.preview(chatId, app)
       );
       expect({
-        expired: await asked({ ...modulePartsOf(frame.screen.entry), hash }),
+        expired: await asked({ ...modulePartsOf(frame.page.entry), hash }),
         reopened: await asked({
-          ...modulePartsOf(reopened.screen.entry),
+          ...modulePartsOf(reopened.page.entry),
           hash,
         }),
       }).toStrictEqual({ expired: 403, reopened: 200 });
@@ -482,7 +482,7 @@ describe(
       expect(frame?.modules["app~desk"]).toBe(code.modules["app~desk"]);
     });
 
-    it("mints no token for Grasp staff, and records each ask for a screen's frame or a preview's", async () => {
+    it("mints no token for Grasp staff, and records each ask for a page's frame or a preview's", async () => {
       const builder = await signedInApi(idp, "builder");
       const { app, chatId } = await deskDraft(builder);
       const session = await signedIn(idp, "grasp-staff", staffPerson());
@@ -492,24 +492,24 @@ describe(
       const events = await auditedDuring(
         async () => {
           answers.push(
-            await outcome(staff.screens.open(app, "desk")),
-            await outcome(staff.chats.preview(chatId, app, "desk"))
+            await outcome(staff.pages.open(app)),
+            await outcome(staff.chats.preview(chatId, app))
           );
         },
         { staffAccesses: true }
       );
       expect({ answers, surfaces: staffSurfaces(events) }).toStrictEqual({
         answers: ["role.forbidden", "role.forbidden"],
-        surfaces: ["screens.open", "chats.preview"],
+        surfaces: ["pages.open", "chats.preview"],
       });
     });
 
     it("serves a module privately and immutably, and lets neither it nor its frame send a referrer", async () => {
       const builder = await signedInApi(idp, "builder");
       const { app, chatId } = await deskDraft(builder);
-      const opened = await builder.api.chats.preview(chatId, app, "desk");
+      const opened = await builder.api.chats.preview(chatId, app);
       const frame = await framed(opened);
-      const own = modulePartsOf(screenModuleOf(frame));
+      const own = modulePartsOf(pageModuleOf(frame));
       const [document, served, refused, missing] = await Promise.all([
         frameDocument(opened),
         routed(modulePath(own)),
@@ -540,32 +540,28 @@ describe(
     it("keeps no token from a reported stack or message in the App's error log or a preview's reports", async () => {
       const builder = await signedInApi(idp, "builder");
       const { app, chatId, revision } = await deskDraft(builder);
-      const frame = await framed(
-        await builder.api.chats.preview(chatId, app, "desk")
-      );
-      const published = await framed(
-        await builder.api.screens.open(app, "desk")
-      );
-      const artifact = `/package-artifacts/${app}/${"c".repeat(64)}/${"d".repeat(64)}/index.js?token=${modulePartsOf(screenModuleOf(published)).token}`;
+      const frame = await framed(await builder.api.chats.preview(chatId, app));
+      const published = await framed(await builder.api.pages.open(app));
+      const artifact = `/package-artifacts/${app}/${"c".repeat(64)}/${"d".repeat(64)}/index.js?token=${modulePartsOf(pageModuleOf(published)).token}`;
       // As engines write them: each frame names its module's whole address.
       const problemOf = (address: string) => ({
         kind: "error" as const,
         message: `Failed to fetch dynamically imported module: ${address}`,
         stack: `Error: boom\n    at Desk (${address}:3:9)\n    at load (https://acme.test${artifact}:1:2)`,
       });
-      await builder.api.screens.report(
+      await builder.api.pages.report(
         app,
-        { version: 1, screen: "desk" },
-        problemOf(screenModuleOf(published))
+        { version: 1, path: "/" },
+        problemOf(pageModuleOf(published))
       );
       await builder.api.chats.previewReport(
         chatId,
         app,
         revision,
-        "desk",
-        problemOf(screenModuleOf(frame))
+        "/",
+        problemOf(pageModuleOf(frame))
       );
-      const { entries } = await builder.api.screens.errors(app);
+      const { entries } = await builder.api.pages.errors(app);
       const reported = await chatsOf(builder).previewReports(
         chatId,
         app,
@@ -573,10 +569,10 @@ describe(
         0
       );
       const tokens = [published, frame].map(
-        (opened) => modulePartsOf(screenModuleOf(opened)).token
+        (opened) => modulePartsOf(pageModuleOf(opened)).token
       );
       const kept = JSON.stringify({ entries, problems: reported.problems });
-      const { pathname } = new URL(screenModuleOf(published));
+      const { pathname } = new URL(pageModuleOf(published));
       expect({
         withToken: tokens.filter((token) => kept.includes(token)),
         withQuery: kept.includes("?token="),

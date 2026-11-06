@@ -192,7 +192,7 @@ describe("a peer that supplies or is sent a large answer", () => {
     const { account } = fresh();
     // `watch(callback)`: the callback is the page's own stub, the answer is
     // ours. The page pulls the subscription, calls through it, passes it on
-    // as an argument, and releases it, as the web app and screens do.
+    // as an argument, and releases it, as the web app and pages do.
     const outcomes = [
       ["push", ["pipeline", 0, ["watch"], [["export", -1]]]],
       ["pull", 1],

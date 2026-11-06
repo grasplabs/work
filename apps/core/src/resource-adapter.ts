@@ -135,7 +135,7 @@ export interface BindingCaller {
   /**
    * Who the audit log names as making each request, and whose spend a
    * model request counts in besides the binding's own: the App, for a
-   * screen's or an agent's call (`delegateActorOf`); the workflow run, for
+   * page's or an agent's call (`delegateActorOf`); the workflow run, for
    * a run's (`runActorOf`), so its workflow and run lineage count it too.
    */
   readonly actor: AuditActor;
@@ -152,7 +152,7 @@ export interface BindingCaller {
    * step attempt no longer holds its lease. An adapter runs it last
    * before its side effect leaves core (connect's call, the provider
    * request), with nothing awaited in between, so a cancel landing while
-   * it prepared the request stops it. A screen's or agent's call has its
+   * it prepared the request stops it. A page's or agent's call has its
    * gate (`authorize`) only.
    */
   readonly requireHolds?: () => void;
@@ -179,7 +179,7 @@ export interface BindingCaller {
    */
   readonly chain?: readonly AppId[];
   /**
-   * Calls a public function of another App as a screen's call of it runs,
+   * Calls a public function of another App as a page's call of it runs,
    * for `by`, carrying the chain and the caller's own checks
    * (app-functions.ts, `callFunction`): given by core's invocation, so an
    * app resource reaches the called App only as that does.
@@ -212,7 +212,7 @@ export interface BindingCaller {
    */
   readonly runOrigin?: RunOrigin;
   /**
-   * Aborted once the person cancels the screen's call this invocation is
+   * Aborted once the person cancels the page's call this invocation is
    * part of (`CallOptions.cancelled`): the Apps it calls stop with it.
    */
   readonly cancelled?: AbortSignal;

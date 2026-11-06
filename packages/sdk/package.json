@@ -1,7 +1,7 @@
 {
   "name": "@grasp-os/sdk",
   "private": true,
-  "description": "Workflow SDK and screen hooks: the only API App code sees",
+  "description": "Workflow SDK and page hooks: the only API App code sees",
   "license": "AGPL-3.0-only",
   "type": "module",
   "sideEffects": [
@@ -26,7 +26,7 @@
     "./client": "./src/client.ts",
     "./form-binding": "./src/form-binding.ts",
     "./react": "./src/react.ts",
-    "./screen-runtime": "./src/screen-runtime.ts",
+    "./page-runtime": "./src/page-runtime.ts",
     "./preview-refresh": "./src/preview-refresh.ts",
     "./preview-runtime": "./src/preview-runtime.ts",
     "./preview-updates": "./src/preview-updates.ts"
@@ -39,6 +39,7 @@
     "@grasp-os/shared": "workspace:*",
     "@standard-schema/spec": "catalog:",
     "@tanstack/react-form": "catalog:",
+    "@tanstack/react-router": "catalog:",
     "capnweb": "catalog:",
     "react-refresh": "catalog:",
     "zod": "catalog:"
