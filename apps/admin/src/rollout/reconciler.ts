@@ -31,7 +31,7 @@
  * statement.
  */
 import { log } from "@grasp-os/shared/log";
-import { and, asc, eq, gt, lte, sql } from "drizzle-orm";
+import { and, asc, count, eq, gt, lte, sql } from "drizzle-orm";
 
 import { adminDatabase, auditIfChanged } from "../db/act.ts";
 import type { AdminDatabase } from "../db/act.ts";
@@ -58,7 +58,6 @@ import {
   isSecretsBehind,
   parallelDeploys,
   planChannel,
-  stateOf,
   targetOf,
 } from "./desired.ts";
 import type {
@@ -404,9 +403,8 @@ const startWaiting = async (
 };
 
 /**
- * Surveys `channel` once: settles deploys whose runs ended, and counts
- * those still out, and finds whether a client following it failed on its
- * release.
+ * Surveys `channel` once: settles deploys whose runs ended, and returns
+ * whether a client following it failed on its release.
  */
 const surveyChannel = async (
   env: Env,
@@ -414,20 +412,53 @@ const surveyChannel = async (
   channel: Channel,
   releases: ChannelReleases,
   desired: SharedByWorker | null
-): Promise<{ deploying: number; failed: boolean }> => {
-  let deploying = 0;
+): Promise<{ failed: boolean }> => {
   let failed = false;
   await eachPage(db, channel, desired, async (page): Promise<"next"> => {
     const rows = await Promise.all(
       page.map(async (row) => await settled(env, db, row))
     );
-    deploying += rows.filter(
-      (row) => stateOf(row, releases) === "deploying"
-    ).length;
     failed ||= rows.some((row) => failsChannel(row, releases));
     return "next";
   });
-  return { deploying, failed };
+  return { failed };
+};
+
+/**
+ * How many deploys are out now, every channel together: one count over
+ * every active client's deploy, whatever a channel's survey did. A run
+ * that ended without being settled yet (its channel's survey failed)
+ * still counts, so the count can only be high, never let the tick past
+ * `parallelDeploys`. An offboarded client's isn't counted: nothing
+ * settles it once its client is no longer active.
+ */
+const deploysOut = async (db: AdminDatabase): Promise<number> => {
+  const [row] = await db
+    .select({ out: count() })
+    .from(clientDeploys)
+    .innerJoin(clients, eq(clients.id, clientDeploys.clientId))
+    .where(
+      and(eq(clientDeploys.status, "deploying"), eq(clients.status, "active"))
+    );
+  return row?.out ?? 0;
+};
+
+/**
+ * Records on each channel why the tick couldn't act on it (an error code),
+ * or null where it could: what "Needs Grasp today" shows at each of the
+ * channel's organizations (src/admin/views.ts, `rolloutNeeds`).
+ */
+const recordStopped = async (
+  db: AdminDatabase,
+  stopped: ReadonlyMap<Channel, string | null>
+): Promise<void> => {
+  for (const [channel, stoppedBy] of stopped) {
+    // oxlint-disable-next-line no-await-in-loop -- three channels
+    await db
+      .update(channels)
+      .set({ stoppedBy })
+      .where(eq(channels.id, channel));
+  }
 };
 
 /**
@@ -455,9 +486,9 @@ const startChannel = async (
 /**
  * Reconciles every channel once: a first pass surveys each
  * (`surveyChannel`), then a second starts deploys on each that didn't
- * fail, channel by channel, while the deploys out on all of them leave
- * room. A channel that can't be surveyed is logged, and the tick starts
- * nothing: deploys it can't count could take it past `parallelDeploys`.
+ * fail, while the deploys out on every channel (`deploysOut`) leave room.
+ * A channel the tick can't survey or start deploys on is logged and
+ * recorded as stopped (`recordStopped`), and only it: the others go on.
  */
 const reconcileChannels = async (
   env: Env,
@@ -465,28 +496,31 @@ const reconcileChannels = async (
   desired: SharedByWorker | null
 ): Promise<void> => {
   const db = adminDatabase(env.DB);
-  const failed = new Set<Channel>();
-  let deploying = 0;
+  const stopped = new Map<Channel, string | null>();
+  const fail = (channel: Channel, error: unknown): void => {
+    const code = errorCode(error);
+    log.error("reconcile.channel_failed", { channel, error: code });
+    stopped.set(channel, code);
+  };
+  const ready: Channel[] = [];
   for (const channel of channelIds) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one channel at a time
       const survey = await surveyChannel(env, db, channel, releases, desired);
-      deploying += survey.deploying;
-      if (survey.failed) {
-        failed.add(channel);
+      stopped.set(channel, null);
+      if (!survey.failed) {
+        ready.push(channel);
       }
     } catch (error) {
-      log.error("reconcile.channel_failed", {
-        channel,
-        error: errorCode(error),
-      });
-      return;
+      fail(channel, error);
     }
   }
-  for (const channel of channelIds) {
-    if (failed.has(channel)) {
-      continue;
-    }
+  let deploying = await deploysOut(db);
+  // In channel order, Edge first: while Edge has more waiting than there
+  // are slots, a long Edge rollout takes every slot each tick, and Beta
+  // and Stable wait for it to finish (a shared-secret rotation, which
+  // puts every client behind at once, does the same).
+  for (const channel of ready) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one channel at a time
       deploying = await startChannel(
@@ -498,12 +532,10 @@ const reconcileChannels = async (
         deploying
       );
     } catch (error) {
-      log.error("reconcile.channel_failed", {
-        channel,
-        error: errorCode(error),
-      });
+      fail(channel, error);
     }
   }
+  await recordStopped(db, stopped);
 };
 
 /** The one lease's id. */

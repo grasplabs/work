@@ -35,7 +35,7 @@ const row = (id: string, input: Partial<GridRow> = {}): GridRow => ({
   pinnedReleaseId: null,
   lastDeploy: null,
   setup: null,
-  rollout: { failed: null, behind: 0 },
+  rollout: { failed: null, behind: 0, channelStopped: null },
   ...input,
 });
 

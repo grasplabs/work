@@ -1,0 +1,1 @@
+ALTER TABLE `channels` ADD `stopped_by` text;
