@@ -6439,6 +6439,10 @@ msgstr "It can be sent once more, exactly as before. Nothing is undone."
 msgid "It can't start until you approve what each binding reaches, for the version it runs."
 msgstr "It can't start until you approve what each binding reaches, for the version it runs."
 
+#: src/engines/data-model-changes.tsx
+msgid "It changes no record the App holds."
+msgstr "It changes no record the App holds."
+
 #: src/workflows/workflow-diagram.tsx
 msgid "It declares no tasks."
 msgstr "It declares no tasks."
@@ -14878,6 +14882,14 @@ msgstr "When it goes differently"
 #: src/workflows/workflow-diagram.tsx
 msgid "When it holds"
 msgstr "When it holds"
+
+#: src/engines/data-model-settings.tsx
+msgid "When it last changed"
+msgstr "When it last changed"
+
+#: src/engines/data-model-settings.tsx
+msgid "When it was added"
+msgstr "When it was added"
 
 #: src/workflows/trigger-description.ts
 msgid "When its webhook is called"

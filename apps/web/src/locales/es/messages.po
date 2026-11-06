@@ -6439,6 +6439,10 @@ msgstr "Se puede enviar una vez más, exactamente igual que antes. No se deshace
 msgid "It can't start until you approve what each binding reaches, for the version it runs."
 msgstr "No puede iniciarse hasta que apruebes lo que alcanza cada vínculo, para la versión que ejecuta."
 
+#: src/engines/data-model-changes.tsx
+msgid "It changes no record the App holds."
+msgstr "No cambia ningún registro de la App."
+
 #: src/workflows/workflow-diagram.tsx
 msgid "It declares no tasks."
 msgstr "No declara ninguna tarea."
@@ -14878,6 +14882,14 @@ msgstr "Cuando va de otra manera"
 #: src/workflows/workflow-diagram.tsx
 msgid "When it holds"
 msgstr "Cuando se cumple"
+
+#: src/engines/data-model-settings.tsx
+msgid "When it last changed"
+msgstr "Cuándo cambió por última vez"
+
+#: src/engines/data-model-settings.tsx
+msgid "When it was added"
+msgstr "Cuándo se añadió"
 
 #: src/workflows/trigger-description.ts
 msgid "When its webhook is called"

@@ -70,6 +70,9 @@ interface RuleChoice {
   label: string;
 }
 
+/** A field named for a team: `team`, `ownerTeam`, `team_id`. */
+const teamNamed = /team/iu;
+
 /** The rules a table's fields allow, each with what it says. */
 const useRuleChoices = (table: DataModelTable): RuleChoice[] => {
   const { t } = useLingui();
@@ -83,7 +86,9 @@ const useRuleChoices = (table: DataModelTable): RuleChoice[] => {
         },
       ];
     }
-    if (field.type.kind === "text") {
+    // A team rule reads a text field that holds a team's ID: offered for
+    // one named for a team, never for every text field (a title).
+    if (field.type.kind === "text" && teamNamed.test(name)) {
       return [
         {
           rule: { kind: "team", field: name },
@@ -298,7 +303,15 @@ export const IndexesPanel = ({
     type.kind === "text" ? [field] : []
   );
   const [searched, setSearched] = useState<string[]>([]);
-  const items = fields.map((field) => ({ value: field, label: field }));
+  // When records were added and changed, as a person says it.
+  const managed: Record<string, string> = {
+    _createdAt: t`When it was added`,
+    _updatedAt: t`When it last changed`,
+  };
+  const items = fields.map((field) => ({
+    value: field,
+    label: managed[field] ?? field,
+  }));
   return (
     <div className="flex flex-col gap-6">
       {table.indexes.length === 0 && table.searchIndex === null ? null : (

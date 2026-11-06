@@ -548,7 +548,7 @@ const FieldRow = ({
           >
             <MoreHorizontalIcon />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuItem
               onClick={() => {
                 onEdit({ kind: "rename" });

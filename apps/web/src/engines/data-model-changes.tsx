@@ -421,7 +421,13 @@ const ReviewDialog = ({
             submit();
           }}
         >
-          {lines.length === 0 ? null : <PlanList lines={lines} />}
+          {lines.length === 0 && asks === undefined ? (
+            <p className="text-sm">
+              <Trans>It changes no record the App holds.</Trans>
+            </p>
+          ) : (
+            <PlanList lines={lines} />
+          )}
           {asks === undefined ? null : (
             <Field>
               <FieldLabel>

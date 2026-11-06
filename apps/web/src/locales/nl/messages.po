@@ -6439,6 +6439,10 @@ msgstr "Het kan nog één keer worden verstuurd, precies zoals eerder. Niets wor
 msgid "It can't start until you approve what each binding reaches, for the version it runs."
 msgstr "Hij kan pas starten als je goedkeurt wat elke koppeling bereikt, voor de versie die hij draait."
 
+#: src/engines/data-model-changes.tsx
+msgid "It changes no record the App holds."
+msgstr "Het verandert geen record van de App."
+
 #: src/workflows/workflow-diagram.tsx
 msgid "It declares no tasks."
 msgstr "Hij declareert geen taken."
@@ -14878,6 +14882,14 @@ msgstr "Als het anders gaat"
 #: src/workflows/workflow-diagram.tsx
 msgid "When it holds"
 msgstr "Als het klopt"
+
+#: src/engines/data-model-settings.tsx
+msgid "When it last changed"
+msgstr "Wanneer het het laatst is gewijzigd"
+
+#: src/engines/data-model-settings.tsx
+msgid "When it was added"
+msgstr "Wanneer het is toegevoegd"
 
 #: src/workflows/trigger-description.ts
 msgid "When its webhook is called"
