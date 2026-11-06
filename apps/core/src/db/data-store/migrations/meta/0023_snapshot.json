@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "56d02ae5-8a2c-430d-9211-cc740858c5ae",
+  "id": "f4ca45b0-6006-49d3-9ed3-c409bdf020da",
   "prevId": "0751cb33-81ec-48fe-abd0-701d97c5be5c",
   "tables": {
     "sdk_abandoned_targets": {
@@ -217,8 +217,8 @@
           "notNull": false,
           "autoincrement": false
         },
-        "cursor_audience": {
-          "name": "cursor_audience",
+        "cursor_owner": {
+          "name": "cursor_owner",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1110,8 +1110,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "owner_id": {
-          "name": "owner_id",
+        "audience": {
+          "name": "audience",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -1131,7 +1131,7 @@
           "columns": [
             "target_hash",
             "table_id",
-            "owner_id",
+            "audience",
             "record_id"
           ],
           "isUnique": false
@@ -2241,7 +2241,7 @@
     "schemas": {},
     "tables": {},
     "columns": {
-      "\"sdk_schema_backfills\".\"cursor_owner\"": "\"sdk_schema_backfills\".\"cursor_audience\""
+      "\"sdk_migration_work\".\"owner_id\"": "\"sdk_migration_work\".\"audience\""
     }
   },
   "internal": {

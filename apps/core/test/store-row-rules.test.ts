@@ -1454,16 +1454,24 @@ const ticketsStore = async (
  * Migrates `store` to v2, standing in for core's transform as the
  * backfill's run would: each batch the store hands out answered with
  * `rewrite` of each of its rows, after `meanwhile` ran on what it was
- * handed. What each batch held, and the last batch's outcome.
+ * handed. After `handOverAfter` batches, its run hands over to a new one,
+ * which goes on from where the store says. What each batch held, and the
+ * last batch's outcome.
  */
 const migrateTickets = async (
   store: OpenStore,
   rewrite: (fields: StoreFields) => StoreFields,
-  meanwhile: (
-    handed: readonly { id: string; revision: number }[]
-  ) => Promise<void> = async () => {
-    // Nobody writes while it runs.
-  }
+  {
+    meanwhile = async () => {
+      // Nobody writes while it runs.
+    },
+    handOverAfter,
+  }: {
+    meanwhile?: (
+      handed: readonly { id: string; revision: number }[]
+    ) => Promise<void>;
+    handOverAfter?: number;
+  } = {}
 ): Promise<{
   batches: StoreFields[][];
   last: unknown;
@@ -1480,10 +1488,20 @@ const migrateTickets = async (
   const target = second.contract.hash;
   const batches: StoreFields[][] = [];
   let last: unknown;
+  let attempt = 1;
   for (let batch = 1; ; batch += 1) {
+    if (batches.length === handOverAfter && attempt === 1) {
+      // oxlint-disable-next-line no-await-in-loop -- once
+      attempt = await objectOf(store).restartBackfill(store.id, {
+        target,
+        attempt,
+        ending: true,
+      });
+      batch = 1;
+    }
     // One batch after the other, as the backfill's run takes them.
     // oxlint-disable-next-line no-await-in-loop -- see above
-    const read = await migrationBatch(store, target, batch);
+    const read = await migrationBatch(store, target, batch, attempt);
     if (read.state !== "transform") {
       last = read;
       break;
@@ -1496,7 +1514,7 @@ const migrateTickets = async (
       store.id,
       JSON.stringify({
         target,
-        attempt: 1,
+        attempt,
         batch,
         phase: read.phase,
         table: read.table,
@@ -1558,14 +1576,44 @@ describe("a migration of a table with row rules", () => {
     expect({
       teams: batches.map((held) => new Set(held.map(({ team }) => team)).size),
       held: batches.flat().length,
-      // A batch is a sandbox call: two a team, of 100 at most each.
-      calls: batches.length,
+      // A batch is a sandbox call. A scan batch takes one team's tickets
+      // of the next 100 and queues the other's, whose work batches are
+      // full: about twice 240 ÷ 100, not one call a ticket.
+      calls: batches.length <= 6,
       last,
     }).toMatchObject({
       teams: batches.map(() => 1),
       held: 240,
-      calls: 4,
+      calls: true,
       last: { state: "ready" },
+    });
+  });
+
+  it("transforms every ticket once when its run hands over midway", async () => {
+    const { store } = await ticketsStore(
+      Array.from({ length: 240 }, (_, index) => ({
+        by: "bob",
+        team: index % 2 === 0 ? "support" : "sales",
+      }))
+    );
+
+    // Two scan batches in, with tickets of the other team queued, a new
+    // run takes over from the store's cursor and its queue.
+    const { batches, last } = await migrateTickets(
+      store,
+      (fields) => ({ ...fields, kind: "ticket" }),
+      { handOverAfter: 2 }
+    );
+    const tickets = await storedTickets(store);
+
+    expect({
+      last,
+      held: batches.flat().length,
+      kinds: tickets.map(({ kind }) => kind),
+    }).toMatchObject({
+      last: { state: "ready" },
+      held: 240,
+      kinds: tickets.map(() => "ticket"),
     });
   });
 
@@ -1576,36 +1624,37 @@ describe("a migration of a table with row rules", () => {
         team: index % 2 === 0 ? "support" : "sales",
       }))
     );
-    // The scan goes by team: a ticket moved to "triage" lands past where
-    // it is, one moved to "archive" behind it.
     const moves = ["triage", "archive"];
 
     // As each of the first two batches is transformed, a person moves
-    // one of its tickets to another team.
+    // one of its tickets to another team: transformed again from the move,
+    // under the audience it then has.
     const { last } = await migrateTickets(
       store,
       (fields) => ({ ...fields, kind: "ticket" }),
-      async (handed) => {
-        const team = moves.shift();
-        const [ticket] = handed;
-        if (team === undefined || ticket === undefined) {
-          return;
-        }
-        await commitAs(
-          store,
-          schemaHash,
-          [
-            {
-              op: "patch",
-              table: "tickets",
-              id: ticket.id,
-              fields: { team },
-              expectedRevision: ticket.revision,
-            },
-          ],
-          "bob",
-          ["support", "sales", team]
-        );
+      {
+        meanwhile: async (handed) => {
+          const team = moves.shift();
+          const [ticket] = handed;
+          if (team === undefined || ticket === undefined) {
+            return;
+          }
+          await commitAs(
+            store,
+            schemaHash,
+            [
+              {
+                op: "patch",
+                table: "tickets",
+                id: ticket.id,
+                fields: { team },
+                expectedRevision: ticket.revision,
+              },
+            ],
+            "bob",
+            ["support", "sales", team]
+          );
+        },
       }
     );
     const tickets = await storedTickets(store);

@@ -174,6 +174,7 @@ import {
   outputRefusal,
   pendingMigrationsSchema,
   queueWork,
+  recordAudience,
   scanPositionSchema,
   scanRangeIds,
 } from "./store-migrations.ts";
@@ -202,12 +203,13 @@ import type {
 } from "./store-queries.ts";
 import { recordReferences } from "./store-references.ts";
 import {
+  audienceKey,
   audienceOf,
   fieldsRead,
   ruleFieldsOf,
   ruleSql,
 } from "./store-rules.ts";
-import type { RuleCaller } from "./store-rules.ts";
+import type { Audience, RuleCaller } from "./store-rules.ts";
 import { runChange, tableStepsOf } from "./store-schema-changes.ts";
 import {
   dropSearches,
@@ -940,18 +942,18 @@ const refuseMigration = (migration: string, reason: string): never => {
 /** Where a migration's scan is, as its backfill row keeps it; null at its start. */
 const cursorOf = (row: {
   cursorTable: string | null;
-  cursorAudience: string | null;
+  cursorOwner: string | null;
   cursorCreatedAt: number | null;
   cursorRecord: string | null;
 }): ScanPosition | null =>
   row.cursorTable === null ||
   row.cursorRecord === null ||
-  row.cursorAudience === null ||
+  row.cursorOwner === null ||
   row.cursorCreatedAt === null
     ? null
     : {
         tableId: row.cursorTable,
-        audience: row.cursorAudience,
+        ownerId: row.cursorOwner,
         createdAt: row.cursorCreatedAt,
         recordId: row.cursorRecord,
       };
@@ -5549,9 +5551,10 @@ export class StoreHost {
       const written =
         fields !== null &&
         (base === undefined || storedText(fields) !== base.valueJson);
+      const audience = migrating?.tables.get(table);
       if (
         migrating !== null &&
-        migrating.tables.has(table) &&
+        audience !== undefined &&
         schemaHash !== migrating.schema &&
         written
       ) {
@@ -5559,7 +5562,13 @@ export class StoreHost {
           this.#db,
           migrating.target,
           tableId,
-          { recordId, ownerId: base?.ownerId ?? ownerId },
+          {
+            recordId,
+            audience: audienceKey(audience, {
+              owner: base?.ownerId ?? ownerId,
+              fields,
+            }),
+          },
           now
         );
         // A ready migration has work again: no longer ready, its run is
@@ -5758,7 +5767,25 @@ export class StoreHost {
       pending.migrations?.consumer ?? [];
     const consumer = { resourceId, resourceVersion };
     if (row.phase === "scan") {
-      const scanned = nextScanBatch(this.#db, migrated, cursorOf(row));
+      const cursor =
+        row.cursorTable === null ||
+        row.cursorRecord === null ||
+        row.cursorOwner === null ||
+        row.cursorCreatedAt === null
+          ? null
+          : {
+              tableId: row.cursorTable,
+              ownerId: row.cursorOwner,
+              createdAt: row.cursorCreatedAt,
+              recordId: row.cursorRecord,
+            };
+      const scanned = nextScanBatch(
+        this.#db,
+        pending.hash,
+        migrated,
+        cursor,
+        now
+      );
       if (scanned !== null) {
         return {
           state: "transform",
@@ -5777,7 +5804,7 @@ export class StoreHost {
           phase: "work",
           cursorTable: null,
           cursorRecord: null,
-          cursorAudience: null,
+          cursorOwner: null,
           cursorCreatedAt: null,
         })
         .where(eq(backfills.targetHash, pending.hash))
@@ -6626,7 +6653,16 @@ export class StoreHost {
           )
           .get();
         if (handed !== undefined) {
-          queueWork(this.#db, target, table.tableId, handed, now);
+          queueWork(
+            this.#db,
+            target,
+            table.tableId,
+            {
+              recordId: handed.recordId,
+              audience: recordAudience(table.audience, handed),
+            },
+            now
+          );
         }
       }
     }
@@ -6637,9 +6673,7 @@ export class StoreHost {
    * Refuses, as a caller's bug, a batch that doesn't account for exactly
    * the records the store handed out for it: a scan batch every record
    * from the cursor through `through` (each committed, or queued as work
-   * since), none outside it but one an edit moved out of it since (a field
-   * a row rule reads changed, which the scan orders by: store-migrations.ts),
-   * which the edit queued as work; a work batch only queued records.
+   * since), none outside it; a work batch only queued records.
    */
   #requireCovered(
     target: string,
@@ -6667,7 +6701,6 @@ export class StoreHost {
     const outside = [...ids].some(
       (id) =>
         !range.has(id) &&
-        !isQueued(this.#db, target, table.tableId, id) &&
         this.#db
           .select({ id: records.recordId })
           .from(records)
@@ -6762,7 +6795,16 @@ export class StoreHost {
       } else {
         // Edited since it was read: transformed again from its new
         // revision, never overwritten with what the old one became.
-        queueWork(this.#db, pending.hash, table.tableId, record, now);
+        queueWork(
+          this.#db,
+          pending.hash,
+          table.tableId,
+          {
+            recordId: record.recordId,
+            audience: recordAudience(table.audience, record),
+          },
+          now
+        );
       }
     }
     return { writes, failure: null };
@@ -6845,7 +6887,7 @@ export class StoreHost {
         ? {}
         : {
             cursorTable: through.tableId,
-            cursorAudience: through.audience,
+            cursorOwner: through.ownerId,
             cursorCreatedAt: through.createdAt,
             cursorRecord: through.recordId,
           };
@@ -7875,16 +7917,27 @@ export class StoreHost {
   #migrating(): {
     target: string;
     schema: string;
-    tables: ReadonlySet<string>;
+    /** Each migrated table's audience (`audienceOf`), by name. */
+    tables: ReadonlyMap<string, Audience>;
   } | null {
     const pending = this.#pendingTarget();
     if (pending?.migrations === null || pending?.migrations === undefined) {
       return null;
     }
+    const { manifest } = pending;
     return {
       target: pending.hash,
       schema: pending.migrations.schema,
-      tables: new Set(pending.migrations.migrations.map(([table]) => table)),
+      tables: new Map(
+        pending.migrations.migrations.flatMap(([table]) => {
+          const declared = Object.hasOwn(manifest.tables, table)
+            ? manifest.tables[table]
+            : undefined;
+          return declared === undefined
+            ? []
+            : [[table, audienceOf(declared)] as const];
+        })
+      ),
     };
   }
 
