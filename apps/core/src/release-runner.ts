@@ -3,7 +3,7 @@ import {
   kitModuleName,
   serverEntryPath,
 } from "@grasp-os/compiler";
-import type { OperationChannel } from "@grasp-os/sdk/runner";
+import type { MutationStart, OperationChannel } from "@grasp-os/sdk/runner";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { whenAborted } from "@grasp-os/shared/deadline";
@@ -84,6 +84,18 @@ import { sessionHost } from "./sandboxed.ts";
 /** The module that runs one function in its isolate. */
 const runModule = "grasp-function.js";
 
+/**
+ * The module that puts a mutation's time and randomness in place (the
+ * SDK's `installMutationRuntime`): the run module's first import, so it
+ * loads before any App module does.
+ */
+const mutationRuntimeModule = "grasp-mutation-runtime.js";
+
+const mutationRuntimeMain = `import { installMutationRuntime } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/runner"))};
+
+export const startMutation = installMutationRuntime();
+`;
+
 /** The longest answer, in characters, an isolate hands back as text. */
 const answerMaxLength = operationResultMaxBytes;
 
@@ -94,7 +106,8 @@ const answerMaxLength = operationResultMaxBytes;
  * Everything in the isolate is untrusted, this module too: core checks
  * all of it again.
  */
-const runMain = `import { WorkerEntrypoint } from "cloudflare:workers";
+const runMain = `import { startMutation } from ${JSON.stringify(mutationRuntimeModule)};
+import { WorkerEntrypoint } from "cloudflare:workers";
 import { runFunction } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/runner"))};
 import { jsonAnswer } from ${JSON.stringify(hostJsonModule)};
 import registered from ${JSON.stringify(appModuleName(serverEntryPath))};
@@ -146,9 +159,12 @@ const failed = (error) => {
 };
 
 export class Run extends WorkerEntrypoint {
-  async run(path, args, remote) {
+  async run(path, args, remote, start) {
     let value;
     try {
+      if (start !== null) {
+        startMutation(start);
+      }
       value = await runFunction(registered, path, args, channelOf(remote));
     } catch (error) {
       return failed(error);
@@ -174,7 +190,12 @@ export class Run extends WorkerEntrypoint {
 `;
 
 interface RunEntrypoint extends Rpc.WorkerEntrypointBranded {
-  run: (path: string, args: Json, remote: RpcTarget) => Promise<Settled>;
+  run: (
+    path: string,
+    args: Json,
+    remote: RpcTarget,
+    start: MutationStart | null
+  ) => Promise<Settled>;
 }
 
 /**
@@ -185,7 +206,7 @@ interface CaptureEntrypoint extends Rpc.WorkerEntrypointBranded {
   [captureMethod]: (
     entrypoint: "Run",
     method: "run",
-    args: [string, Json, RpcTarget],
+    args: [string, Json, RpcTarget, MutationStart | null],
     sink: (lines: unknown) => Promise<void>
   ) => Promise<Settled>;
 }
@@ -468,7 +489,8 @@ const inLoader = async (
   modules: WorkerLoaderWorkerCode["modules"],
   path: string,
   args: Json,
-  channel: RpcTarget
+  channel: RpcTarget,
+  start: MutationStart | null
 ): Promise<Settled> => {
   const code = {
     ...sandbox,
@@ -482,7 +504,7 @@ const inLoader = async (
     return await loader
       .get(null, () => code)
       .getEntrypoint<RunEntrypoint>("Run")
-      .run(path, args, channel);
+      .run(path, args, channel, start);
   }
   const sink = consoleSinkOf(async (lines) => {
     await tailLines(tail, lines);
@@ -493,7 +515,7 @@ const inLoader = async (
   return await captured[captureMethod](
     "Run",
     "run",
-    [path, args, channel],
+    [path, args, channel, start],
     sink
   );
 };
@@ -526,13 +548,14 @@ export const releaseRunner =
      */
     tailOf?: (path: string) => Fetcher
   ): Runner =>
-  async (path, args, channel, signal, call) => {
+  async (path, args, channel, signal, call, start) => {
     // The platform's modules last: no App module takes one's name.
     const modules = {
       ...release.modules,
       ...release.sdk,
       // The host's reading of what App code answers (host-json.ts).
       [hostJsonModule]: hostJsonSource(),
+      [mutationRuntimeModule]: mutationRuntimeMain,
       [runModule]: runMain,
     };
     const isolateChannel = new IsolateChannel(channel);
@@ -543,7 +566,15 @@ export const releaseRunner =
     const answer = settledSchema.safeParse(
       host === undefined
         ? await Promise.race([
-            inLoader(env, tailOf?.(path), modules, path, args, isolateChannel),
+            inLoader(
+              env,
+              tailOf?.(path),
+              modules,
+              path,
+              args,
+              isolateChannel,
+              start ?? null
+            ),
             // Given up on: settled at once, its isolate left to the
             // runtime, as nothing of core's is held for it.
             ...(signal === undefined ? [] : [whenAborted(signal)]),
@@ -559,6 +590,7 @@ export const releaseRunner =
                 { value: path },
                 { value: args },
                 { capability: capability(isolateChannel) },
+                { value: start ?? null },
               ],
               owner,
               // What a draft's function writes goes to its tail, as the

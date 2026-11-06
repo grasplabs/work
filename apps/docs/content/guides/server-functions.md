@@ -69,6 +69,8 @@ export const rename = mutation({
 
 Throw `AppError` for a failure the caller should see: a stable, dotted `code` to branch on and a `message` safe to show. Any other error is an unexpected failure to the caller.
 
+A mutation may run more than once: again when what it read changed before it committed, and again when its caller retries it. Each run computes the same thing. Inside a mutation, `Date.now()` and `new Date()` give the time the mutation started, and `Math.random()`, `crypto.randomUUID()` and `crypto.getRandomValues()` give the same values in every run of it. Queries and actions use the real clock and randomness.
+
 ## Actions
 
 An action has no `ctx.db`. It composes the App's queries and mutations, each its own call, and reaches outside the App only through what its `uses` lists: the App's functions, and permissions such as a workflow it starts.

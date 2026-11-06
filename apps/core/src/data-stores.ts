@@ -242,6 +242,7 @@ const claimedSchema = z.union([
   z.strictObject({
     held: z.strictObject({ receiptId: z.string(), fence: z.number().int() }),
     startedAt: z.number().int(),
+    seed: z.string(),
   }),
   z.strictObject({ outcome: committedSchema, startedAt: z.number().int() }),
 ]);

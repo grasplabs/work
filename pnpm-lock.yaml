@@ -115,6 +115,9 @@ catalogs:
     '@modelcontextprotocol/sdk':
       specifier: 1.32.2
       version: 1.32.2
+    '@noble/ciphers':
+      specifier: 2.4.0
+      version: 2.4.0
     '@orama/orama':
       specifier: 3.1.18
       version: 3.1.18
@@ -1204,6 +1207,9 @@ importers:
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../shared
+      '@noble/ciphers':
+        specifier: 'catalog:'
+        version: 2.4.0
       '@standard-schema/spec':
         specifier: 'catalog:'
         version: 1.1.0

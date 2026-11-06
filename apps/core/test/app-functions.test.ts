@@ -926,6 +926,182 @@ export const flood = query({ args: {}, handler: () => "x".repeat(2 * 1024 * 1024
 `,
 };
 
+/**
+ * An App that reads the clock and randomness in each kind of function,
+ * the platform's own functions as App code held them before the host
+ * started anything included. `roll` fails with what it read, so nothing
+ * commits and its caller may send it again under its key.
+ */
+const diceFiles: Record<string, string> = {
+  ...appDefinition({
+    name: "Dice",
+    tables: {
+      rolls: {
+        fields: { uuid: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+  }),
+  "server/dice.ts": `import { AppError, v } from "@grasp-os/sdk";
+import { action, mutation, query } from "@server/_generated/server";
+
+const heldRandom = Math.random;
+const heldNow = Date.now;
+
+const read = () => ({
+  now: Date.now(),
+  date: new Date().getTime(),
+  heldNow: heldNow(),
+  random: Math.random(),
+  heldRandom: heldRandom(),
+  uuid: crypto.randomUUID(),
+  bytes: Array.from(crypto.getRandomValues(new Uint8Array(8))),
+});
+
+/** What it read, then what it reads once time has passed. */
+const twice = async () => {
+  const before = read();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  return { before, after: read() };
+};
+
+export const roll = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await ctx.db.query("rolls").take(1);
+    throw new AppError("dice.rolled", "Rolled.", await twice());
+  },
+});
+
+export const keep = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const uuid = crypto.randomUUID();
+    await ctx.db.insert("rolls", { uuid });
+    return uuid;
+  },
+});
+
+/** Tries to put the platform's randomness back. */
+export const tamper = mutation({
+  args: {},
+  handler: () => {
+    try {
+      Math.random = () => 0.5;
+      return "replaced";
+    } catch (error) {
+      return error instanceof TypeError ? "refused" : "failed";
+    }
+  },
+});
+
+export const look = query({ args: {}, handler: twice });
+
+export const peek = action({ args: {}, handler: twice });
+`,
+};
+
+/** A read of the clock and randomness, as `diceFiles`' `read` answers it. */
+const readSchema = z.strictObject({
+  now: z.number(),
+  date: z.number(),
+  heldNow: z.number(),
+  random: z.number(),
+  heldRandom: z.number(),
+  uuid: z.string(),
+  bytes: z.array(z.number()),
+});
+
+/** Two reads, one before and one after time passed. */
+const twiceSchema = z.strictObject({ before: readSchema, after: readSchema });
+
+describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
+  it("are the same in every attempt of one submission, and new for another", async () => {
+    const dice = await sealedNotes(diceFiles);
+    const roll = async (key: string) => {
+      const answered = await callAppFunction(
+        env,
+        dice.owner,
+        dice.app,
+        JSON.stringify({
+          reference: { name: "dice.roll", kind: "mutation" },
+          input: {},
+          idempotencyKey: key,
+        })
+      );
+      if (answered.result.ok) {
+        throw new Error("Expected the roll to fail");
+      }
+      return twiceSchema.parse(answered.result.error.details);
+    };
+    const started = Date.now();
+    const first = await roll("roll-one");
+    const again = await roll("roll-one");
+    const other = await roll("roll-two");
+    const ended = Date.now();
+    const { before } = first;
+    expect({
+      again,
+      // Held still while it ran, and by what App code held from before.
+      stillAfterWaiting: first.after.now === before.now,
+      sameClock: before.date === before.now && before.heldNow === before.now,
+      whenStarted: before.now >= started && before.now <= ended,
+      newForAnother: [
+        other.before.random === before.random,
+        other.before.heldRandom === before.heldRandom,
+        other.before.uuid === before.uuid,
+        other.before.bytes.join(",") === before.bytes.join(","),
+      ],
+      aUuid: z.uuidv4().safeParse(before.uuid).success,
+    }).toStrictEqual({
+      again: first,
+      stillAfterWaiting: true,
+      sameClock: true,
+      whenStarted: true,
+      newForAnother: [false, false, false, false],
+      aUuid: true,
+    });
+  });
+
+  it("commit as any mutation does, and can't be put back by App code", async () => {
+    const dice = await sealedNotes(diceFiles);
+    const kept = valueOf(await call(dice, dice.owner, "dice.keep", {}));
+    expect({
+      kept: z.uuidv4().safeParse(kept).success,
+      tamper: valueOf(await call(dice, dice.owner, "dice.tamper", {})),
+    }).toStrictEqual({ kept: true, tamper: "refused" });
+  });
+
+  it("leave a query's and an action's the platform's own", async () => {
+    const dice = await sealedNotes(diceFiles);
+    const live = async (path: string) => {
+      const started = Date.now();
+      const { before, after } = twiceSchema.parse(
+        valueOf(await call(dice, dice.owner, path, {}))
+      );
+      return {
+        moves: after.now > before.now && after.date > before.date,
+        whenRead: before.now >= started && after.now <= Date.now(),
+        differs: [
+          after.random === before.random,
+          after.heldRandom === before.heldRandom,
+          after.uuid === before.uuid,
+          after.bytes.join(",") === before.bytes.join(","),
+        ],
+      };
+    };
+    const platform = {
+      moves: true,
+      whenRead: true,
+      differs: [false, false, false, false],
+    };
+    expect({
+      query: await live("dice.look"),
+      action: await live("dice.peek"),
+    }).toStrictEqual({ query: platform, action: platform });
+  });
+});
+
 describe("a function that declares no return", { timeout: 120_000 }, () => {
   it("answers what its handler returns, of each kind, still held to JSON and the output limit", async () => {
     const app = await sealedNotes(undeclaredReturnFiles);
@@ -1106,12 +1282,13 @@ describe("the SDK a release runs with", { timeout: 120_000 }, () => {
 
   it("needs nothing of its runner but what its protocol pins", async () => {
     const notes = await sealedNotes();
-    // A runner exporting only runFunction, manifestOfApp and
-    // registerApp, as any SDK sealed under protocol 3 does: the
-    // host brings the rest itself.
+    // A runner exporting only what the host's modules import of it
+    // (runFunction, installMutationRuntime, manifestOfApp) and what an
+    // App's entry does (registerApp): the host brings the rest itself.
     await rewriteSdk(notes, "sdk/@grasp-os~sdk~runner.js", (text) => {
       const pinned = exportsOnly(text, [
         "runFunction",
+        "installMutationRuntime",
         "manifestOfApp",
         "registerApp",
       ]);

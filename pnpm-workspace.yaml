@@ -68,6 +68,9 @@ catalog:
   "@cloudflare/vitest-pool-workers": 0.22.0
   "@cloudflare/workers-types": 5.20261023.1
   capnweb: 0.12.0
+  # A mutation's seeded randomness, in its isolate (the SDK's runner):
+  # ChaCha20's keystream from the seed its receipt keeps.
+  "@noble/ciphers": 2.4.0
   # The type of each static file the admin uploads for a release: the
   # library Wrangler types its uploads with, so a client's assets are
   # served as `wrangler deploy` would serve them.

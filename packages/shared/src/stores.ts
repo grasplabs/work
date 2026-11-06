@@ -288,9 +288,11 @@ export interface Held {
  * mutation committed already, and this was its outcome. `startedAt` is
  * when the receipt was made: the same for every attempt of one
  * submission, and new for a fresh one under the key once it is gone.
+ * So is `seed`, the receipt's random seed (64 hex digits), which the
+ * mutation's randomness answers from.
  */
 export type Claimed =
-  | { held: Held; startedAt: number }
+  | { held: Held; startedAt: number; seed: string }
   | { outcome: Committed; startedAt: number };
 
 /**

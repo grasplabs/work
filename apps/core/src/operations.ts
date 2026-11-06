@@ -19,7 +19,7 @@ import {
   appErrorDetailsOf,
 } from "@grasp-os/sdk/host";
 import type { AppManifest, OperationManifest } from "@grasp-os/sdk/host";
-import type { OperationChannel } from "@grasp-os/sdk/runner";
+import type { MutationStart, OperationChannel } from "@grasp-os/sdk/runner";
 import type { RunHandle } from "@grasp-os/sdk/server";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { appCallLimits } from "@grasp-os/shared/apps";
@@ -487,7 +487,13 @@ export type Runner = (
    * runs, nested or not, so a runner may run them together (on-prem, in
    * the sandbox session of the function the caller named).
    */
-  call?: RunnerCall
+  call?: RunnerCall,
+  /**
+   * A mutation's: when it started and the seed of its randomness, from
+   * its receipt, which its time and randomness answer from inside it
+   * (the SDK's `installMutationRuntime`). None for a query or an action.
+   */
+  start?: MutationStart
 ) => Promise<unknown>;
 
 /** An App as the host runs it: its inspected manifest and its runner. */
@@ -2915,7 +2921,8 @@ const runHandler = async (
   operation: OperationManifest,
   args: Json,
   capabilities: Capabilities,
-  stale?: () => Promise<boolean>
+  stale?: () => Promise<boolean>,
+  start?: MutationStart
 ): Promise<Json> => {
   if (run.depth === 0) {
     // A new attempt: what an earlier one's nested calls threw isn't why
@@ -2958,10 +2965,14 @@ const runHandler = async (
   });
   const stopped = new AbortController();
   const ran = settle(
-    run.app.run(operation.path, fresh(args), open.channel, stopped.signal, {
-      tree: run.call,
-      nested: run.depth > 0,
-    })
+    run.app.run(
+      operation.path,
+      fresh(args),
+      open.channel,
+      stopped.signal,
+      { tree: run.call, nested: run.depth > 0 },
+      start
+    )
   );
   try {
     const outcome = await untilDeadline(
@@ -3466,7 +3477,10 @@ const runMutation = async (
           },
         },
         // A failure torn reads may have caused is a stale run too.
-        async () => !(await trusted(async () => await reader.isCurrent()))
+        async () => !(await trusted(async () => await reader.isCurrent())),
+        // The same for every run of it, and every attempt of its
+        // submission: it computes what it did the first time.
+        { startedAt: claimed.startedAt, seed: claimed.seed }
       );
     } catch (error) {
       if (error === staleRun) {

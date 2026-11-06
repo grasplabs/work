@@ -762,6 +762,11 @@ export const runMigration = (
   });
 };
 
+// The host's module of a function's isolate puts a mutation's time and
+// randomness in place with this before any App module loads.
+export { installMutationRuntime } from "./mutation-runtime.ts";
+export type { MutationStart } from "./mutation-runtime.ts";
+
 // The host's entry for every App (`.grasp/app.ts`, from the compiler's
 // `serverEntrySource`) registers its server functions with this, beside
 // the runner the host's main modules call.

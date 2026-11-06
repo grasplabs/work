@@ -4001,6 +4001,8 @@ export class StoreHost {
     const receiptId = await sha256Hex(
       canonicalJson({ storeId, scope: { ...scope }, key: [...key] })
     );
+    // A new receipt's, kept with it: every attempt answers from the same.
+    const seed = toHex(crypto.getRandomValues(new Uint8Array(32)));
     const claimed = this.ctx.storage.transactionSync((): Claimed => {
       this.#bind(storeId);
       const now = Date.now();
@@ -4022,9 +4024,10 @@ export class StoreHost {
             deadline,
             createdAt: now,
             retainUntil: now + retentionMs,
+            seed,
           })
           .run();
-        return { held: { receiptId, fence: 1 }, startedAt: now };
+        return { held: { receiptId, fence: 1 }, startedAt: now, seed };
       }
       if (receipt.expiredAt !== null) {
         throw submissionErrors.create("submission.expired");
@@ -4048,7 +4051,11 @@ export class StoreHost {
         })
         .where(eq(receipts.receiptId, receiptId))
         .run();
-      return { held: { receiptId, fence }, startedAt: receipt.createdAt };
+      return {
+        held: { receiptId, fence },
+        startedAt: receipt.createdAt,
+        seed: receipt.seed,
+      };
     });
     await this.schedule();
     return claimed;
