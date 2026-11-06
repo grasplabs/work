@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test";
-import type { FrameLocator, Page } from "@playwright/test";
+import type { FrameLocator, Locator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { writeDraft } from "./draft-writes.ts";
@@ -189,21 +189,61 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     // The App's own data is as it was: none of the preview's three.
     const after = await openTally(page, app.id);
     await expect(after.getByRole("status")).toHaveText("1 in the App");
+  } finally {
+    core[Symbol.dispose]();
+  }
+});
 
-    // A next version up for review: the workspace's Code view, away from
-    // the chat, shows what it changes as a diff, one column or two.
+/**
+ * Where `added` stands from `removed` on the page: `under` it in the same
+ * column, `beside` it on the same row to its right, or `apart` while
+ * either has no box. Measured fresh on each call: the diff draws its lines
+ * plainly and then highlighted, in a shadow root, replacing each line's
+ * node, so a box taken once can belong to a node already gone.
+ */
+const placeOf = async (removed: Locator, added: Locator): Promise<string> => {
+  const [old, now] = [await removed.boundingBox(), await added.boundingBox()];
+  if (old === null || now === null) {
+    return "apart";
+  }
+  if (now.y > old.y && Math.abs(now.x - old.x) < old.width / 2) {
+    return "under";
+  }
+  if (now.y === old.y && now.x > old.x + old.width / 2) {
+    return "beside";
+  }
+  return "apart";
+};
+
+test("a version up for review shows its changes in the workspace's Code view, one column or side by side", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("chatPreview");
+  const { core, api } = apiOf(builder);
+  try {
+    const app = await api.apps.create({
+      name: `Tally ${crypto.randomUUID().slice(0, 8)}`,
+    });
+    const { version } = await api.apps.files.commit(
+      app.id,
+      tallyFiles("in the App"),
+      "A tally"
+    );
+    await api.apps.versions.setCurrent(app.id, version);
     const next = await api.apps.files.commit(
       app.id,
       tallyFiles("in the next version"),
       "The next tally"
     );
     await api.apps.versions.propose(app.id, next.version);
+    const page = await pageOf(builder);
     await page.goto(`/apps/${app.id}/edit`);
     await page
       .getByRole("navigation", { name: "Workspace views" })
       .getByRole("link", { name: "Code" })
       .click();
     await page.getByRole("button", { name: "Changes" }).click();
+
     // One file changed, one line out and one in.
     const changes = page.getByRole("region", { name: "Changes" });
     const changed = changes.getByRole("region", { name: "server/tally.ts" });
@@ -211,24 +251,10 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     await expect(changed).toContainText("-1+1");
     const removed = changed.getByText(/in the App`;$/u);
     const added = changed.getByText(/in the next version`;$/u);
-    await expect(removed).toBeVisible();
-    await expect(added).toBeVisible();
     // Unified, the new line stands under the old; split, beside it.
-    const unified = [await removed.boundingBox(), await added.boundingBox()];
-    expect((unified[1]?.y ?? 0) > (unified[0]?.y ?? 0)).toBeTruthy();
+    await expect.poll(async () => await placeOf(removed, added)).toBe("under");
     await page.getByRole("button", { name: "Split" }).click();
-    await expect
-      .poll(async () => {
-        const [old, now] = [
-          await removed.boundingBox(),
-          await added.boundingBox(),
-        ];
-        return {
-          sameRow: old?.y === now?.y,
-          beside: (now?.x ?? 0) > (old?.x ?? 0) + (old?.width ?? 0) / 2,
-        };
-      })
-      .toStrictEqual({ sameRow: true, beside: true });
+    await expect.poll(async () => await placeOf(removed, added)).toBe("beside");
   } finally {
     core[Symbol.dispose]();
   }
