@@ -1121,7 +1121,7 @@ const noteSuperseded = async (
  * How long after it was sent a call that changes a client's Workers is
  * taken to have landed or gone with the run that sent it. An upload
  * answers in seconds; a run whose isolate died holds no request open, and
- * its mark stays behind until then (`sendsSettled`).
+ * its mark stays behind until then (`othersSettled`).
  *
  * What's left: Cloudflare may still apply a call whose sender died, or one
  * still unanswered past this bound, after a rollback that waited it out
@@ -1171,19 +1171,23 @@ const sendMarksOf = (
 };
 
 /**
- * Whether a call marked in `marks` for change `change` by a sender other
- * than `except` may still land: sent less than `sendSettleMs` ago.
+ * Whether a call marked in `marks` by a sender other than `except`, for
+ * change `change` or one before it, may still land: sent less than
+ * `sendSettleMs` ago. An earlier change's counts too: a release or a
+ * rollback that took the client over must not send before what the
+ * change it replaced sent has landed, or that call would land after it
+ * and undo it.
  */
 const othersSending = (
   marks: z.infer<typeof sendMarksSchema>,
   change: number,
-  except: string | null,
+  except: string,
   now: number
 ): boolean =>
   Object.entries(marks).some(
     ([sender, mark]) =>
       sender !== except &&
-      (mark.change === change || mark.change === null) &&
+      (mark.change === null || mark.change <= change) &&
       now - mark.at < sendSettleMs
   );
 
@@ -1216,9 +1220,10 @@ const markPath = (sender: string): string =>
   `$."${sender.replaceAll('"', "")}"`;
 
 /**
- * Waits until no other sender (an attempt that timed out and went on) has
- * a call to client `loaded.held.clientId`'s Workers on its way for this
- * change: each mark cleared, or aged out under `sendSettleMs`. A step
+ * Waits until no other sender (an attempt that timed out and went on, or
+ * a run of an earlier change) has a call to client `loaded.held.clientId`'s
+ * Workers on its way for this change or one before it: each mark cleared,
+ * or aged out under `sendSettleMs`. A step
  * waits here before it reads what its call is built from, so a call that
  * lands meanwhile is read, never sent over (`upload`), and again right
  * before it sends (`sendHolding`).
@@ -1252,8 +1257,8 @@ const othersSettled = async (
  *
  * A call already sent can't be stopped, only waited for, so it lands
  * before anything sent after it:
- * - a rollback that took the client waits for every mark of the change it
- *   took over (`sendsSettled`);
+ * - a release or a rollback that took the client waits, before it sends,
+ *   for every mark of the changes before it (`othersSettled`);
  * - a retry of a step waits, before it sends, for any call another
  *   attempt (one that timed out and went on) still has on its way.
  *
@@ -1310,19 +1315,6 @@ const sendHolding = async (
   }
   await clear();
 };
-
-/**
- * Whether no call sent for client `clientId`'s change `change` is still
- * on its way (`sendHolding`): none marked for it, or each marked at least
- * `sendSettleMs` ago: what a runner that took the client over waits for
- * before it changes the client's Workers itself.
- */
-export const sendsSettled = async (
-  db: AdminDatabase,
-  clientId: string,
-  change: number
-): Promise<boolean> =>
-  !othersSending(await sendMarks(db, clientId), change, null, Date.now());
 
 /** The release's Worker `app`. */
 const workerOf = (manifest: ReleaseManifest, app: App): WorkerEntry => {
