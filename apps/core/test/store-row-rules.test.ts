@@ -8,6 +8,7 @@ import {
 } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
+import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -23,6 +24,7 @@ import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { operationRoles } from "../src/app-access.ts";
 import { AppDataRpc } from "../src/app-data.ts";
@@ -578,6 +580,12 @@ const call = async (
 const outcome = (result: OperationResult): unknown =>
   result.ok ? result.value : result.error.code;
 
+/** Field `field` of `value`, or undefined. */
+const fieldOf = (value: unknown, field: string): unknown =>
+  typeof value === "object" && value !== null
+    ? Reflect.get(value, field)
+    : undefined;
+
 /** A refusal as its caller sees it, but for the record it names. */
 const refusal = (result: OperationResult): unknown => {
   if (result.ok) {
@@ -973,21 +981,53 @@ describe("writing a table whose read rules are its write rules", () => {
   });
 });
 
-describe("a person's teams changing", () => {
-  it("expires a page's cursor read under the teams they had", async () => {
+describe("a page's cursor", () => {
+  it("pages on under the teams the person has now, and a forged one reaches no row the rules keep from them", async () => {
     const of = await world();
-    await filled(of);
-    const first = await call(of, of.ada, "pageFrom", { cursor: null });
-    if (
-      !(first.ok && typeof first.value === "object" && first.value !== null)
-    ) {
-      throw new Error("No first page");
+    const ids = await filled(of);
+    /** Ada's page from `cursor` (its titles and the next cursor), or its refusal. */
+    const pageAt = async (cursor: unknown): Promise<unknown> =>
+      outcome(await call(of, of.ada, "pageFrom", { cursor }));
+    const first = await pageAt(null);
+    const cursor = fieldOf(first, "next");
+    if (typeof cursor !== "string") {
+      throw new TypeError("No second page");
     }
-    const cursor: unknown = Reflect.get(first.value, "next");
-    await joinTeam(of.support, of.ada);
-    expect(outcome(await call(of, of.ada, "pageFrom", { cursor }))).toBe(
-      "data.invalid_cursor"
+    // The cursor at a row Ada can't read, by its ID alone: as missing as
+    // a row that never was, never a page after it.
+    const held = z
+      .record(z.string(), z.unknown())
+      .parse(JSON.parse(new TextDecoder().decode(fromBase64Url(cursor))));
+    const forged = toBase64Url(
+      new TextEncoder().encode(
+        JSON.stringify({
+          ...held,
+          id: idIn(ids, "board alpha"),
+          values: undefined,
+        })
+      )
     );
+    const atHidden = await pageAt(forged);
+    await joinTeam(of.support, of.ada);
+    const rest: unknown[] = [];
+    let next: unknown = cursor;
+    while (typeof next === "string") {
+      // One page after the other.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const page = await pageAt(next);
+      rest.push(fieldOf(page, "titles"));
+      next = fieldOf(page, "next");
+    }
+    expect({ first: fieldOf(first, "titles"), atHidden, rest }).toStrictEqual({
+      first: ["sales lead alpha"],
+      atHidden: "data.cursor_expired",
+      // Support's ticket too, now Ada is in support.
+      rest: [
+        ["sales follow up alpha"],
+        ["support ticket alpha"],
+        ["handed to ada alpha"],
+      ],
+    });
   });
 
   it("runs a mutation again under the teams they have when one changes between its reads and its commit", async () => {

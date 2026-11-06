@@ -3,6 +3,7 @@ import type { SchemaDefinition } from "@grasp-os/sdk";
 import { databaseReader } from "@grasp-os/sdk/database";
 import type { PaginationResult } from "@grasp-os/sdk/database";
 import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
+import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
@@ -208,6 +209,73 @@ describe("a search's pages", () => {
         "alpha three",
         "alpha two",
       ],
+    });
+  });
+
+  it("hold no relevance, and start after their record's, read again under the reader's access", async () => {
+    const store = await newStore();
+    const notes = defineSchema({
+      notes: defineTable({ title }).searchIndex(["title"]),
+    });
+    const { schemaHash } = await store.defineTables(
+      manifestText(
+        accessedManifest(notes, {
+          tables: { notes: { read: "owner", write: "owner" } },
+        })
+      )
+    );
+    await insert(store, schemaHash, "alpha one", "alpha two", "alpha three");
+    const {
+      inserted: [graces = ""],
+    } = await commit(
+      store,
+      schemaHash,
+      [
+        {
+          op: "insert",
+          table: "notes",
+          id: newRecordId(),
+          fields: { title: "alpha grace" },
+        },
+      ],
+      "grace"
+    );
+    const db = databaseReader(notes, async (request) => {
+      const { value } = await store.read(scopeOf(schemaHash), request);
+      return value;
+    });
+    const search = async (cursor: string | null) =>
+      await db.search("notes", "alpha").paginate({ pageSize: 2, cursor });
+    const first = await search(null);
+    const cursor = first.nextCursor ?? "";
+    const held: unknown = JSON.parse(
+      new TextDecoder().decode(fromBase64Url(cursor))
+    );
+    /** The cursor at record `id`, as a caller could make it. */
+    const at = (id: string): string =>
+      toBase64Url(
+        new TextEncoder().encode(
+          JSON.stringify({
+            ...(typeof held === "object" ? held : {}),
+            id,
+          })
+        )
+      );
+    const second = await search(cursor);
+    expect({
+      // The last record's ID and the hashes: nothing ranked it.
+      held: Object.keys(held ?? {}).toSorted(),
+      pages: [...first.items, ...second.items]
+        .map((note) => note.title)
+        .toSorted(),
+      // Another person's record is as missing as one that never was.
+      othersRecord: await outcome(search(at(graces))),
+      missingRecord: await outcome(search(at(newRecordId()))),
+    }).toStrictEqual({
+      held: ["generation", "id", "query"],
+      pages: ["alpha one", "alpha three", "alpha two"],
+      othersRecord: "data.cursor_expired",
+      missingRecord: "data.cursor_expired",
     });
   });
 });

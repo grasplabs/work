@@ -49,11 +49,6 @@ export const store = sqliteTable(
      */
     inventoriedAt: integer("inventoried_at"),
     /**
-     * The key the store signs its page cursors with (store-cursors.ts):
-     * 32 random bytes in hex, made on first use, never leaving the store.
-     */
-    cursorKey: text("cursor_key"),
-    /**
      * The store's data contract (store-host.ts, `defineTables`): every
      * table and field of every schema the store accepted, as a canonical
      * schema manifest, and its hash. Every record the store holds, and

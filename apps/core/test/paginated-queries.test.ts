@@ -1079,7 +1079,7 @@ describe(
   "paginated windows and cursors core refuses",
   { timeout: 180_000 },
   () => {
-    it("refuses a cursor edited, or carried to another person, and a window it can't read", async () => {
+    it("refuses a cursor that isn't one, reads a carried one under its reader's access, and refuses a window it can't read", async () => {
       const opened = await openedApp();
       const api = apiOf(opened.release);
       const { client } = clientFor(opened);
@@ -1094,12 +1094,12 @@ describe(
         throw new Error("Three notes take two pages of two");
       }
       const { nextCursor } = first;
-      // One character of the cursor's sealed anchor changed.
-      const at = nextCursor.indexOf(".") + 2;
-      const edited = `${nextCursor.slice(0, at)}${nextCursor[at] === "A" ? "B" : "A"}${nextCursor.slice(at + 1)}`;
+      // The cursor cut short: no longer base64url JSON.
+      const edited = nextCursor.slice(0, -3);
 
       // A member of the App, with their own page: the builder's cursor
-      // isn't theirs to page with.
+      // pages on through the member's own notes (none), never the
+      // builder's.
       const member = await personApi("builder");
       await opened.builder.api.apps.members.add(opened.app, {
         type: "person",
@@ -1118,6 +1118,9 @@ describe(
       const second = await client.query(api.list, {
         pagination: { pageSize: 2, cursor: nextCursor },
       });
+      const carried = await theirs.query(api.list, {
+        pagination: { pageSize: 2, cursor: nextCursor },
+      });
       expect({
         own: second.items.map(({ title }) => title),
         edited: await codeOf(
@@ -1125,11 +1128,7 @@ describe(
             pagination: { pageSize: 2, cursor: edited },
           })
         ),
-        carried: await codeOf(
-          theirs.query(api.list, {
-            pagination: { pageSize: 2, cursor: nextCursor },
-          })
-        ),
+        carried: carried.items,
         // A window's pagination is core's: a caller can't slip a cursor in.
         ownPagination: await raw(
           windowRequest(
@@ -1169,7 +1168,7 @@ describe(
       }).toStrictEqual({
         own: ["One"],
         edited: "data.invalid_cursor",
-        carried: "data.invalid_cursor",
+        carried: [],
         ownPagination: "contract.invalid_args",
         tooLarge: "contract.invalid_request",
         notPaged: "contract.not_paginated",
