@@ -1,3 +1,5 @@
+import { definitionPath, readDefinition } from "@grasp-os/sdk/definition";
+import { tryOperation } from "@grasp-os/sdk/definition-operations";
 import { agentErrors } from "@grasp-os/shared/agent";
 import {
   appErrors,
@@ -27,6 +29,14 @@ import { asPerson } from "./agent-person.ts";
 import { admitEffect, chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { createFromBlueprint, listBlueprints } from "./app-blueprints.ts";
+import {
+  definitionChanges,
+  definitionIn,
+  definitionOperationSchema,
+  definitionPlan,
+  refuseDefinitionFiles,
+} from "./app-definition.ts";
+import type { DefinitionPlan } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import {
   appFor,
@@ -350,6 +360,15 @@ export interface DraftWrite {
   /** A build that couldn't run now, by kind, with why: write again. */
   notChecked: Partial<Record<keyof DraftBuilds, string>>;
 }
+
+/**
+ * What a change of a draft's definition answers (`define`): the problem,
+ * for one the definition can't take, which saved nothing; otherwise what
+ * it does to the App's records, and what fails in the whole draft now.
+ */
+export type DraftDefinition =
+  | { ok: false; problem: string }
+  | ({ ok: true; plan: DefinitionPlan } & DraftWrite);
 
 /** How a check of a draft went: what proposing it checks. */
 export interface DraftCheck {
@@ -1050,81 +1069,20 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     return await this.#build(
       "build.write",
       async (by) => {
-        const id = await this.#buildable(by, app);
+        const found = await editableApp(this.env, by, app);
         const expected = appErrors.parse("app.invalid", overSchema, over);
-        const draft = await draftOf(this.env, this.ctx.props, id);
+        const written = appErrors.parse(
+          "app.invalid",
+          fileChangesSchema,
+          changes
+        );
+        refuseDefinitionFiles(Object.keys(written));
+        const draft = await draftOf(this.env, this.ctx.props, found.id);
         if (expected !== undefined && expected.revision !== draft.revision) {
           throw appErrors.create("app.conflict");
         }
-        const base = await draftFiles(this.env, id, {
-          base: draft.base,
-          changes: {},
-        });
-        // Changed in place (\`applyChanges\`): the draft as it is written,
-        // its TypeScript fixed and formatted first (\`tidied\`).
-        const files = await draftFiles(this.env, id, draft);
-        const written = applyChanges(
-          this.env,
-          files,
-          await tidied(this.env, id, changes)
-        );
-        refuseAppWorkflows(
-          written.flatMap(([path, content]) => (content === null ? [] : [path]))
-        );
-        // Only what differs from the base is kept: a path written back as
-        // the base has it (a deleted file that isn't there, too) is a
-        // change no more. A draft holds at most the base's paths and the
-        // files it adds, which the App's limits bound.
-        const kept = written.filter(
-          ([path, content]) => (content ?? undefined) !== base.get(path)
-        );
-        const unchanged = written.flatMap(([path, content]) =>
-          (content ?? undefined) === base.get(path) ? [path] : []
-        );
-        await admitEffect(this.env, this.ctx.props);
-        const saved = await workspace(
-          this.env,
-          this.ctx.props.workspaceId
-        ).saveDraft(
-          this.ctx.props.chatId,
-          id,
-          draft.base,
-          Object.fromEntries(kept),
-          unchanged,
-          draft.revision,
-          this.ctx.props.runId
-        );
-        if (!saved) {
-          throw appErrors.create("app.conflict");
-        }
-        const changed = new Set([
-          ...Object.keys(draft.changes),
-          ...kept.map(([path]) => path),
-        ]);
-        for (const path of unchanged) {
-          changed.delete(path);
-        }
-        // The draft as saved: its files, with the changes applied.
-        const builds = await draftBuilds(
-          this.env,
-          id,
-          draft.base,
-          Object.fromEntries(files)
-        );
-        const notChecked: DraftWrite["notChecked"] = {};
-        for (const kind of ["screens", "server", "lint"] as const) {
-          const { status, error } = builds[kind];
-          // Couldn't run, or checked on stand-ins (`standIn`): both say why.
-          if (status === "error" || error !== undefined) {
-            notChecked[kind] = error ?? "The build couldn't run now.";
-          }
-        }
-        return {
-          base: draft.base,
-          changed: [...changed].toSorted(),
-          ...writtenDiagnostics(builds),
-          notChecked,
-        };
+        const files = await draftFiles(this.env, found.id, draft);
+        return await this.#save(found.id, draft, files, written);
       },
       (written) => ({
         app: typeof app === "string" ? app : null,
@@ -1132,6 +1090,141 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         errors: written.errors,
       })
     );
+  }
+
+  /**
+   * Changes the App's definition in the chat's draft of `app`
+   * (app-definition.ts): applies `operation` to it, checked whole, and
+   * writes it with the config and schema generated from it. Answers the
+   * problem, saving nothing, for an operation the definition can't take;
+   * otherwise what the change does to the App's records (`plan`) and what
+   * fails in the whole draft now, as `write` does.
+   */
+  async define(app: unknown, operation: unknown): Promise<DraftDefinition> {
+    return await this.#build(
+      "build.define",
+      async (by): Promise<DraftDefinition> => {
+        const found = await editableApp(this.env, by, app);
+        const parsed = appErrors.parse(
+          "app.invalid",
+          definitionOperationSchema,
+          operation
+        );
+        const draft = await draftOf(this.env, this.ctx.props, found.id);
+        const files = await draftFiles(this.env, found.id, draft);
+        const result = tryOperation(definitionIn(files, found.name), parsed);
+        if ("problem" in result) {
+          return { ok: false, problem: result.problem };
+        }
+        const base = await draftFiles(this.env, found.id, {
+          base: draft.base,
+          changes: {},
+        });
+        const before = base.get(definitionPath);
+        const plan = definitionPlan(
+          before === undefined ? null : readDefinition(before),
+          result.definition
+        );
+        return {
+          ok: true,
+          plan,
+          ...(await this.#save(
+            found.id,
+            draft,
+            files,
+            definitionChanges(result.definition)
+          )),
+        };
+      },
+      (defined) => ({
+        app: typeof app === "string" ? app : null,
+        ok: defined.ok,
+      })
+    );
+  }
+
+  /**
+   * Saves `changes` into the chat's `draft` of `id`, whose files are
+   * `files`, refused as a whole as the changes of a commit would be, or
+   * when it writes a file under `workflows/`, which the agent never does
+   * (it may delete one). Answers with what fails in the whole draft now,
+   * every gate at once (`draftBuilds`, `writtenDiagnostics`): what the
+   * agent fixes next.
+   */
+  async #save(
+    id: AppId,
+    draft: Draft,
+    files: Map<string, string>,
+    changes: Record<string, string | null>
+  ): Promise<DraftWrite> {
+    const base = await draftFiles(this.env, id, {
+      base: draft.base,
+      changes: {},
+    });
+    // Changed in place (`applyChanges`): the draft as it is written, its
+    // TypeScript fixed and formatted first (`tidied`).
+    const written = applyChanges(
+      this.env,
+      files,
+      await tidied(this.env, id, changes)
+    );
+    refuseAppWorkflows(
+      written.flatMap(([path, content]) => (content === null ? [] : [path]))
+    );
+    // Only what differs from the base is kept: a path written back as
+    // the base has it (a deleted file that isn't there, too) is a
+    // change no more. A draft holds at most the base's paths and the
+    // files it adds, which the App's limits bound.
+    const kept = written.filter(
+      ([path, content]) => (content ?? undefined) !== base.get(path)
+    );
+    const unchanged = written.flatMap(([path, content]) =>
+      (content ?? undefined) === base.get(path) ? [path] : []
+    );
+    await admitEffect(this.env, this.ctx.props);
+    const saved = await workspace(
+      this.env,
+      this.ctx.props.workspaceId
+    ).saveDraft(
+      this.ctx.props.chatId,
+      id,
+      draft.base,
+      Object.fromEntries(kept),
+      unchanged,
+      draft.revision,
+      this.ctx.props.runId
+    );
+    if (!saved) {
+      throw appErrors.create("app.conflict");
+    }
+    const changed = new Set([
+      ...Object.keys(draft.changes),
+      ...kept.map(([path]) => path),
+    ]);
+    for (const path of unchanged) {
+      changed.delete(path);
+    }
+    // The draft as saved: its files, with the changes applied.
+    const builds = await draftBuilds(
+      this.env,
+      id,
+      draft.base,
+      Object.fromEntries(files)
+    );
+    const notChecked: DraftWrite["notChecked"] = {};
+    for (const kind of ["screens", "server", "lint"] as const) {
+      const { status, error } = builds[kind];
+      // Couldn't run, or checked on stand-ins (`standIn`): both say why.
+      if (status === "error" || error !== undefined) {
+        notChecked[kind] = error ?? "The build couldn't run now.";
+      }
+    }
+    return {
+      base: draft.base,
+      changed: [...changed].toSorted(),
+      ...writtenDiagnostics(builds),
+      notChecked,
+    };
   }
 
   /** Drops the chat's draft of `app`: the next write starts over. */
@@ -1476,17 +1569,26 @@ const buildDeclaration = `/**
  * - The grid's and the fields' own words follow the page's language
  *   (English, German, Dutch, Spanish, French); pass \`text\` to say them
  *   otherwise.
- * The server is \`app.ts\`, which registers the App, \`schema.ts\`, and
- * its functions (\`query\`, \`mutation\`, \`action\` and their
+ * What the App is, its definition (\`definition.json\`: its name, its
+ * tables with their fields, indexes, access and row rules, and its
+ * permissions), changes only through \`define\` (the chat's definition
+ * tools), which writes \`grasp.config.ts\` and \`server/schema.ts\` from
+ * it; \`write\` refuses all three. What it does is its functions
+ * (\`query\`, \`mutation\`, \`action\` and their
  * \`internal\` forms) exported from files under \`server/\`, Convex's way:
  * the file's path is the API (\`server/tasks.ts\`'s \`list\` is
  * \`api.tasks.list\`), and nothing lists them. They import their builders
  * from \`@server/_generated/server\`; screens call them through
- * \`@server/_generated/api\`. An App holds no workflows,
+ * \`@server/_generated/api\`. A query or mutation that needs fewer tables
+ * than their access gives narrows them: \`tables: { notes: { read: true } }\`.
+ * Its screens are listed in \`screens.ts\`:
+ * \`export default { screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }] }\`.
+ * An App holds no workflows,
  * and a write under \`workflows/\` is refused: for something that runs on
  * its own or takes steps, build an independent workflow with
- * \`env.workflowBuild\`, declare it in app.ts
- * (\`permissions: { workflows: [permission.workflow("alias", { input, output })] }\`,
+ * \`env.workflowBuild\`, add it to the App's permissions
+ * (\`define\` with \`addPermission\`, \`permission.workflow("alias", { input, output })\`,
+ * listed in \`uses\` as \`permissions.alias\` from grasp.config.ts and
  * started with \`ctx.workflows.alias.start(input)\`) and bind it to the App
  * under that alias.
  *
@@ -1495,7 +1597,7 @@ const buildDeclaration = `/**
  * \`.paginate({ pageSize, cursor })\` (screens: \`usePaginatedQuery\`), through
  * any number of records, ordered along an index (\`.withIndex(name)\`, then
  * \`.order("desc")\`). For a search box, declare
- * \`.searchIndex(["name", "notes"])\` on the table in schema.ts and read
+ * a search index (\`addIndex\` with \`search\`, over \`["name", "notes"]\`) and read
  * \`ctx.db.search("customers", text)\`: best match first, \`.filter(...)\`
  * and \`.paginate(...)\` as a query, though a search's cursor expires after
  * any write to the table (\`data.cursor_expired\`): load it again from the
@@ -1506,10 +1608,10 @@ const buildDeclaration = `/**
  * name into \`_with.customer\`: the record, null, or \`{ _withheld: true }\`
  * when the person can't read that table. To say who sees and changes which
  * rows (a team's requests for that team, an assignee's for them), give the
- * table row rules in schema.ts with \`rows\` from @grasp-os/sdk:
- * \`.access({ read: [rows.owner(), rows.person("assignee"), rows.team("team"), rows.role("builder")], write: [rows.owner(), rows.role("builder")] })\`,
+ * table row rules (\`setAccess\`):
+ * \`{ read: "appMembers", write: "appMembers", rows: { read: [{ kind: "owner" }, { kind: "person", field: "assignee" }, { kind: "team", field: "team" }, { kind: "role", role: "builder" }], write: [{ kind: "owner" }, { kind: "role", role: "builder" }] } }\`,
  * \`assignee\` a \`v.person()\` field and \`team\` a text field holding a
- * team's ID, and its access in app.ts \`appMembers\` (or \`appBuilders\`).
+ * team's ID; rules need \`appMembers\` (or \`appBuilders\`) access.
  * A row reaches whoever any rule admits; a write changes only a row the
  * read and the write rules both admit the writer to (without write rules,
  * the read rules), and one that would move it out of them is refused
@@ -1526,7 +1628,7 @@ const buildDeclaration = `/**
  * (\`user.id\` for "my requests", "assigned to me",
  * \`user.roles.includes("builder")\` for what only builders do; never a
  * read of a table only builders may read). Reading other members needs the App to
- * declare it, \`app({ ..., permissions: { people: true } })\`, which its reviewer sees;
+ * declare it (\`addPermission\` with \`people\`), which its reviewer sees;
  * only then \`ctx.people\` reads them: \`find(ids)\`,
  * \`search(query, { limit?, cursor? })\` (at least 2 letters or digits)
  * and \`team(teamId, { limit?, cursor? })\`, at most 100 a read, each
@@ -1548,16 +1650,17 @@ const buildDeclaration = `/**
  * mutation's \`ctx.notify(event, ...)\` is a workflow run's event, not
  * this. A visitor's call can't tell anyone. For the rest, read Grasp's
  * reference (\`readFile\` without \`app\`): the SDK's sources, which
- * every write type-checks against (\`@grasp-os/sdk/src/app.ts\`), and a
+ * every write type-checks against (\`@grasp-os/sdk/src/server.ts\`), and a
  * complete App (\`blueprints/board-page/\`).
  *
  * An outside API is reached only as an HTTP connection an admin approved
  * (\`env.connections.available()\`, \`forAppsOnly\`: one origin, the paths
  * and methods it allows; its credential is connect's and never yours).
- * Never write a URL, key or token into code: declare it in app.ts as
- * \`const billing = permission.connection("billing", { contract: "http.request@1", actions: ["get", "send"] })\`
- * under \`permissions: { connections: [billing] }\` (only the actions you
- * use; \`get\` reads, \`send\` changes), list it in the action's \`uses\`,
+ * Never write a URL, key or token into code: add it to the App's
+ * permissions (\`addPermission\` with
+ * \`permission.connection("billing", { contract: "http.request@1", actions: ["get", "send"] })\`:
+ * only the actions you use; \`get\` reads, \`send\` changes), list
+ * \`permissions.billing\` (from grasp.config.ts) in the action's \`uses\`,
  * and call \`await ctx.connections.billing.fetch("/v1/invoices?status=open")\` or
  * \`fetch("/v1/invoices", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(invoice) })\`:
  * a \`Response\` from the connection's own origin (512 KiB at most, a
@@ -1610,6 +1713,38 @@ build: {
     leftOut: number;
     notChecked: { screens?: string; server?: string; lint?: string };
   }>;
+  /**
+   * Changes the App's definition in the draft, as the chat's definition
+   * tools do (\`addTable\`, \`addField\`, \`changeField\`,
+   * \`renameField\`, \`setAccess\`, \`addIndex\`, \`addPermission\`:
+   * \`operation\` is \`{ op, ...that tool's input but app }\`), and writes
+   * grasp.config.ts and server/schema.ts from it. \`ok: false\` with the
+   * problem saves nothing; otherwise the \`plan\` of what it does to the
+   * App's records, and what fails in the whole draft now, as \`write\`.
+   */
+  define(app: string, operation: { op: string; [key: string]: unknown }): Promise<
+    | { ok: false; problem: string }
+    | {
+        ok: true;
+        plan: {
+          accepted: boolean;
+          addedTables: string[];
+          addedFields: { table: string; field: string }[];
+          widenedFields: { table: string; field: string }[];
+          checks: { table: string; field: string; answered: boolean }[];
+          keptFields: { table: string; field: string }[];
+          accessChanges: string[];
+          refused: { table: string; field?: string; reason: string }[];
+        };
+        base: number | null;
+        changed: string[];
+        errors: number;
+        warnings: number;
+        diagnostics: Build["diagnostics"];
+        leftOut: number;
+        notChecked: { screens?: string; server?: string; lint?: string };
+      }
+  >;
   /** Drops the draft: the next write starts again from the App's latest version. */
   discard(app: string): Promise<void>;
   /**
@@ -1626,7 +1761,7 @@ build: {
    * or a function's own failure as the preview answered it (a contract it
    * broke, say); anything else
    * (no draft, a refusal of the call) is thrown. Only an App with
-   * \`app.ts\` and \`schema.ts\` previews (\`app.preview_layout\`, thrown).
+   * grasp.config.ts and server/schema.ts previews (\`app.preview_layout\`, thrown).
    */
   call(app: string, method: string, args?: unknown): Promise<
     | { ok: true; answer: unknown }
@@ -1672,7 +1807,7 @@ build: {
     review: {
       current: number | null;
       files: { path: string; change: "added" | "modified" | "removed" }[];
-      /** How the server code (app.ts, schema.ts, values.ts, server/) changed: it acts for whoever uses the App. */
+      /** How the server code (grasp.config.ts, screens.ts, values.ts, server/) changed: it acts for whoever uses the App. */
       server: "added" | "modified" | "removed" | null;
       serverFiles: { path: string; change: "added" | "modified" | "removed" }[];
       /** Its migrations new or changed: each reads and rewrites every record of its table, whoever owns it; null when they can't be read. */

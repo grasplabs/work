@@ -498,7 +498,9 @@ const seedEngine = async (
     // one seeded before them keeps the screens it has (nothing has
     // shipped, so no seed migrates it; reset local data to seed it anew).
     const files = await owner.api.apps.files.read(app.id, app.currentVersion);
-    if (files["app.ts"] === engineFiles(seed, screens)["app.ts"]) {
+    if (
+      files["grasp.config.ts"] === engineFiles(seed, screens)["grasp.config.ts"]
+    ) {
       await upgradeScreens(owner, adminSession, app, screens);
     } else {
       console.warn(

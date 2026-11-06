@@ -55,9 +55,9 @@ const crmFiles = (
   // What `mine` answers, as its contract (`mineReturns`) types it.
   mineAnswer = '(await ctx.db.query("notes").take(100)).map(({ text }) => text)'
 ) => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema({ notes: defineTable({ text: v.string() }) });
+export default defineSchema({ notes: defineTable({ text: v.string() }).access({ read: "owner", write: "owner" }) });
 `,
   "server/notes.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action, internalQuery, mutation, query } from "@server/_generated/server";
@@ -129,15 +129,11 @@ export const shout = action({
 
 export const hidden = internalQuery({ args: {}, returns: v.number(), handler: () => 1 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { followUp } from "./server/notes.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "CRM",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { workflows: [followUp] },
 });
 `,
@@ -158,7 +154,7 @@ const attempt = `const attempt = async (work: () => Promise<unknown>): Promise<s
 
 /** The Desk: it calls the CRM's notes through `crm`. */
 const deskFiles = (extra = ""): Record<string, string> => ({
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 
 export default defineSchema({});
 `,
@@ -220,15 +216,11 @@ export const later = action({
   handler: async (ctx, args) => await attempt(() => ctx.apps.crm.call("notes.later", { text: args.text })),
 });
 ${extra}`,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { crm } from "./server/desk.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Desk",
-  schema,
-  access: { tables: {} },
-  screens: [],
   permissions: { apps: [crm] },
 });
 `,
@@ -236,7 +228,7 @@ export default app({
 
 /** A relay: `relay.go` calls the next App's `relay.go`, and says how far it got. */
 const relayFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 
 export default defineSchema({});
 `,
@@ -261,15 +253,11 @@ export const go = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { next } from "./server/relay.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Relay",
-  schema,
-  access: { tables: {} },
-  screens: [],
   permissions: { apps: [next] },
 });
 `,
@@ -281,7 +269,7 @@ export default app({
  * leaves answered, and the first refusal it met.
  */
 const fanFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 
 export default defineSchema({});
 `,
@@ -319,15 +307,11 @@ export const go = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { next } from "./server/fan.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Fan",
-  schema,
-  access: { tables: {} },
-  screens: [],
   permissions: { apps: [next] },
 });
 `,
@@ -335,7 +319,7 @@ export default app({
 
 /** The Inviter: one action that invites a guest through its `guests`. */
 const inviterFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 
 export default defineSchema({});
 `,
@@ -358,15 +342,11 @@ export const invite = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { guests } from "./server/inviter.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Inviter",
-  schema,
-  access: { tables: {} },
-  screens: [],
   permissions: { guests },
 });
 `,
@@ -377,7 +357,7 @@ export default app({
  * back) through its `next`, from `asker.go`, answering what it got.
  */
 const askerFiles = (fn: string): Record<string, string> => ({
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 
 export default defineSchema({});
 `,
@@ -401,15 +381,11 @@ export const go = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { next } from "./server/asker.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Asker",
-  schema,
-  access: { tables: {} },
-  screens: [],
   permissions: { apps: [next] },
 });
 `,

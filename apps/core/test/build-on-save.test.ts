@@ -136,14 +136,14 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder);
     // Registration throws (never inspected before: no kept manifest).
-    const throwing = (notesFiles["app.ts"] ?? "").replace(
-      "\nexport default app({",
-      `\nif (schema !== undefined) throw new Error("No notes today ${crypto.randomUUID()}");\nexport default app({`
+    const throwing = (notesFiles["grasp.config.ts"] ?? "").replace(
+      "\nexport default defineApp({",
+      `\nif (globalThis.Object === Object) throw new Error("No notes today ${crypto.randomUUID()}");\nexport default defineApp({`
     );
 
     const { builds } = await builder.api.apps.files.commit(
       app,
-      { ...notesFiles, "app.ts": throwing },
+      { ...notesFiles, "grasp.config.ts": throwing },
       "Notes"
     );
 

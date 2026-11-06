@@ -1,9 +1,11 @@
-import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+import { v } from "@grasp-os/sdk";
 
-// The intake's business store: drafts of a source and the statements taken
-// from it, kept while someone reviews them, and the sources and statements
-// saved from them. Only the App's builders (an admin is one on every App)
-// read or write any of it (app.ts): intake is theirs.
+// The intake's values: what its tables (server/schema.ts, generated from
+// its definition) and its functions share. Its store holds drafts of a
+// source and the statements taken from it, kept while someone reviews
+// them, and the sources and statements saved from them. Only the App's
+// builders (an admin is one on every App) read or write any of it: intake
+// is theirs.
 
 /** What a statement can be about: its tags. */
 export const statementTags = [
@@ -65,26 +67,3 @@ export const draftFields = {
   source: v.object(sourceFields),
   statements: v.array(v.object(statementFields)).max(statementsMax),
 };
-
-export default defineSchema({
-  drafts: defineTable({
-    ...draftFields,
-    origin: v.enum(draftOrigins),
-  }).index("by_created", ["_createdAt"]),
-  sources: defineTable({
-    ...sourceFields,
-    /**
-     * Taken from what someone outside the company wrote in a chat they
-     * were invited to by link: untrusted text. Only the save sets it.
-     */
-    guest: v.boolean(),
-  }).index("by_created", ["_createdAt"]),
-  statements: defineTable({
-    ...statementFields,
-    source: v.id("sources"),
-    /** The source's date. */
-    date: v.string().min(10).max(10),
-    /** Taken from a guest's words, like its source. Only the save sets it. */
-    guest: v.boolean(),
-  }).index("by_source", ["source"]),
-});

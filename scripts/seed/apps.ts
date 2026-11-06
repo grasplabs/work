@@ -3,11 +3,20 @@
  * binds the domain's independent workflows under their aliases, holds its
  * screen, and tests each workflow with a `workflowTest` suite.
  */
+import {
+  definitionPath,
+  definitionText,
+  emptyDefinition,
+} from "@grasp-os/sdk/definition";
+import { applyOperation } from "@grasp-os/sdk/definition-operations";
+import { definitionSources } from "@grasp-os/sdk/definition-source";
+
 import type { EngineSeed } from "./engines.ts";
 
 /**
- * An engine's App files, of the current layout: its AGENTS.md, an App with
- * no tables that binds each of its workflows under its alias, the
+ * An engine's App files, of the current layout: its AGENTS.md, its
+ * definition (no tables, a permission to start each of its workflows,
+ * which it binds under its alias) and the code generated from it, the
  * domain's screen, and a `workflowTest` suite of each workflow on one
  * fixture: `desk` starts the runs, and `decider` answers what they ask.
  */
@@ -15,12 +24,13 @@ export const engineFiles = (
   seed: EngineSeed,
   screens: Readonly<Record<string, string>>
 ): Record<string, string> => {
-  const declared = seed.workflows
-    .map(
-      ({ alias, declared: { input, output } }) =>
-        `export const ${alias} = permission.workflow(${JSON.stringify(alias)}, {\n  input: ${input},\n  output: ${output},\n});\n`
-    )
-    .join("\n");
+  let definition = emptyDefinition(seed.name);
+  for (const { alias, declared } of seed.workflows) {
+    definition = applyOperation(definition, {
+      op: "addPermission",
+      permission: `permission.workflow(${JSON.stringify(alias)}, { input: ${declared.input}, output: ${declared.output} })`,
+    });
+  }
   const screenList = Object.keys(screens).map((path) => {
     // An identifier, as a screen's name is: `finance-cockpit` → `financeCockpit`.
     const name = path
@@ -50,8 +60,13 @@ export const engineFiles = (
   };
   return {
     "AGENTS.md": seed.agents,
-    "schema.ts": `import { defineSchema } from "@grasp-os/sdk";\n\nexport default defineSchema({});\n`,
-    "app.ts": `import { app, permission, v } from "@grasp-os/sdk";\n\nimport schema from "./schema.ts";\n\n${declared}\nexport default app({\n  name: ${JSON.stringify(seed.name)},\n  schema,\n  access: { tables: {} },\n  screens: [${screenList.join(", ")}],\n  permissions: { workflows: [${seed.workflows.map(({ alias }) => alias).join(", ")}] },\n});\n`,
+    [definitionPath]: definitionText(definition),
+    ...definitionSources(definition),
+    ...(screenList.length === 0
+      ? {}
+      : {
+          "screens.ts": `export default {\n  screens: [${screenList.join(", ")}],\n};\n`,
+        }),
     ...screens,
     ...Object.fromEntries(
       seed.workflows.map(({ alias, tests }) => [

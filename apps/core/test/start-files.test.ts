@@ -53,10 +53,10 @@ import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
 const idp = mockIdp();
 
 const files = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  notes: defineTable({ title: v.string() }),
+  notes: defineTable({ title: v.string() }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/review.ts": `import { permission, v } from "@grasp-os/sdk";
@@ -87,21 +87,21 @@ export const stageReview = mutation({
   },
 });
 `,
-  "app.ts": `import { app, permission } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp, permission } from "@grasp-os/sdk";
 import { review } from "./server/review.ts";
-import schema from "./schema.ts";
 
 export const attachments = permission.files({
   operations: ["upload", "read", "delete"],
 });
 
-export default app({
+export default defineApp({
   name: "Reviews",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   permissions: { files: attachments, workflows: [review] },
 });
+`,
+  "screens.ts": `export default {
+  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
+};
 `,
   "screens/desk.tsx": `export default function Desk() {
   return <main>Reviews</main>;
@@ -871,7 +871,7 @@ describe(
       const withoutRead = Object.fromEntries(
         Object.entries(files()).map(([path, text]) => [
           path,
-          path === "app.ts"
+          path === "grasp.config.ts"
             ? text.replace(
                 'operations: ["upload", "read", "delete"]',
                 'operations: ["upload", "delete"]'
@@ -939,13 +939,13 @@ describe(
               ),
             ];
           }
-          if (path === "app.ts") {
+          if (path === "grasp.config.ts") {
             return [
               path,
               text
                 .replace(
-                  'import schema from "./schema.ts";',
-                  'import schema from "./schema.ts";\nimport * as extra from "./server/extra.ts";'
+                  'import { review } from "./server/review.ts";',
+                  'import { review } from "./server/review.ts";\nimport * as extra from "./server/extra.ts";'
                 )
                 .replace(
                   "permissions: { files: attachments, workflows: [review] },",

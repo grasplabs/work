@@ -63,22 +63,22 @@ export const add = mutation({
  * the draft's preview.
  */
 export const tallyFiles = (label: string): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  tally: defineTable({ added: v.boolean() }),
+  tally: defineTable({ added: v.boolean() }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/tally.ts": tallyServer(label),
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Tally",
-  schema,
-  access: { tables: { tally: { read: "appMembers", write: "appMembers" } } },
-  screens: [{ name: "tally", path: "/", source: "screens/tally.tsx" }],
 });
+`,
+  "screens.ts": `export default {
+  screens: [{ name: "tally", path: "/", source: "screens/tally.tsx" }],
+};
 `,
   "screens/tally.tsx": tallyScreen("Add one"),
 });

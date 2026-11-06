@@ -1,9 +1,9 @@
-import { app, defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
+import { defineApp, defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
 import type { Id, SchemaDefinition } from "@grasp-os/sdk";
 import {
   inspectApp,
   manifestText,
-  registerFunctions,
+  registerApp,
   schemaManifest,
 } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
@@ -69,32 +69,54 @@ const schema = defineSchema({
     .index("by_status", ["status"])
     .searchIndex(["title"])
     .access({
-      read: [
-        rows.owner(),
-        rows.person("assignee"),
-        rows.team("team"),
-        rows.role("builder"),
-      ],
-      write: [rows.owner(), rows.person("assignee"), rows.role("builder")],
+      read: "appMembers",
+      write: "appMembers",
+      rows: {
+        read: [
+          rows.owner(),
+          rows.person("assignee"),
+          rows.team("team"),
+          rows.role("builder"),
+        ],
+        write: [rows.owner(), rows.person("assignee"), rows.role("builder")],
+      },
     }),
   // Changed only by members of the team a row names: its owner included.
   accounts: defineTable({ name: v.string(), team: v.string() }).access({
-    write: [rows.team("team")],
+    read: "appMembers",
+    write: "appMembers",
+    rows: {
+      write: [rows.team("team")],
+    },
   }),
   // Rows that point at requests, with no rules of their own.
-  orders: defineTable({ request: v.id("requests"), note: v.string() }),
+  orders: defineTable({ request: v.id("requests"), note: v.string() }).access({
+    read: "appMembers",
+    write: "appMembers",
+  }),
   // Read and changed by its team alone: no write rules of its own, so its
   // read rules hold for writing too.
   tickets: defineTable({ title: v.string(), team: v.string() }).access({
-    read: [rows.team("team")],
+    read: "appMembers",
+    write: "appMembers",
+    rows: {
+      read: [rows.team("team")],
+    },
   }),
   // What a mutation saw, with no rules of its own.
-  logs: defineTable({ text: v.string() }),
+  logs: defineTable({ text: v.string() }).access({
+    read: "appMembers",
+    write: "appMembers",
+  }),
   // Each person's own notes on a request, gone with it.
   notes: defineTable({
     request: v.id("requests", { onDelete: "cascade" }),
     text: v.string(),
-  }).access({ read: [rows.owner()], write: [rows.owner()] }),
+  }).access({
+    read: "appMembers",
+    write: "appMembers",
+    rows: { read: [rows.owner()], write: [rows.owner()] },
+  }),
 });
 
 const { mutation, query } = serverModule(schema);
@@ -386,24 +408,12 @@ const operations = {
   countNotes,
 };
 
-const ruledApp = registerFunctions(
-  app({
-    name: "Requests",
-    schema,
-    access: {
-      tables: {
-        requests: { read: "appMembers", write: "appMembers" },
-        accounts: { read: "appMembers", write: "appMembers" },
-        orders: { read: "appMembers", write: "appMembers" },
-        notes: { read: "appMembers", write: "appMembers" },
-        tickets: { read: "appMembers", write: "appMembers" },
-        logs: { read: "appMembers", write: "appMembers" },
-      },
-    },
-    screens: [],
-  }),
-  { requests: operations }
-);
+const ruledApp = registerApp({
+  config: defineApp({ name: "Requests" }),
+  schema,
+  modules: { requests: operations },
+  migrations: [],
+});
 
 const { manifest } = inspectApp(ruledApp);
 
@@ -1047,14 +1057,14 @@ const dataRpcOf = (
 describe("an App's data page", () => {
   const idp = mockIdp();
   const files: Record<string, string> = {
-    "schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
+    "server/schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  requests: defineTable({ title: v.string(), team: v.string() }).access({
+  requests: defineTable({ title: v.string(), team: v.string() }).access({ read: "appMembers", write: "appMembers", rows: {
     read: [rows.owner(), rows.team("team")],
     write: [rows.team("team")],
-  }),
-  memos: defineTable({ text: v.string() }),
+  } }),
+  memos: defineTable({ text: v.string() }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
     "server/requests.ts": `import { mutation } from "@server/_generated/server";
@@ -1090,19 +1100,10 @@ export const retitle = mutation({
   },
 });
 `,
-    "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+    "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Requests",
-  schema,
-  access: {
-    tables: {
-      requests: { read: "appMembers", write: "appMembers" },
-      memos: { read: "appMembers", write: "appMembers" },
-    },
-  },
-  screens: [],
 });
 `,
     "screens/requests.tsx": `export default function Requests() {
@@ -1336,20 +1337,20 @@ export default app({
   });
 });
 
-/** A tickets schema's manifest text, read and changed by members. */
+/** A tickets schema's manifest text. */
 const ticketsText = (tickets: SchemaDefinition): string =>
-  manifestText(
-    schemaManifest(tickets, {
-      tables: { tickets: { read: "appMembers", write: "appMembers" } },
-    })
-  );
+  manifestText(schemaManifest(tickets));
 /** Tickets read and changed by the team each names. */
 const v1Text = ticketsText(
   defineSchema({
     tickets: defineTable({
       title: v.string().max(200),
       team: v.string(),
-    }).access({ read: [rows.team("team")] }),
+    }).access({
+      read: "appMembers",
+      write: "appMembers",
+      rows: { read: [rows.team("team")] },
+    }),
   })
 );
 /** A longer title, and a kind no record has yet: only a migration adds it. */
@@ -1359,7 +1360,11 @@ const v2Text = ticketsText(
       title: v.string().max(500),
       team: v.string(),
       kind: v.enum(["lead", "ticket"]),
-    }).access({ read: [rows.team("team")] }),
+    }).access({
+      read: "appMembers",
+      write: "appMembers",
+      rows: { read: [rows.team("team")] },
+    }),
   })
 );
 const consumer = (resourceVersion: number) => ({
@@ -1728,41 +1733,29 @@ describe("a record's long history, read by row rules", () => {
 describe("a version's review", () => {
   it("shows each table's row rules as the version declares them", async () => {
     const fixture = await appWith({
-      "schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
+      "server/schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  requests: defineTable({ title: v.string(), team: v.string(), assignee: v.person() }).access({
+  requests: defineTable({ title: v.string(), team: v.string(), assignee: v.person() }).access({ read: "appMembers", write: "appMembers", rows: {
     read: [rows.owner(), rows.team("team"), rows.role("builder")],
     write: [rows.person("assignee")],
-  }),
-  tags: defineTable({ name: v.string() }),
-  deals: defineTable({ name: v.string(), team: v.string() }).access({
+  } }),
+  tags: defineTable({ name: v.string() }).access({ read: "appMembers", write: "appBuilders" }),
+  deals: defineTable({ name: v.string(), team: v.string() }).access({ read: "appMembers", write: "appMembers", rows: {
     read: [rows.team("team")],
-  }),
-  memos: defineTable({ text: v.string(), team: v.string() }).access({
+  } }),
+  memos: defineTable({ text: v.string(), team: v.string() }).access({ read: "appMembers", write: "owner", rows: {
     read: [rows.team("team")],
-  }),
-  notes: defineTable({ text: v.string(), team: v.string() }).access({
+  } }),
+  notes: defineTable({ text: v.string(), team: v.string() }).access({ read: "appMembers", write: "none", rows: {
     read: [rows.team("team")],
-  }),
+  } }),
 });
 `,
-      "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+      "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Requests",
-  schema,
-  access: {
-    tables: {
-      requests: { read: "appMembers", write: "appMembers" },
-      tags: { read: "appMembers", write: "appBuilders" },
-      deals: { read: "appMembers", write: "appMembers" },
-      memos: { read: "appMembers", write: "owner" },
-      notes: { read: "appMembers", write: "none" },
-    },
-  },
-  screens: [],
 });
 `,
     });
@@ -1933,19 +1926,20 @@ describe("deleting a record a row the rules hide refers to", () => {
     const text = manifestText(
       schemaManifest(
         defineSchema({
-          plans: defineTable({ title: v.string() }),
+          plans: defineTable({ title: v.string() }).access({
+            read: "appMembers",
+            write: "appMembers",
+          }),
           holds: defineTable({
             plan: v.id("plans"),
             reason: v.string(),
             team: v.string(),
-          }).access({ read: [rows.team("team")] }),
-        }),
-        {
-          tables: {
-            plans: { read: "appMembers", write: "appMembers" },
-            holds: { read: "appMembers", write: "appMembers" },
-          },
-        }
+          }).access({
+            read: "appMembers",
+            write: "appMembers",
+            rows: { read: [rows.team("team")] },
+          }),
+        })
       )
     );
     const store = await openStore(

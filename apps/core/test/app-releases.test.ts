@@ -57,7 +57,7 @@ import {
 
 /** Notes, laid out as spec 8 has an App: its schema, operations and registration. */
 const notesFiles = (label = "Notes"): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),
@@ -65,13 +65,13 @@ export const noteFields = {
 };
 
 export default defineSchema({
-  notes: defineTable(noteFields).index("by_updated", ["_updatedAt"]),
+  notes: defineTable(noteFields).index("by_updated", ["_updatedAt"]).access({ read: "owner", write: "owner" }),
 });
 `,
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { internal } from "@server/_generated/internal";
 import { action, doc, internalQuery, mutation, query } from "@server/_generated/server";
-import { noteFields } from "../schema.ts";
+import { noteFields } from "./schema.ts";
 
 export const get = query({
   args: { id: v.id("notes") },
@@ -101,14 +101,10 @@ export const tally = action({
   handler: async (ctx) => await ctx.runQuery(internal.notes.count, {}),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: ${JSON.stringify(label)},
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
 });
 `,
 });
@@ -119,7 +115,7 @@ const withTable = (
   name: string
 ): Record<string, string> => ({
   ...files,
-  "schema.ts": (files["schema.ts"] ?? "").replace(
+  "server/schema.ts": (files["server/schema.ts"] ?? "").replace(
     "export default defineSchema({",
     `export default defineSchema({\n  ${name}: defineTable({ label: v.string() }),`
   ),
@@ -222,9 +218,9 @@ describe("sealing a release", { timeout: 120_000 }, () => {
         "server/_generated/internal.ts",
         "server/_generated/server.ts",
         ".grasp/verification.json",
-        "modules/app~app.js",
+        "modules/app~grasp.config.js",
         "modules/app~server~notes.js",
-        "modules/app~schema.js",
+        "modules/app~server~schema.js",
         "modules/app~server~_generated~server.js",
       ])
     );
@@ -339,20 +335,17 @@ describe("sealing a release", { timeout: 120_000 }, () => {
 
 /** A table-less App: nothing to store, so no store binding. */
 const tablelessFiles = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 export default defineSchema({});
 `,
   "server/hello.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-export default app({
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
+
+export default defineApp({
   name: "Hello",
-  schema,
-  access: {},
-  screens: [],
 });
 `,
 });
@@ -647,7 +640,7 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
           ? manifest.artifacts
           : [];
         // The same path again, under the bytes of another artifact.
-        const other = artifactAt(release, "modules/app~schema.js");
+        const other = artifactAt(release, "modules/app~server~schema.js");
         manifest.artifacts = [
           ...artifacts,
           { path: entry.path, sha256: other.sha256, bytes: other.bytes },
@@ -1528,7 +1521,7 @@ describe("App code that a seal refuses", { timeout: 120_000 }, () => {
   it("can't reach the network while it is inspected", async () => {
     await expect(
       sealedWith({
-        "app.ts": `${notesFiles()["app.ts"]}\nawait fetch("https://example.com");\n`,
+        "grasp.config.ts": `${notesFiles()["grasp.config.ts"]}\nawait fetch("https://example.com");\n`,
       })
     ).resolves.toBe("version.inspection_failed");
   });
@@ -1558,14 +1551,14 @@ describe("App code that a seal refuses", { timeout: 120_000 }, () => {
 
   it("must register an App", async () => {
     await expect(
-      sealedWith({ "app.ts": "export default { name: 'Notes' };\n" })
+      sealedWith({ "grasp.config.ts": "export default { name: 'Notes' };\n" })
     ).resolves.toBe("version.inspection_failed");
   });
 
   it("can't hand the host a manifest it didn't declare", async () => {
     // The App's code makes the SDK in its isolate answer a query that
     // writes: no declaration makes that, so the host refuses it.
-    const forging = `${notesFiles()["app.ts"]}
+    const forging = `${notesFiles()["grasp.config.ts"]}
 const stringify = JSON.stringify;
 JSON.stringify = (value, ...rest) => {
   const text = stringify(value, ...rest);
@@ -1574,26 +1567,26 @@ JSON.stringify = (value, ...rest) => {
     : text;
 };
 `;
-    await expect(sealedWith({ "app.ts": forging })).resolves.toBe(
+    await expect(sealedWith({ "grasp.config.ts": forging })).resolves.toBe(
       "version.invalid_manifest"
     );
   });
 
   it("can't register differently each time it is inspected", async () => {
-    const shifting = notesFiles()["app.ts"]?.replace(
+    const shifting = notesFiles()["grasp.config.ts"]?.replace(
       'name: "Notes"',
       'name: "Notes " + Math.random().toString(36).slice(2, 10)'
     );
-    await expect(sealedWith({ "app.ts": shifting ?? "" })).resolves.toBe(
-      "version.unstable_manifest"
-    );
+    await expect(
+      sealedWith({ "grasp.config.ts": shifting ?? "" })
+    ).resolves.toBe("version.unstable_manifest");
   });
 
   it.each([
     [
       "a schema that imports an operation",
       {
-        "schema.ts": `import "./server/notes.ts";\n${notesFiles()["schema.ts"]}`,
+        "server/schema.ts": `import "./server/notes.ts";\n${notesFiles()["server/schema.ts"]}`,
       },
     ],
     [
@@ -1860,14 +1853,14 @@ export const reach = action({
   handler: async (ctx) => await ctx.runQuery(api.extra.defaults, {}),
 });
 `,
-      "app.ts": (files["app.ts"] ?? "")
+      "grasp.config.ts": (files["grasp.config.ts"] ?? "")
         .replace(
-          'import schema from "./schema.ts";',
-          'import schema from "./schema.ts";\nimport { v } from "@grasp-os/sdk";'
+          'import { defineApp } from "@grasp-os/sdk";',
+          'import { defineApp, v } from "@grasp-os/sdk";'
         )
         .replace(
-          "  screens: [],",
-          "  preferences: v.object({ compact: v.boolean().default(false) }),\n  screens: [],"
+          '  name: "Notes",',
+          '  name: "Notes",\n  preferences: v.object({ compact: v.boolean().default(false) }),'
         ),
     });
     const release = await seal(fixture);
@@ -2417,7 +2410,7 @@ describe("screens", { timeout: 120_000 }, () => {
         'import type { query } from "@server/_generated/server";',
         'import type { internal } from "@server/_generated/internal";',
         'export type { create } from "../server/notes.ts";',
-        'export type Schema = typeof import("../schema.ts");',
+        'export type Schema = typeof import("../server/schema.ts");',
       ];
       const screen = "export default function Notes() {\n  return null;\n}\n";
       const built = await buildScreens(
@@ -2461,8 +2454,8 @@ describe("screens", { timeout: 120_000 }, () => {
       "the internal references",
       'import { internal } from "@server/_generated/internal";',
     ],
-    ["the schema", 'import schema from "../schema.ts";'],
-    ["the registration", 'import notes from "../app";'],
+    ["the schema", 'import schema from "../server/schema.ts";'],
+    ["the config", 'import notes from "../grasp.config";'],
     ["an operation", 'import { create } from "../server/notes.ts";'],
     [
       "an operation in a dotted folder",

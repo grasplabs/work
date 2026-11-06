@@ -37,11 +37,11 @@ import { person } from "./sealed-apps.ts";
 // fixture stores.
 
 const appFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }),
-  mottos: defineTable({ text: v.string().min(1).max(200) }),
+  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "owner", write: "owner" }),
+  mottos: defineTable({ text: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appBuilders" }),
 });
 `,
   "server/notes.ts": `import { AppError, permission, v } from "@grasp-os/sdk";
@@ -97,20 +97,11 @@ export const count = internalQuery({
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).length,
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { help } from "./server/notes.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Notes",
-  schema,
-  access: {
-    tables: {
-      notes: { read: "owner", write: "owner" },
-      mottos: { read: "appMembers", write: "appBuilders" },
-    },
-  },
-  screens: [],
   permissions: { brain: help },
 });
 `,
@@ -319,12 +310,12 @@ describe("an App's tests", { timeout: 180_000 }, () => {
 
   it("give each principal the teams its fixture names, as a table's team rules read them", async () => {
     const built = await appWith({
-      "schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
+      "server/schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  deals: defineTable({ title: v.string(), team: v.string() }).access({
+  deals: defineTable({ title: v.string(), team: v.string() }).access({ read: "appMembers", write: "appMembers", rows: {
     read: [rows.team("team")],
-  }),
+  } }),
 });
 `,
       "server/deals.ts": `import { v } from "@grasp-os/sdk";
@@ -343,14 +334,10 @@ export const titles = query({
     (await ctx.db.query("deals").take(100)).map((deal) => deal.title),
 });
 `,
-      "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+      "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Deals",
-  schema,
-  access: { tables: { deals: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
 });
 `,
       "tests/fixtures/deals.json": JSON.stringify({

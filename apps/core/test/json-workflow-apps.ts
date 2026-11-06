@@ -320,10 +320,10 @@ export const endLiveResourceRuns = async (): Promise<void> => {
 
 /** The App every bound workflow here is bound to: one screen, one alias. */
 const boundAppFiles = (alias: string): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  requests: defineTable({ who: v.string() }),
+  requests: defineTable({ who: v.string() }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
@@ -333,17 +333,17 @@ export const ${alias} = permission.workflow(${JSON.stringify(alias)}, {
   output: v.object({ status: v.string() }),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { ${alias} } from "./server/requests.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   permissions: { workflows: [${alias}] },
 });
+`,
+  "screens.ts": `export default {
+  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
+};
 `,
   "screens/desk.tsx": `export default function Desk() {
   return <main>Requests</main>;

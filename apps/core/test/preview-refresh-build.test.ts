@@ -21,19 +21,14 @@ import { signedInApi } from "./sign-in.ts";
 const idp = mockIdp();
 
 const files = {
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 
 export default defineSchema({});
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-import schema from "./schema.ts";
-
-export default app({
+export default defineApp({
   name: "Counter",
-  schema,
-  access: { tables: {} },
-  screens: [],
 });
 `,
   "screens/small.tsx": `import { Button } from "@grasp-os/ui/components/button";

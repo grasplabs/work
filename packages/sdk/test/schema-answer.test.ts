@@ -4,14 +4,18 @@ import { schemaManifest } from "../src/host.ts";
 import { readSchemaAnswers } from "../src/schema-answer.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
 
-// An App's answers, as `app({ answers })` and a manifest read back check
+// An App's answers, as `defineApp({ answers })` and a manifest read back check
 // them: pure, so unit tests; the store giving the value to the records
 // that don't fit is tested through the store
 // (apps/core/test/schema-changes.test.ts).
 
 const schema = schemaManifest(
-  defineSchema({ notes: defineTable({ title: v.string(), size: v.number() }) }),
-  { tables: { notes: { read: "owner", write: "owner" } } }
+  defineSchema({
+    notes: defineTable({ title: v.string(), size: v.number() }).access({
+      read: "owner",
+      write: "owner",
+    }),
+  })
 );
 
 /** Refuses with `message`, as `app` does. */

@@ -37,17 +37,13 @@ const declared = [
 /** The Notes App, its screen declaring `help` links and `attachments` files. */
 const linkedFiles = (origins: readonly string[] | null = declared) => ({
   ...notesFiles,
-  "app.ts": `import { app, permission } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp, permission } from "@grasp-os/sdk";
 
 ${origins === null ? "" : `export const help = permission.links({ origins: ${JSON.stringify(origins)} });\n`}
 export const attachments = permission.files({ operations: ["read"] });
 
-export default app({
+export default defineApp({
   name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { ${origins === null ? "" : "links: help, "}files: attachments },
 });
 `,

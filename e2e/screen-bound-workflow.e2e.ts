@@ -47,9 +47,9 @@ const definition = JSON.stringify({
  * hook's fields it reads.
  */
 const appFiles = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema({ requests: defineTable({ who: v.string() }) });
+export default defineSchema({ requests: defineTable({ who: v.string() }).access({ read: "appMembers", write: "appMembers" }) });
 `,
   "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
 
@@ -58,17 +58,17 @@ export const followUp = permission.workflow("followUp", {
   output: v.object({ status: v.string() }),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { followUp } from "./server/requests.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   permissions: { workflows: [followUp] },
 });
+`,
+  "screens.ts": `export default {
+  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
+};
 `,
   "screens/desk.tsx": `import { useWorkflow } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";

@@ -747,8 +747,8 @@ const checkFiles = {
 
 /** Server code as spec 8 lays it out, as the platform's check reads it. */
 const serverCodeIncludes = [
-  "app.ts",
-  "schema.ts",
+  "grasp.config.ts",
+  "screens.ts",
   "values.ts",
   "server/**/*.ts",
   ".grasp/*.ts",

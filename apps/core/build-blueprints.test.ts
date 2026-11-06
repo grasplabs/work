@@ -65,7 +65,7 @@ const build = (dir: string): string => {
 };
 
 const schema = {
-  "schema.ts":
+  "server/schema.ts":
     'import { defineSchema } from "@grasp-os/sdk";\n\nexport default defineSchema({});\n',
 };
 
@@ -245,7 +245,7 @@ describe("the built-in blueprints' build", () => {
     [
       "a file over an App's limit",
       "large",
-      { "schema.ts": "x".repeat(appLimits.fileLength + 1) },
+      { "server/schema.ts": "x".repeat(appLimits.fileLength + 1) },
       "files/",
     ],
     [

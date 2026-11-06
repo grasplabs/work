@@ -8,10 +8,10 @@ import {
   schemaManifest,
   withDefaultsFilled,
 } from "../src/host.ts";
-import type { SchemaAccess, SchemaManifest, SchemaPlan } from "../src/host.ts";
+import type { AccessMode, SchemaManifest, SchemaPlan } from "../src/host.ts";
 import { descriptorOf } from "../src/value-schema.ts";
 import { defineSchema, defineTable, rows, v } from "../src/values.ts";
-import type { ValueShape } from "../src/values.ts";
+import type { SchemaDefinition, ValueShape } from "../src/values.ts";
 
 // How a store's data contract changes when it is handed a schema: which
 // changes apply on their own, which the store checks every record for as
@@ -19,7 +19,47 @@ import type { ValueShape } from "../src/values.ts";
 // 17.4). Pure, so unit tests; the store applying a plan is tested through
 // the store (apps/core/test/schema-contract.test.ts).
 
-const ownerOnly: SchemaAccess = {
+/** Access declared for a schema's tables by name: a table or mode left out is `none`. */
+interface DeclaredAccess {
+  readonly tables?: Readonly<
+    Record<string, { readonly read?: AccessMode; readonly write?: AccessMode }>
+  >;
+}
+
+/**
+ * `schema`'s manifest, its tables given `declared` access, read back as a
+ * host reads a manifest: checked as `.access` checks a declaration.
+ */
+const manifestOf = (
+  schema: SchemaDefinition,
+  declared: DeclaredAccess
+): SchemaManifest => {
+  const base = schemaManifest(schema);
+  return readSchemaManifest(
+    JSON.stringify({
+      ...base,
+      tables: Object.fromEntries(
+        Object.entries(base.tables).map(([name, table]) => {
+          const held = Object.hasOwn(declared.tables ?? {}, name)
+            ? declared.tables?.[name]
+            : undefined;
+          return [
+            name,
+            {
+              ...table,
+              access: {
+                read: held?.read ?? "none",
+                write: held?.write ?? "none",
+              },
+            },
+          ];
+        })
+      ),
+    })
+  ).manifest;
+};
+
+const ownerOnly: DeclaredAccess = {
   tables: { notes: { read: "owner", write: "owner" } },
 };
 
@@ -34,12 +74,9 @@ const titleIndex: Record<string, string[]> = { by_title: ["title"] };
 const notes = (
   fields: ValueShape,
   indexes: Record<string, string[]> = titleIndex,
-  access: SchemaAccess = ownerOnly
+  access: DeclaredAccess = ownerOnly
 ): SchemaManifest => {
-  const base = schemaManifest(
-    defineSchema({ notes: defineTable(fields) }),
-    access
-  );
+  const base = manifestOf(defineSchema({ notes: defineTable(fields) }), access);
   // Indexes as data, read back through the host's checks.
   return readSchemaManifest(
     JSON.stringify({
@@ -99,30 +136,27 @@ const linked = (target: "notes" | "tags", asId: boolean): SchemaManifest =>
       notes: defineTable({
         title: v.string(),
         parent: asId ? v.id(target).optional() : v.string().optional(),
+      }).access({ read: "owner", write: "owner" }),
+      tags: defineTable({ name: v.string() }).access({
+        read: "owner",
+        write: "owner",
       }),
-      tags: defineTable({ name: v.string() }),
-    }),
-    {
-      tables: {
-        notes: { read: "owner", write: "owner" },
-        tags: { read: "owner", write: "owner" },
-      },
-    }
+    })
   );
 
 /** Notes with `fields` besides a title, beside a Tags table. */
 const linkedNotes = (fields: ValueShape): SchemaManifest =>
   schemaManifest(
     defineSchema({
-      notes: defineTable({ title: v.string(), ...fields }),
-      tags: defineTable({ name: v.string() }),
-    }),
-    {
-      tables: {
-        notes: { read: "owner", write: "owner" },
-        tags: { read: "owner", write: "owner" },
-      },
-    }
+      notes: defineTable({ title: v.string(), ...fields }).access({
+        read: "owner",
+        write: "owner",
+      }),
+      tags: defineTable({ name: v.string() }).access({
+        read: "owner",
+        write: "owner",
+      }),
+    })
   );
 
 const tableNames = (prefix: string): string[] =>
@@ -214,7 +248,7 @@ describe("safe changes", () => {
   });
 
   test("a new table's defaulted fields fill nothing: it holds no records", () => {
-    const v2 = schemaManifest(
+    const v2 = manifestOf(
       defineSchema({
         notes: defineTable(noteFields).index("by_title", ["title"]),
         tags: defineTable({ weight: v.number().default(1) }),
@@ -229,7 +263,7 @@ describe("safe changes", () => {
   });
 
   test("a new table may have required fields: it holds no records", () => {
-    const v2 = schemaManifest(
+    const v2 = manifestOf(
       defineSchema({
         notes: defineTable(noteFields).index("by_title", ["title"]),
         tags: defineTable({ name: v.string(), weight: v.number().default(1) }),
@@ -263,7 +297,7 @@ describe("safe changes", () => {
   });
 
   test("an optional field or a table left out stays in the contract", () => {
-    const v2 = schemaManifest(
+    const v2 = manifestOf(
       defineSchema({
         notes: defineTable(noteFields).index("by_title", ["title"]),
         tags: defineTable({ name: v.string() }),
@@ -543,23 +577,28 @@ describe("a change the store checks every record for", () => {
   });
 
   test("a changed access mode or row rule changes no record, and applies at activation", () => {
-    const shared: SchemaAccess = {
-      tables: { notes: { read: "appMembers", write: "appMembers" } },
-    };
     const fields = { title: v.string(), team: v.string() };
     const plain = schemaManifest(
-      defineSchema({ notes: defineTable(fields) }),
-      shared
+      defineSchema({
+        notes: defineTable(fields).access({
+          read: "appMembers",
+          write: "appMembers",
+        }),
+      })
     );
     const byTeam = schemaManifest(
       defineSchema({
-        notes: defineTable(fields).access({ read: [rows.team("team")] }),
-      }),
-      shared
+        notes: defineTable(fields).access({
+          read: "appMembers",
+          write: "appMembers",
+          rows: { read: [rows.team("team")] },
+        }),
+      })
     );
     const owned = schemaManifest(
-      defineSchema({ notes: defineTable(fields) }),
-      ownerOnly
+      defineSchema({
+        notes: defineTable(fields).access({ read: "owner", write: "owner" }),
+      })
     );
     for (const [before, after] of [
       [plain, byTeam],
@@ -604,6 +643,20 @@ describe("a change the store checks every record for", () => {
     );
   });
 });
+
+/** Notes whose rows a team rule on `team` chooses, with `more` fields. */
+const teamRuled = (team: ReturnType<typeof v.string>, more: ValueShape = {}) =>
+  schemaManifest(
+    defineSchema({
+      notes: defineTable({ title: v.string(), team, ...more }).access({
+        read: "appMembers",
+        write: "appMembers",
+        rows: {
+          read: [rows.team("team")],
+        },
+      }),
+    })
+  );
 
 describe("changes that need a migration", () => {
   test("a defaulted field that can hold a record ID, at any depth, is refused", () => {
@@ -660,26 +713,29 @@ describe("changes that need a migration", () => {
   });
 
   test("a field a row rule reads that a check would fill a default into is refused, with no answer too", () => {
-    const shared: SchemaAccess = {
-      tables: { notes: { read: "appMembers", write: "appMembers" } },
-    };
     const before = schemaManifest(
       defineSchema({
         notes: defineTable({
           title: v.string(),
           team: v.string().optional(),
-        }).access({ read: [rows.team("team")] }),
-      }),
-      shared
+        }).access({
+          read: "appMembers",
+          write: "appMembers",
+          rows: { read: [rows.team("team")] },
+        }),
+      })
     );
     const after = schemaManifest(
       defineSchema({
         notes: defineTable({
           title: v.string(),
           team: v.string().max(10).default("sales"),
-        }).access({ read: [rows.team("team")] }),
-      }),
-      shared
+        }).access({
+          read: "appMembers",
+          write: "appMembers",
+          rows: { read: [rows.team("team")] },
+        }),
+      })
     );
     expect(refusedOf(planSchemaChange(before, after))).toStrictEqual([
       { table: "notes", field: "team", reason: "rule_field_rewritten" },
@@ -687,21 +743,25 @@ describe("changes that need a migration", () => {
   });
 
   test("a defaulted field a row rule reads is refused: filling it in would choose who sees records", () => {
-    const shared: SchemaAccess = {
-      tables: { notes: { read: "appMembers", write: "appMembers" } },
-    };
     const plain = schemaManifest(
-      defineSchema({ notes: defineTable({ title: v.string() }) }),
-      shared
+      defineSchema({
+        notes: defineTable({ title: v.string() }).access({
+          read: "appMembers",
+          write: "appMembers",
+        }),
+      })
     );
     const byTeam = schemaManifest(
       defineSchema({
         notes: defineTable({
           title: v.string(),
           team: v.string().default("sales"),
-        }).access({ read: [rows.team("team")] }),
-      }),
-      shared
+        }).access({
+          read: "appMembers",
+          write: "appMembers",
+          rows: { read: [rows.team("team")] },
+        }),
+      })
     );
     expect(refusedOf(planSchemaChange(plain, byTeam))).toStrictEqual([
       { table: "notes", field: "team", reason: "rule_field_rewritten" },
@@ -709,20 +769,8 @@ describe("changes that need a migration", () => {
   });
 
   test("an answer or a rename that would rewrite a field a row rule reads is refused", () => {
-    const shared: SchemaAccess = {
-      tables: { notes: { read: "appMembers", write: "appMembers" } },
-    };
-    const ruled = (team: ReturnType<typeof v.string>, more: ValueShape = {}) =>
-      schemaManifest(
-        defineSchema({
-          notes: defineTable({ title: v.string(), team, ...more }).access({
-            read: [rows.team("team")],
-          }),
-        }),
-        shared
-      );
-    const before = ruled(v.string());
-    const after = ruled(v.string().max(10));
+    const before = teamRuled(v.string());
+    const after = teamRuled(v.string().max(10));
     // Checked, it rewrites nothing: who sees a record stays as it was.
     expect(planSchemaChange(before, after).accepted).toBeTruthy();
     expect(
@@ -807,15 +855,14 @@ describe("a field the store reserved", () => {
     const tags = (asNumber: boolean) =>
       schemaManifest(
         defineSchema({
-          notes: defineTable(noteFields),
-          tags: defineTable({ name: asNumber ? v.number() : v.string() }),
-        }),
-        {
-          tables: {
-            notes: { read: "owner", write: "owner" },
-            tags: { read: "owner", write: "owner" },
-          },
-        }
+          notes: defineTable(noteFields).access({
+            read: "owner",
+            write: "owner",
+          }),
+          tags: defineTable({
+            name: asNumber ? v.number() : v.string(),
+          }).access({ read: "owner", write: "owner" }),
+        })
       );
     const reserved = reservedOf(tags(false));
     expect(
@@ -880,12 +927,16 @@ describe("a table an explicit migration transforms", () => {
 
 describe("a table declared sensitive", () => {
   const plain = schemaManifest(
-    defineSchema({ notes: defineTable(noteFields) }),
-    ownerOnly
+    defineSchema({
+      notes: defineTable(noteFields).access({ read: "owner", write: "owner" }),
+    })
   );
   const sensitive = schemaManifest(
-    defineSchema({ notes: defineTable(noteFields).sensitive() }),
-    ownerOnly
+    defineSchema({
+      notes: defineTable(noteFields)
+        .sensitive()
+        .access({ read: "owner", write: "owner" }),
+    })
   );
 
   test("leaves a table that never declares it as it was, and reads back as declared", () => {

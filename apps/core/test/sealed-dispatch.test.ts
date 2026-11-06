@@ -379,10 +379,10 @@ const candidatePinOf = async (workflow: string, runId: string) => {
 
 /** The Requests App's files: it binds `followUp`, keeps requests, `desk`. */
 const requestsFiles = (fixture: unknown): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  requests: defineTable({ who: v.string() }),
+  requests: defineTable({ who: v.string() }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
@@ -408,15 +408,11 @@ export const list = query({
   handler: async (ctx) => (await ctx.db.query("requests").take(100)).map(({ who }) => who),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { followUp } from "./server/requests.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
   permissions: { workflows: [followUp] },
 });
 `,

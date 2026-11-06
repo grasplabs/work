@@ -38,10 +38,10 @@ const idp = mockIdp();
 
 /** The Directory App's files: it declares the directory unless `people` is false. */
 const peopleFiles = (people = true): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  notes: defineTable({ text: v.string() }),
+  notes: defineTable({ text: v.string() }).access({ read: "owner", write: "owner" }),
 });
 `,
   "server/dir.ts": `import { v } from "@grasp-os/sdk";
@@ -130,14 +130,10 @@ export const team = query({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Directory",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   ${people ? "permissions: { people: true }," : ""}
 });
 `,

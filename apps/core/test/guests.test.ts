@@ -69,7 +69,7 @@ const idp = mockIdp();
 const guestFiles = (
   operations = '["invite", "list", "read", "revoke"]'
 ): Record<string, string> => ({
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 
 export default defineSchema({});
 `,
@@ -123,16 +123,12 @@ export const revoke = action({
   handler: async (ctx, args) => await outcome(async () => await loose(ctx.guests).revoke(args.id)),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
 import { guests } from "./server/guests.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Guests",
-  schema,
-  access: { tables: {} },
-  screens: [],
   permissions: { guests },
 });
 `,

@@ -45,9 +45,9 @@ const dayMs = 24 * 60 * 60 * 1000;
  * JSON text.
  */
 const statsFiles = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema({ marks: defineTable({ at: v.number() }) });
+export default defineSchema({ marks: defineTable({ at: v.number() }).access({ read: "owner", write: "owner" }) });
 `,
   "server/stats.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
@@ -116,16 +116,12 @@ export const platformReadBurst = action({
     }),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
 import { grasp } from "./server/stats.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Stats",
-  schema,
-  access: { tables: { marks: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { apps: [grasp] },
 });
 `,

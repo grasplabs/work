@@ -3,7 +3,7 @@
 import type { Id as SdkId } from "@grasp-os/sdk";
 import type { Doc as SdkDoc } from "@grasp-os/sdk/database";
 
-import type schema from "../../schema.ts";
+import type schema from "../schema.ts";
 
 type Tables = (typeof schema)["tables"];
 

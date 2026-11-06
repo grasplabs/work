@@ -40,10 +40,10 @@ import type { Fixture } from "./sealed-apps.ts";
 
 /** An App whose actions select a skill and read a pinned one. */
 const skillsFiles = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  notes: defineTable({ title: v.string() }),
+  notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }),
 });
 `,
   "server/skills.ts": `import { permission, v } from "@grasp-os/sdk";
@@ -83,15 +83,11 @@ export const open = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { how } from "./server/skills.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "How",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { brain: how },
 });
 `,

@@ -53,20 +53,20 @@ const filesWith = (
     title = "v.string()",
   }: { withNotes?: boolean; title?: string } = {}
 ): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema(${withNotes ? `{ notes: defineTable({ title: ${title} }) }` : "{}"});
+export default defineSchema(${withNotes ? `{ notes: defineTable({ title: ${title} }).access({ read: "owner", write: "owner" }) }` : "{}"});
 `,
-  "app.ts": `import { app, v } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp, v } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Desk",
-  schema,
-  access: { tables: ${withNotes ? '{ notes: { read: "owner", write: "owner" } }' : "{}"} },
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   ${preferences === "" ? "" : `preferences: ${preferences},`}
 });
+`,
+  "screens.ts": `export default {
+  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
+};
 `,
   "screens/desk.tsx": `export default function Desk() {
   return <main>Desk</main>;

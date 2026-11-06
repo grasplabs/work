@@ -6,14 +6,14 @@ import {
   draftOrigins,
   sourceMedia,
   statementsMax,
-} from "../schema.ts";
+} from "../values.ts";
 
 // Drafts of a source and the statements taken from it, reviewed and
 // edited before they are saved as a `source` and its `statements`. Each
 // draft is typed in by hand (`create`), or proposed (`propose`) with
 // what a run of the `extract` workflow took out of someone's notes or a
 // stakeholder's chat. Only the App's builders reach any of it:
-// the store refuses everyone else (app.ts).
+// the store refuses everyone else (its tables' access).
 
 /** Most drafts the review lists: the newest. */
 const listed = 100;

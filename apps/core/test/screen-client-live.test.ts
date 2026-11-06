@@ -705,22 +705,18 @@ const teamSecrets = async () => {
   const secretFiles = withSecrets();
   const teamFiles: Record<string, string> = {
     ...secretFiles,
-    "schema.ts": (secretFiles["schema.ts"] ?? "")
+    "server/schema.ts": (secretFiles["server/schema.ts"] ?? "")
       .replace(
         "import { defineSchema, defineTable, v }",
         "import { defineSchema, defineTable, rows, v }"
       )
       .replace(
-        "secrets: defineTable({ text: v.string() }),",
-        'secrets: defineTable({ text: v.string(), team: v.string() }).access({ read: [rows.team("team")] }),'
+        'secrets: defineTable({ text: v.string() }).access({ read: "appBuilders", write: "appBuilders" }),',
+        'secrets: defineTable({ text: v.string(), team: v.string() }).access({ read: "appMembers", write: "appMembers", rows: { read: [rows.team("team")] } }),'
       ),
     "server/notes.ts": (secretFiles["server/notes.ts"] ?? "").replace(
       "export const tell = mutation({\n  args: { text: v.string() },",
       "export const tell = mutation({\n  args: { text: v.string(), team: v.string() },"
-    ),
-    "app.ts": (secretFiles["app.ts"] ?? "").replace(
-      'secrets: { read: "appBuilders", write: "appBuilders" }',
-      'secrets: { read: "appMembers", write: "appMembers" }'
     ),
   };
   const opened = await openedApp(teamFiles);

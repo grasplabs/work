@@ -17,8 +17,10 @@ import { codeLimits, describeRun, sourceHash, utf8Bytes } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
 
 // The chat's tools for what it does most (GRA-1470), besides `executeCode`:
-// create an App, read, write, edit and search its draft's files, search
-// the brain, ask for a connection, edit a workflow's draft. Each is one
+// create an App, read, write, edit and search its draft's files, change
+// its definition (its tables, fields, access, indexes and permissions,
+// from which its config and schema are generated: app-definition.ts),
+// search the brain, ask for a connection, edit a workflow's draft. Each is one
 // call of the API the chat's code would call (`env.build.write`, say),
 // through the same stub, so it acts as the chat's agent for its person,
 // under the same permission checks, refusals and audit records: a call
@@ -215,11 +217,103 @@ const readAppParameter = Type.Optional(
 
 /** What the tools that read say of Grasp's reference, where to start. */
 const referenceStart =
-  "Start with @grasp-os/sdk/src/app.ts (what app() takes), and a complete App: blueprints/board-page/app.ts, schema.ts, server/ and screens/.";
+  "Start with a complete App: blueprints/board-page/definition.json (what it is, which the definition tools change), the grasp.config.ts and server/schema.ts generated from it, its functions in server/, screens.ts and screens/.";
 
 /** What `writeFile` and `editFile` say of what they answer with (`env.build.write`). */
 const answersWithDiagnostics =
   "Answers with what fails in the whole App now (`errors`, and `diagnostics` by file: compile, types, lint and the React Compiler, all at once): fix the errors and write again. If the same error comes back three times, stop and tell the person in plain words what you're stuck on. Proposing refuses while any error remains.";
+
+/** What the file tools say of the files the definition tools write. */
+const generatedNote =
+  "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code generated from it: change them with the definition tools (addTable, addField, changeField, renameField, setAccess, addIndex, addPermission), never by writing them.";
+
+/** What the definition tools say of what they answer with (`env.build.define`). */
+const definitionAnswer =
+  "Changes the App's definition in this chat's draft, checked as it is made, and writes grasp.config.ts and server/schema.ts from it. A change the definition can't take answers `ok: false` and the `problem`, saving nothing. Otherwise it answers the `plan`, what the change does to the records the App holds (added, widened, `checks`: fields every record must fit as the version is made current, where an `answer` fills a record that lacks the field; `refused`: what only a migration in server/migrations/ can do), and what fails in the whole App now, as writeFile does.";
+
+/** A type, as the definition tools take it. */
+const typeParameter = Type.String({
+  minLength: 1,
+  maxLength: 20_000,
+  description:
+    'The type as code writes it with `v`: `v.string().max(200)`, `v.enum(["open", "done"])`, `v.id("customers")`, `v.person().optional()`, `v.number().integer().default(0)`.',
+});
+
+/** A value records the App holds already take, as the definition tools take it. */
+const answerParameter = Type.Optional(
+  Type.Unknown({
+    description:
+      "The value records the table holds already take where they lack this field (JSON that fits its type): needed when a required field is added to, or narrowed on, a table that may hold records.",
+  })
+);
+
+const modeParameter = Type.Union(
+  [
+    Type.Literal("owner"),
+    Type.Literal("appMembers"),
+    Type.Literal("appBuilders"),
+    Type.Literal("none"),
+  ],
+  {
+    description:
+      "Who reaches the table's records: only their owner, the App's members, its builders, or nobody.",
+  }
+);
+
+const ruleParameter = Type.Union([
+  Type.Object({ kind: Type.Literal("owner") }, { additionalProperties: false }),
+  Type.Object(
+    {
+      kind: Type.Union([Type.Literal("person"), Type.Literal("team")]),
+      field: Type.String({ minLength: 1, maxLength: 64 }),
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("role"),
+      role: Type.Union([Type.Literal("builder"), Type.Literal("user")]),
+    },
+    { additionalProperties: false }
+  ),
+]);
+
+/** A table's access, as `addTable` and `setAccess` take it. */
+const accessProperties = {
+  read: modeParameter,
+  write: modeParameter,
+  rows: Type.Optional(
+    Type.Object(
+      {
+        read: Type.Optional(
+          Type.Array(ruleParameter, { minItems: 1, maxItems: 8 })
+        ),
+        write: Type.Optional(
+          Type.Array(ruleParameter, { minItems: 1, maxItems: 8 })
+        ),
+      },
+      {
+        additionalProperties: false,
+        description:
+          'Row rules, which of its rows each caller reaches, with `read` or `write` access `appMembers` or `appBuilders`: `{ kind: "owner" }` (who inserted it), `{ kind: "person", field }` (a `v.person()` field names them), `{ kind: "team", field }` (a text field holds their team\'s ID), `{ kind: "role", role: "builder" }`.',
+      }
+    )
+  ),
+};
+
+/** A table's name, as the definition tools take it. */
+const tableParameter = Type.String({
+  minLength: 1,
+  maxLength: 64,
+  description: "The table, by its name.",
+});
+
+/** The definition change `operation` of `app`, as `env.build.define` makes it. */
+const define = async (
+  scope: AgentScope,
+  app: string,
+  operation: Record<string, unknown>
+) => await exports.BuildApi({ props: scope }).define(app, operation);
 
 /** One of the tools here, as `dedicatedTools` makes it for a turn. */
 interface Definition<P extends TSchema> {
@@ -472,7 +566,7 @@ const definitions = (known: Set<string>, assets: Fetcher) => [
     name: "writeFile",
     label: "Write files",
     api: "build",
-    description: `Writes whole files into this chat's draft of an App, creating or replacing each: \`files\` by path, up to ${maxFilesPerWrite} in one call, which saves them together. ${answersWithDiagnostics}`,
+    description: `Writes whole files into this chat's draft of an App, creating or replacing each: \`files\` by path, up to ${maxFilesPerWrite} in one call, which saves them together. ${generatedNote} ${answersWithDiagnostics}`,
     parameters: Type.Object(
       {
         app: appParameter,
@@ -502,7 +596,7 @@ const definitions = (known: Set<string>, assets: Fetcher) => [
     name: "editFile",
     label: "Edit a file",
     api: "build",
-    description: `Replaces \`oldText\`, which must occur exactly once in the file, with \`newText\`, in this chat's draft of an App. Read the file with \`readFile\` first: a file you haven't read or written in this chat is refused. For several edits, make several calls. ${answersWithDiagnostics}`,
+    description: `Replaces \`oldText\`, which must occur exactly once in the file, with \`newText\`, in this chat's draft of an App. Read the file with \`readFile\` first: a file you haven't read or written in this chat is refused. For several edits, make several calls. ${generatedNote} ${answersWithDiagnostics}`,
     parameters: Type.Object(
       {
         app: appParameter,
@@ -543,6 +637,151 @@ const definitions = (known: Set<string>, assets: Fetcher) => [
           { revision }
         );
     },
+  }),
+  tool({
+    name: "addTable",
+    label: "Add a table",
+    api: "build",
+    description: `Adds a table to the App's data model, with its fields (each a type by name) and its access (who reads and who writes its records; nobody until you say). ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        name: Type.String({
+          minLength: 1,
+          maxLength: 64,
+          description: "Its name: a letter, then letters, digits or _.",
+        }),
+        fields: Type.Optional(
+          Type.Record(Type.String({ maxLength: 64 }), typeParameter, {
+            description: "Its fields: each one's type, by its name.",
+          })
+        ),
+        access: Type.Optional(
+          Type.Object(accessProperties, { additionalProperties: false })
+        ),
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "addTable", ...input }),
+  }),
+  tool({
+    name: "addField",
+    label: "Add a field",
+    api: "build",
+    description: `Adds a field to a table. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        table: tableParameter,
+        name: Type.String({ minLength: 1, maxLength: 64 }),
+        type: typeParameter,
+        answer: answerParameter,
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "addField", ...input }),
+  }),
+  tool({
+    name: "changeField",
+    label: "Change a field",
+    api: "build",
+    description: `Changes a field's type. Widening it (a higher max, a value more, optional) keeps every record as it is; narrowing it checks every record as the version is made current. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        table: tableParameter,
+        field: Type.String({
+          minLength: 1,
+          maxLength: 64,
+          description: "The field, by its name.",
+        }),
+        type: typeParameter,
+        answer: answerParameter,
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "changeField", ...input }),
+  }),
+  tool({
+    name: "renameField",
+    label: "Rename a field",
+    api: "build",
+    description: `Renames a field: it keeps its ID, so its indexes, row rules and answers follow it. The records the App holds already keep their values under the old name, which stays in them: the new name starts empty there. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        table: tableParameter,
+        field: Type.String({
+          minLength: 1,
+          maxLength: 64,
+          description: "The field, by its name now.",
+        }),
+        name: Type.String({
+          minLength: 1,
+          maxLength: 64,
+          description: "Its new name.",
+        }),
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "renameField", ...input }),
+  }),
+  tool({
+    name: "setAccess",
+    label: "Set a table's access",
+    api: "build",
+    description: `Sets who reaches a table's records: its \`read\` and \`write\` access, and its row rules. The store enforces them on every read and write; a server function only narrows them (\`tables\`). \`sensitive\` keeps the table's values out of its change history and records every read of it in the audit log. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        table: tableParameter,
+        access: Type.Object(accessProperties, { additionalProperties: false }),
+        sensitive: Type.Optional(Type.Boolean()),
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "setAccess", ...input }),
+  }),
+  tool({
+    name: "addIndex",
+    label: "Add an index",
+    api: "build",
+    description: `Adds an index a query orders and pages a table by (\`.withIndex(name)\`): its fields in order, scalar ones or \`_createdAt\`/\`_updatedAt\`. With \`search\`, the table's one full-text search index instead, over its text fields (\`ctx.db.search(table, text)\`). ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        table: tableParameter,
+        name: Type.String({ minLength: 1, maxLength: 64 }),
+        fields: Type.Array(Type.String({ minLength: 1, maxLength: 64 }), {
+          minItems: 1,
+          maxItems: 8,
+        }),
+        search: Type.Optional(Type.Boolean()),
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "addIndex", ...input }),
+  }),
+  tool({
+    name: "addPermission",
+    label: "Add a permission",
+    api: "build",
+    description: `Adds something the App reaches outside itself, written as code declares it: \`permission.ai({ maxOutputTokens: 2000 })\`, \`permission.connection("mail", { contract: "microsoft-365.mail@1", actions: ["send"] })\`, \`permission.workflow("triage", { input: v.object({...}), output: v.object({...}) })\`, \`permission.app("crm", { functions: {...} })\`, \`permission.grasp()\`, \`permission.brain({...})\`, \`permission.guests({...})\`, \`permission.files({ operations: [...] })\`, \`permission.links({ origins: [...] })\`, or \`people\` (reading the organization's people). Server code imports it as \`permissions.<alias>\` from grasp.config.ts and lists it in a function's \`uses\`. It grants nothing: an admin binds or grants each. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        permission: Type.String({ minLength: 1, maxLength: 20_000 }),
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, permission }) =>
+      await define(scope, app, { op: "addPermission", permission }),
   }),
   tool({
     name: "searchFiles",

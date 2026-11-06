@@ -316,7 +316,7 @@ const checkedDraftCode = async (
 };
 
 /**
- * A draft's server code (`app.ts`, `schema.ts`, `values.ts`,
+ * A draft's server code (`grasp.config.ts`, `screens.ts`, `values.ts`,
  * `server/`), checked as a check reports it: type
  * errors and every gate a seal holds it to, against the references its
  * seal would generate (`checkedDraftCode`); its registration runs in the

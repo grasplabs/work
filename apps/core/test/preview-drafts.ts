@@ -56,10 +56,10 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 /** The App's notes, its functions and a screen that reads them live. */
 export const notesFiles = (marker: string): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }),
+  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, permission, v } from "@grasp-os/sdk";
@@ -258,15 +258,11 @@ export const consult = action({
   handler: async (ctx) => await ctx.ai.generate({ prompt: "Hi" }),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { writer } from "./server/notes.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
   permissions: { ai: writer },
 });
 `,
@@ -303,18 +299,20 @@ const preferencesDeclared = v.object({
 export const withPreferences = (
   files: Record<string, string>
 ): Record<string, string> => {
-  const registration = files["app.ts"] ?? "";
+  const registration = files["grasp.config.ts"] ?? "";
   const anchor = "  permissions: { ai: writer },";
   // A fixture that lost its anchor would silently drop the preferences.
   if (!registration.includes(anchor)) {
-    throw new Error(`app.ts has no "${anchor}" to declare preferences at.`);
+    throw new Error(
+      `grasp.config.ts has no "${anchor}" to declare preferences at.`
+    );
   }
   return {
     ...files,
-    "app.ts": registration
+    "grasp.config.ts": registration
       .replace(
-        'import { app } from "@grasp-os/sdk";',
-        'import { app, v } from "@grasp-os/sdk";'
+        'import { defineApp } from "@grasp-os/sdk";',
+        'import { defineApp, v } from "@grasp-os/sdk";'
       )
       .replace(anchor, `  preferences: ${preferencesSource},\n${anchor}`),
   };
@@ -331,20 +329,20 @@ export const preferenceReference = (name: "get" | "update") => {
 
 /** An App with preferences and no tables, and one screen. */
 export const deskFiles = (marker = "Desk"): Record<string, string> => ({
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 
 export default defineSchema({});
 `,
-  "app.ts": `import { app, v } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp, v } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Desk",
-  schema,
-  access: { tables: {} },
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   preferences: ${preferencesSource},
 });
+`,
+  "screens.ts": `export default {
+  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
+};
 `,
   "screens/desk.tsx": `const Desk = () => <main>${marker}</main>;
 

@@ -46,10 +46,10 @@ import { callAuth, routed, signedInApi } from "./sign-in.ts";
 const idp = mockIdp();
 
 const files: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(500) }).index("by_updated", ["_updatedAt"]),
+  notes: defineTable({ title: v.string().min(1).max(500) }).index("by_updated", ["_updatedAt"]).access({ read: "owner", write: "owner" }),
 });
 `,
   "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
@@ -173,14 +173,10 @@ export const huge = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Writer",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
 });
 `,
   "screens/writer.tsx": `import { useStream } from "@grasp-os/sdk/react";
@@ -1253,7 +1249,7 @@ const endOf = async (frames: ReadableStream<Uint8Array>): Promise<string> => {
 const published = async (opened: Opened): Promise<Release> => {
   const changed = {
     ...files,
-    "app.ts": `${files["app.ts"] ?? ""}\n// The second version.\n`,
+    "grasp.config.ts": `${files["grasp.config.ts"] ?? ""}\n// The second version.\n`,
   };
   const { version } = await opened.builderApi.api.apps.files.commit(
     opened.app,

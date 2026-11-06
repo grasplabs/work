@@ -59,10 +59,10 @@ const chosenModel = "mistral/mistral-large-latest";
  * `maxOutputTokens`.
  */
 const modelFiles = (maxOutputTokens = 300): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  notes: defineTable({ title: v.string() }),
+  notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }),
 });
 `,
   "server/assist.ts": `import { permission, v } from "@grasp-os/sdk";
@@ -155,15 +155,11 @@ export const attempt = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { ai } from "./server/assist.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Assistant",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { ai },
 });
 `,
@@ -302,7 +298,7 @@ const writerApproval = (sealed: Sealed) => ({
 
 /** An App whose actions search and read two of the Brain's collections. */
 const knowledgeFiles = (): Record<string, string> => ({
-  "schema.ts": modelFiles()["schema.ts"] ?? "",
+  "server/schema.ts": modelFiles()["server/schema.ts"] ?? "",
   "server/help.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 
@@ -338,15 +334,11 @@ export const summarize = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { ai, brain } from "./server/help.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Help",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { brain, ai },
 });
 `,
@@ -1455,7 +1447,7 @@ const deskFiles = ({
   collections?: readonly string[];
   sneak?: boolean;
 } = {}): Record<string, string> => ({
-  "schema.ts": modelFiles()["schema.ts"] ?? "",
+  "server/schema.ts": modelFiles()["server/schema.ts"] ?? "",
   "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 
@@ -1501,15 +1493,11 @@ ${
     : ""
 }
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 ${withWriter || withBrain ? `import { ${[...(withWriter ? ["ai"] : []), ...(withBrain ? ["brain"] : [])].join(", ")} } from "./server/desk.ts";` : ""}
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Desk",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { ${[...(withWriter ? ["ai"] : []), ...(withBrain ? ["brain"] : [])].join(", ")} },
 });
 `,

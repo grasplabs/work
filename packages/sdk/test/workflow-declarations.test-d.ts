@@ -14,8 +14,8 @@ import type {
   WorkflowPermission,
 } from "../src/index.ts";
 import { useWorkflow } from "../src/react.ts";
-import type { archiveNotes } from "./notes/app.ts";
-import { summarizeNote } from "./notes/app.ts";
+import type { archiveNotes } from "./notes/grasp.config.ts";
+import { summarizeNote } from "./notes/grasp.config.ts";
 import { workflows } from "./notes/server/_generated/api.ts";
 
 /** The input a declaration takes, as a caller passes it. */

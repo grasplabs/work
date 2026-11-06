@@ -576,7 +576,7 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     const afterCommit = await updated();
     // Another chat's draft, proposed.
     const { chatId: proposing } = await chatWithDraft(builder, app, {
-      "schema.ts": `${deskFiles()["schema.ts"] ?? ""}// Proposed elsewhere.\n`,
+      "server/schema.ts": `${deskFiles()["server/schema.ts"] ?? ""}// Proposed elsewhere.\n`,
     });
     const beforeProposal = await follow();
     await chats.proposeDraft(proposing, app, "Proposed elsewhere");

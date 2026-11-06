@@ -95,7 +95,7 @@ const tryEach = (calls: Record<string, string>): string =>
 const everyCall = (app: string) =>
   tryEach({
     apps: "(await env.apps.list()).map(({ id }) => id)",
-    files: `Object.keys(await env.apps.files(${JSON.stringify(app)})).includes("app.ts")`,
+    files: `Object.keys(await env.apps.files(${JSON.stringify(app)})).includes("grasp.config.ts")`,
     versions: `(await env.apps.versions(${JSON.stringify(app)})).map(({ version }) => version)`,
   });
 

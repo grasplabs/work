@@ -48,11 +48,11 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
  * it commits, and an action.
  */
 const portalFiles = (marker = "1"): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  notes: defineTable({ text: v.string() }),
-  secrets: defineTable({ text: v.string() }),
+  notes: defineTable({ text: v.string() }).access({ read: "owner", write: "owner" }),
+  secrets: defineTable({ text: v.string() }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/portal.ts": `import { permission, v } from "@grasp-os/sdk";
@@ -131,20 +131,11 @@ export const shout = action({
   handler: async (_ctx, args) => args.text.toUpperCase() + "${marker}",
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { followUp } from "./server/portal.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Portal",
-  schema,
-  access: {
-    tables: {
-      notes: { read: "owner", write: "owner" },
-      secrets: { read: "appMembers", write: "appMembers" },
-    },
-  },
-  screens: [],
   permissions: { workflows: [followUp] },
 });
 `,
@@ -182,7 +173,7 @@ export const ${name} = query({
   return {
     ...files,
     "server/portal.ts": `${files["server/portal.ts"] ?? ""}${queries}`,
-    "app.ts": (files["app.ts"] ?? "")
+    "grasp.config.ts": (files["grasp.config.ts"] ?? "")
       .replace("shout } from", `shout, ${list} } from`)
       .replace("kick, shout }", `kick, shout, ${list} }`),
   };

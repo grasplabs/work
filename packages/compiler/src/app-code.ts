@@ -3,17 +3,18 @@
  * part of it may import. Five kinds of file, each a compilation target of
  * its own:
  *
- * - its schema (`schema.ts`) and shared values (`values.ts`): only the
- *   SDK's root module and each other, never a server function or the
- *   App's registration, so declaring the schema can't run server code,
- *   and the modules generated from it can't depend on what they are
- *   generated for;
- * - its server (`app.ts`, `server/**`): its own server files, the schema
- *   and values, the SDK's root module and the generated modules under
- *   `server/_generated/`: no platform module, no Workers runtime, nothing
- *   with authority of its own. Each module under `server/` (but
- *   `_generated/` and `migrations/`) is found for its functions: its path
- *   is their API (`server/tasks.ts`'s `list` is `api.tasks.list`);
+ * - its schema (`server/schema.ts`) and shared values (`values.ts`): only
+ *   the SDK's root module and each other, never a server function or the
+ *   App's config, so declaring the schema can't run server code, and the
+ *   modules generated from it can't depend on what they are generated
+ *   for;
+ * - its server (`grasp.config.ts`, `screens.ts`, `server/**`): its own
+ *   server files, the schema and values, the SDK's root module and the
+ *   generated modules under `server/_generated/`: no platform module, no
+ *   Workers runtime, nothing with authority of its own. Each module under
+ *   `server/` (but the schema, `_generated/` and `migrations/`) is found
+ *   for its functions: its path is their API (`server/tasks.ts`'s `list`
+ *   is `api.tasks.list`);
  * - its migrations (`server/migrations/*.ts`, spec 17.2): the schema,
  *   values and the SDK's root module, never server code or the generated
  *   modules, so a transform is built from nothing that reaches a store or
@@ -47,7 +48,7 @@ import type { CodeFolder } from "./inputs.ts";
 import { kitModuleName, appModuleName } from "./kit.ts";
 
 /**
- * The SDK modules an App's server isolate loads: the root (values, `app`,
+ * The SDK modules an App's server isolate loads: the root (values, `defineApp`,
  * `resource`, `AppError`), the server constructors the generated
  * `server/_generated/server.ts` calls, and the runner the host's main
  * module calls. App code imports only the root (`platformImports`).
@@ -81,12 +82,25 @@ export const generatedModules = {
 } as const;
 
 /**
- * The entry the host runs an App's server from: its registration with
- * the functions every server module exports (`serverEntrySource`).
+ * The entry the host runs an App's server from: its config, schema,
+ * screens, server modules and migrations, registered together
+ * (`serverEntrySource`).
  */
 export const serverEntryPath = ".grasp/app.ts";
 
-const schemaFiles: ReadonlySet<string> = new Set(["schema.ts", "values.ts"]);
+/** Where an App's config is: generated from its definition. */
+export const configPath = "grasp.config.ts";
+
+/** Where an App's schema is: generated from its definition. */
+export const schemaPath = "server/schema.ts";
+
+/** Where an App's screens are listed. */
+export const screensPath = "screens.ts";
+
+const schemaFiles: ReadonlySet<string> = new Set([schemaPath, "values.ts"]);
+
+/** The server files at the App's root: its config and its screens. */
+const rootServerFiles: ReadonlySet<string> = new Set([configPath, screensPath]);
 const generatedFile = /^(?:server\/_generated|\.grasp)\/[\w.-]+\.ts$/u;
 
 /** Where an App's migrations are. */
@@ -111,13 +125,14 @@ export const migrationsFolder: CodeFolder = {
 
 /**
  * Whether `path` is one of the App's server modules, whose exports are
- * its functions: a `.ts` file anywhere under `server/` but its generated
- * modules and its migrations, its folders named as any App path's may be
- * (`hasAppPathSegments`), dots included but never leading, so no `.`,
- * `..` or hidden folder is ever server code.
+ * its functions: a `.ts` file anywhere under `server/` but its schema,
+ * its generated modules and its migrations, its folders named as any App
+ * path's may be (`hasAppPathSegments`), dots included but never leading,
+ * so no `.`, `..` or hidden folder is ever server code.
  */
 export const isServerModule = (path: string): boolean =>
   path.startsWith("server/") &&
+  path !== schemaPath &&
   !path.startsWith(generatedServerFolder) &&
   !path.startsWith(migrationsPrefix) &&
   path.endsWith(".ts") &&
@@ -131,6 +146,7 @@ export const isServerModule = (path: string): boolean =>
 export const serverFolder: CodeFolder = {
   folder: "server/",
   isFile: (path) =>
+    path === schemaPath ||
     isServerModule(path) ||
     migrationsFolder.isFile(path) ||
     generatedFile.test(path),
@@ -156,32 +172,47 @@ const serverModulePaths = (files: Iterable<string>): string[] =>
 
 /**
  * The entry the host runs an App's server from (`serverEntryPath`): the
- * App's registration, with the functions each of `files`' server modules
- * exports (`registerFunctions`). Generated from the file list alone, so
+ * App's config, schema and screens, with each of `files`' server modules
+ * and migrations (`registerApp`). Generated from the file list alone, so
  * the host has it before anything else is known of the App.
  */
 export const serverEntrySource = (files: Iterable<string>): string => {
-  const modules = serverModulePaths(files);
-  const imports = modules
-    .map(
+  const paths = [...files];
+  const modules = serverModulePaths(paths);
+  const migrations = paths
+    .filter((path) => migrationsFolder.isFile(path))
+    .toSorted();
+  const hasScreens = paths.includes(screensPath);
+  const imports = [
+    ...modules.map(
       (module, index) =>
         `import * as m${String(index)} from ${JSON.stringify(`../server/${module}.ts`)};\n`
-    )
-    .join("");
+    ),
+    ...migrations.map(
+      (path, index) =>
+        `import migration${String(index)} from ${JSON.stringify(`../${path}`)};\n`
+    ),
+  ].join("");
   // Computed keys: a quoted `"__proto__"` key would set the map's
   // prototype, where a computed one is a module the SDK refuses by path.
   const entries = modules
     .map(
-      (module, index) => `  [${JSON.stringify(module)}]: m${String(index)},\n`
+      (module, index) => `    [${JSON.stringify(module)}]: m${String(index)},\n`
     )
     .join("");
-  return `// Generated by Grasp: the App's registration, with its server functions.
-import { registerFunctions } from "@grasp-os/sdk/runner";
+  return `// Generated by Grasp: the App, registered from its parts.
+import { registerApp } from "@grasp-os/sdk/runner";
 
-import registered from "../app.ts";
-${imports}
-export default registerFunctions(registered, {
-${entries}});
+import config from "../${configPath}";
+import schema from "../${schemaPath}";
+${hasScreens ? `import screens from "../${screensPath}";\n` : ""}${imports}
+export default registerApp({
+  config,
+  schema,
+${hasScreens ? "  screens,\n" : ""}  modules: {
+${entries}  },
+  migrations: [${migrations.map((_path, index) => `migration${String(index)}`).join(", ")}],
+});
 `;
 };
 
@@ -256,15 +287,15 @@ export const appCodeKind = (path: string): AppCodeKind | undefined => {
   if (migrationsFolder.isFile(path)) {
     return "migration";
   }
-  if (path === "app.ts" || isServerModule(path)) {
+  if (rootServerFiles.has(path) || isServerModule(path)) {
     return "server";
   }
   return isTestFile(path) ? "test" : undefined;
 };
 
-/** Whether `files` are an App of spec 8's layout: a registration and a schema. */
+/** Whether `files` are an App of spec 8's layout: a config and a schema. */
 export const isAppLayout = (files: Readonly<Record<string, string>>): boolean =>
-  Object.hasOwn(files, "app.ts") && Object.hasOwn(files, "schema.ts");
+  Object.hasOwn(files, configPath) && Object.hasOwn(files, schemaPath);
 
 /**
  * The files a build of an App's server code reads: never its tests, and
@@ -307,7 +338,7 @@ const reachable: Readonly<Record<AppCodeKind, ReadonlySet<AppCodeKind>>> = {
   schema: new Set(["schema"]),
   server: new Set(["server", "schema", "migration", "generated"]),
   migration: new Set(["schema"]),
-  generated: new Set(["schema", "server", "generated"]),
+  generated: new Set(["schema", "server", "migration", "generated"]),
   test: new Set(["test", "schema"]),
 };
 
@@ -325,7 +356,7 @@ const platformImports: Readonly<
   migration: new Map([["@grasp-os/sdk", kitModuleName("@grasp-os/sdk")]]),
   generated: new Map([
     ["@grasp-os/sdk/server", kitModuleName("@grasp-os/sdk/server")],
-    // The entry's `registerFunctions` (`serverEntrySource`).
+    // The entry's `registerApp` (`serverEntrySource`).
     ["@grasp-os/sdk/runner", kitModuleName("@grasp-os/sdk/runner")],
   ]),
   test: new Map([
@@ -341,14 +372,14 @@ const platformImports: Readonly<
 /** What each kind is, for messages. */
 const described: Readonly<Record<AppCodeKind, string>> = {
   schema:
-    "The schema (schema.ts, values.ts) imports only @grasp-os/sdk and each other",
+    "The schema (server/schema.ts, values.ts) imports only @grasp-os/sdk and each other",
   server:
-    "Server code (app.ts, server/) imports its own files, schema.ts, values.ts, server/migrations/, @grasp-os/sdk and the generated modules (@server/_generated/server, api, internal and dataModel)",
+    "Server code (grasp.config.ts, screens.ts, server/) imports its own files, server/schema.ts, values.ts, server/migrations/, @grasp-os/sdk and the generated modules (@server/_generated/server, api, internal and dataModel)",
   migration:
-    "A migration (server/migrations/) imports only schema.ts, values.ts and @grasp-os/sdk",
+    "A migration (server/migrations/) imports only server/schema.ts, values.ts and @grasp-os/sdk",
   generated:
-    "Generated code imports only @grasp-os/sdk/server, @grasp-os/sdk/runner, schema.ts and the App's server code",
-  test: "Tests (tests/) import each other, schema.ts, values.ts, @grasp-os/sdk, @grasp-os/sdk/testing and @server/_generated/api: they reach the App through its references, as its callers do",
+    "Generated code imports only @grasp-os/sdk/server, @grasp-os/sdk/runner, server/schema.ts, the App's server code and its migrations",
+  test: "Tests (tests/) import each other, server/schema.ts, values.ts, @grasp-os/sdk, @grasp-os/sdk/testing and @server/_generated/api: they reach the App through its references, as its callers do",
 };
 
 const javascriptExtension = /\.js$/u;
@@ -466,7 +497,7 @@ const serverPath = (
     }
   }
   const path = parts.join("/").replace(/\.tsx?$/u, "");
-  return ["schema", "values", "app"].includes(path) ||
+  return ["values", "grasp.config", "screens"].includes(path) ||
     path.startsWith("server/") ||
     path.startsWith(".grasp/")
     ? path
@@ -498,7 +529,7 @@ export const screenImportError = (
   }
   return reached === undefined
     ? undefined
-    : `"${specifier}" is the App's server code, which screens never import: what a screen calls comes from the App's references, never its handlers, schema, migrations or server modules.`;
+    : `"${specifier}" is the App's server code, which screens never import: what a screen calls comes from the App's references, never its handlers, config, schema, migrations or server modules.`;
 };
 
 /**

@@ -368,14 +368,13 @@ export const memberOf = async (opened: Opened) => {
  * (`secrets`), and its query and mutation.
  */
 export const withSecrets = (): Record<string, string> => {
-  const schema = files["schema.ts"] ?? "";
+  const schema = files["server/schema.ts"] ?? "";
   const operations = files["server/notes.ts"] ?? "";
-  const app = files["app.ts"] ?? "";
   return {
     ...files,
-    "schema.ts": schema.replace(
+    "server/schema.ts": schema.replace(
       "export default defineSchema({",
-      "export default defineSchema({\n  secrets: defineTable({ text: v.string() }),"
+      'export default defineSchema({\n  secrets: defineTable({ text: v.string() }).access({ read: "appBuilders", write: "appBuilders" }),'
     ),
     "server/notes.ts": `${operations}
 export const secrets = query({
@@ -390,9 +389,5 @@ export const tell = mutation({
   handler: async (ctx, args) => await ctx.db.insert("secrets", args),
 });
 `,
-    "app.ts": app.replace(
-      'access: { tables: { notes: { read: "owner", write: "owner" } } }',
-      'access: { tables: { notes: { read: "owner", write: "owner" }, secrets: { read: "appBuilders", write: "appBuilders" } } }'
-    ),
   };
 };

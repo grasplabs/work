@@ -21,7 +21,9 @@ export const v1Schema = `import { defineSchema, defineTable, v } from "@grasp-os
 
 export const noteFields = { title: v.string().min(1).max(200) };
 
-export default defineSchema({ notes: defineTable(noteFields) });
+export default defineSchema({
+  notes: defineTable(noteFields).access({ read: "owner", write: "owner" }),
+});
 `;
 
 export const v2Schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
@@ -31,23 +33,15 @@ export const noteFields = {
   category: v.enum(["launch", "general"]),
 };
 
-export default defineSchema({ notes: defineTable(noteFields) });
+export default defineSchema({
+  notes: defineTable(noteFields).access({ read: "owner", write: "owner" }),
+});
 `;
 
-/** The App's registration, with the migration when it has one. */
-export const appFile = (
-  migrated: boolean
-): string => `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-${migrated ? 'import derive from "./server/migrations/derive-category.ts";' : ""}
+/** The App's config: its migrations are the files in server/migrations/. */
+export const configFile = `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
-  migrations: [${migrated ? "derive" : ""}],
-});
+export default defineApp({ name: "Notes" });
 `;
 
 /** A fixture `deriving` passes: a launch note gets the launch category. */
@@ -63,7 +57,7 @@ export const migrationFile = (
   handler: string,
   fixtures = passingFixtures
 ): string => `import { migration, v } from "@grasp-os/sdk";
-import { noteFields } from "../../schema.ts";
+import { noteFields } from "../schema.ts";
 
 export default migration({
   name: "derive-category",
@@ -90,14 +84,14 @@ export const migratedFiles = (
   fixtures = passingFixtures,
   schema = v2Schema
 ): Record<string, string> => ({
-  "schema.ts": schema,
+  "server/schema.ts": schema,
   "server/migrations/derive-category.ts": migrationFile(
     fromSchema,
     toSchema,
     handler,
     fixtures
   ),
-  "app.ts": appFile(true),
+  "grasp.config.ts": configFile,
 });
 
 /** The code and details of what `work` threw. */
@@ -173,7 +167,7 @@ export const migrated = async (
   } = {}
 ) => {
   const fixture: Fixture = await appWith(
-    { "schema.ts": start, "app.ts": appFile(false) },
+    { "server/schema.ts": start, "grasp.config.ts": configFile },
     "Notes",
     owner
   );

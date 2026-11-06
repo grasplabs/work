@@ -19,10 +19,9 @@ import type { Infer, ValueShape } from "./values.ts";
 //
 // The same declaration is what records are validated against, what types
 // `Doc` and `Id`, what a store's host is handed (its canonical manifest,
-// schema-manifest.ts) and what two versions are compared by. Which tables a
-// caller may read or write is declared beside it (an App's `access`); which
-// rows of a table, by who they are (`.access` with `rows`, below), with the
-// table, since its rules name its fields.
+// schema-manifest.ts) and what two versions are compared by. Who may read
+// or write a table, and which of its rows, is declared on the table
+// (`.access`, with `rows` for row rules), since its rules name its fields.
 //
 // Adapted from Baseflare's `defineSchema` and `defineTable` (MIT, © 2026
 // Baseflare contributors: packages/baseflare/src/server/schema), without
@@ -149,6 +148,35 @@ export type RowRuleList<Field extends string = string> = readonly [
 export interface RowRules<Field extends string = string> {
   readonly read?: RowRuleList<Field>;
   readonly write?: RowRuleList<Field>;
+}
+
+/**
+ * Who a table's records reach, for reading or for writing: only their
+ * owner, the App's members, its builders, or nobody.
+ */
+export type AccessMode = "owner" | "appMembers" | "appBuilders" | "none";
+
+export const accessModes: ReadonlySet<unknown> = new Set<AccessMode>([
+  "owner",
+  "appMembers",
+  "appBuilders",
+  "none",
+]);
+
+/**
+ * A table's access, as `.access` takes it: a mode for reading and one for
+ * writing (a mode left out is `none`), and the row rules that narrow them.
+ */
+export interface TableAccess<Field extends string = string> {
+  readonly read?: AccessMode;
+  readonly write?: AccessMode;
+  readonly rows?: RowRules<Field>;
+}
+
+/** A table's access modes, both explicit. */
+export interface AccessModes {
+  readonly read: AccessMode;
+  readonly write: AccessMode;
 }
 
 /** The most rules one direction of a table holds. */
@@ -283,21 +311,22 @@ export interface TableDefinition<
    */
   readonly sensitive: () => TableDefinition<Fields, Indexes, Searchable>;
   /**
-   * The same table with row rules (`rows`): which of its rows each caller
-   * reads, and which they write, once the table's access mode (an App's
-   * `access`) lets them reach the table at all. Each direction declared
-   * lists at least one rule, and a row reaches whoever any of them
-   * admits. Writing a row takes both: a write changes only a row its
-   * read and its write rules admit the writer to, and leaves it where
-   * they both still do. Without write rules, its read rules are its
-   * write rules too; without read rules, reading is the access mode's
-   * alone. The store enforces them on every read and write: no App code
-   * gets past them. A direction with rules has the access mode
-   * `appMembers` or `appBuilders` (`rows.owner()` is how a rule says
-   * `owner`). A table has one set of rules.
+   * The same table with its access: who reads it and who writes it
+   * (`read` and `write`, each `owner`, `appMembers`, `appBuilders` or
+   * `none`, the default), and its row rules (`rows`): which of its rows
+   * each caller reads, and which they write, once the mode lets them
+   * reach the table at all. Each direction of `rows` lists at least one
+   * rule, and a row reaches whoever any of them admits. Writing a row
+   * takes both: a write changes only a row its read and its write rules
+   * admit the writer to, and leaves it where they both still do. Without
+   * write rules, its read rules are its write rules too; without read
+   * rules, reading is the mode's alone. The store enforces them on every
+   * read and write: no App code gets past them. A direction with rules
+   * has the mode `appMembers` or `appBuilders` (`rows.owner()` is how a
+   * rule says `owner`). A table without `.access` reaches nobody.
    */
   readonly access: (
-    rules: RowRules<SearchField<Fields>>
+    access: TableAccess<SearchField<Fields>>
   ) => TableDefinition<Fields, Indexes, Searchable>;
   /** Its indexes, by name, for types only: never set. */
   readonly "~indexes"?: Indexes;
@@ -391,7 +420,9 @@ export interface TableState {
   readonly searchIndex?: readonly string[];
   /** Declared sensitive (`TableDefinition.sensitive`); left out otherwise. */
   readonly sensitive?: true;
-  /** Its row rules, as `.access` declared them; none without. */
+  /** Its access modes, as `.access` declared them; `none` both ways without. */
+  readonly access?: AccessModes;
+  /** Its row rules, as `.access` declared them (`rows`); none without. */
   readonly rules?: RowRules;
 }
 
@@ -742,6 +773,64 @@ const checkedRules = (state: TableState, rules: unknown): RowRules => {
   });
 };
 
+/** A mode of unknown origin, checked: one left out is `none`. */
+const checkedMode = (mode: unknown): AccessMode => {
+  if (mode === undefined) {
+    return "none";
+  }
+  if (!accessModes.has(mode)) {
+    return refuse(
+      "schema.invalid_access",
+      "A table's `read` and `write` are each `owner`, `appMembers`, `appBuilders` or `none`."
+    );
+  }
+  // SAFETY: one of the modes, checked just above.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return mode as AccessMode;
+};
+
+/**
+ * A table's access of unknown origin, checked against it. Row rules choose
+ * rows among those a mode lets someone reach, so a direction with rules
+ * has a mode that reaches every row (`appMembers` or `appBuilders`):
+ * `owner` already narrows to one person's rows (`rows.owner()` says it
+ * among the rules), and `none` reaches no row.
+ */
+const checkedAccess = (
+  state: TableState,
+  access: unknown
+): { access: AccessModes; rules?: RowRules } => {
+  if (
+    !isPlainObject(access) ||
+    !Object.keys(access).every((key) => ["read", "write", "rows"].includes(key))
+  ) {
+    return refuse(
+      "schema.invalid_access",
+      "A table's access is `{ read?, write?, rows? }`."
+    );
+  }
+  const modes: AccessModes = Object.freeze({
+    read: checkedMode(access.read),
+    write: checkedMode(access.write),
+  });
+  if (access.rows === undefined) {
+    return { access: modes };
+  }
+  const rules = checkedRules(state, access.rows);
+  for (const direction of ["read", "write"] as const) {
+    const mode = modes[direction];
+    if (
+      rules[direction] !== undefined &&
+      (mode === "owner" || mode === "none")
+    ) {
+      refuseRule(
+        `A table with row rules for ${direction === "read" ? "reading" : "writing"} has \`${direction}\` access \`appMembers\` or \`appBuilders\`: the rules choose among the rows it reaches (\`rows.owner()\` among the rules says \`owner\`).`
+      );
+    }
+  }
+  return { access: modes, rules };
+};
+
 /**
  * A table of these fields and indexes, registered as genuine. Typed as any
  * table: what `.index` answers is typed by `TableDefinition`.
@@ -784,13 +873,11 @@ const tableOf = (shape: ValueShape, state: TableState): AnyTable => {
       });
     },
     sensitive: () => tableOf(shape, { ...state, sensitive: true }),
-    access: (rules: unknown) => {
-      if (state.rules !== undefined) {
-        refuseRule(
-          "A table has one set of row rules, for reading and writing."
-        );
+    access: (access: unknown) => {
+      if (state.access !== undefined) {
+        refuse("schema.invalid_access", "A table declares its access once.");
       }
-      return tableOf(shape, { ...state, rules: checkedRules(state, rules) });
+      return tableOf(shape, { ...state, ...checkedAccess(state, access) });
     },
   });
   tableStates.set(table, state);

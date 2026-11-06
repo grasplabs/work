@@ -76,7 +76,7 @@ const storedUnchecked = async (
 };
 
 const first = {
-  "schema.ts":
+  "server/schema.ts":
     'import { defineSchema } from "@grasp-os/sdk";\n\nexport default defineSchema({});\n',
   "screens/inbox.tsx": "export default () => <p>Inbox</p>;\n",
   "AGENTS.md": "# Invoice desk — facturen, 請求書 🧾\n",
@@ -105,7 +105,7 @@ describe("App code", { timeout: 60_000 }, () => {
     });
     await expect(apps.files.read(app.id, 1)).resolves.toStrictEqual(first);
     await expect(apps.files.read(app.id, 2)).resolves.toStrictEqual({
-      "schema.ts": first["schema.ts"],
+      "server/schema.ts": first["server/schema.ts"],
       "screens/inbox.tsx": "export default () => <p>Invoices</p>;\n",
       "components/row.tsx": "export const Row = () => null;\n",
     });
@@ -142,7 +142,7 @@ describe("App code", { timeout: 60_000 }, () => {
     const afterFirst = await apps.files.read(app.id);
     await commit(apps, app.id, {
       "AGENTS.md": "# Second\n",
-      "schema.ts": null,
+      "server/schema.ts": null,
     });
 
     expect({
@@ -163,7 +163,7 @@ describe("App code", { timeout: 60_000 }, () => {
     await expect(
       Promise.all([
         outcome(commit(apps, app.id, { "AGENTS.md": "# Second\n" })),
-        outcome(commit(apps, app.id, { "schema.ts": null })),
+        outcome(commit(apps, app.id, { "server/schema.ts": null })),
       ])
     ).resolves.toStrictEqual([
       "app.nothing_to_commit",

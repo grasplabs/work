@@ -11,7 +11,7 @@ import {
   inspectApp,
   readAppManifest,
   readSealedWorkflows,
-  registerFunctions,
+  registerApp,
   symbolicModules,
   workflowFingerprint,
   workflowQueries,
@@ -23,7 +23,7 @@ import type {
   ServerModules,
 } from "../src/host.ts";
 import type { AnyOperationReference } from "../src/index.ts";
-import { app, permission, v } from "../src/index.ts";
+import { defineApp, permission, v } from "../src/index.ts";
 import { workflowReferenceLimits } from "../src/references.ts";
 import { runFunction } from "../src/runner.ts";
 import type { OperationChannel } from "../src/runner.ts";
@@ -35,7 +35,7 @@ import { defineSchema, defineTable } from "../src/values.ts";
 import { notesWorkflows } from "./notes-workflows.ts";
 import notes from "./notes/.grasp/app.ts";
 import contractsText from "./notes/.grasp/contracts.json?raw";
-import { archiveNotes, summarizeNote } from "./notes/app.ts";
+import { archiveNotes, summarizeNote } from "./notes/grasp.config.ts";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
 import referencesText from "./notes/server/_generated/api.ts?raw";
 import {
@@ -1012,7 +1012,7 @@ describe("symbolic references", () => {
 });
 
 const schema = defineSchema({
-  notes: defineTable({ title: v.string() }),
+  notes: defineTable({ title: v.string() }).access({ read: "appMembers" }),
 });
 const server = serverModule(schema);
 const list = server.query({
@@ -1033,7 +1033,9 @@ const send = server.action({
 
 // SAFETY: a deliberately ill-typed view, for declarations the types refuse.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-const looseApp = app as (definition: unknown) => unknown;
+const looseDefineApp = defineApp as (
+  config: unknown
+) => ReturnType<typeof defineApp>;
 // SAFETY: as above.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
 const looseAction = server.action as (declaration: unknown) => unknown;
@@ -1057,20 +1059,19 @@ const smallModules: ServerModules = { notes: { list, send, secret } };
 const small = (
   changes: Record<string, unknown> = {},
   modules: ServerModules = smallModules
-) =>
-  registerFunctions(
-    // SAFETY: `looseApp` answers what `app` does; `registerFunctions`
-    // refuses anything else at run time.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    looseApp({
-      name: "Small",
-      schema,
-      access: { tables: { notes: { read: "appMembers" } } },
-      screens: [],
-      ...changes,
-    }) as ReturnType<typeof app>,
-    modules
-  );
+) => {
+  const { screens: listed, surfaces, ...config } = changes;
+  return registerApp({
+    config: looseDefineApp({ name: "Small", ...config }),
+    schema,
+    screens: {
+      screens: listed ?? [],
+      ...(surfaces === undefined ? {} : { surfaces }),
+    },
+    modules,
+    migrations: [],
+  });
+};
 
 describe("references in uses", () => {
   test("name a registered function by its path, matching its visibility and kind", () => {
@@ -1607,7 +1608,7 @@ describe("reading a manifest back", () => {
           true
         );
       },
-      "an action has no tables",
+      "An action has no tables",
     ],
     [
       "a query that writes",

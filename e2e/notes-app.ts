@@ -14,7 +14,9 @@ export const noteFields = {
 };
 
 export default defineSchema({
-  notes: defineTable(noteFields).index("by_updated", ["_updatedAt"]),
+  notes: defineTable(noteFields)
+    .index("by_updated", ["_updatedAt"])
+    .access({ read: "owner", write: "owner" }),
 });
 `;
 
@@ -126,21 +128,27 @@ export const detachFile = mutation({
 });
 `;
 
-const registration = `import { app, permission } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+const registration = `import { defineApp, permission } from "@grasp-os/sdk";
 
 export const files = permission.files({
   operations: ["upload", "read", "attach", "delete"],
 });
 
-export default app({
+export default defineApp({
   name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
   permissions: { files },
 });
 `;
+
+const screensList = `export default {
+  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
+};
+`;
+
+/** The screens' list, for screens whose route takes input. */
+const screensWithInput = `import { v } from "@grasp-os/sdk";
+
+${screensList}`;
 
 const attachmentsList = `import { GraspError, useClient, useFile, useMutation, useUpload } from "@grasp-os/sdk/react";
 import type { FileRef } from "@grasp-os/sdk/react";
@@ -460,9 +468,10 @@ export function ImportNote() {
 
 /** The Notes App's files. */
 export const notesAppFiles = (): Record<string, string> => ({
-  "schema.ts": schema,
+  "server/schema.ts": schema,
   "server/notes.ts": operations,
-  "app.ts": registration,
+  "grasp.config.ts": registration,
+  "screens.ts": screensList,
   "components/import-note.tsx": importNote,
   "components/create-note.tsx": createNote,
   "components/note-editor.tsx": noteEditor,
@@ -632,11 +641,11 @@ export const unaskedDownloadFiles = (): Record<string, string> => ({
 
 const linksRegistration = registration
   .replace(
-    "export default app({",
+    "export default defineApp({",
     `/** The help site its screens may link to, and nothing else. */
 export const help = permission.links({ origins: ["https://help.example.com"] });
 
-export default app({`
+export default defineApp({`
   )
   .replace("permissions: { files },", "permissions: { files, links: help },");
 
@@ -688,7 +697,7 @@ export default function Notes() {
  */
 export const linksFiles = (): Record<string, string> => ({
   ...notesAppFiles(),
-  "app.ts": linksRegistration,
+  "grasp.config.ts": linksRegistration,
   "screens/notes.tsx": linksScreen,
 });
 
@@ -699,19 +708,14 @@ export const linksFiles = (): Record<string, string> => ({
  */
 export const navigationFiles = (): Record<string, string> => ({
   ...notesAppFiles(),
-  "app.ts": registration
-    .replace(
-      'import { app, permission } from "@grasp-os/sdk";',
-      'import { app, permission, v } from "@grasp-os/sdk";'
-    )
-    .replace(
-      '  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],',
-      `  screens: [
+  "screens.ts": screensWithInput.replace(
+    '  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],',
+    `  screens: [
     { name: "notes", path: "/", source: "screens/notes.tsx" },
     { name: "start", path: "/start", source: "screens/home.tsx" },
     { name: "note", path: "/notes/:id", source: "screens/note.tsx", input: v.object({ id: v.string() }) },
   ],`
-    ),
+  ),
   "screens/home.tsx": `import { useNavigate } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { screens } from "@server/_generated/api";
@@ -763,7 +767,7 @@ export const surfaceFiles = (): Record<string, string> => {
   const files = navigationFiles();
   return {
     ...files,
-    "app.ts": (files["app.ts"] ?? "").replace(
+    "screens.ts": (files["screens.ts"] ?? "").replace(
       "input: v.object({ id: v.string() }) },\n  ],\n",
       `input: v.object({ id: v.string() }) },
     { name: "prefs", path: "/prefs", source: "screens/prefs.tsx", input: v.object({ section: v.enum(["general", "billing"]).default("general") }) },
@@ -820,14 +824,9 @@ export default function Prefs({ input }: ScreenProps<typeof screens.prefs>) {
  */
 export const hoppingFiles = (): Record<string, string> => ({
   ...notesAppFiles(),
-  "app.ts": registration
-    .replace(
-      'import { app, permission } from "@grasp-os/sdk";',
-      'import { app, permission, v } from "@grasp-os/sdk";'
-    )
-    .replace(
-      '  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],',
-      `  screens: [
+  "screens.ts": screensWithInput.replace(
+    '  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],',
+    `  screens: [
     { name: "notes", path: "/", source: "screens/notes.tsx" },
     { name: "start", path: "/start", source: "screens/takeoff.tsx" },
     { name: "launch", path: "/launch", source: "screens/launch.tsx" },
@@ -835,7 +834,7 @@ export const hoppingFiles = (): Record<string, string> => ({
     { name: "focusHop", path: "/focus-hops/:n", source: "screens/focus-hop.tsx", input: v.object({ n: v.string() }) },
     { name: "forge", path: "/forges/:n", source: "screens/forge.tsx", input: v.object({ n: v.string() }) },
   ],`
-    ),
+  ),
   "screens/takeoff.tsx": `import { useEffect } from "react";
 import { useNavigate } from "@grasp-os/sdk/react";
 import { screens } from "@server/_generated/api";

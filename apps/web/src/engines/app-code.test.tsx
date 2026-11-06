@@ -21,7 +21,7 @@ import { AppCode } from "./app-code.tsx";
 
 // An App's Code, in its workspace, against core's Apps API as the page
 // reaches it over RPC, faked: version 1 is current and version 2, up for
-// review, changes one line of app.ts, adds a screen and deletes old.ts.
+// review, changes one line of grasp.config.ts, adds a screen and deletes old.ts.
 // Core's diff is the files as they were and are, as its `diffFiles`
 // gives them; the page diffs them (@pierre/diffs), and what it drew is read
 // from the shadow roots it draws in.
@@ -51,7 +51,7 @@ const builtApp = (
 });
 
 /**
- * app.ts, its limit far enough from both ends that the lines above and
+ * grasp.config.ts, its limit far enough from both ends that the lines above and
  * below it fold.
  */
 const appWith = (limit: number): string =>
@@ -72,9 +72,9 @@ const oldText = "export const legacy = true;\n";
 type Versions = Record<number, AppFiles>;
 
 const smallVersions: Versions = {
-  1: { "app.ts": appV1, "old.ts": oldText, "schema.ts": schemaText },
+  1: { "grasp.config.ts": appV1, "old.ts": oldText, "schema.ts": schemaText },
   2: {
-    "app.ts": appV2,
+    "grasp.config.ts": appV2,
     "schema.ts": schemaText,
     "screens/inbox.tsx": inboxText,
   },
@@ -125,9 +125,9 @@ const notesAt = (limit: number): string => `export const limit = ${limit};\n`;
 
 /** The chat's draft at each revision, as its agent wrote it. */
 const draftAt: Record<number, AppFiles> = {
-  1: { "app.ts": appV1, "server/notes.ts": notesAt(10) },
+  1: { "grasp.config.ts": appV1, "server/notes.ts": notesAt(10) },
   2: {
-    "app.ts": appV1,
+    "grasp.config.ts": appV1,
     "server/notes.ts": notesAt(25),
     "screens/inbox.tsx": inboxText,
   },
@@ -358,8 +358,8 @@ describe("An App's Code", () => {
       ),
     }).toStrictEqual({
       current: false,
-      path: ["app.ts"],
-      open: "app.ts",
+      path: ["grasp.config.ts"],
+      open: "grasp.config.ts",
       readOnly: true,
     });
   });
@@ -367,7 +367,7 @@ describe("An App's Code", () => {
   it("lays the files out as folders first, each folder opening and folding", async () => {
     await shown("builder", 1, {
       2: {
-        "app.ts": appV2,
+        "grasp.config.ts": appV2,
         "zeta.ts": schemaText,
         "server/b.ts": schemaText,
         "server/a/deep.ts": schemaText,
@@ -392,11 +392,11 @@ describe("An App's Code", () => {
         "a",
         "deep.ts",
         "b.ts",
-        "app.ts",
+        "grasp.config.ts",
         "zeta.ts",
       ],
       folded: {
-        tree: ["screens", "inbox.tsx", "server", "app.ts", "zeta.ts"],
+        tree: ["screens", "inbox.tsx", "server", "grasp.config.ts", "zeta.ts"],
         expanded: "false",
       },
       again: all,
@@ -457,8 +457,8 @@ describe("An App's Code", () => {
       ),
       versionsOffered: named("button", "Current (version 1)") !== undefined,
     }).toStrictEqual({
-      first: ["server", "notes.ts", "app.ts"],
-      written: ["screens", "inbox.tsx", "server", "notes.ts", "app.ts"],
+      first: ["server", "notes.ts", "grasp.config.ts"],
+      written: ["screens", "inbox.tsx", "server", "notes.ts", "grasp.config.ts"],
       open: "notes.ts",
       readOnly: true,
       versionsOffered: false,
@@ -469,12 +469,12 @@ describe("An App's Code", () => {
     await shown("builder");
     await press(named("button", "Changes"));
     await expect
-      .poll(() => changeShown("app.ts"))
+      .poll(() => changeShown("grasp.config.ts"))
       .toContain("export const limit = 25;");
 
     expect({
       files: changedFiles(),
-      modified: holdsAll(changeShown("app.ts"), [
+      modified: holdsAll(changeShown("grasp.config.ts"), [
         "-1",
         "+1",
         "export const limit = 10;",
@@ -489,7 +489,7 @@ describe("An App's Code", () => {
         "export default function Inbox() {}",
       ]),
     }).toStrictEqual({
-      files: ["app.ts", "old.ts", "screens/inbox.tsx"],
+      files: ["grasp.config.ts", "old.ts", "screens/inbox.tsx"],
       modified: true,
       deleted: true,
       added: true,
@@ -502,11 +502,11 @@ describe("An App's Code", () => {
     await press(named("button", "Split"));
 
     await expect
-      .poll(() => changeShown("app.ts"))
+      .poll(() => changeShown("grasp.config.ts"))
       .toContain("export const limit = 25;");
     expect({
       split: named("button", "Split")?.getAttribute("aria-pressed"),
-      both: holdsAll(changeShown("app.ts"), [
+      both: holdsAll(changeShown("grasp.config.ts"), [
         "export const limit = 10;",
         "export const limit = 25;",
       ]),
@@ -522,19 +522,19 @@ describe("An App's Code", () => {
       files: changedFiles(),
       added: changedFiles().every((path) => changeShown(path).includes("+")),
     }).toStrictEqual({
-      files: ["app.ts", "schema.ts", "screens/inbox.tsx"],
+      files: ["grasp.config.ts", "schema.ts", "screens/inbox.tsx"],
       added: true,
     });
   });
 
   it("says so when a change only takes away the final newline", async () => {
     await shown("builder", 1, {
-      1: { "app.ts": "export const done = true;\n" },
-      2: { "app.ts": "export const done = true;" },
+      1: { "grasp.config.ts": "export const done = true;\n" },
+      2: { "grasp.config.ts": "export const done = true;" },
     });
     await press(named("button", "Changes"));
 
-    expect(changeShown("app.ts")).toContain(
+    expect(changeShown("grasp.config.ts")).toContain(
       "Only the newline at the end of the file was removed."
     );
   });

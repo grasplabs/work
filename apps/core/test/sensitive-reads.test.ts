@@ -42,18 +42,18 @@ import { signedInApi } from "./sign-in.ts";
 const idp = mockSessionIdp();
 
 const files: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
   salaries: defineTable({ person: v.string(), amount: v.number() })
     .index("by_person", ["person"])
     .searchIndex(["person"])
-    .sensitive(),
+    .sensitive().access({ read: "appMembers", write: "appMembers" }),
   notes: defineTable({
     text: v.string(),
     salary: v.id("salaries").optional(),
     payslips: v.array(v.id("salaries")).optional(),
-  }),
+  }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/pay.ts": `import { AppError, v } from "@grasp-os/sdk";
@@ -191,19 +191,10 @@ export const byPerson = query({
     (await ctx.db.query("salaries").group({ by: ["person"] })).length,
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Payroll",
-  schema,
-  access: {
-    tables: {
-      salaries: { read: "appMembers", write: "appMembers" },
-      notes: { read: "appMembers", write: "appMembers" },
-    },
-  },
-  screens: [],
 });
 `,
   "screens/pay.tsx": `export default function Pay() {
@@ -783,7 +774,7 @@ describe("a live query of a sensitive table", { timeout: 120_000 }, () => {
   it("is recorded on every push, not only the first", async () => {
     const opened = await openedApp({
       ...notesFiles,
-      "schema.ts": (notesFiles["schema.ts"] ?? "").replace(
+      "server/schema.ts": (notesFiles["server/schema.ts"] ?? "").replace(
         '.index("by_updated", ["_updatedAt"])',
         '.index("by_updated", ["_updatedAt"]).sensitive()'
       ),

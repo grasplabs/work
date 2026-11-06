@@ -743,12 +743,12 @@ describe("the built-in blueprints", () => {
     await builder.api.apps.versions.setCurrent(app.id, edited);
 
     // A release that changes the greeting too, and the schema.
-    const schema = `${hello().files["schema.ts"]}\n// Release 2.\n`;
+    const schema = `${hello().files["server/schema.ts"]}\n// Release 2.\n`;
     const next = releaseWith({
       files: {
         ...hello().files,
         [greetings]: `${hello().files[greetings]}\n// Release 2.\n`,
-        "schema.ts": schema,
+        "server/schema.ts": schema,
       },
     });
     await expect(install(next)).resolves.toBeTruthy();
@@ -839,7 +839,7 @@ describe("the built-in blueprints", () => {
         from: released?.tree,
         to: installed?.tree,
         over: edited,
-        changes: [["schema.ts", "modified"]],
+        changes: [["server/schema.ts", "modified"]],
         conflicts: [greetings],
       },
       before: mine,
@@ -849,7 +849,11 @@ describe("the built-in blueprints", () => {
         ["app.committed", taken.version],
         ["app.blueprint.updated", taken.version],
       ],
-      files: { ...hello().files, [greetings]: mine, "schema.ts": schema },
+      files: {
+        ...hello().files,
+        [greetings]: mine,
+        "server/schema.ts": schema,
+      },
       again: "app.conflict",
       afterwards: null,
       currentBefore: edited,
@@ -884,9 +888,9 @@ describe("the built-in blueprints", () => {
       .bind(tree.tree, app.id)
       .run();
 
-    const schema = `${hello().files["schema.ts"]}\n// Release 2.\n`;
+    const schema = `${hello().files["server/schema.ts"]}\n// Release 2.\n`;
     await install(
-      releaseWith({ files: { ...hello().files, "schema.ts": schema } })
+      releaseWith({ files: { ...hello().files, "server/schema.ts": schema } })
     );
     const offered = await builder.api.apps.blueprints.update(app.id);
     if (!offered) {
@@ -902,11 +906,11 @@ describe("the built-in blueprints", () => {
       changes: offered.changes.map(({ path, change }) => [path, change]),
       conflicts: offered.conflicts,
       v1: Object.keys(taken).filter((path) => path.startsWith("app/")),
-      schema: taken["schema.ts"],
+      schema: taken["server/schema.ts"],
     }).toStrictEqual({
       changes: [
         ["app/server.ts", "deleted"],
-        ["schema.ts", "modified"],
+        ["server/schema.ts", "modified"],
       ],
       conflicts: [],
       v1: [],

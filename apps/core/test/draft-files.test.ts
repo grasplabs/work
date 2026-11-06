@@ -24,7 +24,10 @@ const released = deskFiles("Released");
 const { "screens/desk.tsx": _screen, ...unscreened } = released;
 
 /** The App's registration, as a builder's second version rewrites it. */
-const renamed = (released["app.ts"] ?? "").replace('"Desk"', '"Desk 2"');
+const renamed = (released["grasp.config.ts"] ?? "").replace(
+  '"Desk"',
+  '"Desk 2"'
+);
 
 /** A server file the draft adds. */
 const notes = (limit: number): string => `export const limit = ${limit};\n`;
@@ -51,14 +54,18 @@ describe("a chat's draft files, for the App's code view", () => {
     const second = await chats.draftFiles(chatId, app);
     const empty = await chats.create("Nothing written");
     const before = await chats.draftFiles(empty.id, app);
-    await builder.api.apps.files.commit(app, { "app.ts": renamed }, "Rename");
+    await builder.api.apps.files.commit(
+      app,
+      { "grasp.config.ts": renamed },
+      "Rename"
+    );
     const latest = await chats.draftFiles(empty.id, app);
 
     expect({ first, second, before, latest }).toStrictEqual({
       first: { ...unscreened, "server/notes.ts": notes(10) },
       second: { ...unscreened, "server/notes.ts": notes(25) },
       before: released,
-      latest: { ...released, "app.ts": renamed },
+      latest: { ...released, "grasp.config.ts": renamed },
     });
   });
 

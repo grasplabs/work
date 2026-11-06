@@ -39,9 +39,9 @@ const secret = "the-billing-api-test-credential";
 
 /** An App whose actions read and create invoices at the billing API. */
 const billingFiles = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema({ notes: defineTable({ title: v.string() }) });
+export default defineSchema({ notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }) });
 `,
   "server/billing.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
@@ -93,15 +93,11 @@ export const stray = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { billing } from "./server/billing.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Invoices",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { connections: [billing] },
 });
 `,

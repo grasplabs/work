@@ -27,18 +27,19 @@ export const html = query({
 });
 `;
 
-/** The registration of an App of `screens`, each `screens/<name>.tsx`. */
-const registration = (
-  screens: readonly string[]
-): string => `import { app, v } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+const config = `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
-  name: "Attacks",
-  schema,
-  access: { tables: {} },
+export default defineApp({ name: "Attacks" });
+`;
+
+/** The screens of an App of `screens`, each `screens/<name>.tsx`. */
+const screensOf = (
+  screens: readonly string[]
+): string => `import { v } from "@grasp-os/sdk";
+
+export default {
   screens: [${screens.map((name) => `{ name: "${name}", path: "/${name}", source: "screens/${name}.tsx", input: v.object({ note: v.string().optional() }) }`).join(", ")}],
-});
+};
 `;
 
 /**
@@ -567,9 +568,10 @@ export const attackAppFiles = ({
     injecting: injectingScreen,
   };
   return {
-    "schema.ts": schema,
+    "server/schema.ts": schema,
     "server/attacks.ts": operations,
-    "app.ts": registration(Object.keys(screens)),
+    "grasp.config.ts": config,
+    "screens.ts": screensOf(Object.keys(screens)),
     ...Object.fromEntries(
       Object.entries(screens).map(([name, code]) => [
         `screens/${name}.tsx`,
@@ -581,8 +583,9 @@ export const attackAppFiles = ({
 
 /** The attacking App with only its injecting screen. */
 export const injectingAppFiles = (): Record<string, string> => ({
-  "schema.ts": schema,
+  "server/schema.ts": schema,
   "server/attacks.ts": operations,
-  "app.ts": registration(["injecting"]),
+  "grasp.config.ts": config,
+  "screens.ts": screensOf(["injecting"]),
   "screens/injecting.tsx": injectingScreen,
 });

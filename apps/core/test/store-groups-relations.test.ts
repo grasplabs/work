@@ -1,7 +1,7 @@
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 import type { Id } from "@grasp-os/sdk";
 import { databaseReader } from "@grasp-os/sdk/database";
-import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
+import { manifestText } from "@grasp-os/sdk/host";
 import type { AccessMode } from "@grasp-os/sdk/host";
 import {
   queryMaxGroups,
@@ -18,6 +18,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { accessedManifest } from "./store-schemas.ts";
 
 // Grouped aggregates and related records of a business store
 // (store-queries.ts `groupsOf` and `withRelated`), through core's way into
@@ -68,7 +69,7 @@ const storeWith = async (
     access[table] ?? fallback;
   const defined = await store.defineTables(
     manifestText(
-      schemaManifest(schema, {
+      accessedManifest(schema, {
         tables: {
           orders: {
             read: mode("orders", "appMembers"),

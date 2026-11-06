@@ -26,7 +26,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
-import { notesFiles } from "./notes-client-app.ts";
+import { defineNotes, notesCode, notesFiles } from "./notes-client-app.ts";
 import { signedInApi } from "./sign-in.ts";
 import { stoppingUltracite } from "./ultracite-stops.ts";
 
@@ -415,17 +415,19 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   });
 
   it("reports server code that throws as it registers as one error at its line, not one per screen", async () => {
-    const throwing = (notesFiles["app.ts"] ?? "").replace(
-      "\nexport default app({",
-      'if (schema !== undefined) throw new Error("No notes today");\nexport default app({'
+    const operations = notesCode["server/notes.ts"] ?? "";
+    const throwing = operations.replace(
+      "\nexport const list = query({",
+      '\nif (globalThis.Object === Object) throw new Error("No notes today");\nexport const list = query({'
     );
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        const written = await env.build.write(app.id, ${JSON.stringify({ ...notesFiles, "app.ts": throwing })});
+        ${defineNotes}
+        const written = await env.build.write(app.id, ${JSON.stringify({ ...notesCode, "server/notes.ts": throwing })});
         const proposal = await env.build.propose(app.id, "Notes");
-        // Then an operations file that doesn't parse, its registration fixed.
-        const unparsed = await env.build.write(app.id, ${JSON.stringify({ "app.ts": notesFiles["app.ts"], "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}\nexport const broken = query({ args: {` })});
+        // Then an operations file that doesn't parse, the throw gone.
+        const unparsed = await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": `${operations}\nexport const broken = query({ args: {` })});
         return {
           errors: written.errors,
           diagnostics: written.diagnostics.map(({ file, line, rule, severity, message }) => ({ file, line, rule, severity, says: message.includes("No notes today") })),
@@ -440,14 +442,12 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await chat.ask("Build a notes App");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual({
+    // Where the throw is: its file, whatever line the tidied write puts it on.
+    expect(returned(result?.text)).toMatchObject({
       errors: 1,
       diagnostics: [
         {
-          // Where the throw is once the write is tidied: its imports
-          // grouped, a line apart.
-          file: "app.ts",
-          line: 6,
+          file: "server/notes.ts",
           rule: "server",
           severity: "error",
           says: true,
@@ -485,7 +485,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // Never inspected before, so no kept registration serves it.
     const files = {
       ...notesFiles,
-      "app.ts": `${notesFiles["app.ts"] ?? ""}// ${crypto.randomUUID()}\n`,
+      "grasp.config.ts": `${notesFiles["grasp.config.ts"] ?? ""}// ${crypto.randomUUID()}\n`,
     };
     await chat.stub.saveDraft(
       chatId,
@@ -1407,7 +1407,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // Calls an internal operation by its reference, typed as the seal's
     // generated references type it from the draft's own operations: what
     // it answers is typed, and a wrong call fails.
-    const operations = `${(notesFiles["server/notes.ts"] ?? "").replace(
+    const operations = `${(notesCode["server/notes.ts"] ?? "").replace(
       "import { action, doc, mutation, query }",
       'import { internal } from "@server/_generated/internal";\nimport { action, doc, internalQuery, mutation, query }'
     )}
@@ -1431,14 +1431,15 @@ export const titles = action({
       "const notes = await ctx.runQuery(internal.notes.listAll, {});\n    return notes.map((note) => note.title);",
       "return await ctx.runQuery(internal.notes.missing, {});"
     );
-    const sound = { ...notesFiles, "server/notes.ts": operations };
+    const sound = { ...notesCode, "server/notes.ts": operations };
     const mistyped = operations.replace(
-      'import { noteFields } from "../schema.ts";',
-      'import { noteFields } from "../schema.ts";\n\nexport const total: number = "seven";'
+      'import { noteFields } from "../values.ts";',
+      'import { noteFields } from "../values.ts";\n\nexport const total: number = "seven";'
     );
     const { person, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        ${defineNotes}
         // What each write says of the server code (its screens apart).
         const server = (written) => ({ errors: written.errors, diagnostics: written.diagnostics.filter(({ file }) => !file?.startsWith("screens/")).map(({ file, rule }) => ({ file, rule })) });
         const wrongCall = server(await env.build.write(app.id, ${JSON.stringify({ ...sound, "server/notes.ts": wrongCall })}));
@@ -1446,8 +1447,7 @@ export const titles = action({
         const mistyped = server(await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": mistyped })}));
         const proposal = await env.build.propose(app.id, "Notes");
         const leftover = server(await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": operations, "app/server.ts": "export const leftover = 1;\n", "app/exports.json": "{}" })}));
-        const unregistered = server(await env.build.write(app.id, ${JSON.stringify({ "app/server.ts": null, "app/exports.json": null, "app.ts": null })}));
-        return { wrongCall, sound, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover, unregistered };
+        return { wrongCall, sound, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover };
       };`),
       says("Checked."),
     ]);
@@ -1470,7 +1470,6 @@ export const titles = action({
       leftover: {
         diagnostics: [layout("app/exports.json"), layout("app/server.ts")],
       },
-      unregistered: { diagnostics: [layout(null)] },
     });
     const app = await createdApp(person.api);
     await expect(person.api.apps.versions.list(app.id)).resolves.toStrictEqual(
@@ -1482,20 +1481,21 @@ export const titles = action({
     // An unused name is a lint finding, never a type error: mid-edit, the
     // draft still builds and its preview still runs.
     const unused = {
-      ...notesFiles,
-      "server/notes.ts": (notesFiles["server/notes.ts"] ?? "").replace(
-        'import { noteFields } from "../schema.ts";',
-        'import { noteFields } from "../schema.ts";\nimport { internal } from "@server/_generated/internal";'
+      ...notesCode,
+      "server/notes.ts": (notesCode["server/notes.ts"] ?? "").replace(
+        'import { noteFields } from "../values.ts";',
+        'import { noteFields } from "../values.ts";\nimport { internal } from "@server/_generated/internal";'
       ),
-      "screens/notes.tsx": `import { Badge } from "@grasp-os/ui/components/badge";\n${notesFiles["screens/notes.tsx"] ?? ""}`,
+      "screens/notes.tsx": `import { Badge } from "@grasp-os/ui/components/badge";\n${notesCode["screens/notes.tsx"] ?? ""}`,
     };
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
+        ${defineNotes}
         const written = await env.build.write(app.id, ${JSON.stringify(unused)});
         const called = await env.build.call(app.id, "notes.echo", { word: "hi" });
         const refused = await env.build.propose(app.id, "Notes");
-        const fixed = await env.build.write(app.id, ${JSON.stringify(notesFiles)});
+        const fixed = await env.build.write(app.id, ${JSON.stringify(notesCode)});
         const proposed = await env.build.propose(app.id, "Notes");
         const statuses = ({ check }) => ({ passed: check.passed, screens: check.screens.status, server: check.server.status, lint: check.lint.status });
         return {

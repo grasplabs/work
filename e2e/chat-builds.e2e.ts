@@ -15,10 +15,10 @@ import { apiOf, peopleIn } from "./people.ts";
  * and a mutation that books one, which changes the App's data.
  */
 const invoices = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  invoices: defineTable({ total: v.number() }),
+  invoices: defineTable({ total: v.number() }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/invoices.ts": `import { v } from "@grasp-os/sdk";
@@ -30,15 +30,15 @@ export const book = mutation({
   handler: async (ctx, args) => await ctx.db.insert("invoices", args),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Invoice desk",
-  schema,
-  access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
 });
+`,
+  "screens.ts": `export default {
+  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
+};
 `,
 };
 

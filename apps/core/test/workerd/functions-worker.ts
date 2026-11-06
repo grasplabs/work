@@ -3,8 +3,8 @@ import {
   kitModuleName,
   serverEntryPath,
 } from "@grasp-os/compiler";
-import { app, defineSchema, defineTable, v } from "@grasp-os/sdk";
-import { inspectApp, registerFunctions } from "@grasp-os/sdk/host";
+import { defineApp, defineSchema, defineTable, v } from "@grasp-os/sdk";
+import { inspectApp, registerApp } from "@grasp-os/sdk/host";
 import { serverModule } from "@grasp-os/sdk/server";
 
 import type { OpenStore } from "../../src/data-stores.ts";
@@ -17,7 +17,10 @@ import { releaseRunner } from "../../src/release-runner.ts";
 // sandbox supervisor as on-prem binds it.
 
 const schema = defineSchema({
-  notes: defineTable({ title: v.string() }),
+  notes: defineTable({ title: v.string() }).access({
+    read: "owner",
+    write: "owner",
+  }),
 });
 
 const { action } = serverModule(schema);
@@ -42,14 +45,10 @@ const isolationChild = stub();
 const throws = stub();
 
 const { manifest } = inspectApp(
-  registerFunctions(
-    app({
-      name: "Jobs",
-      schema,
-      access: { tables: { notes: { read: "owner", write: "owner" } } },
-      screens: [],
-    }),
-    {
+  registerApp({
+    config: defineApp({ name: "Jobs" }),
+    schema,
+    modules: {
       jobs: {
         echo: stub(),
         busy,
@@ -70,8 +69,9 @@ const { manifest } = inspectApp(
         waitsInside: action({ ...contract, uses: [leaf] }),
         catches: action({ ...contract, uses: [throws] }),
       },
-    }
-  )
+    },
+    migrations: [],
+  })
 );
 
 /**

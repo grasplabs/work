@@ -1,7 +1,7 @@
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 import { databaseReader } from "@grasp-os/sdk/database";
 import type { PaginationResult } from "@grasp-os/sdk/database";
-import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
+import { manifestText } from "@grasp-os/sdk/host";
 import type { AccessMode } from "@grasp-os/sdk/host";
 import {
   queryMaxScannedEntries,
@@ -18,7 +18,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import { memberRoles, newRecordId } from "./store-schemas.ts";
+import { accessedManifest, memberRoles, newRecordId } from "./store-schemas.ts";
 
 // Full-text search of a business store (store-search.ts, store-queries.ts
 // `searchMatches`), through core's way into a store and its Durable
@@ -58,7 +58,7 @@ const textOf = (
   mode: AccessMode
 ): string =>
   manifestText(
-    schemaManifest(schema, {
+    accessedManifest(schema, {
       tables: { customers: { read: mode, write: mode } },
     })
   );

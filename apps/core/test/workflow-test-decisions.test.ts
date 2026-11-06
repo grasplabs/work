@@ -127,10 +127,10 @@ const filesWith = (
   { reviewer = "approver", deciders = ["approver"] }: Given,
   tests: Record<string, string> = {}
 ): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  invoices: defineTable({ amount: v.number() }),
+  invoices: defineTable({ amount: v.number() }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/invoices.ts": `import { permission, v } from "@grasp-os/sdk";
@@ -140,15 +140,11 @@ export const approval = permission.workflow("approval", {
   output: v.object({ status: v.string() }),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { approval } from "./server/invoices.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Invoices",
-  schema,
-  access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
   permissions: { workflows: [approval] },
 });
 `,

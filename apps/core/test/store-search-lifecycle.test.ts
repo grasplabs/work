@@ -19,7 +19,11 @@ import {
   newStore,
   objectOf,
 } from "./pending-stores.ts";
-import { manifestHash, newRecordId } from "./store-schemas.ts";
+import {
+  accessedManifest,
+  manifestHash,
+  newRecordId,
+} from "./store-schemas.ts";
 
 // A search index through the life of its store (store-search.ts): a
 // search's pages expire with any write to its table, rather than seek on
@@ -34,7 +38,7 @@ const dayMs = 24 * 60 * 60 * 1000;
 /** The manifest text of a notes schema, read and written by members. */
 const notesText = (schema: SchemaDefinition): string =>
   manifestText(
-    schemaManifest(schema, {
+    accessedManifest(schema, {
       tables: { notes: { read: "appMembers", write: "appMembers" } },
     })
   );
@@ -288,18 +292,17 @@ describe("a search index", () => {
       manifestText(
         schemaManifest(
           defineSchema({
-            accounts: defineTable({ name: v.string() }),
+            accounts: defineTable({ name: v.string() }).access({
+              read: "appMembers",
+              write: "appMembers",
+            }),
             contacts: defineTable({
               name: v.string(),
               account: v.id("accounts", { onDelete: "cascade" }),
-            }).searchIndex(["name"]),
-          }),
-          {
-            tables: {
-              accounts: { read: "appMembers", write: "appMembers" },
-              contacts: { read: "appMembers", write: "appMembers" },
-            },
-          }
+            })
+              .searchIndex(["name"])
+              .access({ read: "appMembers", write: "appMembers" }),
+          })
         )
       )
     );

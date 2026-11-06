@@ -1,6 +1,6 @@
 import {
   AppError,
-  app as registerApp,
+  defineApp,
   defineSchema,
   defineTable,
   permission,
@@ -11,7 +11,7 @@ import {
   eventFingerprint,
   inspectApp,
   manifestText,
-  registerFunctions,
+  registerApp,
 } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
@@ -109,7 +109,12 @@ const jobEvents = Object.freeze({
   { jobId: string }
 >;
 
-const schema = defineSchema({ jobs: defineTable({ jobId: v.string() }) });
+const schema = defineSchema({
+  jobs: defineTable({ jobId: v.string() }).access({
+    read: "appMembers",
+    write: "appMembers",
+  }),
+});
 const { mutation } = serverModule(schema);
 
 const review = permission.workflow("review", {
@@ -156,16 +161,12 @@ const unlisted = mutation({
   handler: () => "unreached",
 });
 
-const jobsApp = registerFunctions(
-  registerApp({
-    name: "Jobs",
-    schema,
-    access: { tables: { jobs: { read: "appMembers", write: "appMembers" } } },
-    screens: [],
-    permissions: { workflows: [review] },
-  }),
-  { jobs: { markDone, markThenFail, rawNotify, unlisted } }
-);
+const jobsApp = registerApp({
+  config: defineApp({ name: "Jobs", permissions: { workflows: [review] } }),
+  schema,
+  modules: { jobs: { markDone, markThenFail, rawNotify, unlisted } },
+  migrations: [],
+});
 
 const { manifest } = inspectApp(jobsApp);
 

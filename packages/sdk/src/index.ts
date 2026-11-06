@@ -5,15 +5,16 @@
 // module.
 
 export * from "./values.ts";
-export { app } from "./app.ts";
+export { defineApp } from "./app.ts";
 export type {
   App,
-  AppDefinition,
+  AppConfig,
   AppPermissions,
-  OperationAccess,
+  AppScreens,
   ScreenDefinition,
-  TableVerbs,
+  SurfaceDefinition,
 } from "./app.ts";
+export type { TableNarrowing, TableVerbs } from "./server.ts";
 export { AppError } from "./app-error.ts";
 export { migration } from "./migration.ts";
 export type {

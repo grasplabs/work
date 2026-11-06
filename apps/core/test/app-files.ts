@@ -31,15 +31,15 @@ import { routed, signedInApi } from "./sign-in.ts";
 // side of it. Each file calls `appsOf(mockIdp())` once, for its people.
 
 export const files: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
   notes: defineTable({
     title: v.string().trim().min(1).max(200),
     attachments: v.array(v.file()).max(20).default([]),
-  }),
-  vault: defineTable({ file: v.file() }),
-  board: defineTable({ file: v.file().nullable().default(null) }),
+  }).access({ read: "appMembers", write: "owner" }),
+  vault: defineTable({ file: v.file() }).access({ read: "appBuilders", write: "owner" }),
+  board: defineTable({ file: v.file().nullable().default(null) }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
@@ -161,26 +161,20 @@ export const unpin = mutation({
   },
 });
 `,
-  "app.ts": `import { app, permission } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp, permission } from "@grasp-os/sdk";
 
 export const files = permission.files({
   operations: ["upload", "read", "attach", "delete"],
 });
 
-export default app({
+export default defineApp({
   name: "Notes",
-  schema,
-  access: {
-    tables: {
-      notes: { read: "appMembers", write: "owner" },
-      vault: { read: "appBuilders", write: "owner" },
-      board: { read: "appMembers", write: "appMembers" },
-    },
-  },
-  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
   permissions: { files },
 });
+`,
+  "screens.ts": `export default {
+  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
+};
 `,
   "screens/notes.tsx": `import { useFile, useUpload } from "@grasp-os/sdk/react";
 import { permissions } from "@server/_generated/api";

@@ -30,19 +30,19 @@ const screenSaying = (title: string) => `export default function Screen() {
 
 /** Two screens, `board` and `list`, and nothing else. */
 const twoScreens = {
-  "schema.ts": schema,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "server/schema.ts": schema,
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Boards",
-  schema,
-  access: { tables: { marks: { read: "appMembers", write: "appMembers" } } },
+});
+`,
+  "screens.ts": `export default {
   screens: [
     { name: "board", path: "/", source: "screens/board.tsx" },
     { name: "list", path: "/list", source: "screens/list.tsx" },
   ],
-});
+};
 `,
   "screens/board.tsx": screenSaying("The board"),
   "screens/list.tsx": screenSaying("The list"),

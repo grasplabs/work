@@ -12,7 +12,12 @@ import type { Server } from "node:http";
 
 const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema({ notes: defineTable({ note: v.string().min(1).max(200) }) });
+export default defineSchema({
+  notes: defineTable({ note: v.string().min(1).max(200) }).access({
+    read: "appMembers",
+    write: "appMembers",
+  }),
+});
 `;
 
 const operations = `import { v } from "@grasp-os/sdk";
@@ -50,15 +55,14 @@ export const platformShaped = query({
 });
 `;
 
-const registration = `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+const config = `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
+export default defineApp({ name: "Notes" });
+`;
+
+const screens = `export default {
   screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
-});
+};
 `;
 
 const screenCode = (
@@ -223,9 +227,10 @@ export default function Notes() {
 
 /** The App's files, with every attempt aimed at `attacker`. */
 export const screenAppFiles = (attacker: string): Record<string, string> => ({
-  "schema.ts": schema,
+  "server/schema.ts": schema,
   "server/notes.ts": operations,
-  "app.ts": registration,
+  "grasp.config.ts": config,
+  "screens.ts": screens,
   "screens/notes.tsx": screenCode(attacker),
 });
 

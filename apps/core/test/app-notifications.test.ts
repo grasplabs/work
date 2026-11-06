@@ -1,15 +1,11 @@
 import {
   AppError,
-  app as registerApp,
+  defineApp,
   defineSchema,
   defineTable,
   v,
 } from "@grasp-os/sdk";
-import {
-  inspectApp,
-  manifestText,
-  registerFunctions,
-} from "@grasp-os/sdk/host";
+import { inspectApp, manifestText, registerApp } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
 import {
@@ -53,7 +49,12 @@ import { allEvents } from "./audit-events.ts";
 // a real business store and its outbox, into the person's notifications
 // as their inbox lists them. App code runs as the SDK's runner runs it.
 
-const schema = defineSchema({ orders: defineTable({ title: v.string() }) });
+const schema = defineSchema({
+  orders: defineTable({ title: v.string() }).access({
+    read: "appMembers",
+    write: "appMembers",
+  }),
+});
 
 const { mutation, action } = serverModule(schema);
 
@@ -97,15 +98,12 @@ const ping = mutation({
   },
 });
 
-const ordersApp = registerFunctions(
-  registerApp({
-    name: "Orders",
-    schema,
-    access: { tables: { orders: { read: "appMembers", write: "appMembers" } } },
-    screens: [],
-  }),
-  { orders: { tell, place, ping } }
-);
+const ordersApp = registerApp({
+  config: defineApp({ name: "Orders" }),
+  schema,
+  modules: { orders: { tell, place, ping } },
+  migrations: [],
+});
 
 const { manifest } = inspectApp(ordersApp);
 

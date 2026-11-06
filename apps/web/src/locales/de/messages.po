@@ -3420,6 +3420,10 @@ msgstr "Wissen geändert"
 msgid "Changed the answer to: {question}"
 msgstr "Antwort geändert: {question}"
 
+#: src/chat/thread.tsx
+msgid "Changed the App's definition"
+msgstr "Die Definition der App geändert"
+
 #: src/activity/audit-words.ts
 msgid "Changed what a connection listens for"
 msgstr "Geändert, worauf eine Verbindung achtet"
@@ -3469,6 +3473,10 @@ msgstr "Änderungen seit {when}"
 #: src/engines/store-changes.tsx
 msgid "Changes to the App's stores"
 msgstr "Änderungen an den Speichern der App"
+
+#: src/chat/thread.tsx
+msgid "Changing the App's definition"
+msgstr "Ändert die Definition der App"
 
 #: src/projects/project-dialog.tsx
 msgid "Chart"

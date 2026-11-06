@@ -22,10 +22,10 @@ const idp = mockIdp();
 
 /** A notes App of spec 8's layout whose `create` writes what it creates. */
 const drafted: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }),
+  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
@@ -40,17 +40,40 @@ export const create = mutation({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Invoice desk",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
 });
 `,
 };
+
+/**
+ * The Invoice desk as released: its config, and a schema with the tables
+ * of every draft here, which the agent never writes (its definition's).
+ */
+const releasedDesk: Record<string, string> = {
+  "AGENTS.md": "# Invoice desk\n",
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
+
+export default defineApp({ name: "Invoice desk" });
+`,
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  invoices: defineTable({ number: v.string().min(1).max(20) }).access({ read: "appMembers", write: "appMembers" }),
+  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appMembers" }),
+});
+`,
+};
+
+/** `files` as the agent writes them: never the config or the schema. */
+const agentWritten = (files: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(files).filter(
+      ([path]) => path !== "grasp.config.ts" && path !== "server/schema.ts"
+    )
+  );
 
 describe(
   "a spec 8 draft's sealed preview on-prem",
@@ -62,7 +85,7 @@ describe(
       const { id: app } = await builder.api.apps.create({
         name: "Invoice desk",
       });
-      await release(builder, app, { "AGENTS.md": "# Invoice desk\n" });
+      await release(builder, app, releasedDesk);
       const granted = await admin.api.permissions.list();
       if (
         !granted.some(
@@ -84,7 +107,7 @@ describe(
       await fakeProvider(
         codeStep(`export default async (self, env) => {
           const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-          await env.build.write(app.id, ${JSON.stringify(drafted)});
+          await env.build.write(app.id, ${JSON.stringify(agentWritten(drafted))});
           const created = await env.build.call(app.id, "notes.create", { title: "Invoice 7" });
           // Checked as proposing it would, without proposing it.
           const { preview } = await (async () => { const { job } = await env.build.submit(app.id, { kind: "check" }); for (;;) { const view = await env.build.job(job); if (view.status !== "running") { return view.result; } await scheduler.wait(100); } })();

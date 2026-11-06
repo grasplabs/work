@@ -130,8 +130,8 @@ describe("a build given up on", { timeout: 60_000 }, () => {
         {
           // The App layout, its screen importing its references, its code
           // new, so nothing of it is cached.
-          "app.ts": `export const built = ${JSON.stringify(crypto.randomUUID())};\n`,
-          "schema.ts": "export default {};\n",
+          "grasp.config.ts": `export const built = ${JSON.stringify(crypto.randomUUID())};\n`,
+          "server/schema.ts": "export default {};\n",
           "screens/desk.tsx":
             'import { references } from "@server/_generated/api";\nexport default () => String(references);\n',
         },

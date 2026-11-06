@@ -533,7 +533,7 @@ describe("the session client", { timeout: 120_000 }, () => {
       opened.app,
       {
         ...files,
-        "app.ts": `${files["app.ts"] ?? ""}\n// The second version.\n`,
+        "grasp.config.ts": `${files["grasp.config.ts"] ?? ""}\n// The second version.\n`,
       },
       "Second"
     );
@@ -863,7 +863,7 @@ export default function Notes() {
 
   it("builds a screen of a data grid and a field for every kind of value, typed by what each binds", async () => {
     const tasks = {
-      "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+      "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export const taskFields = {
   title: v.string().trim().min(1).max(200),
@@ -878,13 +878,13 @@ export const taskFields = {
 };
 
 export default defineSchema({
-  tasks: defineTable(taskFields),
-  people: defineTable({ name: v.string() }),
+  tasks: defineTable(taskFields).access({ read: "appMembers", write: "appMembers" }),
+  people: defineTable({ name: v.string() }).access({ read: "appMembers", write: "appBuilders" }),
 });
 `,
       "server/tasks.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
 import { doc, mutation, query } from "@server/_generated/server";
-import { taskFields } from "../schema.ts";
+import { taskFields } from "./schema.ts";
 
 export const list = query({
   args: { pagination: paginationOptionsValidator, search: v.string(), status: v.enum(["open", "done"]).optional() },
@@ -919,20 +919,20 @@ export const rename = mutation({
   },
 });
 `,
-      "app.ts": `import { app, permission } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+      "grasp.config.ts": `import { defineApp, permission } from "@grasp-os/sdk";
 
 export const briefs = permission.files({ operations: ["upload", "read"] });
 
 export const site = permission.links({ origins: ["https://example.com"] });
 
-export default app({
+export default defineApp({
   name: "Tasks",
-  schema,
-  access: { tables: { tasks: { read: "appMembers", write: "appMembers" }, people: { read: "appMembers", write: "appBuilders" } } },
-  screens: [{ name: "tasks", path: "/", source: "screens/tasks.tsx" }],
   permissions: { files: briefs, links: site },
 });
+`,
+      "screens.ts": `export default {
+  screens: [{ name: "tasks", path: "/", source: "screens/tasks.tsx" }],
+};
 `,
     };
     const tasksScreen = `import { useForm, useMutation } from "@grasp-os/sdk/react";
@@ -1000,9 +1000,9 @@ export default function Tasks() {
     await expect(
       diagnosticsOf({
         ...files,
-        "screens/notes.tsx": `import { app } from "@grasp-os/sdk";
+        "screens/notes.tsx": `import { defineApp } from "@grasp-os/sdk";
 export default function Notes() {
-  return <p>{typeof app}</p>;
+  return <p>{typeof defineApp}</p>;
 }
 `,
       })

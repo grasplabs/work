@@ -61,10 +61,10 @@ import { auditedDuring, routed, signedInApi, unique } from "./sign-in.ts";
 const idp = mockIdp();
 
 const files = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  invoices: defineTable({ amount: v.number() }),
+  invoices: defineTable({ amount: v.number() }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/invoices.ts": `import { permission, v } from "@grasp-os/sdk";
@@ -74,17 +74,17 @@ export const review = permission.workflow("review", {
   output: v.object({ status: v.string() }),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { review } from "./server/invoices.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Invoices",
-  schema,
-  access: { tables: { invoices: { read: "appMembers", write: "appMembers" } } },
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
   permissions: { workflows: [review] },
 });
+`,
+  "screens.ts": `export default {
+  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
+};
 `,
   "screens/desk.tsx": `export default function Desk() {
   return <main>Invoices</main>;

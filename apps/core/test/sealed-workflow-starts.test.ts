@@ -43,10 +43,10 @@ import { unique } from "./sign-in.ts";
 // this is the same path from the release's own code.
 
 const files = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  requests: defineTable({ who: v.string() }),
+  requests: defineTable({ who: v.string() }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
@@ -79,15 +79,11 @@ export const kickOff = action({
   handler: async (ctx, args) => await ctx.workflows.followUp.start({ who: args.who }),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { followUp } from "./server/requests.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
   permissions: { workflows: [followUp] },
 });
 `,
@@ -1205,7 +1201,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       app,
       {
         ...files(),
-        "app.ts": `${files()["app.ts"] ?? ""}// Sealed again.\n`,
+        "grasp.config.ts": `${files()["grasp.config.ts"] ?? ""}// Sealed again.\n`,
       },
       "Seal again"
     );

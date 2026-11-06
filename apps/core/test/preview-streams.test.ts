@@ -31,10 +31,10 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 /** The App's notes, and streaming actions that write them. */
 const notesFiles = (marker: string): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }),
+  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/notes.ts": `import { permission, v } from "@grasp-os/sdk";
@@ -123,15 +123,11 @@ export const consult = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { writer } from "./server/notes.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
   permissions: { ai: writer },
 });
 `,

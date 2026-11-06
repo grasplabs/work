@@ -38,10 +38,10 @@ const workflowShape = `v.object({ who: v.string() })`;
 
 /** An App that declares three workflows and a model, with a store. */
 const files = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  requests: defineTable({ who: v.string() }),
+  requests: defineTable({ who: v.string() }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
@@ -71,15 +71,11 @@ export const kickOff = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { followUp, later, remind, writer } from "./server/requests.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Requests",
-  schema,
-  access: { tables: { requests: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
   permissions: { ai: writer, workflows: [followUp, remind, later] },
 });
 `,
@@ -520,7 +516,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     const leaky = await appWith(
       {
         ...files(),
-        "app.ts": `// Deploy with ${token}\n${files()["app.ts"] ?? ""}`,
+        "grasp.config.ts": `// Deploy with ${token}\n${files()["grasp.config.ts"] ?? ""}`,
       },
       "Requests"
     );
@@ -548,7 +544,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       withinBudget: "ok",
       secret: {
         code: "version.export_secret_found",
-        details: { path: "app/app.ts" },
+        details: { path: "app/grasp.config.ts" },
       },
       echoed: false,
     });

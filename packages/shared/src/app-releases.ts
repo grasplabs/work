@@ -31,14 +31,14 @@ export const releaseFormatVersion = 2;
  * `runFunction` (and `manifestOfApp`, for inspection); version 2 adds
  * `runMigration`, which runs an App's explicit migrations
  * (apps/core/src/migration-transform.ts), and the App manifest's
- * `migrations`; version 3 adds `registerFunctions`, which the entry the
- * host generates for every App calls with its server modules (the
- * compiler's `serverEntrySource`). Anything else the host's half needs in
+ * `migrations`; version 4 adds `registerApp`, which the entry the host
+ * generates for every App calls with its parts (the compiler's
+ * `serverEntrySource`). Anything else the host's half needs in
  * the isolate is a host module it loads itself. A new import from the
  * sealed SDK requires a new version, since releases sealed before it
  * don't have it.
  */
-export const sdkProtocolVersion = 3;
+export const sdkProtocolVersion = 4;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 

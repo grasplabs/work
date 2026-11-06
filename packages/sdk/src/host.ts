@@ -19,20 +19,24 @@ export {
   schemaLimits,
 } from "./schema.ts";
 export type {
+  AccessMode,
+  AccessModes,
   IndexBase,
   RowRole,
   RowRule,
   RowRules,
   SchemaDefinitionCode,
+  TableAccess,
 } from "./schema.ts";
 // The descriptor format a manifest names, for a host that writes one.
 export { descriptorVersion } from "./value-descriptor.ts";
 
 // An App as the host runs it: its registration as data, and its handlers.
-export { inspectApp, registerFunctions } from "./app.ts";
+export { inspectApp, registerApp } from "./app.ts";
 export type {
   AppInspection,
   AppManifest,
+  AppParts,
   OperationManifest,
   ServerModules,
   UseManifest,
@@ -85,14 +89,11 @@ export {
   schemaManifest,
 } from "./schema-manifest.ts";
 export type {
-  AccessMode,
   ManifestAccess,
   ManifestIndex,
   ManifestTable,
   ReadManifest,
-  SchemaAccess,
   SchemaManifest,
-  TableAccess,
 } from "./schema-manifest.ts";
 
 // Which currencies and time zones this SDK accepts: a host compares it with

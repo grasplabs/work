@@ -39,7 +39,7 @@ import { appWith, artifactKey, failure, person } from "./sealed-apps.ts";
 
 /** An App of spec 8's layout answering `greeting`. */
 const helloFiles = (greeting = "hello"): Record<string, string> => ({
-  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
 
 export default defineSchema({});
 `,
@@ -52,14 +52,10 @@ export const hello = query({
   handler: () => ${JSON.stringify(greeting)},
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Hello",
-  schema,
-  access: { tables: {} },
-  screens: [],
 });
 `,
 });

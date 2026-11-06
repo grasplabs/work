@@ -31,28 +31,37 @@ import type {
 import { eventReferenceData, referenceName } from "./references.ts";
 import { readSchemaAnswers } from "./schema-answer.ts";
 import { schemaManifest } from "./schema-manifest.ts";
-import type {
-  AccessMode,
-  SchemaAccess,
-  SchemaManifest,
-} from "./schema-manifest.ts";
+import type { SchemaManifest } from "./schema-manifest.ts";
 import type { SchemaAnswer } from "./schema-plan.ts";
-import type { AnyTable, SchemaDefinition } from "./schema.ts";
+import type { AccessMode, SchemaDefinition } from "./schema.ts";
 import { functionState, isServerFunction } from "./server.ts";
-import type { AnyFunction, FunctionKind, Visibility } from "./server.ts";
+import type {
+  AnyFunction,
+  FunctionKind,
+  TableVerbs,
+  Visibility,
+} from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
 import { descriptorOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
 
-// `app`: how an App registers itself (spec 7.1, 7.5): its schema, the
-// access its tables need, how particular functions narrow that access,
-// its screens and the permissions it needs. Its server functions aren't
-// listed: as in Convex, each is an export of a file under `server/`, and
-// the file's path is its API (`server/tasks.ts`'s `list` is
-// `tasks.list`). The host hands the registration those modules
-// (`registerFunctions`, from the entry it generates for every App).
+// How an App registers itself (spec 7.1, 7.5), Convex's way: each part
+// is a file of its own, and the host's entry (`.grasp/app.ts`) hands them
+// all to `registerApp`:
+//
+// - its config, `grasp.config.ts`: `defineApp({ name, permissions,
+//   preferences, answers })`, generated from the App's definition;
+// - its schema, `server/schema.ts`, each table with its access
+//   (`.access`), generated from the definition too;
+// - its screens, `screens.ts`: `{ screens, surfaces }`, each screen a
+//   named route to a screen file;
+// - its server functions: as in Convex, each an export of a module under
+//   `server/`, whose path is its API (`server/tasks.ts`'s `list` is
+//   `tasks.list`);
+// - its migrations: the default export of each `server/migrations/*.ts`.
+//
 // Registering grants nothing: every requirement here becomes usable only
 // once the host authorizes it, and the host intersects it with the
 // caller, the App's grants and current revocations on every read, commit
@@ -67,16 +76,15 @@ import type { AnySchema } from "./value-schema.ts";
 // - a function's kind says whether it is public (`query`, `mutation`,
 //   `action`) or internal (`internalQuery`, …), and no function is
 //   exported at two paths;
-// - every function was declared for this App's schema, and what it `uses`
+// - every function was declared for the App's schema, and what it `uses`
 //   is registered here too: a mutation only the App's queries and the
 //   workflows its `permissions` list, an action any of its functions and
 //   any permission the App lists in its own `permissions`;
 // - `permissions` lists each kind under its own key, each declaration of
 //   that kind, under an alias no other of the App's permissions has;
-// - `access.tables` modes default to `none`, and `operationAccess` only
-//   narrows them: a path, table or verb that doesn't exist, a verb the
-//   App's mode doesn't allow or one a function of its kind can't use (a
-//   query writing, an action touching tables at all) is refused here;
+// - a function's `tables` only narrows what its tables' access and its
+//   kind give it: a verb its table's access doesn't allow, or one a
+//   function of its kind can't use (a query writing), is refused here;
 // - a function's `uses` may name another by its generated reference
 //   (spec 8), resolved here by its path: one whose visibility or kind
 //   doesn't match what is registered there is refused, so a stale or
@@ -84,37 +92,15 @@ import type { AnySchema } from "./value-schema.ts";
 // - screens (spec 8) are a list of named routes, each a screen file and
 //   the route input its parameters are validated with, and `preferences`
 //   (spec 10.7.7), when declared, is a strict object; the top-level path
-//   segments `preferences` and `workflows` are the platform's, so no
-//   function registers under them and declaring preferences or workflows
-//   later never collides with one;
+//   segments `preferences`, `workflows` and `people` are the platform's,
+//   so no function registers under them;
 // - migrations (spec 17.2, migration.ts) are `migration` declarations,
 //   each named once, one a table, of a table the schema has, whose
 //   `output` declares exactly that table's fields.
 //
-// What the host runs from is `inspectApp` of what `registerFunctions`
-// answered: the registration as data (descriptors, paths, the access each
-// function may use), and the handlers by path, which only the runner
-// calls.
-
-/** The verbs a function may use on a table. */
-export interface TableVerbs {
-  readonly read: boolean;
-  readonly insert: boolean;
-  readonly update: boolean;
-  readonly delete: boolean;
-}
-
-const tableVerbs: ReadonlySet<string> = new Set([
-  "read",
-  "insert",
-  "update",
-  "delete",
-]);
-
-/** How one registered function narrows the App's access to its tables. */
-export interface OperationAccess {
-  readonly tables: Readonly<Record<string, Partial<TableVerbs>>>;
-}
+// What the host runs from is `inspectApp` of what `registerApp` answered:
+// the registration as data (descriptors, paths, the access each function
+// may use), and the handlers by path, which only the runner calls.
 
 /**
  * An App's server modules, by their path under `server/` without `.ts`
@@ -159,41 +145,32 @@ export interface SurfaceDefinition {
   readonly input: AnySchema;
 }
 
-/** What an App registers. */
-export interface AppDefinition<
-  Tables extends Readonly<Record<string, AnyTable>>,
-> {
-  /** What people call the App, 1 to 100 characters. */
-  readonly name: string;
-  readonly schema: SchemaDefinition<Tables>;
-  /** The access its tables need; a table or mode left out is `none`. */
-  readonly access: SchemaAccess;
-  /** How particular functions narrow `access`, by path. */
-  readonly operationAccess?: Readonly<Record<string, OperationAccess>>;
+/** An App's screens: `screens.ts`'s default export. */
+export interface AppScreens {
   /** Its screens (spec 8): named routes, each to a screen file. */
   readonly screens: readonly ScreenDefinition[];
-  /** Its people's preferences (spec 10.7.7): a strict object, when declared. */
-  readonly preferences?: AnySchema;
   /** Where the host places its screens besides their routes (spec 34.1). */
   readonly surfaces?: readonly SurfaceDefinition[];
+}
+
+/** What an App's config (`grasp.config.ts`) declares. */
+export interface AppConfig {
+  /** What people call the App, 1 to 100 characters. */
+  readonly name: string;
   /**
    * Everything it can reach outside itself, by kind; none unless listed.
    * Each needs an admin's binding or grant before it serves anything.
    */
   readonly permissions?: AppPermissions;
-  /**
-   * Its explicit migrations (spec 17.2), each a `migration` declared in
-   * `server/migrations/`: transforms of one of its tables' records to this
-   * schema, which only the host runs.
-   */
-  readonly migrations?: readonly Migration[];
+  /** Its people's preferences (spec 10.7.7): a strict object, when declared. */
+  readonly preferences?: AnySchema;
   /**
    * Its answers for the records that lack a field a change of its schema
    * requires (schema-plan.ts, `SchemaAnswer`): for one field each, the
    * value they take where the field is absent or null, as a backfill's
    * default. The store checks every record as the version is made
    * current, and never writes over a value a record holds. Anything that
-   * reshapes records is a migration (`migrations`).
+   * reshapes records is a migration (`server/migrations/`).
    */
   readonly answers?: readonly SchemaAnswer[];
 }
@@ -231,10 +208,28 @@ export interface AppPermissions {
   readonly links?: LinksPermission;
 }
 
-/** A registered App, as `app` answers it. */
-export interface App<Tables extends Readonly<Record<string, AnyTable>>> {
+/** An App's config, as `defineApp` answers it. */
+export interface App {
   readonly name: string;
-  readonly schema: SchemaDefinition<Tables>;
+}
+
+/** The parts of an App the host's entry hands `registerApp`. */
+export interface AppParts {
+  /** `grasp.config.ts`'s default export. */
+  readonly config: App;
+  /** `server/schema.ts`'s default export. */
+  readonly schema: SchemaDefinition;
+  /** `screens.ts`'s default export, when the App has one. */
+  readonly screens?: unknown;
+  /** Each module under `server/` but the schema, `_generated/` and `migrations/`. */
+  readonly modules: ServerModules;
+  /** The default export of each `server/migrations/*.ts`, in path order. */
+  readonly migrations: readonly unknown[];
+}
+
+/** An App registered whole, as `registerApp` answers it. */
+export interface RegisteredApp {
+  readonly name: string;
 }
 
 /** What one entry of a function's `uses` is, as data. */
@@ -279,8 +274,8 @@ export interface OperationManifest {
   readonly stream: ValueDescriptor | null;
   readonly uses: readonly UseManifest[];
   /**
-   * The verbs it may use on each of the schema's tables: the App's access,
-   * narrowed by its kind and its `operationAccess`. Every table is listed.
+   * The verbs it may use on each of the schema's tables: their access,
+   * narrowed by its kind and its `tables`. Every table is listed.
    */
   readonly tables: Readonly<Record<string, TableVerbs>>;
 }
@@ -334,6 +329,8 @@ export interface AppManifest {
 /** What the host runs an App from: its manifest and its handlers by path. */
 export interface AppInspection {
   readonly manifest: AppManifest;
+  /** Its schema, which its functions read and write through. */
+  readonly schema: SchemaDefinition;
   readonly functions: ReadonlyMap<string, AnyFunction>;
   /** Its migrations, by name. */
   readonly migrations: ReadonlyMap<string, Migration>;
@@ -365,41 +362,26 @@ const deepFreeze = <Value>(value: Value): Value => {
   return value;
 };
 
-/**
- * Every App `app` registered, as it declared itself, before its server
- * functions are found (`registerFunctions`).
- */
-const registrations = new WeakMap<object, Registration>();
+/** Every config `defineApp` made, with what it checked of it. */
+const configs = new WeakMap<object, CheckedConfig>();
 
-/** Every App `registerFunctions` registered whole, with its inspection. */
+/** Every App `registerApp` registered whole, with its inspection. */
 const inspections = new WeakMap<object, AppInspection>();
 
-/** What `app` checked of a registration, for `registerFunctions`. */
-interface Registration {
-  readonly definition: AppDefinition<Readonly<Record<string, AnyTable>>>;
-  readonly manifest: SchemaManifest;
+/** What `defineApp` checked of a config, for `registerApp`. */
+interface CheckedConfig {
+  readonly config: AppConfig;
   readonly resources: ReadonlyMap<string, AnyPermission>;
   readonly browser: ReadonlyMap<string, BrowserPermission>;
   readonly workflows: ReadonlyMap<string, WorkflowPermission>;
   readonly people: boolean;
-  readonly screens: Readonly<Record<string, ScreenManifest>>;
-  readonly surfaces: Readonly<Record<string, SurfaceManifest>>;
   readonly preferences: ValueDescriptor | null;
-  readonly migrations: Readonly<Record<string, MigrationManifest>>;
-  readonly migrationsByName: ReadonlyMap<string, Migration>;
-  readonly answers: readonly SchemaAnswer[];
 }
 
-const appKeys: ReadonlySet<string> = new Set([
+const configKeys: ReadonlySet<string> = new Set([
   "name",
-  "schema",
-  "access",
-  "operationAccess",
-  "screens",
-  "surfaces",
-  "preferences",
   "permissions",
-  "migrations",
+  "preferences",
   "answers",
 ]);
 
@@ -425,8 +407,6 @@ export const reservedSegments: ReadonlyMap<string, string> = new Map([
  * whatever awaits it.
  */
 export const referenceKeys: ReadonlySet<string> = new Set(["name", "then"]);
-
-const requiredKeys = ["name", "schema", "access", "screens"] as const;
 
 /**
  * Refuses `segments`, a function's path, where it can't be one: past the
@@ -1059,74 +1039,30 @@ const baseVerbs = (
 });
 
 /**
- * The verbs of each table for function `path` of `kind`: its base verbs,
- * narrowed by `override` when it has one, in which a table or verb left
- * out is denied. A verb the override sets that the base doesn't allow is
- * a widening, and refused.
+ * The verbs of each table for function `fn`, registered at `path`: its
+ * base verbs, narrowed by its `tables` when it declares them, in which a
+ * table or verb left out is denied. A verb `tables` sets that the base
+ * doesn't allow is a widening, and refused.
  */
 const verbsOf = (
   schema: SchemaManifest,
   path: string,
-  kind: FunctionKind,
-  override: unknown
+  fn: AnyFunction
 ): Record<string, TableVerbs> => {
   const verbs: Record<string, TableVerbs> = {};
-  let byTable: Record<string, unknown> | undefined;
-  if (override !== undefined) {
-    if (kind === "action") {
-      refuse(
-        `\`operationAccess\` can't name action \`${path}\`: an action has no tables to narrow.`
-      );
-    }
-    const tables = isPlainObject(override) ? override.tables : undefined;
-    if (
-      !isPlainObject(override) ||
-      !Object.keys(override).every((key) => key === "tables") ||
-      !isPlainObject(tables)
-    ) {
-      return refuse(
-        `\`operationAccess.${path}\` is \`{ tables }\`, a map of table names to verbs.`
-      );
-    }
-    byTable = tables;
-    for (const table of Object.keys(tables)) {
-      if (!Object.hasOwn(schema.tables, table)) {
-        refuse(
-          `\`operationAccess.${path}\` names a table the schema doesn't have.`
-        );
-      }
-    }
-  }
+  const narrowing = fn.tables;
   for (const [table, { access }] of Object.entries(schema.tables)) {
-    const base = baseVerbs(kind, access.read, access.write);
-    if (byTable === undefined) {
+    const base = baseVerbs(fn.kind, access.read, access.write);
+    if (narrowing === null) {
       verbs[table] = base;
       continue;
     }
-    const declared = Object.hasOwn(byTable, table) ? byTable[table] : {};
-    if (!isPlainObject(declared)) {
-      refuse(
-        `\`operationAccess.${path}.tables.${table}\` is a map of verbs to booleans.`
-      );
-      continue;
-    }
-    for (const [verb, value] of Object.entries(declared)) {
-      if (!tableVerbs.has(verb)) {
-        refuse(
-          `\`operationAccess.${path}.tables.${table}\` has no verb \`${verb}\`; the verbs are read, insert, update and delete.`
-        );
-      }
-      if (typeof value !== "boolean") {
-        refuse(
-          `\`operationAccess.${path}.tables.${table}.${verb}\` is a boolean.`
-        );
-      }
-    }
+    const declared = Object.hasOwn(narrowing, table) ? narrowing[table] : {};
     const narrowed = (verb: keyof TableVerbs): boolean => {
-      const wanted = declared[verb] === true;
+      const wanted = declared?.[verb] === true;
       if (wanted && !base[verb]) {
         refuse(
-          `\`operationAccess.${path}.tables.${table}.${verb}\` widens access: ${kind === "query" && verb !== "read" ? "a query only reads" : `the App's \`${verb === "read" ? "read" : "write"}\` access to \`${table}\` is \`none\``}.`
+          `\`${path}\`'s \`tables.${table}.${verb}\` widens access: ${fn.kind === "query" && verb !== "read" ? "a query only reads" : `\`${table}\`'s \`${verb === "read" ? "read" : "write"}\` access is \`none\``}.`
         );
       }
       return wanted;
@@ -1243,28 +1179,6 @@ const usesOf = (
   });
 };
 
-/** Refuses a registration with keys it can't have or without those it must. */
-const checkRegistration = (definition: unknown): void => {
-  if (!isPlainObject(definition)) {
-    refuse("An App is registered with an object.");
-    return;
-  }
-  for (const key of Object.keys(definition)) {
-    if (!appKeys.has(key)) {
-      refuse(`An App's registration has no \`${key}\`.`);
-    }
-  }
-  for (const key of requiredKeys) {
-    if (definition[key] === undefined) {
-      refuse(`An App's registration declares \`${key}\`.`);
-    }
-  }
-  const { name } = definition;
-  if (typeof name !== "string" || name.length === 0 || name.length > 100) {
-    refuse("An App's `name` is 1 to 100 characters.");
-  }
-};
-
 /**
  * The functions `found` holds, by path, and the path of each: every one
  * declared for `schema`, exported at one path only.
@@ -1299,94 +1213,104 @@ const registeredFunctions = (
   return { functions, paths };
 };
 
+/** Refuses a config with keys it can't have, or without a name. */
+const checkConfig = (config: unknown): void => {
+  if (!isPlainObject(config)) {
+    refuse("An App's config is an object.");
+    return;
+  }
+  for (const key of Object.keys(config)) {
+    if (!configKeys.has(key)) {
+      refuse(`An App's config has no \`${key}\`.`);
+    }
+  }
+  const { name } = config;
+  if (typeof name !== "string" || name.length === 0 || name.length > 100) {
+    refuse("An App's `name` is 1 to 100 characters.");
+  }
+};
+
 /**
- * Registers an App, checked whole (see the header) but for its server
- * functions, which `registerFunctions` finds in its server modules:
- * throws `AppDefinitionError` (or the schema's own error, for `access`)
- * for a registration that isn't coherent.
+ * An App's config (`grasp.config.ts`), checked: its name, its
+ * permissions and its preferences. Throws `AppDefinitionError` for one
+ * that isn't coherent; what needs its schema (`answers`) is checked as it
+ * registers (`registerApp`).
  */
-export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
-  definition: AppDefinition<Tables>
-): App<Tables> => {
-  checkRegistration(definition);
-  const { name, schema, access } = definition;
-  // Throws for a schema `defineSchema` didn't make, and for access that
-  // names a table the schema hasn't or a mode that doesn't exist.
-  const manifest = schemaManifest(schema, access);
+export const defineApp = (config: AppConfig): App => {
+  checkConfig(config);
   const {
     actions: resources,
     browser,
     workflows,
     people,
-  } = permissionsOf(definition.permissions);
-  const screens = screensOf(definition.screens);
-  const surfaces = surfacesOf(definition.surfaces, screens);
-  const preferences = preferencesOf(definition.preferences);
-  if (
-    definition.operationAccess !== undefined &&
-    !isPlainObject(definition.operationAccess)
-  ) {
-    refuse("`operationAccess` is a map of function paths to their access.");
-  }
-  const { manifests: migrations, byName: migrationsByName } = migrationsOf(
-    definition.migrations,
-    manifest
-  );
-  const answers = readSchemaAnswers(definition.answers, manifest, refuse);
-
-  const made: App<Tables> = Object.freeze({ name, schema });
-  registrations.set(made, {
-    definition,
-    manifest,
+  } = permissionsOf(config.permissions);
+  const made: App = Object.freeze({ name: config.name });
+  configs.set(made, {
+    config,
     resources,
     browser,
     workflows,
     people,
-    screens,
-    surfaces,
-    preferences,
-    migrations,
-    migrationsByName,
-    answers,
+    preferences: preferencesOf(config.preferences),
   });
   return made;
 };
 
-/**
- * The App `registered` (what `app` answered) with the server functions
- * `modules` export (see the header), checked whole: what `inspectApp`
- * reads. The host calls it from the entry it generates for every App,
- * with each module under `server/` (never `server/_generated/` or
- * `server/migrations/`); App code never does. Throws
- * `AppDefinitionError` for functions that can't be registered.
- */
-export const registerFunctions = <
-  const Tables extends Readonly<Record<string, AnyTable>>,
->(
-  registered: App<Tables>,
-  modules: ServerModules
-): App<Tables> => {
-  const registration =
-    typeof registered === "object" && registered !== null
-      ? registrations.get(registered)
-      : undefined;
-  if (registration === undefined) {
-    return refuse("That isn't an App `app` registered.");
+/** `screens.ts`'s default export, checked: `{ screens, surfaces? }`. */
+const screensPartOf = (
+  screens: unknown
+): {
+  screens: Record<string, ScreenManifest>;
+  surfaces: Record<string, SurfaceManifest>;
+} => {
+  if (screens === undefined) {
+    return { screens: {}, surfaces: {} };
   }
-  const { definition, manifest, resources, workflows } = registration;
-  const { functions, paths } = registeredFunctions(
-    definition.schema,
-    exportedFunctions(modules)
-  );
+  if (
+    !isPlainObject(screens) ||
+    !Object.keys(screens).every(
+      (key) => key === "screens" || key === "surfaces"
+    )
+  ) {
+    return refuse("screens.ts's default export is `{ screens, surfaces? }`.");
+  }
+  const byName = screensOf(screens.screens);
+  return { screens: byName, surfaces: surfacesOf(screens.surfaces, byName) };
+};
 
-  const overrides = definition.operationAccess ?? {};
-  for (const path of Object.keys(overrides)) {
-    if (!functions.has(path)) {
-      refuse(
-        `\`operationAccess\` names \`${path}\`, which no server module exports.`
-      );
-    }
+/**
+ * Registers an App from its parts (see the header), checked whole: what
+ * `inspectApp` reads. The host calls it from the entry it generates for
+ * every App (`.grasp/app.ts`); App code never does. Throws
+ * `AppDefinitionError` (or the schema's own error) for an App that isn't
+ * coherent.
+ */
+export const registerApp = (parts: AppParts): RegisteredApp => {
+  if (!isPlainObject(parts)) {
+    return refuse("An App is registered from its parts.");
   }
+  const checked =
+    typeof parts.config === "object" && parts.config !== null
+      ? configs.get(parts.config)
+      : undefined;
+  if (checked === undefined) {
+    return refuse(
+      "grasp.config.ts's default export isn't a config `defineApp` made."
+    );
+  }
+  const { config, resources, workflows } = checked;
+  // Throws for a schema `defineSchema` didn't make.
+  const manifest = schemaManifest(parts.schema);
+  const { screens, surfaces } = screensPartOf(parts.screens);
+  const { manifests: migrations, byName: migrationsByName } = migrationsOf(
+    parts.migrations,
+    manifest
+  );
+  const answers = readSchemaAnswers(config.answers, manifest, refuse);
+  const { functions, paths } = registeredFunctions(
+    parts.schema,
+    exportedFunctions(parts.modules)
+  );
 
   const operations: Record<string, OperationManifest> = {};
   for (const [path, fn] of functions) {
@@ -1402,50 +1326,38 @@ export const registerFunctions = <
         uses: Object.freeze(
           usesOf(fn, path, paths, functions, resources, workflows)
         ),
-        tables: Object.freeze(
-          verbsOf(
-            manifest,
-            path,
-            fn.kind,
-            Object.hasOwn(overrides, path) ? overrides[path] : undefined
-          )
-        ),
+        tables: Object.freeze(verbsOf(manifest, path, fn)),
       }),
     });
   }
 
-  const made: App<Tables> = Object.freeze({
-    name: registered.name,
-    schema: registered.schema,
-  });
+  const made: RegisteredApp = Object.freeze({ name: config.name });
   inspections.set(made, {
     manifest: deepFreeze({
-      name: definition.name,
+      name: config.name,
       schema: manifest,
       operations,
       resources: Object.fromEntries(resources),
-      browserResources: Object.fromEntries(registration.browser),
+      browserResources: Object.fromEntries(checked.browser),
       workflows: Object.fromEntries(workflows),
-      screens: registration.screens,
-      surfaces: registration.surfaces,
-      preferences: registration.preferences,
-      ...(registration.people ? { people: true } : {}),
-      migrations: registration.migrations,
-      ...(registration.answers.length > 0
-        ? { answers: registration.answers }
-        : {}),
+      screens,
+      surfaces,
+      preferences: checked.preferences,
+      ...(checked.people ? { people: true } : {}),
+      migrations,
+      ...(answers.length > 0 ? { answers } : {}),
     }),
+    schema: parts.schema,
     functions,
-    migrations: new Map(registration.migrationsByName),
+    migrations: new Map(migrationsByName),
   });
   return made;
 };
 
 /**
- * What the host runs `registered` from; throws for anything
- * `registerFunctions` didn't make. The manifest is frozen all the way
- * down, and the handlers are a copy each time, so nothing a caller does
- * to them changes the App.
+ * What the host runs `registered` from; throws for anything `registerApp`
+ * didn't make. The manifest is frozen all the way down, and the handlers
+ * are a copy each time, so nothing a caller does to them changes the App.
  */
 export const inspectApp = (registered: unknown): AppInspection => {
   const inspection =
@@ -1453,12 +1365,11 @@ export const inspectApp = (registered: unknown): AppInspection => {
       ? inspections.get(registered)
       : undefined;
   if (inspection === undefined) {
-    return refuse(
-      "That isn't an App registered with its server functions (`registerFunctions`)."
-    );
+    return refuse("That isn't an App `registerApp` registered.");
   }
   return Object.freeze({
     manifest: inspection.manifest,
+    schema: inspection.schema,
     functions: new Map(inspection.functions),
     migrations: new Map(inspection.migrations),
   });

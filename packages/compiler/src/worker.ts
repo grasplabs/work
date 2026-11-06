@@ -1068,13 +1068,14 @@ const buildAppCodeNoting = (
       diagnostics: [
         problem(
           "server",
-          "The App has no app.ts and schema.ts: register it in app.ts and declare its schema in schema.ts."
+          "The App has no grasp.config.ts and server/schema.ts: Grasp generates them from the App's definition as its first table, field or permission is added (addTable, addPermission)."
         ),
       ],
     };
   }
   // The entry the host runs the App from, made from its file list: its
-  // registration with every server module's functions. Built as the
+  // config, schema and screens with every server module's functions and
+  // every migration. Built as the
   // host's own code, never type-checked as the App's.
   code[serverEntryPath] = serverEntrySource(Object.keys(code));
   const known = new Set(Object.keys(code));
@@ -1158,7 +1159,8 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
     };
   }
   // The entry the host runs the App from, made from its file list: its
-  // registration with every server module's functions. Built as the
+  // config, schema and screens with every server module's functions and
+  // every migration. Built as the
   // host's own code, never type-checked as the App's.
   code[serverEntryPath] = serverEntrySource(Object.keys(code));
   const known = new Set(Object.keys(code));

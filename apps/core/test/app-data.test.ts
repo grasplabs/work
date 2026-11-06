@@ -37,7 +37,7 @@ import { outcome, signedInApi } from "./sign-in.ts";
 const idp = mockIdp();
 
 const files: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
   notes: defineTable({
@@ -45,15 +45,15 @@ export default defineSchema({
     status: v.string().optional(),
     done: v.boolean().default(false),
     tags: v.array(v.string()).default([]),
-  }),
-  salaries: defineTable({ person: v.string(), amount: v.number() }).sensitive(),
-  pins: defineTable({ text: v.string() }),
+  }).access({ read: "appMembers", write: "appMembers" }),
+  salaries: defineTable({ person: v.string(), amount: v.number() }).sensitive().access({ read: "appMembers", write: "appMembers" }),
+  pins: defineTable({ text: v.string() }).access({ read: "owner", write: "owner" }),
   labels: defineTable({
     name: v.string(),
     nick: v.string().nullable(),
     note: v.string().optional(),
     extra: v.string().nullable().optional(),
-  }),
+  }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/notes.ts": `import { mutation } from "@server/_generated/server";
@@ -112,21 +112,10 @@ export const pay = mutation({
   handler: async (ctx, args) => await ctx.db.insert("salaries", args),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Notes",
-  schema,
-  access: {
-    tables: {
-      notes: { read: "appMembers", write: "appMembers" },
-      salaries: { read: "appMembers", write: "appMembers" },
-      pins: { read: "owner", write: "owner" },
-      labels: { read: "appMembers", write: "appMembers" },
-    },
-  },
-  screens: [],
 });
 `,
   "screens/notes.tsx": `export default function Notes() {
@@ -648,12 +637,14 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
   it("keeps no values of a table first declared sensitive in a later version, its earlier changes included", async () => {
     const sensitiveFiles = {
       ...files,
-      "schema.ts": (files["schema.ts"] ?? "").replace(
-        "tags: v.array(v.string()).default([]),\n  }),",
-        "tags: v.array(v.string()).default([]),\n  }).sensitive(),"
+      "server/schema.ts": (files["server/schema.ts"] ?? "").replace(
+        "tags: v.array(v.string()).default([]),\n  }).access(",
+        "tags: v.array(v.string()).default([]),\n  }).sensitive().access("
       ),
     };
-    expect(sensitiveFiles["schema.ts"]).not.toBe(files["schema.ts"]);
+    expect(sensitiveFiles["server/schema.ts"]).not.toBe(
+      files["server/schema.ts"]
+    );
     // The first version: notes as they were; then one declaring them sensitive.
     const builder = await personApi("builder");
     const { id: app } = await builder.api.apps.create({ name: "Notes" });

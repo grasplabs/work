@@ -13,7 +13,12 @@ import { origin } from "./stack.ts";
 
 const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema({ clicks: defineTable({ at: v.number() }) });
+export default defineSchema({
+  clicks: defineTable({ at: v.number() }).access({
+    read: "appMembers",
+    write: "appMembers",
+  }),
+});
 `;
 
 const operations = `import { v } from "@grasp-os/sdk";
@@ -32,18 +37,15 @@ export const addOne = mutation({
 });
 `;
 
-/** The counter's registration, its one screen `screen`. */
-const registration = (
-  screen: string
-): string => `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+const config = `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
-  name: "Counter",
-  schema,
-  access: { tables: { clicks: { read: "appMembers", write: "appMembers" } } },
+export default defineApp({ name: "Counter" });
+`;
+
+/** The counter's screens: its one screen `screen`. */
+const screensOf = (screen: string): string => `export default {
   screens: [{ name: "${screen}", path: "/", source: "screens/${screen}.tsx" }],
-});
+};
 `;
 
 const screen = `import { useMutation, useQuery } from "@grasp-os/sdk/react";
@@ -65,9 +67,10 @@ export default function Counter() {
 
 /** The counter App's code: its schema, functions and one screen, `name`. */
 const counterApp = (name = "counter"): Record<string, string> => ({
-  "schema.ts": schema,
+  "server/schema.ts": schema,
   "server/counter.ts": operations,
-  "app.ts": registration(name),
+  "grasp.config.ts": config,
+  "screens.ts": screensOf(name),
   [`screens/${name}.tsx`]: screen,
 });
 
@@ -128,10 +131,10 @@ test.beforeAll(async () => {
   app = await newApp(builder, name);
 });
 
-/** An App's registration with two screens, `home` and `counter`, of the counter's code. */
+/** An App with two screens, `home` and `counter`, of the counter's code. */
 const twoScreens = (): Record<string, string> => ({
   ...counterApp(),
-  "app.ts": registration("counter").replace(
+  "screens.ts": screensOf("counter").replace(
     'screens: [{ name: "counter"',
     'screens: [{ name: "home", path: "/home", source: "screens/home.tsx" }, { name: "counter"'
   ),

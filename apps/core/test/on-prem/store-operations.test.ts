@@ -15,10 +15,10 @@ import type { Fixture } from "../sealed-apps.ts";
 // waiting on their calls hold both, and each call still runs.
 
 const crmFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  contacts: defineTable({ name: v.string() }),
+  contacts: defineTable({ name: v.string() }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/contacts.ts": `import { v } from "@grasp-os/sdk";
@@ -30,23 +30,19 @@ export const list = query({
   handler: async (ctx) => (await ctx.db.query("contacts").take(100)).map(({ name }) => name),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "CRM",
-  schema,
-  access: { tables: { contacts: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
 });
 `,
 };
 
 const deskFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  marks: defineTable({ label: v.string() }),
+  marks: defineTable({ label: v.string() }).access({ read: "owner", write: "owner" }),
 });
 `,
   "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
@@ -69,15 +65,11 @@ export const list = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { crm } from "./server/desk.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Desk",
-  schema,
-  access: { tables: { marks: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { apps: [crm] },
 });
 `,

@@ -40,11 +40,11 @@ export const sampleApp = ({ ai }: { ai?: number } = {}): Record<
   string,
   string
 > => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  counters: defineTable({ name: v.string(), count: v.number() }).index("by_name", ["name"]),
-  ledger: defineTable({ invoice: v.string(), total: v.number() }),
+  counters: defineTable({ name: v.string(), count: v.number() }).index("by_name", ["name"]).access({ read: "appMembers", write: "appMembers" }),
+  ledger: defineTable({ invoice: v.string(), total: v.number() }).access({ read: "owner", write: "owner" }),
 });
 `,
   "server/counter.ts": `import { v } from "@grasp-os/sdk";
@@ -148,21 +148,12 @@ export const mailOwnKey = action({
 `,
   // `permission` only where the `ai` permission is declared: an unused
   // import fails the type check.
-  "app.ts": `import { app${ai === undefined ? "" : ", permission"} } from "@grasp-os/sdk";
+  "grasp.config.ts": `import {  } from "@grasp-os/sdk";
 
-import schema from "./schema.ts";
 import { send } from "./server/effects.ts";
 
-export default app({
+export default defineApp({
   name: "Invoices",
-  schema,
-  access: {
-    tables: {
-      counters: { read: "appMembers", write: "appMembers" },
-      ledger: { read: "owner", write: "owner" },
-    },
-  },
-  screens: [],
   permissions: {
     connections: [send],${ai === undefined ? "" : `\n    ai: permission.ai({ maxOutputTokens: ${ai} }),`}
   },

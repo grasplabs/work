@@ -45,9 +45,9 @@ const mailFiles = (
   contract = "microsoft-365.mail@1",
   actions = `["send", "list"]`
 ): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema({ notes: defineTable({ title: v.string() }) });
+export default defineSchema({ notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }) });
 `,
   "server/mail.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
@@ -135,15 +135,11 @@ export const careless = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { mail } from "./server/mail.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Mailer",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { connections: [mail] },
 });
 `,
@@ -155,9 +151,9 @@ export default app({
  * what refuses it.
  */
 const unknownContractFiles = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema({ notes: defineTable({ title: v.string() }) });
+export default defineSchema({ notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }) });
 `,
   "server/mail.ts": `import { permission } from "@grasp-os/sdk";
 
@@ -166,15 +162,11 @@ export const mail = permission.connection("mail", {
   actions: ["send", "list"] as never,
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { mail } from "./server/mail.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Mailer",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { connections: [mail] },
 });
 `,
@@ -201,16 +193,12 @@ export const archived = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { archive } from "./server/archive.ts";
 import { mail } from "./server/mail.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Mailer",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { connections: [mail, archive] },
 });
 `,
@@ -228,15 +216,11 @@ export const mail = permission.connection("mail", {
 
 export const ping = query({ args: {}, returns: v.string(), handler: () => "pong" });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { mail } from "./server/mail.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Mailer",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { connections: [mail] },
 });
 `,
@@ -1154,9 +1138,9 @@ const crmRules = (listIsRead = true) => [
 
 /** An App whose actions list and create contacts in the CRM. */
 const crmFiles = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema({ notes: defineTable({ title: v.string() }) });
+export default defineSchema({ notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }) });
 `,
   "server/crm.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
@@ -1199,15 +1183,11 @@ export const create = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { crm } from "./server/crm.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Contacts",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { connections: [crm] },
 });
 `,
@@ -1215,9 +1195,9 @@ export default app({
 
 /** An App reading contacts from two CRMs, each its own resource. */
 const twoCrmFiles = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema({ notes: defineTable({ title: v.string() }) });
+export default defineSchema({ notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }) });
 `,
   "server/crm.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
@@ -1243,15 +1223,11 @@ export const contacts = action({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { backup, crm } from "./server/crm.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Two CRMs",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { connections: [crm, backup] },
 });
 `,

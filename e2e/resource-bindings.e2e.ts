@@ -15,9 +15,9 @@ import { apiOf, peopleIn } from "./people.ts";
 
 /** The engine's files: an action that asks its `ai`. */
 const writerFiles = (): Record<string, string> => ({
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema({ notes: defineTable({ title: v.string() }) });
+export default defineSchema({ notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }) });
 `,
   "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
@@ -31,15 +31,11 @@ export const draft = action({
   handler: async (ctx) => await ctx.ai.generate({ prompt: "Draft a greeting." }),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 import { ai } from "./server/desk.ts";
-import schema from "./schema.ts";
 
-export default app({
+export default defineApp({
   name: "Desk",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  screens: [],
   permissions: { ai },
 });
 `,

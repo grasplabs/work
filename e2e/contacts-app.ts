@@ -5,10 +5,10 @@
  * screen that adds a contact by name and lists them live.
  */
 export const contactsApp: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  contacts: defineTable({ name: v.string().max(200) }),
+  contacts: defineTable({ name: v.string().max(200) }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/contacts.ts": `import { v } from "@grasp-os/sdk";
@@ -29,15 +29,15 @@ export const add = mutation({
   handler: async (ctx, args) => await ctx.db.insert("contacts", args),
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Contacts",
-  schema,
-  access: { tables: { contacts: { read: "appMembers", write: "appMembers" } } },
-  screens: [{ name: "contacts", path: "/", source: "screens/contacts.tsx" }],
 });
+`,
+  "screens.ts": `export default {
+  screens: [{ name: "contacts", path: "/", source: "screens/contacts.tsx" }],
+};
 `,
   "screens/contacts.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";

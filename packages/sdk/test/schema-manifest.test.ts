@@ -11,7 +11,7 @@ import {
   schemaManifest,
   schemaReferences,
 } from "../src/host.ts";
-import type { SchemaAccess, SchemaManifest, TableAccess } from "../src/host.ts";
+import type { AccessMode, SchemaManifest, TableAccess } from "../src/host.ts";
 import type { AnySchema } from "../src/value-schema.ts";
 import { defineSchema, defineTable, rows, v } from "../src/values.ts";
 import type {
@@ -43,14 +43,49 @@ const notes = (fields: NoteFields) =>
       .index("by_title", ["title"]),
   });
 
-const access: SchemaAccess = {
+/** Access declared for a schema's tables by name: a table or mode left out is `none`. */
+interface DeclaredAccess {
+  readonly tables?: Readonly<
+    Record<string, { readonly read?: AccessMode; readonly write?: AccessMode }>
+  >;
+}
+
+const access: DeclaredAccess = {
   tables: { notes: { read: "owner", write: "owner" } },
 };
 
+/**
+ * `schema`'s manifest, its tables given `declared` access, read back as a
+ * host reads a manifest: checked as `.access` checks a declaration.
+ */
 const manifestOf = (
   schema: SchemaDefinition,
-  declared: SchemaAccess = access
-): SchemaManifest => schemaManifest(schema, declared);
+  declared: DeclaredAccess = access
+): SchemaManifest => {
+  const base = schemaManifest(schema);
+  return readSchemaManifest(
+    JSON.stringify({
+      ...base,
+      tables: Object.fromEntries(
+        Object.entries(base.tables).map(([name, table]) => {
+          const held = Object.hasOwn(declared.tables ?? {}, name)
+            ? declared.tables?.[name]
+            : undefined;
+          return [
+            name,
+            {
+              ...table,
+              access: {
+                read: held?.read ?? "none",
+                write: held?.write ?? "none",
+              },
+            },
+          ];
+        })
+      ),
+    })
+  ).manifest;
+};
 
 /** JSON text of `value` with every object's keys in reverse order. */
 const reversedText = (value: unknown): string =>
@@ -73,11 +108,6 @@ const fieldsOf = (json: Record<string, unknown>): Record<string, unknown> =>
   notesOf(json).fields as Record<string, unknown>;
 
 const titleOf = (json: Record<string, unknown>) => fieldsOf(json).title;
-
-const anyAccess = (declared: unknown): SchemaAccess =>
-  // SAFETY: none, on purpose: the manifest checks what the types refuse.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- deliberately ill-typed input
-  declared as SchemaAccess;
 
 const codeOf = (read: () => unknown): unknown => {
   try {
@@ -206,7 +236,7 @@ describe("canonical manifests", () => {
     const declared: Record<string, TableAccess> = Object.fromEntries([
       ["toString", { read: "owner" }],
     ]);
-    const manifest = schemaManifest(defineSchema(tables), {
+    const manifest = manifestOf(defineSchema(tables), {
       tables: declared,
     });
     const accessOf = (table: string) =>
@@ -284,24 +314,30 @@ describe("canonical manifests", () => {
     await expect(schemaHash(manifest)).resolves.toBe(GOLDEN_HASH);
   });
 
-  test("access must name the schema's tables and modes that exist", () => {
+  test("a table's access names modes that exist, once", () => {
+    const table = defineTable(noteFields);
+    const declare: unknown = Reflect.get(table, "access");
+    if (typeof declare !== "function") {
+      throw new TypeError("A table has `access`");
+    }
+    for (const declared of [
+      { read: "everyone" },
+      { read: null },
+      { read: "owner", delete: "owner" },
+      "owner",
+      [],
+    ]) {
+      expect(codeOf(() => Reflect.apply(declare, table, [declared]))).toBe(
+        "schema.invalid_access"
+      );
+    }
     expect(
       codeOf(() =>
-        manifestOf(notes(noteFields), { tables: { people: { read: "owner" } } })
+        defineTable(noteFields)
+          .access({ read: "owner" })
+          .access({ write: "owner" })
       )
-    ).toBe("schema.unknown_table");
-    for (const declared of [
-      { tables: { notes: { read: "everyone" } } },
-      { tables: { notes: { read: null } } },
-      { tables: { notes: { read: "owner", delete: "owner" } } },
-      { tables: { notes: "owner" } },
-      { tables: [] },
-      { grants: {} },
-    ]) {
-      expect(
-        codeOf(() => manifestOf(notes(noteFields), anyAccess(declared)))
-      ).toMatch(/^schema\.invalid_access$/u);
-    }
+    ).toBe("schema.invalid_access");
   });
 
   test("only a schema `defineSchema` made has a manifest", () => {
@@ -692,23 +728,33 @@ describe("row rules", () => {
     if (typeof declare !== "function") {
       throw new TypeError("A table has `access`");
     }
-    return Reflect.apply(declare, table, [rules]);
+    return Reflect.apply(declare, table, [
+      { read: "appMembers", write: "appMembers", rows: rules },
+    ]);
   };
-  const shared: SchemaAccess = {
-    tables: { requests: { read: "appMembers", write: "appMembers" } },
-  };
-  const ruledSchema = defineSchema({
-    requests: defineTable(requestFields).access({
-      read: [rows.owner(), rows.team("team"), rows.role("builder")],
-      write: [rows.person("assignee")],
-    }),
-  });
+  /** Requests whose rules choose rows among those `read` and `write` reach. */
+  const ruledWith = (read: AccessMode, write: AccessMode) =>
+    defineSchema({
+      requests: defineTable(requestFields).access({
+        read,
+        write,
+        rows: {
+          read: [rows.owner(), rows.team("team"), rows.role("builder")],
+          write: [rows.person("assignee")],
+        },
+      }),
+    });
+  const ruledSchema = ruledWith("appMembers", "appMembers");
 
   test("are part of the manifest, its hash and its diff, and read back as declared", async () => {
-    const manifest = schemaManifest(ruledSchema, shared);
+    const manifest = schemaManifest(ruledSchema);
     const plain = schemaManifest(
-      defineSchema({ requests: defineTable(requestFields) }),
-      shared
+      defineSchema({
+        requests: defineTable(requestFields).access({
+          read: "appMembers",
+          write: "appMembers",
+        }),
+      })
     );
     expect(manifest.tables.requests?.rules).toStrictEqual({
       read: [
@@ -756,8 +802,8 @@ describe("row rules", () => {
       unknownDirection: codeOf(() => ruled({ delete: [rows.owner()] })),
       again: codeOf(() =>
         defineTable(requestFields)
-          .access({ read: [rows.owner()] })
-          .access({ write: [rows.owner()] })
+          .access({ read: "appMembers", rows: { read: [rows.owner()] } })
+          .access({ read: "appMembers", rows: { write: [rows.owner()] } })
       ),
     }).toStrictEqual({
       personOnText: "schema.invalid_rules",
@@ -771,15 +817,13 @@ describe("row rules", () => {
       neither: "schema.invalid_rules",
       twice: "schema.invalid_rules",
       unknownDirection: "schema.invalid_rules",
-      again: "schema.invalid_rules",
+      again: "schema.invalid_access",
     });
   });
 
   test("need an access mode that reaches every row for the direction they choose rows in", () => {
-    const of = (read: TableAccess["read"], write: TableAccess["write"]) =>
-      codeOf(() =>
-        schemaManifest(ruledSchema, { tables: { requests: { read, write } } })
-      );
+    const of = (read: AccessMode, write: AccessMode) =>
+      codeOf(() => ruledWith(read, write));
     expect({
       ownerRead: of("owner", "appMembers"),
       ownerWrite: of("appMembers", "owner"),
@@ -796,7 +840,7 @@ describe("row rules", () => {
   });
 
   test("a manifest's rules are checked as a declaration's: a tampered one is refused", () => {
-    const text = manifestText(schemaManifest(ruledSchema, shared)).replace(
+    const text = manifestText(schemaManifest(ruledSchema)).replace(
       '{"field":"assignee","kind":"person"}',
       '{"field":"team","kind":"person"}'
     );

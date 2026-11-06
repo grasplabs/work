@@ -8,7 +8,10 @@
 const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  drafts: defineTable({ text: v.string().max(2000) }),
+  drafts: defineTable({ text: v.string().max(2000) }).access({
+    read: "owner",
+    write: "owner",
+  }),
 });
 `;
 
@@ -44,15 +47,14 @@ export const outline = action({
 });
 `;
 
-const registration = `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+const config = `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
-  name: "Writer",
-  schema,
-  access: { tables: { drafts: { read: "owner", write: "owner" } } },
+export default defineApp({ name: "Writer" });
+`;
+
+const screens = `export default {
   screens: [{ name: "writer", path: "/", source: "screens/writer.tsx" }],
-});
+};
 `;
 
 const screen = `import { useStream } from "@grasp-os/sdk/react";
@@ -111,8 +113,9 @@ export default function Writer() {
 
 /** The Writer App's files. */
 export const writerAppFiles = (): Record<string, string> => ({
-  "schema.ts": schema,
+  "server/schema.ts": schema,
   "server/writer.ts": operations,
-  "app.ts": registration,
+  "grasp.config.ts": config,
+  "screens.ts": screens,
   "screens/writer.tsx": screen,
 });

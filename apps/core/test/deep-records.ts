@@ -17,13 +17,13 @@ export const fieldDepth = valueDepth - 1;
  * channel to the store and back.
  */
 export const deepFiles: Record<string, string> = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 // A leaf in ${String(fieldDepth - 1)} arrays: ${String(fieldDepth)} levels, as deep as a table's field may be.
 const level0 = v.string();\n${Array.from({ length: fieldDepth - 1 }, (_value, index) => `const level${String(index + 1)} = v.array(level${String(index)});`).join("\n")}
 
 export default defineSchema({
-  deep: defineTable({ value: level${String(fieldDepth - 1)} }),
+  deep: defineTable({ value: level${String(fieldDepth - 1)} }).access({ read: "owner", write: "owner" }),
 });
 `,
   "server/deep.ts": `import { v } from "@grasp-os/sdk";
@@ -58,14 +58,10 @@ export const read = query({
   },
 });
 `,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Deep",
-  schema,
-  access: { tables: { deep: { read: "owner", write: "owner" } } },
-  screens: [],
 });
 `,
 };

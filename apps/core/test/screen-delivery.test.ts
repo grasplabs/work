@@ -183,21 +183,17 @@ export const failing = action({
 `;
 
 const appCode = {
-  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
-  steps: defineTable({ step: v.string().min(1).max(100) }),
+  steps: defineTable({ step: v.string().min(1).max(100) }).access({ read: "appMembers", write: "appMembers" }),
 });
 `,
   "server/notes.ts": operationsCode,
-  "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
+  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default app({
+export default defineApp({
   name: "Notes",
-  schema,
-  access: { tables: { steps: { read: "appMembers", write: "appMembers" } } },
-  screens: [],
 });
 `,
 };
