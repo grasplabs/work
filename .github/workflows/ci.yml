@@ -630,6 +630,9 @@ jobs:
     needs: release
     if: github.event_name == 'push'
     uses: ./.github/workflows/deploy-platform.yml
+    # A called workflow sees only the secrets its caller hands it, the
+    # staging environment's OP_SERVICE_ACCOUNT_TOKEN included.
+    secrets: inherit
     with:
       stage: staging
 
