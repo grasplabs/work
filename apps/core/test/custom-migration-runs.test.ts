@@ -21,7 +21,9 @@ export const noteFields = {
   category: v.enum(["launch", "general"]).optional(),
 };
 
-export default defineSchema({ notes: defineTable(noteFields) });
+export default defineSchema({
+  notes: defineTable(noteFields).access({ read: "owner", write: "owner" }),
+});
 `;
 
 /** What the report of `version`'s candidate says of rolling back from it. */
