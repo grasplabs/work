@@ -367,7 +367,9 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "dataStore.sdk_store": { none: "who deleted the store, a process" },
   "dataStore.sdk_records": { company: "the App's records they own (D1)" },
   "dataStore.sdk_abandoned_targets": { company: "migration work" },
-  "dataStore.sdk_schema_backfills": { none: "a backfill's process" },
+  "dataStore.sdk_schema_backfills": {
+    none: "a backfill's process; its scan's cursor names the last record's audience only until the scan is through",
+  },
   "dataStore.sdk_migration_work": { company: "migration work" },
   "dataStore.sdk_mutation_receipts": { company: "writes of the App's records" },
   "dataStore.sdk_commit_writers": { company: "writes of the App's records" },
@@ -620,7 +622,6 @@ export const reviewedPersonColumns: Readonly<
   "dataStore.sdk_preferences": ["person_id"],
   "dataStore.sdk_record_changes": ["actor", "principal"],
   "dataStore.sdk_records": ["owner_id"],
-  "dataStore.sdk_schema_backfills": ["cursor_owner"],
   "dataStore.sdk_store": ["deleted_by"],
   "onboarding.approvals": ["person"],
   "onboarding.asked_about": ["person"],

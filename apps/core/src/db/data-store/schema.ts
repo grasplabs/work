@@ -445,11 +445,12 @@ export const backfills = sqliteTable(
     cursorRecord: text("cursor_record"),
     /**
      * For an explicit migration (`migrations`), the rest of where its scan
-     * is: it goes through a table's records by owner, then creation time,
-     * then ID, so a batch holds one owner's records where the table's
-     * access is `owner` (store-migrations.ts).
+     * is: it goes through a table's records by audience (their owner, or
+     * the owner and the fields its row rules read), then creation time,
+     * then ID, so batches of one audience's records stay full
+     * (store-migrations.ts, `audienceOrder`).
      */
-    cursorOwner: text("cursor_owner"),
+    cursorAudience: text("cursor_audience"),
     cursorCreatedAt: integer("cursor_created_at"),
     /**
      * The explicit migrations the target runs instead of filling, as

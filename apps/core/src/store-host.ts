@@ -940,18 +940,18 @@ const refuseMigration = (migration: string, reason: string): never => {
 /** Where a migration's scan is, as its backfill row keeps it; null at its start. */
 const cursorOf = (row: {
   cursorTable: string | null;
-  cursorOwner: string | null;
+  cursorAudience: string | null;
   cursorCreatedAt: number | null;
   cursorRecord: string | null;
 }): ScanPosition | null =>
   row.cursorTable === null ||
   row.cursorRecord === null ||
-  row.cursorOwner === null ||
+  row.cursorAudience === null ||
   row.cursorCreatedAt === null
     ? null
     : {
         tableId: row.cursorTable,
-        ownerId: row.cursorOwner,
+        audience: row.cursorAudience,
         createdAt: row.cursorCreatedAt,
         recordId: row.cursorRecord,
       };
@@ -5758,19 +5758,7 @@ export class StoreHost {
       pending.migrations?.consumer ?? [];
     const consumer = { resourceId, resourceVersion };
     if (row.phase === "scan") {
-      const cursor =
-        row.cursorTable === null ||
-        row.cursorRecord === null ||
-        row.cursorOwner === null ||
-        row.cursorCreatedAt === null
-          ? null
-          : {
-              tableId: row.cursorTable,
-              ownerId: row.cursorOwner,
-              createdAt: row.cursorCreatedAt,
-              recordId: row.cursorRecord,
-            };
-      const scanned = nextScanBatch(this.#db, migrated, cursor);
+      const scanned = nextScanBatch(this.#db, migrated, cursorOf(row));
       if (scanned !== null) {
         return {
           state: "transform",
@@ -5789,7 +5777,7 @@ export class StoreHost {
           phase: "work",
           cursorTable: null,
           cursorRecord: null,
-          cursorOwner: null,
+          cursorAudience: null,
           cursorCreatedAt: null,
         })
         .where(eq(backfills.targetHash, pending.hash))
@@ -6649,7 +6637,9 @@ export class StoreHost {
    * Refuses, as a caller's bug, a batch that doesn't account for exactly
    * the records the store handed out for it: a scan batch every record
    * from the cursor through `through` (each committed, or queued as work
-   * since), none outside it; a work batch only queued records.
+   * since), none outside it but one an edit moved out of it since (a field
+   * a row rule reads changed, which the scan orders by: store-migrations.ts),
+   * which the edit queued as work; a work batch only queued records.
    */
   #requireCovered(
     target: string,
@@ -6677,6 +6667,7 @@ export class StoreHost {
     const outside = [...ids].some(
       (id) =>
         !range.has(id) &&
+        !isQueued(this.#db, target, table.tableId, id) &&
         this.#db
           .select({ id: records.recordId })
           .from(records)
@@ -6854,7 +6845,7 @@ export class StoreHost {
         ? {}
         : {
             cursorTable: through.tableId,
-            cursorOwner: through.ownerId,
+            cursorAudience: through.audience,
             cursorCreatedAt: through.createdAt,
             cursorRecord: through.recordId,
           };

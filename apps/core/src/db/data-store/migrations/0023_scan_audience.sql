@@ -1,0 +1,1 @@
+ALTER TABLE `sdk_schema_backfills` RENAME COLUMN "cursor_owner" TO "cursor_audience";

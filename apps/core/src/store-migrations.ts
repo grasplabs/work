@@ -3,7 +3,8 @@ import { holdsId } from "@grasp-os/sdk/host";
 import type { SchemaManifest } from "@grasp-os/sdk/host";
 import { storedFieldsSchema } from "@grasp-os/shared/stores";
 import type { MigrationFailure, StoreFields } from "@grasp-os/shared/stores";
-import { and, asc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, lte, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
@@ -15,6 +16,7 @@ import {
   transformBatchOverhead,
   transformRecordBytes,
 } from "./migration-transform.ts";
+import { jsonExpression } from "./store-expressions.ts";
 import { validates } from "./store-queries.ts";
 import { audienceKey } from "./store-rules.ts";
 import type { Audience } from "./store-rules.ts";
@@ -64,9 +66,13 @@ import type { Audience } from "./store-rules.ts";
 //   transform's module state: a batch holds records of one audience only
 //   (store-rules.ts, `audienceKey`: one owner where the access mode or a
 //   rule reads it, one value of each field a row rule reads), cut where
-//   the next record's differs. The scan goes by owner, so an owner table
-//   cuts few batches; a table whose rules read fields cuts one wherever
-//   consecutive records differ in them.
+//   the next record's differs. The scan goes in audience order
+//   (`audienceOrder`), so records alike come together and batches stay
+//   full. An edit can move a record in that order while the scan runs (a
+//   field a row rule reads changed): the edit queues it as work, so a
+//   record moved behind the scan is still transformed, and one moved out
+//   of the batch it was handed in is accounted for (store-host.ts,
+//   `#requireCovered`).
 // - A transform moves a record into other people's sight by rewriting a
 //   field a row rule reads: refused (`rule_changed`), whatever the
 //   transform answered, for the rules of the target and of the contract
@@ -104,14 +110,15 @@ export interface MigrationRow {
 /** Where a batch's scan ends: the last record it read, in scan order. */
 export interface ScanPosition {
   readonly tableId: string;
-  readonly ownerId: string;
+  /** Its audience, as its table's scan orders by it (`audienceOrder`). */
+  readonly audience: string;
   readonly createdAt: number;
   readonly recordId: string;
 }
 
 export const scanPositionSchema = z.strictObject({
   tableId: z.string().min(1),
-  ownerId: z.string(),
+  audience: z.string(),
   createdAt: z.number().int(),
   recordId: z.string().min(1),
 });
@@ -152,6 +159,33 @@ export const fieldsOf = (
     ? (manifest.tables[table]?.fields ?? {})
     : {};
 
+/**
+ * What the scan of a table of `audience` orders its records by first, as
+ * text: who they reach, so records alike come together and a batch, which
+ * holds one audience's only (`batchOf`), runs on as far as its bounds
+ * allow. The owner alone where no row rule reads a field, which the owner
+ * index (`sdk_records_owner_created`) serves; otherwise the owner, where
+ * the audience reads it, and each field a rule reads, as one JSON array
+ * (a field left out and null alike, as in `audienceKey`).
+ */
+const audienceOrder = (audience: Audience): SQL =>
+  audience.fields.length === 0
+    ? sql`${records.ownerId}`
+    : sql.raw(
+        `json_array(${[
+          ...(audience.owner ? ["owner_id"] : []),
+          ...audience.fields.map((field) => jsonExpression(field)),
+        ].join(", ")})`
+      );
+
+/** Where a record of a table of `audience` is in its scan. */
+const scanKey = (audience: Audience): SQL =>
+  sql`(${audienceOrder(audience)}, ${records.createdAt}, ${records.recordId})`;
+
+/** `position` as the values `scanKey` compares with. */
+const positionOf = (position: ScanPosition): SQL =>
+  sql`(${position.audience}, ${position.createdAt}, ${position.recordId})`;
+
 /** A record as a batch hands it on. */
 const rowOf = (record: RecordRow): MigrationRow => ({
   id: record.recordId,
@@ -175,16 +209,16 @@ const audienceOfRecord = (audience: Audience, record: RecordRow): string =>
  * audience up to the first of another, and no more bytes than a
  * transform's batch takes (always at least one: a record holds less).
  */
-const batchOf = (
-  rows: readonly RecordRow[],
+const batchOf = <Row extends RecordRow>(
+  rows: readonly Row[],
   audience: Audience
-): RecordRow[] => {
+): Row[] => {
   const [first] = rows;
   if (first === undefined) {
     return [];
   }
   const key = audienceOfRecord(audience, first);
-  const taken: RecordRow[] = [];
+  const taken: Row[] = [];
   // A running total, as the transform measures its batch
   // (`transformBatchBytes`): a record's stored text is its fields'
   // canonical text, and each is measured once.
@@ -206,8 +240,9 @@ const batchOf = (
 /**
  * The next batch of the scan from `cursor` (null: the start of the first
  * table) through `tables`, in table order, then each table's records by
- * owner, creation time and ID up to its bound: the records, the table and
- * where the batch ends; null once every table is through.
+ * audience (`audienceOrder`), creation time and ID up to its bound: the
+ * records, the table and where the batch ends; null once every table is
+ * through.
  */
 export const nextScanBatch = (
   db: Db,
@@ -227,12 +262,16 @@ export const nextScanBatch = (
     if (table === undefined) {
       continue;
     }
+    const audience = audienceOrder(table.audience);
     const after =
       cursor !== null && cursor.tableId === table.tableId
-        ? sql`(${records.ownerId}, ${records.createdAt}, ${records.recordId}) > (${cursor.ownerId}, ${cursor.createdAt}, ${cursor.recordId})`
+        ? sql`${scanKey(table.audience)} > ${positionOf(cursor)}`
         : undefined;
     const found = db
-      .select()
+      .select({
+        ...getTableColumns(records),
+        audience: sql<string>`${audience}`,
+      })
       .from(records)
       .where(
         and(
@@ -241,11 +280,7 @@ export const nextScanBatch = (
           after
         )
       )
-      .orderBy(
-        asc(records.ownerId),
-        asc(records.createdAt),
-        asc(records.recordId)
-      )
+      .orderBy(asc(audience), asc(records.createdAt), asc(records.recordId))
       .limit(migrationBatchSize)
       .all();
     const taken = batchOf(found, table.audience);
@@ -256,7 +291,7 @@ export const nextScanBatch = (
         rows: taken.map((row) => rowOf(row)),
         through: {
           tableId: table.tableId,
-          ownerId: last.ownerId,
+          audience: last.audience,
           createdAt: last.createdAt,
           recordId: last.recordId,
         },
@@ -388,9 +423,9 @@ export const scanRangeIds = (
         eq(records.tableId, table.tableId),
         lte(records.recordId, table.bound),
         cursor !== null && cursor.tableId === table.tableId
-          ? sql`(${records.ownerId}, ${records.createdAt}, ${records.recordId}) > (${cursor.ownerId}, ${cursor.createdAt}, ${cursor.recordId})`
+          ? sql`${scanKey(table.audience)} > ${positionOf(cursor)}`
           : undefined,
-        sql`(${records.ownerId}, ${records.createdAt}, ${records.recordId}) <= (${through.ownerId}, ${through.createdAt}, ${through.recordId})`
+        sql`${scanKey(table.audience)} <= ${positionOf(through)}`
       )
     )
     .all()
