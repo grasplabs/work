@@ -501,8 +501,14 @@ const workflowBuildDeclaration = `/**
  * what the workflow calls outside itself: \`{ [alias]: { kind, contract, title? } }\`, kind one
  * of ${bindingKinds.map((kind) => `\`${kind}\``).join(", ")}; a model, connector, operation,
  * decision or event binding names a contract of its kind from \`catalog()\` (an event contract's
- * \`events\` are the types a wait for it takes), a compute or action binding one of the
- * workflow's own modules (\`local:code/<file>.ts#<export>\`).
+ * \`events\` are the types a wait for it takes), a files binding a \`files\` one and a brain
+ * binding a \`knowledge\` one; a compute or action binding one of the workflow's own modules
+ * (\`local:code/<file>.ts#<export>\`). Only the workflow's own actions reach a
+ * files binding (the run's own files) or a brain binding (one Brain collection), as uses they
+ * declare (\`resource.files\`, \`resource.knowledge\`); no step calls them itself. What an action
+ * returns is its step's output, which the run records: return a file's reference
+ * \`{ file: <id> }\`, never its content, and hand that reference to the next action, which reads
+ * it. Of the Brain, return only what the next step needs.
  *
  * Each step is \`{ id, type, title?, if?, ... }\`: \`id\` is a stable key (lower-case words
  * and dashes, never changed once made; rename by \`title\`), \`if\` an expression that skips it.

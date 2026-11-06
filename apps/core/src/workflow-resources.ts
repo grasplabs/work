@@ -41,11 +41,16 @@ import type {
   WorkflowVersionBinding,
   WorkflowVersionSource,
 } from "@grasp-os/shared/workflow-resources";
+import {
+  bindingKindOf,
+  contractKindOf,
+} from "@grasp-os/workflow-schema/catalog";
 import type { ContractUse } from "@grasp-os/workflow-schema/catalog";
 import { checkWorkflow } from "@grasp-os/workflow-schema/check";
 import type { CheckedWorkflow, Problem } from "@grasp-os/workflow-schema/check";
 import { expressionTypeRequest } from "@grasp-os/workflow-schema/expression-scope";
 import {
+  bindingKinds,
   definitionFormat,
   eachStep,
   formatLimits,
@@ -697,8 +702,11 @@ const declaredBindingsSchema = z.object({
   bindings: z.record(z.string(), z.unknown()),
 });
 
+/** A binding that names a contract of the catalog, not of the workflow's own modules. */
 const catalogBindingSchema = z.object({
-  kind: z.enum(catalogBindingKinds),
+  kind: z
+    .enum(bindingKinds)
+    .refine((kind) => contractKindOf(kind) !== undefined),
   contract: catalogKeySchema,
 });
 
@@ -845,13 +853,18 @@ const actionUseProblems = (
 ): WorkflowDefinitionProblem[] => {
   const problems: WorkflowDefinitionProblem[] = [];
   for (const use of uses) {
-    const used = bindings[use.alias];
-    if (used?.kind !== use.kind) {
+    const used = Object.hasOwn(bindings, use.alias)
+      ? bindings[use.alias]
+      : undefined;
+    // The use's kind is the catalog's (a Brain collection's `knowledge`),
+    // the binding's the format's (`brain`).
+    if (used === undefined || contractKindOf(used.kind) !== use.kind) {
+      const kind = bindingKindOf(use.kind);
       problems.push({
         code: "binding.use_undeclared",
-        message: `The action reaches \`${use.alias}\`, a ${use.kind} binding the workflow doesn't declare.`,
+        message: `The action reaches \`${use.alias}\`, a ${kind} binding the workflow doesn't declare.`,
         pointer,
-        remedy: `Declare \`${use.alias}\` as a ${use.kind} binding.`,
+        remedy: `Declare \`${use.alias}\` as a ${kind} binding.`,
       });
       continue;
     }
@@ -938,7 +951,10 @@ const bindingProblems = (
       continue;
     }
     const contract = catalog.get(binding.contract);
-    if (contract?.kind !== binding.kind) {
+    if (
+      contract === undefined ||
+      contract.kind !== contractKindOf(binding.kind)
+    ) {
       problems.push({
         code: "binding.unknown_contract",
         message: `The catalog has no ${binding.kind} contract \`${binding.contract}\`.`,

@@ -2,6 +2,8 @@ import type { ValueSchema } from "@grasp-os/sdk";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { isEventType } from "@grasp-os/shared/sealed-builds";
 
+import type { BindingKind } from "./format.ts";
+
 // The host catalog's contracts, as a definition's bindings resolve them:
 // a definition names contracts; the host's approved catalog (and, for
 // `local:` keys, the module manifest it extracted from the workflow's own
@@ -25,6 +27,26 @@ export const contractKinds = [
   "files",
 ] as const;
 export type ContractKind = (typeof contractKinds)[number];
+
+/**
+ * The kind of contract a binding of `kind` names in the catalog: its own,
+ * but for a `brain` binding, whose collection the catalog, the approvals
+ * and an action's uses (`resource.knowledge`) know as `knowledge`.
+ */
+export const contractKindOf = (kind: BindingKind): ContractKind | undefined => {
+  if (kind === "brain") {
+    return "knowledge";
+  }
+  // A workflow's own compute or action is its modules', never the catalog's.
+  if (kind === "compute" || kind === "action") {
+    return undefined;
+  }
+  return kind;
+};
+
+/** The binding kind that names a contract of `kind`, as `contractKindOf` maps it. */
+export const bindingKindOf = (kind: ContractKind): string =>
+  kind === "knowledge" ? "brain" : kind;
 
 /** A value contract: the JSON text of an SDK value descriptor. */
 export type DescriptorText = string;
