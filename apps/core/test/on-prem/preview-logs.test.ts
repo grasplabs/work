@@ -6,6 +6,7 @@ import { z } from "zod";
 import { chatAgentId, personalWorkspaceId } from "../../src/chats-rpc.ts";
 import { workspace } from "../../src/durable-objects.ts";
 import { codeResults, codeStep, model, says } from "../agent-chat.ts";
+import { appDefinition, withoutDefinition } from "../app-definitions.ts";
 import { release, requestGranted } from "../apps.ts";
 import { mockIdp } from "../idp.ts";
 import { fakeProvider } from "../model-provider.ts";
@@ -22,12 +23,15 @@ const idp = mockIdp();
 
 /** A notes App of spec 8's layout whose `create` writes what it creates. */
 const drafted: Record<string, string> = {
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+  ...appDefinition({
+    name: "Invoice desk",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation } from "@server/_generated/server";
 
@@ -40,12 +44,6 @@ export const create = mutation({
   },
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Invoice desk",
-});
-`,
 };
 
 /**
@@ -54,26 +52,23 @@ export default defineApp({
  */
 const releasedDesk: Record<string, string> = {
   "AGENTS.md": "# Invoice desk\n",
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({ name: "Invoice desk" });
-`,
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  invoices: defineTable({ number: v.string().min(1).max(20) }).access({ read: "appMembers", write: "appMembers" }),
-  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+  ...appDefinition({
+    name: "Invoice desk",
+    tables: {
+      invoices: {
+        fields: { number: "v.string().min(1).max(20)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
 };
 
-/** `files` as the agent writes them: never the config or the schema. */
-const agentWritten = (files: Record<string, string>): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(files).filter(
-      ([path]) => path !== "grasp.config.ts" && path !== "server/schema.ts"
-    )
-  );
+/** `files` as the agent writes them: never the definition, its config or its schema. */
+const agentWritten = withoutDefinition;
 
 describe(
   "a spec 8 draft's sealed preview on-prem",

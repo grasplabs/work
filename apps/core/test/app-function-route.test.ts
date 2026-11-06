@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { person } from "./sealed-apps.ts";
@@ -31,12 +32,15 @@ import { routed, signedIn, signedInApi, withSignIn } from "./sign-in.ts";
 const idp = mockIdp();
 
 const files: Record<string, string> = {
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
@@ -52,12 +56,7 @@ export const titles = query({
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title),
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default defineApp({
-  name: "Notes",
-});
-`,
   "screens/notes.tsx": `export default function Notes() {
   return <p>Notes</p>;
 }

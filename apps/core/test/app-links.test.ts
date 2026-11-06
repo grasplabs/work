@@ -9,10 +9,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appHost } from "../src/durable-objects.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { ordinaryData } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { notesFiles } from "./notes-client-app.ts";
+import { notesFiles, notesSpec } from "./notes-client-app.ts";
 import { person as actingPerson } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
@@ -34,19 +35,18 @@ const declared = [
   "https://xn--bcher-kva.example",
 ];
 
-/** The Notes App, its screen declaring `help` links and `attachments` files. */
+/** The Notes App, with permissions to open links to `origins` and to read files. */
 const linkedFiles = (origins: readonly string[] | null = declared) => ({
   ...notesFiles,
-  "grasp.config.ts": `import { defineApp, permission } from "@grasp-os/sdk";
-
-${origins === null ? "" : `export const help = permission.links({ origins: ${JSON.stringify(origins)} });\n`}
-export const attachments = permission.files({ operations: ["read"] });
-
-export default defineApp({
-  name: "Notes",
-  permissions: { ${origins === null ? "" : "links: help, "}files: attachments },
-});
-`,
+  ...appDefinition({
+    ...notesSpec,
+    permissions: [
+      ...(origins === null
+        ? []
+        : [`permission.links({ origins: ${JSON.stringify(origins)} })`]),
+      'permission.files({ operations: ["read"] })',
+    ],
+  }),
 });
 
 const personApi = async (role: Role) => await signedInApi(idp, role);

@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 
+import {
+  definitionPath,
+  definitionSources,
+  generatedFiles,
+  readDefinition,
+} from "@grasp-os/sdk/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { collectionIdSchema, appIdSchema } from "@grasp-os/shared/ids";
 import type { CollectionId } from "@grasp-os/shared/ids";
@@ -104,6 +110,9 @@ const releaseWith = (change: Partial<BuiltinBlueprint>): Release =>
 
 /** Where `hello` keeps its greeting, a function of its release. */
 const greetings = "server/greetings.ts";
+
+/** A file a later release of the built-in adds. */
+const helperPath = "values.ts";
 
 /** A release whose `hello` greets differently. */
 const changedHello = (): Release =>
@@ -258,6 +267,25 @@ describe("the built-in blueprints", () => {
     ).map((file) => file.split("/")[2] ?? file);
     expect(release.blueprints.map(({ id }) => id).toSorted()).toStrictEqual(
       [...folders, "hello"].toSorted()
+    );
+  });
+
+  it("hold their config and schema exactly as their definition generates them", () => {
+    expect(
+      release.blueprints.map(({ id, files }) => ({
+        id,
+        generated: {
+          [generatedFiles.config]: files[generatedFiles.config],
+          [generatedFiles.schema]: files[generatedFiles.schema],
+        },
+      }))
+    ).toStrictEqual(
+      release.blueprints.map(({ id, files }) => ({
+        id,
+        generated: definitionSources(
+          readDefinition(files[definitionPath] ?? "")
+        ),
+      }))
     );
   });
 
@@ -742,13 +770,14 @@ describe("the built-in blueprints", () => {
     );
     await builder.api.apps.versions.setCurrent(app.id, edited);
 
-    // A release that changes the greeting too, and the schema.
-    const schema = `${hello().files["server/schema.ts"]}\n// Release 2.\n`;
+    // A release that changes the greeting too, and adds a helper.
+    const helper =
+      "export const shout = (text: string) => text.toUpperCase();\n";
     const next = releaseWith({
       files: {
         ...hello().files,
         [greetings]: `${hello().files[greetings]}\n// Release 2.\n`,
-        "server/schema.ts": schema,
+        [helperPath]: helper,
       },
     });
     await expect(install(next)).resolves.toBeTruthy();
@@ -839,7 +868,7 @@ describe("the built-in blueprints", () => {
         from: released?.tree,
         to: installed?.tree,
         over: edited,
-        changes: [["server/schema.ts", "modified"]],
+        changes: [[helperPath, "added"]],
         conflicts: [greetings],
       },
       before: mine,
@@ -852,7 +881,7 @@ describe("the built-in blueprints", () => {
       files: {
         ...hello().files,
         [greetings]: mine,
-        "server/schema.ts": schema,
+        [helperPath]: helper,
       },
       again: "app.conflict",
       afterwards: null,
@@ -888,9 +917,10 @@ describe("the built-in blueprints", () => {
       .bind(tree.tree, app.id)
       .run();
 
-    const schema = `${hello().files["server/schema.ts"]}\n// Release 2.\n`;
+    const helper =
+      "export const shout = (text: string) => text.toUpperCase();\n";
     await install(
-      releaseWith({ files: { ...hello().files, "server/schema.ts": schema } })
+      releaseWith({ files: { ...hello().files, [helperPath]: helper } })
     );
     const offered = await builder.api.apps.blueprints.update(app.id);
     if (!offered) {
@@ -906,15 +936,15 @@ describe("the built-in blueprints", () => {
       changes: offered.changes.map(({ path, change }) => [path, change]),
       conflicts: offered.conflicts,
       v1: Object.keys(taken).filter((path) => path.startsWith("app/")),
-      schema: taken["server/schema.ts"],
+      helper: taken[helperPath],
     }).toStrictEqual({
       changes: [
         ["app/server.ts", "deleted"],
-        ["server/schema.ts", "modified"],
+        [helperPath, "added"],
       ],
       conflicts: [],
       v1: [],
-      schema,
+      helper,
     });
 
     await reinstall();

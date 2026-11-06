@@ -1,6 +1,7 @@
 import { kitModuleName } from "@grasp-os/compiler";
 import { describe, expect, it } from "vite-plus/test";
 
+import { appDefinition } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { appModulesOf, kitModulesOf, loadFrame } from "./screen-frames.ts";
@@ -23,16 +24,8 @@ const entryBudget = 1024 * 1024;
 const files = {
   // An App of spec 8's layout with nothing to call: what is measured is
   // the screens, which call nothing of it.
-  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  ...appDefinition({ name: "Closure", tables: {} }),
 
-export default defineSchema({});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Closure",
-});
-`,
   "screens/small.tsx": `import { Button } from "@grasp-os/ui/components/button";
 import { Card, CardContent } from "@grasp-os/ui/components/card";
 import { useState } from "react";

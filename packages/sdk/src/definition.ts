@@ -297,7 +297,9 @@ const tableOf = (table: DefinedTable): AnyTable => {
 };
 
 /** The definition's permissions, by kind, as `defineApp` takes them. */
-export const permissionsOf = (definition: AppDefinition): AppPermissions => {
+export const definedPermissions = (
+  definition: AppDefinition
+): AppPermissions => {
   const permissions: Record<string, unknown> = {};
   const listed = new Map<string, unknown[]>();
   for (const data of definition.permissions) {
@@ -355,7 +357,7 @@ export const definitionApp = (
   const answers = answersOf(definition);
   const config = defineApp({
     name: definition.name,
-    permissions: permissionsOf(definition),
+    permissions: definedPermissions(definition),
     ...(definition.preferences.length === 0
       ? {}
       : { preferences: v.object(shapeOf(definition.preferences)) }),

@@ -709,7 +709,7 @@ const definitions = (known: Set<string>, assets: Fetcher) => [
     name: "renameField",
     label: "Rename a field",
     api: "build",
-    description: `Renames a field: it keeps its ID, so its indexes, row rules and answers follow it. The records the App holds already keep their values under the old name, which stays in them: the new name starts empty there. ${definitionAnswer}`,
+    description: `Renames a field this draft added: it keeps its ID, so its indexes and row rules follow it. A field the App's released version has can't be renamed yet, as its records hold their values under that name: the answer says what to do instead. ${definitionAnswer}`,
     parameters: Type.Object(
       {
         app: appParameter,
@@ -756,7 +756,14 @@ const definitions = (known: Set<string>, assets: Fetcher) => [
       {
         app: appParameter,
         table: tableParameter,
-        name: Type.String({ minLength: 1, maxLength: 64 }),
+        name: Type.Optional(
+          Type.String({
+            minLength: 1,
+            maxLength: 64,
+            description:
+              "Its name, which `.withIndex(name)` reads; a search index has none.",
+          })
+        ),
         fields: Type.Array(Type.String({ minLength: 1, maxLength: 64 }), {
           minItems: 1,
           maxItems: 8,

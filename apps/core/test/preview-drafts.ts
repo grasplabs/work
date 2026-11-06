@@ -5,6 +5,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 import { env } from "cloudflare:workers";
 
+import { appDefinition, preferencesOf, redefined } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import type { Idp } from "./idp.ts";
 import type { previewStores } from "./previews.ts";
@@ -56,20 +57,25 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 /** The App's notes, its functions and a screen that reads them live. */
 export const notesFiles = (marker: string): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
-  "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: ["permission.ai({ maxOutputTokens: 100 })"],
+  }),
+  "server/notes.ts": `import { paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
 import { action, doc, mutation, query } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
 // ${marker}
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const writer = permission.ai({ maxOutputTokens: 100 });
+export const writer = permissions.ai;
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
@@ -258,14 +264,7 @@ export const consult = action({
   handler: async (ctx) => await ctx.ai.generate({ prompt: "Hi" }),
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { writer } from "./server/notes.ts";
 
-export default defineApp({
-  name: "Notes",
-  permissions: { ai: writer },
-});
-`,
   "screens/desk.tsx": `import { useQuery } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 
@@ -298,25 +297,11 @@ const preferencesDeclared = v.object({
 /** `files` with the App declaring those preferences. */
 export const withPreferences = (
   files: Record<string, string>
-): Record<string, string> => {
-  const registration = files["grasp.config.ts"] ?? "";
-  const anchor = "  permissions: { ai: writer },";
-  // A fixture that lost its anchor would silently drop the preferences.
-  if (!registration.includes(anchor)) {
-    throw new Error(
-      `grasp.config.ts has no "${anchor}" to declare preferences at.`
-    );
-  }
-  return {
-    ...files,
-    "grasp.config.ts": registration
-      .replace(
-        'import { defineApp } from "@grasp-os/sdk";',
-        'import { defineApp, v } from "@grasp-os/sdk";'
-      )
-      .replace(anchor, `  preferences: ${preferencesSource},\n${anchor}`),
-  };
-};
+): Record<string, string> =>
+  redefined(files, (definition) => ({
+    ...definition,
+    preferences: preferencesOf(preferencesSource),
+  }));
 
 /**
  * The reference to the preference operation `name` of a release of `app`
@@ -329,17 +314,7 @@ export const preferenceReference = (name: "get" | "update") => {
 
 /** An App with preferences and no tables, and one screen. */
 export const deskFiles = (marker = "Desk"): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
-
-export default defineSchema({});
-`,
-  "grasp.config.ts": `import { defineApp, v } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Desk",
-  preferences: ${preferencesSource},
-});
-`,
+  ...appDefinition({ name: "Desk", preferences: preferencesSource }),
   "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
 };

@@ -20,6 +20,7 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { runEngine } from "../src/workflows/engine.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { resumed, stopped, whileEngineRefuses } from "./runs.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
@@ -127,27 +128,24 @@ const filesWith = (
   { reviewer = "approver", deciders = ["approver"] }: Given,
   tests: Record<string, string> = {}
 ): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Invoices",
+    tables: {
+      invoices: {
+        fields: { amount: "v.number()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("approval", {\n  input: v.object({ amount: v.number() }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/invoices.ts": `import { v } from "@grasp-os/sdk";
+import { permissions } from "../grasp.config.ts";
 
-export default defineSchema({
-  invoices: defineTable({ amount: v.number() }).access({ read: "appMembers", write: "appMembers" }),
-});
+export const approval = permissions.approval;
 `,
-  "server/invoices.ts": `import { permission, v } from "@grasp-os/sdk";
 
-export const approval = permission.workflow("approval", {
-  input: v.object({ amount: v.number() }),
-  output: v.object({ status: v.string() }),
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { approval } from "./server/invoices.ts";
-
-export default defineApp({
-  name: "Invoices",
-  permissions: { workflows: [approval] },
-});
-`,
   "tests/fixtures/desk.json": JSON.stringify({
     principals: {
       "desk-user": { role: "user" },

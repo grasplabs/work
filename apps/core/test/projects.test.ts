@@ -16,6 +16,7 @@ import {
   deleteWorkflowResource,
   shareWorkflowResource,
 } from "../src/workflow-resources.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { racingDb, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
@@ -58,16 +59,8 @@ const workflowOf = async (owner: Person): Promise<string> => {
 const appOf = async (owner: Person): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `Desk ${unique()}` });
   await release(owner, id, {
-    "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+    ...appDefinition({ name: "Desk", tables: {} }),
 
-export default defineSchema({});
-`,
-    "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Desk",
-});
-`,
     "screens/desk.tsx": "export default () => <p>Desk</p>;\n",
   });
   return id;

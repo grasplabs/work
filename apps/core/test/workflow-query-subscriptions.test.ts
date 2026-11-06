@@ -23,6 +23,7 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { terminateResourceRun } from "../src/workflows/resource-runs.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
 import { appWith, queryReference, seal } from "./sealed-apps.ts";
 import { signedInApi, unique } from "./sign-in.ts";
@@ -39,19 +40,23 @@ import { signedInApi, unique } from "./sign-in.ts";
 const idp = mockIdp();
 
 const files = (): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  requests: defineTable({ who: v.string() }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
-  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Requests",
+    tables: {
+      requests: {
+        fields: { who: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const followUp = permission.workflow("followUp", {
-  input: v.object({ who: v.string().trim().min(1) }),
-  output: v.object({ status: v.string() }),
-});
+export const followUp = permissions.followUp;
 
 export const kickOff = action({
   args: { who: v.string() },
@@ -64,14 +69,7 @@ export const kickOff = action({
   handler: async (ctx, args) => await ctx.workflows.followUp.start({ who: args.who }),
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { followUp } from "./server/requests.ts";
 
-export default defineApp({
-  name: "Requests",
-  permissions: { workflows: [followUp] },
-});
-`,
   "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
 };

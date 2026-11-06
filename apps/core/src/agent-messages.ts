@@ -1,5 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
+import { definitionToolNames } from "@grasp-os/shared/chat";
 
 // Kept out of agent.ts so reading stored messages doesn't load the agent
 // loop (Pi and TypeBox), which a chat loads at its first turn.
@@ -19,13 +20,7 @@ export const dedicatedToolNames = [
   "readFile",
   "writeFile",
   "editFile",
-  "addTable",
-  "addField",
-  "changeField",
-  "renameField",
-  "setAccess",
-  "addIndex",
-  "addPermission",
+  ...definitionToolNames,
   "searchFiles",
   "searchBrain",
   "requestConnection",

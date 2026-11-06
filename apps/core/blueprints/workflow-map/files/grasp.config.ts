@@ -2,7 +2,6 @@
 // read-only. Change it with the definition tools (addTable, addField,
 // changeField, renameField, setAccess, addIndex, addPermission).
 import { defineApp } from "@grasp-os/sdk";
-
 export default defineApp({
-  name: "Workflow map",
+  name: "Workflow map"
 });

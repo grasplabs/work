@@ -14,6 +14,8 @@ import {
 import type { TransformRow } from "../src/migration-transform.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
 import { reviewVersion } from "../src/version-review.ts";
+import { appDefinition } from "./app-definitions.ts";
+import type { TableSpec } from "./app-definitions.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
@@ -71,42 +73,50 @@ const tableOf = (name: string): string => name.replaceAll("-", "_");
 const tablesOf = (names: readonly string[]): string[] =>
   names.length === 0 ? ["notes"] : names.map((name) => tableOf(name));
 
-/** The schema of `names`' tables, each with `fields`. */
-const schemaOf = (names: readonly string[], fields: string): string =>
-  `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+/** `fields` as the App's values.ts exports them, as `name`, for its migrations. */
+const valuesOf = (
+  name: string,
+  fields: Readonly<Record<string, string>>
+): string => `import { v } from "@grasp-os/sdk";
 
-export const noteFields = {
-${fields}
+export const ${name} = {
+${Object.entries(fields)
+  .map(([field, type]) => `  ${field}: ${type},`)
+  .join("\n")}
+};
+`;
+
+/** The definition of `names`' tables, each with `fields`, and the fields as values.ts exports them. */
+const schemaOf = (
+  names: readonly string[],
+  fields: Readonly<Record<string, string>>
+): Record<string, string> => ({
+  ...appDefinition({
+    name: "Notes",
+    tables: Object.fromEntries(
+      tablesOf(names).map((table) => [
+        table,
+        { fields, access: { read: "owner", write: "owner" } },
+      ])
+    ),
+  }),
+  "values.ts": valuesOf("noteFields", fields),
+});
+
+const baseFields = {
+  title: "v.string().trim().min(1).max(200)",
+  body: 'v.string().max(100_000).default("")',
 };
 
-export default defineSchema({
-${tablesOf(names)
-  .map(
-    (table) =>
-      `  ${table}: defineTable(noteFields).access({ read: "owner", write: "owner" }),`
-  )
-  .join("\n")}
-});
-`;
-
-const baseFields = `  title: v.string().trim().min(1).max(200),
-  body: v.string().max(100_000).default(""),`;
-
 /** The fields of a note after the migration: a category, required. */
-const migratedFields = `${baseFields}
-  category: v.enum(["launch", "general"]),`;
-
-/** The App's config: its migrations are the files in server/migrations/. */
-const configFile = `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({ name: "Notes" });
-`;
+const migratedFields = {
+  ...baseFields,
+  category: 'v.enum(["launch", "general"])',
+};
 
 /** Notes before the migrations of `names`: no category yet. */
-const baseFiles = (names: readonly string[]): Record<string, string> => ({
-  "server/schema.ts": schemaOf(names, baseFields),
-  "grasp.config.ts": configFile,
-});
+const baseFiles = (names: readonly string[]): Record<string, string> =>
+  schemaOf(names, baseFields);
 
 /** Notes, with `migrations` (file name to source) registered in order. */
 const notesFiles = (
@@ -114,14 +124,13 @@ const notesFiles = (
 ): Record<string, string> => {
   const names = Object.keys(migrations);
   return {
-    "server/schema.ts": schemaOf(names, migratedFields),
+    ...schemaOf(names, migratedFields),
     ...Object.fromEntries(
       Object.entries(migrations).map(([name, source]) => [
         `server/migrations/${name}.ts`,
         source,
       ])
     ),
-    "grasp.config.ts": configFile,
   };
 };
 
@@ -137,7 +146,7 @@ const migrationSource = (
     fixtures = '[{ row: { title: "Fixture" } }]',
   } = {}
 ): string => `import { migration, v } from "@grasp-os/sdk";
-import { noteFields } from "../schema.ts";
+import { noteFields } from "../../values.ts";
 ${prelude}
 export default migration({
   name: ${JSON.stringify(name)},
@@ -667,14 +676,23 @@ describe("an explicit migration", { timeout: 120_000 }, () => {
 });
 
 /** Who reads and writes the table of salary migration `name` (see below). */
-const salaryAccess = (name: string): string => {
+const salaryAccess = (name: string): TableSpec["access"] => {
   if (name.startsWith("none-")) {
-    return '{ read: "none", write: "appMembers" }';
+    return { read: "none", write: "appMembers" };
   }
   if (name.startsWith("open-")) {
-    return '{ read: "appMembers", write: "appMembers" }';
+    return { read: "appMembers", write: "appMembers" };
   }
-  return '{ read: "appMembers", write: "appMembers", rows: { read: [rows.person("employee"), rows.team("team")] } }';
+  return {
+    read: "appMembers",
+    write: "appMembers",
+    rows: {
+      read: [
+        { kind: "person", field: "employee" },
+        { kind: "team", field: "team" },
+      ],
+    },
+  };
 };
 
 /**
@@ -683,26 +701,27 @@ const salaryAccess = (name: string): string => {
  * migration's table has no rules: an `open-` one's members read it, and
  * no one reads a `none-` one's.
  */
-const salariesSchema = (names: readonly string[], fields: string): string =>
-  `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
-
-export const salaryFields = {
-${fields}
-};
-
-export default defineSchema({
-${names
-  .map(
-    (name) =>
-      `  ${tableOf(name)}: defineTable(salaryFields).access(${salaryAccess(name)}),`
-  )
-  .join("\n")}
+const salariesSchema = (
+  names: readonly string[],
+  fields: Readonly<Record<string, string>>
+): Record<string, string> => ({
+  ...appDefinition({
+    name: "Notes",
+    tables: Object.fromEntries(
+      names.map((name) => [
+        tableOf(name),
+        { fields, access: salaryAccess(name) },
+      ])
+    ),
+  }),
+  "values.ts": valuesOf("salaryFields", fields),
 });
-`;
 
-const salaryBase = `  employee: v.person(),
-  team: v.string(),
-  amount: v.number(),`;
+const salaryBase = {
+  employee: "v.person()",
+  team: "v.string()",
+  amount: "v.number()",
+};
 
 /** Module state of each salary migration: the row before, while a call lasts. */
 const salaryPrelude = "let previous: number | undefined;";
@@ -777,10 +796,10 @@ const sealedSalaries = async () =>
     (fromSchema, toSchema) => {
       const names = Object.keys(salaryHandlers);
       return {
-        "server/schema.ts": salariesSchema(
-          names,
-          `${salaryBase}\n  band: v.enum(["low", "high"]),`
-        ),
+        ...salariesSchema(names, {
+          ...salaryBase,
+          band: 'v.enum(["low", "high"])',
+        }),
         ...Object.fromEntries(
           Object.entries(salaryHandlers).map(([name, handler]) => [
             `server/migrations/${name}.ts`,
@@ -795,16 +814,9 @@ const sealedSalaries = async () =>
             }).replaceAll("noteFields", "salaryFields"),
           ])
         ),
-        "grasp.config.ts": configFile,
       };
     },
-    {
-      "server/schema.ts": salariesSchema(
-        Object.keys(salaryHandlers),
-        salaryBase
-      ),
-      "grasp.config.ts": configFile,
-    }
+    salariesSchema(Object.keys(salaryHandlers), salaryBase)
   ));
 
 /** A salary record of `employee` in `team`. */

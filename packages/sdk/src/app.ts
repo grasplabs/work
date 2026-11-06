@@ -208,7 +208,11 @@ export interface AppPermissions {
   readonly links?: LinksPermission;
 }
 
-/** An App's config, as `defineApp` answers it. */
+/**
+ * An App by its name: its config, as `defineApp` answers it, and the App
+ * registered whole, as `registerApp` does. Each is what `registerApp` and
+ * `inspectApp` take, and nothing else is.
+ */
 export interface App {
   readonly name: string;
 }
@@ -225,11 +229,6 @@ export interface AppParts {
   readonly modules: ServerModules;
   /** The default export of each `server/migrations/*.ts`, in path order. */
   readonly migrations: readonly unknown[];
-}
-
-/** An App registered whole, as `registerApp` answers it. */
-export interface RegisteredApp {
-  readonly name: string;
 }
 
 /** What one entry of a function's `uses` is, as data. */
@@ -1285,7 +1284,7 @@ const screensPartOf = (
  * `AppDefinitionError` (or the schema's own error) for an App that isn't
  * coherent.
  */
-export const registerApp = (parts: AppParts): RegisteredApp => {
+export const registerApp = (parts: AppParts): App => {
   if (!isPlainObject(parts)) {
     return refuse("An App is registered from its parts.");
   }
@@ -1331,7 +1330,7 @@ export const registerApp = (parts: AppParts): RegisteredApp => {
     });
   }
 
-  const made: RegisteredApp = Object.freeze({ name: config.name });
+  const made: App = Object.freeze({ name: config.name });
   inspections.set(made, {
     manifest: deepFreeze({
       name: config.name,

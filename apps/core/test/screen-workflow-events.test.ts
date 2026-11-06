@@ -42,6 +42,7 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { mockIdp } from "./idp.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { liveStatus } from "./runs.ts";
@@ -61,27 +62,24 @@ import { auditedDuring, routed, signedInApi, unique } from "./sign-in.ts";
 const idp = mockIdp();
 
 const files = (): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Invoices",
+    tables: {
+      invoices: {
+        fields: { amount: "v.number()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("review", {\n  input: v.object({ jobId: v.string() }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/invoices.ts": `import { v } from "@grasp-os/sdk";
+import { permissions } from "../grasp.config.ts";
 
-export default defineSchema({
-  invoices: defineTable({ amount: v.number() }).access({ read: "appMembers", write: "appMembers" }),
-});
+export const review = permissions.review;
 `,
-  "server/invoices.ts": `import { permission, v } from "@grasp-os/sdk";
 
-export const review = permission.workflow("review", {
-  input: v.object({ jobId: v.string() }),
-  output: v.object({ status: v.string() }),
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { review } from "./server/invoices.ts";
-
-export default defineApp({
-  name: "Invoices",
-  permissions: { workflows: [review] },
-});
-`,
   "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
 };

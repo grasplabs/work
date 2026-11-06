@@ -2,7 +2,6 @@
 // read-only. Change it with the definition tools (addTable, addField,
 // changeField, renameField, setAccess, addIndex, addPermission).
 import { defineApp, permission, v } from "@grasp-os/sdk";
-
 export const permissions = {
   map: permission.app("map", {
     functions: {
@@ -11,88 +10,68 @@ export const permissions = {
         args: {
           pagination: v.object({
             pageSize: v.number().integer().min(1).max(100).default(50),
-            cursor: v.string().min(1).max(4096).nullable().default(null),
-          }),
-        },
-        returns: v.union(
-          v.object({
-            items: v
-              .array(
-                v.object({
-                  id: v.string(),
-                  title: v.string().max(200),
-                  team: v.string().max(200).nullable(),
-                  state: v.enum(["drawn", "designed"]),
-                  current: v.object({
-                    version: v.number().integer().min(1),
-                    hoursPerWeek: v.number().min(0).max(100_000),
-                    basis: v.enum(["estimated", "observed"]),
-                    minutesPerPass: v.number().min(0),
-                  }),
-                  drawn: v
-                    .object({
-                      version: v.number().integer().min(1),
-                      hoursPerWeek: v.number().min(0).max(100_000),
-                      basis: v.enum(["estimated", "observed"]),
-                      minutesPerPass: v.number().min(0),
-                    })
-                    .nullable(),
-                  app: v
-                    .object({
-                      appId: v.string().min(1).max(256),
-                      workflowId: v.string().min(1).max(256),
-                    })
-                    .nullable(),
-                })
-              )
-              .max(100),
-            nextCursor: v.null(),
-            hasMore: v.literal(false),
-          }),
-          v.object({
-            items: v
-              .array(
-                v.object({
-                  id: v.string(),
-                  title: v.string().max(200),
-                  team: v.string().max(200).nullable(),
-                  state: v.enum(["drawn", "designed"]),
-                  current: v.object({
-                    version: v.number().integer().min(1),
-                    hoursPerWeek: v.number().min(0).max(100_000),
-                    basis: v.enum(["estimated", "observed"]),
-                    minutesPerPass: v.number().min(0),
-                  }),
-                  drawn: v
-                    .object({
-                      version: v.number().integer().min(1),
-                      hoursPerWeek: v.number().min(0).max(100_000),
-                      basis: v.enum(["estimated", "observed"]),
-                      minutesPerPass: v.number().min(0),
-                    })
-                    .nullable(),
-                  app: v
-                    .object({
-                      appId: v.string().min(1).max(256),
-                      workflowId: v.string().min(1).max(256),
-                    })
-                    .nullable(),
-                })
-              )
-              .min(1)
-              .max(100),
-            nextCursor: v.string().min(1).max(4096),
-            hasMore: v.literal(true),
+            cursor: v.string().min(1).max(4096).nullable().default(null)
           })
-        ),
-      },
-    },
+        },
+        returns: v.union(v.object({
+          items: v.array(v.object({
+            id: v.string(),
+            title: v.string().max(200),
+            team: v.string().max(200).nullable(),
+            state: v.enum(["drawn", "designed"]),
+            current: v.object({
+              version: v.number().integer().min(1),
+              hoursPerWeek: v.number().min(0).max(100000),
+              basis: v.enum(["estimated", "observed"]),
+              minutesPerPass: v.number().min(0)
+            }),
+            drawn: v.object({
+              version: v.number().integer().min(1),
+              hoursPerWeek: v.number().min(0).max(100000),
+              basis: v.enum(["estimated", "observed"]),
+              minutesPerPass: v.number().min(0)
+            }).nullable(),
+            app: v.object({
+              appId: v.string().min(1).max(256),
+              workflowId: v.string().min(1).max(256)
+            }).nullable()
+          })).max(100),
+          nextCursor: v.null(),
+          hasMore: v.literal(false)
+        }), v.object({
+          items: v.array(v.object({
+            id: v.string(),
+            title: v.string().max(200),
+            team: v.string().max(200).nullable(),
+            state: v.enum(["drawn", "designed"]),
+            current: v.object({
+              version: v.number().integer().min(1),
+              hoursPerWeek: v.number().min(0).max(100000),
+              basis: v.enum(["estimated", "observed"]),
+              minutesPerPass: v.number().min(0)
+            }),
+            drawn: v.object({
+              version: v.number().integer().min(1),
+              hoursPerWeek: v.number().min(0).max(100000),
+              basis: v.enum(["estimated", "observed"]),
+              minutesPerPass: v.number().min(0)
+            }).nullable(),
+            app: v.object({
+              appId: v.string().min(1).max(256),
+              workflowId: v.string().min(1).max(256)
+            }).nullable()
+          })).min(1).max(100),
+          nextCursor: v.string().min(1).max(4096),
+          hasMore: v.literal(true)
+        }))
+      }
+    }
   }),
-  grasp: permission.grasp(),
+  grasp: permission.grasp()
 };
 export default defineApp({
   name: "Board page",
   permissions: {
-    apps: [permissions.map, permissions.grasp],
-  },
+    apps: [permissions.map, permissions.grasp]
+  }
 });

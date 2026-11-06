@@ -33,6 +33,7 @@ import type { HostedActivation } from "../src/workflows/resource-runs.ts";
 import type { StepError } from "../src/workflows/sealed-isolate.ts";
 import { sealedRunModules } from "../src/workflows/sealed-run.ts";
 import type { SealedRunMemory } from "../src/workflows/sealed-run.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { engineOfTest } from "./run-host.ts";
@@ -379,19 +380,23 @@ const candidatePinOf = async (workflow: string, runId: string) => {
 
 /** The Requests App's files: it binds `followUp`, keeps requests, `desk`. */
 const requestsFiles = (fixture: unknown): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  requests: defineTable({ who: v.string() }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
-  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Requests",
+    tables: {
+      requests: {
+        fields: { who: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/requests.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const followUp = permission.workflow("followUp", {
-  input: v.object({ who: v.string().trim().min(1) }),
-  output: v.object({ status: v.string() }),
-});
+export const followUp = permissions.followUp;
 
 export const add = mutation({
   args: { who: v.string() },
@@ -408,14 +413,7 @@ export const list = query({
   handler: async (ctx) => (await ctx.db.query("requests").take(100)).map(({ who }) => who),
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { followUp } from "./server/requests.ts";
 
-export default defineApp({
-  name: "Requests",
-  permissions: { workflows: [followUp] },
-});
-`,
   "tests/fixtures/desk.json": JSON.stringify({
     principals: {
       "desk-user": { role: "user" },

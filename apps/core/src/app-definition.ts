@@ -1,24 +1,25 @@
 import {
   definitionManifest,
   definitionPath,
+  definitionSources,
   definitionText,
   emptyDefinition,
   generatedFiles,
-  readDefinition,
-} from "@grasp-os/sdk/definition";
-import type { AppDefinition } from "@grasp-os/sdk/definition";
-import type { DefinitionOperation } from "@grasp-os/sdk/definition-operations";
-import { definitionSources } from "@grasp-os/sdk/definition-source";
-import { planSchemaChange } from "@grasp-os/sdk/host";
+  planSchemaChange,
+  tryReadDefinition,
+} from "@grasp-os/sdk/host";
+import type { AppDefinition, DefinitionOperation } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import { z } from "zod";
 
 // An App's definition among its files (@grasp-os/sdk's definition.ts):
 // `definition.json`, what the App is, and the config and schema generated
-// from it, which only the definition tools write (agent-builds.ts,
-// `define`). A chat's agent never writes them by hand: `write` refuses
-// them, naming the tools, so the definition and the code generated from
-// it never part.
+// from it. Every App of spec 8's layout has one: a draft gets an empty one
+// with its first write (agent-builds.ts), and every version the App
+// commits holds its config and schema exactly as its definition generates
+// them (`withDefinitionCode`). A chat's agent changes it only with the
+// definition tools (`define`): `write` refuses the three files, naming the
+// tools, so the definition and the code generated from it never part.
 
 /** The files only the definition tools write. */
 export const definitionFiles: ReadonlySet<string> = new Set([
@@ -27,32 +28,32 @@ export const definitionFiles: ReadonlySet<string> = new Set([
   generatedFiles.schema,
 ]);
 
-/** Refuses a write that names any of `definitionFiles`. */
+/**
+ * Refuses a write that names any of `definitionFiles`, in any case: an
+ * App's paths may not differ only in case, so `GRASP.config.ts` would be
+ * the same file.
+ */
 export const refuseDefinitionFiles = (paths: Iterable<string>): void => {
-  const named = [...paths].filter((path) => definitionFiles.has(path));
+  const named = [...paths].filter((path) =>
+    definitionFiles.has(path.toLowerCase())
+  );
   if (named.length > 0) {
     throw appErrors.create("app.generated_file", { issues: named.toSorted() });
   }
 };
 
 /**
- * The definition `files` hold, or a new one named `name` for an App that
- * has none yet. An App whose config was written without a definition
- * (one exported, or written before) has none the tools could change
- * without losing it: refused.
+ * The definition `files` hold, a new one named `name` for files with none
+ * yet, or the problem with the one they hold.
  */
 export const definitionIn = (
   files: ReadonlyMap<string, string>,
   name: string
-): AppDefinition => {
+): { definition: AppDefinition } | { problem: string } => {
   const text = files.get(definitionPath);
-  if (text !== undefined) {
-    return readDefinition(text);
-  }
-  if (files.has(generatedFiles.config) || files.has(generatedFiles.schema)) {
-    throw appErrors.create("app.no_definition");
-  }
-  return emptyDefinition(name);
+  return text === undefined
+    ? { definition: emptyDefinition(name) }
+    : tryReadDefinition(text);
 };
 
 /** The files `definition` is: itself, and the code generated from it. */
@@ -61,6 +62,92 @@ export const definitionChanges = (
 ): Record<string, string> => ({
   [definitionPath]: definitionText(definition),
   ...definitionSources(definition),
+});
+
+/**
+ * `files` with their config and schema as their definition generates
+ * them, changed in place. Files with no definition yet, the first of the
+ * App named `name` (one of pages alone too), get an empty one. Refused
+ * (`app.definition_invalid`) when they hold a config or a schema but no
+ * definition, a definition that isn't one, or have lost the one they had
+ * (`had`).
+ */
+export const withDefinitionCode = (
+  files: Map<string, string>,
+  name: string,
+  had: boolean
+): void => {
+  const text = files.get(definitionPath);
+  if (text === undefined) {
+    const handwritten =
+      files.has(generatedFiles.config) || files.has(generatedFiles.schema);
+    if (had || handwritten) {
+      throw appErrors.create("app.definition_invalid", {
+        issues: [
+          `${generatedFiles.config} and ${generatedFiles.schema} are generated from ${definitionPath}, which the App doesn't have.`,
+        ],
+      });
+    }
+    for (const [path, source] of Object.entries(
+      definitionChanges(emptyDefinition(name))
+    )) {
+      files.set(path, source);
+    }
+    return;
+  }
+  const read = tryReadDefinition(text);
+  if ("problem" in read) {
+    throw appErrors.create("app.definition_invalid", {
+      issues: [read.problem],
+    });
+  }
+  for (const [path, source] of Object.entries(
+    definitionSources(read.definition)
+  )) {
+    files.set(path, source);
+  }
+};
+
+/**
+ * Why `operation` can't rename the field it names, or undefined: a field
+ * the released definition (`before`) has already holds values in the
+ * App's records, which stay under its old name until a rename can carry
+ * them by its stable ID (GRA-1602). A field this draft added holds none.
+ */
+export const renameRefusal = (
+  operation: DefinitionOperation,
+  definition: AppDefinition,
+  before: AppDefinition | null
+): string | undefined => {
+  if (operation.op !== "renameField") {
+    return undefined;
+  }
+  const table = definition.tables.find(({ name }) => name === operation.table);
+  const field = table?.fields.find(({ name }) => name === operation.field);
+  const released = before?.tables
+    .find(({ id }) => id === table?.id)
+    ?.fields.some(({ id }) => id === field?.id);
+  return released === true
+    ? `\`${operation.table}.${operation.field}\` is in the App's released version, and its records hold values under that name, which a rename doesn't carry yet. Keep its name, or add a field with the new name and copy the values with a migration in server/migrations/.`
+    : undefined;
+};
+
+/**
+ * `definition` without the answers `before`, the released definition,
+ * holds as well: those were for a change that is applied, or applies as
+ * that version is made current, and would fill records anew if kept.
+ */
+export const withoutAnswersOf = (
+  definition: AppDefinition,
+  before: AppDefinition | null
+): AppDefinition => ({
+  ...definition,
+  answers: definition.answers.filter(
+    (answer) =>
+      !(before?.answers ?? []).some(
+        (held) => held.table === answer.table && held.field === answer.field
+      )
+  ),
 });
 
 /** Where a field is, as a plan names it. */
@@ -90,6 +177,11 @@ export interface DefinitionPlan {
   keptFields: PlanField[];
   /** Tables whose access changes, for every record at once. */
   accessChanges: string[];
+  /**
+   * Tables declared sensitive: their change history keeps no values from
+   * now on, and every read is audited. A table stays so once declared.
+   */
+  sensitiveTables: string[];
   /** What needs a migration in code, and why. */
   refused: { table: string; field?: string; reason: string }[];
 }
@@ -104,6 +196,11 @@ export const definitionPlan = (
   after: AppDefinition
 ): DefinitionPlan => {
   const target = definitionManifest(after);
+  const sensitiveBefore = new Set(
+    (before?.tables ?? []).flatMap((table) =>
+      table.sensitive === true ? [table.id] : []
+    )
+  );
   const plan = planSchemaChange(
     before === null ? null : definitionManifest(before).schema,
     target.schema,
@@ -121,6 +218,11 @@ export const definitionPlan = (
     })),
     keptFields: fieldsOf(plan.retainedFields),
     accessChanges: [...plan.ruleChanges],
+    sensitiveTables: after.tables.flatMap((table) =>
+      table.sensitive === true && !sensitiveBefore.has(table.id)
+        ? [table.name]
+        : []
+    ),
     refused: plan.accepted
       ? []
       : plan.refused.map(({ table, field, reason }) => ({
@@ -196,9 +298,35 @@ export const definitionOperationSchema: z.ZodType<DefinitionOperation> =
     z.strictObject({
       op: z.literal("addIndex"),
       table: text,
-      name: text,
+      name: text.optional(),
       fields: z.array(text).min(1),
       search: z.boolean().optional(),
     }),
     z.strictObject({ op: z.literal("addPermission"), permission: text }),
   ]);
+
+/** What an operation's audit record keeps: its kind, its table and its alias. */
+export const operationDetail = (
+  operation: unknown
+): Record<string, string | null> => {
+  const parsed = definitionOperationSchema.safeParse(operation);
+  if (!parsed.success) {
+    return { op: null };
+  }
+  const { data } = parsed;
+  let table: string | null = null;
+  if ("table" in data) {
+    ({ table } = data);
+  } else if (data.op === "addTable") {
+    table = data.name;
+  }
+  return {
+    op: data.op,
+    table,
+    alias:
+      data.op === "addPermission"
+        ? (/["'`](?<alias>[\w-]+)["'`]/u.exec(data.permission)?.groups?.alias ??
+          data.permission.slice(0, 64))
+        : null,
+  };
+};

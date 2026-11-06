@@ -1068,7 +1068,7 @@ const buildAppCodeNoting = (
       diagnostics: [
         problem(
           "server",
-          "The App has no grasp.config.ts and server/schema.ts: Grasp generates them from the App's definition as its first table, field or permission is added (addTable, addPermission)."
+          "The App has no grasp.config.ts and server/schema.ts, which Grasp generates from its definition.json."
         ),
       ],
     };

@@ -8,6 +8,7 @@ import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 
 import { callAppFunction } from "../src/app-functions.ts";
+import { appDefinition } from "./app-definitions.ts";
 import type { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 
@@ -40,13 +41,26 @@ export const sampleApp = ({ ai }: { ai?: number } = {}): Record<
   string,
   string
 > => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  counters: defineTable({ name: v.string(), count: v.number() }).index("by_name", ["name"]).access({ read: "appMembers", write: "appMembers" }),
-  ledger: defineTable({ invoice: v.string(), total: v.number() }).access({ read: "owner", write: "owner" }),
-});
-`,
+  ...appDefinition({
+    name: "Invoices",
+    tables: {
+      counters: {
+        fields: { name: "v.string()", count: "v.number()" },
+        indexes: { by_name: ["name"] },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+      ledger: {
+        fields: { invoice: "v.string()", total: "v.number()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+    permissions: [
+      'permission.connection("send", { contract: "composio.mail@1", actions: ["MAIL_SEND"] })',
+      ...(ai === undefined
+        ? []
+        : [`permission.ai({ maxOutputTokens: ${String(ai)} })`]),
+    ],
+  }),
   "server/counter.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
@@ -98,9 +112,9 @@ export const book = mutation({
   },
 });
 `,
-  "server/effects.ts": `import { permission } from "@grasp-os/sdk";
+  "server/effects.ts": `import { permissions } from "../grasp.config.ts";
 
-export const send = permission.connection("send", { contract: "composio.mail@1", actions: ["MAIL_SEND"] });
+export const send = permissions.send;
 
 export const invoice = { to: "ben@acme.test", subject: "Invoice INV-7" };
 
@@ -145,19 +159,6 @@ export const mailOwnKey = action({
     ),
 });
 
-`,
-  // `permission` only where the `ai` permission is declared: an unused
-  // import fails the type check.
-  "grasp.config.ts": `import {  } from "@grasp-os/sdk";
-
-import { send } from "./server/effects.ts";
-
-export default defineApp({
-  name: "Invoices",
-  permissions: {
-    connections: [send],${ai === undefined ? "" : `\n    ai: permission.ai({ maxOutputTokens: ${ai} }),`}
-  },
-});
 `,
 });
 

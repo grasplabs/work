@@ -4,12 +4,12 @@
  * screen, and tests each workflow with a `workflowTest` suite.
  */
 import {
+  applyOperation,
   definitionPath,
+  definitionSources,
   definitionText,
   emptyDefinition,
-} from "@grasp-os/sdk/definition";
-import { applyOperation } from "@grasp-os/sdk/definition-operations";
-import { definitionSources } from "@grasp-os/sdk/definition-source";
+} from "@grasp-os/sdk/host";
 
 import type { EngineSeed } from "./engines.ts";
 

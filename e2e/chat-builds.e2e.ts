@@ -1,5 +1,6 @@
 import { expect } from "@playwright/test";
 
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
@@ -15,12 +16,15 @@ import { apiOf, peopleIn } from "./people.ts";
  * and a mutation that books one, which changes the App's data.
  */
 const invoices = {
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  invoices: defineTable({ total: v.number() }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+  ...appDefinition({
+    name: "Invoice desk",
+    tables: {
+      invoices: {
+        fields: { total: "v.number()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/invoices.ts": `import { v } from "@grasp-os/sdk";
 import { mutation } from "@server/_generated/server";
 
@@ -30,12 +34,7 @@ export const book = mutation({
   handler: async (ctx, args) => await ctx.db.insert("invoices", args),
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default defineApp({
-  name: "Invoice desk",
-});
-`,
   "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
 };

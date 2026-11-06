@@ -1,3 +1,6 @@
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
+import type { AppSpec } from "../apps/core/test/app-definitions.ts";
+
 /**
  * The Notes App of spec 8 and 9.4, as a builder writes it: a schema, its
  * operations and registration, and a screen on the React SDK
@@ -5,25 +8,29 @@
  * the host generates (`@server/_generated/api`).
  */
 
-const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export const noteFields = {
-  title: v.string().trim().min(1).max(200),
-  body: v.string().max(100_000).default(""),
-  attachments: v.array(v.file()).max(20).default([]),
-};
-
-export default defineSchema({
-  notes: defineTable(noteFields)
-    .index("by_updated", ["_updatedAt"])
-    .access({ read: "owner", write: "owner" }),
-});
-`;
+/** The Notes App's definition: its notes, and the files they attach. */
+const notesSpec = {
+  name: "Notes",
+  tables: {
+    notes: {
+      fields: {
+        title: "v.string().trim().min(1).max(200)",
+        body: 'v.string().max(100_000).default("")',
+        attachments: "v.array(v.file()).max(20).default([])",
+      },
+      access: { read: "owner", write: "owner" },
+      indexes: { by_updated: ["_updatedAt"] },
+    },
+  },
+  permissions: [
+    'permission.files({ operations: ["upload", "read", "attach", "delete"] })',
+  ],
+} satisfies AppSpec;
 
 const operations = `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
 import { action, doc, internalMutation, mutation, query } from "@server/_generated/server";
 import { internal } from "@server/_generated/internal";
-import { noteFields } from "./schema.ts";
+import { noteFields } from "../values.ts";
 
 export const list = query({
   args: { pagination: paginationOptionsValidator },
@@ -125,18 +132,6 @@ export const detachFile = mutation({
     await ctx.db.patch("notes", args.id, { attachments: note.attachments.filter((file) => file.id !== args.file.id) }, { expectedRevision: args.expectedRevision });
     return null;
   },
-});
-`;
-
-const registration = `import { defineApp, permission } from "@grasp-os/sdk";
-
-export const files = permission.files({
-  operations: ["upload", "read", "attach", "delete"],
-});
-
-export default defineApp({
-  name: "Notes",
-  permissions: { files },
 });
 `;
 
@@ -468,9 +463,17 @@ export function ImportNote() {
 
 /** The Notes App's files. */
 export const notesAppFiles = (): Record<string, string> => ({
-  "server/schema.ts": schema,
+  ...appDefinition(notesSpec),
+  "values.ts": `import { v } from "@grasp-os/sdk";
+
+export const noteFields = {
+  title: v.string().trim().min(1).max(200),
+  body: v.string().max(100_000).default(""),
+  attachments: v.array(v.file()).max(20).default([]),
+};
+`,
   "server/notes.ts": operations,
-  "grasp.config.ts": registration,
+
   "screens.ts": screensList,
   "components/import-note.tsx": importNote,
   "components/create-note.tsx": createNote,
@@ -639,16 +642,6 @@ export const unaskedDownloadFiles = (): Record<string, string> => ({
   "screens/notes.tsx": unaskedScreen,
 });
 
-const linksRegistration = registration
-  .replace(
-    "export default defineApp({",
-    `/** The help site its screens may link to, and nothing else. */
-export const help = permission.links({ origins: ["https://help.example.com"] });
-
-export default defineApp({`
-  )
-  .replace("permissions: { files },", "permissions: { files, links: help },");
-
 const linksScreen = `import { GraspError, useClient } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
@@ -697,7 +690,14 @@ export default function Notes() {
  */
 export const linksFiles = (): Record<string, string> => ({
   ...notesAppFiles(),
-  "grasp.config.ts": linksRegistration,
+  // The help site its screens may link to, and nothing else.
+  ...appDefinition({
+    ...notesSpec,
+    permissions: [
+      ...notesSpec.permissions,
+      'permission.links({ origins: ["https://help.example.com"] })',
+    ],
+  }),
   "screens/notes.tsx": linksScreen,
 });
 

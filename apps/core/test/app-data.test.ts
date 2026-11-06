@@ -22,6 +22,7 @@ import { loadRelease } from "../src/app-releases.ts";
 import { identify } from "../src/auth/identity.ts";
 import { openStore } from "../src/data-stores.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { appDefinition, withSensitive } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -37,25 +38,38 @@ import { outcome, signedInApi } from "./sign-in.ts";
 const idp = mockIdp();
 
 const files: Record<string, string> = {
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({
-    title: v.string().min(1).max(200),
-    status: v.string().optional(),
-    done: v.boolean().default(false),
-    tags: v.array(v.string()).default([]),
-  }).access({ read: "appMembers", write: "appMembers" }),
-  salaries: defineTable({ person: v.string(), amount: v.number() }).sensitive().access({ read: "appMembers", write: "appMembers" }),
-  pins: defineTable({ text: v.string() }).access({ read: "owner", write: "owner" }),
-  labels: defineTable({
-    name: v.string(),
-    nick: v.string().nullable(),
-    note: v.string().optional(),
-    extra: v.string().nullable().optional(),
-  }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: {
+          title: "v.string().min(1).max(200)",
+          status: "v.string().optional()",
+          done: "v.boolean().default(false)",
+          tags: "v.array(v.string()).default([])",
+        },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+      salaries: {
+        fields: { person: "v.string()", amount: "v.number()" },
+        sensitive: true,
+        access: { read: "appMembers", write: "appMembers" },
+      },
+      pins: {
+        fields: { text: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+      labels: {
+        fields: {
+          name: "v.string()",
+          nick: "v.string().nullable()",
+          note: "v.string().optional()",
+          extra: "v.string().nullable().optional()",
+        },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": `import { mutation } from "@server/_generated/server";
 import { v } from "@grasp-os/sdk";
 
@@ -112,12 +126,7 @@ export const pay = mutation({
   handler: async (ctx, args) => await ctx.db.insert("salaries", args),
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default defineApp({
-  name: "Notes",
-});
-`,
   "screens/notes.tsx": `export default function Notes() {
   return <p>Notes</p>;
 }
@@ -635,13 +644,7 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
   });
 
   it("keeps no values of a table first declared sensitive in a later version, its earlier changes included", async () => {
-    const sensitiveFiles = {
-      ...files,
-      "server/schema.ts": (files["server/schema.ts"] ?? "").replace(
-        "tags: v.array(v.string()).default([]),\n  }).access(",
-        "tags: v.array(v.string()).default([]),\n  }).sensitive().access("
-      ),
-    };
+    const sensitiveFiles = withSensitive(files, "notes");
     expect(sensitiveFiles["server/schema.ts"]).not.toBe(
       files["server/schema.ts"]
     );

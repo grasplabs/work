@@ -319,7 +319,7 @@ describe("a draft's preferences in its preview", { timeout: 180_000 }, () => {
     // write of its screens alone keeps them: preview-hot-updates.test.ts.)
     const next = await first.write(
       {
-        "server/schema.ts": `${deskFiles()["server/schema.ts"] ?? ""}// Again\n`,
+        "screens.ts": `${deskFiles()["screens.ts"] ?? ""}// Again\n`,
       },
       first.revision
     );

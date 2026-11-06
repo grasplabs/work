@@ -15,6 +15,7 @@ import { z } from "zod";
 
 import { appVisitorResponse, sweepAppVisitors } from "../src/app-visitors.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
@@ -65,12 +66,15 @@ const visitedApp = async (
 
 /** A Notes App's files: one function, one screen. */
 const notesFiles: Record<string, string> = {
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
@@ -80,12 +84,7 @@ export const titles = query({
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title),
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default defineApp({
-  name: "Notes",
-});
-`,
   "screens/notes.tsx": `export default function Notes() {
   return <p>Notes</p>;
 }

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { callAppFunction } from "../../src/app-functions.ts";
 import { setCurrentVersion } from "../../src/apps.ts";
 import { approveResourceBinding } from "../../src/resource-bindings.ts";
+import { appDefinition } from "../app-definitions.ts";
 import { deepFiles, fieldDepth } from "../deep-records.ts";
 import { appWith, person, seal } from "../sealed-apps.ts";
 import type { Fixture } from "../sealed-apps.ts";
@@ -15,12 +16,15 @@ import type { Fixture } from "../sealed-apps.ts";
 // waiting on their calls hold both, and each call still runs.
 
 const crmFiles: Record<string, string> = {
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  contacts: defineTable({ name: v.string() }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+  ...appDefinition({
+    name: "CRM",
+    tables: {
+      contacts: {
+        fields: { name: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/contacts.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
@@ -30,29 +34,26 @@ export const list = query({
   handler: async (ctx) => (await ctx.db.query("contacts").take(100)).map(({ name }) => name),
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "CRM",
-});
-`,
 };
 
 const deskFiles: Record<string, string> = {
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  marks: defineTable({ label: v.string() }).access({ read: "owner", write: "owner" }),
-});
-`,
-  "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Desk",
+    tables: {
+      marks: {
+        fields: { label: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+    permissions: [
+      'permission.app("crm", {\n  functions: {\n    "contacts.list": { kind: "query", args: {}, returns: v.array(v.string()) },\n  },\n})',
+    ],
+  }),
+  "server/desk.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const crm = permission.app("crm", {
-  functions: {
-    "contacts.list": { kind: "query", args: {}, returns: v.array(v.string()) },
-  },
-});
+export const crm = permissions.crm;
 
 /** Holds its process a while, so another consumer's action holds the other, then calls. */
 export const list = action({
@@ -63,14 +64,6 @@ export const list = action({
     await new Promise((resolve) => setTimeout(resolve, 500));
     return await ctx.apps.crm.call("contacts.list", {});
   },
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { crm } from "./server/desk.ts";
-
-export default defineApp({
-  name: "Desk",
-  permissions: { apps: [crm] },
 });
 `,
 };

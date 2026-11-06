@@ -20,6 +20,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
+import { definitionFiles } from "./app-definition.ts";
 import { batchesOf, callSplitting, ultraciteBatch } from "./batches.ts";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
 import { inspectDraft, withDraftReferences } from "./draft-references.ts";
@@ -362,12 +363,16 @@ export const draftServerBuild = async (
 
 /**
  * The files Ultracite's rules read (`lint`): the App's TypeScript, but its
- * declarations and what core generates.
+ * declarations, what core generates, and the config and schema its
+ * definition generates (app-definition.ts), which no one edits.
  */
 const lintedFiles = (files: Record<string, string>): Record<string, string> =>
   Object.fromEntries(
     Object.entries(files).filter(
-      ([path]) => isLintedCode(path) && !isGeneratedPath(path)
+      ([path]) =>
+        isLintedCode(path) &&
+        !isGeneratedPath(path) &&
+        !definitionFiles.has(path)
     )
   );
 

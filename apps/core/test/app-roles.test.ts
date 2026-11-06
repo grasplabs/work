@@ -3,6 +3,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { appDefinition } from "./app-definitions.ts";
 import { outlook, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
@@ -37,16 +38,8 @@ const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
 const files = {
-  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  ...appDefinition({ name: "Desk", tables: {} }),
 
-export default defineSchema({});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Desk",
-});
-`,
   "screens/desk.tsx": "export default () => <p>Desk</p>;\n",
 };
 

@@ -4,11 +4,7 @@ import { AppDefinitionError } from "../src/app.ts";
 import { evaluateExpression } from "../src/definition-expression.ts";
 import { applyOperation } from "../src/definition-operations.ts";
 import type { DefinitionOperation } from "../src/definition-operations.ts";
-import {
-  configSource,
-  schemaSource,
-  validatorSource,
-} from "../src/definition-source.ts";
+import { schemaSource, validatorSource } from "../src/definition-source.ts";
 import {
   definitionManifest,
   definitionText,
@@ -22,7 +18,9 @@ import { v } from "../src/values.ts";
 // An App's definition (definition.ts): the operations that change it, the
 // code generated from it, and what a definition of unknown origin is
 // refused for. Pure, so unit tests; core's tools and builds are tested
-// through core (apps/core/test/agent-definition.test.ts).
+// through core (apps/core/test/agent-builds.test.ts), and that the code
+// generated from a definition seals as the App it is, there too
+// (app-releases.test.ts), where a seal runs it.
 
 /** IDs counted up, so a test can name them. */
 const counter = () => {
@@ -164,11 +162,139 @@ describe("operations", () => {
         { op: "addPermission", permission: "fetch('https://example.com')" },
         /builder's methods/u,
       ],
+      // What would reach past the builders: a prototype's, a computed
+      // member, a function's own methods, code in a template or a spread.
+      [
+        {
+          op: "addField",
+          table: "tasks",
+          name: "x",
+          type: "v.__proto__.string()",
+        },
+        /./u,
+      ],
+      [
+        { op: "addField", table: "tasks", name: "x", type: 'v["string"]()' },
+        /./u,
+      ],
+      [
+        { op: "addField", table: "tasks", name: "x", type: "v.string.call(v)" },
+        /./u,
+      ],
+      [
+        {
+          op: "addField",
+          table: "tasks",
+          name: "x",
+          type: ["v.literal(`$", "{globalThis.fetch}`)"].join(""),
+        },
+        /./u,
+      ],
+      [
+        {
+          op: "addField",
+          table: "tasks",
+          name: "x",
+          type: "v.object({ ...globalThis })",
+        },
+        /./u,
+      ],
+      [
+        {
+          op: "addPermission",
+          permission: 'permission.hasOwnProperty("ai")',
+        },
+        /./u,
+      ],
+      [
+        {
+          op: "addPermission",
+          permission: 'permission.ai({ "__proto__": { maxOutputTokens: 5 } })',
+        },
+        /./u,
+      ],
+      [
+        {
+          op: "addField",
+          table: "tasks",
+          name: "x",
+          type: 'v.object({ "__proto__": v.string() })',
+        },
+        /./u,
+      ],
+      // A search index is the table's one, which has no name.
+      [
+        {
+          op: "addIndex",
+          table: "tasks",
+          name: "by_text",
+          fields: ["title"],
+          search: true,
+        },
+        /no name/u,
+      ],
+      [{ op: "addIndex", table: "tasks", fields: ["title"] }, /has a name/u],
     ];
     for (const [operation, message] of refusals) {
       expect(() => applyOperation(before, operation)).toThrow(message);
     }
     expect(tasks()).toStrictEqual(before);
+  });
+
+  test("keep a table's one search index, and a table sensitive once it is declared so", () => {
+    const searched = applyOperation(tasks(), {
+      op: "addIndex",
+      table: "tasks",
+      fields: ["title"],
+      search: true,
+    });
+    expect(searched.tables[0]?.searchIndex).toStrictEqual(["id2"]);
+    expect(() =>
+      applyOperation(searched, {
+        op: "addIndex",
+        table: "tasks",
+        fields: ["title"],
+        search: true,
+      })
+    ).toThrow(/search index already/u);
+    const sensitive = applyOperation(tasks(), {
+      op: "setAccess",
+      table: "tasks",
+      access: { read: "owner", write: "owner" },
+      sensitive: true,
+    });
+    // Access set again without `sensitive` keeps it; `false` is refused.
+    const reset = applyOperation(sensitive, {
+      op: "setAccess",
+      table: "tasks",
+      access: { read: "appMembers", write: "appMembers" },
+    });
+    expect(reset.tables[0]?.sensitive).toBeTruthy();
+    expect(() =>
+      applyOperation(sensitive, {
+        op: "setAccess",
+        table: "tasks",
+        access: { read: "owner", write: "owner" },
+        sensitive: false,
+      })
+    ).toThrow(/stays so/u);
+  });
+
+  test("drop a field's answer when it is renamed, as its records under the new name lack it", () => {
+    const answered = applyOperation(tasks(), {
+      op: "addField",
+      table: "tasks",
+      name: "priority",
+      type: 'v.enum(["low", "high"])',
+      answer: "low",
+    });
+    const renamed = applyOperation(answered, {
+      op: "renameField",
+      table: "tasks",
+      field: "priority",
+      name: "urgency",
+    });
+    expect([answered.answers.length, renamed.answers]).toStrictEqual([1, []]);
   });
 
   test("keep an answer for the records a required field is added to", () => {
@@ -213,42 +339,6 @@ describe("generated code", () => {
         descriptorOf(type)
       );
     }
-  });
-
-  test("writes the config and the schema the definition declares", () => {
-    const definition = applyOperation(
-      applyOperation(
-        applyOperation(tasks(), {
-          op: "setAccess",
-          table: "tasks",
-          access: {
-            read: "appMembers",
-            write: "appMembers",
-            rows: {
-              read: [{ kind: "owner" }, { kind: "person", field: "owner" }],
-            },
-          },
-        }),
-        {
-          op: "addPermission",
-          permission: "permission.ai({ maxOutputTokens: 500 })",
-        }
-      ),
-      { op: "addPermission", permission: "people" }
-    );
-    const schema = schemaSource(definition);
-    expect(schema).toContain(
-      'import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";'
-    );
-    expect(schema).toContain("title: v.string().trim().min(1).max(200),");
-    expect(schema).toContain('rows.person("owner")');
-    const config = configSource(definition);
-    expect(config).toContain(
-      "export const permissions = {\n  ai: permission.ai({\n    maxOutputTokens: 500\n  })\n};"
-    );
-    expect(config).toContain(
-      "permissions: {\n    ai: permissions.ai,\n    people: true\n  }"
-    );
   });
 });
 

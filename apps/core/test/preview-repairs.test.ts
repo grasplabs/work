@@ -16,6 +16,7 @@ import {
   pausedReply,
   says,
 } from "./agent-chat.ts";
+import { appDefinition, withoutDefinition } from "./app-definitions.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -53,12 +54,15 @@ const attack =
  * is fixed. Its broken code fails lint too (`prefer-structured-clone`).
  */
 const desk = (fixed: boolean): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  invoices: defineTable({ number: v.string().min(1).max(20) }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+  ...appDefinition({
+    name: "Invoice desk",
+    tables: {
+      invoices: {
+        fields: { number: "v.string().min(1).max(20)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/desk.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 
@@ -73,12 +77,6 @@ export const total = query({
     return text as number;
   }`
   },
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Invoice desk",
 });
 `,
 });
@@ -142,26 +140,23 @@ const checkLogs = `export default async (self, env) => {
  */
 const releasedDesk: Record<string, string> = {
   "AGENTS.md": "# Invoice desk\n",
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({ name: "Invoice desk" });
-`,
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  invoices: defineTable({ number: v.string().min(1).max(20) }).access({ read: "appMembers", write: "appMembers" }),
-  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+  ...appDefinition({
+    name: "Invoice desk",
+    tables: {
+      invoices: {
+        fields: { number: "v.string().min(1).max(20)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
 };
 
-/** `files` as the agent writes them: never the config or the schema. */
-const agentWritten = (files: Record<string, string>): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(files).filter(
-      ([path]) => path !== "grasp.config.ts" && path !== "server/schema.ts"
-    )
-  );
+/** `files` as the agent writes them: never the definition, its config or its schema. */
+const agentWritten = withoutDefinition;
 
 /** Finds the Invoice desk, and writes `files` into its draft. */
 const write = (
@@ -238,12 +233,15 @@ const previewAt = async (
  */
 /** A notes App of spec 8's layout, as the agent drafts one. */
 const spec8Notes: Record<string, string> = {
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+  ...appDefinition({
+    name: "Invoice desk",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
 
@@ -257,12 +255,6 @@ export const titles = query({
   args: {},
   returns: v.array(v.string()),
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title),
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Invoice desk",
 });
 `,
 };
@@ -279,12 +271,6 @@ export const broken = query({
   },
 });
 `,
-  "grasp.config.ts": (spec8Notes["grasp.config.ts"] ?? "")
-    .replace("{ create, titles }", "{ broken, create, titles }")
-    .replace(
-      "{ notes: { create, titles } }",
-      "{ notes: { broken, create, titles } }"
-    ),
 };
 
 /**
@@ -867,7 +853,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     });
   });
 
-  it("refuses the agent a call of a draft that isn't spec 8's layout, whatever server code it has, and loads none of it", async () => {
+  it("runs none of a v1 server a draft holds: the draft's own code, from its definition, has no such function", async () => {
     const { stub, chatId } = await setUp(
       [
         codeStep(`export default async (self, env) => {
@@ -893,8 +879,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     });
 
     const results = await codeResults(stub, chatId);
-    expect(returned(results[0]?.text)).toStrictEqual({
-      refused: "app.preview_layout",
+    expect(returned(results[0]?.text)).toMatchObject({
+      answered: { ok: false, code: "operation.not_found" },
     });
   });
 

@@ -18,6 +18,7 @@ import {
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { knowledgeFingerprintOf } from "../src/resource-knowledge.ts";
 import { isRestricted } from "../src/restricted.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
@@ -40,19 +41,23 @@ import type { Fixture } from "./sealed-apps.ts";
 
 /** An App whose actions select a skill and read a pinned one. */
 const skillsFiles = (): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }),
-});
-`,
-  "server/skills.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "How",
+    tables: {
+      notes: {
+        fields: { title: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+    permissions: [
+      'permission.brain({\n  operations: ["skillsSelect", "skillsRead"],\n  collections: ["company", "secret"],\n})',
+    ],
+  }),
+  "server/skills.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const how = permission.brain({
-  operations: ["skillsSelect", "skillsRead"],
-  collections: ["company", "secret"],
-});
+export const how = permissions.brain;
 
 /** The skill selected for a task, or why none, and its text at the pin. */
 export const pick = action({
@@ -81,14 +86,6 @@ export const open = action({
     const read = await ctx.brain.skillsRead(args);
     return read.skill.name;
   },
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { how } from "./server/skills.ts";
-
-export default defineApp({
-  name: "How",
-  permissions: { brain: how },
 });
 `,
 });

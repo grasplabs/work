@@ -19,6 +19,7 @@ import {
 } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -38,12 +39,16 @@ const idp = mockIdp();
 
 /** The Directory App's files: it declares the directory unless `people` is false. */
 const peopleFiles = (people = true): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ text: v.string() }).access({ read: "owner", write: "owner" }),
-});
-`,
+  ...appDefinition({
+    name: "Directory",
+    tables: {
+      notes: {
+        fields: { text: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+    permissions: people ? ["people"] : [],
+  }),
   "server/dir.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
@@ -128,13 +133,6 @@ export const team = query({
     const found = await ctx.people.find(args.ids);
     return JSON.stringify({ page, found });
   },
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Directory",
-  ${people ? "permissions: { people: true }," : ""}
 });
 `,
 });

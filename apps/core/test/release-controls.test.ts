@@ -33,7 +33,7 @@ const sealedTwice = async () => {
     fixture.app,
     {
       ...notesFiles,
-      "server/schema.ts": `${notesFiles["server/schema.ts"] ?? ""}// Again.\n`,
+      "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}// Again.\n`,
     },
     "Again"
   );

@@ -19,6 +19,7 @@ import { findApp } from "../src/apps.ts";
 import { callMaxNested } from "../src/call-limits.ts";
 import { classifyOutput } from "../src/data-policy-rpc.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -183,19 +184,16 @@ export const failing = action({
 `;
 
 const appCode = {
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  steps: defineTable({ step: v.string().min(1).max(100) }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      steps: {
+        fields: { step: "v.string().min(1).max(100)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": operationsCode,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Notes",
-});
-`,
 };
 
 const screenOf = (

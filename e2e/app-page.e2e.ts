@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -12,11 +13,6 @@ import type { Person } from "./people.ts";
 // archived. Its settings are a page of their own, and a section of the
 // workspace. Only its builders edit, publish or restore it, and a draft is
 // theirs alone.
-
-const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ marks: defineTable({ at: v.number() }) });
-`;
 
 /** A screen that says which it is, `title`. */
 const screenSaying = (title: string) => `export default function Screen() {
@@ -30,13 +26,11 @@ const screenSaying = (title: string) => `export default function Screen() {
 
 /** Two screens, `board` and `list`, and nothing else. */
 const twoScreens = {
-  "server/schema.ts": schema,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Boards",
+    tables: { marks: { fields: { at: "v.number()" } } },
+  }),
 
-export default defineApp({
-  name: "Boards",
-});
-`,
   "screens.ts": `export default {
   screens: [
     { name: "board", path: "/", source: "screens/board.tsx" },

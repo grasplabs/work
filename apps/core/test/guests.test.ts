@@ -16,6 +16,7 @@ import { z } from "zod";
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { sweepGuestChats } from "../src/guests.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { grantReviewed, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -69,14 +70,16 @@ const idp = mockIdp();
 const guestFiles = (
   operations = '["invite", "list", "read", "revoke"]'
 ): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
-
-export default defineSchema({});
-`,
-  "server/guests.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Guests",
+    tables: {},
+    permissions: [`permission.guests({ operations: ${operations} })`],
+  }),
+  "server/guests.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const guests = permission.guests({ operations: ${operations} });
+export const guests = permissions.guests;
 
 // What the declaration may leave out, called past its types on purpose:
 // the call is what refuses it.
@@ -121,15 +124,6 @@ export const revoke = action({
   returns: v.string(),
   uses: [guests],
   handler: async (ctx, args) => await outcome(async () => await loose(ctx.guests).revoke(args.id)),
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-import { guests } from "./server/guests.ts";
-
-export default defineApp({
-  name: "Guests",
-  permissions: { guests },
 });
 `,
 });

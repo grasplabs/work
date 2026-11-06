@@ -37,6 +37,7 @@ import { callOperation } from "../src/operations.ts";
 import type { Runner } from "../src/operations.ts";
 import type { SessionCheck } from "../src/session-check.ts";
 import { reviewVersion } from "../src/version-review.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { published, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { refusalOf } from "./migrated-apps.ts";
@@ -1057,16 +1058,26 @@ const dataRpcOf = (
 describe("an App's data page", () => {
   const idp = mockIdp();
   const files: Record<string, string> = {
-    "server/schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  requests: defineTable({ title: v.string(), team: v.string() }).access({ read: "appMembers", write: "appMembers", rows: {
-    read: [rows.owner(), rows.team("team")],
-    write: [rows.team("team")],
-  } }),
-  memos: defineTable({ text: v.string() }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+    ...appDefinition({
+      name: "Requests",
+      tables: {
+        requests: {
+          fields: { title: "v.string()", team: "v.string()" },
+          access: {
+            read: "appMembers",
+            write: "appMembers",
+            rows: {
+              read: [{ kind: "owner" }, { kind: "team", field: "team" }],
+              write: [{ kind: "team", field: "team" }],
+            },
+          },
+        },
+        memos: {
+          fields: { text: "v.string()" },
+          access: { read: "appMembers", write: "appMembers" },
+        },
+      },
+    }),
     "server/requests.ts": `import { mutation } from "@server/_generated/server";
 import { v } from "@grasp-os/sdk";
 
@@ -1100,12 +1111,7 @@ export const retitle = mutation({
   },
 });
 `,
-    "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default defineApp({
-  name: "Requests",
-});
-`,
     "screens/requests.tsx": `export default function Requests() {
   return <p>Requests</p>;
 }
@@ -1733,31 +1739,58 @@ describe("a record's long history, read by row rules", () => {
 describe("a version's review", () => {
   it("shows each table's row rules as the version declares them", async () => {
     const fixture = await appWith({
-      "server/schema.ts": `import { defineSchema, defineTable, rows, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  requests: defineTable({ title: v.string(), team: v.string(), assignee: v.person() }).access({ read: "appMembers", write: "appMembers", rows: {
-    read: [rows.owner(), rows.team("team"), rows.role("builder")],
-    write: [rows.person("assignee")],
-  } }),
-  tags: defineTable({ name: v.string() }).access({ read: "appMembers", write: "appBuilders" }),
-  deals: defineTable({ name: v.string(), team: v.string() }).access({ read: "appMembers", write: "appMembers", rows: {
-    read: [rows.team("team")],
-  } }),
-  memos: defineTable({ text: v.string(), team: v.string() }).access({ read: "appMembers", write: "owner", rows: {
-    read: [rows.team("team")],
-  } }),
-  notes: defineTable({ text: v.string(), team: v.string() }).access({ read: "appMembers", write: "none", rows: {
-    read: [rows.team("team")],
-  } }),
-});
-`,
-      "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Requests",
-});
-`,
+      ...appDefinition({
+        name: "Requests",
+        tables: {
+          requests: {
+            fields: {
+              title: "v.string()",
+              team: "v.string()",
+              assignee: "v.person()",
+            },
+            access: {
+              read: "appMembers",
+              write: "appMembers",
+              rows: {
+                read: [
+                  { kind: "owner" },
+                  { kind: "team", field: "team" },
+                  { kind: "role", role: "builder" },
+                ],
+                write: [{ kind: "person", field: "assignee" }],
+              },
+            },
+          },
+          tags: {
+            fields: { name: "v.string()" },
+            access: { read: "appMembers", write: "appBuilders" },
+          },
+          deals: {
+            fields: { name: "v.string()", team: "v.string()" },
+            access: {
+              read: "appMembers",
+              write: "appMembers",
+              rows: { read: [{ kind: "team", field: "team" }] },
+            },
+          },
+          memos: {
+            fields: { text: "v.string()", team: "v.string()" },
+            access: {
+              read: "appMembers",
+              write: "owner",
+              rows: { read: [{ kind: "team", field: "team" }] },
+            },
+          },
+          notes: {
+            fields: { text: "v.string()", team: "v.string()" },
+            access: {
+              read: "appMembers",
+              write: "none",
+              rows: { read: [{ kind: "team", field: "team" }] },
+            },
+          },
+        },
+      }),
     });
     const review = await reviewVersion(env, fixture.owner, fixture.app, 1);
     // Only the tables that have rules: the other is its access mode's

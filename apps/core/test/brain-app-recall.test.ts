@@ -17,6 +17,7 @@ import {
 } from "../src/permissions.ts";
 import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { isRestricted } from "../src/restricted.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
@@ -37,19 +38,23 @@ import type { Fixture } from "./sealed-apps.ts";
 
 /** An App whose action recalls from two declared Knowledge collections. */
 const brainFiles = (): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }),
-});
-`,
-  "server/brain.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Ask",
+    tables: {
+      notes: {
+        fields: { title: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+    permissions: [
+      'permission.brain({\n  operations: ["recall"],\n  collections: ["handbook", "salaries"],\n})',
+    ],
+  }),
+  "server/brain.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const help = permission.brain({
-  operations: ["recall"],
-  collections: ["handbook", "salaries"],
-});
+export const help = permissions.brain;
 
 /** The titles of what a recall cited, and how far it got. */
 export const ask = action({
@@ -66,14 +71,6 @@ export const ask = action({
       coverage: pack.coverage.state,
     };
   },
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { help } from "./server/brain.ts";
-
-export default defineApp({
-  name: "Ask",
-  permissions: { brain: help },
 });
 `,
 });

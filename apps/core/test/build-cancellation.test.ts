@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { withDraftReferences } from "../src/draft-references.ts";
 import { buildOnSave } from "../src/save-builds.ts";
+import { appDefinition } from "./app-definitions.ts";
 
 // A build job's check given up on once its lease is lost (build-
 // admission.ts, `holding`): what it builds and tests starts nothing more,
@@ -130,8 +131,7 @@ describe("a build given up on", { timeout: 60_000 }, () => {
         {
           // The App layout, its screen importing its references, its code
           // new, so nothing of it is cached.
-          "grasp.config.ts": `export const built = ${JSON.stringify(crypto.randomUUID())};\n`,
-          "server/schema.ts": "export default {};\n",
+          ...appDefinition({ name: `Desk ${crypto.randomUUID()}` }),
           "screens/desk.tsx":
             'import { references } from "@server/_generated/api";\nexport default () => String(references);\n',
         },

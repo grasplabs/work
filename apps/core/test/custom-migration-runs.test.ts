@@ -9,22 +9,21 @@ import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
 import { threwOnRecord } from "../src/migration-transform.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
 import { racingDb } from "./apps.ts";
-import { deriving, migrated, notesOf, refusalOf } from "./migrated-apps.ts";
+import {
+  deriving,
+  migrated,
+  notesOf,
+  notesOfFields,
+  refusalOf,
+} from "./migrated-apps.ts";
 import { codeOf, commit } from "./pending-stores.ts";
 import { newRecordId } from "./store-schemas.ts";
 
 /** Notes whose category is optional: version 1's notes fit it as they are. */
-const optionalCategorySchema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export const noteFields = {
-  title: v.string().min(1).max(200),
-  category: v.enum(["launch", "general"]).optional(),
-};
-
-export default defineSchema({
-  notes: defineTable(noteFields).access({ read: "owner", write: "owner" }),
+const optionalCategorySchema = notesOfFields({
+  title: "v.string().min(1).max(200)",
+  category: 'v.enum(["launch", "general"]).optional()',
 });
-`;
 
 /** What the report of `version`'s candidate says of rolling back from it. */
 const reportedRollback = async (

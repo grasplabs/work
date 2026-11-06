@@ -23,6 +23,7 @@ import {
   revokeResourceBinding,
 } from "../src/resource-bindings.ts";
 import { isRestricted, restrict } from "../src/restricted.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { published, release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -55,17 +56,23 @@ const crmFiles = (
   // What `mine` answers, as its contract (`mineReturns`) types it.
   mineAnswer = '(await ctx.db.query("notes").take(100)).map(({ text }) => text)'
 ) => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ notes: defineTable({ text: v.string() }).access({ read: "owner", write: "owner" }) });
-`,
-  "server/notes.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "CRM",
+    tables: {
+      notes: {
+        fields: { text: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+    permissions: [
+      'permission.workflow("followUp", {\n  input: v.object({ who: v.string() }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, internalQuery, mutation, query } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const followUp = permission.workflow("followUp", {
-  input: v.object({ who: v.string() }),
-  output: v.object({ status: v.string() }),
-});
+export const followUp = permissions.followUp;
 
 /** Starts the CRM's follow-up: what the start answered, or why it refused. */
 export const kick = action({
@@ -129,14 +136,6 @@ export const shout = action({
 
 export const hidden = internalQuery({ args: {}, returns: v.number(), handler: () => 1 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { followUp } from "./server/notes.ts";
-
-export default defineApp({
-  name: "CRM",
-  permissions: { workflows: [followUp] },
-});
-`,
 });
 
 /** What a call answered, as JSON, or why it failed: its code and the App's. */
@@ -153,24 +152,31 @@ const attempt = `const attempt = async (work: () => Promise<unknown>): Promise<s
 };`;
 
 /** The Desk: it calls the CRM's notes through `crm`. */
-const deskFiles = (extra = ""): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+/** The CRM's functions the Desk declares it calls. */
+const crmFunctions = [
+  '"notes.add": { kind: "mutation", args: { text: v.string() }, returns: v.null() }',
+  '"notes.mine": { kind: "query", args: {}, returns: v.array(v.string()) }',
+  '"notes.shout": { kind: "action", args: { text: v.string() }, returns: v.string() }',
+  '"notes.kick": { kind: "action", args: {}, returns: v.string() }',
+  '"notes.kickLater": { kind: "mutation", args: {}, returns: v.null() }',
+  '"notes.later": { kind: "action", args: { text: v.string() }, returns: v.null() }',
+];
 
-export default defineSchema({});
-`,
-  "server/desk.ts": `import { permission, v } from "@grasp-os/sdk";
+const deskFiles = (
+  extra = "",
+  functions: readonly string[] = crmFunctions
+): Record<string, string> => ({
+  ...appDefinition({
+    name: "Desk",
+    permissions: [
+      `permission.app("crm", { functions: { ${functions.join(", ")} } })`,
+    ],
+  }),
+  "server/desk.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const crm = permission.app("crm", {
-  functions: {
-    "notes.add": { kind: "mutation", args: { text: v.string() }, returns: v.null() },
-    "notes.mine": { kind: "query", args: {}, returns: v.array(v.string()) },
-    "notes.shout": { kind: "action", args: { text: v.string() }, returns: v.string() },
-    "notes.kick": { kind: "action", args: {}, returns: v.string() },
-    "notes.kickLater": { kind: "mutation", args: {}, returns: v.null() },
-    "notes.later": { kind: "action", args: { text: v.string() }, returns: v.null() },
-  },
-});
+export const crm = permissions.crm;
 
 ${attempt}
 
@@ -216,28 +222,22 @@ export const later = action({
   handler: async (ctx, args) => await attempt(() => ctx.apps.crm.call("notes.later", { text: args.text })),
 });
 ${extra}`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { crm } from "./server/desk.ts";
-
-export default defineApp({
-  name: "Desk",
-  permissions: { apps: [crm] },
-});
-`,
 });
 
 /** A relay: `relay.go` calls the next App's `relay.go`, and says how far it got. */
 const relayFiles: Record<string, string> = {
-  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
-
-export default defineSchema({});
-`,
-  "server/relay.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Relay",
+    tables: {},
+    permissions: [
+      'permission.app("next", {\n  functions: { "relay.go": { kind: "action", args: {}, returns: v.string() } },\n})',
+    ],
+  }),
+  "server/relay.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const next = permission.app("next", {
-  functions: { "relay.go": { kind: "action", args: {}, returns: v.string() } },
-});
+export const next = permissions.next;
 
 export const go = action({
   args: {},
@@ -253,14 +253,6 @@ export const go = action({
   },
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { next } from "./server/relay.ts";
-
-export default defineApp({
-  name: "Relay",
-  permissions: { apps: [next] },
-});
-`,
 };
 
 /**
@@ -269,18 +261,18 @@ export default defineApp({
  * leaves answered, and the first refusal it met.
  */
 const fanFiles: Record<string, string> = {
-  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
-
-export default defineSchema({});
-`,
-  "server/fan.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Fan",
+    tables: {},
+    permissions: [
+      'permission.app("next", {\n  functions: {\n    "fan.go": { kind: "action", args: { width: v.number(), depth: v.number() }, returns: v.string() },\n  },\n})',
+    ],
+  }),
+  "server/fan.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const next = permission.app("next", {
-  functions: {
-    "fan.go": { kind: "action", args: { width: v.number(), depth: v.number() }, returns: v.string() },
-  },
-});
+export const next = permissions.next;
 
 export const go = action({
   args: { width: v.number(), depth: v.number() },
@@ -307,26 +299,20 @@ export const go = action({
   },
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { next } from "./server/fan.ts";
-
-export default defineApp({
-  name: "Fan",
-  permissions: { apps: [next] },
-});
-`,
 };
 
 /** The Inviter: one action that invites a guest through its `guests`. */
 const inviterFiles: Record<string, string> = {
-  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
-
-export default defineSchema({});
-`,
-  "server/inviter.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Inviter",
+    tables: {},
+    permissions: ['permission.guests({ operations: ["invite"] })'],
+  }),
+  "server/inviter.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const guests = permission.guests({ operations: ["invite"] });
+export const guests = permissions.guests;
 
 export const invite = action({
   args: {},
@@ -342,14 +328,6 @@ export const invite = action({
   },
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { guests } from "./server/inviter.ts";
-
-export default defineApp({
-  name: "Inviter",
-  permissions: { guests },
-});
-`,
 };
 
 /**
@@ -357,16 +335,20 @@ export default defineApp({
  * back) through its `next`, from `asker.go`, answering what it got.
  */
 const askerFiles = (fn: string): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
-
-export default defineSchema({});
-`,
-  "server/asker.ts": `import { permission, v } from "@grasp-os/sdk";
-import { action } from "@server/_generated/server";
-
-export const next = permission.app("next", {
+  ...appDefinition({
+    name: "Asker",
+    tables: {},
+    permissions: [
+      `permission.app("next", {
   functions: { "${fn}": { kind: "action", args: {}, returns: v.string() } },
-});
+})`,
+    ],
+  }),
+  "server/asker.ts": `import { v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
+
+export const next = permissions.next;
 
 export const go = action({
   args: {},
@@ -379,14 +361,6 @@ export const go = action({
       return "refused:" + String(Reflect.get(Object(error), "code"));
     }
   },
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { next } from "./server/asker.ts";
-
-export default defineApp({
-  name: "Asker",
-  permissions: { apps: [next] },
 });
 `,
 });
@@ -687,13 +661,10 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
     const desk = await sealedApp(deskFiles(), "Desk");
     // A declaration of the CRM's internal function: no App serves it.
     const prying = await sealedApp(
-      {
-        ...deskFiles(),
-        "server/desk.ts": (deskFiles()["server/desk.ts"] ?? "").replace(
-          '"notes.shout": { kind: "action", args: { text: v.string() }, returns: v.string() },',
-          '"notes.shout": { kind: "action", args: { text: v.string() }, returns: v.string() },\n    "notes.hidden": { kind: "query", args: {}, returns: v.number() },'
-        ),
-      },
+      deskFiles("", [
+        ...crmFunctions,
+        '"notes.hidden": { kind: "query", args: {}, returns: v.number() }',
+      ]),
       "Prying desk"
     );
     const internal = await failure(

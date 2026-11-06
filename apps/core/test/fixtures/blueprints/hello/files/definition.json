@@ -1,0 +1,33 @@
+{
+  "name": "Hello",
+  "permissions": [],
+  "preferences": [],
+  "tables": [
+    {
+      "id": "id1",
+      "name": "greetings",
+      "fields": [
+        {
+          "id": "id2",
+          "name": "name",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "string",
+            "trim": false,
+            "email": false,
+            "min": 1,
+            "max": 200
+          }
+        }
+      ],
+      "indexes": [],
+      "access": {
+        "read": "appMembers",
+        "write": "appMembers"
+      }
+    }
+  ],
+  "answers": []
+}

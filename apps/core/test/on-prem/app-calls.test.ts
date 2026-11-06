@@ -5,6 +5,7 @@ import { z } from "zod";
 import { loadRelease } from "../../src/app-releases.ts";
 import type { Release } from "../../src/app-releases.ts";
 import { chatOf, codeResults, codeStep, says } from "../agent-chat.ts";
+import { appDefinition } from "../app-definitions.ts";
 import { requestGranted } from "../apps.ts";
 import { mockIdp } from "../idp.ts";
 import { signedInApi } from "../sign-in.ts";
@@ -17,12 +18,15 @@ import { signedInApi } from "../sign-in.ts";
 const idp = mockIdp();
 
 const files: Record<string, string> = {
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
 
@@ -57,12 +61,6 @@ export const createAndCount = action({
     await ctx.runMutation(create, args);
     return await ctx.runQuery(count, {});
   },
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Notes",
 });
 `,
 };

@@ -710,7 +710,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       app,
       {
         ...files,
-        "grasp.config.ts": `${files["grasp.config.ts"] ?? ""}\n// The second.\n`,
+        "server/notes.ts": `${files["server/notes.ts"] ?? ""}\n// The second.\n`,
       },
       "Second"
     );

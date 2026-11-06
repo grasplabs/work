@@ -21,12 +21,14 @@ import {
   transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
+import { appDefinition, redefined } from "./app-definitions.ts";
 import { published, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { defineNotes, notesCode, notesFiles } from "./notes-client-app.ts";
+import { calledAs } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
 import { stoppingUltracite } from "./ultracite-stops.ts";
 
@@ -54,6 +56,9 @@ const rates = (at: number): string =>
   `var rate${at} = ${at}\nexport const total${at} = (n: number) => { return n*rate${at} }\n`;
 
 const appName = "Invoice desk";
+
+/** The Ledger's definition, which its first version got: empty, as it has pages alone. */
+const ledgerDefinition = appDefinition({ name: "Ledger" });
 
 /** A screen whose button is restyled, which @shadcn/lint refuses. */
 const restyled = `import { Button } from "@grasp-os/ui/components/button";
@@ -316,13 +321,18 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       base: 1,
       revision: 1,
       changed: ["notes.md"],
-      files: { "AGENTS.md": "# Ledger\n", "notes.md": "the agent's" },
+      files: {
+        ...ledgerDefinition,
+        "AGENTS.md": "# Ledger\n",
+        "notes.md": "the agent's",
+      },
     });
     expect(returned(after?.text)).toStrictEqual({
       notes: "the agent's",
       builder: null,
     });
     await expect(builder.api.apps.files.read(existing)).resolves.toStrictEqual({
+      ...ledgerDefinition,
       "AGENTS.md": "# Ledger\n",
       "notes.md": "the builder's",
       "builder.md": "mine",
@@ -485,7 +495,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // Never inspected before, so no kept registration serves it.
     const files = {
       ...notesFiles,
-      "grasp.config.ts": `${notesFiles["grasp.config.ts"] ?? ""}// ${crypto.randomUUID()}\n`,
+      "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}// ${crypto.randomUUID()}\n`,
     };
     await chat.stub.saveDraft(
       chatId,
@@ -573,6 +583,96 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       `${appName}2`,
       appErrors.create("app.creates_exhausted").message,
     ]);
+  });
+
+  it("changes a definition whose table holds records only as the records can follow, says what each change does to them, and records each change", async () => {
+    // Version 1: the Notes App, current, with a note in its store, and an
+    // answer its definition kept for a category it no longer has.
+    const { builder, chat, grant } = await setUp([
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
+        const definition = async () => JSON.parse((await env.build.files(app.id)).files["definition.json"]);
+        const steps = {};
+        // A field the released version has holds the note's value under
+        // its name: refused, saying what to do instead.
+        steps.released = await env.build.define(app.id, { op: "renameField", table: "notes", field: "title", name: "heading" });
+        // A field the note lacks: checked against it, answered or not.
+        const unanswered = await env.build.define(app.id, { op: "addField", table: "notes", name: "category", type: "v.string()" });
+        steps.unanswered = unanswered.ok && unanswered.plan.checks;
+        const answered = await env.build.define(app.id, { op: "changeField", table: "notes", field: "category", type: "v.string()", answer: "general" });
+        steps.answered = answered.ok && answered.plan.checks;
+        // The released answer went with the first change; the draft's own
+        // goes with a rename of its field, which this draft added.
+        steps.answers = (await definition()).answers.length;
+        const renamed = await env.build.define(app.id, { op: "renameField", table: "notes", field: "category", name: "topic" });
+        steps.renamed = renamed.ok && renamed.plan.checks;
+        steps.afterRename = (await definition()).answers.length;
+        const sensitive = await env.build.define(app.id, { op: "setAccess", table: "notes", access: { read: "owner", write: "owner" }, sensitive: true });
+        steps.sensitive = sensitive.ok && sensitive.plan.sensitiveTables;
+        return steps;
+      };`),
+      says("Defined."),
+    ]);
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
+    await release(
+      builder,
+      app,
+      redefined(notesFiles, (definition) => ({
+        ...definition,
+        answers: [
+          {
+            table: definition.tables[0]?.id ?? "",
+            field: definition.tables[0]?.fields[0]?.id ?? "",
+            value: "Untitled",
+          },
+        ],
+      }))
+    );
+    await calledAs(
+      await builder.api.whoami(),
+      app,
+      { name: "notes.create", kind: "mutation" },
+      { title: "Plan" }
+    );
+    await grant();
+
+    await chat.ask("Give the notes a category");
+
+    const [result] = await codeResults(chat.stub, chat.chat.id);
+    const steps = z
+      .object({
+        released: z.object({ ok: z.literal(false), problem: z.string() }),
+      })
+      .loose()
+      .parse(returned(result?.text));
+    const events = await allEvents();
+    const defined = events.filter(
+      ({ action, detail }) =>
+        action === "agent.call" &&
+        detail.chat === chat.chat.id &&
+        detail.method === "build.define"
+    );
+    expect({
+      ...steps,
+      released: steps.released.problem.includes("released version"),
+      audited: defined.map(({ detail }) => [detail.op, detail.table]),
+    }).toStrictEqual({
+      released: true,
+      unanswered: [{ table: "notes", field: "category", answered: false }],
+      answered: [{ table: "notes", field: "category", answered: true }],
+      answers: 1,
+      renamed: [{ table: "notes", field: "topic", answered: false }],
+      afterRename: 0,
+      sensitive: ["notes"],
+      audited: [
+        ["renameField", "notes"],
+        ["addField", "notes"],
+        ["changeField", "notes"],
+        ["renameField", "notes"],
+        ["setAccess", "notes"],
+      ],
+    });
   });
 
   it("keeps no change that leaves a file as the base has it", async () => {
@@ -1361,7 +1461,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const late =
       "The build didn't finish in time. It runs again when this is first used.";
     expect(returned(result?.text)).toStrictEqual({
-      written: { errors: 0, notChecked: { screens: late } },
+      written: { errors: 0, notChecked: { screens: late, server: late } },
       proposal: {
         version: null,
         passed: false,
@@ -1697,6 +1797,7 @@ export const titles = action({
     await expect(
       builder.api.apps.files.read(existing, 3)
     ).resolves.toStrictEqual({
+      ...ledgerDefinition,
       "AGENTS.md": "# Ledger\n\nWith notes.\n",
       "board.md": "the builder's",
       "notes.md": "the agent's",

@@ -333,7 +333,7 @@ export interface VersionReview {
   /** Its files that differ from the current version's, by path. */
   files: { path: string; change: ReviewChange }[];
   /**
-   * How its server code (`app.ts`, `schema.ts`, `values.ts`,
+   * How its server code (`grasp.config.ts`, `screens.ts`, `values.ts`,
    * `server/`, as its seal builds them) differs, if
    * it does: it runs as whoever uses the App, with every permission the
    * App holds. Its files that differ are `serverFiles`.
@@ -1025,8 +1025,8 @@ export const appErrors = defineErrorFamily({
     "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild, add it to the App's permissions with addPermission (permission.workflow) and bind it to the App under that alias.",
   "app.generated_file":
     "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code Grasp generates from it: change them with addTable, addField, changeField, renameField, setAccess, addIndex and addPermission, never by writing them.",
-  "app.no_definition":
-    "This App's grasp.config.ts and server/schema.ts weren't generated from a definition, so the definition tools can't change them.",
+  "app.definition_invalid":
+    "The App's definition.json, from which its grasp.config.ts and server/schema.ts are generated, is missing or isn't valid.",
   "app.chat_has_app":
     "This chat is an App's own chat: it changes that App, whose ID the chat gives, and creates no other. Change its files with readFile, writeFile and editFile; for another App, the person starts one from New App.",
   "app.draft_failed":
@@ -1036,7 +1036,7 @@ export const appErrors = defineErrorFamily({
   "app.preview_outdated":
     "The draft changed since this preview loaded it. Load the preview again.",
   "app.preview_layout":
-    "A preview runs only an App with grasp.config.ts and server/schema.ts, which Grasp generates as its first table or permission is added (addTable, addPermission).",
+    "A preview runs only an App with grasp.config.ts and server/schema.ts, which Grasp generates from its definition as its draft is first written.",
   "app.preview_side_effect":
     "A preview changes nothing and reaches nothing outside it: no connections, no other Apps, no workflows and no writes to Knowledge.",
 });

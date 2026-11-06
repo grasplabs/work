@@ -23,6 +23,7 @@ import {
   approveResourceBinding,
   reviewResourceBindings,
 } from "../src/resource-bindings.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
@@ -40,22 +41,40 @@ import { connectDb, testBinding } from "./test-env.ts";
 
 const idp = mockIdp();
 
+/** A permission to call `actions` of `contract` through a connection, as `alias`. */
+const connectionTo = (
+  alias: string,
+  contract = "microsoft-365.mail@1",
+  actions = `["send", "list"]`
+): string =>
+  `permission.connection("${alias}", { contract: "${contract}", actions: ${actions} })`;
+
+/** The Mailer's definition, holding `permissions`. */
+const mailerDefinition = (
+  permissions: readonly string[]
+): Record<string, string> =>
+  appDefinition({
+    name: "Mailer",
+    tables: {
+      notes: {
+        fields: { title: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+    permissions,
+  });
+
 /** An App whose actions send and list mail through Microsoft 365. */
 const mailFiles = (
   contract = "microsoft-365.mail@1",
   actions = `["send", "list"]`
 ): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }) });
-`,
-  "server/mail.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...mailerDefinition([connectionTo("mail", contract, actions)]),
+  "server/mail.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const mail = permission.connection("mail", {
-  contract: "${contract}",
-  actions: ${actions},
-});
+export const mail = permissions.mail;
 
 export const send = action({
   args: { to: v.string().email(), subject: v.string().min(1) },
@@ -135,53 +154,25 @@ export const careless = action({
   },
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { mail } from "./server/mail.ts";
-
-export default defineApp({
-  name: "Mailer",
-  permissions: { connections: [mail] },
-});
-`,
 });
 
 /**
  * An App declaring a mail connector of a contract no connector generates:
- * past the types on purpose, which know every contract, so the binding is
- * what refuses it.
+ * the config its definition generates doesn't type-check, as the types
+ * know every contract, so no version of it runs to be bound.
  */
-const unknownContractFiles = (): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }) });
-`,
-  "server/mail.ts": `import { permission } from "@grasp-os/sdk";
-
-export const mail = permission.connection("mail", {
-  contract: "grasp.mail@1" as never,
-  actions: ["send", "list"] as never,
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { mail } from "./server/mail.ts";
-
-export default defineApp({
-  name: "Mailer",
-  permissions: { connections: [mail] },
-});
-`,
-});
+const unknownContractFiles = (): Record<string, string> =>
+  mailerDefinition([connectionTo("mail", "grasp.mail@1")]);
 
 /** The Mailer, with a second alias of the same contract: its archive. */
 const archiveFiles = (): Record<string, string> => ({
   ...mailFiles(),
-  "server/archive.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...mailerDefinition([connectionTo("mail"), connectionTo("archive")]),
+  "server/archive.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const archive = permission.connection("archive", {
-  contract: "microsoft-365.mail@1",
-  actions: ["send", "list"],
-});
+export const archive = permissions.archive;
 
 export const archived = action({
   args: {},
@@ -193,37 +184,24 @@ export const archived = action({
   },
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { archive } from "./server/archive.ts";
-import { mail } from "./server/mail.ts";
-
-export default defineApp({
-  name: "Mailer",
-  permissions: { connections: [mail, archive] },
-});
-`,
 });
 
 /** The Mailer, declaring its mail resource still, with no action that uses it. */
 const unusedMailFiles = (): Record<string, string> => ({
-  "server/mail.ts": `import { permission, v } from "@grasp-os/sdk";
+  "server/mail.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const mail = permission.connection("mail", {
-  contract: "microsoft-365.mail@1",
-  actions: ["send", "list"],
-});
+export const mail = permissions.mail;
 
 export const ping = query({ args: {}, returns: v.string(), handler: () => "pong" });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { mail } from "./server/mail.ts";
-
-export default defineApp({
-  name: "Mailer",
-  permissions: { connections: [mail] },
-});
-`,
+  ...appDefinition({
+    name: "Mailer",
+    permissions: [
+      'permission.connection("mail", {\n  contract: "microsoft-365.mail@1",\n  actions: ["send", "list"],\n})',
+    ],
+  }),
 });
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
@@ -876,10 +854,6 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       contract: "google-workspace.mail@1",
       bind: false,
     });
-    const unknown = await mailerApp({
-      files: unknownContractFiles(),
-      bind: false,
-    });
     const refusal = async ({ admin, approval }: Mailer) =>
       await failure(
         async () => await admin.api.resourceBindings.approve(approval)
@@ -889,12 +863,15 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       narrow: await refusal(narrow),
       // A Microsoft connection serves no Google contract.
       google: await refusal(google),
-      // No connector generates it.
-      unknown: await refusal(unknown),
+      // No connector generates it: its version doesn't build.
+      unknown: await failure(
+        async () =>
+          await mailerApp({ files: unknownContractFiles(), bind: false })
+      ),
     }).toStrictEqual({
       narrow: "resource.target_invalid",
       google: "resource.target_invalid",
-      unknown: "resource.target_invalid",
+      unknown: "version.build_failed",
     });
   });
 
@@ -1138,17 +1115,23 @@ const crmRules = (listIsRead = true) => [
 
 /** An App whose actions list and create contacts in the CRM. */
 const crmFiles = (): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }) });
-`,
-  "server/crm.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Contacts",
+    tables: {
+      notes: {
+        fields: { title: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+    permissions: [
+      'permission.connection("crm", {\n  contract: "composio.crm@1",\n  actions: ["CRM_LIST_CONTACTS", "CRM_CREATE_CONTACT"],\n})',
+    ],
+  }),
+  "server/crm.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const crm = permission.connection("crm", {
-  contract: "composio.crm@1",
-  actions: ["CRM_LIST_CONTACTS", "CRM_CREATE_CONTACT"],
-});
+export const crm = permissions.crm;
 
 export const contacts = action({
   args: {},
@@ -1183,34 +1166,30 @@ export const create = action({
   },
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { crm } from "./server/crm.ts";
-
-export default defineApp({
-  name: "Contacts",
-  permissions: { connections: [crm] },
-});
-`,
 });
 
 /** An App reading contacts from two CRMs, each its own resource. */
 const twoCrmFiles = (): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }) });
-`,
-  "server/crm.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Two CRMs",
+    tables: {
+      notes: {
+        fields: { title: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+    permissions: [
+      'permission.connection("crm", {\n  contract: "composio.crm@1",\n  actions: ["CRM_LIST_CONTACTS"],\n})',
+      'permission.connection("backup", {\n  contract: "composio.crm@1",\n  actions: ["CRM_LIST_CONTACTS"],\n})',
+    ],
+  }),
+  "server/crm.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const crm = permission.connection("crm", {
-  contract: "composio.crm@1",
-  actions: ["CRM_LIST_CONTACTS"],
-});
+export const crm = permissions.crm;
 
-export const backup = permission.connection("backup", {
-  contract: "composio.crm@1",
-  actions: ["CRM_LIST_CONTACTS"],
-});
+export const backup = permissions.backup;
 
 export const contacts = action({
   args: {},
@@ -1221,14 +1200,6 @@ export const contacts = action({
     await ctx.connections.backup.call("CRM_LIST_CONTACTS", { limit: 5 });
     return 0;
   },
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { backup, crm } from "./server/crm.ts";
-
-export default defineApp({
-  name: "Two CRMs",
-  permissions: { connections: [crm, backup] },
 });
 `,
 });

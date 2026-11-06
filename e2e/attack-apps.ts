@@ -1,3 +1,5 @@
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
+
 /**
  * Apps whose screens attack the page around their frame, for
  * screen-attacks.e2e.ts: one leaves for the attacker's address, one for
@@ -7,11 +9,6 @@
  * build's. What they send carries only made-up markers, to receivers
  * the test runs itself.
  */
-
-const schema = `import { defineSchema } from "@grasp-os/sdk";
-
-export default defineSchema({});
-`;
 
 const operations = `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
@@ -25,11 +22,6 @@ export const html = query({
   returns: v.string(),
   handler: () => '<img alt="" src="no-such-image" onerror="document.body.dataset.inlineHandler = \\'ran\\'">',
 });
-`;
-
-const config = `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({ name: "Attacks" });
 `;
 
 /** The screens of an App of `screens`, each `screens/<name>.tsx`. */
@@ -568,9 +560,9 @@ export const attackAppFiles = ({
     injecting: injectingScreen,
   };
   return {
-    "server/schema.ts": schema,
+    ...appDefinition({ name: "Attacks", tables: {} }),
     "server/attacks.ts": operations,
-    "grasp.config.ts": config,
+
     "screens.ts": screensOf(Object.keys(screens)),
     ...Object.fromEntries(
       Object.entries(screens).map(([name, code]) => [
@@ -583,9 +575,9 @@ export const attackAppFiles = ({
 
 /** The attacking App with only its injecting screen. */
 export const injectingAppFiles = (): Record<string, string> => ({
-  "server/schema.ts": schema,
+  ...appDefinition({ name: "Attacks", tables: {} }),
   "server/attacks.ts": operations,
-  "grasp.config.ts": config,
+
   "screens.ts": screensOf(["injecting"]),
   "screens/injecting.tsx": injectingScreen,
 });

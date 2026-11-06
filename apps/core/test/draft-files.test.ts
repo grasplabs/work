@@ -1,6 +1,7 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { describe, expect, it } from "vite-plus/test";
 
+import { redefined } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { deskFiles } from "./preview-drafts.ts";
@@ -23,11 +24,11 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 const released = deskFiles("Released");
 const { "screens/desk.tsx": _screen, ...unscreened } = released;
 
-/** The App's registration, as a builder's second version rewrites it. */
-const renamed = (released["grasp.config.ts"] ?? "").replace(
-  '"Desk"',
-  '"Desk 2"'
-);
+/** The App's definition, as a builder's second version renames it. */
+const renamed = redefined(released, (definition) => ({
+  ...definition,
+  name: "Desk 2",
+}));
 
 /** A server file the draft adds. */
 const notes = (limit: number): string => `export const limit = ${limit};\n`;
@@ -54,18 +55,14 @@ describe("a chat's draft files, for the App's code view", () => {
     const second = await chats.draftFiles(chatId, app);
     const empty = await chats.create("Nothing written");
     const before = await chats.draftFiles(empty.id, app);
-    await builder.api.apps.files.commit(
-      app,
-      { "grasp.config.ts": renamed },
-      "Rename"
-    );
+    await builder.api.apps.files.commit(app, renamed, "Rename");
     const latest = await chats.draftFiles(empty.id, app);
 
     expect({ first, second, before, latest }).toStrictEqual({
       first: { ...unscreened, "server/notes.ts": notes(10) },
       second: { ...unscreened, "server/notes.ts": notes(25) },
       before: released,
-      latest: { ...released, "grasp.config.ts": renamed },
+      latest: renamed,
     });
   });
 

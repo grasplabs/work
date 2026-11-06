@@ -9,6 +9,7 @@ import {
   definitionManifest,
   peoplePermission,
   permissionDataSchema,
+  readDefinition,
 } from "./definition.ts";
 import type {
   AppDefinition,
@@ -99,7 +100,8 @@ export type DefinitionOperation =
   | {
       readonly op: "addIndex";
       readonly table: string;
-      readonly name: string;
+      /** Its name; a search index has none, as a table has one. */
+      readonly name?: string;
       /** The fields it orders by, or, with `search`, the text fields it searches. */
       readonly fields: readonly string[];
       readonly search?: boolean;
@@ -221,6 +223,35 @@ const permissionFrom = (
   };
 };
 
+/** `definition` with the index `operation` adds: a named one, or its table's search index. */
+const withIndex = (
+  definition: AppDefinition,
+  operation: Extract<DefinitionOperation, { op: "addIndex" }>
+): AppDefinition => {
+  const table = tableNamed(definition, operation.table);
+  const fields = operation.fields.map((name) => fieldId(table, name));
+  if (operation.search === true) {
+    if (operation.name !== undefined) {
+      return refuse(
+        "A search index has no name: a table has one, which `ctx.db.search` reads. Leave `name` out."
+      );
+    }
+    if (table.searchIndex !== undefined) {
+      return refuse(
+        `\`${table.name}\` has a search index already: a table has one, over every text field it searches.`
+      );
+    }
+    return withTable(definition, { ...table, searchIndex: fields });
+  }
+  if (operation.name === undefined) {
+    return refuse("An index has a name, which `.withIndex(name)` reads.");
+  }
+  return withTable(definition, {
+    ...table,
+    indexes: [...table.indexes, { name: operation.name, fields }],
+  });
+};
+
 /** The definition after `operation`, before it is checked. */
 const applied = (
   definition: AppDefinition,
@@ -295,33 +326,37 @@ const applied = (
           `\`${table.name}\` has a field \`${operation.name}\` already.`
         );
       }
-      return withTable(definition, {
-        ...table,
-        fields: table.fields.map((held) =>
-          held.id === field.id ? { ...held, name: operation.name } : held
+      return {
+        ...withTable(definition, {
+          ...table,
+          fields: table.fields.map((held) =>
+            held.id === field.id ? { ...held, name: operation.name } : held
+          ),
+        }),
+        // An answer was for the records that lacked the field by its old
+        // name: under the new one, it would fill every record anew.
+        answers: definition.answers.filter(
+          (answer) => answer.table !== table.id || answer.field !== field.id
         ),
-      });
+      };
     }
     case "setAccess": {
       const table = tableNamed(definition, operation.table);
-      const { sensitive: _sensitive, ...rest } = table;
-      const sensitive = operation.sensitive ?? table.sensitive === true;
-      return withTable(definition, {
-        ...rest,
-        access: accessFrom(table, operation.access),
-        ...(sensitive ? { sensitive: true } : {}),
-      });
-    }
-    case "addIndex": {
-      const table = tableNamed(definition, operation.table);
-      const fields = operation.fields.map((name) => fieldId(table, name));
-      if (operation.search === true) {
-        return withTable(definition, { ...table, searchIndex: fields });
+      // Once declared sensitive, a table stays so: the store keeps its
+      // values out of the change history for good.
+      if (table.sensitive === true && operation.sensitive === false) {
+        return refuse(
+          `\`${table.name}\` is sensitive, and a table stays so once declared: leave \`sensitive\` out.`
+        );
       }
       return withTable(definition, {
         ...table,
-        indexes: [...table.indexes, { name: operation.name, fields }],
+        access: accessFrom(table, operation.access),
+        ...(operation.sensitive === true ? { sensitive: true as const } : {}),
       });
+    }
+    case "addIndex": {
+      return withIndex(definition, operation);
     }
     case "addPermission": {
       const declared = permissionFrom(operation.permission);
@@ -367,17 +402,12 @@ const definitionErrors = [
   ValueDefinitionError,
 ];
 
-/**
- * `applyOperation`, its refusal answered as data: the problem, in words,
- * where an operation can't be made. Anything else still throws.
- */
-export const tryOperation = (
-  definition: AppDefinition,
-  operation: DefinitionOperation,
-  newId?: () => string
+/** What `make` makes, or the problem a builder refused it with, in words. */
+const attempt = (
+  make: () => AppDefinition
 ): { definition: AppDefinition } | { problem: string } => {
   try {
-    return { definition: applyOperation(definition, operation, newId) };
+    return { definition: make() };
   } catch (error) {
     if (definitionErrors.some((type) => error instanceof type)) {
       return {
@@ -387,3 +417,20 @@ export const tryOperation = (
     throw error;
   }
 };
+
+/**
+ * `applyOperation`, its refusal answered as data: the problem, in words,
+ * where an operation can't be made. Anything else still throws.
+ */
+export const tryOperation = (
+  definition: AppDefinition,
+  operation: DefinitionOperation,
+  newId?: () => string
+): { definition: AppDefinition } | { problem: string } =>
+  attempt(() => applyOperation(definition, operation, newId));
+
+/** `readDefinition`, its refusal answered as data, as `tryOperation`'s is. */
+export const tryReadDefinition = (
+  text: string
+): { definition: AppDefinition } | { problem: string } =>
+  attempt(() => readDefinition(text));

@@ -2,7 +2,6 @@
 // read-only. Change it with the definition tools (addTable, addField,
 // changeField, renameField, setAccess, addIndex, addPermission).
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
 export default defineSchema({
   drafts: defineTable({
     source: v.object({
@@ -10,65 +9,38 @@ export default defineSchema({
       medium: v.enum(["interview", "chat", "document", "other"]),
       date: v.string().min(10).max(10),
       from: v.string().trim().max(200),
-      notes: v.string().trim().max(30_000),
+      notes: v.string().trim().max(30000)
     }),
-    statements: v
-      .array(
-        v.object({
-          text: v.string().trim().min(1).max(200),
-          tags: v
-            .array(
-              v.enum([
-                "goal",
-                "blocker",
-                "time_sink",
-                "handover",
-                "tool",
-                "rule",
-              ])
-            )
-            .min(1)
-            .max(6),
-          quote: v.string().trim().max(1000),
-        })
-      )
-      .max(90),
-    origin: v.enum(["manual", "notes", "guest"]),
-  })
-    .index("by_created", ["_createdAt"])
-    .access({
-      read: "appBuilders",
-      write: "appBuilders",
-    }),
+    statements: v.array(v.object({
+      text: v.string().trim().min(1).max(200),
+      tags: v.array(v.enum(["goal", "blocker", "time_sink", "handover", "tool", "rule"])).min(1).max(6),
+      quote: v.string().trim().max(1000)
+    })).max(90),
+    origin: v.enum(["manual", "notes", "guest"])
+  }).index("by_created", ["_createdAt"]).access({
+    read: "appBuilders",
+    write: "appBuilders"
+  }),
   sources: defineTable({
     title: v.string().trim().min(1).max(200),
     medium: v.enum(["interview", "chat", "document", "other"]),
     date: v.string().min(10).max(10),
     from: v.string().trim().max(200),
-    notes: v.string().trim().max(30_000),
-    guest: v.boolean(),
-  })
-    .index("by_created", ["_createdAt"])
-    .access({
-      read: "appBuilders",
-      write: "appBuilders",
-    }),
+    notes: v.string().trim().max(30000),
+    guest: v.boolean()
+  }).index("by_created", ["_createdAt"]).access({
+    read: "appBuilders",
+    write: "appBuilders"
+  }),
   statements: defineTable({
     text: v.string().trim().min(1).max(200),
-    tags: v
-      .array(
-        v.enum(["goal", "blocker", "time_sink", "handover", "tool", "rule"])
-      )
-      .min(1)
-      .max(6),
+    tags: v.array(v.enum(["goal", "blocker", "time_sink", "handover", "tool", "rule"])).min(1).max(6),
     quote: v.string().trim().max(1000),
     source: v.id("sources"),
     date: v.string().min(10).max(10),
-    guest: v.boolean(),
+    guest: v.boolean()
+  }).index("by_source", ["source"]).access({
+    read: "appBuilders",
+    write: "appBuilders"
   })
-    .index("by_source", ["source"])
-    .access({
-      read: "appBuilders",
-      write: "appBuilders",
-    }),
 });

@@ -15,6 +15,7 @@ import { appFor } from "../src/apps.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
 import { requestPermission } from "../src/permissions.ts";
 import { readPlatformStatistics } from "../src/statistics.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
@@ -45,14 +46,21 @@ const dayMs = 24 * 60 * 60 * 1000;
  * JSON text.
  */
 const statsFiles = (): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({ marks: defineTable({ at: v.number() }).access({ read: "owner", write: "owner" }) });
-`,
-  "server/stats.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Stats",
+    tables: {
+      marks: {
+        fields: { at: "v.number()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+    permissions: ["permission.grasp()"],
+  }),
+  "server/stats.ts": `import { v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const grasp = permission.grasp();
+export const grasp = permissions.grasp;
 
 // What the declaration may leave out, called past its types on purpose:
 // the call is what refuses it.
@@ -114,15 +122,6 @@ export const platformReadBurst = action({
         Array.from({ length: args.count }, async () => await loose(ctx.apps.grasp).call("statistics.read", JSON.parse(args.json)))
       );
     }),
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-import { grasp } from "./server/stats.ts";
-
-export default defineApp({
-  name: "Stats",
-  permissions: { apps: [grasp] },
 });
 `,
 });

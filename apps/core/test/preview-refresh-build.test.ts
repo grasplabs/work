@@ -2,6 +2,7 @@ import { kitModuleName } from "@grasp-os/compiler";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { describe, expect, it } from "vite-plus/test";
 
+import { appDefinition } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { chatWithDraft } from "./previews.ts";
@@ -21,16 +22,8 @@ import { signedInApi } from "./sign-in.ts";
 const idp = mockIdp();
 
 const files = {
-  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+  ...appDefinition({ name: "Counter", tables: {} }),
 
-export default defineSchema({});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Counter",
-});
-`,
   "screens/small.tsx": `import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
 

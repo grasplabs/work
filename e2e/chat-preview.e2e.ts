@@ -392,6 +392,7 @@ test("an App's own chat writes its screen and server code, and its workspace pre
       "server",
       "schema.ts",
       "tally.ts",
+      "definition.json",
       "grasp.config.ts",
       "screens.ts",
     ]);

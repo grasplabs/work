@@ -1,3 +1,4 @@
+import { definitionToolNames } from "@grasp-os/shared/chat";
 import type {
   ChatCitation,
   ChatCode,
@@ -157,16 +158,8 @@ const fieldOf = (input: Record<string, unknown>, field: string): string => {
   return typeof value === "string" ? value : "…";
 };
 
-/** The tools that change an App's definition (core's agent-tools.ts). */
-const definitionTools: ReadonlySet<string> = new Set([
-  "addTable",
-  "addField",
-  "changeField",
-  "renameField",
-  "setAccess",
-  "addIndex",
-  "addPermission",
-]);
+/** The tools that change an App's definition. */
+const definitionTools: ReadonlySet<string> = new Set(definitionToolNames);
 
 /** The paths of the files a call writes (`files`, by path), as far as they came. */
 const pathsOf = (input: Record<string, unknown>): string[] => {

@@ -2,6 +2,7 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page, Route } from "@playwright/test";
 
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -47,25 +48,24 @@ const definition = JSON.stringify({
  * hook's fields it reads.
  */
 const appFiles = (): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Requests",
+    tables: {
+      requests: {
+        fields: { who: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/requests.ts": `import { v } from "@grasp-os/sdk";
+import { permissions } from "../grasp.config.ts";
 
-export default defineSchema({ requests: defineTable({ who: v.string() }).access({ read: "appMembers", write: "appMembers" }) });
+export const followUp = permissions.followUp;
 `,
-  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
 
-export const followUp = permission.workflow("followUp", {
-  input: v.object({ who: v.string().trim().min(1) }),
-  output: v.object({ status: v.string() }),
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { followUp } from "./server/requests.ts";
-
-export default defineApp({
-  name: "Requests",
-  permissions: { workflows: [followUp] },
-});
-`,
   "screens.ts": `export default {
   screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
 };

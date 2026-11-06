@@ -1,4 +1,5 @@
 import { isAppLayout, isAppTestSuite } from "@grasp-os/compiler";
+import { definitionPath } from "@grasp-os/sdk/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
@@ -45,6 +46,7 @@ import {
   requireNotArchived,
 } from "./app-access.ts";
 import type { Person } from "./app-access.ts";
+import { withDefinitionCode } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import { refuseV1Server } from "./app-v1-server.ts";
 import { queuedWebhookDeliveries } from "./app-webhook-queue.ts";
@@ -748,13 +750,16 @@ export const readFiles = async (
 export const applyChanges = (
   env: Env,
   files: Map<string, string>,
-  input: unknown
+  input: unknown,
+  /** The App's name, for the empty definition of its first files. */
+  name: string
 ): [string, string | null][] => {
   const changes = Object.entries(
     appErrors.parse("app.invalid", fileChangesSchema, input)
   );
   const before = sizeOf(files);
   const agentsBefore = files.get(appMemoryPath);
+  const defined = files.has(definitionPath);
   const added = new Set(
     changes.flatMap(([path, content]) =>
       content === null || files.has(path) ? [] : [path]
@@ -767,6 +772,9 @@ export const applyChanges = (
       files.set(path, content);
     }
   }
+  // The config and schema as the definition generates them, whatever the
+  // changes held of them, before the App's limits are checked on them.
+  withDefinitionCode(files, name, defined);
   checkLimits(files, before);
   checkPaths(files.keys(), added);
   checkMemory(agentsBefore, files.get(appMemoryPath));
@@ -829,10 +837,10 @@ export const commitFiles = async (
   input: unknown,
   message: unknown
 ): Promise<CommittedVersion> => {
-  const { id: appId } = await editableApp(env, by, app);
+  const { id: appId, name } = await editableApp(env, by, app);
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
   const { latest, files } = await latestFiles(env, appId);
-  applyChanges(env, files, input);
+  applyChanges(env, files, input, name);
   const { tree, json } = await versionTree(files);
   if (tree === latest?.tree) {
     throw appErrors.create("app.nothing_to_commit");

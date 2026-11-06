@@ -14,6 +14,7 @@ import { appHost } from "../src/durable-objects.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { leasedBuild } from "../src/screen-delivery.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
@@ -48,20 +49,27 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
  * it commits, and an action.
  */
 const portalFiles = (marker = "1"): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ text: v.string() }).access({ read: "owner", write: "owner" }),
-  secrets: defineTable({ text: v.string() }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
-  "server/portal.ts": `import { permission, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Portal",
+    tables: {
+      notes: {
+        fields: { text: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+      secrets: {
+        fields: { text: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("followUp", {\n  input: v.object({ who: v.string() }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/portal.ts": `import { v } from "@grasp-os/sdk";
 import { action, mutation, query } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
 
-export const followUp = permission.workflow("followUp", {
-  input: v.object({ who: v.string() }),
-  output: v.object({ status: v.string() }),
-});
+export const followUp = permissions.followUp;
 
 export const add = mutation({
   args: { text: v.string() },
@@ -131,14 +139,7 @@ export const shout = action({
   handler: async (_ctx, args) => args.text.toUpperCase() + "${marker}",
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { followUp } from "./server/portal.ts";
 
-export default defineApp({
-  name: "Portal",
-  permissions: { workflows: [followUp] },
-});
-`,
   "screens/portal.tsx": `export default function Portal() {
   return <p>Portal</p>;
 }
@@ -169,13 +170,9 @@ export const ${name} = query({
 `
     )
     .join("");
-  const list = manyNames.join(", ");
   return {
     ...files,
     "server/portal.ts": `${files["server/portal.ts"] ?? ""}${queries}`,
-    "grasp.config.ts": (files["grasp.config.ts"] ?? "")
-      .replace("shout } from", `shout, ${list} } from`)
-      .replace("kick, shout }", `kick, shout, ${list} }`),
   };
 };
 

@@ -45,6 +45,7 @@ import type {
   UseRefusal,
 } from "../src/operations.ts";
 import { hostedRelease } from "../src/release-runner.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 
@@ -2413,19 +2414,19 @@ describe("evidence of a refused use", () => {
 
   it("is kept by core as app.use.refused, from a person's call", async () => {
     const fixture = await appWith({
-      "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-export default defineSchema({ notes: defineTable({ title: v.string() }).access({ read: "owner", write: "owner" }) });
-`,
+      ...appDefinition({
+        name: "Notes",
+        tables: {
+          notes: {
+            fields: { title: "v.string()" },
+            access: { read: "owner", write: "owner" },
+          },
+        },
+      }),
       "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { action, query } from "@server/_generated/server";
 export const label = query({ args: {}, returns: v.string(), handler: () => "label" });
 export const probe = action({ args: {}, returns: v.null(), handler: async () => null });
-`,
-      "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Notes",
-});
 `,
     });
     const release = await seal(fixture);

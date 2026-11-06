@@ -1,5 +1,5 @@
 import { serverSdkModules } from "@grasp-os/compiler";
-import { schemaHash } from "@grasp-os/sdk/host";
+import { schemaHash, definitionManifest } from "@grasp-os/sdk/host";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import {
   releaseFormatVersion,
@@ -37,6 +37,8 @@ import {
 } from "../src/db/core/schema.ts";
 import { buildAppCode, buildAppTests, buildScreens } from "../src/screens.ts";
 import { claimStore } from "../src/store-owners.ts";
+import { appDefinition, definitionOf } from "./app-definitions.ts";
+import type { AppSpec } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   appWith,
@@ -56,22 +58,34 @@ import {
 // workflow may name, as its build reads them.
 
 /** Notes, laid out as spec 8 has an App: its schema, operations and registration. */
+/** The Notes App's definition, named `label`. */
+const notesSpec = (label = "Notes"): AppSpec => ({
+  name: label,
+  tables: {
+    notes: {
+      fields: {
+        title: "v.string().trim().min(1).max(200)",
+        body: 'v.string().max(100_000).default("")',
+      },
+      access: { read: "owner", write: "owner" },
+      indexes: { by_updated: ["_updatedAt"] },
+    },
+  },
+});
+
 const notesFiles = (label = "Notes"): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  ...appDefinition(notesSpec(label)),
+  "values.ts": `import { v } from "@grasp-os/sdk";
 
 export const noteFields = {
   title: v.string().trim().min(1).max(200),
   body: v.string().max(100_000).default(""),
 };
-
-export default defineSchema({
-  notes: defineTable(noteFields).index("by_updated", ["_updatedAt"]).access({ read: "owner", write: "owner" }),
-});
 `,
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
 import { internal } from "@server/_generated/internal";
 import { action, doc, internalQuery, mutation, query } from "@server/_generated/server";
-import { noteFields } from "./schema.ts";
+import { noteFields } from "../values.ts";
 
 export const get = query({
   args: { id: v.id("notes") },
@@ -101,25 +115,19 @@ export const tally = action({
   handler: async (ctx) => await ctx.runQuery(internal.notes.count, {}),
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: ${JSON.stringify(label)},
-});
-`,
 });
 
-/** `files` with one more table, `name`, in its schema. */
-const withTable = (
-  files: Record<string, string>,
-  name: string
-): Record<string, string> => ({
-  ...files,
-  "server/schema.ts": (files["server/schema.ts"] ?? "").replace(
-    "export default defineSchema({",
-    `export default defineSchema({\n  ${name}: defineTable({ label: v.string() }),`
-  ),
-});
+/** The Notes App's files with one more table, `name`. */
+const withTable = (name: string): Record<string, string> => {
+  const spec = notesSpec();
+  return {
+    ...notesFiles(),
+    ...appDefinition({
+      ...spec,
+      tables: { ...spec.tables, [name]: { fields: { label: "v.string()" } } },
+    }),
+  };
+};
 
 /** The artifact of `release` at `path`. */
 const artifactAt = (release: Release, path: string) => {
@@ -335,18 +343,10 @@ describe("sealing a release", { timeout: 120_000 }, () => {
 
 /** A table-less App: nothing to store, so no store binding. */
 const tablelessFiles = (): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema } from "@grasp-os/sdk";
-export default defineSchema({});
-`,
+  ...appDefinition({ name: "Hello", tables: {} }),
   "server/hello.ts": `import { v } from "@grasp-os/sdk";
 import { query } from "@server/_generated/server";
 export const hello = query({ args: {}, returns: v.string(), handler: () => "hello" });
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({
-  name: "Hello",
-});
 `,
 });
 
@@ -1509,6 +1509,56 @@ export const run = async (principal: TestPrincipal, refs: typeof api, flag: bool
   });
 });
 
+describe("an App's definition", { timeout: 120_000 }, () => {
+  it("seals as the App it is: its generated config and schema register as the definition does", async () => {
+    // A definition of every part the generator writes: tables of row
+    // rules, indexes and a search index, a sensitive one, permissions,
+    // preferences, and an answer.
+    const spec: AppSpec = {
+      name: "Desk",
+      tables: {
+        notes: {
+          fields: {
+            title: "v.string().trim().min(1).max(200)",
+            owner: "v.person().optional()",
+            team: "v.string()",
+            tags: "v.array(v.string()).max(5).default([])",
+            priority: 'v.enum(["low", "high"])',
+          },
+          indexes: { by_title: ["title"] },
+          searchIndex: ["title"],
+          access: {
+            read: "appMembers",
+            write: "appMembers",
+            rows: {
+              read: [
+                { kind: "owner" },
+                { kind: "person", field: "owner" },
+                { kind: "team", field: "team" },
+              ],
+            },
+          },
+        },
+        salaries: {
+          fields: { note: 'v.id("notes")', amount: "v.number().min(0)" },
+          sensitive: true,
+          access: { read: "appBuilders", write: "appBuilders" },
+        },
+      },
+      permissions: [
+        "permission.ai({ maxOutputTokens: 500 })",
+        'permission.links({ origins: ["https://help.example.com"] })',
+        "people",
+      ],
+      preferences: { compact: "v.boolean().default(false)" },
+      answers: [{ table: "notes", field: "priority", value: "low" }],
+    };
+    const fixture = await appWith(appDefinition(spec), "Desk");
+    const release = await seal(fixture);
+    expect(release.app).toStrictEqual(definitionManifest(definitionOf(spec)));
+  });
+});
+
 describe("App code that a seal refuses", { timeout: 120_000 }, () => {
   /** Notes with `changes` to its files, sealed. */
   const sealedWith = async (
@@ -1521,7 +1571,7 @@ describe("App code that a seal refuses", { timeout: 120_000 }, () => {
   it("can't reach the network while it is inspected", async () => {
     await expect(
       sealedWith({
-        "grasp.config.ts": `${notesFiles()["grasp.config.ts"]}\nawait fetch("https://example.com");\n`,
+        "server/extra.ts": 'await fetch("https://example.com");\nexport {};\n',
       })
     ).resolves.toBe("version.inspection_failed");
   });
@@ -1549,17 +1599,10 @@ describe("App code that a seal refuses", { timeout: 120_000 }, () => {
     }).toStrictEqual({ code: "version.inspection_failed", byPath: true });
   });
 
-  it("must register an App", async () => {
-    await expect(
-      sealedWith({ "grasp.config.ts": "export default { name: 'Notes' };\n" })
-    ).resolves.toBe("version.inspection_failed");
-  });
-
   it("can't hand the host a manifest it didn't declare", async () => {
     // The App's code makes the SDK in its isolate answer a query that
     // writes: no declaration makes that, so the host refuses it.
-    const forging = `${notesFiles()["grasp.config.ts"]}
-const stringify = JSON.stringify;
+    const forging = `const stringify = JSON.stringify;
 JSON.stringify = (value, ...rest) => {
   const text = stringify(value, ...rest);
   return typeof value === "object" && value !== null && "operations" in value
@@ -1567,28 +1610,28 @@ JSON.stringify = (value, ...rest) => {
     : text;
 };
 `;
-    await expect(sealedWith({ "grasp.config.ts": forging })).resolves.toBe(
+    await expect(sealedWith({ "server/forge.ts": forging })).resolves.toBe(
       "version.invalid_manifest"
     );
   });
 
   it("can't register differently each time it is inspected", async () => {
-    const shifting = notesFiles()["grasp.config.ts"]?.replace(
-      'name: "Notes"',
-      'name: "Notes " + Math.random().toString(36).slice(2, 10)'
+    // A query whose argument's name is new each time.
+    const shifting = `import { v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
+
+export const shifting = query({
+  args: { [Math.random().toString(36).slice(2, 10)]: v.string() },
+  returns: v.null(),
+  handler: () => null,
+});
+`;
+    await expect(sealedWith({ "server/shifting.ts": shifting })).resolves.toBe(
+      "version.unstable_manifest"
     );
-    await expect(
-      sealedWith({ "grasp.config.ts": shifting ?? "" })
-    ).resolves.toBe("version.unstable_manifest");
   });
 
   it.each([
-    [
-      "a schema that imports an operation",
-      {
-        "server/schema.ts": `import "./server/notes.ts";\n${notesFiles()["server/schema.ts"]}`,
-      },
-    ],
     [
       "server code that imports the Workers runtime",
       {
@@ -1617,7 +1660,7 @@ JSON.stringify = (value, ...rest) => {
   it("can't be bound to a store another App's releases use, and never touches its tables", async () => {
     const first = await appWith(notesFiles());
     await seal(first);
-    const second = await appWith(withTable(notesFiles(), "beta"));
+    const second = await appWith(withTable("beta"));
     // The second's owner manages the store too: only the claim refuses.
     await shareStoreWith(first, second);
     await expect(
@@ -1636,7 +1679,7 @@ JSON.stringify = (value, ...rest) => {
   });
 
   it("can't be bound to a store a workflow owns, and never touches its tables", async () => {
-    const fixture = await appWith(withTable(notesFiles(), "gamma"));
+    const fixture = await appWith(withTable("gamma"));
     const store = await createStore(env, fixture.owner);
     await claimStore(env, store, {
       kind: "workflow",
@@ -1662,8 +1705,8 @@ JSON.stringify = (value, ...rest) => {
   });
 
   it("goes to exactly one of two Apps sealed onto a new store at once, and only its tables", async () => {
-    const alpha = await appWith(withTable(notesFiles(), "alpha"));
-    const beta = await appWith(withTable(notesFiles(), "beta"));
+    const alpha = await appWith(withTable("alpha"));
+    const beta = await appWith(withTable("beta"));
     const store = await createStore(env, alpha.owner);
     // Both owners manage the store: only the claim decides.
     await shareStoreWith({ ...alpha, store }, beta);
@@ -1694,7 +1737,7 @@ JSON.stringify = (value, ...rest) => {
     const first = await appWith(notesFiles());
     // Files no other seal builds: any build of them is this seal's.
     const second = await appWith({
-      ...withTable(notesFiles(), "beta"),
+      ...withTable("beta"),
       "server/marker.ts": `export const marker = ${JSON.stringify(crypto.randomUUID())};\n`,
     });
     const before = await builds();
@@ -1853,15 +1896,10 @@ export const reach = action({
   handler: async (ctx) => await ctx.runQuery(api.extra.defaults, {}),
 });
 `,
-      "grasp.config.ts": (files["grasp.config.ts"] ?? "")
-        .replace(
-          'import { defineApp } from "@grasp-os/sdk";',
-          'import { defineApp, v } from "@grasp-os/sdk";'
-        )
-        .replace(
-          '  name: "Notes",',
-          '  name: "Notes",\n  preferences: v.object({ compact: v.boolean().default(false) }),'
-        ),
+      ...appDefinition({
+        ...notesSpec(),
+        preferences: { compact: "v.boolean().default(false)" },
+      }),
     });
     const release = await seal(fixture);
     expect([

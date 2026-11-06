@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
+import { appDefinition } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -10,16 +11,6 @@ import { origin } from "./stack.ts";
 // open it, and use its page with live data from its App's functions; its
 // workflows and who opens it are in its settings. Only the people core
 // opens Apps to see them.
-
-const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  clicks: defineTable({ at: v.number() }).access({
-    read: "appMembers",
-    write: "appMembers",
-  }),
-});
-`;
 
 const operations = `import { v } from "@grasp-os/sdk";
 import { mutation, query } from "@server/_generated/server";
@@ -35,11 +26,6 @@ export const addOne = mutation({
   returns: v.id("clicks"),
   handler: async (ctx) => await ctx.db.insert("clicks", { at: Date.now() }),
 });
-`;
-
-const config = `import { defineApp } from "@grasp-os/sdk";
-
-export default defineApp({ name: "Counter" });
 `;
 
 /** The counter's screens: its one screen `screen`. */
@@ -67,9 +53,17 @@ export default function Counter() {
 
 /** The counter App's code: its schema, functions and one screen, `name`. */
 const counterApp = (name = "counter"): Record<string, string> => ({
-  "server/schema.ts": schema,
+  ...appDefinition({
+    name: "Counter",
+    tables: {
+      clicks: {
+        fields: { at: "v.number()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/counter.ts": operations,
-  "grasp.config.ts": config,
+
   "screens.ts": screensOf(name),
   [`screens/${name}.tsx`]: screen,
 });

@@ -2,7 +2,6 @@
 // read-only. Change it with the definition tools (addTable, addField,
 // changeField, renameField, setAccess, addIndex, addPermission).
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
 export default defineSchema({
   snapshots: defineTable({
     take: v.string().min(1).max(64),
@@ -11,23 +10,17 @@ export default defineSchema({
     maturity: v.number().integer().min(0).max(5),
     windowDays: v.number().integer().min(1).max(366),
     figures: v.number().integer().min(0).max(250),
-    signals: v
-      .array(
-        v.object({
-          workflow: v.string().min(1).max(256),
-          kind: v.string().min(1).max(64),
-          value: v.number().min(0),
-        })
-      )
-      .max(50),
+    signals: v.array(v.object({
+      workflow: v.string().min(1).max(256),
+      kind: v.string().min(1).max(64),
+      value: v.number().min(0)
+    })).max(50),
     decisionNeeded: v.string().trim().max(1000),
-    narrative: v.string().max(30_000),
-  })
-    .index("by_created", ["_createdAt"])
-    .access({
-      read: "appMembers",
-      write: "appBuilders",
-    }),
+    narrative: v.string().max(30000)
+  }).index("by_created", ["_createdAt"]).access({
+    read: "appMembers",
+    write: "appBuilders"
+  }),
   figures: defineTable({
     take: v.string().min(1).max(64),
     at: v.number().integer().min(0),
@@ -35,33 +28,25 @@ export default defineSchema({
     title: v.string().max(200),
     team: v.string().max(200).nullable(),
     state: v.enum(["drawn", "designed"]),
-    drawn: v
-      .object({
-        version: v.number().integer().min(1),
-        hoursPerWeek: v.number().min(0).max(100_000),
-        basis: v.enum(["estimated", "observed"]),
-      })
-      .nullable(),
-    designed: v
-      .object({
-        version: v.number().integer().min(1),
-        hoursPerWeek: v.number().min(0).max(100_000),
-        basis: v.enum(["estimated", "observed"]),
-      })
-      .nullable(),
+    drawn: v.object({
+      version: v.number().integer().min(1),
+      hoursPerWeek: v.number().min(0).max(100000),
+      basis: v.enum(["estimated", "observed"])
+    }).nullable(),
+    designed: v.object({
+      version: v.number().integer().min(1),
+      hoursPerWeek: v.number().min(0).max(100000),
+      basis: v.enum(["estimated", "observed"])
+    }).nullable(),
     unavailable: v.boolean(),
-    running: v
-      .object({
-        appId: v.string().min(1).max(256),
-        workflowId: v.string().min(1).max(256),
-        runs: v.number().integer().min(1),
-        hoursPerWeek: v.number().min(0).max(100_000),
-      })
-      .nullable(),
+    running: v.object({
+      appId: v.string().min(1).max(256),
+      workflowId: v.string().min(1).max(256),
+      runs: v.number().integer().min(1),
+      hoursPerWeek: v.number().min(0).max(100000)
+    }).nullable()
+  }).index("by_take", ["take", "at"]).access({
+    read: "appMembers",
+    write: "appBuilders"
   })
-    .index("by_take", ["take", "at"])
-    .access({
-      read: "appMembers",
-      write: "appBuilders",
-    }),
 });

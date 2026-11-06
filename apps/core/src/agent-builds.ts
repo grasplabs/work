@@ -1,5 +1,4 @@
-import { definitionPath, readDefinition } from "@grasp-os/sdk/definition";
-import { tryOperation } from "@grasp-os/sdk/definition-operations";
+import { definitionPath, tryOperation } from "@grasp-os/sdk/host";
 import { agentErrors } from "@grasp-os/shared/agent";
 import {
   appErrors,
@@ -31,10 +30,14 @@ import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { createFromBlueprint, listBlueprints } from "./app-blueprints.ts";
 import {
   definitionChanges,
+  definitionFiles,
   definitionIn,
   definitionOperationSchema,
   definitionPlan,
+  operationDetail,
   refuseDefinitionFiles,
+  renameRefusal,
+  withoutAnswersOf,
 } from "./app-definition.ts";
 import type { DefinitionPlan } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
@@ -1082,7 +1085,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           throw appErrors.create("app.conflict");
         }
         const files = await draftFiles(this.env, found.id, draft);
-        return await this.#save(found.id, draft, files, written);
+        return await this.#save(found, draft, files, written);
       },
       (written) => ({
         app: typeof app === "string" ? app : null,
@@ -1112,24 +1115,41 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         );
         const draft = await draftOf(this.env, this.ctx.props, found.id);
         const files = await draftFiles(this.env, found.id, draft);
-        const result = tryOperation(definitionIn(files, found.name), parsed);
-        if ("problem" in result) {
-          return { ok: false, problem: result.problem };
-        }
         const base = await draftFiles(this.env, found.id, {
           base: draft.base,
           changes: {},
         });
-        const before = base.get(definitionPath);
-        const plan = definitionPlan(
-          before === undefined ? null : readDefinition(before),
-          result.definition
+        const current = definitionIn(files, found.name);
+        const released = definitionIn(base, found.name);
+        if ("problem" in current) {
+          return {
+            ok: false,
+            problem: `The App's definition isn't valid: ${current.problem}`,
+          };
+        }
+        if ("problem" in released) {
+          return {
+            ok: false,
+            problem: `The App's released definition isn't valid: ${released.problem}`,
+          };
+        }
+        const before = base.has(definitionPath) ? released.definition : null;
+        const refused = renameRefusal(parsed, current.definition, before);
+        if (refused !== undefined) {
+          return { ok: false, problem: refused };
+        }
+        const result = tryOperation(
+          withoutAnswersOf(current.definition, before),
+          parsed
         );
+        if ("problem" in result) {
+          return { ok: false, problem: result.problem };
+        }
         return {
           ok: true,
-          plan,
+          plan: definitionPlan(before, result.definition),
           ...(await this.#save(
-            found.id,
+            found,
             draft,
             files,
             definitionChanges(result.definition)
@@ -1138,6 +1158,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       },
       (defined) => ({
         app: typeof app === "string" ? app : null,
+        ...operationDetail(operation),
         ok: defined.ok,
       })
     );
@@ -1152,7 +1173,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    * agent fixes next.
    */
   async #save(
-    id: AppId,
+    { id, name }: Pick<App, "id" | "name">,
     draft: Draft,
     files: Map<string, string>,
     changes: Record<string, string | null>
@@ -1163,10 +1184,25 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
     });
     // Changed in place (`applyChanges`): the draft as it is written, its
     // TypeScript fixed and formatted first (`tidied`).
+    // The definition and the code generated from it are kept as generated,
+    // never tidied: every commit must hold them exactly so.
+    const generated = Object.entries(changes).filter(([path]) =>
+      definitionFiles.has(path)
+    );
+    const code = Object.entries(changes).filter(
+      ([path]) => !definitionFiles.has(path)
+    );
     const written = applyChanges(
       this.env,
       files,
-      await tidied(this.env, id, changes)
+      {
+        // A change of the definition alone has no code to tidy.
+        ...(code.length === 0 && generated.length > 0
+          ? {}
+          : await tidied(this.env, id, Object.fromEntries(code))),
+        ...Object.fromEntries(generated),
+      },
+      name
     );
     refuseAppWorkflows(
       written.flatMap(([path, content]) => (content === null ? [] : [path]))

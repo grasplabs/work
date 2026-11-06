@@ -26,6 +26,7 @@ import {
 } from "../src/app-webhook-queue.ts";
 import { drainWebhookDeliveries } from "../src/app-webhooks.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
@@ -67,13 +68,19 @@ const deepValidator = (() => {
 })();
 
 const files: Record<string, string> = {
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200) }).access({ read: "appMembers", write: "appMembers" }),
-  blobs: defineTable({ body: v.string() }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
+  ...appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: { title: "v.string().min(1).max(200)" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+      blobs: {
+        fields: { body: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+  }),
   "server/notes.ts": `import { action, mutation, query } from "@server/_generated/server";
 import { v } from "@grasp-os/sdk";
 
@@ -137,12 +144,7 @@ export const add = action({
   },
 });
 `,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
 
-export default defineApp({
-  name: "Notes",
-});
-`,
   "screens/notes.tsx": `export default function Notes() {
   return <p>Notes</p>;
 }

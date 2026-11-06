@@ -10,6 +10,7 @@
  */
 import { z } from "zod";
 
+import { withoutDefinition } from "../apps/core/test/app-definitions.ts";
 import type { Answer } from "../apps/core/test/provider-streams.ts";
 import { contactsApp } from "./contacts-app.ts";
 import { invoiceApproval } from "./invoice-approval.ts";
@@ -99,13 +100,8 @@ const sharedTable = (
   access: { read: "appMembers", write: "appMembers" },
 });
 
-/** `files` as the agent writes them: never the definition's config or schema. */
-const codeOf = (files: Record<string, string>): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(files).filter(
-      ([path]) => path !== "grasp.config.ts" && path !== "server/schema.ts"
-    )
-  );
+/** `files` as the agent writes them: never the definition, its config or its schema. */
+const codeOf = withoutDefinition;
 
 /** The workflow open beside a chat, as its first message names it (web's draw-in-chat.ts). */
 const besideWorkflow = /\(ID (?<found>[^)\s]+)\) is open beside this chat/u;

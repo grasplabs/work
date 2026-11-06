@@ -13,8 +13,9 @@ import { z } from "zod";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { appDefinition } from "./app-definitions.ts";
+import type { TableSpec } from "./app-definitions.ts";
 import { racingDb } from "./apps.ts";
-import { v1Schema } from "./migrated-apps.ts";
 import {
   codeOf,
   commit,
@@ -810,35 +811,39 @@ describe("a changed access mode", () => {
   });
 });
 
-/** The Notes App's schema with titles of at most 100. */
-const shortTitles = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+/** The Notes App's definition, its notes of `fields`, read and written as `access` says. */
+const notesDefinition = (
+  noteFields: Readonly<Record<string, string>>,
+  access?: TableSpec["access"]
+): Record<string, string> =>
+  appDefinition({
+    name: "Notes",
+    tables: {
+      notes: {
+        fields: noteFields,
+        ...(access === undefined ? {} : { access }),
+      },
+    },
+  });
 
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(100) }),
-});
-`;
+const title = "v.string().min(1).max(200)";
 
-/** The Notes App's schema with a category that defaults to general. */
-const categorised = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+/** The Notes App's first definition, each note its owner's. */
+const ownedV1 = notesDefinition({ title }, { read: "owner", write: "owner" });
 
-export default defineSchema({
-  notes: defineTable({
-    title: v.string().min(1).max(200),
-    category: v.string().default("general"),
-  }).access({ read: "owner", write: "owner" }),
-});
-`;
+/** The Notes App with titles of at most 100. */
+const shortTitles = notesDefinition({ title: "v.string().min(1).max(100)" });
 
-/** The Notes App's config. */
-const notesConfig = `import { defineApp } from "@grasp-os/sdk";
+/** The Notes App with a category that defaults to general. */
+const categorised = notesDefinition(
+  { title, category: 'v.string().default("general")' },
+  { read: "owner", write: "owner" }
+);
 
-export default defineApp({ name: "Notes" });
-`;
-
-/** The Notes App's first schema, its notes shared with every member. */
-const sharedV1 = v1Schema.replace(
-  '.access({ read: "owner", write: "owner" })',
-  '.access({ read: "appMembers", write: "appMembers" })'
+/** The Notes App's first definition, its notes shared with every member. */
+const sharedV1 = notesDefinition(
+  { title },
+  { read: "appMembers", write: "appMembers" }
 );
 
 /**
@@ -847,23 +852,14 @@ const sharedV1 = v1Schema.replace(
  * with every member.
  */
 const sharedNext = async () => {
-  const fixture = await appWith({
-    "server/schema.ts": v1Schema,
-    "grasp.config.ts": notesConfig,
-  });
+  const fixture = await appWith(ownedV1);
   const first = await seal(fixture);
   await setCurrentVersion(env, fixture.owner, fixture.app, 1);
   const store = await openStore(env, fixture.store);
   const owned = first.manifest.schemaHash;
   await insert(store, owned, { title: "Ada's" }, "ada");
   await insert(store, owned, { title: "Grace's" }, "grace");
-  await commitFiles(
-    env,
-    fixture.owner,
-    fixture.app,
-    { "server/schema.ts": sharedV1 },
-    "Shared notes"
-  );
+  await commitFiles(env, fixture.owner, fixture.app, sharedV1, "Shared notes");
   const second = await seal(fixture, 2);
   return {
     fixture,
@@ -1066,7 +1062,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       env,
       fixture.owner,
       fixture.app,
-      { "server/schema.ts": shortTitles },
+      shortTitles,
       "Shorter titles"
     );
     await seal(fixture, 3);
@@ -1132,7 +1128,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       env,
       fixture.owner,
       fixture.app,
-      { "server/schema.ts": shortTitles },
+      shortTitles,
       "Shorter titles"
     );
     await seal(fixture, 3);
@@ -1170,7 +1166,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       env,
       fixture.owner,
       fixture.app,
-      { "server/schema.ts": shortTitles },
+      shortTitles,
       "Shorter titles"
     );
     await seal(fixture, 3);
@@ -1202,7 +1198,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       env,
       fixture.owner,
       fixture.app,
-      { "server/schema.ts": categorised },
+      categorised,
       "Categories"
     );
     // Version 3 adds a defaulted category the notes lack, under the rules
@@ -1233,10 +1229,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
   it("applies no rules for an activation refused as busy, so it never puts back the rules a winner tightened", async () => {
     // Version 1 shares the notes; version 2 makes them their owner's, and
     // version 3 narrows the titles.
-    const fixture = await appWith({
-      "server/schema.ts": sharedV1,
-      "grasp.config.ts": notesConfig,
-    });
+    const fixture = await appWith(sharedV1);
     const first = await seal(fixture);
     await setCurrentVersion(env, fixture.owner, fixture.app, 1);
     const store = await openStore(env, fixture.store);
@@ -1247,7 +1240,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       env,
       fixture.owner,
       fixture.app,
-      { "server/schema.ts": v1Schema },
+      ownedV1,
       "Owner's notes"
     );
     await seal(fixture, 2);
@@ -1255,7 +1248,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       env,
       fixture.owner,
       fixture.app,
-      { "server/schema.ts": shortTitles },
+      shortTitles,
       "Shorter titles"
     );
     await seal(fixture, 3);
@@ -1312,10 +1305,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       'v.string().default("general")',
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one App after the other
-      const fixture = await appWith({
-        "server/schema.ts": v1Schema,
-        "grasp.config.ts": notesConfig,
-      });
+      const fixture = await appWith(ownedV1);
       // oxlint-disable-next-line no-await-in-loop -- one App after the other
       const first = await seal(fixture);
       // oxlint-disable-next-line no-await-in-loop -- one App after the other
@@ -1332,14 +1322,10 @@ describe("making the release current", { timeout: 180_000 }, () => {
         env,
         fixture.owner,
         fixture.app,
-        {
-          "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-
-export default defineSchema({
-  notes: defineTable({ title: v.string().min(1).max(200), category: ${category} }).access({ read: "appMembers", write: "appMembers" }),
-});
-`,
-        },
+        notesDefinition(
+          { title, category },
+          { read: "appMembers", write: "appMembers" }
+        ),
         "Shared, with categories"
       );
       // oxlint-disable-next-line no-await-in-loop -- one App after the other

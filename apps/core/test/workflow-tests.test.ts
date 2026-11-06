@@ -23,6 +23,7 @@ import {
 } from "../src/workflow-resources.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import { fixtureRunSessionOf } from "../src/workflows/fixture-run-sessions.ts";
+import { appDefinition } from "./app-definitions.ts";
 import { passing } from "./json-workflow-apps.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
@@ -96,27 +97,24 @@ const filesWith = (
   /** The parameter values the fixture gives each workflow, by alias. */
   workflows?: Record<string, { params: Record<string, unknown> }>
 ): Record<string, string> => ({
-  "server/schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+  ...appDefinition({
+    name: "Requests",
+    tables: {
+      requests: {
+        fields: { who: "v.string()" },
+        access: { read: "appMembers", write: "appMembers" },
+      },
+    },
+    permissions: [
+      'permission.workflow("followUp", {\n  input: v.object({ who: v.string().trim().min(1) }),\n  output: v.object({ status: v.string() }),\n})',
+    ],
+  }),
+  "server/requests.ts": `import { v } from "@grasp-os/sdk";
+import { permissions } from "../grasp.config.ts";
 
-export default defineSchema({
-  requests: defineTable({ who: v.string() }).access({ read: "appMembers", write: "appMembers" }),
-});
+export const followUp = permissions.followUp;
 `,
-  "server/requests.ts": `import { permission, v } from "@grasp-os/sdk";
 
-export const followUp = permission.workflow("followUp", {
-  input: v.object({ who: v.string().trim().min(1) }),
-  output: v.object({ status: v.string() }),
-});
-`,
-  "grasp.config.ts": `import { defineApp } from "@grasp-os/sdk";
-import { followUp } from "./server/requests.ts";
-
-export default defineApp({
-  name: "Requests",
-  permissions: { workflows: [followUp] },
-});
-`,
   "tests/fixtures/desk.json": JSON.stringify({
     principals: { "desk-user": { role: "user" } },
     ...(workflows === undefined ? {} : { workflows }),
