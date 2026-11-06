@@ -870,7 +870,9 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       previewed.references,
       id
     );
-    const { scope } = await previewFrame(chatId, id, built.artifact);
+    const { scope } = await previewFrame(chatId, id, built.artifact, {
+      updates: true,
+    });
     await stageModules(this.#env, appModules(built.code, scope));
     return refreshOf(previewed.revision, built, previewed.shows);
   }
@@ -960,17 +962,19 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         throw error;
       }
     }
+    // Only the draft as it is now takes updates, and only its frame's
+    // policy allows them (page-frame.ts): a version opened read-only
+    // stays as it was, staged apart from the draft's writes.
+    const updates = now.revision !== readOnlyRevision;
     // A preview reads no real data; its frame still runs exactly this
     // build and nothing else, until the page hands it an update.
-    const { scope, artifact } = await previewFrame(chatId, id, built.artifact);
+    const { scope, artifact } = await previewFrame(chatId, id, built.artifact, {
+      updates,
+    });
     await stageFrame(this.#env, artifact, built.code, {
       preview: true,
       scope,
     });
-    // Only the draft as it is now takes updates, and only its frame's
-    // policy allows them (page-frame.ts): a version opened read-only
-    // stays as it was.
-    const updates = now.revision !== readOnlyRevision;
     return {
       app: id,
       name,

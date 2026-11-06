@@ -2,6 +2,7 @@ import { createSocket } from "node:dgram";
 import type { Socket } from "node:dgram";
 import { once } from "node:events";
 
+import { appFilesPath } from "@grasp-os/shared/app-file-limits";
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { z } from "zod";
@@ -328,6 +329,87 @@ test("a page runs its build and nothing else: no handler, inline script, data: o
     },
     ran: [],
   });
+});
+
+/** The address of the page's module a page's frame names, token and all. */
+const frameEntry = async (page: Page): Promise<string> => {
+  const described = page.frameLocator('iframe[title="App"]').locator("#page");
+  await expect(described).toBeAttached({ timeout: 30_000 });
+  return z
+    .object({ entry: z.string() })
+    .parse(JSON.parse((await described.textContent()) ?? "")).entry;
+};
+
+test("a page imports no module but its build's: not another App's, a package's, a file's or one past its directory, however escaped", async ({
+  pageOf,
+}) => {
+  const page = await pageOf(builder);
+  const violations = await recordCspViolations(page);
+  // Another App's build, as its own frame names it, valid token and all.
+  await page.goto(pagePath(probing));
+  const other = new URL(await frameEntry(page));
+  const { scope = "", file = "" } =
+    /^\/page-modules\/(?<scope>[^/]+)\/(?<file>[^/]+)$/u.exec(other.pathname)
+      ?.groups ?? {};
+  await page.goto(pagePath(injecting));
+  const own = new URL(await frameEntry(page));
+  const directory = new URL("./", own).href;
+  const { origin } = own;
+  // Refused by the frame's policy: each is outside its two directories.
+  const outside = {
+    anotherApp: other.href,
+    // The URL parser resolves `%2e%2e` before the policy matches it.
+    dotSegments: `${directory}%2e%2e/${scope}/1/${file}${other.search}`,
+    sharedKit: `${origin}/page-modules/kit/${file}`,
+    package: `${origin}/package-artifacts/${injecting}/${"c".repeat(64)}/${"d".repeat(64)}/index.js`,
+    appFile: `${origin}${appFilesPath}/${"e".repeat(32)}/content`,
+  };
+  // Under its directory as the browser matches the path, another App's
+  // module once decoded: core answers none of them.
+  const escaped = {
+    escapedSlash: `${directory}..%2F${scope}/${file}${other.search}`,
+    escapedBackslash: `${directory}..%5C${scope}%5C${file}${other.search}`,
+  };
+  const frame = page.frame({ url: /\/page-frame\?load=/u });
+  const tried = await frame?.evaluate(
+    async (addresses) =>
+      Object.fromEntries(
+        await Promise.all(
+          Object.entries(addresses).map(
+            async ([name, address]) =>
+              [
+                name,
+                await import(address).then(
+                  (): string => "ran",
+                  (): string => "blocked"
+                ),
+              ] as const
+          )
+        )
+      ),
+    { ...outside, ...escaped }
+  );
+
+  expect(tried).toStrictEqual({
+    anotherApp: "blocked",
+    dotSegments: "blocked",
+    sharedKit: "blocked",
+    package: "blocked",
+    appFile: "blocked",
+    escapedSlash: "blocked",
+    escapedBackslash: "blocked",
+  });
+  // The policy refused those outside, not some other failure to load.
+  await expect
+    .poll(() =>
+      Object.entries(outside)
+        .filter(
+          ([, address]) =>
+            !violations.some((line) => line.includes(new URL(address).pathname))
+        )
+        .map(([name]) => name)
+    )
+    .toStrictEqual([]);
 });
 
 test("a page can't send its frame to another origin", async ({ pageOf }) => {

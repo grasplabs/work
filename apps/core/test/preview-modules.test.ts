@@ -214,7 +214,7 @@ describe(
       const own = modulePartsOf(pageModuleOf(frame));
       const [expires = ""] = own.token.split(".");
       const kitAddress = Object.values(frame.addresses).find((address) =>
-        new URL(address).pathname.startsWith("/page-modules/kit/")
+        new URL(address).pathname.startsWith("/page-modules/kit-")
       );
       const kit = modulePartsOf(kitAddress ?? "");
       const noToken = await routed(`/page-modules/${own.scope}/${own.hash}.js`);

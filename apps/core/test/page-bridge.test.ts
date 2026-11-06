@@ -1,4 +1,6 @@
 import { kitModuleName, pageRuntime } from "@grasp-os/compiler";
+import { appFilesPath } from "@grasp-os/shared/app-file-limits";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppVersionPush } from "@grasp-os/shared/pages";
 import type { Role } from "@grasp-os/shared/roles";
@@ -19,6 +21,7 @@ import { versionPages } from "../src/pages.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
+  allowsScript,
   appModulesOf,
   frameDocument,
   kitModulesOf,
@@ -29,7 +32,7 @@ import {
   policyOf,
   routed,
 } from "./page-frames.ts";
-import type { Framed } from "./page-frames.ts";
+import type { Framed, LoadedFrame } from "./page-frames.ts";
 import type { RawSettled } from "./sign-in.ts";
 import {
   firstVersion,
@@ -220,6 +223,53 @@ const sweptAt = async (ahead: number): Promise<void> => {
   }
 };
 
+/**
+ * The policy of the frame of a build of `kit` kit modules and `own` of its
+ * own, staged as core stages one.
+ */
+const policyOfBuild = async (kit: number, own: number): Promise<string> => {
+  const names = Array.from({ length: own }, (_, index) => `app~m${index}`);
+  const addresses = await Promise.all(
+    names.map(async (name) => await sha256Hex(`${kit}:${own}:${name}`))
+  );
+  const artifact = await sha256Hex(`build:${kit}:${own}`);
+  await stageFrame(env, artifact, {
+    entry: "app~m0",
+    runtime: "kit~m0",
+    modules: Object.fromEntries(
+      names.map((name) => [name, `export default "${name}";\n`])
+    ),
+    addresses: Object.fromEntries(
+      names.map((name, index) => [name, addresses[index] ?? ""])
+    ),
+    kit: Object.fromEntries(
+      Array.from({ length: kit }, (_, index) => [
+        `kit~m${index}`,
+        `export const m${index} = ${index};\n`,
+      ])
+    ),
+    css: "",
+  });
+  const response = await frameDocument({
+    artifact,
+    frameToken: await frameAccess(env, artifact),
+  });
+  expect(response.status).toBe(200);
+  return response.headers.get("content-security-policy") ?? "";
+};
+
+/** How many sources a policy's `script-src` names, the directive's name included. */
+const sourcesOf = (header: string): number =>
+  header
+    .split(";")
+    .find((directive) => directive.trim().startsWith("script-src"))
+    ?.trim()
+    .split(" ").length ?? 0;
+
+/** The App's own modules' addresses of `frame`. */
+const appAddresses = (frame: LoadedFrame): string[] =>
+  appModulesOf(frame).map((name) => frame.addresses[name] ?? "");
+
 describe("pages", { timeout: 60_000 }, () => {
   it("opens a page at the App's current version, with only the kit modules it needs", async () => {
     const builder = await personApi("builder");
@@ -284,16 +334,13 @@ describe("pages", { timeout: 60_000 }, () => {
       throw new Error("An opened page has a frame");
     }
     const scripts = frame.policy.get("script-src") ?? [];
-    // The policy names each address without its token: browsers match a
-    // policy's paths without the query.
-    const addresses = [
-      ...new Set(
-        Object.values(frame.addresses).map((address) => {
-          const { origin, pathname } = new URL(address);
-          return `${origin}${pathname}`;
-        })
-      ),
-    ];
+    const { origin } = new URL(frame.page.entry);
+    const kitDirectory = new URL(
+      "./",
+      Object.values(frame.addresses).find((address) =>
+        new URL(address).pathname.startsWith("/page-modules/kit-")
+      )
+    ).href;
     const unknown = { artifact: "0".repeat(64) };
     const missing = await frameDocument({
       ...unknown,
@@ -301,12 +348,16 @@ describe("pages", { timeout: 60_000 }, () => {
     });
 
     expect({
-      // The document's own inline scripts by hash, each module of the
-      // build by its exact address, and nothing else: no inline script or
-      // handler the page writes, no data: or blob: module, no eval.
+      // The document's own inline scripts by hash, the build's modules
+      // by the two directories that hold them (its own, by its artifact,
+      // and its kit set's), and nothing else: no inline script or handler
+      // the page writes, no data: or blob: module, no eval.
       scripts: scripts.toSorted(),
+      kit: /^\/page-modules\/kit-[0-9a-f]{64}\/$/u.test(
+        new URL(kitDirectory).pathname
+      ),
       served: Object.values(frame.addresses).every((address) =>
-        new URL(address).pathname.startsWith("/page-modules/")
+        allowsScript(frame, address)
       ),
       // A build core never staged runs nothing, and a miss is cached for
       // a minute, not read from storage on every ask.
@@ -316,7 +367,12 @@ describe("pages", { timeout: 60_000 }, () => {
         cache: missing.headers.get("cache-control"),
       },
     }).toStrictEqual({
-      scripts: [...frame.inline, ...addresses].toSorted(),
+      scripts: [
+        ...frame.inline,
+        kitDirectory,
+        `${origin}/page-modules/${bundle.artifact}/`,
+      ].toSorted(),
+      kit: true,
       served: true,
       missing: {
         status: 404,
@@ -324,6 +380,141 @@ describe("pages", { timeout: 60_000 }, () => {
         cache: "public, max-age=60",
       },
     });
+  });
+
+  it("names the same few script sources however many modules a build loads", async () => {
+    // A page with the data grid or a chart loads about 150 of the kit's.
+    const small = await policyOfBuild(1, 1);
+    const large = await policyOfBuild(150, 60);
+    expect({
+      sameLength: large.length === small.length,
+      // Far under what proxies and Node take of a header (16 KB).
+      bounded: large.length < 1024,
+      // `script-src`, two inline scripts' hashes and two directories.
+      sources: [sourcesOf(small), sourcesOf(large)],
+    }).toStrictEqual({ sameLength: true, bounded: true, sources: [5, 5] });
+  });
+
+  it("lets a frame run no other build's module: an older version's, another App's, another kit set's, a package's or a file's", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const older = await loadFrame(await builder.api.pages.open(app));
+    await release(builder, app, {
+      "src/routes/index.tsx": pageCode.replace("<p>Notes</p>", "<p>Later</p>"),
+    });
+    const current = await loadFrame(await builder.api.pages.open(app));
+    const { id: plain } = await builder.api.apps.create({ name: "Plain" });
+    await release(builder, plain, {
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
+function Plain() {
+  return <main>Plain</main>;
+}
+export const Route = createFileRoute("/")({ component: Plain });
+`,
+    });
+    const another = await loadFrame(await builder.api.pages.open(plain));
+    if (older === null || current === null || another === null) {
+      throw new Error("Opened pages have frames");
+    }
+    const { origin } = new URL(current.page.entry);
+    const own = new URL("./", current.page.entry).href;
+    const { scope, hash } = modulePartsOf(older.page.entry);
+    const allowed = (addresses: string[]): boolean[] =>
+      addresses.map((address) => allowsScript(current, address));
+    expect({
+      own: allowed(Object.values(current.addresses)).every(Boolean),
+      older: allowed(appAddresses(older)).some(Boolean),
+      // Another App's, whose kit set is another (no button): its own kit
+      // directory, which this frame doesn't name.
+      another: allowed(Object.values(another.addresses)).some(Boolean),
+      // Up out of its directory, as the URL parser resolves it before a
+      // browser matches the policy.
+      dotSegments: allowed(
+        ["%2e%2e", "%2E%2E", ".%2e", "%2e."].map(
+          (dots) => `${own}${dots}/${scope}/${hash}.js`
+        )
+      ).some(Boolean),
+      // Where the kit was kept for every build, before each set had its own.
+      sharedKit: allowed(
+        Object.values(current.addresses).map(
+          (address) =>
+            `${origin}/page-modules/kit/${modulePartsOf(address).hash}.js`
+        )
+      ).some(Boolean),
+      package: allowed([
+        `${origin}/package-artifacts/${app}/${"c".repeat(64)}/${"d".repeat(64)}/index.js`,
+      ]).some(Boolean),
+      file: allowed([
+        `${origin}${appFilesPath}/${"e".repeat(32)}/content`,
+      ]).some(Boolean),
+    }).toStrictEqual({
+      own: true,
+      older: false,
+      another: false,
+      dotSegments: false,
+      sharedKit: false,
+      package: false,
+      file: false,
+    });
+  });
+
+  it("answers nothing under a frame's directories but its own modules, however the path is escaped, and redirects nowhere", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const older = await loadFrame(await builder.api.pages.open(app));
+    await release(builder, app, {
+      "src/routes/index.tsx": pageCode.replace("<p>Notes</p>", "<p>Later</p>"),
+    });
+    const current = await loadFrame(await builder.api.pages.open(app));
+    if (older === null || current === null) {
+      throw new Error("Opened pages have frames");
+    }
+    const other = modulePartsOf(older.page.entry);
+    const otherCode = older.modules[older.entry] ?? "";
+    const query = new URL(older.page.entry).search;
+    const directories = [
+      ...new Set(
+        Object.values(current.addresses).map(
+          (address) => new URL("./", address).pathname
+        )
+      ),
+    ];
+    // Each passes as under the directory, matched as the browser writes
+    // the path; decoded, most are the older build's module, asked with its
+    // own valid token.
+    const escapes = [
+      `..%2F${other.scope}/${other.hash}.js${query}`,
+      `..%2f${other.scope}/${other.hash}.js${query}`,
+      `..%5C${other.scope}%5C${other.hash}.js${query}`,
+      `%2E%2E%2F${other.scope}%2F${other.hash}.js${query}`,
+      `x/..%2F..%2F${other.scope}/${other.hash}.js${query}`,
+      `%2F${other.hash}.js${query}`,
+      `1/${other.hash}.js${new URL(current.page.entry).search}`,
+      `${other.hash}.js/${query}`,
+      `${other.hash}%2Ejs${query}`,
+      "",
+    ];
+    const answers = await Promise.all(
+      directories.flatMap((directory) =>
+        escapes.map(async (escape) => {
+          const response = await routed(`${directory}${escape}`, {
+            "sec-fetch-site": "cross-site",
+            "sec-fetch-dest": "script",
+          });
+          return {
+            // A 403 where the token is for the other directory.
+            refused: [403, 404].includes(response.status),
+            location: response.headers.get("location"),
+            other: (await response.text()) === otherCode,
+          };
+        })
+      )
+    );
+    expect(directories).toHaveLength(2);
+    expect(answers).toStrictEqual(
+      answers.map(() => ({ refused: true, location: null, other: false }))
+    );
   });
 
   it("serves a build's frame so no markup its page writes is parsed, and no name looked up ahead of time", async () => {

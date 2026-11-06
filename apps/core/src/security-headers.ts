@@ -157,7 +157,11 @@ export const isRefusedToProductPage = (request: Request): boolean =>
  * The policy of the document pages run in (page-frame.ts), for one
  * build: App code nobody reviewed line by line, so no network at all, and
  * no script but `scripts`, the hash sources of the document's own inline
- * scripts and the exact addresses of the build's modules.
+ * scripts and the directories of the build's modules: a source ending in
+ * `/` matches every path under it, and each directory holds one build's
+ * modules alone and never changes (page-frame.ts says how), so the policy
+ * stays a few hundred bytes however many modules a page loads, and allows
+ * no more than naming each would.
  *
  * - `sandbox allow-scripts` gives it an opaque origin even when it is
  *   opened on its own, not framed: no cookies, storage or DOM of this
