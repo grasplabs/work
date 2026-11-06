@@ -434,7 +434,12 @@ export const chatCodeRuns = sqliteTable(
       .notNull()
       .references(() => chats.id),
     toolCallId: text("tool_call_id").notNull(),
-    turnId: text("turn_id").notNull(),
+    /**
+     * Always written; null on a run an earlier release opened, kept so a
+     * rollback's code still writes here. Its draft writes never amend a
+     * turn's version (draft-versions.ts).
+     */
+    turnId: text("turn_id"),
     sourceHash: text("source_hash").notNull(),
     sourceChars: integer("source_chars").notNull(),
     agent: text().notNull(),

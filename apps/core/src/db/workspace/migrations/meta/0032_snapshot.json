@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fb64bb52-8799-4821-95db-56580682ba21",
+  "id": "c3e9a9ee-7c46-4fe9-a61e-394c36d2211c",
   "prevId": "e9b10be8-7908-4ce9-9e62-b918f84b42df",
   "tables": {
     "audit_outbox": {
@@ -324,7 +324,7 @@
           "name": "turn_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "source_hash": {

@@ -53,8 +53,9 @@ const toVersion = (
 });
 
 /**
- * Who wrote a version: the agent's turn (none when its run kept no
- * record), in its code step `callId`, or the person restoring one.
+ * Who wrote a version: the agent's turn (none when its run kept no record,
+ * or an earlier release opened it), in its code step `callId`, or the
+ * person restoring one.
  */
 export type VersionAuthor =
   | { turnId: string | null; callId: string | null }

@@ -221,6 +221,40 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
     });
   });
 
+  it("keeps each write of a run with no turn, as an earlier release opens one, as a version of its own", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id } = await builder.api.apps.create({ name: "Desk" });
+    await release(builder, id, deskFiles("Released"));
+    const app = appIdSchema.parse(id);
+    const chat = await builder.api.chats.create("Build");
+    const chatId = chatIdSchema.parse(chat.id);
+    const stub = chatsOf(builder);
+    for (const [at, marker] of ["One", "Two"].entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one write after the other
+      const run = await openTestRun(stub, chatId, "turn-1");
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await runInDurableObject(stub, (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE chat_code_runs SET turn_id = NULL WHERE id = ?",
+          run
+        );
+      });
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await stub.saveDraft(
+        chatId,
+        app,
+        1,
+        { "src/routes/index.tsx": desk(marker) },
+        [],
+        at,
+        run
+      );
+    }
+    const versions = await builder.api.chats.draftVersions(chatId, app);
+
+    expect(versions.map(({ number }) => number)).toStrictEqual([2, 1]);
+  });
+
   it("keeps every write that lands together, numbered in the order they landed, and restores as a new version", async () => {
     const builder = await signedInApi(idp, "builder");
     const { app, chatId, write, revision } = await twoVersions(builder);
