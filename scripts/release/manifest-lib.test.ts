@@ -24,6 +24,7 @@ import {
   assertReleaseDir,
   generateManifest,
   parseWranglerConfig,
+  releaseBudget,
   verifyRelease,
   writeRelease,
 } from "./manifest-lib.ts";
@@ -161,6 +162,48 @@ describe("the release manifest", () => {
     expect(() => generateManifest(info, [connect, coreWithoutAssets])).toThrow(
       /assets/u
     );
+  });
+
+  it("refuses a build over what a client's deploy can carry", () => {
+    const [connect, core] = fixture;
+    const [main] = core?.modules ?? [];
+    if (connect === undefined || core === undefined || main === undefined) {
+      throw new Error("expected two builds");
+    }
+    // Two modules of half the budget each, neither over it alone, which
+    // with core's own are over it: the deploy sends them all in one upload.
+    const half = releaseBudget.workerModules / 2;
+    const halves = ["a.js", "b.js"].map((name) => ({
+      ...main,
+      name,
+      size: half,
+      bytes: Buffer.alloc(half),
+    }));
+    expect(() =>
+      generateManifest(info, [
+        connect,
+        { ...core, modules: [...core.modules, ...halves] },
+      ])
+    ).toThrow(/core is over the release budget: its modules are 4\d\.\d MiB/u);
+    expect(() =>
+      generateManifest(info, [
+        connect,
+        {
+          ...core,
+          assets: {
+            blobs: core.assets?.blobs ?? new Map<string, Buffer>(),
+            manifest: {
+              ...core.assets?.manifest,
+              "/big.wasm": {
+                hash: "0".repeat(32),
+                size: releaseBudget.staticFile + 1,
+              },
+            },
+          },
+        },
+      ])
+    ).toThrow(/static file \/big\.wasm/u);
+    expect(() => generateManifest(info, [connect, core])).not.toThrow();
   });
 });
 
