@@ -11,8 +11,8 @@
  */
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 
-import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
+import { D1MigrationError } from "../cloudflare/d1-migration-error.ts";
 import { applyD1Migrations } from "../cloudflare/workers.ts";
 import type { BeforeMigration } from "../cloudflare/workers.ts";
 import type { ReleaseStore } from "../releases/import.ts";
@@ -78,16 +78,6 @@ export const migrateDatabases = async (
         sql: decoder.decode(await readBlob(store, file)),
       }))
     );
-    // What `before` threw stays its own: the runner's, not the migration's.
-    let refused: { error: unknown } | undefined;
-    const check = async () => {
-      try {
-        await before?.();
-      } catch (error) {
-        refused = { error };
-        throw error;
-      }
-    };
     try {
       // oxlint-disable-next-line no-await-in-loop -- one database at a time
       const names = await applyD1Migrations(
@@ -95,22 +85,21 @@ export const migrateDatabases = async (
         accountId,
         id,
         migrations,
-        check
+        async () => {
+          await before?.();
+        }
       );
       applied.set(name, names.length);
     } catch (error) {
-      if (refused !== undefined) {
-        throw refused.error;
-      }
-      // An API that didn't answer, or answered 429 or 5xx, stays the API's
-      // failure; SQL that D1 refused (a 400, or a statement that failed
-      // inside an answer) is the migration's.
-      if (error instanceof CloudflareApiError && error.status !== 400) {
+      // A migration D1 refused is the migration's, named; anything else
+      // (an API that didn't answer, or answered 429 or 5xx, a runner that
+      // lost its client) stays its own.
+      if (!(error instanceof D1MigrationError)) {
         throw error;
       }
       throw new DeployError(
         "d1_migration_failed",
-        `A migration of ${name} failed`,
+        `Migration ${error.migration} of ${name} failed`,
         { cause: error }
       );
     }

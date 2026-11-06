@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { createD1Database } from "../src/cloudflare/accounts.ts";
 import { cloudflareApi } from "../src/cloudflare/api.ts";
+import { D1MigrationError } from "../src/cloudflare/d1-migration-error.ts";
 import {
   applyD1Migrations,
   queryD1,
@@ -189,6 +190,44 @@ describe("static assets", () => {
         completed: true,
       }))
     );
+  });
+
+  it("logs how many files and bytes each upload session asks for, counts only", async () => {
+    const account = namespaced();
+    const files = await Promise.all([
+      file("/index.html", "<!doctype html>"),
+      file("/app.js", "console.log(1)"),
+    ]);
+    await deploy(core(account.id), "26.01.1", files);
+    const added = await file("/new.js", "1");
+    const entries: unknown[] = [];
+    const logged = vi
+      .spyOn(console, "info")
+      .mockImplementation((entry: unknown) => {
+        entries.push(entry);
+      });
+    try {
+      await deploy(core(account.id), "26.01.2", [...files, added]);
+    } finally {
+      logged.mockRestore();
+    }
+    const sessions = entries.filter(
+      (entry) =>
+        typeof entry === "object" &&
+        entry !== null &&
+        Reflect.get(entry, "event") === "deploy.assets_session"
+    );
+
+    expect(sessions).toStrictEqual([
+      {
+        event: "deploy.assets_session",
+        script: "grasp-os-core",
+        files: 3,
+        bytes: [...files, added].reduce((total, { size }) => total + size, 0),
+        asked: 1,
+        askedBytes: added.size,
+      },
+    ]);
   });
 
   it("names each file by the key the release manifest gives it (Wrangler's shape and extension rule, with SHA-256) bound to its type, dot-files included", async () => {
@@ -462,6 +501,36 @@ describe("D1 migrations", () => {
     expect(recorded).toStrictEqual(migrations.map(({ name }) => ({ name })));
   });
 
+  it("applies a first deploy's many migrations in one query, in order, each recorded", async () => {
+    const account = cloudflare.addAccount();
+    const { uuid } = await database(account.id, "grasp-os-core");
+    const prefix = `m_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+    const many = Array.from({ length: 120 }, (_, index) => ({
+      name: `${prefix}_${String(index).padStart(4, "0")}.sql`,
+      sql: `CREATE TABLE ${prefix}_${String(index)} (id TEXT);`,
+    }));
+    const before = cloudflare.calls.length;
+
+    await expect(
+      applyD1Migrations(api, account.id, uuid, many)
+    ).resolves.toStrictEqual(many.map(({ name }) => name));
+    const queries = cloudflare.calls
+      .slice(before)
+      .filter(({ path }) => path.endsWith("/query")).length;
+    const [recorded] = await queryD1(
+      api,
+      account.id,
+      uuid,
+      `SELECT name FROM d1_migrations WHERE name LIKE '${prefix}%' ORDER BY id;`
+    );
+
+    expect({ queries, recorded }).toStrictEqual({
+      // What the database applied, then every migration it hadn't.
+      queries: 2,
+      recorded: many.map(({ name }) => ({ name })),
+    });
+  });
+
   it("applies core's real migrations: FTS5 tables, triggers and comments", async () => {
     const account = cloudflare.addAccount();
     const { uuid } = await database(account.id, "grasp-os-knowledge");
@@ -556,7 +625,10 @@ describe("D1 migrations", () => {
           sql: `CREATE TABLE ${broken} (id TEXT);`,
         },
       ])
-    ).rejects.toMatchObject({ status: 400, codes: [7500] });
+    ).rejects.toMatchObject({
+      migration: `${broken}_0000.sql`,
+      cause: { status: 400, codes: [7500] },
+    });
 
     const [recorded] = await queryD1(
       api,
@@ -565,5 +637,57 @@ describe("D1 migrations", () => {
       `SELECT name FROM d1_migrations WHERE name LIKE '${broken}%';`
     );
     expect(recorded).toStrictEqual([]);
+  });
+
+  it("names the migration D1 refuses in the middle of a query, and a retry goes on from it", async () => {
+    const account = cloudflare.addAccount();
+    const { uuid } = await database(account.id, "grasp-os-core");
+    const prefix = `b_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
+    const named = (index: number, sql: string) => ({
+      name: `${prefix}_${String(index).padStart(4, "0")}.sql`,
+      sql,
+    });
+    const fixed = named(1, `CREATE TABLE ${prefix}_1 (id TEXT);`);
+    const sent = [
+      named(0, `CREATE TABLE ${prefix}_0 (id TEXT);`),
+      // Refused: one query carries all three, and D1 says only that the
+      // query failed.
+      { ...fixed, sql: "CREATE TABLE oops (" },
+      named(2, `CREATE TABLE ${prefix}_2 (id TEXT);`),
+    ];
+    const recordedNow = async (): Promise<unknown[]> => {
+      const [rows = []] = await queryD1(
+        api,
+        account.id,
+        uuid,
+        `SELECT name FROM d1_migrations WHERE name LIKE '${prefix}%' ORDER BY id;`
+      );
+      return rows.map(({ name }) => name);
+    };
+
+    const refused = await applyD1Migrations(api, account.id, uuid, sent).then(
+      () => null,
+      (error: unknown) => error
+    );
+    const afterRefusal = await recordedNow();
+    // The release fixed: the retry applies what's left, from the one refused.
+    const retried = await applyD1Migrations(api, account.id, uuid, [
+      sent[0] ?? fixed,
+      fixed,
+      sent[2] ?? fixed,
+    ]);
+
+    expect({
+      refused:
+        refused instanceof D1MigrationError ? refused.migration : refused,
+      afterRefusal,
+      retried,
+      recorded: await recordedNow(),
+    }).toStrictEqual({
+      refused: fixed.name,
+      afterRefusal: [sent[0]?.name],
+      retried: [fixed.name, sent[2]?.name],
+      recorded: sent.map(({ name }) => name),
+    });
   });
 });
