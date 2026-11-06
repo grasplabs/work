@@ -740,7 +740,7 @@ export const TableRecords = ({
             >
               <Input
                 aria-label={t`Record ID`}
-                className="h-8 w-48"
+                className="h-8 w-36"
                 onChange={(event) => {
                   setWanted(event.target.value);
                 }}

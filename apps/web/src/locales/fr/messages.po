@@ -9604,11 +9604,6 @@ msgid "Press a line to change it, take out what is wrong, or type what is missin
 msgstr "Appuyez sur une ligne pour la modifier, retirez ce qui est faux, ou tapez ce qui manque. Ce que vous laissez, c’est ce qui compte."
 
 #: src/engines/app-workspace.tsx
-msgctxt "an app's draft, not live"
-msgid "Preview"
-msgstr "Aperçu"
-
-#: src/engines/app-workspace.tsx
 msgctxt "an app's workspace view"
 msgid "Preview"
 msgstr "Aperçu"

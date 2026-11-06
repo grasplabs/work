@@ -668,10 +668,6 @@ const PreviewBar = ({
   }
   return (
     <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2">
-      <Badge variant="secondary">
-        <EyeIcon data-icon="inline-start" />
-        <Trans context="an app's draft, not live">Preview</Trans>
-      </Badge>
       <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
         {says}
       </span>

@@ -9604,11 +9604,6 @@ msgid "Press a line to change it, take out what is wrong, or type what is missin
 msgstr "Druk op een regel om hem aan te passen, haal weg wat niet klopt, of typ wat er ontbreekt. Wat je laat staan, telt."
 
 #: src/engines/app-workspace.tsx
-msgctxt "an app's draft, not live"
-msgid "Preview"
-msgstr "Voorvertoning"
-
-#: src/engines/app-workspace.tsx
 msgctxt "an app's workspace view"
 msgid "Preview"
 msgstr "Voorvertoning"
