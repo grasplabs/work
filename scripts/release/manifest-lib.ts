@@ -303,10 +303,11 @@ const mebibytes = (bytes: number): string =>
  *   leaves a quarter of that as headroom. The deploy streams them into the
  *   upload, so they don't bound its memory. The 1 s startup limit isn't
  *   a size: Cloudflare checks it on every upload.
- * - A static file: Cloudflare takes 25 MiB at most. The deploy holds the
- *   one it's sending, read and as base64, so this bounds its memory too.
- * Static files in total aren't bounded here: the deploy sends one at a
- * time.
+ * - A static file: Cloudflare takes 25 MiB at most. The deploy sends one
+ *   this large on its own, holding it read and as base64, so this bounds
+ *   its memory too.
+ * Static files in total aren't bounded here: the deploy reads each only
+ * as its request goes out, three requests at a time.
  */
 export const releaseBudget = {
   workerModules: 48 * 1024 * 1024,
