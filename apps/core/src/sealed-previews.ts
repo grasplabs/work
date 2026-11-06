@@ -1534,6 +1534,7 @@ export class SealedPreviews {
         this.#sealing.delete(name);
         if (sealFailure(error)) {
           this.#unbuilt.set(name, running.server);
+          this.#restore(chatId, app);
         }
       }
       throw error;
@@ -1549,6 +1550,42 @@ export class SealedPreviews {
     this.#running.set(name, running);
     this.#discardLeftovers();
     return release;
+  }
+
+  /**
+   * Runs again the last server code of the chat's draft of `app` that
+   * sealed, as kept (`previewReleases`), when nothing runs: after this
+   * object started again, so the draft's frames still run on it, store
+   * and all, while the draft's own server code doesn't seal (`served`).
+   * Its draft names only the revision and version it was sealed at, all a
+   * call of it is matched by (`runsServerOf`): its files are kept sealed.
+   * Never a version of the App's (a negative revision): the draft's frames
+   * then run on the App's latest version, as before anything sealed.
+   */
+  #restore(chatId: ChatId, app: AppId): void {
+    const name = nameOf(chatId, app);
+    const kept = this.#keptRelease(chatId, app);
+    if (this.#running.has(name) || kept === undefined || kept.revision < 0) {
+      return;
+    }
+    const draft: Draft = {
+      base: kept.version - 1,
+      changes: {},
+      revision: kept.revision,
+    };
+    const running: Running = {
+      revision: kept.revision,
+      draft,
+      since: kept.revision,
+      // Its files aren't read again, so its server code is named by the
+      // revision it was sealed at: never any draft's or version's own.
+      server: canonicalJson({ sealedAt: kept.revision }),
+      version: kept.version,
+      release: this.#load(chatId, app, kept.version),
+      streams: new Map(),
+    };
+    void heard(running.release);
+    this.#running.set(name, running);
   }
 
   /**
@@ -2069,6 +2106,18 @@ export class SealedPreviews {
         ([name, { revision }]) => `${name}:${revision}`
       )
     );
+    // The last server code each preview sealed, kept across a restart,
+    // and its store with it: what `#restore` runs again.
+    for (const kept of this.#db
+      .select({
+        chatId: previewReleases.chatId,
+        appId: previewReleases.appId,
+        revision: previewReleases.revision,
+      })
+      .from(previewReleases)
+      .all()) {
+      running.add(`${nameOf(kept.chatId, kept.appId)}:${kept.revision}`);
+    }
     const left = this.#db
       .select({
         storeId: previewStores.storeId,

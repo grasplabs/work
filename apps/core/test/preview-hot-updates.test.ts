@@ -661,6 +661,78 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     });
   });
 
+  it("keeps the draft's frames on the last server code that built, store and all, when the chat's object starts again while its own server code doesn't", async () => {
+    const { builder, app, chatId, revision, write } = await setUp();
+    const { chats } = builder.api;
+    const titles = await requestFor(
+      builder,
+      { chatId, app, revision },
+      "notes.titles"
+    );
+    await chats.previewFunction(
+      chatId,
+      app,
+      revision,
+      await requestFor(builder, { chatId, app, revision }, "notes.create", {
+        title: "kept",
+      })
+    );
+    const broken = await write({ "server/notes.ts": titlesUnbuilt }, revision);
+    const before = refreshed(
+      await chats.previewUpdate(chatId, app, broken, { screen: "desk" })
+    );
+    // A deploy restarts the object: nothing it held in memory is left.
+    await runInDurableObject(chatsOf(builder), (_instance, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+    const called = outcome(
+      await chats.previewFunction(chatId, app, broken, titles)
+    );
+    const after = refreshed(
+      await chats.previewUpdate(chatId, app, broken, { screen: "desk" })
+    );
+    expect({
+      before: before.serverUnbuilt,
+      called,
+      after: { serverUnbuilt: after.serverUnbuilt, entry: after.entry },
+    }).toStrictEqual({
+      before: true,
+      called: ["kept"],
+      after: { serverUnbuilt: true, entry: before.entry },
+    });
+  });
+
+  it("says the draft's server code doesn't build even of a screen that calls none of it", async () => {
+    const { builder, app, chatId, revision, write } = await setUp();
+    const { chats } = builder.api;
+    const broken = await write(
+      {
+        "server/notes.ts": titlesUnbuilt,
+        "screens/desk.tsx": `export default function Desk() {
+  return <main>Static</main>;
+}
+`,
+      },
+      revision
+    );
+    const update = refreshed(
+      await chats.previewUpdate(chatId, app, broken, { screen: "desk" })
+    );
+    const fixed = await write(
+      { "server/notes.ts": titlesSaying("fixed") },
+      broken
+    );
+    const afterFix = refreshed(
+      await chats.previewUpdate(chatId, app, fixed, { screen: "desk" })
+    );
+    expect({
+      broken: update.serverUnbuilt,
+      fixed: afterFix.serverUnbuilt,
+    }).toStrictEqual({ broken: true, fixed: undefined });
+  });
+
   it("seals the same release whatever the draft's screens and components hold, but not its server code", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id } = await builder.api.apps.create({ name: "Notes" });

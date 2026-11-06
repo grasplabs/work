@@ -94,6 +94,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
+import { refused as refusedResult } from "./action-invocation.ts";
 import { isMessage } from "./agent-messages.ts";
 import {
   auditAgentCall,
@@ -4766,12 +4767,20 @@ export class Workspace extends DurableObject<Env> {
       chargeWindow?: (pages: number, whole: number) => Promise<void>;
     } = {}
   ): Promise<string> {
-    const {
-      id,
-      draft,
-      revision,
-      ownRevision: ranDraft,
-    } = this.#servedBuild(chatId, personId, appId, at);
+    const served = this.#servedBuild(chatId, personId, appId, at);
+    const { id, revision } = served;
+    const { draft, unsealed } = await this.#runsOn(id, appId, served);
+    const ranDraft = served.ownRevision && draft === served.draft;
+    // Run in place of the draft's own server code, which doesn't seal:
+    // that is what the agent's check hears of the call, as it would have
+    // been answered on the draft.
+    if (served.ownRevision && unsealed !== undefined) {
+      const problem = functionProblem(request, refusedResult(unsealed));
+      if (problem !== undefined) {
+        this.#previewReports.report(id, appId, served.draft.revision, problem);
+      }
+      this.#previewReports.saw(id, appId, served.draft.revision);
+    }
     // A screen of the draft's own revision: only what it ran into decides
     // the draft's check. A frame still on an earlier screen of the same
     // server code, or on a version of the App, is answered, but what it
@@ -4823,12 +4832,9 @@ export class Workspace extends DurableObject<Env> {
     request: unknown,
     attach: boolean
   ): Promise<ReadableStream<Uint8Array>> {
-    const { id, draft, revision } = this.#servedBuild(
-      chatId,
-      personId,
-      appId,
-      at
-    );
+    const served = this.#servedBuild(chatId, personId, appId, at);
+    const { id, revision } = served;
+    const { draft } = attach ? served : await this.#runsOn(id, appId, served);
     return await this.#sealedPreviews.openStream(
       id,
       personId,
@@ -4885,38 +4891,104 @@ export class Workspace extends DurableObject<Env> {
       throw appErrors.create("app.preview_outdated");
     }
     const app = appIdSchema.parse(appId);
-    let { draft } = served;
-    // Of the draft at its revision, on other server code than its own.
-    let inPlace = typeof at === "number" && !served.ownRevision;
-    let sealed: Awaited<ReturnType<SealedPreviews["release"]>>;
-    try {
-      sealed = await this.#sealedPreviews.release(id, app, draft);
-    } catch (error) {
-      // The draft's server code doesn't build: its screens are built
-      // against what its frames then run on, the last server code of the
-      // preview that sealed, or else the App's latest version.
-      if (
-        typeof at !== "number" ||
-        !this.#sealedPreviews.serverUnbuilt(id, app, own)
-      ) {
-        throw error;
-      }
-      const last = this.#sealedPreviews.served(id, app, own, at);
-      draft =
-        last === undefined || last === own
-          ? await this.#latestInPlace(app, error)
-          : last;
-      inPlace = true;
-      sealed = await this.#sealedPreviews.release(id, app, draft);
-    }
+    const { draft, inPlace } = await this.#sealedFor(id, app, own, at, served);
+    const sealed = await this.#sealedPreviews.release(id, app, draft);
     const generated = await generateModules(sealed.release.app, {
       resourceId: app,
       resourceVersion: sealed.version,
     });
     return {
       references: generated[generatedPaths.api] ?? null,
-      serverUnbuilt: inPlace,
+      // Of the draft at its revision, on other server code than its own.
+      serverUnbuilt: typeof at === "number" && (inPlace || !served.ownRevision),
     };
+  }
+
+  /**
+   * The draft a call of a frame `served` (`#servedBuild`) runs on: the one
+   * served, sealed, or what runs in place of its server code when that
+   * doesn't seal (`#sealedFor`), with why it doesn't (`unsealed`). Should
+   * nothing do, the one served, so the call is answered why.
+   */
+  async #runsOn(
+    id: ChatId,
+    appId: string,
+    served: { draft: Draft; revision: number }
+  ): Promise<{ draft: Draft; unsealed?: unknown }> {
+    // A version of the App runs its own code.
+    if (served.revision < 0) {
+      return { draft: served.draft };
+    }
+    const app = appIdSchema.parse(appId);
+    try {
+      await this.#sealedPreviews.release(id, app, served.draft);
+      return { draft: served.draft };
+    } catch (error) {
+      try {
+        const draft = await this.#inPlace(
+          id,
+          app,
+          this.draft(id, appId),
+          served.revision,
+          error
+        );
+        return { draft, unsealed: error };
+      } catch {
+        return { draft: served.draft };
+      }
+    }
+  }
+
+  /**
+   * What a frame of the chat's draft `own` of `app` showing `at` runs on,
+   * `served` by `#servedBuild`, sealed: as served, or, when the draft's
+   * server code doesn't seal, what its frames run on in its place
+   * (`inPlace`): the last server code of the preview that sealed, kept
+   * across a restart of this object (`SealedPreviews.served`), or else the
+   * App's latest version. Throws the seal's failure when there is none.
+   */
+  async #sealedFor(
+    id: ChatId,
+    app: AppId,
+    own: Draft,
+    at: PreviewAt,
+    served: { draft: Draft }
+  ): Promise<{ draft: Draft; inPlace: boolean }> {
+    try {
+      await this.#sealedPreviews.release(id, app, served.draft);
+      return { draft: served.draft, inPlace: false };
+    } catch (error) {
+      return {
+        draft: await this.#inPlace(id, app, own, at, error),
+        inPlace: true,
+      };
+    }
+  }
+
+  /**
+   * What a frame of the chat's draft `own` of `app` showing `at` runs on
+   * once sealing its server code failed with `error`: the last server code
+   * of the preview that sealed (`SealedPreviews.served`), or else the
+   * App's latest version. Throws `error` for any other failure, or when
+   * there is none.
+   */
+  async #inPlace(
+    id: ChatId,
+    app: AppId,
+    own: Draft,
+    at: PreviewAt,
+    error: unknown
+  ): Promise<Draft> {
+    if (
+      typeof at !== "number" ||
+      !this.#sealedPreviews.serverUnbuilt(id, app, own)
+    ) {
+      throw error;
+    }
+    const last = this.#sealedPreviews.served(id, app, own, at);
+    return last === undefined || last === own
+      ? await this.#latestInPlace(app, error)
+      : last;
   }
 
   /**

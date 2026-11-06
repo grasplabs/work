@@ -1,3 +1,4 @@
+import { isAppLayout } from "@grasp-os/compiler";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { AppFiles } from "@grasp-os/shared/apps";
@@ -1046,27 +1047,38 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     id: AppId,
     screen: string | undefined
   ): Promise<PreviewScreen> {
-    let serverUnbuilt = false;
-    let failure: { error: unknown } | undefined;
-    const withReferences = await withReferencesText(
-      Object.fromEntries(files),
-      async () => {
-        try {
-          const read = await references();
-          ({ serverUnbuilt } = read);
-          return read.references ?? undefined;
-        } catch (error) {
-          failure = { error };
-          throw error;
-        }
+    const source = Object.fromEntries(files);
+    // Its server code read whatever its screens import: whether it builds
+    // is said even of screens that call none of it.
+    const reading = isAppLayout(source) ? references() : undefined;
+    let read:
+      | { references: PreviewReferences }
+      | { failed: unknown }
+      | undefined;
+    if (reading !== undefined) {
+      try {
+        read = { references: await reading };
+      } catch (error) {
+        read = { failed: error };
       }
-    );
+    }
+    let needed = false;
+    const withReferences = await withReferencesText(source, async () => {
+      needed = true;
+      const got = await reading;
+      return got?.references ?? undefined;
+    });
     // Its screens import references that couldn't be had: why (its server
     // code doesn't build, say) is what to tell, never that the App has no
     // server code, which a build without them would say.
-    if (failure !== undefined) {
-      throw failure.error;
+    if (needed && read !== undefined && "failed" in read) {
+      throw read.failed;
     }
+    const serverUnbuilt =
+      read !== undefined &&
+      ("failed" in read
+        ? buildFailed(read.failed)
+        : read.references.serverUnbuilt);
     const built = await screenCode(
       this.#env,
       withReferences,
