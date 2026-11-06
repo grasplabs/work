@@ -1,10 +1,11 @@
 import { readOnlyRevision, shownAt } from "@grasp-os/shared/chat";
 import type { ChatDraft } from "@grasp-os/shared/chat";
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vite-plus/test";
 
+import { openTestRun, testRunOpening } from "./agent-chat.ts";
 import { appDefinition } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -13,13 +14,16 @@ import { chatsOf, chatWithDraft, outcome, requestFor } from "./previews.ts";
 import { failure } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
 
-// Every write of a chat's draft of an App is kept as a version: listed,
-// previewed read-only and restored as a new version, the draft discarded,
+// Each agent turn's writes of a chat's draft of an App are kept as one
+// version, as the turn left the draft: listed, previewed read-only and
+// restored as a new version, the draft discarded,
 // only by the chat's person while they build the App, and gone with the
 // chat. The version of the App a draft is proposed as is previewed
 // read-only the same way, until it is published. These tests start from
 // the ways it can fail: a write lost or kept out of order when writes
-// land together, a restore that rewrites history, an earlier or proposed
+// land together, a turn's writes split into versions or one turn's
+// folded into another's, a turn that wrote nothing or was cut short
+// leaving a version that isn't the draft, a restore that rewrites history, an earlier or proposed
 // version's preview that runs or changes anything, someone else (or a
 // person who no longer builds the App) reading another's versions, and
 // versions that outlive their chat.
@@ -108,6 +112,91 @@ const keptRows = async (person: Person, chatId: ChatId) =>
   );
 
 describe("versions of a chat's draft", { timeout: 180_000 }, () => {
+  it("keeps one version per agent turn that wrote, as the turn left the draft, whether or not it ended", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id } = await builder.api.apps.create({ name: "Desk" });
+    await release(builder, id, deskFiles("Released"));
+    const app = appIdSchema.parse(id);
+    const { chats } = builder.api;
+    const chat = await chats.create("Build");
+    const chatId = chatIdSchema.parse(chat.id);
+    const stub = chatsOf(builder);
+    let revision = 0;
+    /** Writes `changes` in a code run of turn `turnId`, as its code does. */
+    const write = async (
+      turnId: string,
+      changes: Record<string, string>
+    ): Promise<void> => {
+      const run = await openTestRun(stub, chatId, turnId);
+      if (!(await stub.saveDraft(chatId, app, 1, changes, [], revision, run))) {
+        throw new Error("The draft wasn't written");
+      }
+      revision += 1;
+    };
+    const numbers = async () => {
+      const versions = await chats.draftVersions(chatId, app);
+      return versions.map(({ number }) => number);
+    };
+
+    // One turn, three writes in as many code steps: one version, the last.
+    await write("turn-1", { "src/routes/index.tsx": desk("One") });
+    await write("turn-1", { "src/routes/index.tsx": desk("Two") });
+    await write("turn-1", { "src/routes/notes.tsx": desk("Notes") });
+    const [first] = await chats.draftVersions(chatId, app);
+    const firstPreview = await chats.preview(chatId, app);
+    const firstVersionPreview = await chats.preview(chatId, app, 1);
+    const afterFirst = await keptRows(builder, chatId);
+    // A turn that runs code but writes nothing keeps nothing.
+    await openTestRun(stub, chatId, "turn-2");
+    const afterNothing = await numbers();
+    // A turn cut short after one write: what it wrote is its version, as
+    // the draft holds it, and the next turn's is the next.
+    await write("turn-3", { "src/routes/index.tsx": desk("Cut") });
+    await write("turn-4", { "src/routes/index.tsx": desk("Four") });
+    const [, cut] = await chats.draftVersions(chatId, app);
+    // A restore while a turn writes: its next write is a version of its
+    // own, after the restore, and the earlier versions stay as they were.
+    await write("turn-5", { "src/routes/index.tsx": desk("Five") });
+    await chats.restoreDraftVersion(chatId, app, 1);
+    revision += 1;
+    const restoredPreview = await chats.preview(chatId, app);
+    await write("turn-5", { "src/routes/index.tsx": desk("Six") });
+    const versions = await chats.draftVersions(chatId, app);
+    const [draft] = await chats.drafts(chatId);
+
+    expect({
+      first: {
+        number: first?.number,
+        revision: first?.revision,
+        byAgent: first?.callId === testRunOpening.toolCallId,
+        previewIsDraft: firstVersionPreview.artifact === firstPreview.artifact,
+      },
+      // What the turn wrote over is no undo point: its two files, kept.
+      afterFirst,
+      afterNothing,
+      cutIsDraft: cut?.revision === 4,
+      numbers: versions.map(({ number }) => number),
+      restoredFrom: versions.map(({ restoredFrom }) => restoredFrom),
+      restoredIsFirst: restoredPreview.artifact === firstPreview.artifact,
+      kept: versions.at(-1),
+      draftAtNewest: draft?.revision === versions[0]?.revision,
+    }).toStrictEqual({
+      first: { number: 1, revision: 3, byAgent: true, previewIsDraft: true },
+      afterFirst: {
+        chat_draft_versions: 1,
+        chat_draft_version_files: 2,
+        chat_draft_contents: 2,
+      },
+      afterNothing: [1],
+      cutIsDraft: true,
+      numbers: [6, 5, 4, 3, 2, 1],
+      restoredFrom: [null, 1, null, null, null, null],
+      restoredIsFirst: true,
+      kept: first,
+      draftAtNewest: true,
+    });
+  });
+
   it("keeps every write that lands together, numbered in the order they landed, and restores as a new version", async () => {
     const builder = await signedInApi(idp, "builder");
     const { app, chatId, write, revision } = await twoVersions(builder);

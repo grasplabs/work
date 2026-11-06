@@ -4,7 +4,7 @@ import { appErrors } from "@grasp-os/shared/apps";
 import type { ChatDraftVersion } from "@grasp-os/shared/chat";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { and, desc, eq, max } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 
 import {
@@ -14,17 +14,25 @@ import {
 } from "./db/workspace/schema.ts";
 import type { Draft } from "./workspace.ts";
 
-// Every write of a chat's draft of an App, kept as a version that never
-// changes (`chat_draft_versions`), where the draft itself holds only the
-// latest: so the person can see how the draft got where it is, preview an
-// earlier version and restore it, which makes a new version rather than
-// rewriting any. A version is written in the transaction of the write it
-// records, from the draft as that write left it, so no write lands
-// without one and none is kept for a write that didn't land; numbered in
-// the order the writes landed. Hashed synchronously (node:crypto, which
-// workerd has), as the Workspace object's transactions are. Only the
-// Workspace object calls these. Versions are the chat's, as its draft
-// is: deleted with the chat.
+// A chat's draft of an App, kept as a version per agent turn that wrote
+// it (`chat_draft_versions`), where the draft itself holds only the
+// latest: the person's undo point per message. They see how the draft
+// got where it is, preview an earlier version and restore it, which makes
+// a new version rather than rewriting any. The preview follows every
+// write (sealed-previews.ts); a version, the draft as its turn left it.
+//
+// Each write of a turn keeps its version again, in the write's own
+// transaction, from the draft as that write left it: no write lands
+// without its turn's version holding it, and none is kept for a write
+// that didn't land. A turn cut short keeps what it wrote, then, as one
+// version: the draft keeps those writes, and its every state the person
+// saw stays one they can restore. Nothing has to notice a turn's end,
+// which a restart may skip. A turn's writes amend its version only while
+// it is the newest: after a restore, the turn's next write is a version
+// of its own, numbered after it. Numbered in the order they landed.
+// Hashed synchronously (node:crypto, which workerd has), as the Workspace
+// object's transactions are. Only the Workspace object calls these.
+// Versions are the chat's, as its draft is: deleted with the chat.
 
 /** The SHA-256 of `text`'s UTF-8 bytes, as hex. */
 const sha256 = (text: string): string =>
@@ -43,9 +51,12 @@ const toVersion = (
   createdAt: row.createdAt.toISOString(),
 });
 
-/** Who wrote a version: the agent's code step, or the person restoring one. */
+/**
+ * Who wrote a version: the agent's turn (none when its run kept no
+ * record), in its code step `callId`, or the person restoring one.
+ */
 export type VersionAuthor =
-  | { callId: string | null }
+  | { turnId: string | null; callId: string | null }
   | { restoredFrom: number };
 
 /** A chat's draft versions, in its Workspace object's SQLite. */
@@ -57,8 +68,9 @@ export class DraftVersions {
   }
 
   /**
-   * Keeps `draft`, the chat's draft of `appId` as a write just left it, as
-   * its next version. Called inside the transaction of the write.
+   * Keeps `draft`, the chat's draft of `appId` as a write just left it:
+   * as the version of the turn that wrote it, while that is the newest,
+   * else as the next version. Called inside the transaction of the write.
    */
   keep(
     chatId: ChatId,
@@ -67,7 +79,11 @@ export class DraftVersions {
     by: VersionAuthor,
     createdAt: Date
   ): ChatDraftVersion {
-    const number = this.#latest(chatId, appId) + 1;
+    const latest = this.#latest(chatId, appId);
+    const turnId = "turnId" in by ? by.turnId : null;
+    const amends =
+      latest !== undefined && turnId !== null && latest.turnId === turnId;
+    const number = amends ? latest.number : (latest?.number ?? 0) + 1;
     const hashes: Record<string, string | null> = {};
     for (const [path, content] of Object.entries(draft.changes)) {
       if (content === null) {
@@ -89,18 +105,88 @@ export class DraftVersions {
       revision: draft.revision,
       base: draft.base,
       contentHash: sha256(canonicalJson({ base: draft.base, files: hashes })),
+      turnId,
       callId: "callId" in by ? by.callId : null,
       restoredFrom: "restoredFrom" in by ? by.restoredFrom : null,
       createdAt,
     };
-    this.#db.insert(chatDraftVersions).values(row).run();
+    const replaced = amends ? this.#replace(row) : [];
+    if (!amends) {
+      this.#db.insert(chatDraftVersions).values(row).run();
+    }
     for (const [path, hash] of Object.entries(hashes)) {
       this.#db
         .insert(chatDraftVersionFiles)
         .values({ chatId, appId, number, path, sha256: hash })
         .run();
     }
+    this.#dropUnheld(chatId, appId, replaced);
     return toVersion(row);
+  }
+
+  /**
+   * Rewrites version `row.number` as `row`, its files gone for the caller
+   * to write again: the content hashes they held, to drop those no
+   * version holds any more (`#dropUnheld`).
+   */
+  #replace(row: typeof chatDraftVersions.$inferSelect): string[] {
+    const { chatId, appId, number } = row;
+    const ofVersion = and(
+      eq(chatDraftVersionFiles.chatId, chatId),
+      eq(chatDraftVersionFiles.appId, appId),
+      eq(chatDraftVersionFiles.number, number)
+    );
+    const held = this.#db
+      .delete(chatDraftVersionFiles)
+      .where(ofVersion)
+      .returning({ sha256: chatDraftVersionFiles.sha256 })
+      .all()
+      .flatMap(({ sha256: hash }) => (hash === null ? [] : [hash]));
+    this.#db
+      .update(chatDraftVersions)
+      .set(row)
+      .where(
+        and(
+          eq(chatDraftVersions.chatId, chatId),
+          eq(chatDraftVersions.appId, appId),
+          eq(chatDraftVersions.number, number)
+        )
+      )
+      .run();
+    return held;
+  }
+
+  /**
+   * Drops the contents of `hashes` no version of the chat's draft of
+   * `appId` holds: what a turn wrote and then wrote over is no undo point.
+   */
+  #dropUnheld(chatId: ChatId, appId: string, hashes: readonly string[]): void {
+    for (const hash of new Set(hashes)) {
+      const held = this.#db
+        .select({ number: chatDraftVersionFiles.number })
+        .from(chatDraftVersionFiles)
+        .where(
+          and(
+            eq(chatDraftVersionFiles.chatId, chatId),
+            eq(chatDraftVersionFiles.appId, appId),
+            eq(chatDraftVersionFiles.sha256, hash)
+          )
+        )
+        .limit(1)
+        .get();
+      if (held === undefined) {
+        this.#db
+          .delete(chatDraftContents)
+          .where(
+            and(
+              eq(chatDraftContents.chatId, chatId),
+              eq(chatDraftContents.appId, appId),
+              eq(chatDraftContents.sha256, hash)
+            )
+          )
+          .run();
+      }
+    }
   }
 
   /** The versions of the chat's draft of `appId`, newest first. */
@@ -195,19 +281,25 @@ export class DraftVersions {
       .run();
   }
 
-  /** The number of the chat's latest version of `appId`'s draft; 0 for none. */
-  #latest(chatId: ChatId, appId: string): number {
-    return (
-      this.#db
-        .select({ latest: max(chatDraftVersions.number) })
-        .from(chatDraftVersions)
-        .where(
-          and(
-            eq(chatDraftVersions.chatId, chatId),
-            eq(chatDraftVersions.appId, appId)
-          )
+  /** The chat's latest version of `appId`'s draft: its number and turn. */
+  #latest(
+    chatId: ChatId,
+    appId: string
+  ): { number: number; turnId: string | null } | undefined {
+    return this.#db
+      .select({
+        number: chatDraftVersions.number,
+        turnId: chatDraftVersions.turnId,
+      })
+      .from(chatDraftVersions)
+      .where(
+        and(
+          eq(chatDraftVersions.chatId, chatId),
+          eq(chatDraftVersions.appId, appId)
         )
-        .get()?.latest ?? 0
-    );
+      )
+      .orderBy(desc(chatDraftVersions.number))
+      .limit(1)
+      .get();
   }
 }

@@ -228,9 +228,10 @@ export const shownAt = ({
   appVersion === undefined ? revision : { appVersion };
 
 /**
- * One write of the chat's draft of an App, kept as it left the draft
- * (`ChatsApi.draftVersions`): never changed, and restored only as a new
- * one.
+ * One agent turn's writes of the chat's draft of an App, kept as the turn
+ * left the draft, or one restore (`ChatsApi.draftVersions`): the newest
+ * follows its turn's writes while the turn runs, then never changes; and
+ * is restored only as a new one.
  */
 export interface ChatDraftVersion {
   /** Its place among the draft's versions, from 1, in the order they landed. */
@@ -243,7 +244,7 @@ export interface ChatDraftVersion {
   contentHash: string;
   /**
    * The code step or tool call (`ChatCode.callId`, `ChatToolCall.callId`)
-   * that wrote it, when the
+   * that wrote it last, when the
    * chat's agent did; null when the person restored an earlier one.
    */
   callId: string | null;

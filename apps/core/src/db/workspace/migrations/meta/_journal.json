@@ -225,6 +225,13 @@
       "when": 1793892671040,
       "tag": "0031_drop_chat_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1794005408046,
+      "tag": "0032_chat_turn_versions",
+      "breakpoints": true
     }
   ]
 }

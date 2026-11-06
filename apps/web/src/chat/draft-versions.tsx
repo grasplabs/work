@@ -22,11 +22,12 @@ import { useCore } from "../use-core.ts";
 
 // The versions of a chat's draft of an App, in the studio's bar (as the
 // prototype's `components/apps/app-studio.tsx` reads "Version N of M"):
-// core keeps every write of the draft as a version, and the person steps
-// back through them to preview an earlier one, read-only, then returns to
-// the latest, or restores it as the draft's newest version; or discards
-// the draft, its versions kept to restore one. Read again at each of the
-// draft's writes.
+// core keeps each agent turn's writes of the draft as one version, and
+// the person steps back through them to preview an earlier one,
+// read-only, then returns to the latest, or restores it as the draft's
+// newest version; or discards the draft, its versions kept to restore
+// one. Read again at each of the draft's writes: the newest follows its
+// turn's writes.
 
 /** A version the person opened, at the draft's revision they opened it on. */
 export interface ShownVersion {

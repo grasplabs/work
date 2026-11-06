@@ -256,15 +256,16 @@ export const chatDraftFiles = sqliteTable(
 );
 
 /**
- * Every write of a chat's draft of an App, kept as it left the draft and
- * never changed: its `number`, counting up from 1 per chat and App in the
- * order the writes landed, the draft's revision it made, the version it
- * is over (`base`), and the SHA-256 of what it holds (`contentHash`, of
- * the canonical JSON of `base` and each path's content hash). Who wrote
- * it: the chat's agent, in the code step `callId`, or the chat's person,
- * restoring version `restoredFrom`. The draft's row and files hold only
- * the latest; these hold every one, to list, preview and restore. Deleted
- * with the chat, whose drafts they are.
+ * Each agent turn that wrote a chat's draft of an App, kept as the turn
+ * left the draft, and each restore: its `number`, counting up from 1 per
+ * chat and App in the order they landed, the draft's revision it made,
+ * the version it is over (`base`), and the SHA-256 of what it holds
+ * (`contentHash`, of the canonical JSON of `base` and each path's content
+ * hash). Who wrote it: the chat's agent, in turn `turnId` (its last write
+ * in the code step `callId`), or the chat's person, restoring version
+ * `restoredFrom`. The draft's row and files hold only the latest; these
+ * hold every one, to list, preview and restore. Deleted with the chat,
+ * whose drafts they are.
  */
 export const chatDraftVersions = sqliteTable(
   "chat_draft_versions",
@@ -278,6 +279,7 @@ export const chatDraftVersions = sqliteTable(
     revision: integer().notNull(),
     base: integer(),
     contentHash: text("content_hash").notNull(),
+    turnId: text("turn_id"),
     callId: text("call_id"),
     restoredFrom: integer("restored_from"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
@@ -412,7 +414,7 @@ export const chatFiles = sqliteTable(
 /**
  * Every code run of a chat's agent, as evidence of what ran and how it
  * ended: its run ID (the lease its stubs answer to, random and never
- * reused), the tool call it ran for, the SHA-256 and length of its module
+ * reused), the tool call and the turn it ran for, the SHA-256 and length of its module
  * (never the module itself: the transcript has the call), the agent and
  * runtime it ran on, whether that runtime enforces the CPU limit, and its
  * status: `running` until it ends, then how it ended (`CodeRunStatus` in
@@ -432,6 +434,7 @@ export const chatCodeRuns = sqliteTable(
       .notNull()
       .references(() => chats.id),
     toolCallId: text("tool_call_id").notNull(),
+    turnId: text("turn_id").notNull(),
     sourceHash: text("source_hash").notNull(),
     sourceChars: integer("source_chars").notNull(),
     agent: text().notNull(),

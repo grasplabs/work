@@ -1429,11 +1429,19 @@ describe("chat agent code run leases", () => {
       );
 
     // Open: written. Ended (completed, cancelled, timed out): refused.
-    const ended = await stub.openCodeRun(chatId, testRunOpening);
+    const ended = await stub.openCodeRun(
+      chatId,
+      crypto.randomUUID(),
+      testRunOpening
+    );
     const first = await refusedWith(write(ended, 0));
     await stub.closeCodeRun(chatId, ended, "wall_expired");
     // Revoked while open: refused as revoked, however it then ends.
-    const revoked = await stub.openCodeRun(chatId, testRunOpening);
+    const revoked = await stub.openCodeRun(
+      chatId,
+      crypto.randomUUID(),
+      testRunOpening
+    );
     await stub.revokeCodeRun(chatId, revoked);
 
     expect({
@@ -2167,7 +2175,11 @@ describe("chat agent code output", () => {
   it("takes no more lines of a run than one may log, whatever is sent", async () => {
     const { stub, chat, personId } = await newChat();
     const chatId = chatIdSchema.parse(chat.id);
-    const run = await stub.openCodeRun(chatId, testRunOpening);
+    const run = await stub.openCodeRun(
+      chatId,
+      crypto.randomUUID(),
+      testRunOpening
+    );
     const { latest } = await watchOutput(stub, chat.id, personId);
 
     for (let line = 0; line < codeLimits.logLines + 500; line += 1) {
@@ -2196,7 +2208,11 @@ describe("chat agent code output", () => {
     async (_, line) => {
       const { stub, chat, personId } = await newChat();
       const chatId = chatIdSchema.parse(chat.id);
-      const run = await stub.openCodeRun(chatId, testRunOpening);
+      const run = await stub.openCodeRun(
+        chatId,
+        crypto.randomUUID(),
+        testRunOpening
+      );
       const { latest } = await watchOutput(stub, chat.id, personId);
 
       await stub.codeRunOutput(chatId, run, "call_test", line);
@@ -2385,7 +2401,11 @@ describe("chat agent code run retention", () => {
     const kept = await runInDurableObject(stub, (instance) => {
       const ids: string[] = [];
       for (let run = 0; run < runs; run += 1) {
-        const id = instance.openCodeRun(chatId, testRunOpening);
+        const id = instance.openCodeRun(
+          chatId,
+          crypto.randomUUID(),
+          testRunOpening
+        );
         instance.closeCodeRun(chatId, id, "completed");
         ids.push(id);
       }
