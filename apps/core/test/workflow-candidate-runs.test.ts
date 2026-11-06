@@ -1366,43 +1366,11 @@ describe("test runs of a draft whose actions read files and the Brain", () => {
     }).toStrictEqual({
       invalid: { status: "failed", code: "workflow.call_invalid" },
       valid: { status: "completed", output: { status: "deleted" } },
-
-describe("a draft's test run and what its workflow keeps between runs", () => {
-  it("goes on with an empty state when it started before test runs froze their state, its row naming no snapshot", async () => {
-    const ada = await person("builder");
-    const { workflow, revision } = await drafted(ada, {
-      steps: [hold("3 seconds")],
-      status: '"done"',
-    });
-    const { runId } = await startCandidateRun(env, ada, workflow.id, {
-      revision,
-      input: { who: "Ada" },
-      fixtures: {},
-    });
-    await vi.waitFor(
-      async () => {
-        const going = await candidateRunFor(env, ada, workflow.id, runId);
-        if (going.status !== "running") {
-          throw new Error(`Test run ${runId} is ${going.status}`);
-        }
-      },
-      { timeout: 20_000, interval: 100 }
-    );
-    // Its row as a core before this one wrote it: no snapshot named. Its
-    // wake after the hold activates it again under this one.
-    await env.DB.prepare(
-      "UPDATE workflow_candidate_runs SET state_hash = NULL WHERE id = ?"
-    )
-      .bind(runId)
-      .run();
-    expect(endOf(await ended(ada, workflow.id, runId))).toStrictEqual({
-      status: "completed",
-      output: { status: "done" },
     });
   });
+});
 
-  // What its isolate reads of it, and a step keeping state, come with
-  // the format's `state`; the run host's tests hold both.
+describe("a draft's test run and what its workflow keeps between runs", () => {
   it("freezes the state with its row as it starts, whatever is written since, and runs with it", async () => {
     const ada = await person("builder");
     const { workflow, revision } = await drafted(ada, { status: '"done"' });

@@ -64,19 +64,11 @@ export const snapshotStored = (
 
 const snapshotSchema = z.record(z.string(), z.json());
 
-/**
- * The snapshot `hash` names, if it is stored. A run or test run started
- * before runs froze their state names none (null): it started with
- * nothing kept, so it reads the empty snapshot, and goes on after the
- * upgrade as it would have.
- */
+/** The snapshot `hash` names, if it is stored. */
 export const snapshotOf = async (
   env: Env,
-  hash: string | null
+  hash: string
 ): Promise<Record<string, Json> | undefined> => {
-  if (hash === null) {
-    return {};
-  }
   const row = await drizzle(env.DB)
     .select({ body: workflowStateSnapshots.body })
     .from(workflowStateSnapshots)

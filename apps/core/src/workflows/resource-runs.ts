@@ -850,6 +850,9 @@ const loadedRun = async (
   ) {
     throw new Error(`Run ${runId}'s receipt doesn't admit it`);
   }
+  if (receipt.stateHash === null) {
+    throw new Error(`Run ${runId}'s start froze no state: start it again`);
+  }
   const state = await snapshotOf(env, receipt.stateHash);
   if (state === undefined) {
     throw new Error(`Run ${runId}'s snapshot isn't stored`);

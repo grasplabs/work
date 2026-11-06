@@ -469,6 +469,9 @@ const loadedCandidateRun = async (
   ) {
     throw new Error(`Test run ${runId} doesn't match its record`);
   }
+  if (row.stateHash === null) {
+    throw new Error(`Test run ${runId} froze no state: start it again`);
+  }
   const state = await snapshotOf(env, row.stateHash);
   if (state === undefined) {
     throw new Error(`Test run ${runId}'s snapshot isn't stored`);
