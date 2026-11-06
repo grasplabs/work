@@ -1,4 +1,3 @@
-import type { Id } from "@grasp-os/sdk";
 import { useForm } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -16,6 +15,7 @@ import {
   TextareaField,
 } from "@grasp-os/ui/form";
 import { api } from "@server/_generated/api";
+import type { Id } from "@server/_generated/dataModel";
 import { useState } from "react";
 
 export const Decide = ({

@@ -1,4 +1,3 @@
-import type { ReturnOf } from "@grasp-os/sdk";
 import { useMutation, usePaginatedQuery, useUser } from "@grasp-os/sdk/react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -18,11 +17,12 @@ import {
 } from "@grasp-os/ui/components/item";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { api } from "@server/_generated/api";
+import type { Doc } from "@server/_generated/dataModel";
 
 import { formatMoney } from "../lib/money";
 import { Decide } from "./decide";
 
-type Request = ReturnOf<typeof api.requests.list>["items"][number];
+type Request = Doc<"requests">;
 
 export type Status = Request["status"];
 

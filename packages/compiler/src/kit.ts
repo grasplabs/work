@@ -133,6 +133,20 @@ export const pageReferences = {
 } as const;
 
 /**
+ * The types of an App's tables (`Doc`, `Id`, `TableName`), which its
+ * pages import with `import type`, as Convex's pages import theirs, and
+ * which every build of them generates from the App's schema
+ * (`buildFiles`): types alone, erased as each page compiles, so a page
+ * gets no server code from them. The schema and `values.ts` they come
+ * from are read by the type check, never compiled.
+ */
+export const pageDataModel = {
+  specifier: "@server/_generated/dataModel",
+  path: "server/_generated/dataModel.ts",
+  reads: ["server/schema.ts", "values.ts"],
+} as const;
+
+/**
  * What renders a page in its frame. App code doesn't import it, but every
  * page needs it (`PageClosure.kitModules`).
  */

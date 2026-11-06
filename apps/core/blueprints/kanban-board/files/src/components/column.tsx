@@ -1,4 +1,3 @@
-import type { ReturnOf } from "@grasp-os/sdk";
 import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
@@ -18,10 +17,10 @@ import {
 } from "@grasp-os/ui/components/item";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { api } from "@server/_generated/api";
+import type { Doc } from "@server/_generated/dataModel";
 import { ArrowLeftIcon, ArrowRightIcon, XIcon } from "lucide-react";
 
-type BoardCard = ReturnOf<typeof api.cards.list>[number];
-type ColumnId = BoardCard["column"];
+type ColumnId = Doc<"cards">["column"];
 
 export const columns: readonly { id: ColumnId; title: string }[] = [
   { id: "todo", title: "To do" },
@@ -29,7 +28,7 @@ export const columns: readonly { id: ColumnId; title: string }[] = [
   { id: "done", title: "Done" },
 ];
 
-const CardItem = ({ card }: { card: BoardCard }) => {
+const CardItem = ({ card }: { card: Doc<"cards"> }) => {
   const move = useMutation(api.cards.move);
   const remove = useMutation(api.cards.remove);
   const at = columns.findIndex(({ id }) => id === card.column);

@@ -2566,6 +2566,81 @@ export const Route = createFileRoute("/")({ component: Notes });
       ]);
     }
   );
+
+  it.each([
+    [
+      "import type",
+      'import type { Doc, Id } from "@server/_generated/dataModel";',
+      [],
+    ],
+    [
+      "type specifiers",
+      'import { type Doc, type Id } from "@server/_generated/dataModel";',
+      [],
+    ],
+    [
+      "a value import",
+      'import { Doc, Id } from "@server/_generated/dataModel";',
+      [expect.stringContaining("import them with import type")],
+    ],
+    [
+      "a value beside its types",
+      'import { type Doc, type Id, default as model } from "@server/_generated/dataModel";',
+      [expect.stringContaining("import them with import type")],
+    ],
+  ])(
+    "take the data model's types by %s only, checked against the schema",
+    async (_case, line, refused) => {
+      const build = await buildPages(
+        env,
+        {
+          ...notesFiles(),
+          "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+${line}
+
+export const titleOf = (note: Doc<"notes">): string => note.title;
+export const idOf = (note: Doc<"notes">): Id<"notes"> => note._id;
+
+function Notes() {
+  return null;
+}
+
+export const Route = createFileRoute("/")({ component: Notes });
+`,
+        },
+        "app-test"
+      );
+      expect({
+        ok: build.ok,
+        said: build.diagnostics?.map(({ message }) => message) ?? [],
+      }).toStrictEqual({ ok: refused.length === 0, said: refused });
+    }
+  );
+
+  it("type-check a page's use of the data model against the App's own tables", async () => {
+    const build = await buildPages(
+      env,
+      {
+        ...notesFiles(),
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import type { Doc } from "@server/_generated/dataModel";
+
+export const stray: Doc<"tasks"> | undefined = undefined;
+
+function Notes() {
+  return null;
+}
+
+export const Route = createFileRoute("/")({ component: Notes });
+`,
+      },
+      "app-test"
+    );
+    expect({
+      ok: build.ok,
+      rules: build.diagnostics?.map(({ file, rule }) => `${file} ${rule}`),
+    }).toStrictEqual({ ok: false, rules: ["src/routes/index.tsx TS2344"] });
+  });
 });
 
 describe("import boundaries", { timeout: 120_000 }, () => {

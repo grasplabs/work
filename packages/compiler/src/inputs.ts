@@ -1,3 +1,4 @@
+import { dataModelSource } from "@grasp-os/sdk/host";
 /**
  * What a build reads of an App's files, and how much of it a build takes.
  * Core uses these before it hashes and sends the files; the compiler again
@@ -11,7 +12,7 @@ import {
 import { workflowModulesError } from "@grasp-os/shared/workflow-modules";
 
 import type { Diagnostic } from "./diagnostic.ts";
-import { pageReferences } from "./kit.ts";
+import { pageDataModel, pageReferences } from "./kit.ts";
 
 /**
  * Where an App's front end is, as an ordinary Vite React app's: its
@@ -133,29 +134,36 @@ export const Route = createRootRoute();
 `;
 
 /**
- * The files a build reads: the App's front end and declarations, and the
+ * The files a build reads: the App's front end and declarations, the
  * references the host generated for the App's server code, which pages
- * import as `@server/_generated/api`, with the default root route
- * (`defaultRoot`) when the App's pages have none. Never a route tree of
- * the App's own: the build writes the one its pages make
- * (route-tree.ts).
+ * import as `@server/_generated/api`, and, for an App with a schema, its
+ * data model's types (`pageDataModel`), generated here from it as the
+ * host generates them, with the default root route (`defaultRoot`) when
+ * the App's pages have none. Never a route tree of the App's own: the
+ * build writes the one its pages make (route-tree.ts).
  */
 export const buildFiles = (
   files: Record<string, string>
 ): Record<string, string> => {
+  const typesRead: readonly string[] = pageDataModel.reads;
   const read = Object.fromEntries(
     Object.entries(files).filter(
       ([path]) =>
         path !== routeTreePath &&
         (path.startsWith(sourceFolder) ||
           declarationFile.test(path) ||
-          path === pageReferences.path)
+          path === pageReferences.path ||
+          typesRead.includes(path))
     )
   );
-  const routed = Object.keys(read).some((path) => isPageFile(path));
-  return routed && !Object.hasOwn(read, rootPage)
-    ? { ...read, [rootPage]: defaultRoot }
+  const [schema] = pageDataModel.reads;
+  const typed = Object.hasOwn(read, schema)
+    ? { ...read, [pageDataModel.path]: dataModelSource }
     : read;
+  const routed = Object.keys(typed).some((path) => isPageFile(path));
+  return routed && !Object.hasOwn(typed, rootPage)
+    ? { ...typed, [rootPage]: defaultRoot }
+    : typed;
 };
 
 /**

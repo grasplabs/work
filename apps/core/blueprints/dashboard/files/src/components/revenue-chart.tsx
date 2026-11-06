@@ -1,4 +1,3 @@
-import type { MoneyValue } from "@grasp-os/sdk";
 import {
   Bar,
   BarChart,
@@ -10,6 +9,7 @@ import {
   chartColor,
 } from "@grasp-os/ui/components/chart";
 import type { ChartConfig } from "@grasp-os/ui/components/chart";
+import type { Doc } from "@server/_generated/dataModel";
 
 import { formatMoney } from "../lib/money";
 
@@ -18,7 +18,7 @@ const config: ChartConfig = { revenue: { label: "Revenue", color: "chart-1" } };
 export const RevenueChart = ({
   months,
 }: {
-  months: readonly { month: string; revenue: MoneyValue }[];
+  months: readonly Doc<"months">[];
 }) => {
   const currency = months[0]?.revenue.currency ?? "EUR";
   return (

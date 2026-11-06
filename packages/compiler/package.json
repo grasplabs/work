@@ -26,6 +26,7 @@
     ".": "./src/index.ts",
     "./css": "./src/packages/css.ts",
     "./inputs": "./src/inputs.ts",
+    "./page-imports": "./src/page-imports.ts",
     "./route-tree": "./src/route-tree.ts"
   },
   "scripts": {

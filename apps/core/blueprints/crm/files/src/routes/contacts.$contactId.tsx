@@ -1,4 +1,3 @@
-import type { Id } from "@grasp-os/sdk";
 import { useForm, useMutation, useQuery } from "@grasp-os/sdk/react";
 import {
   Card,
@@ -22,6 +21,7 @@ import {
   TextField,
 } from "@grasp-os/ui/form";
 import { api } from "@server/_generated/api";
+import type { Id } from "@server/_generated/dataModel";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
 const AddDeal = ({ contact }: { contact: Id<"contacts"> }) => {

@@ -18,7 +18,7 @@ import type { Diagnostic as TscDiagnostic } from "@tsrs/wasm/core";
 import { generatedModules, serverSdkImports } from "./app-code.ts";
 import type { Diagnostic } from "./diagnostic.ts";
 import { computeSdkImports } from "./imports.ts";
-import { pageReferences } from "./kit.ts";
+import { pageDataModel, pageReferences } from "./kit.ts";
 
 /** A tsconfig's `compilerOptions`, as JSON. */
 export type CompilerOptions = Readonly<Record<string, unknown>>;
@@ -49,8 +49,11 @@ export const compilerOptions = {
   // diagnostics count, so the kit's declarations' don't (`typeCheck`).
   skipLibCheck: false,
   types: [],
-  // The App's generated references, as its pages import them.
-  paths: { [pageReferences.specifier]: [`./${pageReferences.path}`] },
+  // The App's generated references and data model, as its pages import them.
+  paths: {
+    [pageReferences.specifier]: [`./${pageReferences.path}`],
+    [pageDataModel.specifier]: [`./${pageDataModel.path}`],
+  },
 } as const satisfies CompilerOptions;
 
 /**
@@ -67,13 +70,13 @@ export interface TypeTarget {
 /** Code the host generated, checked against its SDK as it imports it. */
 export const generatedTarget: TypeTarget = {
   options: compilerOptions,
-  mapped: new Set([pageReferences.specifier]),
+  mapped: new Set([pageReferences.specifier, pageDataModel.specifier]),
 };
 
 /** A page's files: the DOM's lib, the kit's modules (`allowed`). */
 export const pageTarget = (allowed: ReadonlySet<string>): TypeTarget => ({
   options: compilerOptions,
-  mapped: new Set([pageReferences.specifier]),
+  mapped: new Set([pageReferences.specifier, pageDataModel.specifier]),
   allowed,
 });
 

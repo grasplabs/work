@@ -5,6 +5,7 @@ import {
   kitModuleName,
   ownEntry,
   packageModuleName,
+  pageDataModel,
   pageReferences,
   pageRootNames,
   routerSpecifier,
@@ -437,6 +438,11 @@ export const pageTypeImportError = (
     return files.has(pageReferences.path)
       ? undefined
       : `"${specifier}" holds the references the host generates from the App's server code (grasp.config.ts, server/), which this App doesn't have yet.`;
+  }
+  if (specifier === pageDataModel.specifier) {
+    return files.has(pageDataModel.path)
+      ? undefined
+      : `"${specifier}" holds the types of the App's tables, generated from server/schema.ts, which this App doesn't have yet.`;
   }
   return specifier === "lucide-react" || kit.imports.includes(specifier)
     ? undefined

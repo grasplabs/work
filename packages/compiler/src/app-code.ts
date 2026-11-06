@@ -445,6 +445,9 @@ export const appCodeImport = (
     : { module };
 };
 
+/** The data model's types, which a page imports with `import type` alone. */
+const dataModelSpecifier = "@server/_generated/dataModel";
+
 /** The imports pages can never make, and why: the App's server. */
 const serverSpecifiers: ReadonlySet<string> = new Set([
   "@server/_generated/server",
@@ -525,6 +528,9 @@ export const pageImportError = (
   } else if (serverSpecifiers.has(specifier)) {
     reached = specifier;
   }
+  if (reached === dataModelSpecifier) {
+    return `"${specifier}" holds the types of the App's tables alone: import them with import type.`;
+  }
   return reached === undefined
     ? undefined
     : `"${specifier}" is the App's server code, which pages never import: what a page calls comes from the App's references, never its handlers, config, schema, migrations or server modules.`;
@@ -548,7 +554,11 @@ export const typeImportError = (
     return undefined;
   }
   if (page) {
-    return pageImportError(file, specifier);
+    // The data model's types, erased as the page compiles: what a page
+    // imports for its types, as Convex's do.
+    return specifier === dataModelSpecifier
+      ? undefined
+      : pageImportError(file, specifier);
   }
   return bootstrapOnly.has(specifier)
     ? `"${specifier}" is the platform's bootstrap, which only the code that makes and mounts the client imports (spec 10.7.1): never an App's server code or tests, not even for its types.`
