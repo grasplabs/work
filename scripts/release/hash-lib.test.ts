@@ -31,13 +31,41 @@ describe("release hashing", () => {
   it("fails on a bundled file it has no module type for", async () => {
     writeFileSync(path.join(dir, "index.js"), "export default {};\n");
     writeFileSync(path.join(dir, "mystery.dat"), "?");
-    await expect(collectModules(dir)).rejects.toThrow(/mystery\.dat/u);
+    await expect(collectModules(dir, { sourceMaps: true })).rejects.toThrow(
+      /mystery\.dat/u
+    );
+  });
+
+  it("ships a source map without the sources it embeds, unless it's off", async () => {
+    writeFileSync(path.join(dir, "index.js"), "export default {};\n");
+    const map = {
+      version: 3,
+      sources: ["../src/index.ts"],
+      sourcesContent: ["export default {};\n"],
+      names: [],
+      mappings: "AAAA",
+    };
+    writeFileSync(path.join(dir, "index.js.map"), JSON.stringify(map));
+
+    const { modules } = await collectModules(dir, { sourceMaps: true });
+    const shipped = modules.find(({ name }) => name === "index.js.map");
+    expect(shipped?.type).toBe("sourcemap");
+    const { sourcesContent: _sources, ...mappings } = map;
+    expect(JSON.parse(shipped?.bytes.toString("utf-8") ?? "")).toStrictEqual(
+      mappings
+    );
+    expect(shipped?.size).toBe(shipped?.bytes.length);
+
+    const without = await collectModules(dir, { sourceMaps: false });
+    expect(without.modules.map(({ name }) => name)).toStrictEqual(["index.js"]);
   });
 
   it("fails without exactly one ES module", async () => {
     writeFileSync(path.join(dir, "a.js"), "export default {};\n");
     writeFileSync(path.join(dir, "b.js"), "export default {};\n");
-    await expect(collectModules(dir)).rejects.toThrow(/a\.js, b\.js/u);
+    await expect(collectModules(dir, { sourceMaps: true })).rejects.toThrow(
+      /a\.js, b\.js/u
+    );
   });
 
   it("refuses asset files that Wrangler reads as configuration", async () => {

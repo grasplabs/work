@@ -1,6 +1,7 @@
 /**
- * On-prem smoke run: bundles core and serves it on plain workerd (no
- * Wrangler, no Miniflare), checks it answers, and waits for its built-in
+ * On-prem smoke run: bundles core as it ships, minified, checks the bundle
+ * kept its names (workerd-bundle-names.ts), and serves it on plain workerd
+ * (no Wrangler, no Miniflare), checks it answers, and waits for its built-in
  * content to install: it fails on any failure core or workerd logs before
  * that. Then opens the frontend through the on-prem profile's assets
  * service, and delivers signed raw mail to core's ingress, as the router
@@ -32,6 +33,7 @@ import {
 import type { RawMail } from "../packages/shared/src/mail-ingress.ts";
 import { routerSecretHeader } from "../packages/shared/src/router.ts";
 import { writeAssetsService } from "./workerd-assets.ts";
+import { checkBundleNames } from "./workerd-bundle-names.ts";
 import { d1DatabasesOf, writeD1Service } from "./workerd-d1.ts";
 import { writeR2Service } from "./workerd-r2.ts";
 import { nativeWorkerd, startSandboxSupervisor } from "./workerd-sandbox.ts";
@@ -91,6 +93,7 @@ const modules = [
     .filter((file) => textModule.test(file))
     .map((file) => `(name = "${file}", text = embed "${file}")`),
 ];
+checkBundleNames(out, modules);
 
 // The on-prem profile's D1 service, and core's D1 migrations for it.
 writeD1Service(out, d1DatabasesOf(coreWranglerConfig));

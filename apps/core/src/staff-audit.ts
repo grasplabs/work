@@ -84,7 +84,8 @@ const targetKeyOf = (target: object): string => {
 
 /**
  * A target's name as a surface's: `KnowledgeRpc` is `knowledge`. Read from
- * its class's name, which holds as core's bundle isn't minified.
+ * its class's name, which the minified bundle keeps (`keep_names`,
+ * wrangler.jsonc; the on-prem smoke run checks it).
  */
 const namespaceOf = (target: object): string => {
   const name = target.constructor.name.replace(/Rpc$/u, "");

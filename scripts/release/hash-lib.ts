@@ -12,6 +12,7 @@ import {
   mapConcurrently,
   sha256OfBytes,
 } from "@grasp-os/shared/release";
+import { z } from "zod";
 
 /**
  * Files read and hashed at once: each holds its bytes, and an asset its
@@ -52,7 +53,10 @@ export interface CollectedAssets {
 }
 
 // Module types by extension, as core's `rules` bundle them: the Durable
-// Object migrations (.sql) and the Grasp skills (SKILL.md) are text.
+// Object migrations (.sql) and the Grasp skills (SKILL.md) are text. A
+// source map goes up with its module, as `wrangler deploy` uploads it
+// (`upload_source_maps`), so Cloudflare's logs name real files and
+// functions in a minified Worker's stack traces.
 const MODULE_TYPES = {
   ".js": "esm",
   ".mjs": "esm",
@@ -61,6 +65,7 @@ const MODULE_TYPES = {
   ".txt": "text",
   ".wasm": "wasm",
   ".bin": "data",
+  ".map": "sourcemap",
 } as const;
 
 /** A module type the script-upload API understands. */
@@ -72,8 +77,7 @@ const isModuleExtension = (
   Object.hasOwn(MODULE_TYPES, extension);
 
 // What `wrangler deploy --dry-run --outdir` writes next to the modules.
-const isDryRunExtra = (name: string): boolean =>
-  name.endsWith(".map") || name === "README.md";
+const isDryRunExtra = (name: string): boolean => name === "README.md";
 
 /** Every file under `dir`, relative and POSIX-separated, sorted; symlinks skipped as Wrangler does. */
 const walkFiles = (dir: string): string[] =>
@@ -100,16 +104,54 @@ const readCollected = async (
   };
 };
 
+const sourceMapSchema = z.looseObject({ sourcesContent: z.unknown() });
+
 /**
- * Reads a `wrangler deploy --dry-run --outdir` directory. Fails on an
- * extension it doesn't know: a bundle shape this pipeline hasn't seen needs
- * a decision, not a guess.
+ * A source map without the sources it embeds: Cloudflare remaps a stack
+ * trace from the mappings and names alone, and the sources more than
+ * triple core's map (47 MB against 14 MB), which Cloudflare caps at
+ * 60 MiB.
+ */
+const withoutSources = (bytes: Buffer): Buffer<ArrayBuffer> => {
+  const { sourcesContent: _sources, ...map } = sourceMapSchema.parse(
+    JSON.parse(bytes.toString("utf-8"))
+  );
+  return Buffer.from(JSON.stringify(map));
+};
+
+const readModule = async (
+  dir: string,
+  name: string,
+  type: ModuleType
+): Promise<CollectedModule> => {
+  if (type !== "sourcemap") {
+    return { ...(await readCollected(dir, name)), type };
+  }
+  const bytes = withoutSources(readFileSync(path.join(dir, name)));
+  return {
+    name,
+    sha256: await sha256OfBytes(bytes),
+    size: bytes.length,
+    bytes,
+    type,
+  };
+};
+
+/**
+ * Reads a `wrangler deploy --dry-run --outdir` directory, with its source
+ * maps when `sourceMaps` (the Worker's `upload_source_maps`). Fails on an
+ * extension it doesn't know: a bundle shape this pipeline hasn't seen
+ * needs a decision, not a guess.
  */
 export const collectModules = async (
-  outDir: string
+  outDir: string,
+  { sourceMaps }: { sourceMaps: boolean }
 ): Promise<{ mainModule: string; modules: CollectedModule[] }> => {
+  const names = walkFiles(outDir).filter(
+    (name) => !(isDryRunExtra(name) || (!sourceMaps && name.endsWith(".map")))
+  );
   const modules = await mapConcurrently(
-    walkFiles(outDir).filter((name) => !isDryRunExtra(name)),
+    names,
     COLLECT_CONCURRENCY,
     async (name): Promise<CollectedModule> => {
       const extension = path.extname(name);
@@ -118,10 +160,7 @@ export const collectModules = async (
           `Unrecognised module in the dry-run output: ${name} (${outDir})`
         );
       }
-      return {
-        ...(await readCollected(outDir, name)),
-        type: MODULE_TYPES[extension],
-      };
+      return await readModule(outDir, name, MODULE_TYPES[extension]);
     }
   );
   const esm = modules.filter((module) => module.type === "esm");
