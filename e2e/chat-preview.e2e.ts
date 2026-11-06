@@ -213,17 +213,9 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     const added = changed.getByText(/in the next version`;$/u);
     await expect(removed).toBeVisible();
     await expect(added).toBeVisible();
-    // Unified, the new line stands under the old; split, beside it. Each
-    // read once the diff has laid its lines out, which follows their text.
-    await expect
-      .poll(async () => {
-        const [old, now] = [
-          await removed.boundingBox(),
-          await added.boundingBox(),
-        ];
-        return (now?.y ?? 0) > (old?.y ?? 0);
-      })
-      .toBe(true);
+    // Unified, the new line stands under the old; split, beside it.
+    const unified = [await removed.boundingBox(), await added.boundingBox()];
+    expect((unified[1]?.y ?? 0) > (unified[0]?.y ?? 0)).toBeTruthy();
     await page.getByRole("button", { name: "Split" }).click();
     await expect
       .poll(async () => {
