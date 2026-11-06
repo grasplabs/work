@@ -2108,6 +2108,57 @@ describe("provisioning a placed client", () => {
     });
   });
 
+  it.each([
+    { upload: "the same upload", waits: false },
+    { upload: "another upload (read with other settings)", waits: true },
+  ])(
+    "after a dead attempt's core upload landed, marked, the next attempt waits for it only when it was $upload",
+    async ({ waits }) => {
+      const manifest = await importRelease();
+      const { clientId, held } = await setUp(manifest);
+      // Core's upload lands, with its migration, and its answer never
+      // arrives: its attempt's mark stays, as a dead isolate's would.
+      cloudflare.failNext(isCoreUpload, "lost");
+      await expect(failing(held)).resolves.toMatchObject({ status: 0 });
+      if (waits) {
+        await db
+          .update(clientProvisions)
+          .set({
+            sending: sql`(SELECT json_group_object(key, json_set(value, '$.fingerprint', 'another')) FROM json_each(${clientProvisions.sending}))`,
+          })
+          .where(eq(clientProvisions.clientId, clientId));
+      }
+      const uploads = () => cloudflare.calls.filter(isCoreUpload).length;
+      const sentBefore = uploads();
+
+      const run = runClientProvision(context, await attempt(clientId));
+      await scheduler.wait(500);
+      const meanwhile = await operationOf(clientId);
+      const whileMarked = {
+        uploads: uploads() - sentBefore,
+        status: meanwhile?.status,
+      };
+      // Aged out: no call of it can land any more.
+      await db
+        .update(clientProvisions)
+        .set({
+          sending: sql`(SELECT json_group_object(key, json_set(value, '$.at', 0)) FROM json_each(${clientProvisions.sending}))`,
+        })
+        .where(eq(clientProvisions.clientId, clientId));
+      await run;
+      const after = await operationOf(clientId);
+
+      expect({ whileMarked, status: after?.status }).toStrictEqual({
+        // The same upload: it goes on at once. Another: nothing goes out
+        // until the mark ages.
+        whileMarked: waits
+          ? { uploads: 0, status: "running" }
+          : { uploads: 1, status: "done" },
+        status: "done",
+      });
+    }
+  );
+
   it("takes the real release live in Workers for Platforms with no AI Gateway or AI binding, Grasp's AI key on its connect alone, and without mail", async () => {
     const real = await importRealRelease();
     const { account, clientId, held } = await setUp(
