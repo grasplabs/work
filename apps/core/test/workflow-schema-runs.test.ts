@@ -134,6 +134,12 @@ const declared = {
       required: ["id"],
       additionalProperties: false,
     },
+    // A closed object whose field has a default: `{}` fits it.
+    badge: {
+      type: "object",
+      properties: { label: { type: "string", default: "unknown" } },
+      additionalProperties: false,
+    },
   },
 };
 
@@ -2121,6 +2127,14 @@ const readState = {
 // snapshot its start froze. Each test has a workflow of its own, so its
 // state starts empty.
 describe("a grasp-workflow/1 workflow's state on the run host", () => {
+  // Its workflows bind a model, as every sealed workflow does: approved
+  // only once the organization has one, whichever tests ran before.
+  beforeAll(async () => {
+    await connectModels(`test-model-key-${crypto.randomUUID()}`, [
+      allowedModel,
+    ]);
+  });
+
   afterAll(endLiveResourceRuns);
 
   it("keeps a step's state once it succeeded, which the next run reads, and nothing of a step its `if` skipped", async () => {
@@ -2256,10 +2270,16 @@ describe("a grasp-workflow/1 workflow's state on the run host", () => {
     /** `remember`, keeping `state` alone. */
     const keepingOnly = async (state: Record<string, unknown>) =>
       await generated([{ ...remember, state }], {
-        schema: objectOf({ who: { type: "string" }, id: { type: "string" } }),
+        schema: objectOf({
+          who: { type: "string" },
+          id: { type: "string" },
+          label: { type: "string" },
+        }),
         value: {
           who: { $expr: 'state.who ?? "none"' },
           id: { $expr: 'state.profile?.id ?? "none"' },
+          // Typed by the schema's output, `label` filled in: read as such.
+          label: { $expr: 'state.badge?.label.toUpperCase() ?? "none"' },
         },
       });
     /** What a run of `state`'s step ended with, and what it wrote. */
@@ -2285,6 +2305,7 @@ describe("a grasp-workflow/1 workflow's state on the run host", () => {
     const fits = await ranKeeping({
       who: "user_1",
       profile: { $expr: "({ id: output.messageId })" },
+      badge: {},
     });
     const { source, sealed: withTable } = await keepingOnly({});
     const next = await waitingRun(kept);
@@ -2296,9 +2317,9 @@ describe("a grasp-workflow/1 workflow's state on the run host", () => {
     const failed = { ended: "workflow.failed_after_effect", writes: 0 };
     expect({ refused, fits, read: read.ended }).toStrictEqual({
       refused: { notInteger: failed, notPerson: failed, extraKey: failed },
-      // The one that fits: read back exactly as it was kept.
-      fits: { ended: { who: "none", id: "none" }, writes: 1 },
-      read: { who: "user_1", id: "m-1" },
+      // The one that fits: read back as it was kept, its defaults filled in.
+      fits: { ended: { who: "none", id: "none", label: "none" }, writes: 1 },
+      read: { who: "user_1", id: "m-1", label: "UNKNOWN" },
     });
   });
 
