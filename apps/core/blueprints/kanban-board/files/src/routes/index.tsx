@@ -19,7 +19,7 @@ const AddCard = () => {
   });
   return (
     <Form aria-label="New card" className="flex-row items-end" form={form}>
-      <TextField form={form} label="New card" name="title" />
+      <TextField form={form} label="Title" name="title" />
       <SubmitButton form={form}>Add</SubmitButton>
       <FormError form={form} />
     </Form>

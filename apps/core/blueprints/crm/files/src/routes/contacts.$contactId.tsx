@@ -24,6 +24,8 @@ import { api } from "@server/_generated/api";
 import type { Id } from "@server/_generated/dataModel";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
+import { stages } from "../components/stages";
+
 const AddDeal = ({ contact }: { contact: Id<"contacts"> }) => {
   const form = useForm(api.deals.add, {
     defaultValues: { contact, title: "", amount: 0 },
@@ -63,6 +65,7 @@ const Contact = () => {
   }
   return (
     <main className="flex flex-col gap-6 p-6">
+      <Link to="/">All contacts</Link>
       <PageHeader>
         <PageHeaderContent>
           <PageHeaderTitle>{contact.name}</PageHeaderTitle>
@@ -78,6 +81,7 @@ const Contact = () => {
           { field: "value", label: "Value" },
           {
             field: "stage",
+            cell: (deal) => stages[deal.stage],
             edit: async (deal, stage) =>
               await setStage({
                 id: deal._id,

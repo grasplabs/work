@@ -44,7 +44,15 @@ const children = [
       process.env.MINIFLARE_WORKERD_V8_FLAGS
     ),
   }),
-  start("vp", ["run", "--filter", "@grasp-os/web", "dev"]),
+  // Vite proxies the page frame from core, whose policy lists every kit
+  // module the page loads (security-headers.ts `pageFramePolicy`): a page
+  // on the data grid or a chart sends one past Node's 16 KiB of headers.
+  start("vp", ["run", "--filter", "@grasp-os/web", "dev"], {
+    ...process.env,
+    NODE_OPTIONS: [process.env.NODE_OPTIONS, "--max-http-header-size=131072"]
+      .filter(Boolean)
+      .join(" "),
+  }),
   start("wrangler", [
     "dev",
     "-c",
