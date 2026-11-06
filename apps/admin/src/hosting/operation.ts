@@ -600,6 +600,7 @@ const switchProvisionRelease = async (
         releaseId,
         status: "running",
         error: null,
+        runId: held.runId,
         startedBy: actorName(actor),
         updatedAt: new Date(),
       })
@@ -651,7 +652,7 @@ export const startClientProvision = async (
     db
       .insert(clientProvisions)
       .select(
-        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, NULL, NULL, 1, 'release', ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
+        sql`SELECT ${id}, ${clientId}, ${releaseId}, NULL, 'running', NULL, NULL, NULL, ${held.runId}, NULL, 1, 'release', ${actorName(actor)}, ${now.getTime()}, ${now.getTime()} WHERE ${stillHolds(held)}`
       )
       .onConflictDoNothing(),
     {
@@ -879,6 +880,10 @@ export const startClientRelease = async (
         status: "running",
         step: null,
         error: null,
+        // The run it's started for, from the start: a run whose every
+        // attempt is lost before its first step is still its own
+        // (`lostAttemptOf`).
+        runId: held.runId,
         // A change of its own, counted.
         change: operation.change + 1,
         what: target === operation.releaseId ? (what ?? "settings") : "release",
