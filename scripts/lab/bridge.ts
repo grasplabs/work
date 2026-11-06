@@ -140,7 +140,11 @@ export const claudeCallOf = (
   if (!thinks) {
     own.MAX_THINKING_TOKENS = "0";
   }
-  if (asked.max_tokens !== undefined) {
+  // Claude Code counts thinking against its output limit and, where the
+  // API would cut the answer short, fails the whole call ("exceeded the
+  // 400 output token maximum"). So a request that thinks is answered
+  // whole: a turn that fails measures nothing.
+  if (asked.max_tokens !== undefined && !thinks) {
     own.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(asked.max_tokens);
   }
   return { args, env: own };

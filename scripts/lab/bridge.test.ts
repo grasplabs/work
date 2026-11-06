@@ -68,7 +68,7 @@ describe("what the bridge asks Claude Code", () => {
     expect(env.HOME).toBe("/home/lab");
   });
 
-  it("thinks only when asked to, keeps the token limit, and passes the effort asked for", () => {
+  it("thinks only when asked to, and passes the effort asked for", () => {
     const quiet = claudeCallOf(asked, {});
     const thinking = claudeCallOf(
       {
@@ -80,10 +80,20 @@ describe("what the bridge asks Claude Code", () => {
     );
 
     expect(quiet.env.MAX_THINKING_TOKENS).toBe("0");
-    expect(quiet.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe("400");
     expect(thinking.env.MAX_THINKING_TOKENS).toBeUndefined();
     expect(thinking.args).toContain("--effort");
     expect(thinking.args[thinking.args.indexOf("--effort") + 1]).toBe("low");
+  });
+
+  it("keeps the token limit, but answers a request that thinks whole, as Claude Code would fail it rather than cut it short", () => {
+    const quiet = claudeCallOf(asked, {});
+    const thinking = claudeCallOf(
+      { ...asked, thinking: { type: "adaptive" } },
+      {}
+    );
+
+    expect(quiet.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe("400");
+    expect(thinking.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBeUndefined();
   });
 
   it("gives one user message as it is, and a conversation with who said what", () => {
