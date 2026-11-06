@@ -17,6 +17,7 @@ import type { Brief } from "./climb-agent.ts";
 import {
   climb,
   defaultClimb,
+  keysWithoutContradictions,
   noiseBetween,
   partToRaise,
   wrapped,
@@ -307,6 +308,10 @@ describe("the climb", () => {
 });
 
 describe("what the climb works out", () => {
+  it("names the keys it can't climb on, as they plant no contradiction to measure", () => {
+    expect(keysWithoutContradictions(["01", "04", "05"])).toStrictEqual(["01"]);
+  });
+
   it("counts as noise what two runs of one Stephen differ by, never less than the least", () => {
     const one = standingOf(
       runsOf({ ...startingNumbers(0.9), heard: 0.8 }, [

@@ -60,6 +60,7 @@ import {
   unseenText,
 } from "./climb-agent.ts";
 import type { Brief, Proposal } from "./climb-agent.ts";
+import { contradictionsIn } from "./contradictions.ts";
 import { openCore, servedMarks } from "./core.ts";
 import {
   allKept,
@@ -68,7 +69,7 @@ import {
   openFolder,
   scoresFolder,
 } from "./kept.ts";
-import { repoRoot } from "./keys/index.ts";
+import { keyOf, repoRoot } from "./keys/index.ts";
 import { labMarksFile } from "./marks.ts";
 import type { Marks } from "./marks.ts";
 import { practices } from "./practice.ts";
@@ -778,6 +779,17 @@ export const climbRecord = (id: string): string =>
   path.join(openFolder("out"), "climb", `${id}.json`);
 
 /**
+ * The keys of `ids` that plant no contradiction: on them the Contradictions
+ * part is never measured, so a climb on them could never take a round.
+ * Only the ids are said, never what a key holds.
+ */
+export const keysWithoutContradictions = (ids: string[]): string[] =>
+  ids.filter((id) => {
+    const key = keyOf(id);
+    return key !== undefined && contradictionsIn(key).length === 0;
+  });
+
+/**
  * `vp run lab climb`: the branch first (a `feat/stephen-climb-…` of its
  * own when on main), Stephen's files as they are committed, then the climb,
  * and its branch pushed when it stops.
@@ -792,6 +804,16 @@ export const startClimb = async (setting: {
   if (process.env.LAB_HIDDEN === undefined) {
     throw new Error(
       "A climb confirms every change on the hidden set: set LAB_HIDDEN."
+    );
+  }
+  // Before an hour of measuring where he stands, not after it.
+  const unmeasured = keysWithoutContradictions([
+    setting.keys.open,
+    setting.keys.hidden,
+  ]);
+  if (unmeasured.length > 0) {
+    throw new Error(
+      `Key ${unmeasured.join(" and ")} plants no contradiction, so the Contradictions part can't be measured on it: choose keys that do (--open-key, --hidden-key).`
     );
   }
   const dirty = await git([
