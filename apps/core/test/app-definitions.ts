@@ -90,16 +90,34 @@ export const preferencesOf = (
     type,
   }));
 
-/** The definition `spec` describes, its IDs counted up, so it is the same each time. */
+/**
+ * `operation` applied to `definition`, a new table's or field's ID taken
+ * from its name: so a table or field of one name has one ID in every
+ * definition a test makes, as one App's versions keep it.
+ */
+const applied = (
+  definition: AppDefinition,
+  operation: DefinitionOperation
+): AppDefinition => {
+  let id: string | undefined;
+  if (operation.op === "addTable") {
+    id = `table:${operation.name}`;
+  } else if (operation.op === "addField") {
+    id = `field:${operation.table}.${operation.name}`;
+  }
+  return applyOperation(definition, operation, () => {
+    if (id === undefined) {
+      throw new Error(`No ID to give in ${operation.op}`);
+    }
+    return id;
+  });
+};
+
+/** The definition `spec` describes, its IDs taken from names, so it is the same each time. */
 export const definitionOf = (spec: AppSpec): AppDefinition => {
-  let next = 0;
-  const newId = (): string => {
-    next += 1;
-    return `id${String(next)}`;
-  };
   let definition = emptyDefinition(spec.name);
   const apply = (operation: DefinitionOperation): void => {
-    definition = applyOperation(definition, operation, newId);
+    definition = applied(definition, operation);
   };
   const tables = Object.entries(spec.tables ?? {});
   // Every table first, then their fields: a field may name a table
@@ -172,26 +190,16 @@ export const redefined = (
 /**
  * `files` with their definition changed by `operations`, as the agent's
  * definition tools change it, and the code generated from it: new IDs
- * count up past the ones it holds.
+ * taken from names, as `definitionOf` takes them.
  */
 export const definedWith = (
   files: Readonly<Record<string, string>>,
   ...operations: readonly DefinitionOperation[]
 ): Record<string, string> =>
   redefined(files, (definition) => {
-    let next = Math.max(
-      0,
-      ...definition.tables
-        .flatMap((table) => [table.id, ...table.fields.map(({ id }) => id)])
-        .map((id) => Number(/^id(?<n>\d+)$/u.exec(id)?.groups?.n ?? 0))
-    );
-    const newId = (): string => {
-      next += 1;
-      return `id${String(next)}`;
-    };
     let changed = definition;
     for (const operation of operations) {
-      changed = applyOperation(changed, operation, newId);
+      changed = applied(changed, operation);
     }
     return changed;
   });

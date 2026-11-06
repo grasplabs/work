@@ -30,13 +30,13 @@ import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { createFromBlueprint, listBlueprints } from "./app-blueprints.ts";
 import {
   definitionChanges,
+  definitionRefusal,
   definitionFiles,
   definitionIn,
   definitionOperationSchema,
   definitionPlan,
   operationDetail,
   refuseDefinitionFiles,
-  renameRefusal,
 } from "./app-definition.ts";
 import type { DefinitionPlan } from "./app-definition.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
@@ -47,6 +47,7 @@ import {
   draftFiles,
   draftOverLatest,
   editableApp,
+  heldDefinitions,
   versionFiles,
   latestVersion,
   proposeDraft,
@@ -1140,22 +1141,6 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           };
         }
         const before = base.has(definitionPath) ? released.definition : null;
-        // The commit the draft starts from, which may have run and been
-        // rolled back from: its fields may hold values too.
-        const started = definitionIn(
-          await draftFiles(this.env, found.id, {
-            base: draft.base,
-            changes: {},
-          }),
-          found.name
-        );
-        const refused = renameRefusal(parsed, current.definition, [
-          before,
-          "definition" in started ? started.definition : null,
-        ]);
-        if (refused !== undefined) {
-          return { ok: false, problem: refused };
-        }
         // An answer belongs to the version it is committed with: what that
         // version's move gives the records that don't fit it, used once,
         // as the store applies it (store-host.ts, `defineTables`). A draft
@@ -1168,15 +1153,27 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         if ("problem" in result) {
           return { ok: false, problem: result.problem };
         }
-        return {
-          ok: true,
-          plan: definitionPlan(before, result.definition),
-          ...(await this.#save(
+        // Saved as any write is, and refused as one is: a rename of a
+        // field a version of the App has among it (`withDefinitionCode`).
+        let saved: DraftWrite;
+        try {
+          saved = await this.#save(
             found,
             draft,
             files,
             definitionChanges(result.definition)
-          )),
+          );
+        } catch (error) {
+          const refusal = definitionRefusal(error);
+          if (refusal === undefined) {
+            throw error;
+          }
+          return { ok: false, problem: refusal };
+        }
+        return {
+          ok: true,
+          plan: definitionPlan(before, result.definition),
+          ...saved,
         };
       },
       (defined) => ({
@@ -1196,7 +1193,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    * agent fixes next.
    */
   async #save(
-    { id, name }: Pick<App, "id" | "name">,
+    { id, name, currentVersion }: Pick<App, "id" | "name" | "currentVersion">,
     draft: Draft,
     files: Map<string, string>,
     changes: Record<string, string | null>
@@ -1205,6 +1202,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       base: draft.base,
       changes: {},
     });
+    const held = await heldDefinitions(this.env, id, currentVersion, base);
     // Changed in place (`applyChanges`): the draft as it is written, its
     // TypeScript fixed and formatted first (`tidied`).
     // The definition and the code generated from it are kept as generated,
@@ -1225,7 +1223,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           : await tidied(this.env, id, Object.fromEntries(code))),
         ...Object.fromEntries(generated),
       },
-      name
+      name,
+      held
     );
     refuseAppWorkflows(
       written.flatMap(([path, content]) => (content === null ? [] : [path]))

@@ -818,6 +818,48 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
+  it("refuses a commit that renames a field a version has, as the definition tools do", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
+    const nicknamed = definedWith(notesFiles, {
+      op: "addField",
+      table: "notes",
+      name: "nickname",
+      type: "v.string().optional()",
+    });
+    await release(builder, app, nicknamed);
+    // Its definition.json written by hand, as an export or a builder
+    // would: the field's ID kept, its name changed.
+    const renamed = redefined(nicknamed, (definition) => ({
+      ...definition,
+      tables: definition.tables.map((table) => ({
+        ...table,
+        fields: table.fields.map((field) =>
+          field.name === "nickname" ? { ...field, name: "displayName" } : field
+        ),
+      })),
+    }));
+
+    const refused: unknown = await builder.api.apps.files
+      .commit(app, renamed, "Rename")
+      .then(
+        () => null,
+        (error: unknown) => error
+      );
+
+    const { code, details } = z
+      .object({
+        code: z.string(),
+        details: z.object({ issues: z.array(z.string()) }),
+      })
+      .parse(refused);
+    expect(code).toBe("app.definition_invalid");
+    expect(details.issues.join(" ")).toContain(
+      "`notes.nickname` is in a version of the App"
+    );
+  });
+
   it("keeps no change that leaves a file as the base has it", async () => {
     const ledger = `const [app] = (await env.apps.list()).filter(({ name }) => name === "Ledger");`;
     const { existing, chat, grant } = await setUp([

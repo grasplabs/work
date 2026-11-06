@@ -68,17 +68,46 @@ export const definitionChanges = (
 });
 
 /**
+ * Why `definition` renames a field one of the App's versions has (`held`:
+ * the current one, and the commit a change starts from, which may have
+ * run and been rolled back from), or undefined. Such a field may hold
+ * values in the App's records, which stay under its old name until a
+ * rename can carry them by its stable ID (GRA-1602): only a field the
+ * change itself added renames.
+ */
+export const renameRefusal = (
+  definition: AppDefinition,
+  held: readonly (AppDefinition | null)[]
+): string | undefined => {
+  for (const version of held) {
+    for (const table of version?.tables ?? []) {
+      const now = definition.tables.find(({ id }) => id === table.id);
+      for (const field of table.fields) {
+        const renamed = now?.fields.find(({ id }) => id === field.id);
+        if (renamed !== undefined && renamed.name !== field.name) {
+          return `\`${table.name}.${field.name}\` is in a version of the App, and its records may hold values under that name, which a rename doesn't carry yet. Only a field this draft added renames. Keep its name, or add a field with the new name and copy the values with a migration in server/migrations/.`;
+        }
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
  * `files` with their config and schema as their definition generates
  * them, changed in place. Files with no definition yet, the first of the
  * App named `name` (one of pages alone too), get an empty one. Refused
  * (`app.definition_invalid`) when they hold a config or a schema but no
- * definition, a definition that isn't one, or have lost the one they had
- * (`had`).
+ * definition, a definition that isn't one, have lost the one they had
+ * (`had`), or rename a field a version of the App has (`held`, see
+ * `renameRefusal`): every write of a definition comes through here, the
+ * definition tools' and a commit's alike.
  */
 export const withDefinitionCode = (
   files: Map<string, string>,
   name: string,
-  had: boolean
+  had: boolean,
+  held: readonly (AppDefinition | null)[] = []
 ): void => {
   const text = files.get(definitionPath);
   if (text === undefined) {
@@ -104,6 +133,10 @@ export const withDefinitionCode = (
       issues: [read.problem],
     });
   }
+  const renamed = renameRefusal(read.definition, held);
+  if (renamed !== undefined) {
+    throw appErrors.create("app.definition_invalid", { issues: [renamed] });
+  }
   for (const [path, source] of Object.entries(
     definitionSources(read.definition)
   )) {
@@ -112,32 +145,35 @@ export const withDefinitionCode = (
 };
 
 /**
- * Why `operation` can't rename the field it names, or undefined. Only a
- * field this draft added renames: one the App's versions had (`held`:
- * the current one, and the commit the draft starts from, which may have
- * run and been rolled back from) may hold values in the App's records,
- * which stay under its old name until a rename can carry them by its
- * stable ID (GRA-1602).
+ * The problem an `app.definition_invalid` refusal names, in words, or
+ * undefined for any other error: as the definition tools answer it.
  */
-export const renameRefusal = (
-  operation: DefinitionOperation,
-  definition: AppDefinition,
-  held: readonly (AppDefinition | null)[]
-): string | undefined => {
-  if (operation.op !== "renameField") {
+export const definitionRefusal = (error: unknown): string | undefined => {
+  if (appErrors.codeOf(error) !== "app.definition_invalid") {
     return undefined;
   }
-  const table = definition.tables.find(({ name }) => name === operation.table);
-  const field = table?.fields.find(({ name }) => name === operation.field);
-  const versioned = held.some(
-    (version) =>
-      version?.tables
-        .find(({ id }) => id === table?.id)
-        ?.fields.some(({ id }) => id === field?.id) === true
-  );
-  return versioned
-    ? `\`${operation.table}.${operation.field}\` is in a version of the App, and its records may hold values under that name, which a rename doesn't carry yet. Only a field this draft added renames. Keep its name, or add a field with the new name and copy the values with a migration in server/migrations/.`
-    : undefined;
+  const details: unknown =
+    typeof error === "object" && error !== null
+      ? Reflect.get(error, "details")
+      : undefined;
+  const parsed = z
+    .object({ issues: z.array(z.string()).min(1) })
+    .safeParse(details);
+  return parsed.success
+    ? parsed.data.issues.join(" ")
+    : appErrors.create("app.definition_invalid").message;
+};
+
+/** The definition `files` hold, or null for none or one that doesn't read. */
+export const heldDefinition = (
+  files: ReadonlyMap<string, string>
+): AppDefinition | null => {
+  const text = files.get(definitionPath);
+  if (text === undefined) {
+    return null;
+  }
+  const read = tryReadDefinition(text);
+  return "definition" in read ? read.definition : null;
 };
 
 /** Where a field is, as a plan names it. */
