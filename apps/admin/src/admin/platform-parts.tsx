@@ -106,6 +106,7 @@ export const eventWords = (
     "client.sign_in": `changed how ${company}'s people sign in`,
     "client.sealed_secret": `set one of ${company}'s secrets`,
     "client.teams_bot": `changed ${company}'s Teams bot`,
+    "client.staff_window": `opened or closed Grasp's staff window at ${company}`,
   };
   return `${event.actor} ${what[event.action]}`;
 };

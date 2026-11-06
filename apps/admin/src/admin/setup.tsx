@@ -91,6 +91,7 @@ import {
   ChannelChange,
   RotateSecrets,
   SignInChange,
+  StaffWindowChange,
   SealedSecretChange,
   TeamsBotChange,
   TeamsPackageDownload,
@@ -1010,6 +1011,7 @@ const plainEventWords: Readonly<Record<string, string>> = {
   "client.rotate_secrets": "Rotated its secrets.",
   "client.sign_in": "Changed how its people sign in.",
   "client.teams_bot": "Changed its Teams bot.",
+  "client.staff_window": "Opened or closed Grasp's staff window.",
 };
 
 /** A move to another channel, in a sentence, from what its event records. */
@@ -1738,6 +1740,18 @@ const Settings = ({
         {client === null ? null : (
           <SignInChange clientId={clientId} refresh={refresh} signIn={signIn} />
         )}
+      </Section>
+      <Section
+        description="While it is open, Grasp's staff can bring in the kickoff and steer the onboarding from here. It reaches the company once its settings are applied, and its own admin can end it."
+        title="Grasp's staff window"
+      >
+        <StaffWindowChange
+          canChange={client !== null && signIn !== null}
+          clientId={clientId}
+          configPending={setup.configPending}
+          refresh={refresh}
+          setup={setup.staffWindow}
+        />
       </Section>
       {client === null ? null : (
         <Section

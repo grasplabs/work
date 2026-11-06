@@ -45,8 +45,10 @@ import type { ReactNode } from "react";
 
 import {
   applySettingsFn,
+  closeStaffWindowFn,
   fetchClientLive,
   fetchTeamsPackageFn,
+  openStaffWindowFn,
   rotateSecretsFn,
   setSealedSecretFn,
   setSignInFn,
@@ -54,12 +56,13 @@ import {
 } from "../clients/functions.ts";
 import type { LiveStatus, Reach } from "../clients/grid.ts";
 import type { HistoryEntry } from "../clients/queries.ts";
+import type { StaffWindowSetup } from "../clients/setup.ts";
 import { SignInFields, signInOf, textOf } from "../clients/sign-in-fields.tsx";
 import type { TeamsBot } from "../clients/teams-bot.ts";
 import { useSettingsAction } from "../clients/use-action.ts";
 import { channelIds } from "../db/schema.ts";
 import type { Channel } from "../db/schema.ts";
-import type { ClientSignInRecord } from "../deploy/core-config.ts";
+import type { ClientSignInRecord, StaffWindow } from "../deploy/core-config.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { formatTime } from "../releases/format.ts";
 import { releaseName } from "../releases/version.ts";
@@ -279,6 +282,132 @@ export const SignInChange = ({
         <Failure failure={failure} />
       </div>
     </form>
+  );
+};
+
+/** What a staff window reaches, in words. */
+const scopeWords = (window: StaffWindow): string =>
+  window.scope === "onboarding"
+    ? "The onboarding only"
+    : "Everything an admin can";
+
+/** Whether the staff window is open, in words. */
+const openWords = (setup: StaffWindowSetup): string => {
+  if (setup.window === null) {
+    return "No";
+  }
+  return setup.open
+    ? `Until ${formatTime(new Date(setup.window.until))}`
+    : "No, it ended";
+};
+
+/**
+ * Grasp's staff window on the company: opened from here for 1 to 7 days,
+ * in the onboarding's scope, so staff can bring in its kickoff and steer
+ * its onboarding; closed from here too. Either reaches its core once its
+ * settings are applied.
+ */
+export const StaffWindowChange = ({
+  clientId,
+  setup,
+  canChange,
+  configPending,
+  refresh,
+}: {
+  clientId: string;
+  setup: StaffWindowSetup;
+  canChange: boolean;
+  configPending: boolean;
+  refresh: Refresh;
+}) => {
+  const { busy, failure, run } = useSettingsAction();
+  const [days, setDays] = useState("7");
+  const { window, available } = setup;
+  return (
+    <>
+      <Facts
+        rows={[
+          { label: "Open", value: openWords(setup) },
+          ...(window === null
+            ? []
+            : [{ label: "Reaches", value: scopeWords(window) }]),
+          ...(window !== null && configPending
+            ? [
+                {
+                  label: "Live",
+                  value: "Once its settings are applied",
+                  attention: true,
+                },
+              ]
+            : []),
+        ]}
+      />
+      {canChange ? (
+        <div className="flex flex-col gap-3 border-t px-5 py-4">
+          {available ? null : (
+            <p className="text-muted-foreground">
+              The admin doesn&rsquo;t know Grasp&rsquo;s staff yet: set
+              STAFF_ENTRA_TENANT_ID and STAFF_ENTRA_OIDS on it to open a window.
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <NativeSelect
+              aria-label="How long"
+              disabled={busy || !available}
+              onChange={(event) => {
+                setDays(event.currentTarget.value);
+              }}
+              value={days}
+            >
+              {["1", "2", "3", "7"].map((each) => (
+                <NativeSelectOption key={each} value={each}>
+                  {each === "1" ? "1 day" : `${each} days`}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <Button
+              disabled={busy || !available}
+              onClick={() => {
+                void run(
+                  async () =>
+                    await thenRefresh(
+                      async () =>
+                        await openStaffWindowFn({
+                          data: { clientId, days: Number(days) },
+                        }),
+                      refresh
+                    )
+                );
+              }}
+              size="sm"
+              variant={setup.open ? "outline" : "default"}
+            >
+              {setup.open ? "Open it again from now" : "Open a staff window"}
+            </Button>
+            {window === null ? null : (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  void run(
+                    async () =>
+                      await thenRefresh(
+                        async () =>
+                          await closeStaffWindowFn({ data: { clientId } }),
+                        refresh
+                      )
+                  );
+                }}
+                size="sm"
+                variant="outline"
+              >
+                Close it
+              </Button>
+            )}
+            <Failure failure={failure} />
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 };
 

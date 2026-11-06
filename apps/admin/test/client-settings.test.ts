@@ -4,9 +4,15 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { clientHistory, clientSettings } from "../src/clients/queries.ts";
-import { SettingsError, setSignIn } from "../src/clients/settings.ts";
+import {
+  closeStaffWindow,
+  openStaffWindow,
+  SettingsError,
+  setSignIn,
+} from "../src/clients/settings.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clients } from "../src/db/schema.ts";
+import { staffWindowOf } from "../src/deploy/core-config.ts";
 import { setClientChannel } from "../src/rollout/channels.ts";
 import { racingDb } from "./racing-db.ts";
 import { emptyStoreSecret, useStoreSecrets } from "./secrets-store.ts";
@@ -388,5 +394,99 @@ describe("a client's settings", () => {
         ["client.create", null],
       ]
     );
+  });
+
+  describe("Grasp's staff window", () => {
+    const grasp = {
+      ...env,
+      STAFF_ENTRA_TENANT_ID: "4b2c6e1a-9d3f-4a7b-8c5e-1f2a3b4c5d6e",
+      STAFF_ENTRA_OIDS: "0f1e2d3c-4b5a-4968-8776-655443322110",
+    };
+    const windowOf = async (clientId: string) => {
+      const [row] = await db
+        .select({
+          staffWindow: clients.staffWindow,
+          configChangedAt: clients.configChangedAt,
+        })
+        .from(clients)
+        .where(eq(clients.id, clientId));
+      return row;
+    };
+
+    it("opens for the days asked, in the onboarding's scope, audited, and marks the client's config changed", async () => {
+      const clientId = await recordClient();
+      const now = new Date("2026-11-06T09:00:00.000Z");
+      const opened = await openStaffWindow(
+        grasp,
+        staff,
+        { clientId, days: 3 },
+        now
+      );
+      expect(opened).toStrictEqual({
+        opened: "2026-11-06T09:00:00.000Z",
+        until: "2026-11-09T09:00:00.000Z",
+        scope: "onboarding",
+      });
+      const row = await windowOf(clientId);
+      expect(staffWindowOf(row?.staffWindow ?? null)).toStrictEqual(opened);
+      expect(row?.configChangedAt).not.toBeNull();
+      const events = await eventsOf(clientId, "client.staff_window");
+      expect(
+        events.map(({ actor, detail }) => ({
+          actor,
+          detail: staffWindowOf(detail),
+        }))
+      ).toStrictEqual([{ actor: staff.email, detail: opened }]);
+    });
+
+    it("closes, audited once, and is no change when none is open", async () => {
+      const clientId = await recordClient();
+      await openStaffWindow(grasp, staff, { clientId, days: 1 });
+      await expect(
+        closeStaffWindow(grasp, staff, { clientId })
+      ).resolves.toBeTruthy();
+      await expect(
+        closeStaffWindow(grasp, staff, { clientId })
+      ).resolves.toBeFalsy();
+      const closed = await windowOf(clientId);
+      expect(closed?.staffWindow).toBeNull();
+      const events = await eventsOf(clientId, "client.staff_window");
+      expect(events.map(({ detail }) => detail)).toStrictEqual([
+        expect.stringContaining('"scope":"onboarding"'),
+        JSON.stringify({ closed: true }),
+      ]);
+    });
+
+    it("refuses while the admin doesn't know Grasp's staff, beyond seven days, or for a client it doesn't have", async () => {
+      const clientId = await recordClient();
+      expect({
+        unknownStaff: await codeOf(
+          openStaffWindow(env, staff, { clientId, days: 1 })
+        ),
+        noOids: await codeOf(
+          openStaffWindow({ ...grasp, STAFF_ENTRA_OIDS: "" }, staff, {
+            clientId,
+            days: 1,
+          })
+        ),
+        tooLong: await codeOf(
+          openStaffWindow(grasp, staff, { clientId, days: 8 })
+        ),
+        none: await codeOf(
+          openStaffWindow(grasp, staff, { clientId, days: 0 })
+        ),
+        unknownClient: await codeOf(
+          openStaffWindow(grasp, staff, { clientId: "nobody", days: 1 })
+        ),
+      }).toStrictEqual({
+        unknownStaff: "staff_window_unavailable",
+        noOids: "staff_window_unavailable",
+        tooLong: "staff_window_invalid",
+        none: "staff_window_invalid",
+        unknownClient: "unknown_client",
+      });
+      const row = await windowOf(clientId);
+      expect(row?.staffWindow).toBeNull();
+    });
   });
 });

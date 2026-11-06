@@ -11,4 +11,13 @@ interface __BaseEnv_Env {
   DURABLE_OBJECT_JURISDICTION?: string;
   /** Local dev only, from .dev.vars: who requests to this machine come from (src/access.ts). */
   DEV_ACCESS_EMAIL?: string;
+  /**
+   * Grasp's own Entra tenant, whose staff a client's staff window lets in
+   * (src/deploy/context.ts, `graspStaffOf`). Unset, no window opens.
+   */
+  STAFF_ENTRA_TENANT_ID?: string;
+  /** The Entra object ids of the staff a window lets in, comma-separated. */
+  STAFF_ENTRA_OIDS?: string;
+  /** The email domains Grasp's staff sign in with, comma-separated; joingrasp.com unless set. */
+  STAFF_EMAIL_DOMAINS?: string;
 }

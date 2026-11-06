@@ -28,7 +28,10 @@ import {
   adminUnreachable,
   clientSignInSchema,
   missingSignInApp,
+  staffWindowMaxDays,
+  staffWindowOf,
 } from "../deploy/core-config.ts";
+import type { StaffWindow } from "../deploy/core-config.ts";
 import { sealSecret } from "../deploy/sealed-secrets.ts";
 import type { SealedSecretName } from "../deploy/sealed-secrets.ts";
 import { keyedHash } from "../deploy/upload.ts";
@@ -56,6 +59,14 @@ export const settingsErrorCodes = [
   "secret_invalid",
   /** A Teams bot that isn't one: an app id or tenant that isn't a GUID, or no expiry day. */
   "teams_bot_invalid",
+  /**
+   * A staff window can't be opened: the admin doesn't know Grasp's own
+   * staff (STAFF_ENTRA_TENANT_ID, STAFF_ENTRA_OIDS) or Entra app
+   * (ENTRA_CLIENT_ID), or the client has no sign-in for core to keep it in.
+   */
+  "staff_window_unavailable",
+  /** A staff window that isn't one: not 1 to 7 days, or another scope. */
+  "staff_window_invalid",
 ] as const;
 export type SettingsErrorCode = (typeof settingsErrorCodes)[number];
 
@@ -436,4 +447,136 @@ export const setTeamsBot = async (
       detail: { appId, tenantId, secretExpiresOn },
     }
   );
+};
+
+/**
+ * A staff window as the page asks for it: how many days from now, at most
+ * seven, and what it lets Grasp's staff reach (the onboarding alone,
+ * unless staff ask for everything).
+ */
+export const staffWindowInputSchema = z.object({
+  clientId: clientIdSchema,
+  days: z.unknown(),
+  scope: z.unknown().optional(),
+});
+
+const staffWindowAskSchema = z.object({
+  days: z.int().min(1).max(staffWindowMaxDays),
+  scope: z.enum(["full", "onboarding"]).default("onboarding"),
+});
+
+/**
+ * Opens a staff window on client `clientId`, as `staff`: from now for
+ * `days` days (at most seven), in `scope`. Grasp's staff can then bring in
+ * its kickoff and steer its onboarding from the admin (core's
+ * `staffLetIn`), once a deploy, or applying its settings, gives its core
+ * the window. Audited (`client.staff_window`, with when it opened and
+ * until when) and marks the client, so its Setup says a change waits.
+ * Opening again replaces the window. Refused (`staff_window_unavailable`)
+ * while the admin doesn't know Grasp's staff or Entra app, or the client
+ * has no sign-in, since core would have no `SIGN_IN` to keep it in.
+ */
+export const openStaffWindow = async (
+  env: Env,
+  staff: Staff,
+  input: z.input<typeof staffWindowInputSchema>,
+  now: Date = new Date()
+): Promise<StaffWindow> => {
+  const db = adminDatabase(env.DB);
+  const { clientId, ...ask } = staffWindowInputSchema.parse(input);
+  const asked = staffWindowAskSchema.safeParse(ask);
+  if (!asked.success) {
+    throw new SettingsError(
+      "staff_window_invalid",
+      `A staff window is 1 to ${String(staffWindowMaxDays)} days`
+    );
+  }
+  const apps = signInApps(env);
+  if (apps.staff === undefined || apps.entraClientId === undefined) {
+    throw new SettingsError(
+      "staff_window_unavailable",
+      "Set STAFF_ENTRA_TENANT_ID and STAFF_ENTRA_OIDS (and ENTRA_CLIENT_ID) on the admin to open a staff window"
+    );
+  }
+  const [client] = await db
+    .select({ signIn: clients.signIn })
+    .from(clients)
+    .where(eq(clients.id, clientId));
+  if (client === undefined) {
+    throw new SettingsError("unknown_client", `No client ${clientId}`);
+  }
+  if (client.signIn === null) {
+    throw new SettingsError(
+      "staff_window_unavailable",
+      `${clientId} has no sign-in for its core to keep a staff window in`
+    );
+  }
+  const window: StaffWindow = {
+    opened: now.toISOString(),
+    until: new Date(
+      now.getTime() + asked.data.days * 24 * 60 * 60 * 1000
+    ).toISOString(),
+    scope: asked.data.scope,
+  };
+  await actIfChanged(
+    db,
+    staff,
+    db
+      .update(clients)
+      .set({
+        staffWindow: JSON.stringify(window),
+        configChangedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(clients.id, clientId)),
+    {
+      action: "client.staff_window",
+      clientId,
+      detail: {
+        opened: window.opened,
+        until: window.until,
+        scope: window.scope,
+      },
+    }
+  );
+  return window;
+};
+
+/**
+ * Closes client `clientId`'s staff window, as `staff`: its next deploy,
+ * or applying its settings, takes Grasp's staff out of its core. Audited
+ * (`client.staff_window`, `closed`) only when one was there. Returns
+ * whether it closed one.
+ */
+export const closeStaffWindow = async (
+  env: Env,
+  staff: Staff,
+  input: { clientId: string }
+): Promise<boolean> => {
+  const db = adminDatabase(env.DB);
+  const clientId = clientIdSchema.parse(input.clientId);
+  await assertClient(db, clientId);
+  const now = new Date();
+  return await actIfChanged(
+    db,
+    staff,
+    db
+      .update(clients)
+      .set({ staffWindow: null, configChangedAt: now, updatedAt: now })
+      .where(and(eq(clients.id, clientId), isNotNull(clients.staffWindow))),
+    { action: "client.staff_window", clientId, detail: { closed: true } }
+  );
+};
+
+/** Client `clientId`'s staff window as its record keeps it, or null for none. */
+export const staffWindowOfClient = async (
+  env: Env,
+  clientId: string
+): Promise<StaffWindow | null> => {
+  const db = adminDatabase(env.DB);
+  const [client] = await db
+    .select({ staffWindow: clients.staffWindow })
+    .from(clients)
+    .where(eq(clients.id, clientId));
+  return staffWindowOf(client?.staffWindow ?? null);
 };

@@ -39,6 +39,7 @@ export const staffActions = [
   "client.sign_in",
   "client.sealed_secret",
   "client.teams_bot",
+  "client.staff_window",
 ] as const;
 export type StaffAction = (typeof staffActions)[number];
 

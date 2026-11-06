@@ -22,6 +22,9 @@ const refusals: Readonly<Record<SettingsErrorCode, string>> = {
     "That isn't a secret: paste the client secret's value as Entra shows it, without spaces.",
   teams_bot_invalid:
     "That isn't a Teams bot: give its app id and tenant as the GUIDs Entra shows, and the day its secret expires.",
+  staff_window_unavailable:
+    "A staff window can't be opened yet: set STAFF_ENTRA_TENANT_ID and STAFF_ENTRA_OIDS on the admin, and give the company a sign-in first.",
+  staff_window_invalid: "A staff window lasts 1 to 7 days.",
 };
 
 /** A staff change to a client's settings (`useAction`), its refusals worded. */
