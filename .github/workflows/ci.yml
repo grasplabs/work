@@ -5,9 +5,10 @@
 # bytes for the staging admin, which rolls them out to staging's clients.
 # A release staging accepted reaches production's admin only through the
 # Promote release workflow. Both stages share Grasp's one Cloudflare
-# account; the admins, routers and connect gateways are deployed by hand
+# account. A push to main also deploys staging's admin, router and connect
+# gateway (deploy-platform, below); production's are deployed only by hand
 # with the Deploy platform workflow. Jobs with secrets never run for pull
-# requests from forks. CI deploys nothing: the admins roll releases out.
+# requests from forks. CI deploys no client: the admins roll releases out.
 #
 # A draft pull request runs only the fast checks (static):
 # the tests, workerd, the release build and the journeys wait until it is
@@ -585,7 +586,7 @@ jobs:
         with:
           save: ${{ github.event_name == 'push' }}
       - run: vp run release:build --out release-out
-      # The admin isn't deployed from here (see Deploy platform): check that
+      # The admin isn't part of a release (see Deploy platform): check that
       # it builds, for each stage, into a Worker cf would deploy
       # (cloudflare.config.ts). Vite records the stage as its mode, which
       # the deploy names again. No credentials needed.
@@ -612,6 +613,26 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Every push to main deploys staging's platform (the admin, router and
+  # connect gateway) with the Deploy platform workflow, the same steps a
+  # run by hand takes, in staging's GitHub and 1Password environments.
+  # Before publish-release: the staging admin imports a release from its
+  # bucket within 5 minutes of its publish (apps/admin/wrangler.jsonc), so
+  # the admin that imports and rolls out a release is always at least as
+  # new as the release, and a release that needs an admin change never
+  # meets the old admin. A deploy that fails holds the release back, and
+  # the run goes red. One staging platform deploy at a time, by hand or
+  # from here: the job's own concurrency group (deploy-platform-staging),
+  # apart from this run's, waits for one deploying and replaces one still
+  # waiting.
+  deploy-platform:
+    name: deploy-platform
+    needs: release
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/deploy-platform.yml
+    with:
+      stage: staging
+
   # Every merge to main is a release: built once (the release job),
   # verified against its manifest and published to staging's releases
   # bucket, where the staging admin imports it and rolls it out to
@@ -630,7 +651,7 @@ jobs:
   # be published, and its changes ship in the next release.
   publish-release:
     name: publish-release
-    needs: release
+    needs: [release, deploy-platform]
     if: github.event_name == 'push'
     # It holds the staging 1Password token: GitHub-hosted runners only, so
     # no secret leaves GitHub's machines.
