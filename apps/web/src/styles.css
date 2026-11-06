@@ -6,6 +6,8 @@
  * type-* utilities), with its optical sizes: the cut follows the size.
  */
 @import "@fontsource-variable/newsreader/opsz.css";
+/* JetBrains Mono, the theme's code font (`font-mono`), wherever code is shown. */
+@import "@fontsource-variable/jetbrains-mono";
 /* How each icon of a control moves when it is pointed at. */
 @import "./icon-moves.css";
 
@@ -1203,7 +1205,8 @@
 /*
  * Code in the agent's answers (chat/answer-markdown.tsx), highlighted by
  * class (rehype-highlight): coloured from the theme's tokens, so it follows
- * light and dark, and set without any inline style the CSP would refuse.
+ * light and dark, and set without any inline style (the `no-inline-styles`
+ * lint rule).
  */
 @layer components {
   .hljs-comment,
@@ -1215,37 +1218,86 @@
   .hljs-keyword,
   .hljs-selector-tag,
   .hljs-built_in,
-  .hljs-type,
   .hljs-doctag {
-    font-weight: 600;
+    color: var(--syntax-keyword);
   }
 
   .hljs-string,
   .hljs-regexp,
-  .hljs-addition,
   .hljs-symbol {
-    color: var(--status-agreed);
+    color: var(--syntax-string);
   }
 
   .hljs-number,
   .hljs-literal,
-  .hljs-deletion,
   .hljs-variable.constant_ {
-    color: var(--destructive);
+    color: var(--syntax-constant);
   }
 
   .hljs-title,
+  .hljs-type,
   .hljs-section,
   .hljs-attr,
   .hljs-attribute,
   .hljs-name,
   .hljs-property {
-    color: var(--chart-5);
+    color: var(--syntax-function);
+  }
+
+  .hljs-addition {
+    color: var(--status-agreed);
+  }
+
+  .hljs-deletion {
+    color: var(--destructive);
   }
 
   .hljs-meta,
   .hljs-punctuation {
     color: var(--muted-foreground);
+  }
+}
+
+/*
+ * An App's Code view (engines/code-view.tsx): @pierre/diffs draws each
+ * file and diff in a shadow root, coloured by its custom properties, which
+ * reach in from here. Its theme ("grasp", a theme of CSS variables) names
+ * every colour a variable, each set to the theme's token, so the view
+ * follows light and dark with the rest of the page. Added and removed
+ * lines are the status colours; the code is set in the theme's mono at
+ * the line height the library's virtualizer counts on: 20px, fixed in its
+ * own code (`DEFAULT_VIRTUAL_FILE_METRICS`), so in pixels here too, not rem,
+ * that a larger root font size can't move one from the other.
+ */
+@layer components {
+  diffs-container {
+    color-scheme: light;
+    --diffs-font-family: var(--font-mono);
+    --diffs-header-font-family: var(--font-sans);
+    --diffs-font-size: 0.8125rem;
+    --diffs-line-height: 20px;
+    --diffs-tab-size: 2;
+    --diffs-foreground: var(--foreground);
+    --diffs-background: var(--card);
+    --diffs-token-comment: var(--muted-foreground);
+    --diffs-token-punctuation: var(--muted-foreground);
+    --diffs-token-keyword: var(--syntax-keyword);
+    --diffs-token-string: var(--syntax-string);
+    --diffs-token-string-expression: var(--syntax-string);
+    --diffs-token-constant: var(--syntax-constant);
+    --diffs-token-function: var(--syntax-function);
+    --diffs-token-parameter: var(--foreground);
+    --diffs-token-link: var(--syntax-function);
+    --diffs-token-inserted: var(--status-agreed);
+    --diffs-token-deleted: var(--destructive);
+    --diffs-addition-color-override: var(--status-agreed);
+    --diffs-deletion-color-override: var(--destructive);
+    --diffs-modified-color-override: var(--status-attention);
+    --diffs-fg-number-override: var(--faint);
+  }
+
+  .dark diffs-container {
+    color-scheme: dark;
   }
 }
 

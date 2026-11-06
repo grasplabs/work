@@ -48,7 +48,7 @@ import {
   SendIcon,
   SettingsIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { appSlot, setActiveChat } from "../chat/active-chat.ts";
@@ -65,6 +65,7 @@ import type { ShownVersion } from "../chat/draft-versions.tsx";
 import { DraftPreview } from "../chat/studio.tsx";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { LoadingLines } from "../frame/page-states.tsx";
 import { useWide } from "../frame/wide.ts";
 import { useVersionPushes } from "../screens/use-version-pushes.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -74,7 +75,6 @@ import {
   useAppAsk,
   useAppChatId,
 } from "./app-chat.tsx";
-import { AppCode } from "./app-code.tsx";
 import type { ChatBuilding } from "./app-code.tsx";
 import { AppData } from "./app-data.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
@@ -83,6 +83,12 @@ import type { AppSettingsSection, StoreChangesRead } from "./app-settings.tsx";
 import { readMembers, sharesApp, ShareApp } from "./app-sharing.tsx";
 import { StatusBadge, useStatusMove } from "./app-status.tsx";
 import { useAppRead } from "./use-app-read.ts";
+
+// The Code view, with its renderer and highlighter, loads once it opens.
+const AppCode = lazy(async () => {
+  const { AppCode: code } = await import("./app-code.tsx");
+  return { default: code };
+});
 
 // An App's workspace, where its builders change it (/apps/$app/edit),
 // apart from the App itself (/apps/$app), which its people use and which
@@ -920,8 +926,16 @@ const MainArea = ({
       {preview}
     </div>
     {view === "code" ? (
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 md:px-6">
-        <AppCode app={app} building={building} />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <Suspense
+          fallback={
+            <div className="p-4">
+              <LoadingLines lines={6} />
+            </div>
+          }
+        >
+          <AppCode app={app} building={building} />
+        </Suspense>
       </div>
     ) : null}
     {view === "data" ? <DataArea app={app.id} /> : null}

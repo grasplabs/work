@@ -1229,6 +1229,42 @@
   --icon-wait: 0.18s;
 }
 
+/* The brackets step apart and back. */
+.lucide-file-code > :nth-child(3) {
+  --icon-move: icon-hop;
+  --icon-x: -1.5px;
+  --icon-time: 0.4s;
+}
+.lucide-file-code > :nth-child(4) {
+  --icon-move: icon-hop;
+  --icon-x: 1.5px;
+  --icon-time: 0.4s;
+}
+.lucide-file-braces > :nth-child(3) {
+  --icon-move: icon-hop;
+  --icon-x: -1.5px;
+  --icon-time: 0.4s;
+}
+.lucide-file-braces > :nth-child(4) {
+  --icon-move: icon-hop;
+  --icon-x: 1.5px;
+  --icon-time: 0.4s;
+}
+
+/* The sun comes up over the hill. */
+.lucide-file-image > :nth-child(3) {
+  --icon-move: icon-pop;
+  --icon-time: 0.35s;
+}
+
+/* The letter's bar comes down onto its stem. */
+.lucide-file-type > :nth-child(5) {
+  --icon-move: icon-land;
+  --icon-y: -2px;
+  --icon-fade: 0;
+  --icon-time: 0.35s;
+}
+
 /* The arrow comes up from below. */
 .lucide-file-up > :is(:nth-child(3), :nth-child(4)) {
   --icon-move: icon-land;

@@ -141,6 +141,8 @@ catalog:
   "@base-ui/react": 1.8.0
   "@fontsource-variable/geist": 5.2.8
   "@fontsource-variable/newsreader": 5.3.0
+  # The code font, wherever code is shown (the theme's font-mono).
+  "@fontsource-variable/jetbrains-mono": 5.3.0
   # Translations of the frontend: macros compiled at build time, catalogs
   # in apps/web/src/locales.
   "@lingui/babel-plugin-lingui-macro": 6.8.0
@@ -210,10 +212,11 @@ catalog:
   # The kit's charts.
   recharts: 3.10.1
   # The agent's answers: code blocks highlighted by class, so the theme's
-  # tokens colour them and the CSP needs no inline style.
+  # tokens colour them with no inline style (the no-inline-styles lint rule).
   rehype-highlight: 7.0.2
-  # An App's Code tab: a draft's changes, line by line, as hunks.
-  diff: 9.0.0
+  # An App's Code tab: its files and a draft's changes, virtualised and
+  # highlighted by the library's own highlighter (Highlights).
+  "@pierre/diffs": 1.6.2
   remark-gfm: 4.0.1
   shadcn: 4.23.0
   tailwind-merge: 3.7.0

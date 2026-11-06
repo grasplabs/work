@@ -189,6 +189,46 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     // The App's own data is as it was: none of the preview's three.
     const after = await openTally(page, app.id);
     await expect(after.getByRole("status")).toHaveText("1 in the App");
+
+    // A next version up for review: the workspace's Code view, away from
+    // the chat, shows what it changes as a diff, one column or two.
+    const next = await api.apps.files.commit(
+      app.id,
+      tallyFiles("in the next version"),
+      "The next tally"
+    );
+    await api.apps.versions.propose(app.id, next.version);
+    await page.goto(`/apps/${app.id}/edit`);
+    await page
+      .getByRole("navigation", { name: "Workspace views" })
+      .getByRole("link", { name: "Code" })
+      .click();
+    await page.getByRole("button", { name: "Changes" }).click();
+    // One file changed, one line out and one in.
+    const changes = page.getByRole("region", { name: "Changes" });
+    const changed = changes.getByRole("region", { name: "server/tally.ts" });
+    await expect(changes.getByRole("region")).toHaveCount(1);
+    await expect(changed).toContainText("-1+1");
+    const removed = changed.getByText(/in the App`;$/u);
+    const added = changed.getByText(/in the next version`;$/u);
+    await expect(removed).toBeVisible();
+    await expect(added).toBeVisible();
+    // Unified, the new line stands under the old; split, beside it.
+    const unified = [await removed.boundingBox(), await added.boundingBox()];
+    expect((unified[1]?.y ?? 0) > (unified[0]?.y ?? 0)).toBeTruthy();
+    await page.getByRole("button", { name: "Split" }).click();
+    await expect
+      .poll(async () => {
+        const [old, now] = [
+          await removed.boundingBox(),
+          await added.boundingBox(),
+        ];
+        return {
+          sameRow: old?.y === now?.y,
+          beside: (now?.x ?? 0) > (old?.x ?? 0) + (old?.width ?? 0) / 2,
+        };
+      })
+      .toStrictEqual({ sameRow: true, beside: true });
   } finally {
     core[Symbol.dispose]();
   }
@@ -275,17 +315,24 @@ test("an App's own chat writes its screen, and its workspace previews it, taking
       .getByRole("navigation", { name: "Workspace views" })
       .getByRole("link", { name: "Code" })
       .click();
+    // Its tree: folders first, each open, then the files, each by name.
     const files = page.getByRole("navigation", { name: "Files" });
     await expect(files.getByRole("button")).toHaveText([
+      "screens",
       "tally.tsx",
+      "server",
       "tally.ts",
       "app.ts",
       "schema.ts",
     ]);
-    await expect(files).toContainText("screens");
-    await expect(files).toContainText("server");
     await files.getByRole("button", { name: "tally.tsx" }).click();
-    await expect(page.locator("figure")).toContainText("Add another");
+    const code = page.getByRole("region", {
+      name: "Code of screens/tally.tsx",
+    });
+    await expect(code).toContainText("Add another");
+    await expect(
+      page.getByRole("navigation", { name: "Open file" })
+    ).toHaveText(/screens.*tally\.tsx/u);
   } finally {
     core[Symbol.dispose]();
   }

@@ -23,7 +23,8 @@ import { AppCode } from "./app-code.tsx";
 // reaches it over RPC, faked: version 1 is current and version 2, up for
 // review, changes one line of app.ts, adds a screen and deletes old.ts.
 // Core's diff is the files as they were and are, as its `diffFiles`
-// gives them; the page works out the lines.
+// gives them; the page diffs them (@pierre/diffs), and what it drew is read
+// from the shadow roots it draws in.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -86,13 +87,18 @@ const manyLines = (name: string, count: number): string =>
   );
 
 /**
- * Versions whose draft rewrites every line of data.ts (2,200 edits, past
- * what is worked out line by line) and adds a 2,100-line report.ts.
+ * Versions whose draft rewrites every line of data.ts (4,200 lines old and
+ * new, past what is diffed line by line), rewrites all of rows.ts (2,200,
+ * within it) and adds a 2,100-line report.ts.
  */
 const largeVersions: Versions = {
-  1: { "data.ts": manyLines("old", 1100) },
+  1: {
+    "data.ts": manyLines("old", 2100),
+    "rows.ts": manyLines("old row", 1100),
+  },
   2: {
-    "data.ts": manyLines("new", 1100),
+    "data.ts": manyLines("new", 2100),
+    "rows.ts": manyLines("new row", 1100),
     "report.ts": manyLines("report", 2100),
   },
 };
@@ -275,25 +281,60 @@ const named = (selector: string, name: string) =>
     (each) => each.textContent?.trim() === name
   );
 
-/** The text of the file shown. */
-const fileShown = (): string =>
-  document.querySelector("figure pre")?.textContent ?? "";
+/**
+ * The text `element` shows, the code @pierre/diffs draws in its shadow
+ * roots included: what a person reads there.
+ */
+const textShown = (node: Node | null | undefined): string => {
+  if (node === null || node === undefined) {
+    return "";
+  }
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent ?? "";
+  }
+  const shadow = node instanceof Element ? node.shadowRoot : null;
+  return [...(shadow?.childNodes ?? []), ...node.childNodes]
+    .map((child) => textShown(child))
+    .join("");
+};
 
-/** The tree's folders and files, top to bottom. */
-const treeShown = (): string[] =>
-  [...document.querySelectorAll('nav[aria-label="Files"] li > :first-child')]
-    .map((entry) => entry.textContent?.trim() ?? "")
-    .filter((name) => name !== "");
+/** The text of the open file's code, as the view shows it. */
+const codeShown = (): string =>
+  textShown(document.querySelector('section[aria-label^="Code of"]'));
 
-/** Each changed file shown, and its lines as the view prints them. */
-const changesShown = () =>
-  [...document.querySelectorAll("section")].map((section) => ({
-    file: section.querySelector("h3")?.textContent,
-    text: section.textContent,
-    lines: [...(section.querySelector("pre")?.children ?? [])].map(
-      (line) => line.textContent
+/** Where the open file is, as its bar says it. */
+const pathShown = (): string[] =>
+  [
+    ...document.querySelectorAll(
+      'nav[aria-label="Open file"] [data-slot="breadcrumb-item"]'
     ),
-  }));
+  ].map((item) => item.textContent.trim());
+
+/** The tree's folders and files as they stand, top to bottom. */
+const treeShown = (): string[] =>
+  [...document.querySelectorAll('nav[aria-label="Files"] button')].map(
+    (entry) => entry.textContent.trim()
+  );
+
+/** The file the tree marks as open. */
+const openInTree = (): string | undefined =>
+  document
+    .querySelector('nav[aria-label="Files"] [aria-current="true"]')
+    ?.textContent.trim();
+
+/** The changed files the Changes show, each a region named by its path. */
+const changedFiles = (): string[] =>
+  [...document.querySelectorAll('section[aria-label="Changes"] section')].map(
+    (section) => section.getAttribute("aria-label") ?? ""
+  );
+
+/** What the Changes show of the file at `path`. */
+const changeShown = (path: string): string =>
+  textShown(document.querySelector(`section[aria-label="${path}"]`));
+
+/** Whether `text` holds each of `parts`. */
+const holdsAll = (text: string, parts: readonly string[]): boolean =>
+  parts.every((part) => text.includes(part));
 
 describe("An App's Code", () => {
   afterEach(() => {
@@ -307,108 +348,182 @@ describe("An App's Code", () => {
   it("shows the version up for review, as the preview does, read-only", async () => {
     await shown("builder");
 
+    await expect.poll(codeShown).toContain("export const limit = 25;");
     expect({
-      file: fileShown(),
+      current: codeShown().includes("export const limit = 10;"),
+      path: pathShown(),
+      open: openInTree(),
       readOnly: document.body.textContent.includes(
         "Read-only. Changes to the code go through the chat."
       ),
-    }).toStrictEqual({ file: appV2, readOnly: true });
-  });
-
-  it("shows the text of the file picked, the current version's too", async () => {
-    await shown("builder");
-    await press(named("button", "inbox.tsx"));
-    const picked = fileShown();
-    await press(named("button", "Current (version 1)"));
-    await press(named("button", "old.ts"));
-
-    expect({ picked, current: fileShown() }).toStrictEqual({
-      picked: inboxText,
-      current: oldText,
+    }).toStrictEqual({
+      current: false,
+      path: ["app.ts"],
+      open: "app.ts",
+      readOnly: true,
     });
   });
 
-  it("shows the chat's draft as its agent writes it, the file picked kept", async () => {
+  it("lays the files out as folders first, each folder opening and folding", async () => {
+    await shown("builder", 1, {
+      2: {
+        "app.ts": appV2,
+        "zeta.ts": schemaText,
+        "server/b.ts": schemaText,
+        "server/a/deep.ts": schemaText,
+        "screens/inbox.tsx": inboxText,
+      },
+    });
+    const all = treeShown();
+    await press(named('nav[aria-label="Files"] button', "server"));
+    const folded = {
+      tree: treeShown(),
+      expanded: named('nav[aria-label="Files"] button', "server")?.getAttribute(
+        "aria-expanded"
+      ),
+    };
+    await press(named('nav[aria-label="Files"] button', "server"));
+
+    expect({ all, folded, again: treeShown() }).toStrictEqual({
+      all: [
+        "screens",
+        "inbox.tsx",
+        "server",
+        "a",
+        "deep.ts",
+        "b.ts",
+        "app.ts",
+        "zeta.ts",
+      ],
+      folded: {
+        tree: ["screens", "inbox.tsx", "server", "app.ts", "zeta.ts"],
+        expanded: "false",
+      },
+      again: all,
+    });
+  });
+
+  it("opens the tree's first file when the version has no app.ts", async () => {
+    await shown("builder", 1, {
+      2: {
+        "zeta.ts": schemaText,
+        "server/b.ts": "export const b = 1;\n",
+        "server/a/deep.ts": "export const deep = 1;\n",
+      },
+    });
+
+    await expect.poll(codeShown).toContain("export const deep = 1;");
+    expect(openInTree()).toBe("deep.ts");
+  });
+
+  it("opens the file picked, where it is in the tree, the current version's too", async () => {
+    await shown("builder");
+    await press(named("button", "inbox.tsx"));
+    await expect.poll(codeShown).toContain("function Inbox()");
+    const picked = { path: pathShown(), open: openInTree() };
+    await press(named("button", "Current (version 1)"));
+    await press(named("button", "old.ts"));
+    await expect.poll(codeShown).toContain("export const legacy = true;");
+
+    expect({
+      picked,
+      current: { path: pathShown(), open: openInTree() },
+    }).toStrictEqual({
+      picked: { path: ["screens", "inbox.tsx"], open: "inbox.tsx" },
+      current: { path: ["old.ts"], open: "old.ts" },
+    });
+  });
+
+  it("shows the chat's draft as its agent writes it, the file open kept", async () => {
     revisionNow = 1;
     await shown("builder", 1, smallVersions, true);
     await press(named("button", "notes.ts"));
-    const first = { file: fileShown(), tree: treeShown() };
+    await expect.poll(codeShown).toContain("export const limit = 10;");
+    const first = treeShown();
     await act(async () => {
       moveDraft(2);
       await Promise.resolve();
     });
     await settled();
     await settled();
+    await expect.poll(codeShown).toContain("export const limit = 25;");
 
     expect({
       first,
-      written: { file: fileShown(), tree: treeShown() },
+      written: treeShown(),
+      open: openInTree(),
       readOnly: document.body.textContent.includes(
         "Read-only. Changes to the code go through the chat."
       ),
       versionsOffered: named("button", "Current (version 1)") !== undefined,
     }).toStrictEqual({
-      first: {
-        file: notesAt(10),
-        tree: ["server", "notes.ts", "app.ts"],
-      },
-      written: {
-        file: notesAt(25),
-        tree: ["screens", "inbox.tsx", "server", "notes.ts", "app.ts"],
-      },
+      first: ["server", "notes.ts", "app.ts"],
+      written: ["screens", "inbox.tsx", "server", "notes.ts", "app.ts"],
+      open: "notes.ts",
       readOnly: true,
       versionsOffered: false,
     });
   });
 
-  it("shows the draft's changed lines against the current version, with a few around them", async () => {
+  it("shows the draft's changes against the current version, file by file, with what each adds and removes", async () => {
     await shown("builder");
     await press(named("button", "Changes"));
+    await expect
+      .poll(() => changeShown("app.ts"))
+      .toContain("export const limit = 25;");
 
-    expect(
-      changesShown().map(({ file, lines }) => ({ file, lines }))
-    ).toStrictEqual([
-      {
-        file: "app.ts",
-        lines: [
-          "⋯ 4 unchanged lines",
-          "  // Note 4",
-          "  // Note 5",
-          "  // Note 6",
-          "- export const limit = 10;",
-          "+ export const limit = 25;",
-          "  // End 1",
-          "  // End 2",
-          "  // End 3",
-          "⋯ 2 unchanged lines",
-        ],
-      },
-      { file: "old.ts", lines: ["- export const legacy = true;"] },
-      {
-        file: "screens/inbox.tsx",
-        lines: ["+ export default function Inbox() {}"],
-      },
-    ]);
+    expect({
+      files: changedFiles(),
+      modified: holdsAll(changeShown("app.ts"), [
+        "-1",
+        "+1",
+        "export const limit = 10;",
+        "export const limit = 25;",
+      ]),
+      deleted: holdsAll(changeShown("old.ts"), [
+        "-1",
+        "export const legacy = true;",
+      ]),
+      added: holdsAll(changeShown("screens/inbox.tsx"), [
+        "+1",
+        "export default function Inbox() {}",
+      ]),
+    }).toStrictEqual({
+      files: ["app.ts", "old.ts", "screens/inbox.tsx"],
+      modified: true,
+      deleted: true,
+      added: true,
+    });
+  });
+
+  it("shows the changes side by side once split is chosen", async () => {
+    await shown("builder");
+    await press(named("button", "Changes"));
+    await press(named("button", "Split"));
+
+    await expect
+      .poll(() => changeShown("app.ts"))
+      .toContain("export const limit = 25;");
+    expect({
+      split: named("button", "Split")?.getAttribute("aria-pressed"),
+      both: holdsAll(changeShown("app.ts"), [
+        "export const limit = 10;",
+        "export const limit = 25;",
+      ]),
+    }).toStrictEqual({ split: "true", both: true });
   });
 
   it("shows every file of a draft as added while no version is current", async () => {
     await shown("builder", null);
-    const draftFile = fileShown();
     await press(named("button", "Changes"));
+    await expect.poll(changedFiles).toHaveLength(3);
 
     expect({
-      draftFile,
-      changes: changesShown().map(({ file, lines }) => ({
-        file,
-        added: lines.every((line) => line?.startsWith("+ ")),
-      })),
+      files: changedFiles(),
+      added: changedFiles().every((path) => changeShown(path).includes("+")),
     }).toStrictEqual({
-      draftFile: appV2,
-      changes: [
-        { file: "app.ts", added: true },
-        { file: "schema.ts", added: true },
-        { file: "screens/inbox.tsx", added: true },
-      ],
+      files: ["app.ts", "schema.ts", "screens/inbox.tsx"],
+      added: true,
     });
   });
 
@@ -419,47 +534,66 @@ describe("An App's Code", () => {
     });
     await press(named("button", "Changes"));
 
-    expect(
-      changesShown().map(({ file, lines }) => ({ file, lines }))
-    ).toStrictEqual([
-      {
-        file: "app.ts",
-        lines: [
-          "- export const done = true;",
-          "+ export const done = true;",
-          "No newline at end of file",
-        ],
-      },
-    ]);
+    expect(changeShown("app.ts")).toContain(
+      "Only the newline at the end of the file was removed."
+    );
   });
 
-  it("says a file rewritten past what is worked out has too many changes, and shows a large new file whole", async () => {
-    await shown("builder", 1, largeVersions);
+  it("counts no line for an empty file added or deleted, and only the new ones for one filled", async () => {
+    await shown("builder", 1, {
+      1: { "filled.ts": "", "gone.ts": "" },
+      2: { "filled.ts": "export const filled = true;\n", "new.ts": "" },
+    });
     await press(named("button", "Changes"));
-    const [rewritten, added] = changesShown();
+    await expect
+      .poll(() => changeShown("filled.ts"))
+      .toContain("export const filled = true;");
+    /** The lines a file's change shows removed and added, as `-n` and `+n`, but none. */
+    const counts = (path: string): string[] =>
+      (changeShown(path).match(/[-+]\d+/gu) ?? []).filter(
+        (count) => count.slice(1) !== "0"
+      );
 
     expect({
-      rewritten: {
-        file: rewritten?.file,
-        tooMany: rewritten?.text.includes(
-          "Too many changes to show line by line"
-        ),
-        lines: rewritten?.lines.length,
-      },
-      added: {
-        file: added?.file,
-        lines: added?.lines.length,
-        allAdded: added?.lines.every((line) => line?.startsWith("+ // report")),
-        last: added?.lines.at(-1),
-      },
+      files: changedFiles(),
+      filled: counts("filled.ts"),
+      added: counts("new.ts"),
+      deleted: counts("gone.ts"),
     }).toStrictEqual({
-      rewritten: { file: "data.ts", tooMany: true, lines: 0 },
-      added: {
-        file: "report.ts",
-        lines: 2100,
-        allAdded: true,
-        last: "+ // report 2100",
+      files: ["filled.ts", "gone.ts", "new.ts"],
+      filled: ["+1"],
+      added: [],
+      deleted: [],
+    });
+  });
+
+  it("says a change too large to show line by line is so, and opens its file in Files", async () => {
+    await shown("builder", 1, largeVersions);
+    await press(named("button", "Changes"));
+    await expect.poll(() => changeShown("rows.ts")).toContain("+1100");
+    const changes = {
+      files: changedFiles(),
+      tooLarge: changeShown("data.ts").includes(
+        "This change is too large to show line by line."
+      ),
+      rewritten: holdsAll(changeShown("rows.ts"), ["-1100", "+1100"]),
+      added: changeShown("report.ts").includes("+2100"),
+    };
+    await press(
+      document
+        .querySelector('section[aria-label="data.ts"]')
+        ?.querySelector("button") ?? undefined
+    );
+    await expect.poll(codeShown).toContain("// new 1");
+
+    expect({ changes, open: openInTree() }).toStrictEqual({
+      changes: {
+        files: ["data.ts", "report.ts", "rows.ts"],
+        tooLarge: true,
+        rewritten: true,
+        added: true,
       },
+      open: "data.ts",
     });
   });
 });

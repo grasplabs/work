@@ -698,6 +698,10 @@ msgstr "{leadsHeard} von {leads}"
 msgid "{left, plural, one {# team here is not interviewed yet.} other {# teams here are not interviewed yet.}}"
 msgstr "{left, plural, one {# Team hier ist noch nicht interviewt.} other {# Teams hier sind noch nicht interviewt.}}"
 
+#: src/engines/app-code.tsx
+msgid "{lines, plural, one {# line} other {# lines}}"
+msgstr "{lines, plural, one {# Zeile} other {# Zeilen}}"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "{live} of {count}"
 msgstr "{live} von {count}"
@@ -1227,10 +1231,6 @@ msgstr "{total, plural, one {{count} von # Tool erlaubt} other {{count} von # To
 #: src/dashboard/runs-widget.tsx
 msgid "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 msgstr "{total, plural, one {Bei {withPerson} von # Lauf war die Entscheidung einer Person nötig.} other {Bei {withPerson} von # Läufen war die Entscheidung einer Person nötig.}}"
-
-#: src/engines/app-code.tsx
-msgid "{unchanged, plural, one {⋯ # unchanged line} other {⋯ # unchanged lines}}"
-msgstr "{unchanged, plural, one {⋯ # unveränderte Zeile} other {⋯ # unveränderte Zeilen}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{uninterviewed} of {total} not interviewed yet"
@@ -1958,7 +1958,6 @@ msgid "Add who answers"
 msgstr "Wer antwortet hinzufügen"
 
 #: src/chat/builds.tsx
-#: src/engines/app-code.tsx
 #: src/settings/package-approvers.tsx
 msgid "Added"
 msgstr "Hinzugefügt"
@@ -3385,7 +3384,6 @@ msgid "Change: {text}"
 msgstr "Ändern: {text}"
 
 #: src/chat/builds.tsx
-#: src/engines/app-code.tsx
 #: src/engines/app-data.tsx
 msgid "Changed"
 msgstr "Geändert"
@@ -3802,6 +3800,10 @@ msgctxt "an app's workspace view"
 msgid "Code"
 msgstr "Code"
 
+#: src/engines/app-code.tsx
+msgid "Code of {file}"
+msgstr "Code von {file}"
+
 #: src/chat/thread.tsx
 msgid "Code step"
 msgstr "Code-Schritt"
@@ -4189,6 +4191,7 @@ msgstr "Kopenhagen"
 #: src/chat/answer-markdown.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
+#: src/engines/app-code.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
@@ -4210,6 +4213,7 @@ msgid "Copy as Markdown"
 msgstr "Als Markdown kopieren"
 
 #: src/chat/answer-markdown.tsx
+#: src/engines/app-code.tsx
 msgid "Copy code"
 msgstr "Code kopieren"
 
@@ -4504,10 +4508,6 @@ msgstr "Diesen Workflow löschen"
 #: src/interview/closed.tsx
 msgid "Delete your interview?"
 msgstr "Ihr Interview löschen?"
-
-#: src/engines/app-code.tsx
-msgid "Deleted"
-msgstr "Gelöscht"
 
 #: src/engines/app-data.tsx
 msgctxt "a record was deleted"
@@ -6128,6 +6128,10 @@ msgstr "4 Sekunden gedrückt halten"
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
 msgstr "Stunden noch nicht bekannt"
+
+#: src/engines/app-code.tsx
+msgid "How changes are shown"
+msgstr "Wie Änderungen angezeigt werden"
 
 #: src/workflows/requests/request-plan.tsx
 msgid "How far back"
@@ -8125,10 +8129,6 @@ msgstr "Für diese Instanz ist noch kein Modell eingerichtet."
 msgid "No modules yet. A module holds calculations a task calls through a local binding."
 msgstr "Noch keine Module. Ein Modul enthält Berechnungen, die eine Aufgabe über eine lokale Bindung aufruft."
 
-#: src/engines/app-code.tsx
-msgid "No newline at end of file"
-msgstr "Kein Zeilenumbruch am Dateiende"
-
 #: src/engines/resource-bindings.tsx
 msgid "No other App serves every function it declares, public and exactly as declared."
 msgstr "Keine andere App bietet jede Funktion, die sie deklariert, öffentlich und genau wie deklariert."
@@ -8902,6 +8902,10 @@ msgstr "Einen Moment"
 msgid "One real case"
 msgstr "Ein echter Fall"
 
+#: src/engines/app-code.tsx
+msgid "Only a newline at the end of the file was added."
+msgstr "Nur ein Zeilenumbruch am Dateiende wurde hinzugefügt."
+
 #: src/settings/sign-in-settings.tsx
 msgid "Only accounts of the Google Workspace {hostedDomain}."
 msgstr "Nur Konten des Google Workspace {hostedDomain}."
@@ -8953,6 +8957,10 @@ msgstr "Nur wer im Workspace angemeldet ist, öffnet ihn."
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Nur der erste Weg"
+
+#: src/engines/app-code.tsx
+msgid "Only the newline at the end of the file was removed."
+msgstr "Nur der Zeilenumbruch am Dateiende wurde entfernt."
 
 #: src/knowledge/collection-markers.tsx
 msgid "Only the owner"
@@ -9059,6 +9067,10 @@ msgstr "Chat öffnen"
 msgid "Open external link?"
 msgstr "Externen Link öffnen?"
 
+#: src/engines/app-code.tsx
+msgid "Open file"
+msgstr "Geöffnete Datei"
+
 #: src/workflows/unapproved-start.tsx
 msgid "Open Files and apps"
 msgstr "Dateien und Apps öffnen"
@@ -9074,6 +9086,10 @@ msgstr "Im Chat öffnen"
 #: src/engines/app-chat.tsx
 msgid "Open in Chat"
 msgstr "Im Chat öffnen"
+
+#: src/engines/app-code.tsx
+msgid "Open in Files"
+msgstr "In Dateien öffnen"
 
 #: src/dashboard/widget-block.tsx
 msgid "Open in full"
@@ -11878,6 +11894,11 @@ msgstr "Quellen"
 msgid "Sparkles"
 msgstr "Funken"
 
+#: src/engines/app-code.tsx
+msgctxt "a diff's old and new lines side by side"
+msgid "Split"
+msgstr "Nebeneinander"
+
 #: src/workflows/workflow-diagram.tsx
 msgctxt "parts one under the other"
 msgid "Stacked"
@@ -13372,6 +13393,10 @@ msgstr "Das lässt sich nicht rückgängig machen. Bestätigen Sie bis {until} o
 msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
 msgstr "Diese Änderung wird erneut angewendet und lässt sich daher jetzt nicht verwerfen. Die Seite zeigt jetzt den aktuellen Stand."
 
+#: src/engines/app-code.tsx
+msgid "This change is too large to show line by line."
+msgstr "Diese Änderung ist zu groß, um sie Zeile für Zeile zu zeigen."
+
 #: src/engines/store-change-errors.ts
 msgid "This change was already abandoned."
 msgstr "Diese Änderung wurde bereits verworfen."
@@ -13767,10 +13792,6 @@ msgstr "Morgen"
 msgid "Too large to read"
 msgstr "Zu groß zum Lesen"
 
-#: src/engines/app-code.tsx
-msgid "Too many changes to show line by line"
-msgstr "Zu viele Änderungen, um sie Zeile für Zeile zu zeigen"
-
 #: src/screens/screen-files.ts
 msgid "Too many files are moving at once. Try again shortly."
 msgstr "Zu viele Dateien werden gerade übertragen. Versuchen Sie es gleich noch einmal."
@@ -13978,6 +13999,11 @@ msgstr "Rückgängig"
 #: src/settings/erasures.tsx
 msgid "Unfinished runs (stopped) and decision confirmations"
 msgstr "Unbeendete Ausführungen (gestoppt) und Entscheidungsbestätigungen"
+
+#: src/engines/app-code.tsx
+msgctxt "a diff's lines in one column"
+msgid "Unified"
+msgstr "Untereinander"
 
 #: src/activity/pending.tsx
 msgid "Unknown"

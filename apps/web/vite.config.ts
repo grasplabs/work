@@ -58,6 +58,12 @@ export default defineConfig({
       process.env.GITHUB_SHA ?? "local"
     ),
   },
+  build: {
+    // Fonts are always files of their own: Vite would inline the smallest
+    // (a few of JetBrains Mono's subsets) as `data:` URLs, which the page's
+    // CSP refuses (font-src is default-src, 'self'; core's security-headers.ts).
+    assetsInlineLimit: (file) => (file.endsWith(".woff2") ? false : undefined),
+  },
   test: {
     setupFiles: ["./src/test-setup.ts"],
   },

@@ -698,6 +698,10 @@ msgstr "{leadsHeard} of {leads}"
 msgid "{left, plural, one {# team here is not interviewed yet.} other {# teams here are not interviewed yet.}}"
 msgstr "{left, plural, one {# team here is not interviewed yet.} other {# teams here are not interviewed yet.}}"
 
+#: src/engines/app-code.tsx
+msgid "{lines, plural, one {# line} other {# lines}}"
+msgstr "{lines, plural, one {# line} other {# lines}}"
+
 #: src/dashboard/standard-widgets.tsx
 msgid "{live} of {count}"
 msgstr "{live} of {count}"
@@ -1227,10 +1231,6 @@ msgstr "{total, plural, one {{count} of its # tool allowed} other {{count} of it
 #: src/dashboard/runs-widget.tsx
 msgid "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
 msgstr "{total, plural, one {{withPerson} of # run asked a person for a decision.} other {{withPerson} of # runs asked a person for a decision.}}"
-
-#: src/engines/app-code.tsx
-msgid "{unchanged, plural, one {⋯ # unchanged line} other {⋯ # unchanged lines}}"
-msgstr "{unchanged, plural, one {⋯ # unchanged line} other {⋯ # unchanged lines}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{uninterviewed} of {total} not interviewed yet"
@@ -1958,7 +1958,6 @@ msgid "Add who answers"
 msgstr "Add who answers"
 
 #: src/chat/builds.tsx
-#: src/engines/app-code.tsx
 #: src/settings/package-approvers.tsx
 msgid "Added"
 msgstr "Added"
@@ -3385,7 +3384,6 @@ msgid "Change: {text}"
 msgstr "Change: {text}"
 
 #: src/chat/builds.tsx
-#: src/engines/app-code.tsx
 #: src/engines/app-data.tsx
 msgid "Changed"
 msgstr "Changed"
@@ -3802,6 +3800,10 @@ msgctxt "an app's workspace view"
 msgid "Code"
 msgstr "Code"
 
+#: src/engines/app-code.tsx
+msgid "Code of {file}"
+msgstr "Code of {file}"
+
 #: src/chat/thread.tsx
 msgid "Code step"
 msgstr "Code step"
@@ -4189,6 +4191,7 @@ msgstr "Copenhagen"
 #: src/chat/answer-markdown.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
+#: src/engines/app-code.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
@@ -4210,6 +4213,7 @@ msgid "Copy as Markdown"
 msgstr "Copy as Markdown"
 
 #: src/chat/answer-markdown.tsx
+#: src/engines/app-code.tsx
 msgid "Copy code"
 msgstr "Copy code"
 
@@ -4504,10 +4508,6 @@ msgstr "Delete this workflow"
 #: src/interview/closed.tsx
 msgid "Delete your interview?"
 msgstr "Delete your interview?"
-
-#: src/engines/app-code.tsx
-msgid "Deleted"
-msgstr "Deleted"
 
 #: src/engines/app-data.tsx
 msgctxt "a record was deleted"
@@ -6128,6 +6128,10 @@ msgstr "Hold for 4 seconds"
 #: src/brain/thinking/work-hours.tsx
 msgid "Hours not known yet"
 msgstr "Hours not known yet"
+
+#: src/engines/app-code.tsx
+msgid "How changes are shown"
+msgstr "How changes are shown"
 
 #: src/workflows/requests/request-plan.tsx
 msgid "How far back"
@@ -8125,10 +8129,6 @@ msgstr "No model is set up for this deployment yet."
 msgid "No modules yet. A module holds calculations a task calls through a local binding."
 msgstr "No modules yet. A module holds calculations a task calls through a local binding."
 
-#: src/engines/app-code.tsx
-msgid "No newline at end of file"
-msgstr "No newline at end of file"
-
 #: src/engines/resource-bindings.tsx
 msgid "No other App serves every function it declares, public and exactly as declared."
 msgstr "No other App serves every function it declares, public and exactly as declared."
@@ -8902,6 +8902,10 @@ msgstr "One moment"
 msgid "One real case"
 msgstr "One real case"
 
+#: src/engines/app-code.tsx
+msgid "Only a newline at the end of the file was added."
+msgstr "Only a newline at the end of the file was added."
+
 #: src/settings/sign-in-settings.tsx
 msgid "Only accounts of the Google Workspace {hostedDomain}."
 msgstr "Only accounts of the Google Workspace {hostedDomain}."
@@ -8953,6 +8957,10 @@ msgstr "Only someone signed in to the workspace opens it."
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Only the first way"
+
+#: src/engines/app-code.tsx
+msgid "Only the newline at the end of the file was removed."
+msgstr "Only the newline at the end of the file was removed."
 
 #: src/knowledge/collection-markers.tsx
 msgid "Only the owner"
@@ -9059,6 +9067,10 @@ msgstr "Open Chat"
 msgid "Open external link?"
 msgstr "Open external link?"
 
+#: src/engines/app-code.tsx
+msgid "Open file"
+msgstr "Open file"
+
 #: src/workflows/unapproved-start.tsx
 msgid "Open Files and apps"
 msgstr "Open Files and apps"
@@ -9074,6 +9086,10 @@ msgstr "Open in chat"
 #: src/engines/app-chat.tsx
 msgid "Open in Chat"
 msgstr "Open in Chat"
+
+#: src/engines/app-code.tsx
+msgid "Open in Files"
+msgstr "Open in Files"
 
 #: src/dashboard/widget-block.tsx
 msgid "Open in full"
@@ -11878,6 +11894,11 @@ msgstr "Sources"
 msgid "Sparkles"
 msgstr "Sparkles"
 
+#: src/engines/app-code.tsx
+msgctxt "a diff's old and new lines side by side"
+msgid "Split"
+msgstr "Split"
+
 #: src/workflows/workflow-diagram.tsx
 msgctxt "parts one under the other"
 msgid "Stacked"
@@ -13372,6 +13393,10 @@ msgstr "This can't be undone. Confirm by {until}, or prepare it again."
 msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
 msgstr "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
 
+#: src/engines/app-code.tsx
+msgid "This change is too large to show line by line."
+msgstr "This change is too large to show line by line."
+
 #: src/engines/store-change-errors.ts
 msgid "This change was already abandoned."
 msgstr "This change was already abandoned."
@@ -13767,10 +13792,6 @@ msgstr "Tomorrow"
 msgid "Too large to read"
 msgstr "Too large to read"
 
-#: src/engines/app-code.tsx
-msgid "Too many changes to show line by line"
-msgstr "Too many changes to show line by line"
-
 #: src/screens/screen-files.ts
 msgid "Too many files are moving at once. Try again shortly."
 msgstr "Too many files are moving at once. Try again shortly."
@@ -13978,6 +13999,11 @@ msgstr "Undo"
 #: src/settings/erasures.tsx
 msgid "Unfinished runs (stopped) and decision confirmations"
 msgstr "Unfinished runs (stopped) and decision confirmations"
+
+#: src/engines/app-code.tsx
+msgctxt "a diff's lines in one column"
+msgid "Unified"
+msgstr "Unified"
 
 #: src/activity/pending.tsx
 msgid "Unknown"

@@ -19,6 +19,11 @@ import {
   CommandList,
 } from "@grasp-os/ui/components/command";
 import {
+  FileTree,
+  FileTreeFile,
+  FileTreeFolder,
+} from "@grasp-os/ui/components/file-tree";
+import {
   NavigationMenu,
   NavigationMenuContent,
   NavigationMenuItem,
@@ -60,7 +65,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
-import { BookOpenIcon, MessagesSquareIcon } from "lucide-react";
+import { BookOpenIcon, FileCodeIcon, MessagesSquareIcon } from "lucide-react";
 import { useState } from "react";
 
 const BreadcrumbDemo = () => (
@@ -247,10 +252,40 @@ const TabsDemo = () => (
   </Tabs>
 );
 
+const FileTreeDemo = () => {
+  const [open, setOpen] = useState("server/invoices.ts");
+  const file = (path: string, name: string) => (
+    <FileTreeFile
+      active={open === path}
+      icon={<FileCodeIcon />}
+      onClick={() => {
+        setOpen(path);
+      }}
+    >
+      {name}
+    </FileTreeFile>
+  );
+  return (
+    <nav aria-label="Files" className="w-56">
+      <FileTree>
+        <FileTreeFolder defaultOpen name="server">
+          {file("server/invoices.ts", "invoices.ts")}
+          {file("server/schema.ts", "schema.ts")}
+        </FileTreeFolder>
+        <FileTreeFolder name="screens">
+          {file("screens/inbox.tsx", "inbox.tsx")}
+        </FileTreeFolder>
+        {file("app.ts", "app.ts")}
+      </FileTree>
+    </nav>
+  );
+};
+
 export const navigationDemos = {
   "brand-header": BrandHeaderDemo,
   breadcrumb: BreadcrumbDemo,
   command: CommandDemo,
+  "file-tree": FileTreeDemo,
   "navigation-menu": NavigationMenuDemo,
   "page-sidebar": PageSidebarDemo,
   pagination: PaginationDemo,
