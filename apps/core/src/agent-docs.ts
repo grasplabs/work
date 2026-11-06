@@ -6,8 +6,6 @@ import {
   docsSearchIndexFile,
 } from "@grasp-os/shared/docs";
 import type { DocsPage } from "@grasp-os/shared/docs";
-import { sharedRun } from "@grasp-os/shared/shared-runs";
-import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import { create, insertMultiple, search } from "@orama/orama";
 import { z } from "zod";
 
@@ -30,7 +28,8 @@ import { docsPath } from "./security-headers.ts";
 // chat shares ends, which the gateway caches apart (prompt-cache.ts). The
 // rest, the API reference above all, the agent finds with `searchDocs`
 // and reads with `readDocs`, from the release's own docs among core's
-// static files, the files docs.ts serves.
+// static files, the files docs.ts serves, read at each call: no chat
+// shares a cache or anything else of another's.
 
 /** The docs section of the system prompt: the guides, and how to read on. */
 export const docsSection = [
@@ -58,7 +57,11 @@ const indexOf = async (pages: readonly DocsPage[]) => {
   return index;
 };
 
-const loadDocs = async (assets: Fetcher) => {
+/**
+ * The release's docs' pages, read from its static files at each call:
+ * nothing of one chat's reads is kept for another's.
+ */
+const pagesOf = async (assets: Fetcher): Promise<DocsPage[]> => {
   const response = await assets.fetch(assetUrl(docsSearchIndexFile));
   // A file the release lacks answers with the frontend's page.
   const isJson =
@@ -71,37 +74,7 @@ const loadDocs = async (assets: Fetcher) => {
   if (!pages.success) {
     throw new Error(unreadable);
   }
-  return { pages: pages.data, index: await indexOf(pages.data) };
-};
-
-type Docs = Awaited<ReturnType<typeof loadDocs>>;
-
-/**
- * The release's docs, once read: the release's static files never change
- * under an isolate. Kept only once read, never as a pending promise.
- */
-let releaseDocs: Docs | undefined;
-
-/**
- * Reads under way, which the requests that come meanwhile share
- * (`sharedRun`), each going on in its own context once it settles.
- */
-const docsReads = new Map<string, SharedRun<Docs>>();
-
-/**
- * The longest a read of the docs' index, and its indexing, may take
- * before the requests waiting on it take it for abandoned and read again.
- */
-const docsReadMs = 10_000;
-
-const docsOf = async (assets: Fetcher): Promise<Docs> => {
-  releaseDocs ??= await sharedRun(
-    docsReads,
-    docsSearchIndexFile,
-    docsReadMs,
-    async () => await loadDocs(assets)
-  );
-  return releaseDocs;
+  return pages.data;
 };
 
 /** A page's Markdown, refused when the static files answer with the frontend's page instead. */
@@ -239,8 +212,8 @@ export const searchDocs = (
   },
   executionMode: "parallel",
   execute: async (_toolCallId, { query }) => {
-    const { index } = await docsOf(assets);
-    const { hits } = await search<Docs["index"], DocsPage>(index, {
+    const index = await indexOf(await pagesOf(assets));
+    const { hits } = await search<typeof index, DocsPage>(index, {
       term: query,
       properties: ["title", "description", "content"],
       boost: { title: 3, description: 2 },
@@ -302,7 +275,7 @@ export const readDocs = (
   },
   executionMode: "parallel",
   execute: async (_toolCallId, { path, fromLine, toLine }) => {
-    const { pages } = await docsOf(assets);
+    const pages = await pagesOf(assets);
     // Only a page the docs list, by its own file: never another of core's
     // static files.
     const route = docsRoute(path);
