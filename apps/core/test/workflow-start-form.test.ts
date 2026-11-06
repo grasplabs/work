@@ -183,15 +183,18 @@ describe("starting an independent workflow by hand", () => {
       properties: form.input?.properties,
       // Uma, a user, picks from everyone, by name and ID alone.
       offersAda: form.people?.people.find(({ id }) => id === ada.userId),
-      // Each read on the record: how many, never whom.
-      recorded: recorded.map(({ action, actor, target, detail }) => ({
-        action,
-        actor,
-        target,
-        counts:
-          detail.people === form.people?.people.length &&
-          detail.teams === form.people?.teams.length,
-      })),
+      // Each read on the record: how many, never whom. Only this
+      // workflow's: runs elsewhere in the worker record their steps too.
+      recorded: recorded
+        .filter(({ target }) => target?.id === workflow.id)
+        .map(({ action, actor, target, detail }) => ({
+          action,
+          actor,
+          target,
+          counts:
+            detail.people === form.people?.people.length &&
+            detail.teams === form.people?.teams.length,
+        })),
       teams: Array.isArray(form.people?.teams),
       person: await startWith(`person:${ada.userId}`),
       role: await startWith("role:admin"),
