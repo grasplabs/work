@@ -35,6 +35,11 @@ on:
       stage:
         type: string
         required: true
+    outputs:
+      # "true" when the run's commit is still main's head (head, below):
+      # CI publishes the commit's release only then.
+      current:
+        value: ${{ jobs.head.outputs.current }}
   workflow_dispatch:
     inputs:
       stage:
@@ -51,13 +56,16 @@ permissions:
   contents: read
 
 jobs:
-  # From CI only (a push to main): deploys only main's head. A rerun of an
-  # older push keeps that push's commit, and deploying it would roll the
-  # platform back under newer releases; it skips the deploy instead and
-  # succeeds, so its publish-release runs as before. Main's head, not
-  # "not older than what's deployed": the newest push deploys anyway, and
-  # nothing records what's deployed. A run by hand deploys whatever commit
-  # of main it was started on, on purpose.
+  # From CI only (a push to main): deploys only main's head. A push that
+  # main has moved past, whether a newer push landed while it built or it
+  # is a rerun of an older one, deploys nothing, and CI publishes nothing
+  # for it either (the `current` output): deploying it would roll the
+  # platform back under newer releases, and publishing it would let the
+  # old admin roll out a release without its platform. The newer push
+  # deploys and publishes everything, since a release is a build of all of
+  # main. Main's head, not "not older than what's deployed": the newest
+  # push deploys anyway, and nothing records what's deployed. A run by
+  # hand deploys whatever commit of main it was started on, on purpose.
   head:
     name: head
     if: github.event_name == 'push'

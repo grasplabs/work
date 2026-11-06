@@ -652,7 +652,10 @@ jobs:
   publish-release:
     name: publish-release
     needs: [release, deploy-platform]
-    if: github.event_name == 'push'
+    # Only for main's head, together with its platform deploy: a push main
+    # has moved past publishes nothing, and the newer push's release carries
+    # its changes (Deploy platform, `head`).
+    if: github.event_name == 'push' && needs.deploy-platform.outputs.current == 'true'
     # It holds the staging 1Password token: GitHub-hosted runners only, so
     # no secret leaves GitHub's machines.
     runs-on: ubuntu-latest
