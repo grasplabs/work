@@ -14,17 +14,17 @@ import type { LogFields } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { AppErrorPayload } from "@grasp-os/shared/operations";
-import { portableFunctionPath } from "@grasp-os/shared/portable";
-import type { Identity } from "@grasp-os/shared/rpc";
 import {
   appFunctionPath,
   jsonBytes,
-  screenErrors,
-  screenLeaseHeader,
-  screenLimits,
+  pageErrors,
+  pageLeaseHeader,
+  pageLimits,
   streamCallActions,
-} from "@grasp-os/shared/screens";
-import type { StreamCallAction } from "@grasp-os/shared/screens";
+} from "@grasp-os/shared/pages";
+import type { StreamCallAction } from "@grasp-os/shared/pages";
+import { portableFunctionPath } from "@grasp-os/shared/portable";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { idempotencyKeySchema } from "@grasp-os/shared/submissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 
@@ -34,7 +34,7 @@ import {
   invocationName,
 } from "./action-invocation.ts";
 import {
-  callScreenFunction,
+  callPageFunction,
   readFunctionRequest,
   refusalOf,
 } from "./app-functions.ts";
@@ -45,20 +45,20 @@ import type { TokenCheck } from "./auth/app-tokens.ts";
 import { identify, identifyFull } from "./auth/identity.ts";
 import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
-import { requireNotRevoked } from "./release-runner.ts";
-import { isOwnOrigin } from "./rpc.ts";
 import {
   delivering,
   leasedBuild,
   personRefusal,
   requireDelivery,
-} from "./screen-delivery.ts";
-import type { LeasedBuild } from "./screen-delivery.ts";
-import { isWorkflowRequest } from "./screen-workflows.ts";
-import { admitted, admitWindow, windowCharger } from "./screens-rpc.ts";
+} from "./page-delivery.ts";
+import type { LeasedBuild } from "./page-delivery.ts";
+import { isWorkflowRequest } from "./page-workflows.ts";
+import { admitted, admitWindow, windowCharger } from "./pages-rpc.ts";
+import { requireNotRevoked } from "./release-runner.ts";
+import { isOwnOrigin } from "./rpc.ts";
 import { auditStaffRoute, routeMember } from "./staff-audit.ts";
 
-// A running App's screen calling one of its App's functions (spec 32.6):
+// A running App's page calling one of its App's functions (spec 32.6):
 // `POST /api/app-functions/<app>`, the request as the body, the frame's
 // lease in a header. A plain request, not the page's WebSocket, so the
 // request's bytes are bounded as they are read, before anything parses
@@ -73,11 +73,11 @@ import { auditStaffRoute, routeMember } from "./staff-audit.ts";
 //   another site can send without a preflight core never answers.
 // - Someone without a role in the App, or who lost it: the session is read
 //   on every request, the role checked by the call itself
-//   (`callScreenFunction`), and the App named only by the path. A
+//   (`callPageFunction`), and the App named only by the path. A
 //   paginated list's window is read as the person too (query-windows.ts).
 // - The page's frame was opened for one person and the browser's cookie
 //   is now someone else's (they signed in in another tab): the page names
-//   the person its frame is for (`screenPersonHeader`), and a call whose
+//   the person its frame is for (`pagePersonHeader`), and a call whose
 //   session is anyone else's is refused before it is counted or read
 //   (`personRefusal`), so what the frame sends again, such as a save
 //   under an idempotency key whose answer was lost, never runs as them.
@@ -88,12 +88,12 @@ import { auditStaffRoute, routeMember } from "./staff-audit.ts";
 //   answer. No lease is code core didn't serve: refused unless the App's
 //   data is `ordinary` (data-policy.ts).
 // - A flood: each request counts against the person's requests of the
-//   App's screens (`admitted`), before its body is read; a paginated
+//   App's pages (`admitted`), before its body is read; a paginated
 //   list's window counts one more for every page past its first
 //   (`admitWindow`), and every page past what it paid for is charged as
 //   it is read (`windowCharger`).
 // - An answer larger than a frame takes: refused here
-//   (`screen.answer_too_large`), as a call of the App's server is.
+//   (`page.answer_too_large`), as a call of the App's server is.
 //
 // A portable host (spec 10.7.1: the App's UI outside Grasp's shell, a
 // native app or another site) calls the same functions at
@@ -111,12 +111,12 @@ import { auditStaffRoute, routeMember } from "./staff-audit.ts";
 //   preflight.
 // - Which code gets the data: no build core leased, since core doesn't
 //   deliver the host's code, which has all the network its browser or app
-//   gives it. It runs as a screen without a lease does: only when an admin
+//   gives it. It runs as a page without a lease does: only when an admin
 //   classified the App's data `ordinary` (accepting that it goes to code
 //   Grasp didn't serve, data-policy.ts), never once the release of the
 //   App's current version is revoked; checked before the call and again
-//   before its answer, and a refusal recorded (screen-delivery.ts).
-// - The budget: the same as the person's screens of that App, so a token
+//   before its answer, and a refusal recorded (page-delivery.ts).
+// - The budget: the same as the person's pages of that App, so a token
 //   adds no requests to it.
 //
 // A streaming action (spec 10.7.6) goes through the same admission, at
@@ -143,10 +143,10 @@ import { auditStaffRoute, routeMember } from "./staff-audit.ts";
 // again. Every resend is admitted exactly as a start is, the person's
 // access fingerprinted again (`accessOf`), the build's delivery checked
 // before the run and again before its answer. A portable host's action
-// goes the same way, its token checked again where a screen's session is.
+// goes the same way, its token checked again where a page's session is.
 
-/** How long a screen waits for a function's answer. */
-const screenCallMs = 30_000;
+/** How long a page waits for a function's answer. */
+const pageCallMs = 30_000;
 
 /** The App ID after `base` in `pathname`, if it is one of base's paths. */
 export const appAfter = (
@@ -197,7 +197,7 @@ const functionStreamCall = (
 
 /** The status a refusal before the call answers with. */
 export const statusOf = (code: string): number => {
-  if (code === "screen.rate_limited") {
+  if (code === "page.rate_limited") {
     return 429;
   }
   if (code === "request.timeout") {
@@ -211,8 +211,8 @@ export const statusOf = (code: string): number => {
 
 /** `answer`, unless it is more than a frame takes in one call. */
 const withinFrame = (answer: FunctionAnswer): FunctionAnswer => {
-  if (jsonBytes(answer, screenLimits.answerBytes) > screenLimits.answerBytes) {
-    throw screenErrors.create("screen.answer_too_large");
+  if (jsonBytes(answer, pageLimits.answerBytes) > pageLimits.answerBytes) {
+    throw pageErrors.create("page.answer_too_large");
   }
   return answer;
 };
@@ -463,7 +463,7 @@ const keyedAnswer = async (
     operation,
     stage: "admission",
   });
-  // A screen's form, told to the App's webhooks once the run succeeds,
+  // A page's form, told to the App's webhooks once the run succeeds,
   // named as its own release resolves it (action-invocation.ts); a
   // portable host's is not.
   const tellsForm = caller.portableSession === undefined;
@@ -510,13 +510,13 @@ const keyedAnswer = async (
     }
     return { ...answer, result: { ok: false, error: withheld(error, key) } };
   }
-  if (jsonBytes(answer, screenLimits.answerBytes) <= screenLimits.answerBytes) {
+  if (jsonBytes(answer, pageLimits.answerBytes) <= pageLimits.answerBytes) {
     return answer;
   }
-  // The action ran, and its receipt holds an answer larger than a screen
-  // takes: what it did is unknown to the screen, not refused.
+  // The action ran, and its receipt holds an answer larger than a page
+  // takes: what it did is unknown to the page, not refused.
   const refusal = refusalOf(
-    screenErrors.create("screen.answer_too_large"),
+    pageErrors.create("page.answer_too_large"),
     crypto.randomUUID()
   );
   return {
@@ -570,7 +570,7 @@ const boundedCall = async (
     }
     const text = new TextDecoder().decode(body);
     // A portable host's App token, from any origin and with no build core
-    // leased, starts and controls no run (screen-workflows.ts): refused
+    // leased, starts and controls no run (page-workflows.ts): refused
     // until that is decided on its own (GRA-626).
     if (portableSession !== undefined && isWorkflowRequest(text)) {
       return Response.json({
@@ -606,15 +606,15 @@ const boundedCall = async (
       operation,
       async () =>
         withinFrame(
-          await callScreenFunction(
+          await callPageFunction(
             env,
             person,
             id,
             text,
-            Date.now() + screenCallMs,
+            Date.now() + pageCallMs,
             windowCharger(env, person, id),
             // No form a portable host sends is told to the App's webhooks.
-            // A screen's keyed mutation commits its form with its writes.
+            // A page's keyed mutation commits its form with its writes.
             portableSession === undefined ? { tellsForm: true } : {}
           )
         )
@@ -626,8 +626,8 @@ const boundedCall = async (
 };
 
 /**
- * The refusal of a screen's call whose frame names someone other than
- * the person signed in (`screenPersonHeader`, see the header), or none:
+ * The refusal of a page's call whose frame names someone other than
+ * the person signed in (`pagePersonHeader`, see the header), or none:
  * a streaming action's calls as much as a plain call.
  */
 const personRefused = (
@@ -652,7 +652,7 @@ const personRefused = (
 
 /**
  * `POST /api/app-functions/<app>`: calls a function of the App for the
- * person signed in, as their screen running the build its lease names
+ * person signed in, as their page running the build its lease names
  * (see the header). Answers the call's `FunctionAnswer`, whatever its
  * result; a refusal before the call as an error response.
  */
@@ -702,7 +702,7 @@ export const appFunctionResponse = async (
     {
       person,
       // A missing lease is no build: code core didn't serve.
-      lease: request.headers.get(screenLeaseHeader),
+      lease: request.headers.get(pageLeaseHeader),
       operation: "call",
       current: async () => await identifyFull(env, request.headers),
     },
@@ -845,7 +845,7 @@ interface AdmittedCall {
 }
 
 /**
- * What every call of a screen's passes before anything reads its body
+ * What every call of a page's passes before anything reads its body
  * (see the header): the method, the origin, JSON, a session, the
  * person's rate, the body bounded and the lease read. A refusal as the
  * response to answer.
@@ -909,7 +909,7 @@ const admitCall = async (
     env,
     person.userId,
     id,
-    request.headers.get(screenLeaseHeader)
+    request.headers.get(pageLeaseHeader)
   );
   return { person, id, body: new TextDecoder().decode(body), build };
 };
@@ -917,7 +917,7 @@ const admitCall = async (
 /**
  * How often a stream's relay checks again that its person is signed in,
  * with the role and teams the stream started under, and that the
- * screen's build still gets the App's data: on a timer, whether frames
+ * page's build still gets the App's data: on a timer, whether frames
  * come or not, and before the result whatever the time.
  */
 const streamRecheckMs = 5000;
@@ -974,9 +974,9 @@ interface RelayOf {
 }
 
 /**
- * The invocation's frames as the screen gets them (see the header): each
+ * The invocation's frames as the page gets them (see the header): each
  * line passed on as it is read, the result only after a check of its own
- * and within what a screen takes in one answer, and the person and the
+ * and within what a page takes in one answer, and the person and the
  * build checked again every `streamRecheckMs` meanwhile, frames or not.
  * A refusal ends the relay with a `refused` line carrying it, and cancels
  * the invocation at once.
@@ -1032,7 +1032,7 @@ const relay = (
             );
             controller.close();
           } catch {
-            // The screen dropped the stream already: nobody reads the
+            // The page dropped the stream already: nobody reads the
             // refusal, but the invocation is cancelled all the same.
           }
           await finish();
@@ -1101,10 +1101,10 @@ const relay = (
           await refuse?.(error);
           return;
         }
-        // As a plain call's answer: no more than a screen takes in one.
+        // As a plain call's answer: no more than a page takes in one.
         const fits =
-          jsonBytes(frame.result, screenLimits.answerBytes) <=
-          screenLimits.answerBytes;
+          jsonBytes(frame.result, pageLimits.answerBytes) <=
+          pageLimits.answerBytes;
         const out = fits
           ? line
           : JSON.stringify({
@@ -1113,7 +1113,7 @@ const relay = (
               result: {
                 ok: false,
                 error: refusalOf(
-                  screenErrors.create("screen.answer_too_large"),
+                  pageErrors.create("page.answer_too_large"),
                   requestId
                 ),
               },
@@ -1145,7 +1145,7 @@ const streamRequestOf = (
 /**
  * `POST /api/app-functions/<app>/<stream | attach | cancel>`: one of the
  * App's streaming actions (spec 10.7.6), for the person signed in, as
- * their screen running the build its lease names, each admitted as a
+ * their page running the build its lease names, each admitted as a
  * start is, against the person's role now. `stream` starts the
  * invocation its key names (or joins it, with the same input) and
  * `attach` reads it again without ever starting it, each answering its
@@ -1221,7 +1221,7 @@ const appStreamResponse = async (
 };
 
 /**
- * The response to `request` when `pathname` is a screen's call of one of
+ * The response to `request` when `pathname` is a page's call of one of
  * its App's functions: a call (`<path>/<app>`) or one of a streaming
  * action's (`<path>/<app>/<stream | attach | cancel>`); undefined for any
  * other path.

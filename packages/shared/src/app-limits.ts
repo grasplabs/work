@@ -25,10 +25,15 @@ export const appLimits = {
 
 /**
  * One folder or file name in an App's path (`appPathSchema`): letters,
- * digits, `_`, `-` and `.`, not starting with a `.`. That rules out `.`
- * and `..`, so a path can't step out of the App, and hidden files.
+ * digits, `_`, `-`, `$`, `(`, `)` and `.`, not starting with a `.`. That
+ * rules out `.` and `..`, so a path can't step out of the App, and hidden
+ * files; a name never holds a `/`. The rest is how TanStack Router names
+ * its file routes: `$` a parameter (`tasks.$taskId.tsx`), a leading `_`
+ * a pathless layout (`_layout.inbox.tsx`), a trailing one a route out of
+ * its parent's layout (`tasks_.new.tsx`), and `(…)` a route group, a
+ * folder that adds nothing to the address (`(admin)/settings.tsx`).
  */
-export const appPathSegmentPattern = /^[\w-][\w.-]*$/u;
+export const appPathSegmentPattern = /^[\w$()-][\w.$()-]*$/u;
 
 /**
  * The most bytes of an App's manifest's text, as UTF-8, checked before it

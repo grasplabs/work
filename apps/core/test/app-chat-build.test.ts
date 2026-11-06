@@ -22,7 +22,7 @@ import { signedInApi, unique } from "./sign-in.ts";
 // reference isn't there to read, so the model guesses the shapes; the
 // generated config is written by hand, past the definition; a tool, a
 // check or a call answers only that something failed, never where or
-// why; and an App that should pass never gets a draft with its screen.
+// why; and an App that should pass never gets a draft with its page.
 
 const idp = mockIdp();
 
@@ -78,20 +78,15 @@ export const move = mutation({
 });
 `;
 
-/** The board's screens. */
-const screens = `export default {
-  screens: [{ name: "board", path: "/", source: "screens/board.tsx" }],
-};
-`;
-
 /** A config written by hand, as a model that guessed would write it. */
 const handwritten = `import { defineApp } from "@grasp-os/sdk";
 
 export default defineApp({ name: "Board" });
 `;
 
-/** The board's one screen: four columns of cards. */
-const screen = `import { useMutation, useQuery } from "@grasp-os/sdk/react";
+/** The board's one page: four columns of cards. */
+const page = `import { createFileRoute } from "@tanstack/react-router";
+import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
@@ -160,7 +155,7 @@ const Board = () => {
   );
 };
 
-export default Board;
+export const Route = createFileRoute("/")({ component: Board });
 `;
 
 /** The board's operations with a type error on their line 16. */
@@ -182,7 +177,7 @@ const checking = (app: string) => `export default async (self, env) => {
     passed: check.passed,
     server: check.server.status,
     diagnostics: check.server.diagnostics.map(({ file, line, message }) => ({ file, line, message })),
-    screens: check.screens.status,
+    pages: check.pages.status,
     called,
   };
 };`;
@@ -198,8 +193,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
     const code = {
       "values.ts": values,
       "server/cards.ts": mistyped,
-      "screens.ts": screens,
-      "screens/board.tsx": screen,
+      "src/routes/index.tsx": page,
     };
     const { stub } = await personalChatsOf(
       builder.userId,
@@ -289,7 +283,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       passed: true,
       server: "ok",
       diagnostics: [],
-      screens: "ok",
+      pages: "ok",
       called: { ok: true, answer: [] },
     });
     expect(
@@ -300,10 +294,9 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
         changed: [
           "definition.json",
           "grasp.config.ts",
-          "screens.ts",
-          "screens/board.tsx",
           "server/cards.ts",
           "server/schema.ts",
+          "src/routes/index.tsx",
           "values.ts",
         ],
       },

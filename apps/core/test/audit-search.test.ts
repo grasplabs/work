@@ -451,6 +451,47 @@ describe("audit log export", () => {
     ]);
   });
 
+  it("finds an App's events stored when its pages were screens, by actor, action and target, as its page's", async () => {
+    const { api } = await signedInApi(idp, "admin");
+    const targetId = `screen-${unique()}`;
+    const appId = crypto.randomUUID();
+    // As a release before an App's pages were file routes stored it.
+    const older = {
+      ...event({
+        action: "app.directory.read",
+        target: { type: "directory", id: targetId },
+      }),
+      actor: { type: "app", appId, part: "screen" },
+    };
+    const stored = canonicalJson(older);
+    await appendStored(auditLog(env), stored, older.id);
+    const found = async (filter: AuditFilter) => {
+      const records = await searchAll(api, { targetId, ...filter });
+      return records.map((record) => ({
+        id: record.event?.id,
+        actor: record.event?.actor,
+      }));
+    };
+    const asPage = [
+      { id: older.id, actor: { type: "app", appId, part: "page" } },
+    ];
+
+    await expect(
+      Promise.all([
+        found({ actorType: "app" }),
+        found({ action: "app.directory" }),
+        found({}),
+      ])
+    ).resolves.toStrictEqual([asPage, asPage, asPage]);
+    // Exported as it was stored, its place in the chain verified.
+    const document = exportSchema.parse(
+      JSON.parse(await exported(api, { targetId }, "json"))
+    );
+    expect(document.records).toMatchObject([
+      { eventJson: stored, verified: true },
+    ]);
+  });
+
   it("reports the last full verification with the export", async () => {
     const { api } = await signedInApi(idp, "admin");
     await expect(verifyAll(api)).resolves.toMatchObject({ ok: true });

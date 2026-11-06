@@ -31,7 +31,7 @@ import { signedInApi } from "./sign-in.ts";
 
 // A chat's preview of its draft of an App of spec 8's layout
 // (sealed-previews.ts): the draft sealed into a draft release, and every
-// call of its screens, its live queries and the chat's agent run on it
+// call of its pages, its live queries and the chat's agent run on it
 // through the operation host, on a store of the preview's own. These
 // tests start from the ways it can fail (the threat model on GRA-652):
 // the draft reads or writes the App's data, reaches an outside system,
@@ -132,9 +132,12 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     await release(builder, id, deskFiles());
     const app = appIdSchema.parse(id);
     const { chatId, revision } = await chatWithDraft(builder, app, {
-      "screens/desk.tsx": `export default function Desk() {
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
+function Desk() {
   return <main>Drafted desk</main>;
 }
+export const Route = createFileRoute("/")({ component: Desk });
 `,
     });
     const answered = outcome(
@@ -177,9 +180,12 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     await release(builder, id, deskFiles());
     const app = appIdSchema.parse(id);
     const { chatId, revision } = await chatWithDraft(builder, app, {
-      "screens/desk.tsx": `export default function Desk() {
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
+function Desk() {
   return <main>Drafted desk</main>;
 }
+export const Route = createFileRoute("/")({ component: Desk });
 `,
     });
     const at = { chatId, app, revision };
@@ -305,7 +311,8 @@ describe("a draft's preferences in its preview", { timeout: 180_000 }, () => {
     const builder = await signedInApi(idp, "builder");
     const first = await deskDraft(builder);
     const second = await chatWithDraft(builder, first.app, {
-      "screens/desk.tsx": deskFiles("Elsewhere")["screens/desk.tsx"] ?? "",
+      "src/routes/index.tsx":
+        deskFiles("Elsewhere")["src/routes/index.tsx"] ?? "",
     });
     const secondAt = { ...second, app: first.app };
     await preferenceCall(builder, first, "update", {
@@ -316,10 +323,18 @@ describe("a draft's preferences in its preview", { timeout: 180_000 }, () => {
     const elsewhere = await preferenceCall(builder, secondAt, "get", {});
     // The draft's server code changes: its preview, and the store holding
     // its preferences, go; the next revision starts from the defaults. (A
-    // write of its screens alone keeps them: preview-hot-updates.test.ts.)
+    // write of its pages alone keeps them: preview-hot-updates.test.ts.)
     const next = await first.write(
       {
-        "screens.ts": `${deskFiles()["screens.ts"] ?? ""}// Again\n`,
+        "server/again.ts": `import { v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
+
+export const again = query({
+  args: {},
+  returns: v.null(),
+  handler: async () => null,
+});
+`,
       },
       first.revision
     );

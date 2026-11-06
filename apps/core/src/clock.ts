@@ -35,11 +35,11 @@ import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
 import { checkReadings } from "./onboarding/documents.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
+import { sweepPageFrames } from "./page-frame.ts";
+import { sweepBuilds } from "./pages.ts";
 import { retryErasures } from "./person-erasure.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
-import { sweepScreenFrames } from "./screen-frame.ts";
-import { sweepBuilds } from "./screens.ts";
 import { sweepPreviewStores } from "./sealed-previews.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
 import { sendStephenSummaries } from "./stephen-summary.ts";
@@ -272,16 +272,16 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     },
   },
   {
-    name: "screens.frames",
+    name: "pages.frames",
     period: "quarterHour",
-    run: sweepScreenFrames,
+    run: sweepPageFrames,
   },
   {
-    name: "screens.previews",
+    name: "pages.previews",
     period: "quarterHour",
     run: sweepPreviewStores,
   },
-  { name: "screens.builds", period: "quarterHour", run: sweepBuilds },
+  { name: "pages.builds", period: "quarterHour", run: sweepBuilds },
   {
     name: "speech.spoken_lines",
     period: "quarterHour",

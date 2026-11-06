@@ -9,12 +9,12 @@ import type {
 import { defineErrorFamily } from "./errors.ts";
 import { platformLimits } from "./platform-limits.ts";
 
-// An App's files (spec 9.6, 10.7.5, 32.5): what a screen uploads through
+// An App's files (spec 9.6, 10.7.5, 32.5): what a page uploads through
 // its App's `permission.files` declaration, attaches to records by reference
 // (`{ id }`) and reads, downloads or deletes again. Core keeps them in the
 // App's store: their record in the store's database (core's
 // file-host.ts), their bytes in the deployment's private R2, in chunks.
-// What core, the page around a screen's frame and the SDK say to each
+// What core, the page around a page's frame and the SDK say to each
 // other about them is here and in app-file-limits.ts: the paths of core's
 // file channel, the limits, the types a file may be and how its bytes
 // show which, and the messages of the frame's file port.
@@ -104,8 +104,7 @@ export const deleteFileSchema = z.strictObject({
 
 export const fileErrors = defineErrorFamily({
   "file.not_found": "That file isn't available.",
-  "file.operation_denied":
-    "This App's screens may not do that with these files.",
+  "file.operation_denied": "This App's pages may not do that with these files.",
   "file.unavailable": "This App keeps no records, so it keeps no files.",
   "file.invalid": "That isn't a file this App can take.",
   "file.too_large": `A file is at most ${platformLimits.appFileBytes / 1024 / 1024} MB.`,

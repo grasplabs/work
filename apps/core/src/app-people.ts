@@ -28,16 +28,16 @@ import { members, teamMembers, teams, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 
 // Who calls an App, and the organization's people (GRA-1474): what App
-// code reads as `ctx.auth.getUser()` and `ctx.people`, and a screen as
+// code reads as `ctx.auth.getUser()` and `ctx.people`, and a page as
 // `useUser()` and `usePeople()` (the SDK's people.ts). Core answers both
 // itself. Threat model, and how each is closed:
 //
-// - A screen or App code makes up who calls: the user is read here from
+// - A page or App code makes up who calls: the user is read here from
 //   core's own record of the call (the member's verified session, the
 //   person a run acts for, the visitor's session), never from a request;
-//   no read takes a person to be. A screen that shows another name fools
+//   no read takes a person to be. A page that shows another name fools
 //   only itself: the App's server code decides with
-//   `ctx.auth.getUser()`, which no screen reaches.
+//   `ctx.auth.getUser()`, which no page reaches.
 // - Any App, or an agent through one, harvests the organization: only an
 //   App that declares it reads the directory (`permissions: { people: true }`,
 //   which its versions' review shows); any other read is refused
@@ -46,7 +46,7 @@ import { inList } from "./db/d1.ts";
 // - A visitor reads the directory: a visitor's call has no directory,
 //   only who they are (their session's ID and address). Asking for it is
 //   refused as a function the App doesn't grant them, and recorded
-//   (`app.visitor_refused`), from a screen and from App code alike.
+//   (`app.visitor_refused`), from a page and from App code alike.
 // - Someone removed, or not a member, is read or reads: every read is of
 //   the organization's current members only (a membership, and no removal
 //   recorded); a caller who lost theirs is refused
@@ -115,7 +115,7 @@ const checkedArgs = (
 };
 
 /**
- * Answers read `name` with `args` (App code's, or a screen's), for the
+ * Answers read `name` with `args` (App code's, or a page's), for the
  * caller `access` names: who calls, or a directory read. Anything else
  * is a read that doesn't exist (`operation.not_found`).
  */
@@ -141,7 +141,7 @@ export const answerPeople = async (
 };
 
 /**
- * The read `name` names, for a screen's call of `people.<read>`
+ * The read `name` names, for a page's call of `people.<read>`
  * (`peopleReferences`, people.ts): undefined for any other path. What it
  * takes is checked by the read's own contract (`checkedArgs`). The
  * reference names no App: the App is the one the call was made through.
@@ -352,7 +352,7 @@ export interface MemberReader {
   readonly roles: () => Promise<WriterRoles>;
   /** Whether the App declares it reads the organization's people. */
   readonly declared: boolean;
-  /** Who the audit log names as reading: the App's server or screen, or an agent. */
+  /** Who the audit log names as reading: the App's server or page, or an agent. */
   readonly actor: AuditActor;
   readonly requestId: string;
 }

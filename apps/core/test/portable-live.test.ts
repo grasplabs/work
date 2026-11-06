@@ -4,6 +4,8 @@ import { clientInternals } from "@grasp-os/sdk/host";
 import { toBase64Url } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { pageLimits } from "@grasp-os/shared/pages";
+import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
 import {
   accessEndedCloseCode,
   appTokenMs,
@@ -18,8 +20,6 @@ import type {
   PortableQueriesApi,
 } from "@grasp-os/shared/portable";
 import type { Role } from "@grasp-os/shared/roles";
-import { screenLimits } from "@grasp-os/shared/screens";
-import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 import { newWebSocketRpcSession } from "capnweb";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -540,7 +540,7 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
       "Leaks data"
     );
     await eventually(() => {
-      expect(list.now()).toBe("screen.revoked");
+      expect(list.now()).toBe("page.revoked");
     });
     const events = await eventsAfter(head);
     const refused = events
@@ -550,10 +550,10 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
           `${String(detail?.operation)}/${String(detail?.stage)}: ${String(detail?.reason)}`
       );
     expect({
-      shown: fromRefusal(list.seen, "screen.revoked"),
+      shown: fromRefusal(list.seen, "page.revoked"),
       refused,
     }).toStrictEqual({
-      shown: ["screen.revoked"],
+      shown: ["page.revoked"],
       refused: ["portable.watchQuery/push: revoked"],
     });
     list.stop();
@@ -727,7 +727,7 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
       const token = await tokenFor(notes.builder.session, notes.app);
       const { live } = await openLive(notes.app);
       const queries = live.connect(token);
-      const { burst } = screenLimits.requests;
+      const { burst } = pageLimits.requests;
       const renewed: string[] = [];
       for (let count = 0; count < burst; count += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one renewal after another, as a host sends them
@@ -746,8 +746,8 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
         closed: await closedWithin(next.closed),
       }).toStrictEqual({
         first: "ok",
-        last: "screen.rate_limited",
-        connected: "screen.rate_limited",
+        last: "page.rate_limited",
+        connected: "page.rate_limited",
         closed: connectAgainCloseCode,
       });
     } finally {
@@ -773,7 +773,7 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
           .connect(sensitiveToken)
           .watchQuery(listOf(sensitive), () => {})
       )
-    ).resolves.toBe("screen.unreviewed");
+    ).resolves.toBe("page.unreviewed");
 
     // Following counts as a request: seventeen a minute, renewed as it
     // goes, until a hundred are followed at once.
@@ -804,7 +804,7 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
     expect({
       followed: answers.filter((answer) => answer === "ok").length,
       refused: [...new Set(answers.filter((answer) => answer !== "ok"))],
-    }).toStrictEqual({ followed: 100, refused: ["screen.too_many_queries"] });
+    }).toStrictEqual({ followed: 100, refused: ["page.too_many_queries"] });
   });
 
   it("shows a change made elsewhere without reading again, over one connection its token opened", async () => {

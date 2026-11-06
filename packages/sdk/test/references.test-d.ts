@@ -14,7 +14,6 @@ import type {
   OperationReference,
   ProgressOf,
   ReturnOf,
-  ScreenInputOf,
 } from "../src/index.ts";
 import type { ValueDescriptor } from "../src/value-descriptor.ts";
 import type { workflows } from "./notes/server/_generated/api.ts";
@@ -22,7 +21,6 @@ import {
   api,
   preferences,
   permissions,
-  screens,
 } from "./notes/server/_generated/api.ts";
 import { internal } from "./notes/server/_generated/internal.ts";
 import type {
@@ -158,11 +156,7 @@ void query(internal.notes.count, {});
 // @ts-expect-error the api has no internal function
 void api.notes.count;
 
-// A screen's route input, and the literal permissions.
-expectTypeOf<ScreenInputOf<typeof screens.note>>().toEqualTypeOf<{
-  id: Id<"notes">;
-}>();
-expectTypeOf(screens.note.name).toEqualTypeOf<"note">();
+// The literal permissions.
 expectTypeOf(permissions.files.operations).toEqualTypeOf<
   readonly ["upload", "read", "attach"]
 >();

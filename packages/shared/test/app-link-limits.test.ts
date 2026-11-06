@@ -7,7 +7,7 @@ import {
   originRefusal,
 } from "../src/app-link-limits.ts";
 
-// Which URL a links declaration lets a screen open (app-link-limits.ts),
+// Which URL a links declaration lets a page open (app-link-limits.ts),
 // as pure logic: the same decision core makes for every open, starting
 // from the ways a URL can pass for one it isn't.
 

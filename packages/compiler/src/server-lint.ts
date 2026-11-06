@@ -8,7 +8,7 @@
  * baseflare's codegen warns of it too. A warning, never an error: the
  * code may mean it, and the host makes nothing of it either way. Through
  * ESLint's `Linter` and oxc's parser (eslint-parser.ts), in the lint
- * isolate's lint (ultracite-worker.ts), as screens' design is (lint.ts).
+ * isolate's lint (ultracite-worker.ts), as pages' design is (lint.ts).
  */
 import type { Rule } from "eslint";
 import { Linter } from "eslint/universal";

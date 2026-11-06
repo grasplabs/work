@@ -1,8 +1,8 @@
-// An App's external links (spec 10.7.7, 32.3): which URL a screen may ask
+// An App's external links (spec 10.7.7, 32.3): which URL a page may ask
 // the page to open through its App's `permission.links` declaration, decided
 // the same way by core (app-link-route.ts), which alone decides, and by
 // the SDK as a declaration is checked. Apart and with nothing imported:
-// the runtime in every screen's frame carries the message types, and
+// the runtime in every page's frame carries the message types, and
 // can't bring Zod along (app-links.ts has the schemas).
 //
 // A URL is opened only when its own origin, as the URL standard parses

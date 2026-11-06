@@ -16,10 +16,10 @@ import { person } from "../sealed-apps.ts";
 // app-test-sessions.test.ts): the Notes App with a suite, making its
 // version current, and places held in the sandbox supervisor.
 
-/** The Notes App, its screens left out, with a fixture. */
+/** The Notes App, its pages left out, with a fixture. */
 export const appFiles: Record<string, string> = {
   ...Object.fromEntries(
-    Object.entries(notesFiles).filter(([path]) => !path.startsWith("screens/"))
+    Object.entries(notesFiles).filter(([path]) => !path.startsWith("src/"))
   ),
   "tests/fixtures/notes.json": JSON.stringify({
     principals: { "note-owner": { role: "user" } },

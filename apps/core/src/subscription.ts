@@ -1,4 +1,4 @@
-import type { SubscriptionApi } from "@grasp-os/shared/screens";
+import type { SubscriptionApi } from "@grasp-os/shared/pages";
 import { waitUntil } from "cloudflare:workers";
 
 import { CoreRpcTarget } from "./rpc-target.ts";

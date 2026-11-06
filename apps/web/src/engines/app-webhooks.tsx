@@ -32,7 +32,7 @@ import { useCoreAction } from "../use-core-action.ts";
 // builders give it, which Grasp sends its events to, signed with each
 // one's secret. The secret is shown once, as the webhook is added. Until an
 // admin approves an address, what goes there is IDs and the event only;
-// approving is the admin's alone, as approving a screen's build is.
+// approving is the admin's alone, as approving a page's build is.
 
 const eventNames = {
   form_sent: msg({

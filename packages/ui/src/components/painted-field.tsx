@@ -41,7 +41,7 @@ const paintedFieldVariants = cva("painted-field", {
 /**
  * The brand's painted field (`painted-field` in styles.css): a painting, a
  * grain and a pattern, always all three, so both are asked for. It is for
- * the one or two things on a screen that matter most, and two fields side
+ * the one or two things on a page that matter most, and two fields side
  * by side never share a painting or a pattern. Text on it follows the
  * paint, muted text included. `render` makes it any element, such as an
  * `article` or a link. A page places it (layout classes) and nothing else:

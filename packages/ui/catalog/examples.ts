@@ -1,5 +1,5 @@
 /**
- * Short examples of composing the kit's components into common screens,
+ * Short examples of composing the kit's components into common pages,
  * each loaded by name and only when asked for: nothing here imports an
  * example until its loader runs. The source is at
  * `catalog/examples/<name>.tsx`.

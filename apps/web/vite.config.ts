@@ -72,10 +72,10 @@ export default defineConfig({
     proxy: {
       "/api": "http://localhost:8787",
       "/rpc": { target: "ws://localhost:8787", ws: true },
-      // The document screens run in, with its own policy, and the modules
-      // it runs (core's screen-frame.ts).
-      "/screen-frame": "http://localhost:8787",
-      "/screen-modules": "http://localhost:8787",
+      // The document pages run in, with its own policy, and the modules
+      // it runs (core's page-frame.ts).
+      "/page-frame": "http://localhost:8787",
+      "/page-modules": "http://localhost:8787",
       // The SDK docs, which core's build adds to its static files.
       "/docs": "http://localhost:8787",
     },

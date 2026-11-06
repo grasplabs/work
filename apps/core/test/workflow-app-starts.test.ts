@@ -522,7 +522,7 @@ const kinds = {
   "requests.plainMutation": "mutation",
 } as const;
 
-/** Calls `path` as `by` through the App's invocation, as a screen would. */
+/** Calls `path` as `by` through the App's invocation, as a page would. */
 const call = async (
   fx: Fixture,
   by: Identity,
@@ -700,7 +700,7 @@ describe("an action starting a workflow", () => {
       { who: "Bob" },
       { key }
     );
-    // The reply was lost: the screen calls again under the same key.
+    // The reply was lost: the page calls again under the same key.
     const again = await call(
       fx,
       fx.bob,

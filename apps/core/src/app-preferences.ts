@@ -66,7 +66,7 @@ import type { StoredPreferences } from "./store-host.ts";
 // - Access lost mid-call: the caller's gate (their own check, an agent's
 //   grant say; the release not revoked; the person's role read again; the
 //   deadline) runs before the store is read, and again right before it is
-//   written. A live `get` is read again through the screen's
+//   written. A live `get` is read again through the page's
 //   subscription, which lets go once access goes.
 // - Activity leaked through live reads, or one person spending everyone's
 //   budget for them: a live `get` watches its own person's revision only
@@ -294,7 +294,7 @@ const answerGet = (
 ): OperationResult => {
   // Told first, whatever the document holds: a read refused because a
   // stored value no longer fits still follows the person's next write, so
-  // a screen showing the refusal gets the repaired document.
+  // a page showing the refusal gets the repaired document.
   caller.observeReads?.(storeId, {
     [preferencesWatch(caller.userId)]: stored.revision,
   });

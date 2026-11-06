@@ -9,9 +9,9 @@ import {
 } from "@grasp-os/shared/app-file-limits";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
+import { pagePersonHeader } from "@grasp-os/shared/page-limits";
+import { pageLeaseHeader } from "@grasp-os/shared/pages";
 import type { Role } from "@grasp-os/shared/roles";
-import { screenPersonHeader } from "@grasp-os/shared/screen-limits";
-import { screenLeaseHeader } from "@grasp-os/shared/screens";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
@@ -28,7 +28,7 @@ import { routed, signedInApi } from "./sign-in.ts";
 
 // The App the files tests (app-files-*.test.ts) upload to, read and
 // download from: its source, its functions as its session client calls
-// them, its screen's file channel, and the ways the tests break core's
+// them, its page's file channel, and the ways the tests break core's
 // side of it. Each file calls `appsOf(mockIdp())` once, for its people.
 
 export const files: Record<string, string> = {
@@ -175,18 +175,17 @@ export const unpin = mutation({
 });
 `,
 
-  "screens.ts": `export default {
-  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
-};
-`,
-  "screens/notes.tsx": `import { useFile, useUpload } from "@grasp-os/sdk/react";
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { useFile, useUpload } from "@grasp-os/sdk/react";
 import { permissions } from "@server/_generated/api";
 
-export default function Notes() {
+function Notes() {
   const upload = useUpload(permissions.files);
   const shown = useFile(permissions.files, upload.status === "completed" ? upload.file : "skip");
   return <p>{upload.status} {shown?.name ?? ""}</p>;
 }
+
+export const Route = createFileRoute("/")({ component: Notes });
 `,
 };
 
@@ -260,7 +259,7 @@ const apiOf = (release: Release) => ({
   >(release, "notes.unpin"),
 });
 
-/** The App's `permissions`, as its screens import them from `@server/_generated/api`. */
+/** The App's `permissions`, as its pages import them from `@server/_generated/api`. */
 export const permissions = {
   files: {
     kind: "files",
@@ -272,18 +271,18 @@ export const permissions = {
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 /**
- * `person`'s open screen of `app`: its lease, the person it names, and the
+ * `person`'s open page of `app`: its lease, the person it names, and the
  * page's channel. A request the test sends itself names them too, unless
  * it names someone.
  */
-export const screenOf = async (person: Person, app: string) => {
-  const { lease } = await person.api.screens.open(app, "notes");
+export const pageOf = async (person: Person, app: string) => {
+  const { lease } = await person.api.pages.open(app);
   const fetch = async (path: string, init: RequestInit, coreEnv?: Env) => {
     const headers = new Headers(init.headers);
     headers.set("origin", clientOrigin);
     headers.set("cookie", person.session);
-    if (!headers.has(screenPersonHeader)) {
-      headers.set(screenPersonHeader, person.userId);
+    if (!headers.has(pagePersonHeader)) {
+      headers.set(pagePersonHeader, person.userId);
     }
     return await routed(path, { ...init, headers }, coreEnv);
   };
@@ -302,7 +301,7 @@ type Downloads = Map<string, Uint8Array>;
 
 /**
  * The page's file transport over `channel`, as the frame's file port
- * reaches it (apps/web's screen-files.ts): a download read to its end,
+ * reaches it (apps/web's page-files.ts): a download read to its end,
  * as the browser's own download would.
  */
 const pageFiles = (
@@ -322,23 +321,23 @@ const pageFiles = (
   delete: channel.delete,
 });
 
-type Screen = Awaited<ReturnType<typeof screenOf>>;
+type Page = Awaited<ReturnType<typeof pageOf>>;
 
 /**
- * The session client of `screen` of `app`, as the frame's runtime mounts
+ * The session client of `page` of `app`, as the frame's runtime mounts
  * it, over the page's relay of its calls and files; and what it
  * downloaded.
  */
-const clientOf = (screen: Screen, app: string) => {
+const clientOf = (page: Page, app: string) => {
   const downloads: Downloads = new Map();
   const client = new GraspClient({
     call: async (request) => {
-      const response = await screen.fetch(`/api/app-functions/${app}`, {
+      const response = await page.fetch(`/api/app-functions/${app}`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          [screenLeaseHeader]: screen.lease,
-          [screenPersonHeader]: screen.person,
+          [pageLeaseHeader]: page.lease,
+          [pagePersonHeader]: page.person,
         },
         body: request,
       });
@@ -346,14 +345,14 @@ const clientOf = (screen: Screen, app: string) => {
     },
     // These tests read and change; none follows a query.
     watch: async () => await Promise.reject(new Error("No follows here")),
-    files: pageFiles(screen.channel, downloads),
+    files: pageFiles(page.channel, downloads),
   });
   return { client, downloads };
 };
 
 /**
  * The people of `idp`'s organization, and the Notes App as they reach it:
- * released by a builder, open in their screen, shared with a colleague.
+ * released by a builder, open in their page, shared with a colleague.
  */
 export const appsOf = (idp: Idp) => {
   const personApi = async (role: Role) => await signedInApi(idp, role);
@@ -372,23 +371,23 @@ export const appsOf = (idp: Idp) => {
     };
   };
 
-  /** A builder's App, open in their screen, with its client and API. */
+  /** A builder's App, open in their page, with its client and API. */
   const openedApp = async () => {
     const builder = await personApi("builder");
     const { app, release, admin } = await releasedApp(builder);
-    const screen = await screenOf(builder, app);
+    const page = await pageOf(builder, app);
     return {
       builder,
       app,
       release,
       admin,
       api: apiOf(release),
-      screen,
-      ...clientOf(screen, app),
+      page,
+      ...clientOf(page, app),
     };
   };
 
-  /** A colleague `builder` shared `app` with, its screen open. */
+  /** A colleague `builder` shared `app` with, its page open. */
   const colleagueOf = async (builder: Person, app: string) => {
     const colleague = await personApi("user");
     await builder.api.apps.members.add(app, {
@@ -396,8 +395,8 @@ export const appsOf = (idp: Idp) => {
       id: colleague.userId,
       role: "user",
     });
-    const screen = await screenOf(colleague, app);
-    return { userId: colleague.userId, screen, ...clientOf(screen, app) };
+    const page = await pageOf(colleague, app);
+    return { userId: colleague.userId, page, ...clientOf(page, app) };
   };
 
   return { personApi, releasedApp, openedApp, colleagueOf };
@@ -552,15 +551,15 @@ export const answerOf = async (response: Response): Promise<unknown> => {
 };
 
 /**
- * Raw requests of `screen`'s file channel for `app`'s `files`, as
+ * Raw requests of `page`'s file channel for `app`'s `files`, as
  * a page that doesn't follow the protocol would send them.
  */
-export const rawChannel = (screen: Screen, app: string) => {
+export const rawChannel = (page: Page, app: string) => {
   const base = `${appFilesPath}/${app}/files/uploads`;
-  const leased = { [screenLeaseHeader]: screen.lease };
+  const leased = { [pageLeaseHeader]: page.lease };
   return {
     begin: async (body: unknown) =>
-      await screen.fetch(base, {
+      await page.fetch(base, {
         method: "POST",
         headers: { ...leased, "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -572,7 +571,7 @@ export const rawChannel = (screen: Screen, app: string) => {
       hash: string,
       coreEnv?: Env
     ) =>
-      await screen.fetch(
+      await page.fetch(
         `${base}/${file}/chunks/${index}`,
         {
           method: "PUT",
@@ -586,9 +585,9 @@ export const rawChannel = (screen: Screen, app: string) => {
         coreEnv
       ),
     status: async (file: string) =>
-      await screen.fetch(`${base}/${file}`, { headers: leased }),
+      await page.fetch(`${base}/${file}`, { headers: leased }),
     finish: async (file: string, coreEnv?: Env) =>
-      await screen.fetch(
+      await page.fetch(
         `${base}/${file}/finish`,
         { method: "POST", headers: leased },
         coreEnv
@@ -767,13 +766,13 @@ const lastStepOf = (path: string, init: RequestInit) => {
 };
 
 /**
- * `screen`'s file channel for `app`, over a network that delivers an
+ * `page`'s file channel for `app`, over a network that delivers an
  * upload's finish and its cancellation in the order `first` says: the
  * other waits until `first` was answered (or, should `first` never be
  * sent, a few seconds).
  */
 export const orderedChannel = (
-  screen: Screen,
+  page: Page,
   app: string,
   first: "finish" | "cancel"
 ): FileChannel => {
@@ -783,14 +782,14 @@ export const orderedChannel = (
   }, 5000);
   return fileChannel({
     app,
-    lease: screen.lease,
-    person: screen.named,
+    lease: page.lease,
+    person: page.named,
     fetch: async (path, init) => {
       const which = lastStepOf(path, init);
       if (which !== "other" && which !== first) {
         await answered;
       }
-      const response = await screen.fetch(path, init);
+      const response = await page.fetch(path, init);
       if (which === first) {
         clearTimeout(fallback);
         resolve(null);

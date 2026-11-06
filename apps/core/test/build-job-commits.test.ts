@@ -15,7 +15,7 @@ import {
   slowVersionReads,
   storedTrees,
   writtenMeanwhile,
-  screenBuilds,
+  pageBuilds,
   submittedJob,
   endedJob,
   createdApp,
@@ -58,7 +58,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       readCollection(chat.agent, collectionId, "HANDBOOK")
     );
 
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     let job: z.infer<typeof jobRowSchema>;
     try {
       await chat.ask("Build an invoice desk for invoices@");
@@ -192,7 +192,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       codeStep(submitProposal),
       says("Submitted."),
     ]);
-    const checking = holdFiles(screenBuilds());
+    const checking = holdFiles(pageBuilds());
     let job: z.infer<typeof jobRowSchema>;
     try {
       await chat.ask("Build an invoice desk for invoices@");
@@ -223,7 +223,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
     await published(shared);
     const { builder, chat } = await setUp([
       codeStep(`export default async (self, env) => {
-        await env.build.write(${JSON.stringify(shared)}, ${JSON.stringify({ "screens/desk.tsx": desk })});
+        await env.build.write(${JSON.stringify(shared)}, ${JSON.stringify({ "src/routes/index.tsx": desk })});
         return await env.build.submit(${JSON.stringify(shared)}, { kind: "propose", message: "A desk" });
       };`),
       says("Submitted."),

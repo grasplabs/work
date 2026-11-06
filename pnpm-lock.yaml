@@ -139,6 +139,9 @@ catalogs:
     '@tanstack/react-start':
       specifier: 1.169.4
       version: 1.169.4
+    '@tanstack/router-generator':
+      specifier: 1.167.46
+      version: 1.167.46
     '@tanstack/router-plugin':
       specifier: 1.168.48
       version: 1.168.48
@@ -776,12 +779,18 @@ importers:
       '@fontsource-variable/newsreader':
         specifier: 'catalog:'
         version: 5.3.0
+      '@grasp-os/compiler':
+        specifier: workspace:*
+        version: link:../../packages/compiler
       '@grasp-os/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
       '@grasp-os/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@tanstack/react-router':
+        specifier: 'catalog:'
+        version: 1.170.46(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@types/mdast':
         specifier: 'catalog:'
         version: 4.0.4
@@ -1024,6 +1033,12 @@ importers:
       '@shadcn/lint':
         specifier: 'catalog:'
         version: 0.1.5(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@7.0.2))(eslint@10.11.0(jiti@2.7.0)(supports-color@10.2.2))
+      '@tanstack/react-router':
+        specifier: 'catalog:'
+        version: 1.170.46(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@tanstack/router-generator':
+        specifier: 'catalog:'
+        version: 1.167.46(supports-color@10.2.2)
       '@tsrs/wasm':
         specifier: 'catalog:'
         version: 0.20.1-ts7.1.0-beta
@@ -1159,6 +1174,9 @@ importers:
       '@tanstack/react-form':
         specifier: 'catalog:'
         version: 1.33.5(@tanstack/react-start@1.169.4(@voidzero-dev/vite-plus-core@0.3.3(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(esbuild@0.28.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@10.2.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@tanstack/react-router':
+        specifier: 'catalog:'
+        version: 1.170.46(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       capnweb:
         specifier: 'catalog:'
         version: 0.12.0
@@ -9267,11 +9285,6 @@ packages:
     engines: {node: '>=14'}
     hasBin: true
 
-  prettier@3.9.8:
-    resolution: {integrity: sha512-WRFq3Wn3WId7LLROfMLdH7xaFr2jR62wU8nLO6rQUOLOxNZUviyJQs1M0iIhLexSFy+L+w0ch66wtoO2jRjG0A==}
-    engines: {node: '>=14'}
-    hasBin: true
-
   pretty-format@27.5.1:
     resolution: {integrity: sha512-Qb1gy5OrP5+zDf2Bvnzdl3jsTf1qXVMazbvCoKhtKqVs4/YK4ozX4gKQJJVyNe+cajNPn0KoC0MC3FUmaHWEmQ==}
     engines: {node: ^10.13.0 || ^12.13.0 || ^14.15.0 || >=15.0.0}
@@ -14165,7 +14178,7 @@ snapshots:
       '@tanstack/virtual-file-routes': 1.162.0
       jiti: 2.7.0
       magic-string: 0.30.21
-      prettier: 3.9.8
+      prettier: 3.9.10
       zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
@@ -18718,8 +18731,6 @@ snapshots:
   prelude-ls@1.2.1: {}
 
   prettier@3.9.10: {}
-
-  prettier@3.9.8: {}
 
   pretty-format@27.5.1:
     dependencies:

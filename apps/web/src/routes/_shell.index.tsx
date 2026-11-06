@@ -31,7 +31,7 @@ import { PageNotLoaded, PageLoading } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { useWide } from "../frame/wide.ts";
 import { loadFromCore } from "../load-from-core.tsx";
-import { usePageSidePanel } from "../screens/app-panel-context.tsx";
+import { usePageSidePanel } from "../pages/app-panel-context.tsx";
 import { TourOffer } from "../tour/tour-layer.tsx";
 import { useTour } from "../tour/tour-state.ts";
 

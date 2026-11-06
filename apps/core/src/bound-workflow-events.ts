@@ -3,7 +3,7 @@ import type { BoundWorkflowEvent } from "@grasp-os/sdk/host";
 
 // The events of a workflow an App binds, as its references carry them
 // (spec 10.4.6): `workflows.<wf>.events.<alias>` and the event waits of
-// its listen tasks. Only events a person's screen may send become
+// its listen tasks. Only events a person's page may send become
 // references: an event binding whose contract admits a browser-callable
 // type (at most one, the catalog refuses more) is that type and its data's
 // descriptor; any other event binding (a webhook's, a connector's, another
@@ -54,7 +54,7 @@ export const boundEventsOf = (
     if (sent.length > 1) {
       // The catalog refuses this contract: one here is corrupt data.
       throw new Error(
-        `Event binding ${binding.alias} admits more than one type a screen sends.`
+        `Event binding ${binding.alias} admits more than one type a page sends.`
       );
     }
     const [first] = sent;

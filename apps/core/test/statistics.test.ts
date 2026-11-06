@@ -195,7 +195,7 @@ const callerOf = async (userId: string) => {
 
 /**
  * Calls `path` of `app`'s current release as `userId`, with `input` as
- * JSON text, as a screen would: what the action answered, read back, or
+ * JSON text, as a page would: what the action answered, read back, or
  * the call's own refusal.
  */
 const callAs = async (

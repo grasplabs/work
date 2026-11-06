@@ -4,9 +4,9 @@ import type { Release } from "../src/app-releases.ts";
 import { appDefinition, withoutDefinition } from "./app-definitions.ts";
 import type { AppSpec } from "./app-definitions.ts";
 
-// A Notes App on the accepted SDK, and its `api` as its screens import it
-// from `@server/_generated/api`: what the session client's tests call, through a screen's
-// page (screen-client*.test.ts) or a portable host
+// A Notes App on the accepted SDK, and its `api` as its pages import it
+// from `@server/_generated/api`: what the session client's tests call, through a page's
+// page (page-client*.test.ts) or a portable host
 // (portable-client.test.ts).
 
 /** The Notes App's definition: its notes, which each person keeps their own. */
@@ -130,7 +130,7 @@ export const stamp = action({
 });
 
 // Answers as much as an operation may, which leaves no room for the rest
-// of a screen's answer.
+// of a page's answer.
 export const big = action({
   args: {},
   returns: v.string(),
@@ -138,7 +138,8 @@ export const big = action({
 });
 `,
 
-  "screens/notes.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { api } from "@server/_generated/api";
 
@@ -163,7 +164,7 @@ const Notes = () => {
   );
 };
 
-export default Notes;
+export const Route = createFileRoute("/")({ component: Notes });
 `,
 };
 
@@ -260,7 +261,7 @@ export const referenceTo = <
   return data as OperationReference<Args, Return, Kind, "public", Progress>;
 };
 
-/** The App's `api`, as its screens import it from `@server/_generated/api`. */
+/** The App's `api`, as its pages import it from `@server/_generated/api`. */
 export const apiOf = (release: Release) => ({
   list: referenceTo<
     { pagination: { cursor?: string | null; pageSize?: number } },

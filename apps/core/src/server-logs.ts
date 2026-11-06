@@ -1,5 +1,5 @@
 import type { AppId, ChatId, WorkspaceId } from "@grasp-os/shared/ids";
-import type { ServerLog } from "@grasp-os/shared/screens";
+import type { ServerLog } from "@grasp-os/shared/pages";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { appHost, workspace } from "./durable-objects.ts";
@@ -12,7 +12,7 @@ import { appHost, workspace } from "./durable-objects.ts";
 // runtime hands it what each call logged once the call ends:
 //
 // - a live App's lines go to its error log (app-error-log.ts), in the
-//   App's own Durable Object, with its screens' problems;
+//   App's own Durable Object, with its pages' problems;
 // - a draft's preview's lines go to the chat's Workspace object, for the
 //   agent's next check of the draft (preview-reports.ts): each isolate a
 //   draft's sealed preview runs a function in (sealed-previews.ts), named

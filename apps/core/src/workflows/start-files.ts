@@ -15,13 +15,13 @@ import {
 import type { RunFileSource } from "./run-files.ts";
 
 // The files a start hands its run (GRA-885): each `file` value (`v.file()`,
-// `{ id }`) of a start's input names a file of the App whose screen starts
+// `{ id }`) of a start's input names a file of the App whose page starts
 // it, read as the person it acts for may read it now, and copied into the
 // run's own files before the start is admitted. The run's input keeps the
 // value's shape, `{ id }`, now naming its run file, read through the
 // workflow's own `files` binding. Threat note on GRA-885:
 //
-// - Only an App's screen or code hands a run an App's file (`StartFiles`,
+// - Only an App's page or code hands a run an App's file (`StartFiles`,
 //   which app-start-files.ts builds), and only an email trigger's start
 //   its message's attachments (inbound-email.ts, GRA-1363). Any other
 //   start holding a `file` value is refused (`file.start_files`): nothing
@@ -41,7 +41,7 @@ export interface StartFile extends RunFileSource {
 
 /**
  * The files a start may hand its run: an App's, given only for a start an
- * App's screen or code makes, acting for the person using it; or a
+ * App's page or code makes, acting for the person using it; or a
  * message's attachments, for its email trigger's start (inbound-email.ts).
  */
 export interface StartFiles {

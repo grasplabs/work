@@ -51,7 +51,7 @@ const legacyStaff = identifierSchema.optional();
 
 /**
  * Who did something: a person, an agent acting for one, part of an App (its
- * screens or server code), a workflow run, the platform itself, or Grasp
+ * pages or server code), a workflow run, the platform itself, or Grasp
  * staff (whose access is always logged).
  */
 export const auditActorSchema = z.discriminatedUnion("type", [
@@ -78,7 +78,12 @@ export const auditActorSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("app"),
     appId: appIdSchema,
-    part: z.enum(["screen", "server"]),
+    // Events written before an App's pages were file routes name the part
+    // `screen`: the log is history and keeps them readable, as the page
+    // they are now. New events write `page`.
+    part: z
+      .enum(["page", "server", "screen"])
+      .transform((part) => (part === "screen" ? "page" : part)),
     staff: legacyStaff,
   }),
   z.object({

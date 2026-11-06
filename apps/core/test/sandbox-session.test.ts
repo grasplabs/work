@@ -1,5 +1,5 @@
 import { whenAborted } from "@grasp-os/shared/deadline";
-import { rpcArgumentDepth } from "@grasp-os/shared/screens";
+import { rpcArgumentDepth } from "@grasp-os/shared/pages";
 import { RpcSession, RpcTarget, WebSocketTransport } from "capnweb";
 import { describe, expect, it } from "vite-plus/test";
 

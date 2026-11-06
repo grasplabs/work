@@ -24,8 +24,8 @@ import { formatDateTime } from "./format.ts";
 // them what is asked (the review context, as core pinned it) and the
 // answer as core will record it, and only their click here mints the
 // one-use confirmation the answer needs. Shown by the decision's page and
-// by the page around an App's screen, never inside the screen's frame: a
-// screen can ask to answer, but only the person, here, confirms it.
+// by the page around an App's page, never inside the page's frame: a
+// page can ask to answer, but only the person, here, confirms it.
 
 /** A decision and the answer to confirm, as core gave them for review. */
 export interface PendingConfirmation {
@@ -35,7 +35,7 @@ export interface PendingConfirmation {
 
 /**
  * How long Confirm stays disabled once the dialog opens: a click already
- * on its way, which a screen could time its request for, never confirms.
+ * on its way, which a page could time its request for, never confirms.
  */
 const confirmDelayMs = 1000;
 
@@ -60,9 +60,9 @@ export const confirmAndAnswer = async (
 
 /**
  * Who wrote the answer's payload: the person, on the decision's page, or
- * an App's screen, which asked to answer.
+ * an App's page, which asked to answer.
  */
-export type AnswerSource = "page" | "screen";
+export type AnswerSource = "page";
 
 /** A payload that is a comment and nothing else. */
 const commentAlone = z.strictObject({ comment: z.string() });
@@ -75,9 +75,9 @@ const PayloadLabel = ({
   source: AnswerSource;
   comment: boolean;
 }) => {
-  if (source === "screen") {
+  if (source === "page") {
     return (
-      <Trans context="what an App's screen sends with an answer to a decision">
+      <Trans context="what an App's page sends with an answer to a decision">
         Sent by the app
       </Trans>
     );
@@ -101,8 +101,8 @@ const PayloadText = ({
     return null;
   }
   // A comment alone, as the decision's page sends it, reads as the
-  // person's own. What an App's screen sends with its answer is the
-  // screen's, whatever it looks like, and says so.
+  // person's own. What an App's page sends with its answer is the
+  // page's, whatever it looks like, and says so.
   const alone = commentAlone.safeParse(payload);
   const comment =
     source === "page" && alone.success ? alone.data.comment : undefined;

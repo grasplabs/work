@@ -17,7 +17,7 @@ import type { FileValue } from "./values.ts";
 // to a file's bytes elsewhere, or anything that would let one be fetched.
 // Failure modes, and how each is closed:
 //
-// - A screen names a resource or operation its App didn't declare: the
+// - A page names a resource or operation its App didn't declare: the
 //   generated reference is read as data, its operation checked here and
 //   again by core against the sealed release (the reference only says
 //   what the App declared; it grants nothing).
@@ -26,7 +26,7 @@ import type { FileValue } from "./values.ts";
 // - A cancellation passes for success, or a success for a cancellation:
 //   cancelling asks core, which answers what won; an upload published
 //   first resolves with its file and shows completed.
-// - A preview outlives its file, its screen or its reader's access: its
+// - A preview outlives its file, its page or its reader's access: its
 //   URL is a local `blob:` URL of the frame's own, revoked when the hook
 //   lets go of it (another file, unmount) or the client is fenced.
 
@@ -42,7 +42,7 @@ export interface TransferProgress {
 
 /**
  * What the client needs of the platform to move files: the page's file
- * channel, through the frame's file port (screen-runtime.ts), or a host's
+ * channel, through the frame's file port (page-runtime.ts), or a host's
  * own. Each rejects with a coded refusal (`{ code, message }`), as the
  * operation transport does; one without a code is a lost answer.
  */

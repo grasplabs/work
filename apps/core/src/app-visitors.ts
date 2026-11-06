@@ -25,9 +25,9 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { pageErrors } from "@grasp-os/shared/pages";
+import type { PageBundle } from "@grasp-os/shared/pages";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { screenErrors } from "@grasp-os/shared/screens";
-import type { ScreenBundle } from "@grasp-os/shared/screens";
 import {
   and,
   asc,
@@ -64,10 +64,10 @@ import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { escapeHtml } from "./mail-outbox.ts";
 import { sendMail } from "./mail.ts";
+import { deliveryOf, leasedBuild, standingOf } from "./page-delivery.ts";
+import type { LeasedBuild } from "./page-delivery.ts";
+import { visitorPage } from "./pages-rpc.ts";
 import { boundedText, jsonOf } from "./request-body.ts";
-import { deliveryOf, leasedBuild, standingOf } from "./screen-delivery.ts";
-import type { LeasedBuild } from "./screen-delivery.ts";
-import { visitorScreen } from "./screens-rpc.ts";
 import { requireNotStaff } from "./sharing.ts";
 
 // Visitors (`@grasp-os/shared/app-visitors`): someone who isn't a member
@@ -102,13 +102,13 @@ import { requireNotStaff } from "./sharing.ts";
 //   and 100 per App; each code sent is audited.
 // - A session used for something else. A session (256 random bits, kept
 //   as its SHA-256) belongs to one App: opening takes only the token and
-//   answers that App's screen, and signing in to another App needs that
+//   answers that App's page, and signing in to another App needs that
 //   App's own code. A visitor never holds a member's session, so `/rpc`
 //   and every member's route refuse them.
-// - The screen reaching past the App. The screen runs in the frame core
-//   serves for every screen (screen-frame.ts). Its calls come here, never
+// - The page reaching past the App. The page runs in the frame core
+//   serves for every page (page-frame.ts). Its calls come here, never
 //   through a member's route (which needs a member's session; the lease a
-//   visitor's screen gets is for `visitor:<session>`, which no member's
+//   visitor's page gets is for `visitor:<session>`, which no member's
 //   is), and run as the App itself, only for the functions its builders
 //   granted visitors (app-visitor-calls.ts): never as a member.
 // - Access that outlives its reason. On every open and call, the session
@@ -131,7 +131,7 @@ const hourMs = 60 * minuteMs;
 
 /**
  * The most bytes a visitor's request may carry: a call's request
- * (`functionRequestMaxBytes`, as a member's screen may send) written as a
+ * (`functionRequestMaxBytes`, as a member's page may send) written as a
  * JSON string, where escaping can at most double it, and room for the
  * rest (the action, a session and a lease). Every other request is far
  * smaller, and checked field by field once it is parsed.
@@ -558,15 +558,15 @@ const sessionOf = async (env: Env, token: string) =>
     )
     .get();
 
-/** What a visitor opens: the App, by name, and its first screen. */
+/** What a visitor opens: the App, by name, and its first page. */
 export interface AppVisit {
   app: AppId;
   name: string;
-  screen: ScreenBundle | null;
+  page: PageBundle | null;
 }
 
 /**
- * The App a visitor's session opens, with its first screen, while the
+ * The App a visitor's session opens, with its first page, while the
  * session is unexpired, the App published and the address still listed.
  * `visitor.signed_out` otherwise.
  */
@@ -596,7 +596,7 @@ const openVisit = async (env: Env, token: string): Promise<AppVisit> => {
   return {
     app: found.id,
     name: found.name,
-    screen: await visitorScreen(env, found, `visitor:${session.id}`),
+    page: await visitorPage(env, found, `visitor:${session.id}`),
   };
 };
 
@@ -619,7 +619,7 @@ const signOut = async (env: Env, token: string): Promise<void> => {
   ]);
 };
 
-/** How long a visitor's call may take, as a member's screen call may. */
+/** How long a visitor's call may take, as a member's page call may. */
 const visitorCallMs = 30_000;
 
 /** The session `id`, unexpired, or undefined. */
@@ -635,7 +635,7 @@ const sessionById = async (env: Env, id: string) =>
     )
     .get();
 
-/** Whose screen build a visitor's call runs for (`deliveredToVisitor`). */
+/** Whose page build a visitor's call runs for (`deliveredToVisitor`). */
 interface VisitorDeliveryTarget {
   app: AppId;
   sessionId: string;
@@ -643,7 +643,7 @@ interface VisitorDeliveryTarget {
 }
 
 /**
- * Refuses, with `screen.revoked` or `screen.unreviewed`, unless `build`
+ * Refuses, with `page.revoked` or `page.unreviewed`, unless `build`
  * gets the App's data now; the refusal is audited as the visitor, with
  * the stage it came at.
  */
@@ -660,17 +660,17 @@ const requireVisitorDelivery = async (
     env,
     app,
     "app.visitor_refused",
-    { reason: `screen_${delivery}`, stage },
+    { reason: `page_${delivery}`, stage },
     sessionId
   );
-  throw screenErrors.create(
-    delivery === "revoked" ? "screen.revoked" : "screen.unreviewed"
+  throw pageErrors.create(
+    delivery === "revoked" ? "page.revoked" : "page.unreviewed"
   );
 };
 
 /**
- * `run`'s answer for a visitor's screen running `target.build`, as
- * `delivering` (screen-delivery.ts) is for a member's: its delivery is
+ * `run`'s answer for a visitor's page running `target.build`, as
+ * `delivering` (page-delivery.ts) is for a member's: its delivery is
  * read before `run`, so code refused starts nothing, and again before
  * whatever `run` ends with is handed over, its answer or its error, so a
  * release revoked while it ran keeps both here. What `run` already
@@ -694,7 +694,7 @@ export const deliveredToVisitor = async <Answer>(
 };
 
 /**
- * A call of one of the App's functions by a visitor, from its screen
+ * A call of one of the App's functions by a visitor, from its page
  * (app-visitor-calls.ts): run as the App itself, only for a function the
  * App's current version grants visitors, while the session is live, the
  * App published and the address listed, each read again before every
@@ -880,7 +880,7 @@ export const appVisitorResponse = async (
     if (!isExpectedError(error)) {
       throw error;
     }
-    // A screen refused (unreviewed or revoked) is the App's to fix: 409.
+    // A page refused (unreviewed or revoked) is the App's to fix: 409.
     return errorResponse(statusFor[error.code] ?? 409, error, requestId);
   }
 };

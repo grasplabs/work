@@ -21,13 +21,13 @@ import {
 } from "./people.ts";
 
 // The Notes App end to end on the platform's own runtime and React SDK: a
-// builder's App of spec 8's layout, sealed and current, its screen in its
+// builder's App of spec 8's layout, sealed and current, its page in its
 // sandboxed frame reading and writing the App's store through the session
 // client the platform mounts, with the generated `@server/_generated/api` references, an
 // operation-bound create form and a record editor with explicit Save.
 // What a lost answer, a cancelled save or a reused key does is core's
-// own test, through the same client (apps/core/test/screen-client*.test.ts).
-// A screen whose page connects again as someone else, or calls core once
+// own test, through the same client (apps/core/test/page-client*.test.ts).
+// A page whose page connects again as someone else, or calls core once
 // someone else signed in, is stopped before anything it holds is sent as
 // them; one whose person signed out is emptied too.
 
@@ -59,26 +59,26 @@ const notesApp = async (
 };
 
 /**
- * The notes screen, once it shows its notes. The first open of an App's
- * screen builds it before the frame can show anything, which on a loaded
+ * The notes page, once it shows its notes. The first open of an App's
+ * page builds it before the frame can show anything, which on a loaded
  * machine takes longer than the default 5 seconds.
  */
 const openNotes = async (page: Page, app: string): Promise<FrameLocator> => {
-  await page.goto(`/apps/${app}/full?screen=notes`);
-  const screen = page.frameLocator('iframe[title="notes app"]');
-  await expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible({
+  await page.goto(`/apps/${app}/full`);
+  const appPage = page.frameLocator('iframe[title="App"]');
+  await expect(appPage.getByRole("heading", { name: "Notes" })).toBeVisible({
     timeout: 20_000,
   });
-  return screen;
+  return appPage;
 };
 
-/** Creates a note in the screen's create form. */
+/** Creates a note in the page's create form. */
 const createNote = async (
-  screen: FrameLocator,
+  appPage: FrameLocator,
   title: string,
   body = ""
 ): Promise<void> => {
-  const form = screen.getByRole("form", { name: "New note" });
+  const form = appPage.getByRole("form", { name: "New note" });
   await form.getByLabel("Title").fill(title);
   await form.getByLabel("Body").fill(body);
   await form.getByRole("button", { name: "Create note" }).click();
@@ -90,26 +90,26 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
   const { builder } = peopleIn("notesApp");
   const app = await notesApp(builder);
   const page = await pageOf(builder);
-  const screen = await openNotes(page, app);
-  await expect(screen.getByText("No notes yet.")).toBeVisible();
+  const appPage = await openNotes(page, app);
+  await expect(appPage.getByText("No notes yet.")).toBeVisible();
 
   // A title of only spaces fails the operation's own check, in the
   // browser: nothing is sent, the field says why and gets focus.
-  const create = screen.getByRole("form", { name: "New note" });
+  const create = appPage.getByRole("form", { name: "New note" });
   const title = create.getByLabel("Title");
-  await createNote(screen, "   ");
+  await createNote(appPage, "   ");
   await expect(title).toHaveAttribute("aria-invalid", "true");
   await expect(title).toBeFocused();
-  await expect(screen.getByText("No notes yet.")).toBeVisible();
+  await expect(appPage.getByText("No notes yet.")).toBeVisible();
 
   // Created as the host normalized it, the form reset after the commit,
   // and the list it reads refreshed.
-  await createNote(screen, "  Call Acme  ");
-  const notes = screen.getByRole("list", { name: "Notes" });
+  await createNote(appPage, "  Call Acme  ");
+  const notes = appPage.getByRole("list", { name: "Notes" });
   await expect(notes.getByText("Call Acme", { exact: true })).toBeVisible();
   await expect(title).toHaveValue("");
   await expect(title).toHaveAttribute("aria-invalid", "false");
-  await createNote(screen, "Send the invoice", "Before Friday");
+  await createNote(appPage, "Send the invoice", "Before Friday");
   await expect(notes.getByRole("listitem")).toHaveText([
     /Send the invoice/u,
     /Call Acme/u,
@@ -117,12 +117,12 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
 
   // An action that saves a note and then fails: the note it saved stays,
   // and the list shows it, though the action itself failed.
-  await screen.getByRole("button", { name: "Import a note" }).click();
-  await expect(screen.getByRole("status", { name: "Import" })).toHaveText(
+  await appPage.getByRole("button", { name: "Import a note" }).click();
+  await expect(appPage.getByRole("status", { name: "Import" })).toHaveText(
     "The import stopped halfway."
   );
   await expect(notes.getByText("Imported", { exact: true })).toBeVisible();
-  await screen.getByRole("button", { name: "Delete Imported" }).click();
+  await appPage.getByRole("button", { name: "Delete Imported" }).click();
   await expect(notes.getByRole("listitem")).toHaveCount(2);
 
   // They are the App's records: a new session loads them again.
@@ -178,7 +178,7 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
   await expect(reloaded.getByText("No notes yet.")).toBeVisible();
 });
 
-test("a screen whose page connects again as someone else is stopped, and the page loads again as them, sending nothing of the first person's", async ({
+test("a page whose page connects again as someone else is stopped, and the page loads again as them, sending nothing of the first person's", async ({
   pageOf,
 }) => {
   // Someone else may use the App, so a save sent again under their cookie
@@ -219,11 +219,11 @@ test("a screen whose page connects again as someone else is stopped, and the pag
     await route.continue();
   });
 
-  const screen = await openNotes(page, app);
-  await expect(screen.getByText("No notes yet.")).toBeVisible();
+  const appPage = await openNotes(page, app);
+  await expect(appPage.getByText("No notes yet.")).toBeVisible();
   // The first person's save: its answer lost, so the client sends it again
   // under the same key until the host answers.
-  await createNote(screen, "Mine");
+  await createNote(appPage, "Mine");
   await expect.poll(() => lost).toBeGreaterThan(0);
 
   // The connection drops, and the browser's cookie becomes someone else's
@@ -235,19 +235,19 @@ test("a screen whose page connects again as someone else is stopped, and the pag
   loseSaves = false;
   refuse = false;
 
-  // Connected again as them: the tab's connection ends, the screen is
+  // Connected again as them: the tab's connection ends, the page is
   // stopped before anything else, and the page loads again, for the person
   // signed in now, without the first person's note. Nothing the first
-  // person's screen held reached core.
+  // person's page held reached core.
   await reloaded;
-  const theirs = page.frameLocator('iframe[title="notes app"]');
+  const theirs = page.frameLocator('iframe[title="App"]');
   await expect(theirs.getByText("No notes yet.")).toBeVisible({
     timeout: 20_000,
   });
   expect(reached).toStrictEqual([]);
 });
 
-test("a screen whose function call core refuses as someone else's is stopped, and the page loads again as them", async ({
+test("a page whose function call core refuses as someone else's is stopped, and the page loads again as them", async ({
   pageOf,
 }) => {
   const { first, next } = peopleIn("notesAppTwoTabs");
@@ -263,28 +263,28 @@ test("a screen whose function call core refuses as someone else's is stopped, an
       answered.push(response.status());
     }
   });
-  const screen = await openNotes(page, app);
-  await expect(screen.getByText("No notes yet.")).toBeVisible();
+  const appPage = await openNotes(page, app);
+  await expect(appPage.getByText("No notes yet.")).toBeVisible();
 
   // Another tab signs in as someone else: the cookie changes, the page's
   // connection doesn't. The first person's save goes with their cookie.
   await signInTo(page.context(), next);
   const reloaded = page.waitForEvent("load", { timeout: 20_000 });
-  await createNote(screen, "Mine");
+  await createNote(appPage, "Mine");
 
   // Core refused it as someone else's: the tab's connection ends, the
-  // screen is stopped before anything else, and the page loads again, for
+  // page is stopped before anything else, and the page loads again, for
   // the person signed in now, without the first person's note.
   await reloaded;
   expect(answered.length).toBeGreaterThan(0);
   expect(answered.every((status) => status === 401)).toBe(true);
-  const theirs = page.frameLocator('iframe[title="notes app"]');
+  const theirs = page.frameLocator('iframe[title="App"]');
   await expect(theirs.getByText("No notes yet.")).toBeVisible({
     timeout: 20_000,
   });
 });
 
-test("a screen whose person signed out is stopped and the page loads again, so nothing of theirs stays on it", async ({
+test("a page whose person signed out is stopped and the page loads again, so nothing of theirs stays on it", async ({
   pageOf,
 }) => {
   const { first } = peopleIn("notesAppSignedOut");
@@ -297,17 +297,17 @@ test("a screen whose person signed out is stopped and the page loads again, so n
       await socket.close();
     };
   });
-  const screen = await openNotes(page, app);
-  await createNote(screen, "Private");
+  const appPage = await openNotes(page, app);
+  await createNote(appPage, "Private");
   await expect(
-    screen
+    appPage
       .getByRole("list", { name: "Notes" })
       .getByText("Private", { exact: true })
   ).toBeVisible();
 
   // Signed out elsewhere; the page hears of it when it connects again,
-  // stops the screen and loads again, and shows the session ended, with
-  // no screen in the frame.
+  // stops the page and loads again, and shows the session ended, with
+  // no page in the frame.
   await endSession(first);
   const reloaded = page.waitForEvent("load", { timeout: 20_000 });
   await drop?.();
@@ -315,13 +315,13 @@ test("a screen whose person signed out is stopped and the page loads again, so n
   await expect(page.getByText("Your session has ended")).toBeVisible({
     timeout: 20_000,
   });
-  await expect(page.locator('iframe[title="notes app"]')).not.toHaveAttribute(
+  await expect(page.locator('iframe[title="App"]')).not.toHaveAttribute(
     "src",
     /./u
   );
 });
 
-test("a note saved in one session appears on another session's open screen without reloading", async ({
+test("a note saved in one session appears on another session's open page without reloading", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("notesLive");
@@ -331,15 +331,15 @@ test("a note saved in one session appears on another session's open screen witho
   const saving = await openNotes(await pageOf(builder), app);
 
   // Saved in the second session: the first, which asks nothing, shows it.
-  await createNote(saving, "Pushed to the other screen");
+  await createNote(saving, "Pushed to the other page");
   const notes = watching.getByRole("list", { name: "Notes" });
   await expect(
-    notes.getByText("Pushed to the other screen", { exact: true })
+    notes.getByText("Pushed to the other page", { exact: true })
   ).toBeVisible();
 
   // An edit follows the same way, and so does a delete.
   await saving
-    .getByRole("button", { name: "Edit Pushed to the other screen" })
+    .getByRole("button", { name: "Edit Pushed to the other page" })
     .click();
   const editor = saving.getByRole("form", { name: "Edit note" });
   await editor.getByLabel("Title").fill("Edited elsewhere");
@@ -424,9 +424,9 @@ test("a draft survives a newer note, a stale save and a refresh, and is re-appli
   await expect(list.getByText("Plan", { exact: true })).toBeVisible();
 
   // I start editing the title; someone else saves a new body meanwhile.
-  let screen = await openNotes(mine, app);
-  await screen.getByRole("button", { name: "Edit Plan" }).click();
-  let editor = screen.getByRole("form", { name: "Edit note" });
+  let appPage = await openNotes(mine, app);
+  await appPage.getByRole("button", { name: "Edit Plan" }).click();
+  let editor = appPage.getByRole("form", { name: "Edit note" });
   await editor.getByLabel("Title").fill("My plan");
 
   await theirs.getByRole("button", { name: "Edit Plan" }).click();
@@ -468,9 +468,9 @@ test("a draft survives a newer note, a stale save and a refresh, and is re-appli
   await other.getByRole("button", { name: "Save changes" }).click();
   await expect(changes).toContainText("Latest version: Their second body");
   await mine.reload();
-  screen = await openNotes(mine, app);
-  await screen.getByRole("button", { name: "Edit My plan" }).click();
-  editor = screen.getByRole("form", { name: "Edit note" });
+  appPage = await openNotes(mine, app);
+  await appPage.getByRole("button", { name: "Edit My plan" }).click();
+  editor = appPage.getByRole("form", { name: "Edit note" });
   changes = editor.getByRole("status").filter({
     hasText: "This changed since you started editing",
   });
@@ -521,7 +521,7 @@ test("a draft survives a newer note, a stale save and a refresh, and is re-appli
 
   // A tab the browser restored with my own drafts in it, signed out: the
   // page drops them as soon as it learns nobody is signed in, with no
-  // screen open to do it.
+  // page open to do it.
   const restoredKey = `grasp.form-drafts:${encodeURIComponent(builder.userId)}:${encodeURIComponent(app)}`;
   await mine.evaluate((key) => {
     sessionStorage.setItem(
@@ -536,19 +536,19 @@ test("a draft survives a newer note, a stale save and a refresh, and is re-appli
   );
 });
 
-test("a screen's frame speaks the page's language", async ({ pageOf }) => {
+test("a page's frame speaks the page's language", async ({ pageOf }) => {
   const { builder } = peopleIn("notesLanguage");
   const app = await notesApp(builder);
   const page = await pageOf(builder, { locale: "de-DE" });
-  await page.goto(`/apps/${app}/full?screen=notes`);
-  const screen = page.frameLocator("iframe");
-  await expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible({
+  await page.goto(`/apps/${app}/full`);
+  const appPage = page.frameLocator("iframe");
+  await expect(appPage.getByRole("heading", { name: "Notes" })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(screen.locator("html")).toHaveAttribute("lang", "de");
+  await expect(appPage.locator("html")).toHaveAttribute("lang", "de");
 });
 
-/** How long the activation a page has as a screen opens can last. */
+/** How long the activation a page has as a page opens can last. */
 const openingActivationMs = 5000;
 
 /** A 1×1 PNG, as a person's file picker hands it over. */
@@ -563,15 +563,15 @@ test("a person attaches a file to a note, previews and downloads it, and removes
   const { builder } = peopleIn("notesApp");
   const app = await notesApp(builder);
   const page = await pageOf(builder);
-  const screen = await openNotes(page, app);
-  // Playwright's checks give the page activation as the screen opens,
+  const appPage = await openNotes(page, app);
+  // Playwright's checks give the page activation as the page opens,
   // which the page takes for the click that opened it: one that admits
-  // no download for as long as it can last (screen-files.ts). The
+  // no download for as long as it can last (page-files.ts). The
   // person's clicks below keep the page's activation going all the while.
   await page.waitForTimeout(openingActivationMs);
-  await createNote(screen, "Trip");
-  await screen.getByRole("button", { name: "Edit Trip" }).click();
-  const attachments = screen.getByRole("region", { name: "Attachments" });
+  await createNote(appPage, "Trip");
+  await appPage.getByRole("button", { name: "Edit Trip" }).click();
+  const attachments = appPage.getByRole("region", { name: "Attachments" });
   const picker = attachments.getByLabel("Attach a file");
 
   // A type a browser would run is refused before any byte leaves the page.
@@ -629,60 +629,62 @@ test("a person attaches a file to a note, previews and downloads it, and removes
   ).toHaveText("Removed photo.png.");
 });
 
-test("a screen can't download a file nobody clicked for", async ({
-  pageOf,
-}) => {
+test("a page can't download a file nobody clicked for", async ({ pageOf }) => {
   const { builder } = peopleIn("notesApp");
   const app = await notesApp(builder, undefined, unaskedDownloadFiles());
   const page = await pageOf(builder);
-  await page.goto(`/apps/${app}/full?screen=notes`);
-  const screen = page.frameLocator('iframe[title="notes app"]');
-  // Nothing touches the page while the screen waits to download: Playwright
+  await page.goto(`/apps/${app}/full`);
+  const appPage = page.frameLocator('iframe[title="App"]');
+  // Nothing touches the page while the page waits to download: Playwright
   // runs its checks with a user gesture, which would count as a click.
   await page.waitForTimeout(12_000);
   // A while after opening, with no click: refused by the page.
   await expect(
-    screen.getByRole("status", { name: "Unasked download" })
+    appPage.getByRole("status", { name: "Unasked download" })
   ).toHaveText("file.gesture_required", { timeout: 20_000 });
   // After a click it goes on to core, which knows no such file.
-  await screen.getByRole("button", { name: "Download" }).click();
+  await appPage.getByRole("button", { name: "Download" }).click();
   await expect(
-    screen.getByRole("status", { name: "Asked download", exact: true })
+    appPage.getByRole("status", { name: "Asked download", exact: true })
   ).toHaveText("file.not_found");
 });
 
-/** Opens the file view screen of `app`, its heading shown. */
+/** Opens the file view page of `app`, its heading shown. */
 const openFiles = async (page: Page, app: string): Promise<FrameLocator> => {
-  await page.goto(`/apps/${app}/full?screen=notes`);
-  const screen = page.frameLocator('iframe[title="notes app"]');
-  await expect(screen.getByRole("heading", { name: "Files" })).toBeVisible({
+  await page.goto(`/apps/${app}/full`);
+  const appPage = page.frameLocator('iframe[title="App"]');
+  await expect(appPage.getByRole("heading", { name: "Files" })).toBeVisible({
     timeout: 20_000,
   });
-  return screen;
+  return appPage;
 };
 
-test("a file shown is read once, however often its screen renders", async ({
+test("a file shown is read once, however often its page renders", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("notesApp");
   const app = await notesApp(builder, undefined, fileViewFiles());
   const page = await pageOf(builder);
-  const screen = await openFiles(page, app);
-  await screen
+  const appPage = await openFiles(page, app);
+  await appPage
     .getByLabel("Upload a file")
     .setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: pixel });
-  await expect(screen.getByText("Showing photo.png, rendered 0")).toBeVisible();
+  await expect(
+    appPage.getByText("Showing photo.png, rendered 0")
+  ).toBeVisible();
   let reads = 0;
   page.on("request", (request) => {
     if (request.url().includes("/files/files/")) {
       reads += 1;
     }
   });
-  const again = screen.getByRole("button", { name: "Render again" });
+  const again = appPage.getByRole("button", { name: "Render again" });
   await again.click();
   await again.click();
   await again.click();
-  await expect(screen.getByText("Showing photo.png, rendered 3")).toBeVisible();
+  await expect(
+    appPage.getByText("Showing photo.png, rendered 3")
+  ).toBeVisible();
   await page.waitForTimeout(1000);
   expect(reads).toBe(0);
 });
@@ -693,13 +695,13 @@ test("a file hidden, then shown again, loads afresh instead of its last view", a
   const { builder } = peopleIn("notesApp");
   const app = await notesApp(builder, undefined, fileViewFiles());
   const page = await pageOf(builder);
-  const screen = await openFiles(page, app);
-  await screen
+  const appPage = await openFiles(page, app);
+  await appPage
     .getByLabel("Upload a file")
     .setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: pixel });
-  await expect(screen.getByText("Showing photo.png")).toBeVisible();
-  await screen.getByRole("button", { name: "Hide the file" }).click();
-  await expect(screen.getByText("The file is hidden")).toBeVisible();
+  await expect(appPage.getByText("Showing photo.png")).toBeVisible();
+  await appPage.getByRole("button", { name: "Hide the file" }).click();
+  await expect(appPage.getByText("The file is hidden")).toBeVisible();
   // The next read is held back a moment on its way to core.
   const { promise: released, resolve: letThrough } =
     Promise.withResolvers<null>();
@@ -707,24 +709,24 @@ test("a file hidden, then shown again, loads afresh instead of its last view", a
     await released;
     await route.continue();
   });
-  await screen.getByRole("button", { name: "Show the file" }).click();
-  await expect(screen.getByText("Loading the file…")).toBeVisible();
-  await expect(screen.getByText("Showing photo.png")).toHaveCount(0);
+  await appPage.getByRole("button", { name: "Show the file" }).click();
+  await expect(appPage.getByText("Loading the file…")).toBeVisible();
+  await expect(appPage.getByText("Showing photo.png")).toHaveCount(0);
   letThrough(null);
-  await expect(screen.getByText("Showing photo.png")).toBeVisible();
+  await expect(appPage.getByText("Showing photo.png")).toBeVisible();
 });
 
-test("a file the screen deletes while showing it is gone, never read again or a failure", async ({
+test("a file the page deletes while showing it is gone, never read again or a failure", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("notesApp");
   const app = await notesApp(builder, undefined, fileViewFiles());
   const page = await pageOf(builder);
-  const screen = await openFiles(page, app);
-  await screen
+  const appPage = await openFiles(page, app);
+  await appPage
     .getByLabel("Upload a file")
     .setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: pixel });
-  await expect(screen.getByText("Showing photo.png")).toBeVisible();
+  await expect(appPage.getByText("Showing photo.png")).toBeVisible();
   const reads: string[] = [];
   page.on("request", (request) => {
     // A read of the file (its deletion is a POST).
@@ -733,40 +735,40 @@ test("a file the screen deletes while showing it is gone, never read again or a 
     }
   });
   // Still shown when its deletion lands, as a row is until the change
-  // that removes it reaches the screen's own data.
-  await screen.getByRole("button", { name: "Delete the file" }).click();
-  await expect(screen.getByRole("status", { name: "Deletion" })).toHaveText(
+  // that removes it reaches the page's own data.
+  await appPage.getByRole("button", { name: "Delete the file" }).click();
+  await expect(appPage.getByRole("status", { name: "Deletion" })).toHaveText(
     "deleted"
   );
-  await expect(screen.getByText("The file is gone")).toBeVisible();
-  await expect(screen.getByRole("heading", { name: "Files" })).toBeVisible();
+  await expect(appPage.getByText("The file is gone")).toBeVisible();
+  await expect(appPage.getByRole("heading", { name: "Files" })).toBeVisible();
   // Hidden, then shown again: still gone, not read again.
-  await screen.getByRole("button", { name: "Hide the file" }).click();
-  await expect(screen.getByText("The file is hidden")).toBeVisible();
-  await screen.getByRole("button", { name: "Show the file" }).click();
-  await expect(screen.getByText("The file is gone")).toBeVisible();
+  await appPage.getByRole("button", { name: "Hide the file" }).click();
+  await expect(appPage.getByText("The file is hidden")).toBeVisible();
+  await appPage.getByRole("button", { name: "Show the file" }).click();
+  await expect(appPage.getByText("The file is gone")).toBeVisible();
   await page.waitForTimeout(1000);
   expect(reads).toStrictEqual([]);
 });
 
-test("a file whose screen lost the App's data shows the refusal, and isn't read again", async ({
+test("a file whose page lost the App's data shows the refusal, and isn't read again", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("notesApp");
   const app = await notesApp(builder, undefined, fileViewFiles());
   const page = await pageOf(builder);
-  const screen = await openFiles(page, app);
-  const picker = screen.getByLabel("Upload a file");
+  const appPage = await openFiles(page, app);
+  const picker = appPage.getByLabel("Upload a file");
   await picker.setInputFiles({
     name: "photo.png",
     mimeType: "image/png",
     buffer: pixel,
   });
-  await expect(screen.getByText("Showing photo.png")).toBeVisible();
+  await expect(appPage.getByText("Showing photo.png")).toBeVisible();
   // The App's release is revoked: its build gets none of the App's data,
-  // and the next thing the screen asks is refused. The page then asks
-  // core about the build at once, and stops the screen: the refusal the
-  // person is left with is the page's, not the screen's own, which shows
+  // and the next thing the page asks is refused. The page then asks
+  // core about the build at once, and stops the page: the refusal the
+  // person is left with is the page's, not the page's own, which shows
   // only until then.
   await revokeNewestRelease(app);
   let reads = 0;
@@ -775,12 +777,12 @@ test("a file whose screen lost the App's data shows the refusal, and isn't read 
       reads += 1;
     }
   });
-  // The page's own refusal of a revoked release (the screen's or the
+  // The page's own refusal of a revoked release (the page's or the
   // version's, whichever it hears first).
   const refusal = page.getByText(/^This version of the App was revoked/u);
-  // The upload makes the screen ask, but it may have asked already: its
+  // The upload makes the page ask, but it may have asked already: its
   // live data is refused the same way the moment the release is
-  // revoked, and the page then stops the screen, its picker with it. So
+  // revoked, and the page then stops the page, its picker with it. So
   // whichever comes first: the refusal, or the upload that brings it.
   const uploaded = async (): Promise<void> => {
     try {
@@ -790,36 +792,34 @@ test("a file whose screen lost the App's data shows the refusal, and isn't read 
         buffer: pixel,
       });
     } catch {
-      // The screen was stopped first: there was nothing left to upload to.
+      // The page was stopped first: there was nothing left to upload to.
     }
   };
   const upload = uploaded();
   await Promise.race([refusal.waitFor(), upload]);
   await expect(refusal).toBeVisible();
-  await expect(page.locator('iframe[title="notes app"]')).not.toHaveAttribute(
-    "src"
-  );
+  await expect(page.locator('iframe[title="App"]')).not.toHaveAttribute("src");
   await page.waitForTimeout(3000);
   expect(reads).toBe(0);
 });
 
 /**
- * How long the links screen's later open waits after its click (6 s),
+ * How long the links page's later open waits after its click (6 s),
  * with room for its check: past any activation the click left.
  */
 const laterOpenWaitMs = 9000;
 
-/** Opens the links screen of `app`, its heading shown. */
+/** Opens the links page of `app`, its heading shown. */
 const openLinks = async (page: Page, app: string): Promise<FrameLocator> => {
-  await page.goto(`/apps/${app}/full?screen=notes`);
-  const screen = page.frameLocator('iframe[title="notes app"]');
-  await expect(screen.getByRole("heading", { name: "Links" })).toBeVisible({
+  await page.goto(`/apps/${app}/full`);
+  const appPage = page.frameLocator('iframe[title="App"]');
+  await expect(appPage.getByRole("heading", { name: "Links" })).toBeVisible({
     timeout: 20_000,
   });
-  return screen;
+  return appPage;
 };
 
-test("a screen opens its declared help site on a click, with no opener or referrer, and only with the person's say otherwise", async ({
+test("a page opens its declared help site on a click, with no opener or referrer, and only with the person's say otherwise", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("notesApp");
@@ -840,18 +840,18 @@ test("a screen opens its declared help site on a click, with no opener or referr
       body: "<title>Help</title><p>Help</p>",
     });
   });
-  const screen = await openLinks(page, app);
+  const appPage = await openLinks(page, app);
   // The activation Playwright gave the page as it opened is the page's
-  // own: it admits no link for as long as it can last (screen-files.ts).
+  // own: it admits no link for as long as it can last (page-files.ts).
   await page.waitForTimeout(openingActivationMs);
   const dialog = page.getByRole("alertdialog");
 
-  // A click in the screen: opened at once, in a tab of its own.
+  // A click in the page: opened at once, in a tab of its own.
   const opening = page.context().waitForEvent("page");
-  await screen.getByRole("button", { name: "Open help", exact: true }).click();
+  await appPage.getByRole("button", { name: "Open help", exact: true }).click();
   const tab = await opening;
   await tab.waitForLoadState();
-  await expect(screen.getByRole("status", { name: "Link" })).toHaveText(
+  await expect(appPage.getByRole("status", { name: "Link" })).toHaveText(
     "opened"
   );
   await expect(dialog).toBeHidden();
@@ -867,22 +867,22 @@ test("a screen opens its declared help site on a click, with no opener or referr
   await tab.close();
 
   // Long after the click: the page asks, naming the origin; turned down,
-  // nothing opens. Nothing touches the page while the screen waits to
+  // nothing opens. Nothing touches the page while the page waits to
   // open: Playwright runs its checks with a user gesture, which the page
   // would take for the person's.
-  await screen.getByRole("button", { name: "Open help later" }).click();
+  await appPage.getByRole("button", { name: "Open help later" }).click();
   await page.waitForTimeout(laterOpenWaitMs);
   await expect(dialog).toBeVisible({ timeout: 15_000 });
   await expect(dialog).toContainText("https://help.example.com");
   await dialog.getByRole("button", { name: "Cancel" }).click();
-  await expect(screen.getByRole("status", { name: "Link" })).toHaveText(
+  await expect(appPage.getByRole("status", { name: "Link" })).toHaveText(
     "link.declined"
   );
 
   // Asked again (after the pause a turned-down link starts), confirmed:
   // opened.
   await page.waitForTimeout(5000);
-  await screen.getByRole("button", { name: "Open help later" }).click();
+  await appPage.getByRole("button", { name: "Open help later" }).click();
   await page.waitForTimeout(laterOpenWaitMs);
   await expect(dialog).toBeVisible({ timeout: 15_000 });
   const confirmed = page.context().waitForEvent("page");
@@ -890,13 +890,13 @@ test("a screen opens its declared help site on a click, with no opener or referr
   const later = await confirmed;
   await later.waitForLoadState();
   expect(later.url()).toBe("https://help.example.com/later");
-  await expect(screen.getByRole("status", { name: "Link" })).toHaveText(
+  await expect(appPage.getByRole("status", { name: "Link" })).toHaveText(
     "opened"
   );
 
   // A site it didn't declare, written to pass for its own: refused.
-  await screen.getByRole("button", { name: "Open elsewhere" }).click();
-  await expect(screen.getByRole("status", { name: "Link" })).toHaveText(
+  await appPage.getByRole("button", { name: "Open elsewhere" }).click();
+  await expect(appPage.getByRole("status", { name: "Link" })).toHaveText(
     "link.not_allowed"
   );
   expect(visits).toStrictEqual([

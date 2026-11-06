@@ -23,7 +23,7 @@ export type Loaded<T> =
 
 /**
  * What a page can name that core may not have (any more): an App, a
- * workflow, a collection or document, a decision, a screen. Not
+ * workflow, a collection or document, a decision, a page. Not
  * `request.not_found`, an endpoint this core doesn't know (an older one),
  * nor what a page reads along the way, such as a member: those stay
  * refusals, with their reference.
@@ -36,7 +36,7 @@ const notFoundCodes = new Set([
   "knowledge.not_found",
   "brain.work_not_found",
   "decision.not_found",
-  "screen.not_found",
+  "page.not_found",
   "project.not_found",
 ]);
 

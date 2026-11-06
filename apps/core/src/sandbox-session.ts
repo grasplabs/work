@@ -1,5 +1,6 @@
 import { chunkBytes } from "@grasp-os/shared/chunks";
 import { whenAborted } from "@grasp-os/shared/deadline";
+import { pageLimits } from "@grasp-os/shared/pages";
 import {
   maxCapturedLines,
   maxCapturedMessage,
@@ -14,7 +15,6 @@ import {
   rpcCopyNodeBounds,
 } from "@grasp-os/shared/rpc-accounting";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
-import { screenLimits } from "@grasp-os/shared/screens";
 import { isolateArgumentDepth } from "@grasp-os/shared/stores";
 import { RpcSession, WebSocketTransport } from "capnweb";
 import { z } from "zod";
@@ -92,7 +92,7 @@ export interface SessionCall {
    */
   readonly platformModules?: Readonly<Record<string, PlatformModule>>;
   /**
-   * Whether the isolate runs with `nodejs_compat`, which the screen
+   * Whether the isolate runs with `nodejs_compat`, which the page
    * compiler's React Compiler needs: core's own platform code only. The
    * sandbox host adds that flag and no other.
    */
@@ -863,7 +863,7 @@ export const runInSession = async (
       // App code's calls, each a message with its list of arguments
       // around an argument as deep as `isolateArgumentDepth`.
       maxDepth: isolateArgumentDepth + 1,
-      maxBigIntDigits: screenLimits.rpc.maxBigIntDigits,
+      maxBigIntDigits: pageLimits.rpc.maxBigIntDigits,
     },
   });
   // Given up on: its capabilities refuse from now, not once the supervisor

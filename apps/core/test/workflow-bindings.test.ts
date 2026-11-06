@@ -521,7 +521,7 @@ const eventContract = async (admin: Person): Promise<string> => {
 describe("event contracts", () => {
   beforeAll(chooseModel);
 
-  it("admit each event type only with its data's contract and whether a screen sends it", async () => {
+  it("admit each event type only with its data's contract and whether a page sends it", async () => {
     const admin = await person("admin");
     const data = JSON.stringify(emptyObject);
     const publish = async (events: unknown) =>
@@ -539,7 +539,7 @@ describe("event contracts", () => {
       unreadableData: await publish({
         "grasp.job.done": { data: "{}", browser: false },
       }),
-      twoForScreens: await publish({
+      twoForPages: await publish({
         "grasp.job.done": { data, browser: true },
         "grasp.job.failed": { data, browser: true },
       }),
@@ -560,7 +560,7 @@ describe("event contracts", () => {
       noData: "workflow.contract_invalid",
       noSender: "workflow.contract_invalid",
       unreadableData: "workflow.contract_invalid",
-      twoForScreens: "workflow.contract_invalid",
+      twoForPages: "workflow.contract_invalid",
       noTypes: "workflow.contract_invalid",
       paddedType: "workflow.contract_invalid",
       controlType: "workflow.contract_invalid",
@@ -610,7 +610,7 @@ describe("event contracts", () => {
     });
   });
 
-  it("make an event wait one an App sends to only when it waits on the type a screen sends", async () => {
+  it("make an event wait one an App sends to only when it waits on the type a page sends", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const events = await eventContract(admin);
@@ -624,7 +624,7 @@ describe("event contracts", () => {
       basedOn: null,
     });
     // The same binding, waiting on the contract's other type, which no
-    // screen sends.
+    // page sends.
     await publishWorkflowVersion(env, ada, workflow.id, {
       definition: definitionOf({
         status: "2.0.0",

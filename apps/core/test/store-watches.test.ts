@@ -1,4 +1,4 @@
-import { querySubscriptionLimits } from "@grasp-os/shared/screens";
+import { querySubscriptionLimits } from "@grasp-os/shared/pages";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -15,11 +15,11 @@ import {
 // The live queries a business store's object keeps (store-watches.ts),
 // through its RPC surface as core calls it: told of every write that
 // moves a table's generation, a backfill's batch as much as a commit;
-// and its bounds, which watches whose screens are gone must not fill for
+// and its bounds, which watches whose pages are gone must not fill for
 // everyone.
 
 /**
- * A watcher as core passes one, and what it was told. One whose screen
+ * A watcher as core passes one, and what it was told. One whose page
  * is gone (`answers` false) never answers, as a connection that died
  * without a word doesn't.
  */
@@ -124,7 +124,7 @@ describe("a store's live queries", { timeout: 120_000 }, () => {
     );
   });
 
-  it("sweeps the watches whose screens are gone from its alarm", async () => {
+  it("sweeps the watches whose pages are gone from its alarm", async () => {
     const store = await newStore();
     await store.defineTables(v1, consumer(1));
     const gone = watcherOf(false);

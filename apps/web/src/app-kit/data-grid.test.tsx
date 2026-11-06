@@ -26,7 +26,7 @@ import {
 } from "./test-host.tsx";
 import type { Answer, Sent } from "./test-host.tsx";
 
-// The data grid an App screen shows its records in, against a real session
+// The data grid an App page shows its records in, against a real session
 // client: what it asks the App's query for (the page size, then more on
 // Load more; the search, sort and filters the person chose), how it shows
 // and edits each field as the query declares it, what it does with the
@@ -129,7 +129,7 @@ const people = ["Ada", "Grace", "Linus", "Margaret", "Ken"].map(
 /** A person as the list answers them. */
 type Person = (typeof people)[number];
 
-/** The query's arguments for what the person did, as a screen hands them on. */
+/** The query's arguments for what the person did, as a page hands them on. */
 const argsOf = ({ search, sort, filters }: DataGridState<Person>) => {
   let order: "name" | "-name" | undefined;
   if (sort?.field === "name") {

@@ -1,23 +1,23 @@
 /**
- * The compiler's own lint rules for screens, beside @shadcn/lint's (which
+ * The compiler's own lint rules for pages, beside @shadcn/lint's (which
  * hold classes, colours and the `style` prop to the kit): every other way
- * a screen could style itself outside the design system, load what the
+ * a page could style itself outside the design system, load what the
  * frame would refuse anyway, or reach WebRTC, refused where it is
  * written, each with what to do instead. The frame's sandbox, CSP and
  * bootstrap hold at run time (core's security-headers.ts and
- * screen-frame.ts); these say so at build, where it can be fixed. They
+ * page-frame.ts); these say so at build, where it can be fixed. They
  * read source, which code can always spell another way, so nothing
  * relies on them.
  */
 import {
-  screenNestedDocuments,
-  screenPeerInterfaces,
-} from "@grasp-os/shared/screens";
+  pageNestedDocuments,
+  pagePeerInterfaces,
+} from "@grasp-os/shared/pages";
 import type { Rule } from "eslint";
 
-/** Added to every message: a screen styles itself with the kit. */
+/** Added to every message: a page styles itself with the kit. */
 const instead =
-  "Style screens with the kit's components and theme classes (@grasp-os/ui).";
+  "Style pages with the kit's components and theme classes (@grasp-os/ui).";
 
 /** Elements whose `src`-like attributes load a resource into the frame. */
 const loadingElements = new Set([
@@ -349,7 +349,7 @@ const noStyleEscapes: Rule.RuleModule = {
     type: "problem",
     docs: {
       description:
-        "Refuse styling a screen outside the design system through the DOM or raw HTML",
+        "Refuse styling a page outside the design system through the DOM or raw HTML",
     },
     schema: false,
     messages: {
@@ -357,7 +357,7 @@ const noStyleEscapes: Rule.RuleModule = {
       styleWrite: `Writing an element's style ({{what}}) styles it outside the design system. Toggle a theme class instead, or set a CSS custom property the kit reads through className. ${instead}`,
       createElement: `document.createElement("{{element}}") adds a stylesheet outside the design system. ${instead}`,
       sheet: `{{member}} reaches the frame's stylesheets or head, outside the design system. ${instead}`,
-      constructedSheet: `A constructed stylesheet (new CSSStyleSheet) styles the screen outside the design system. ${instead}`,
+      constructedSheet: `A constructed stylesheet (new CSSStyleSheet) styles the page outside the design system. ${instead}`,
     },
   },
   create: (context) => ({
@@ -455,12 +455,12 @@ const noRemoteResources: Rule.RuleModule = {
     type: "problem",
     docs: {
       description:
-        "Refuse loading a stylesheet or a remote resource into a screen",
+        "Refuse loading a stylesheet or a remote resource into a page",
     },
     schema: false,
     messages: {
-      link: `A <link> loads a stylesheet or resource into the screen, outside the design system: the screen's frame never loads one. ${instead}`,
-      remote: `<{{element}} {{attribute}}="{{url}}"> loads a resource from outside the screen, which its frame never loads. Use a file the App stores (a data: or blob: URL), or an icon from lucide-react.`,
+      link: `A <link> loads a stylesheet or resource into the page, outside the design system: the page's frame never loads one. ${instead}`,
+      remote: `<{{element}} {{attribute}}="{{url}}"> loads a resource from outside the page, which its frame never loads. Use a file the App stores (a data: or blob: URL), or an icon from lucide-react.`,
     },
   },
   create: (context) => ({
@@ -508,11 +508,11 @@ const noRemoteResources: Rule.RuleModule = {
   }),
 };
 
-/** The WebRTC interfaces that open a peer connection (@grasp-os/shared/screens). */
-const peerInterfaces = new Set(screenPeerInterfaces);
+/** The WebRTC interfaces that open a peer connection (@grasp-os/shared/pages). */
+const peerInterfaces = new Set(pagePeerInterfaces);
 
 /** Elements that hold a document of their own, and with it a realm of its own. */
-const frameElements = new Set(screenNestedDocuments);
+const frameElements = new Set(pageNestedDocuments);
 
 /** Members that hand over a nested document's window or document. */
 const childRealmMembers = new Set([
@@ -523,19 +523,19 @@ const childRealmMembers = new Set([
 
 /** What to do instead of reaching outside the frame. */
 const insteadOfOut =
-  "A screen reaches outside its frame only through its App's functions.";
+  "A page reaches outside its frame only through its App's functions.";
 
 const noPeerConnections: Rule.RuleModule = {
   meta: {
     type: "problem",
     docs: {
       description:
-        "Refuse WebRTC and nested documents in a screen, where it is written",
+        "Refuse WebRTC and nested documents in a page, where it is written",
     },
     schema: false,
     messages: {
-      peer: `{{name}} opens a peer connection out of the screen's frame, past what its App may reach. ${insteadOfOut}`,
-      frame: `A nested document (<{{element}}>) gives the screen a second realm, with its own WebRTC. ${insteadOfOut}`,
+      peer: `{{name}} opens a peer connection out of the page's frame, past what its App may reach. ${insteadOfOut}`,
+      frame: `A nested document (<{{element}}>) gives the page a second realm, with its own WebRTC. ${insteadOfOut}`,
       childRealm: `{{member}} reaches a nested document's realm, with its own WebRTC. ${insteadOfOut}`,
     },
   },
@@ -784,7 +784,7 @@ const noImportant: Rule.RuleModule = {
 };
 
 /**
- * A plain `<form>` in a screen (GRA-1520): the screen's frame is sandboxed
+ * A plain `<form>` in a page (GRA-1520): the page's frame is sandboxed
  * without `allow-forms`, which stays off, so the browser never submits it
  * and its `onSubmit` never runs. The kit's `Form` handles a submit itself.
  * ESLint's `no-restricted-syntax` would say it, but its options need a JSON
@@ -795,11 +795,11 @@ const noImportant: Rule.RuleModule = {
 const noBareForms: Rule.RuleModule = {
   meta: {
     type: "problem",
-    docs: { description: "Refuse a plain <form> in a screen" },
+    docs: { description: "Refuse a plain <form> in a page" },
     schema: false,
     hasSuggestions: true,
     messages: {
-      form: "A plain <form> never submits in a screen: its frame doesn't allow forms, so its onSubmit never runs.",
+      form: "A plain <form> never submits in a page: its frame doesn't allow forms, so its onSubmit never runs.",
       kit: "Use Form from @grasp-os/ui/form (with useForm, the form's fields and SubmitButton), which submits itself.",
     },
   },

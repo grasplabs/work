@@ -285,7 +285,7 @@ const prepare = (input: AuditEvent): Incoming => {
 
 /**
  * The IDs an actor is found by: the person's, staff member's or agent's,
- * the App's (for its screens, server code and workflow runs alike) and the
+ * the App's (for its pages, server code and workflow runs alike) and the
  * workflow run's.
  */
 export const actorIdsOf = (actor: AuditActor): string[] => {

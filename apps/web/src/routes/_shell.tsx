@@ -8,9 +8,9 @@ import { readWithin, shellStatus } from "../core-connection.ts";
 import { AppFrame } from "../frame/app-frame.tsx";
 import { PageError } from "../frame/page-states.tsx";
 import { landingAfterSignIn, takeJustSignedIn } from "../landing.ts";
+import { AppPanelProvider } from "../pages/app-panel-context.tsx";
+import { AppPanelSlot } from "../pages/app-panel.tsx";
 import { RouteError } from "../route-error.tsx";
-import { AppPanelProvider } from "../screens/app-panel-context.tsx";
-import { AppPanelSlot } from "../screens/app-panel.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 
 // The signed-in product: the app's sidebar beside the page, each page
@@ -20,7 +20,7 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
 const Shell = () => {
   const { core, identity } = Route.useRouteContext();
   return (
-    // The panel slot beside every page (screens/app-panel.tsx): outside the
+    // The panel slot beside every page (pages/app-panel.tsx): outside the
     // page, so navigating the page leaves it open.
     // Keyed by who is signed in: someone else signing in on the browser
     // finds no panel of theirs open.

@@ -14,7 +14,7 @@ import { withoutDefinition } from "../apps/core/test/app-definitions.ts";
 import type { Answer } from "../apps/core/test/provider-streams.ts";
 import { contactsApp } from "./contacts-app.ts";
 import { invoiceApproval } from "./invoice-approval.ts";
-import { tallyFiles, tallyScreen, tallyServer } from "./tally-app.ts";
+import { tallyFiles, tallyPage, tallyServer } from "./tally-app.ts";
 
 /** An agent's turn: its answer, or its answer to what the chat said so far. */
 export type ScriptedReply = Answer | ((said: string) => Answer);
@@ -155,7 +155,7 @@ export const modelScripts = {
         outputTokens: 40,
       }),
       says("The tally is in the preview."),
-      // Asked again: a write of its screen alone, which the open preview
+      // Asked again: a write of its page alone, which the open preview
       // takes in place.
       (said) => ({
         text: "Renaming the button.",
@@ -166,7 +166,7 @@ export const modelScripts = {
             arguments: {
               app: readIn(said, ownApp),
               files: {
-                "screens/tally.tsx": tallyScreen("Add another"),
+                "src/routes/index.tsx": tallyPage("Add another"),
               },
             },
           },
@@ -182,12 +182,12 @@ export const modelScripts = {
           "server/tally.ts": tallyServer("counted anew"),
         }),
       says("It counts anew."),
-      // Server code that doesn't build, with a write of its screen: the
-      // screen shows, on the server code that last built.
+      // Server code that doesn't build, with a write of its page: the
+      // page shows, on the server code that last built.
       (said) =>
         writesTally(said, "take-more", "Taking more.", {
           "server/tally.ts": tallyServer("taken", 1000),
-          "screens/tally.tsx": tallyScreen("Add more"),
+          "src/routes/index.tsx": tallyPage("Add more"),
         }),
       says("It takes more."),
       (said) =>
@@ -205,7 +205,7 @@ export const modelScripts = {
    */
   buildsApp: {
     opener:
-      "A contact list for the sales team: each contact's name, added from its screen.",
+      "A contact list for the sales team: each contact's name, added from its page.",
     replies: [
       calls("findsapp1", "searchFiles", {
         text: "export const defineApp =",
@@ -250,8 +250,8 @@ export const modelScripts = {
     ],
   },
   /**
-   * An App's own chat whose first screen doesn't build: the agent writes
-   * the tally with a screen that doesn't parse, then, asked, fixes it.
+   * An App's own chat whose first page doesn't build: the agent writes
+   * the tally with a page that doesn't parse, then, asked, fixes it.
    */
   fixesBrokenTally: {
     opener: "Build a tally, and get it working.",
@@ -267,14 +267,18 @@ export const modelScripts = {
           app: readIn(said, ownApp),
           files: {
             ...codeOf(tallyFiles("in the preview")),
-            "screens/tally.tsx": "export default function Tally( {",
+            "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Tally( {
+
+export const Route = createFileRoute("/")({ component: Tally });
+`,
           },
         }),
-      says("The tally's screen doesn't build yet."),
+      says("The tally's page doesn't build yet."),
       (said) =>
         calls("fixestly1", "writeFile", {
           app: readIn(said, ownApp),
-          files: { "screens/tally.tsx": tallyScreen("Add one") },
+          files: { "src/routes/index.tsx": tallyPage("Add one") },
         }),
       says("The tally works now."),
     ],

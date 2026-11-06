@@ -34,7 +34,7 @@ import {
   valueOf,
 } from "./test-host.tsx";
 
-// The form fields an App screen binds to a form `useForm` made, one for
+// The form fields an App page binds to a form `useForm` made, one for
 // every kind of value its schema can declare, against a real session
 // client: each says what the schema refuses (a value it needs, a bound,
 // a whole number), only once the person left it or tried to submit, and

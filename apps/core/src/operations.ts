@@ -3179,7 +3179,7 @@ const startNested = async (
       maxDepth: callMaxDepth,
     });
   }
-  // A streaming action runs only for a screen following it (spec 10.7.6):
+  // A streaming action runs only for a page following it (spec 10.7.6):
   // nested, its progress would have no one to go to.
   if (callee.stream !== null) {
     throw operationErrors.create("operation.mode_mismatch");
@@ -3539,7 +3539,7 @@ const runMutation = async (
  * (`checkedProgress`) and handed to `sink`, unless the call is cancelled
  * or has emitted `streamMaxEmits` already. It waits for nothing: the sink
  * keeps the latest snapshot only, so an action emitting faster than its
- * screen reads costs it nothing more than that one snapshot.
+ * page reads costs it nothing more than that one snapshot.
  */
 const emitProgress = async (
   compiled: Compiled,
@@ -3749,7 +3749,7 @@ const execute = async (
 
 /**
  * The latest deadline a call may have: a server invocation's wall time
- * (spec 18.1) from now. A caller may give less (a screen's call, an
+ * (spec 18.1) from now. A caller may give less (a page's call, an
  * agent's, a step's attempt), never more: a later deadline is held to it.
  */
 const invocationDeadline = (asked: number): number => {

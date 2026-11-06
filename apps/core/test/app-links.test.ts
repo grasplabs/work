@@ -1,9 +1,9 @@
 import { linkChannel } from "@grasp-os/sdk/host";
 import { appLinksPath } from "@grasp-os/shared/app-link-limits";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import { pagePersonHeader } from "@grasp-os/shared/page-limits";
+import { pageLeaseHeader } from "@grasp-os/shared/pages";
 import type { Role } from "@grasp-os/shared/roles";
-import { screenPersonHeader } from "@grasp-os/shared/screen-limits";
-import { screenLeaseHeader } from "@grasp-os/shared/screens";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -19,7 +19,7 @@ import { clientOrigin } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 
 // An App's external links (spec 10.7.7, 32.3), through core's link channel
-// as a running screen's page reaches it (app-link-route.ts): which URL may
+// as a running page's page reaches it (app-link-route.ts): which URL may
 // open through the App's `resource.links` declaration, for whom, through
 // which build, and the record of each opened. From the threat model on
 // GRA-762: adversarial URLs (userinfo, Unicode names and punycode, ports,
@@ -65,17 +65,17 @@ const released = async (
 };
 
 /**
- * `person`'s open screen of `app`: its lease, the page's link channel,
+ * `person`'s open page of `app`: its lease, the page's link channel,
  * and raw requests of the channel as a page that doesn't follow the
  * protocol would send them.
  */
-const screenOf = async (
+const pageOf = async (
   person: Person,
   app: string,
   /** Core's env each request reaches, as it is sent: core's own unless a test holds part of it. */
   coreEnv: () => Env = () => env
 ) => {
-  const { lease } = await person.api.screens.open(app, "notes");
+  const { lease } = await person.api.pages.open(app);
   const fetch = async (path: string, init: RequestInit) => {
     const headers = new Headers(init.headers);
     // The page's own origin, unless the request says otherwise: `none`
@@ -86,8 +86,8 @@ const screenOf = async (
       headers.delete("origin");
     }
     headers.set("cookie", person.session);
-    if (!headers.has(screenPersonHeader)) {
-      headers.set(screenPersonHeader, person.userId);
+    if (!headers.has(pagePersonHeader)) {
+      headers.set(pagePersonHeader, person.userId);
     }
     return await routed(path, { ...init, headers }, coreEnv());
   };
@@ -110,7 +110,7 @@ const screenOf = async (
         method: "POST",
         headers: {
           "content-type": "application/json",
-          [screenLeaseHeader]: lease,
+          [pageLeaseHeader]: lease,
           ...headers,
         },
         body: JSON.stringify(body),
@@ -130,7 +130,7 @@ const screenOf = async (
 
 /**
  * A builder's App declaring links, current and published (a draft is its
- * builders' alone), open in their screen.
+ * builders' alone), open in their page.
  */
 const openedApp = async (
   files = linkedFiles(),
@@ -152,13 +152,13 @@ const openedApp = async (
     app: id,
     version,
     builder,
-    screen: await screenOf(builder, id),
+    page: await pageOf(builder, id),
   };
 };
 
 /**
- * Core's database with the first read of App `app`'s screen delivery held
- * once it is reached (screen-delivery.ts `standingOf`): a link request
+ * Core's database with the first read of App `app`'s page delivery held
+ * once it is reached (page-delivery.ts `standingOf`): a link request
  * waits there, past its admission and before its decision, until
  * `release`.
  */
@@ -249,11 +249,11 @@ const linksOpened = async (
 
 describe("an App's external links", { timeout: 120_000 }, () => {
   it("opens a URL its declaration allows, as core parsed it, and records the open without its path", async () => {
-    const { app, version, builder, screen } = await openedApp();
+    const { app, version, builder, page } = await openedApp();
     const url = "https://help.example.com/guide?customer=ada#billing";
 
-    const checked = await screen.channel.check("links", url);
-    const opened = await screen.channel.open("links", url, "activation");
+    const checked = await page.channel.check("links", url);
+    const opened = await page.channel.open("links", url, "activation");
 
     expect({
       checked,
@@ -282,7 +282,7 @@ describe("an App's external links", { timeout: 120_000 }, () => {
   });
 
   it("decides on the URL's own origin, whatever its text says", async () => {
-    const { app, screen } = await openedApp();
+    const { app, page } = await openedApp();
     // A sample of each kind, within one person's burst of requests: the
     // pure rules are app-link-limits.test.ts's, case by case.
     const cases = {
@@ -302,9 +302,9 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     const decided: Record<string, unknown> = {};
     for (const [name, url] of Object.entries(cases)) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time, as a person clicks
-      decided[name] = await outcomeOf(screen.channel.check("links", url));
+      decided[name] = await outcomeOf(page.channel.check("links", url));
     }
-    const punycode = await screen.channel.check(
+    const punycode = await page.channel.check(
       "links",
       "https://bücher.example/katalog"
     );
@@ -340,11 +340,11 @@ describe("an App's external links", { timeout: 120_000 }, () => {
   });
 
   it("opens a redirect through an allowed origin as given, and fetches nothing", async () => {
-    const { screen } = await openedApp();
+    const { page } = await openedApp();
     const fetched = vi.spyOn(globalThis, "fetch");
     const url = "https://help.example.com/out?to=https://evil.test/";
     try {
-      const opened = await screen.channel.open("links", url, "confirmation");
+      const opened = await page.channel.open("links", url, "confirmation");
       expect({
         opened: opened.url,
         fetched: fetched.mock.calls.filter(([target]) =>
@@ -359,12 +359,12 @@ describe("an App's external links", { timeout: 120_000 }, () => {
   });
 
   it("opens nothing through a resource that isn't a links declaration, or isn't declared", async () => {
-    const { screen } = await openedApp();
+    const { page } = await openedApp();
     const url = "https://help.example.com/";
 
     expect({
-      files: await outcomeOf(screen.channel.check("files", url)),
-      none: await outcomeOf(screen.channel.check("elsewhere", url)),
+      files: await outcomeOf(page.channel.check("files", url)),
+      none: await outcomeOf(page.channel.check("elsewhere", url)),
     }).toStrictEqual({ files: "link.not_allowed", none: "link.not_allowed" });
   });
 
@@ -376,7 +376,7 @@ describe("an App's external links", { timeout: 120_000 }, () => {
       id: colleague.userId,
       role: "user",
     });
-    const theirs = await screenOf(colleague, app);
+    const theirs = await pageOf(colleague, app);
     const url = "https://help.example.com/";
     const before = await outcomeOf(theirs.channel.check("links", url));
     await builder.api.apps.members.remove(app, {
@@ -387,7 +387,7 @@ describe("an App's external links", { timeout: 120_000 }, () => {
 
     // A version without the declaration, opened.
     await released(builder, app, linkedFiles(null));
-    const reopened = await screenOf(builder, app);
+    const reopened = await pageOf(builder, app);
     const undeclared = await outcomeOf(reopened.channel.check("links", url));
 
     expect({
@@ -402,16 +402,16 @@ describe("an App's external links", { timeout: 120_000 }, () => {
   });
 
   it("opens nothing for anyone once its App is archived, builders included, and opens again once it is restored", async () => {
-    const { app, builder, screen } = await openedApp();
+    const { app, builder, page } = await openedApp();
     const url = "https://help.example.com/";
-    const before = await outcomeOf(screen.channel.check("links", url));
+    const before = await outcomeOf(page.channel.check("links", url));
     await builder.api.apps.archive(app);
     const archived = {
-      check: await outcomeOf(screen.channel.check("links", url)),
-      open: await outcomeOf(screen.channel.open("links", url, "activation")),
+      check: await outcomeOf(page.channel.check("links", url)),
+      open: await outcomeOf(page.channel.open("links", url, "activation")),
     };
     await builder.api.apps.restore(app);
-    const restored = await outcomeOf(screen.channel.check("links", url));
+    const restored = await outcomeOf(page.channel.check("links", url));
 
     expect({ before, archived, restored }).toStrictEqual({
       before: "opened",
@@ -423,7 +423,7 @@ describe("an App's external links", { timeout: 120_000 }, () => {
   it("opens nothing through a request admitted before its App was archived, decided after", async () => {
     const { app, builder } = await openedApp();
     let reaching: Env = env;
-    const screen = await screenOf(builder, app, () => reaching);
+    const page = await pageOf(builder, app, () => reaching);
     const url = "https://help.example.com/";
     // Admitted while the App is in use, held before its decision while
     // the App is archived, then let go.
@@ -441,15 +441,15 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     };
 
     expect({
-      check: await across(async () => await screen.channel.check("links", url)),
+      check: await across(async () => await page.channel.check("links", url)),
       open: await across(
-        async () => await screen.channel.open("links", url, "activation")
+        async () => await page.channel.open("links", url, "activation")
       ),
     }).toStrictEqual({ check: "app.archived", open: "app.archived" });
   });
 
-  it("opens nothing through a release revoked since its screen opened", async () => {
-    const { app, version, screen } = await openedApp();
+  it("opens nothing through a release revoked since its page opened", async () => {
+    const { app, version, page } = await openedApp();
     await revokeRelease(
       env,
       await actingPerson("admin"),
@@ -459,20 +459,20 @@ describe("an App's external links", { timeout: 120_000 }, () => {
 
     await expect(
       outcomeOf(
-        screen.channel.open("links", "https://help.example.com/", "activation")
+        page.channel.open("links", "https://help.example.com/", "activation")
       )
     ).resolves.not.toBe("opened");
   });
 
   it("opens links of an App whose data isn't ordinary only once the person confirmed each, the whole URL shown", async () => {
-    const { app, screen } = await openedApp(linkedFiles(), { ordinary: false });
+    const { app, page } = await openedApp(linkedFiles(), { ordinary: false });
     const url = "https://help.example.com/?q=what-the-page-read";
 
-    const checked = await screen.channel.check("links", url);
+    const checked = await page.channel.check("links", url);
     const clicked = await outcomeOf(
-      screen.channel.open("links", url, "activation")
+      page.channel.open("links", url, "activation")
     );
-    const confirmed = await screen.channel.open("links", url, "confirmation");
+    const confirmed = await page.channel.open("links", url, "confirmation");
     const recorded = await linksOpened(app);
 
     expect({
@@ -491,15 +491,15 @@ describe("an App's external links", { timeout: 120_000 }, () => {
   });
 
   it("opens a restricted App's links only once the person confirmed each", async () => {
-    const { app, screen } = await openedApp();
+    const { app, page } = await openedApp();
     await appHost(env, appIdSchema.parse(app)).restrict();
     const url = "https://help.example.com/";
 
-    const checked = await screen.channel.check("links", url);
+    const checked = await page.channel.check("links", url);
     const clicked = await outcomeOf(
-      screen.channel.open("links", url, "activation")
+      page.channel.open("links", url, "activation")
     );
-    const confirmed = await screen.channel.open("links", url, "confirmation");
+    const confirmed = await page.channel.open("links", url, "confirmation");
 
     const recorded = await linksOpened(app);
     expect({
@@ -517,37 +517,37 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     });
   });
 
-  it("answers only a screen of the person's own, from the deployment's own page", async () => {
-    const { builder, screen } = await openedApp();
+  it("answers only a page of the person's own, from the deployment's own page", async () => {
+    const { builder, page } = await openedApp();
     const body = { url: "https://help.example.com/" };
 
     expect({
-      noLease: await screen.raw("links", "check", body, {
-        [screenLeaseHeader]: "",
+      noLease: await page.raw("links", "check", body, {
+        [pageLeaseHeader]: "",
       }),
-      forgedLease: await screen.raw("links", "check", body, {
-        [screenLeaseHeader]: `${screen.lease.split(".")[0]}.AAAA`,
+      forgedLease: await page.raw("links", "check", body, {
+        [pageLeaseHeader]: `${page.lease.split(".")[0]}.AAAA`,
       }),
-      crossSite: await screen.raw("links", "check", body, {
+      crossSite: await page.raw("links", "check", body, {
         "sec-fetch-site": "cross-site",
       }),
-      someoneElse: await screen.raw("links", "check", body, {
-        [screenPersonHeader]: `${builder.userId}x`,
+      someoneElse: await page.raw("links", "check", body, {
+        [pagePersonHeader]: `${builder.userId}x`,
       }),
-      openWithoutIntent: await screen.raw("links", "open", body),
-      unknownIntent: await screen.raw("links", "open", {
+      openWithoutIntent: await page.raw("links", "open", body),
+      unknownIntent: await page.raw("links", "open", {
         ...body,
         intent: "wish",
       }),
-      extraField: await screen.raw("links", "check", {
+      extraField: await page.raw("links", "check", {
         ...body,
         target: "_top",
       }),
-      otherOrigin: await screen.raw("links", "check", body, {
+      otherOrigin: await page.raw("links", "check", body, {
         origin: "https://evil.test",
       }),
-      noOrigin: await screen.raw("links", "check", body, { origin: "none" }),
-      ownPage: await screen.raw("links", "check", body),
+      noOrigin: await page.raw("links", "check", body, { origin: "none" }),
+      ownPage: await page.raw("links", "check", body),
     }).toStrictEqual({
       noLease: { status: 403, code: "request.forbidden" },
       forgedLease: { status: 403, code: "request.forbidden" },
@@ -563,12 +563,12 @@ describe("an App's external links", { timeout: 120_000 }, () => {
   });
 
   it("opens nothing through another App's path with this App's lease, though the person may open both", async () => {
-    const { builder, screen } = await openedApp();
+    const { builder, page } = await openedApp();
     const { id: other } = await builder.api.apps.create({ name: "Other" });
     await released(builder, other, linkedFiles());
 
     await expect(
-      screen.raw(
+      page.raw(
         "links",
         "check",
         { url: "https://help.example.com/" },
@@ -579,7 +579,7 @@ describe("an App's external links", { timeout: 120_000 }, () => {
   });
 
   it("refuses a person's checks past their burst of requests, before reading anything", async () => {
-    const { screen } = await openedApp();
+    const { page } = await openedApp();
     const body = { url: "https://help.example.com/" };
     const statuses: number[] = [];
     // The clock stands still, so no request comes back to the burst while
@@ -588,8 +588,8 @@ describe("an App's external links", { timeout: 120_000 }, () => {
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
     try {
       for (let attempt = 0; attempt < 30; attempt += 1) {
-        // oxlint-disable-next-line no-await-in-loop -- one after another, as a loop in a screen sends them
-        const { status } = await screen.raw("links", "check", body);
+        // oxlint-disable-next-line no-await-in-loop -- one after another, as a loop in a page sends them
+        const { status } = await page.raw("links", "check", body);
         statuses.push(status);
       }
     } finally {

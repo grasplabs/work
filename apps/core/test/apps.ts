@@ -14,7 +14,7 @@ import { signedInApi } from "./sign-in.ts";
  * What `run` returns, run with core's clock `sessionRecheckMs` on: past
  * the time the connection's last reading of the session, and with it the
  * last answer to whether someone may still use an App, holds, so the next
- * push to their screen checks again. Waiting that out for real
+ * push to their page checks again. Waiting that out for real
  * took five seconds a test, and raced a loaded runner. Tests wait at most
  * 3 s for the push that is refused, so only the moved clock can get there.
  */
@@ -36,7 +36,7 @@ type Builder = Pick<Awaited<ReturnType<typeof signedInApi>>, "api">;
  * Classifies the App's data as ordinary, as an admin does
  * (`DataPolicyApi.classify`): code core didn't serve, a call with no
  * lease, then gets it too. For tests that call an App's functions without
- * a screen's lease, which aren't about that (screen-delivery.test.ts is).
+ * a page's lease, which aren't about that (page-delivery.test.ts is).
  */
 export const ordinaryData = async (app: string): Promise<void> => {
   await env.DB.prepare(
@@ -62,7 +62,7 @@ export const published = async (app: string): Promise<void> => {
 /**
  * Commits `files` as the App's next version, makes it current and
  * publishes the App, with its data classified as ordinary
- * (`ordinaryData`), so a call without a screen's lease reaches it too.
+ * (`ordinaryData`), so a call without a page's lease reaches it too.
  */
 export const release = async (
   builder: Builder,

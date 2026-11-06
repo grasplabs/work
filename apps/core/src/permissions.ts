@@ -422,9 +422,9 @@ const parseId = (id: unknown): PermissionId => {
 };
 
 /**
- * Tells App `subject`'s screens that what it may start changed, after a
+ * Tells App `subject`'s pages that what it may start changed, after a
  * grant or revoke of one of its permissions, so their live workflow
- * watches read again (screen-workflows.ts). Best effort: the change
+ * watches read again (page-workflows.ts). Best effort: the change
  * stands if the App's host can't be reached.
  */
 const tellPolicyChanged = async (
@@ -631,7 +631,7 @@ const workflowGenerationMoved = (
 
 /**
  * Refuses `send` on a workflow for anyone but an App: events reach a run
- * only through an App's screen or mutation, so no other subject is
+ * only through an App's page or mutation, so no other subject is
  * granted what it can't use.
  */
 const requireSenderFits = (

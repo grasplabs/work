@@ -43,10 +43,10 @@ import { requireNotStaff } from "./sharing.ts";
 //   every visitor's session, in the same batch as the status, and a
 //   sign-in's session goes in only while the App is still published.
 // - Code core didn't lease, or of a revoked release. A call runs only for
-//   a screen build that gets the App's data, read before it runs and
+//   a page build that gets the App's data, read before it runs and
 //   again before its answer or error is handed over
 //   (`deliveredToVisitor`), so a revocation while it ran keeps both.
-// - A call too large. Its request is bounded as a member's screen's is
+// - A call too large. Its request is bounded as a member's page's is
 //   (`functionRequestMaxBytes`), and the endpoint's body has room for
 //   exactly that, escaped.
 // - Reaching another App's data, or a member's. The call runs on the
@@ -69,7 +69,7 @@ import { requireNotStaff } from "./sharing.ts";
 // - Unseen. Every call admitted is audited as the visitor, with the
 //   function granted and the version. Every refusal is audited too: not
 //   granted (an action and core's own queries included), too many calls,
-//   and a screen build refused before or after it ran. Granting is audited as the builder, one event per
+//   and a page build refused before or after it ran. Granting is audited as the builder, one event per
 //   function granted or taken away, with the version.
 
 /** The functions App `app`'s version `version` grants visitors, by path. */

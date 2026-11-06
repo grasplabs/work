@@ -387,7 +387,7 @@ export const catalogContractSchema = z
     /**
      * An event contract's admitted CloudEvents types, each with the
      * descriptor of its data (required: no type is admitted untyped),
-     * whether a person's screen may send it, which is what makes it an
+     * whether a person's page may send it, which is what makes it an
      * App's event reference, and whether outsiders may (`ingress`): a
      * reply to the run's mail (`email`), through a reply address of the
      * run's own (core's run-inboxes.ts). An email type's data is the
@@ -405,20 +405,20 @@ export const catalogContractSchema = z
       .optional(),
   })
   .refine(
-    // A screen sends an event through its binding's alias, which names one
-    // type: an event contract admits at most one type a screen sends.
+    // A page sends an event through its binding's alias, which names one
+    // type: an event contract admits at most one type a page sends.
     (contract) =>
       Object.values(contract.events ?? {}).filter(({ browser }) => browser)
         .length <= 1,
-    { message: "An event contract admits at most one type a screen sends." }
+    { message: "An event contract admits at most one type a page sends." }
   )
   .refine(
-    // Who sends a type is a screen or outsiders, never both.
+    // Who sends a type is a page or outsiders, never both.
     (contract) =>
       Object.values(contract.events ?? {}).every(
         ({ browser, ingress }) => !(browser && ingress !== undefined)
       ),
-    { message: "An event type a screen sends takes no ingress." }
+    { message: "An event type a page sends takes no ingress." }
   )
   .refine(
     // A binding's inbox (`inbox.<alias>`) is one address, and what arrives
@@ -722,7 +722,7 @@ export interface WorkflowStart {
 /**
  * The start keys core derives itself begin with this: an App action's
  * starts, and a committed mutation's. A key a caller chooses (a person's,
- * an agent's, and a screen's when screens start workflows) may not, so no
+ * an agent's, and a page's when pages start workflows) may not, so no
  * caller can take one of core's keys before core does.
  */
 export const coreStartKeyPrefix = "grasp:";

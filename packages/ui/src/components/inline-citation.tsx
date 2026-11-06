@@ -4,7 +4,7 @@
 // (grasplabs/prototype `components/ai-elements/inline-citation.tsx`,
 // ddd235d), with the same markup and classes. Where the kit differs:
 // - its words are English props with defaults (`label`, `unknown`), as the
-//   kit's other components have them, since App screens carry no Lingui;
+//   kit's other components have them, since App pages carry no Lingui;
 // - the index reads the carousel as it changes, not through an effect;
 // - the card is a popover that opens on hover, as the prototype's hover
 //   card does, and on a click, a tap or the keyboard too: a preview card's

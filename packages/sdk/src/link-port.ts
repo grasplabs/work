@@ -6,7 +6,7 @@ import type {
 import type { LinkTransport } from "./client-links.ts";
 
 // The frame's side of its link port (spec 10.7.7): how the session client
-// in a screen's frame asks the page to open a link. The frame sends the
+// in a page's frame asks the page to open a link. The frame sends the
 // resource and the URL; the page, which alone reaches core and opens
 // anything, answers each call by its number with whether it opened it.
 // What the page says is trusted as everything else it says to the frame

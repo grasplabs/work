@@ -1,5 +1,5 @@
 /**
- * App compiler: builds an App's screens into ES modules and CSS, in a
+ * App compiler: builds an App's pages into ES modules and CSS, in a
  * Dynamic Worker of its own. The modules import each other and the kit's
  * modules by flat name (see kit.ts); a page maps those names to the code
  * with an import map.
@@ -44,7 +44,7 @@ export type {
   ComputeModulesBuild,
   InspectTarget,
   GeneratedWorkflowBuild,
-  ScreenBuild,
+  PageBuild,
   TargetBuilds,
   TargetInspections,
 } from "./worker.ts";
@@ -68,6 +68,7 @@ export {
   isDesignLinted,
   isGeneratedPath,
   isLintedCode,
+  isPageFile,
   limitErrors,
   generatedWorkflowEntry,
   generatedWorkflowErrors,
@@ -79,7 +80,7 @@ export {
   packageModuleName,
   packageModulePrefix,
   previewRuntime,
-  screenRuntime,
+  pageRuntime,
 } from "./kit.ts";
 export {
   designContextKey,
@@ -87,8 +88,8 @@ export {
   lintKey,
   lintRecordOf,
   moduleRecordOf,
-  screenIncrementKeys,
-  screenSources,
+  pageIncrementKeys,
+  pageSources,
 } from "./increments.ts";
 export type {
   BuildMetrics,
@@ -97,7 +98,8 @@ export type {
   LintRecord,
   ModuleRecord,
 } from "./increments.ts";
-export { screenRefusals } from "./refusals.ts";
+export { pageRefusals } from "./refusals.ts";
+export type { SurfaceManifest } from "./route-tree.ts";
 export { platformPeers, platformScope } from "./packages/platform.ts";
 /** Part of every build's cache key: a new compiler or kit builds again. */
 export { version as compilerVersion } from "#version";
@@ -239,7 +241,7 @@ const esbuildWasmOf = async (assets: Fetcher): Promise<ArrayBuffer> =>
   );
 
 /**
- * The module sets every App imports, kept (`reader`): every screen build
+ * The module sets every App imports, kept (`reader`): every page build
  * picks its closure from them, and they are a few MB each.
  */
 const modulesRead = reader<KitModules>(true);
@@ -267,7 +269,7 @@ export const kitPreviewModules = async (assets: Fetcher): Promise<KitModules> =>
   await readModules(assets, compilerAssets.kitPreviewModules);
 
 /**
- * The SDK's modules the isolates core runs outside the screens load (a
+ * The SDK's modules the isolates core runs outside the pages load (a
  * sealed run's, a JSON workflow's generated and compute modules', an
  * App's tests'): one set per release.
  */

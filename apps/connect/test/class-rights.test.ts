@@ -680,7 +680,7 @@ describe("a grant asked to connect again", () => {
     const anna = await connectGoogle(googleDefaultGrant);
     const account = ownAccount(anna.person, "google");
     await exports.default.requireClassRights({ classes: ["read-company"] });
-    // On Google's consent screen now: the flow is open.
+    // On Google's consent page now: the flow is open.
     await startAs(anna.person, { provider: "google" });
     const asked = providers.revocations().length;
 

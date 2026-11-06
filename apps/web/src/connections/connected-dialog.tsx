@@ -98,7 +98,7 @@ const Done = ({
 };
 
 /**
- * The success screen for `connection` of the app named `app`, open while
+ * The success page for `connection` of the app named `app`, open while
  * the page was just sent back with it.
  */
 export const ConnectedDialog = ({

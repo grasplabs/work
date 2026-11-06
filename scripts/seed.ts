@@ -4,7 +4,7 @@
  * so every page has something to show and shows what the prototype does:
  * the company's name, people in teams and roles, the onboarding's roster and plan, the
  * prototype's domains with the workflows core can run, 30 days of their
- * runs and apps over them (scripts/seed/screens.ts), Knowledge, and
+ * runs and apps over them (scripts/seed/pages.ts), Knowledge, and
  * chats. Run it while `vp run dev` runs.
  *
  * Everything goes through core's API as the person who would do it, signed
@@ -45,8 +45,8 @@ import {
   signInAs,
 } from "./seed/local.ts";
 import type { Session } from "./seed/local.ts";
+import { enginePages } from "./seed/pages.ts";
 import { seedRuns } from "./seed/runs.ts";
-import { engineScreens } from "./seed/screens.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -245,22 +245,22 @@ const seedCollection = async (
 
 /**
  * Brings an engine seeded before it had its apps, or with older ones, to
- * the seed's screens, as its next version made current. Only the seed's
+ * the seed's pages, as its next version made current. Only the seed's
  * own change is made current: a later version that holds exactly the
- * current one plus the seed's screens (a seed stopped before making it
+ * current one plus the seed's pages (a seed stopped before making it
  * current) is reused; one with anyone else's changes is left alone, and
  * so is the engine, as committing over it would release them.
  */
-const upgradeScreens = async (
+const upgradePages = async (
   owner: Session,
   adminSession: Session,
   app: { id: string; name: string; currentVersion: number | null },
-  screens: Readonly<Record<string, string>>
+  pages: Readonly<Record<string, string>>
 ): Promise<void> => {
   const current = app.currentVersion ?? undefined;
   const files = await owner.api.apps.files.read(app.id, current);
   const changed = Object.fromEntries(
-    Object.entries(screens).filter(([path, code]) => files[path] !== code)
+    Object.entries(pages).filter(([path, code]) => files[path] !== code)
   );
   if (Object.keys(changed).length === 0) {
     return;
@@ -268,7 +268,7 @@ const upgradeScreens = async (
   const [latest] = await owner.api.apps.versions.list(app.id);
   if (latest !== undefined && latest.version !== current) {
     const later = await owner.api.apps.files.read(app.id, latest.version);
-    const upgraded = { ...files, ...screens };
+    const upgraded = { ...files, ...pages };
     const paths = new Set([...Object.keys(later), ...Object.keys(upgraded)]);
     if ([...paths].some((path) => later[path] !== upgraded[path])) {
       console.warn(
@@ -382,7 +382,7 @@ const startBindingOf = (alias: string): string =>
     .toUpperCase();
 
 /**
- * The App's permission to start each of its workflows from its screens,
+ * The App's permission to start each of its workflows from its pages,
  * asked by the engine's owner and granted by an admin, where it has none;
  * one still requested (a seed stopped before granting it) is granted
  * now. One someone revoked is left revoked: that was their decision.
@@ -459,9 +459,10 @@ const seedEngine = async (
   if (app.process === null) {
     await owner.api.apps.update(app.id, { process: seed.process });
   }
-  const screens = Object.fromEntries(
-    Object.entries(engineScreens[seed.name] ?? {}).map(([name, code]) => [
-      `screens/${name}.tsx`,
+  // The domain's one page, the App's `/`.
+  const pages = Object.fromEntries(
+    Object.values(enginePages[seed.name] ?? {}).map((code) => [
+      "src/routes/index.tsx",
       code,
     ])
   );
@@ -487,24 +488,24 @@ const seedEngine = async (
     }
     const { version } = await owner.api.apps.files.commit(
       app.id,
-      engineFiles(seed, screens),
+      engineFiles(seed, pages),
       "Release the engine's workflows and apps"
     );
     // An admin makes it current, which approves its code, once its
     // workflow tests pass.
     await adminSession.api.apps.versions.setCurrent(app.id, version);
-  } else if (Object.keys(screens).length > 0) {
-    // Its screens need the engine's own App files and workflow bindings:
-    // one seeded before them keeps the screens it has (nothing has
+  } else if (Object.keys(pages).length > 0) {
+    // Its pages need the engine's own App files and workflow bindings:
+    // one seeded before them keeps the pages it has (nothing has
     // shipped, so no seed migrates it; reset local data to seed it anew).
     const files = await owner.api.apps.files.read(app.id, app.currentVersion);
     if (
-      files["grasp.config.ts"] === engineFiles(seed, screens)["grasp.config.ts"]
+      files["grasp.config.ts"] === engineFiles(seed, pages)["grasp.config.ts"]
     ) {
-      await upgradeScreens(owner, adminSession, app, screens);
+      await upgradePages(owner, adminSession, app, pages);
     } else {
       console.warn(
-        `${app.name} was seeded before its independent workflows: its screens are left as they are. Reset local data to seed it again.`
+        `${app.name} was seeded before its independent workflows: its pages are left as they are. Reset local data to seed it again.`
       );
     }
   }

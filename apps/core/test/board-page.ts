@@ -14,7 +14,7 @@ import { signedInApi, unique } from "./sign-in.ts";
 // The board page's tests' helpers, shared by its test files
 // (board-page*.test.ts): an admin's board page and workflow map, the
 // map's workflows, runs and signals seeded, and the page's functions
-// called as its screens call them.
+// called as its pages call them.
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
@@ -211,7 +211,7 @@ export const seedSignals = async (
   ]);
 };
 
-/** Saves a workflow in the map, as its screen does, answering its ID. */
+/** Saves a workflow in the map, as its page does, answering its ID. */
 export const saveWorkflow = async (
   admin: Person,
   map: AppId,

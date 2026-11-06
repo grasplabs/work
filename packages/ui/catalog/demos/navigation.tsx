@@ -272,10 +272,12 @@ const FileTreeDemo = () => {
           {file("server/invoices.ts", "invoices.ts")}
           {file("server/schema.ts", "schema.ts")}
         </FileTreeFolder>
-        <FileTreeFolder name="screens">
-          {file("screens/inbox.tsx", "inbox.tsx")}
+        <FileTreeFolder name="src">
+          <FileTreeFolder name="routes">
+            {file("src/routes/index.tsx", "index.tsx")}
+          </FileTreeFolder>
         </FileTreeFolder>
-        {file("app.ts", "app.ts")}
+        {file("grasp.config.ts", "grasp.config.ts")}
       </FileTree>
     </nav>
   );

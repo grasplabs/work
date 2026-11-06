@@ -6,9 +6,9 @@ import { test } from "./contexts.ts";
 import { recordCspViolations } from "./csp.ts";
 import { hostileName, seedHostileArtifact } from "./package-artifact.ts";
 import type { SeededArtifact } from "./package-artifact.ts";
+import { serveAttacker } from "./page-app.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
-import { serveAttacker } from "./screen-app.ts";
 import { origin } from "./stack.ts";
 
 // An approved npm package that turns hostile once it runs, and the browser
@@ -16,10 +16,10 @@ import { origin } from "./stack.ts";
 // `importScripts`, a fetch elsewhere, images, fonts and stylesheets from
 // elsewhere (one through a custom property set from script), and script in
 // an SVG. Its files are served under the artifact policy (core's
-// packages/serve.ts); a screen runs under the frame's. Each is tried where
+// packages/serve.ts); a page runs under the frame's. Each is tried where
 // a browser could run the file: as a worker (from a stand-in page, as the
 // product page can't start one), as a document opened on its own, and
-// from a real screen. Every attempt is aimed at a receiver
+// from a real page. Every attempt is aimed at a receiver
 // this file runs; a test passes when the browser reported refusing it and
 // the receiver heard nothing.
 
@@ -52,15 +52,16 @@ test.beforeEach(() => {
 });
 
 /**
- * A screen that tries to load the package's module and start it as a
+ * A page that tries to load the package's module and start it as a
  * worker, shows its SVG, fetches elsewhere, and sets a remote image
  * through a custom property and an `@import` from script: what the
- * package's code would do once in a screen.
+ * package's code would do once in a page.
  */
-const widgetScreen = (
+const widgetPage = (
   receiver: string,
   { directory, query }: PackageArtifactAddress
-): string => `import { useEffect, useState } from "react";
+): string => `import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
 const attacker = "${receiver}";
 const artifact = "${directory}";
@@ -129,7 +130,7 @@ const probe = async (): Promise<Record<string, string>> => {
   };
 };
 
-export default function Widget() {
+function Widget() {
   const [probes, setProbes] = useState("");
   useEffect(() => {
     void probe().then((results) => {
@@ -143,6 +144,7 @@ export default function Widget() {
     </main>
   );
 }
+export const Route = createFileRoute("/")({ component: Widget });
 `;
 
 /** What the hostile worker posts (package-artifact.ts), or its error. */
@@ -301,17 +303,17 @@ test("a package's SVG opened on its own runs no script and loads nothing from el
   expect(withoutToken.status()).toBe(403);
 });
 
-test("a screen can't load a package's code, or bring in what the code would fetch", async ({
+test("a page can't load a package's code, or bring in what the code would fetch", async ({
   pageOf,
 }) => {
   const { core, api } = apiOf(builder);
   let app = "";
   try {
-    ({ id: app } = await api.apps.create({ name: "Widget screen" }));
+    ({ id: app } = await api.apps.create({ name: "Widget page" }));
     await release(
       api,
       app,
-      { "screens/widget.tsx": widgetScreen(attacker.url, seeded.address) },
+      { "src/routes/index.tsx": widgetPage(attacker.url, seeded.address) },
       "Widget"
     );
   } finally {
@@ -319,9 +321,9 @@ test("a screen can't load a package's code, or bring in what the code would fetc
   }
   const page = await pageOf(builder);
   const violations = await recordCspViolations(page);
-  await page.goto(`/apps/${app}/full?screen=widget`);
-  const screen = page.frameLocator('iframe[title="widget app"]');
-  const probes = screen.getByRole("status", { name: "Probes" });
+  await page.goto(`/apps/${app}/full`);
+  const appPage = page.frameLocator('iframe[title="App"]');
+  const probes = appPage.getByRole("status", { name: "Probes" });
   await expect(probes).not.toBeEmpty({ timeout: 30_000 });
 
   expect(JSON.parse((await probes.textContent()) ?? "")).toStrictEqual({

@@ -112,7 +112,7 @@ export const maxInboxBytes = 32 * 1024 * 1024;
 
 /**
  * What one sender's events may take of a run's inbox (`EventCommand.sender`,
- * run.ts): an eighth of its count and bytes, so no one sender (a screen, a
+ * run.ts): an eighth of its count and bytes, so no one sender (a page, a
  * mutation) fills it and leaves every other sender none. Events a sender
  * names no one for count only against the whole inbox.
  */

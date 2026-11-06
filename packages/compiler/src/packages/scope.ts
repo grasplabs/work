@@ -1,10 +1,10 @@
 /**
  * Whether a package's stylesheet reaches past the package's own elements
  * (spec 20: approved packages follow scoped CSS rules, and only the kit
- * styles the screen). A screen runs in a frame of its own, so no package
+ * styles the page). A page runs in a frame of its own, so no package
  * reaches the host's chrome; but a rule whose selector names no class or
  * id of its own (`*`, `html`, `body`, `:root`, `button`, `[data-slot]`,
- * `.dark a`) restyles every element of the screen it is loaded in, the
+ * `.dark a`) restyles every element of the page it is loaded in, the
  * kit's controls and theme included. A package's own rules name its own
  * classes, as specialist libraries do (`.react-flow__node`, `.rdp-day`).
  *
@@ -31,7 +31,7 @@ const holdingRules = new Set([
   "starting-style",
 ]);
 
-/** The kit's theme classes, on the screen's root: no package's own. */
+/** The kit's theme classes, on the page's root: no package's own. */
 const themeClasses = new Set(["dark", "light"]);
 
 /** Functional pseudo-classes whose classes still pick the package's own. */
@@ -206,7 +206,7 @@ const restart = (reading: Reading): void => {
 /**
  * Whether an `@scope` prelude's root, its first parenthesised selector
  * list, names a class or id of the package's own in every selector. One
- * with no root scopes to the stylesheet's owner: the whole screen.
+ * with no root scopes to the stylesheet's owner: the whole page.
  */
 const scopeRootScoped = (prelude: readonly CssToken[]): boolean => {
   const at = prelude.findIndex(({ type }) => type !== "whitespace");

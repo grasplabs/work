@@ -38,8 +38,8 @@ const packages = [
 const files = [
   { project: "@grasp-os/core", file: "/repo/apps/core/test/agent.test.ts" },
   {
-    project: "@grasp-os/core:screens",
-    file: "/repo/apps/core/test/screens.test.ts",
+    project: "@grasp-os/core:pages",
+    file: "/repo/apps/core/test/pages.test.ts",
   },
   { project: "@grasp-os/web", file: "/repo/apps/web/src/app.test.tsx" },
   { project: "admin", file: "/repo/apps/admin/test/rollout.test.ts" },
@@ -65,7 +65,7 @@ describe("planning which test projects run", () => {
   it("runs every project with a file in an affected package", () => {
     expect(
       affectedProjects(files, packages, new Set(["/repo/apps/core"]))
-    ).toStrictEqual(["@grasp-os/core", "@grasp-os/core:screens", "scripts"]);
+    ).toStrictEqual(["@grasp-os/core", "@grasp-os/core:pages", "scripts"]);
   });
 
   it("runs nothing of a package the change doesn't reach", () => {
@@ -89,7 +89,7 @@ describe("planning which test projects run", () => {
         packages,
         changedPackages: ["/repo/apps/core"],
         tests: files,
-        projects: ["@grasp-os/core", "@grasp-os/core:screens", "scripts"],
+        projects: ["@grasp-os/core", "@grasp-os/core:pages", "scripts"],
         root,
       })
     ).toStrictEqual([]);

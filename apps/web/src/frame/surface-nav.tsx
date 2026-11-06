@@ -1,4 +1,4 @@
-import type { SidebarApp } from "@grasp-os/shared/screens";
+import type { SidebarApp } from "@grasp-os/shared/pages";
 import {
   SidebarMenuItem,
   SidebarMenuSub,
@@ -11,14 +11,14 @@ import { useEffect, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { loadFromCore } from "../load-from-core.tsx";
-import { openingState } from "../screens/screen-navigate.ts";
+import { appSplat } from "../pages/app-address.ts";
 
 // The Apps' sidebar surfaces (spec 34.1), under Apps in the shell's
 // sidebar: each App that declares any, by name, its entries under it. An
-// entry opens its screen in the main pane by its route and surface, with
-// nothing as input, which opening checks with core as any screen; listing
-// them opens nothing. Read once as the sidebar shows; none while core
-// doesn't answer.
+// entry opens the App's page at the entry's route (pages/app-address.ts),
+// which opening checks with core as any address; listing them opens
+// nothing. Read once as the sidebar shows; none while core doesn't
+// answer.
 
 /** The Apps with sidebar entries, as core lists them for the person. */
 const useSidebarApps = (core: CoreConnection): SidebarApp[] => {
@@ -28,7 +28,7 @@ const useSidebarApps = (core: CoreConnection): SidebarApp[] => {
     const read = async (): Promise<void> => {
       const found = await loadFromCore(
         core,
-        async (session) => await session.screens.sidebar(),
+        async (session) => await session.pages.sidebar(),
         left.signal
       );
       if (!left.signal.aborted && found.state === "ready") {
@@ -53,20 +53,17 @@ const AppEntries = ({ app }: { app: SidebarApp }) => (
     </SidebarMenuSubButton>
     <SidebarMenuSub>
       {app.entries.map((entry) => (
-        <SidebarMenuSubItem key={entry.name}>
+        <SidebarMenuSubItem key={entry.path}>
           <SidebarMenuSubButton
             render={
-              <Link
-                params={{ app: app.app }}
-                search={{ screen: entry.screen }}
-                state={openingState(app.app, {
-                  screen: entry.screen,
-                  route: entry.route,
-                  input: {},
-                  surface: entry.name,
-                })}
-                to="/apps/$app"
-              />
+              appSplat(entry.path) === "" ? (
+                <Link params={{ app: app.app }} to="/apps/$app" />
+              ) : (
+                <Link
+                  params={{ app: app.app, _splat: appSplat(entry.path) }}
+                  to="/apps/$app/pages/$"
+                />
+              )
             }
             size="sm"
           >

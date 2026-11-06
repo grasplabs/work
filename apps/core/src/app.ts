@@ -9,10 +9,10 @@ import {
 } from "@grasp-os/shared/operation-limits";
 import {
   querySubscriptionLimits,
-  screenErrors,
-  screenLimits,
-} from "@grasp-os/shared/screens";
-import type { AppErrorLog, ServerLog } from "@grasp-os/shared/screens";
+  pageErrors,
+  pageLimits,
+} from "@grasp-os/shared/pages";
+import type { AppErrorLog, ServerLog } from "@grasp-os/shared/pages";
 import {
   statisticErrors,
   statisticReadLimitsOf,
@@ -29,16 +29,16 @@ import { auditedBatch, outboxed } from "./audit-outbox.ts";
 // person to the App ends at, so what it counts can't be skipped by opening
 // another. It keeps the App's restricted mode (restricted.ts), its error
 // log and its rate buckets, follows its runs and revocations for open
-// screens, and holds the places of its running invocations. No App code
+// pages, and holds the places of its running invocations. No App code
 // runs here: an App's functions run in isolates of their own, from its
 // sealed release (app-functions.ts).
 
 /** How often, at most, the count of dropped reports is written to the log. */
 const suppressedWriteMs = 60_000;
-/** How often, at most, refused requests of an App's screens are logged. */
+/** How often, at most, refused requests of an App's pages are logged. */
 const refusalLogMs = 60_000;
 /**
- * How often, at most, the same refusal of the App's data to a screen (who,
+ * How often, at most, the same refusal of the App's data to a page (who,
  * which build, why, what and where) is audited (`auditOnce`).
  */
 const refusalAuditMs = 10 * 60_000;
@@ -48,7 +48,7 @@ const refusalsKept = 1000;
 const appBucket = "app";
 /**
  * The lines kept a minute of what an App's server code writes with
- * `console`, as many as of its screens' reports (`screenLimits.appReports`)
+ * `console`, as many as of its pages' reports (`pageLimits.appReports`)
  * but counted apart from them (`logServer`).
  */
 const serverLinesLimit = { burst: 200, perMinute: 200 } as const;
@@ -78,7 +78,7 @@ export type AccessWatcher = Rpc.Stub<
 
 /**
  * Most connections of one person that follow the App's revocations at
- * once: one per open tab of the App's screens, so this only bounds what a
+ * once: one per open tab of the App's pages, so this only bounds what a
  * page that follows over and over keeps here.
  */
 const accessFollowersPerPerson = 64;
@@ -103,14 +103,14 @@ export class App extends DurableObject<Env> {
   /** The minute a read refused past its bounds was last audited. */
   #limitedAuditMinute = -1;
 
-  // What the App's screens may ask and report, counted here because every
+  // What the App's pages may ask and report, counted here because every
   // connection of every person to this App ends at this one object: a
   // count the page or one connection kept is skipped by opening another.
   // Kept in memory: a restart of this object starts the buckets full,
   // which an idle App's are anyway.
 
-  /** Each person's requests of the App's screens. */
-  readonly #requests = new TokenBuckets(screenLimits.requests);
+  /** Each person's requests of the App's pages. */
+  readonly #requests = new TokenBuckets(pageLimits.requests);
 
   /**
    * Each person's reads of their live queries that writes caused
@@ -127,14 +127,14 @@ export class App extends DurableObject<Env> {
   /** Chunks refused since the last line logged of them, and when that was. */
   #refusedChunks = { chunks: 0, loggedAt: 0 };
 
-  /** The reports kept of each person's screens, and of all of them. */
-  readonly #callerReports = new TokenBuckets(screenLimits.callerReports);
-  readonly #appReports = new TokenBuckets(screenLimits.appReports);
+  /** The reports kept of each person's pages, and of all of them. */
+  readonly #callerReports = new TokenBuckets(pageLimits.callerReports);
+  readonly #appReports = new TokenBuckets(pageLimits.appReports);
 
   /**
    * The lines kept of what the App's server code writes with `console`:
-   * a budget apart from its screens' reports, so server code that logs
-   * a lot never crowds out a problem a screen reports.
+   * a budget apart from its pages' reports, so server code that logs
+   * a lot never crowds out a problem a page reports.
    */
   readonly #serverLines = new TokenBuckets(serverLinesLimit);
 
@@ -147,7 +147,7 @@ export class App extends DurableObject<Env> {
   /** Requests refused since the last line logged of them, and when that was. */
   #refused = { requests: 0, loggedAt: 0 };
 
-  /** When each refusal of a screen was last audited, oldest first (`auditOnce`). */
+  /** When each refusal of a page was last audited, oldest first (`auditOnce`). */
   readonly #refusalsAudited = new Map<string, number>();
 
   /** The refusals whose rows are being written now (`auditOnce`). */
@@ -165,8 +165,8 @@ export class App extends DurableObject<Env> {
   /**
    * Puts the App in restricted mode, for good, and tells every connection
    * following its live queries, the first time: a run's snapshot says what
-   * the App may send the run (screen-workflows.ts, `canSend`), which the
-   * App's restricted mode decides, so its screens read it again.
+   * the App may send the run (page-workflows.ts, `canSend`), which the
+   * App's restricted mode decides, so its pages read it again.
    */
   async restrict(): Promise<void> {
     if (await this.isRestricted()) {
@@ -177,10 +177,10 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * Audits what `refusal` names, with `entry`: a screen's refusal of the
+   * Audits what `refusal` names, with `entry`: a page's refusal of the
    * App's data (who, which build, why, what and where), or a person's use
    * of the App from a portable host (app-function-route.ts); unless it was
-   * audited within `refusalAuditMs`, so a screen opened over and over, or
+   * audited within `refusalAuditMs`, so a page opened over and over, or
    * a page retrying, adds a row a window, not one a try. The check and the
    * write are one operation per refusal here: the same refusal arriving
    * while its row is being written waits for that write instead of
@@ -286,8 +286,8 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * Whether `userId`'s screen may ask the App one more thing now
-   * (`screenLimits.requests`), at `count` requests: a paginated list's
+   * Whether `userId`'s page may ask the App one more thing now
+   * (`pageLimits.requests`), at `count` requests: a paginated list's
    * window counts one per page it reads (query-windows.ts), never more
    * than the burst. Asked before the request is read, so one that is
    * refused or malformed counts too.
@@ -299,7 +299,7 @@ export class App extends DurableObject<Env> {
       this.#refused.requests += 1;
       // One line a minute for whoever audits it, not one a request.
       if (now - this.#refused.loggedAt >= refusalLogMs) {
-        log.warn("screen.requests_limited", {
+        log.warn("page.requests_limited", {
           appId: this.#app,
           refused: this.#refused.requests,
         });
@@ -310,7 +310,7 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * Whether `userId`'s screen may send one more chunk of a file now
+   * Whether `userId`'s page may send one more chunk of a file now
    * (`fileLimits.chunkRequests`): asked before the chunk is read or
    * anything is looked up, so a refused, duplicate or malformed chunk
    * counts too. Refusals reach the log at most once a minute.
@@ -332,8 +332,8 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * Whether one more report of `userId`'s screen is kept now: within what
-   * one person's screens may report, and all of the App's together. One
+   * Whether one more report of `userId`'s page is kept now: within what
+   * one person's pages may report, and all of the App's together. One
    * that isn't is only counted. The count reaches the log at once the
    * first time and at most once a minute after, so a flood of reports
    * writes one number, not a record each.
@@ -378,7 +378,7 @@ export class App extends DurableObject<Env> {
       this.#suppressed.writtenAt = now;
       // One line for the operator too, as often as the number is written.
       if (reports > 0) {
-        log.warn("screen.reports_suppressed", { appId: this.#app, reports });
+        log.warn("page.reports_suppressed", { appId: this.#app, reports });
       }
     } finally {
       this.#suppressed.writing = false;
@@ -394,8 +394,8 @@ export class App extends DurableObject<Env> {
    * Adds what the App's server code at `version` wrote with `console` to
    * its error log, for its tail alone (server-logs.ts): each line within
    * what the App's server lines may use together (`serverLinesLimit`),
-   * apart from its screens' reports, and only counted past it, so code
-   * that logs in a loop writes no more, and suppresses no screen's report.
+   * apart from its pages' reports, and only counted past it, so code
+   * that logs in a loop writes no more, and suppresses no page's report.
    */
   async logServer(version: number, logs: ServerLog[]): Promise<void> {
     for (const line of logs) {
@@ -448,7 +448,7 @@ export class App extends DurableObject<Env> {
     }
     if (theirs().length >= accessFollowersPerPerson) {
       held[Symbol.dispose]();
-      throw screenErrors.create("screen.too_many_queries");
+      throw pageErrors.create("page.too_many_queries");
     }
     const id = crypto.randomUUID();
     this.#accessFollowers.set(id, { userId, onRevoked: held });
@@ -464,7 +464,7 @@ export class App extends DurableObject<Env> {
    * Tells the connections of `userIds` (of everyone, when `null`) that
    * follow the App's live queries that their role in it may have dropped
    * (access-revocations.ts): each checks again now, and clears what its
-   * screens show if it has. Returns at once, with how many connections it
+   * pages show if it has. Returns at once, with how many connections it
    * told; a connection that is gone is dropped.
    */
   accessRevoked(userIds: readonly string[] | null): number {
@@ -481,7 +481,7 @@ export class App extends DurableObject<Env> {
   /**
    * Tells every connection that follows the App that another of its
    * versions was made current (apps.ts, `makeCurrent`): each tells the
-   * pages that follow its version (screens-rpc.ts, `watchVersion`), which
+   * pages that follow its version (pages-rpc.ts, `watchVersion`), which
    * read it again as their person. Returns at once, with how many
    * connections it told; a connection that is gone is dropped.
    */
@@ -535,8 +535,8 @@ export class App extends DurableObject<Env> {
    * Tells every connection that follows the App's live queries that what
    * the App may start may have changed (a permission of the App granted or
    * revoked, permissions.ts): each reads its workflow queries and watches
-   * of the App again, as its person, so a screen's `canRun` and
-   * `canCancel` follow the grant (screen-workflows.ts). Returns at once,
+   * of the App again, as its person, so a page's `canRun` and
+   * `canCancel` follow the grant (page-workflows.ts). Returns at once,
    * with how many connections it told.
    */
   workflowPolicyChanged(): number {

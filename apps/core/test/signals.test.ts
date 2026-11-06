@@ -213,7 +213,7 @@ describe("improvement signals", () => {
         people
       );
     await logged(
-      emptySearch({ type: "app", appId: app, part: "screen" }, once),
+      emptySearch({ type: "app", appId: app, part: "page" }, once),
       emptySearch({ type: "person", userId: someone }, people),
       throughAgent(someone),
       throughAgent(second),

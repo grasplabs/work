@@ -25,8 +25,8 @@ import { readAtMost } from "@grasp-os/shared/http";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { pageErrors, pageLeaseHeader } from "@grasp-os/shared/pages";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { screenErrors, screenLeaseHeader } from "@grasp-os/shared/screens";
 import { not } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -50,13 +50,13 @@ import type {
   FileReader,
   Publishable,
 } from "./file-host.ts";
+import { delivering, leasedBuild, personRefusal } from "./page-delivery.ts";
+import { admitted } from "./pages-rpc.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import { delivering, leasedBuild, personRefusal } from "./screen-delivery.ts";
-import { admitted } from "./screens-rpc.ts";
 import { routeMember } from "./staff-audit.ts";
 
-// Core's file channel (spec 10.7.5): how a running App's screen, through
+// Core's file channel (spec 10.7.5): how a running App's page, through
 // its page, moves the bytes of its App's files, which never travel in a
 // JSON call. `<appFilesPath>/<app>/<alias>/…`, `<alias>` the files
 // resource the App declares:
@@ -94,11 +94,11 @@ import { routeMember } from "./staff-audit.ts";
 //   (their roles, the records holding it, its tombstone) and the build
 //   still gets the App's data, and ends after `fileLimits.downloadMs`, so a revocation, a
 //   lost role, a detachment or a deletion fences the bytes still to come.
-// - A screen does what its App didn't declare: each request needs its
+// - A page does what its App didn't declare: each request needs its
 //   resource's operation (`upload`, `read` or `delete`) in the sealed
 //   release's `permission.files` declaration, never in what the request says.
 // - A flood: each request but a chunk counts against the person's
-//   requests of the App's screens (`admitted`); each chunk against a
+//   requests of the App's pages (`admitted`); each chunk against a
 //   chunk budget of its own (`AppHost.admitChunk`), charged before it is
 //   read or anything is looked up, a refused or repeated one too. What is
 //   kept is bounded by the store's quotas (file-host.ts, `begin`).
@@ -246,7 +246,7 @@ const operationOf = (request: FileRequest): FilesOperation => {
 
 /** The HTTP status of each refusal that isn't a plain 403. */
 const statuses: Readonly<Record<string, number>> = {
-  "screen.rate_limited": 429,
+  "page.rate_limited": 429,
   // A chunk write too slow to settle: lost, for the page to send again.
   "internal.unexpected": 503,
   "auth.unauthenticated": 401,
@@ -275,7 +275,7 @@ const statusOf = (code: string): number =>
 
 /** Whether a request may come from where it did (see the header). */
 const fromOwnPage = (request: Request, env: Env): boolean => {
-  if (request.headers.get(screenLeaseHeader) === null) {
+  if (request.headers.get(pageLeaseHeader) === null) {
     return false;
   }
   const site = request.headers.get("sec-fetch-site");
@@ -804,7 +804,7 @@ const answer = async (
 
 /**
  * A request of core's file channel (see the header), for the person
- * signed in, as their screen running the build its lease names.
+ * signed in, as their page running the build its lease names.
  */
 export const appFileResponse = async (
   request: Request,
@@ -848,7 +848,7 @@ export const appFileResponse = async (
   try {
     // A chunk counts against a budget of its own, charged before anything
     // is looked up or read; everything else is a request of the person's
-    // screens, counted before anything else is read.
+    // pages, counted before anything else is read.
     let app: AppId;
     if (asked.kind === "chunk") {
       const named = appIdSchema.safeParse(route.app);
@@ -856,7 +856,7 @@ export const appFileResponse = async (
         throw requestErrors.create("request.not_found");
       }
       if (!(await appHost(env, named.data).admitChunk(person.userId))) {
-        throw screenErrors.create("screen.rate_limited");
+        throw pageErrors.create("page.rate_limited");
       }
       const found = await usableApp(env, person, named.data);
       app = found.id;
@@ -867,9 +867,9 @@ export const appFileResponse = async (
       env,
       person.userId,
       app,
-      request.headers.get(screenLeaseHeader)
+      request.headers.get(pageLeaseHeader)
     );
-    // A lease that doesn't verify, for this person and App, is no screen
+    // A lease that doesn't verify, for this person and App, is no page
     // of theirs, whatever the App's data: code core didn't serve runs
     // without one elsewhere where the data is ordinary, but never moves
     // files.

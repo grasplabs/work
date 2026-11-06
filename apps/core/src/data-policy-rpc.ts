@@ -9,8 +9,8 @@ import type {
   OutputClass,
 } from "@grasp-os/shared/data-policy";
 import type { AppId } from "@grasp-os/shared/ids";
+import { pageErrors } from "@grasp-os/shared/pages";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { screenErrors } from "@grasp-os/shared/screens";
 import { eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -23,7 +23,7 @@ import {
   storedEvent,
 } from "./audit-outbox.ts";
 import { generationSql, policyOf } from "./data-policy.ts";
-import { apps, screenPolicies } from "./db/core/schema.ts";
+import { apps, pagePolicies } from "./db/core/schema.ts";
 import {
   requireMemberAdmin,
   requireStillAdmin,
@@ -73,9 +73,9 @@ export const classifyOutput = async (
 ): Promise<OutputClass> => {
   requireMemberAdmin(by);
   const found = await editableApp(env, by, app);
-  const output = screenErrors.parse("screen.invalid", outputClassSchema, input);
-  const generation = screenErrors.parse(
-    "screen.invalid",
+  const output = pageErrors.parse("page.invalid", outputClassSchema, input);
+  const generation = pageErrors.parse(
+    "page.invalid",
     generationSchema,
     reviewed
   );
@@ -95,18 +95,18 @@ export const classifyOutput = async (
   );
   const classified = await auditedBatch(env, db, [
     db
-      .insert(screenPolicies)
+      .insert(pagePolicies)
       // The table's columns, in its order.
       .select(
         sql`SELECT ${found.id}, ${output}, 1 WHERE ${reviewedUnder(by, found.id, generation)}`
       )
       .onConflictDoUpdate({
-        target: screenPolicies.appId,
+        target: pagePolicies.appId,
         set: {
           output: sql`excluded.output`,
-          generation: sql`${screenPolicies.generation} + 1`,
+          generation: sql`${pagePolicies.generation} + 1`,
         },
-        setWhere: sql`${screenPolicies.output} <> excluded.output`,
+        setWhere: sql`${pagePolicies.output} <> excluded.output`,
       }),
     outboxedEventWhere(db, event, sql`changes() > 0`),
     revocationsOf(
@@ -122,7 +122,7 @@ export const classifyOutput = async (
     // Nothing landed: they are no longer an admin, or the App's policy
     // moved on since they read it (a classification, a grant).
     await requireStillAdmin(env, by);
-    throw screenErrors.create("screen.review_outdated");
+    throw pageErrors.create("page.review_outdated");
   }
   return now;
 };

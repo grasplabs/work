@@ -423,7 +423,7 @@ const kinds = {
   "jobs.unlisted": "mutation",
 } as const;
 
-/** Calls `path` as `by` through the App's invocation, as a screen would. */
+/** Calls `path` as `by` through the App's invocation, as a page would. */
 const call = async (
   fx: Fixture,
   by: Identity,

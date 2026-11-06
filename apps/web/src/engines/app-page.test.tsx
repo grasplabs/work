@@ -52,9 +52,9 @@ const appAs = (role: ViewedApp["role"]): ViewedApp => ({
   role,
 });
 
-/** The live App with `screens`, as `viewer` sees it. */
+/** The live App, with pages to open or not, as `viewer` sees it. */
 const shown = async (
-  screens: string[],
+  opens: boolean,
   { role, staff }: { role: ViewedApp["role"]; staff: boolean }
 ): Promise<void> => {
   const router = createRouter({
@@ -62,12 +62,11 @@ const shown = async (
       component: () => (
         <AppPage
           app={appAs(role)}
-          contents={{ version: 1, screens }}
           fullPage={null}
           identity={{ staff }}
-          open={screens[0]}
+          opens={opens}
         >
-          <p>The screen</p>
+          <p>The page</p>
         </AppPage>
       ),
     }),
@@ -111,7 +110,7 @@ describe(AppPage, () => {
     const edit: Record<string, string | null | undefined> = {};
     for (const [who, viewer] of Object.entries({ builder, user, staff })) {
       // oxlint-disable-next-line no-await-in-loop -- one page at a time
-      await shown(["home"], viewer);
+      await shown(true, viewer);
       edit[who] = linkTo("Edit");
       takenDown();
     }
@@ -123,31 +122,19 @@ describe(AppPage, () => {
     });
   });
 
-  it("shows an App with two screens as one App with two pages, the open one marked, and the open one under the bar", async () => {
-    await shown(["home", "invoices"], user);
+  it("shows the App's pages under its bar, its name the heading", async () => {
+    await shown(true, user);
 
-    const pages = document.querySelector('nav[aria-label="Pages"]');
     expect({
       heading: [...document.querySelectorAll("h1")].map(
         (each) => each.textContent
       ),
-      pages: [...(pages?.querySelectorAll("a") ?? [])].map((link) => ({
-        name: link.textContent,
-        open: link.getAttribute("aria-current") === "page",
-      })),
-      screen: document.body.textContent.includes("The screen"),
-    }).toStrictEqual({
-      heading: ["Invoices"],
-      pages: [
-        { name: "home", open: true },
-        { name: "invoices", open: false },
-      ],
-      screen: true,
-    });
+      page: document.body.textContent.includes("The page"),
+    }).toStrictEqual({ heading: ["Invoices"], page: true });
   });
 
   it("says an App with no page has nothing to open, with the way to build it for its builder alone", async () => {
-    await shown([], builder);
+    await shown(false, builder);
     const forBuilder = {
       said: document.body.textContent.includes("No page yet"),
       build: linkTo("Build it"),
@@ -156,7 +143,7 @@ describe(AppPage, () => {
       root?.unmount();
     });
     document.body.replaceChildren();
-    await shown([], user);
+    await shown(false, user);
 
     expect({
       forBuilder,

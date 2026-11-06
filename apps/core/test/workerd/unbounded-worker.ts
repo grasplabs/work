@@ -1,7 +1,7 @@
 import type { Acting } from "../../src/auth/identity.ts";
 import { buildDependencies } from "../../src/packages/build.ts";
 import { resolveDependencies } from "../../src/packages/resolve.ts";
-import { buildScreens } from "../../src/screens.ts";
+import { buildPages } from "../../src/pages.ts";
 import { runCompute } from "../../src/workflow-modules.ts";
 import { loadSealedIsolate } from "../../src/workflows/sealed-isolate.ts";
 
@@ -70,14 +70,15 @@ export default {
         )
       );
     }
-    if (pathname === "/screens") {
+    if (pathname === "/pages") {
       return new Response(
         await refusal(
           async () =>
-            await buildScreens(
+            await buildPages(
               { ...env, SANDBOX_HOST: undefined },
               {
-                "screens/home.tsx": "export default () => null;",
+                "src/routes/index.tsx":
+                  'import { createFileRoute } from "@tanstack/react-router"; export const Route = createFileRoute("/")({ component: () => null });',
               },
               "app-test"
             )

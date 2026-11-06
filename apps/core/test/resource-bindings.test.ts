@@ -192,7 +192,7 @@ const nextVersion = async (
   return { ...sealed, release };
 };
 
-/** The request a screen sends to call `path` of `release`. */
+/** The request a page sends to call `path` of `release`. */
 const requestFor = (release: Release, path: string, input: unknown): string => {
   const operation = release.app.operations[path];
   if (operation === undefined) {
@@ -935,7 +935,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     }).toStrictEqual({ outcome: "first|version.revoked", sent: 1 });
   });
 
-  it("stop a screen caller whose App role is removed between two requests", async () => {
+  it("stop a page caller whose App role is removed between two requests", async () => {
     const sealed = await sealedApp(modelFiles());
     await approveModel(sealed);
     const user = await person("user");

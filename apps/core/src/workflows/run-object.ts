@@ -566,7 +566,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
 
   /**
    * Takes the status of an independent workflow's run, or a test run of
-   * its draft (`notify`): its row follows the engine's status; a screen's
+   * its draft (`notify`): its row follows the engine's status; a page's
    * controls of an independent run settle from the engine's own word on
    * them, below.
    */
@@ -605,7 +605,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         ? (live.error.code ?? null)
         : null
     );
-    // A screen's pause or resume of it settles from where the engine has
+    // A page's pause or resume of it settles from where the engine has
     // the run now, and which controls it took, read together here from
     // its journal, as an App run's do (resource-runs.ts).
     if (type === "resource") {

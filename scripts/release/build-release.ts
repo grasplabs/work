@@ -147,7 +147,7 @@ console.info(`Building release ${releaseId} from ${commit}`);
 // check: an earlier release in it stays until this one is built.
 assertReleaseDir(out);
 
-// Before core's build, which adds the compiled screen runtime to its output.
+// Before core's build, which adds the compiled page runtime to its output.
 runVisibly("vp", ["run", "--filter", `@grasp-os/${FRONTEND}`, "build"]);
 
 // Collecting reads every bundle into memory, so the dry-run output can go.

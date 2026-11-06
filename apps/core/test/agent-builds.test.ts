@@ -60,8 +60,9 @@ const appName = "Invoice desk";
 /** The Ledger's definition, which its first version got: empty, as it has pages alone. */
 const ledgerDefinition = appDefinition({ name: "Ledger" });
 
-/** A screen whose button is restyled, which @shadcn/lint refuses. */
+/** A page whose button is restyled, which @shadcn/lint refuses. */
 const restyled = `import { Button } from "@grasp-os/ui/components/button";
+import { createFileRoute } from "@tanstack/react-router";
 
 const Desk = () => (
   <main className="flex flex-col gap-4 p-6">
@@ -69,10 +70,10 @@ const Desk = () => (
   </main>
 );
 
-export default Desk;
+export const Route = createFileRoute("/")({ component: Desk });
 `;
 
-/** The same screen with the button's own variant: what the lint asks for. */
+/** The same page with the button's own variant: what the lint asks for. */
 const fixed = restyled.replace(
   '<Button className="rounded-full">',
   '<Button variant="outline">'
@@ -372,7 +373,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         const errors = [];
         for (let attempt = 0; attempt < 8; attempt += 1) {
-          const written = await env.build.write(app.id, { "screens/desk.tsx": ${JSON.stringify(restyled)} + "// " + attempt + "\\n" });
+          const written = await env.build.write(app.id, { "src/routes/index.tsx": ${JSON.stringify(restyled)} + "// " + attempt + "\\n" });
           errors.push(written.errors);
         }
         return errors;
@@ -380,7 +381,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       says("The button is still restyled: I'm stuck on it."),
       codeStep(`export default async (self, env) => {
         ${findApp}
-        const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
+        const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": fixed })});
         const proposal = await env.build.propose(app.id, "A desk");
         return { errors: written.errors, version: proposal.version };
       };`),
@@ -406,25 +407,28 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       )
       .replace("    <Button", "    <p>{count}</p>\n    <Button");
     const { chat } = await setUp((app) => [
-      toolStep("writeFile", { app, files: { "screens/desk.tsx": mistyped } }),
+      toolStep("writeFile", {
+        app,
+        files: { "src/routes/index.tsx": mistyped },
+      }),
       says("Two things fail."),
     ]);
 
-    await chat.ask("Add a desk screen to the Ledger");
+    await chat.ask("Add a desk page to the Ledger");
 
     const [written] = await toolResults(chat.stub, chat.chat.id);
     expect(written?.isError).toBeFalsy();
     expect(returned(written?.text)).toMatchObject({
       errors: 2,
       diagnostics: [
-        { file: "screens/desk.tsx", line: 3, rule: "TS2322" },
-        { file: "screens/desk.tsx", line: 8, rule: "shadcn/no-restyle" },
+        { file: "src/routes/index.tsx", line: 4, rule: "TS2322" },
+        { file: "src/routes/index.tsx", line: 9, rule: "shadcn/no-restyle" },
       ],
       leftOut: 0,
     });
   });
 
-  it("reports server code that throws as it registers as one error at its line, not one per screen", async () => {
+  it("reports server code that throws as it registers as one error at its line, not one per page", async () => {
     const operations = notesCode["server/notes.ts"] ?? "";
     const throwing = operations.replace(
       "\nexport const list = query({",
@@ -464,16 +468,16 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         },
       ],
       version: null,
-      // Its compile error, and nothing of the screens that import it.
+      // Its compile error, and nothing of the pages that import it.
       unparsed: { errors: 1, files: ["server/notes.ts"] },
     });
   });
 
-  it("never proposes screens checked against stand-ins, though the sandbox ends one inspection and not the next", async () => {
+  it("never proposes pages checked against stand-ins, though the sandbox ends one inspection and not the next", async () => {
     // The attack, under load: the sandbox ends one inspection of the
-    // server code (its deadline), so the screens fall back to the
+    // server code (its deadline), so the pages fall back to the
     // permissive stand-ins, while another inspection of the same code
-    // registers and passes the server check. Proposed then, a screen with
+    // registers and passes the server check. Proposed then, a page with
     // calls that don't exist would be committed. The draft's builds
     // inspect once, for both, and a stand-in check never passes.
     const { person, chat, grant } = await setUp([
@@ -483,7 +487,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         return {
           version: proposal.version,
           passed: proposal.check.passed,
-          standIn: proposal.check.screens.standIn ?? false,
+          standIn: proposal.check.pages.standIn ?? false,
           server: proposal.check.server.status,
         };
       };`),
@@ -546,7 +550,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect({ inspections, proposal: returned(result?.text) }).toStrictEqual({
-      // One inspection, read by the screens and the server check alike.
+      // One inspection, read by the pages and the server check alike.
       inspections: 1,
       proposal: {
         version: null,
@@ -682,7 +686,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled.replace(' className="rounded-full"', "") })});
+        const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": restyled.replace(' className="rounded-full"', "") })});
         const draft = await env.build.files(app.id);
         return { changed: written.changed.toSorted(), files: Object.keys(draft.files).toSorted() };
       };`),
@@ -696,8 +700,8 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const files = [
       "definition.json",
       "grasp.config.ts",
-      "screens/desk.tsx",
       "server/schema.ts",
+      "src/routes/index.tsx",
     ];
     expect(returned(result?.text)).toStrictEqual({ changed: files, files });
   });
@@ -949,7 +953,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       says("No."),
     ]);
     await grant();
-    // They use the shared App's screens, but don't build it.
+    // They use the shared App's pages, but don't build it.
     await other.api.apps.members.add(shared, {
       type: "person",
       id: person.userId,
@@ -974,11 +978,11 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       editing(app),
       toolStep("writeFile", {
         app,
-        files: { "screens/desk.tsx": fixed, "notes.md": "Desk notes" },
+        files: { "src/routes/index.tsx": fixed, "notes.md": "Desk notes" },
       }),
       codeStep(`export default async (self, env) => {
         const { files } = await env.build.files(${JSON.stringify(app)});
-        return { agents: files["AGENTS.md"], desk: files["screens/desk.tsx"], notes: files["notes.md"] };
+        return { agents: files["AGENTS.md"], desk: files["src/routes/index.tsx"], notes: files["notes.md"] };
       };`),
       says("Done."),
       // The next question's edit, which the person's discard overtakes.
@@ -991,7 +995,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       says("It moved."),
     ]);
 
-    await chat.ask("Name the desk, and add its screen");
+    await chat.ask("Name the desk, and add its page");
 
     const steps = await toolResults(chat.stub, chat.chat.id);
     const [unread, read, edited, written, draft] = steps;
@@ -1078,11 +1082,11 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       toolStep("writeFile", {
         app,
         files: {
-          "components/total.ts":
+          "src/components/total.ts":
             "var rate = 2\nexport const total = (n: number) => { return n*rate }\nexport const same = (a: number, b: number) => a == b\n",
         },
       }),
-      toolStep("readFile", { app, path: "components/total.ts" }),
+      toolStep("readFile", { app, path: "src/components/total.ts" }),
       says("Written."),
     ]);
 
@@ -1102,7 +1106,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       .parse(returned(written?.text));
     expect({
       written: diagnostics
-        .filter(({ file }) => file === "components/total.ts")
+        .filter(({ file }) => file === "src/components/total.ts")
         .map(({ line, rule }) => ({ line, rule })),
       read: read?.text,
     }).toStrictEqual({
@@ -1116,14 +1120,14 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     // more than one call's 250,000 (`ultraciteBatch`).
     const files = Object.fromEntries(
       Array.from({ length: 50 }, (_, at) => [
-        `components/rate-${at}.ts`,
+        `src/components/rate-${at}.ts`,
         `var rate${at} = ${at}\nexport const total${at} = (n: number) => { return n*rate${at} }\n${lines(at)}\n`,
       ])
     );
     const { chat } = await setUp((app) => [
       toolStep("writeFile", { app, files }),
-      toolStep("readFile", { app, path: "components/rate-0.ts" }),
-      toolStep("readFile", { app, path: "components/rate-49.ts" }),
+      toolStep("readFile", { app, path: "src/components/rate-0.ts" }),
+      toolStep("readFile", { app, path: "src/components/rate-49.ts" }),
       says("Written."),
     ]);
 
@@ -1139,20 +1143,20 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("saves as written a file whose tidy stops at its isolate's limits by itself, and tidies the rest of the write", async () => {
     const files = Object.fromEntries(
       Array.from({ length: 4 }, (_, at) => [
-        `components/rate-${at}.ts`,
+        `src/components/rate-${at}.ts`,
         rates(at),
       ])
     );
     const { chat } = await setUp((app) => [
       toolStep("writeFile", { app, files }),
-      toolStep("readFile", { app, path: "components/rate-0.ts" }),
-      toolStep("readFile", { app, path: "components/rate-3.ts" }),
+      toolStep("readFile", { app, path: "src/components/rate-0.ts" }),
+      toolStep("readFile", { app, path: "src/components/rate-3.ts" }),
       says("Written."),
     ]);
 
     const { LOADER: loader } = env;
     env.LOADER = stoppingUltracite(loader, {
-      marker: "components/rate-0.ts",
+      marker: "src/components/rate-0.ts",
       limit: "CPU time",
       fresh: true,
     });
@@ -1175,16 +1179,16 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       toolStep("writeFile", {
         app,
         files: {
-          "screens/a.md": "Alpha\nbeta\nalphabet",
-          "screens/b.md": "ALPHA",
-          "screensaver.md": "alpha",
+          "pages/a.md": "Alpha\nbeta\nalphabet",
+          "pages/b.md": "ALPHA",
+          "pagesaver.md": "alpha",
           "server/x.ts": "alpha",
           "many.md": many,
         },
       }),
-      toolStep("searchFiles", { app, text: "aLpHa", path: "screens" }),
+      toolStep("searchFiles", { app, text: "aLpHa", path: "pages" }),
       toolStep("searchFiles", { app, text: "an alpha" }),
-      toolStep("readFile", { app, path: "screens/a.md" }),
+      toolStep("readFile", { app, path: "pages/a.md" }),
       toolStep("readFile", { app, path: "many.md", fromLine: 104 }),
       says("Found."),
     ]);
@@ -1205,12 +1209,12 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       whole: whole?.text,
       end: end?.text,
     }).toStrictEqual({
-      // Not `screensaver.md`, which only starts like the folder.
+      // Not `pagesaver.md`, which only starts like the folder.
       inFolder: {
         matches: [
-          "screens/a.md:1:Alpha",
-          "screens/a.md:3:alphabet",
-          "screens/b.md:1:ALPHA",
+          "pages/a.md:1:Alpha",
+          "pages/a.md:3:alphabet",
+          "pages/b.md:1:ALPHA",
         ],
       },
       capped: [100, 5, "many.md:1:an alpha line"],
@@ -1300,7 +1304,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { chat, existing } = await setUp([]);
     await fakeProvider(
       codeStep(`export default async (self, env) => {
-          await env.build.write(${JSON.stringify(existing)}, { "screens/late.tsx": "export default () => null;" });
+          await env.build.write(${JSON.stringify(existing)}, { "src/routes/late.tsx": "import { createFileRoute } from \\"@tanstack/react-router\\";\\nconst Page = () => null;\\n\\nexport const Route = createFileRoute(\\"/late\\")({ component: Page });\\n" });
         };`),
       says("It ran out of time.")
     );
@@ -1328,7 +1332,13 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { chat, existing } = await setUp((app) => [
       toolStep("writeFile", {
         app,
-        files: { "screens/late.tsx": "export default () => null;" },
+        files: {
+          "src/routes/late.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => null;
+
+export const Route = createFileRoute("/late")({ component: Page });
+`,
+        },
       }),
       says("Never asked."),
     ]);
@@ -1543,7 +1553,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
   it("says a write's build couldn't run, proposes nothing then, and checks it at the next write once it can", async () => {
     const write = `export default async (self, env) => {
       ${findApp}
-      const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
+      const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": fixed })});
       const proposal = await env.build.propose(app.id, "A desk");
       return { errors: written.errors, notChecked: written.notChecked, version: proposal.version };
     };`;
@@ -1552,7 +1562,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": unbuilt })});
+        const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": unbuilt })});
         const proposal = await env.build.propose(app.id, "A desk");
         return { errors: written.errors, notChecked: written.notChecked, version: proposal.version };
       };`),
@@ -1586,7 +1596,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     expect(returned(results[0]?.text)).toStrictEqual({
       errors: 0,
       notChecked: {
-        screens:
+        pages:
           "The build couldn't run now. It runs again when this is first used.",
       },
       version: null,
@@ -1602,11 +1612,11 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        const written = await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": fixed })});
+        const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": fixed })});
         const proposal = await env.build.propose(app.id, "Fixed the button");
         return {
           written: { errors: written.errors, notChecked: written.notChecked },
-          proposal: { version: proposal.version, passed: proposal.check.passed, screens: proposal.check.screens },
+          proposal: { version: proposal.version, passed: proposal.check.passed, pages: proposal.check.pages },
         };
       };`),
       says("It couldn't be built in time."),
@@ -1646,11 +1656,11 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const late =
       "The build didn't finish in time. It runs again when this is first used.";
     expect(returned(result?.text)).toStrictEqual({
-      written: { errors: 0, notChecked: { screens: late, server: late } },
+      written: { errors: 0, notChecked: { pages: late, server: late } },
       proposal: {
         version: null,
         passed: false,
-        screens: { status: "error", diagnostics: [], error: late },
+        pages: { status: "error", diagnostics: [], error: late },
       },
     });
   });
@@ -1659,7 +1669,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     const { person, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
-        await env.build.write(app.id, ${JSON.stringify({ "screens/desk.tsx": restyled })});
+        await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": restyled })});
         const proposal = await env.build.propose(app.id, "A desk");
         return {
           version: proposal.version,
@@ -1725,8 +1735,8 @@ export const titles = action({
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         ${defineNotes}
-        // What each write says of the server code (its screens apart).
-        const server = (written) => ({ errors: written.errors, diagnostics: written.diagnostics.filter(({ file }) => !file?.startsWith("screens/")).map(({ file, rule }) => ({ file, rule })) });
+        // What each write says of the server code (its pages apart).
+        const server = (written) => ({ errors: written.errors, diagnostics: written.diagnostics.filter(({ file }) => !file?.startsWith("pages/")).map(({ file, rule }) => ({ file, rule })) });
         const wrongCall = server(await env.build.write(app.id, ${JSON.stringify({ ...sound, "server/notes.ts": wrongCall })}));
         const sound = server(await env.build.write(app.id, ${JSON.stringify(sound)}));
         const mistyped = server(await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": mistyped })}));
@@ -1771,7 +1781,7 @@ export const titles = action({
         'import { noteFields } from "../values.ts";',
         'import { noteFields } from "../values.ts";\nimport { internal } from "@server/_generated/internal";'
       ),
-      "screens/notes.tsx": `import { Badge } from "@grasp-os/ui/components/badge";\n${notesCode["screens/notes.tsx"] ?? ""}`,
+      "src/routes/index.tsx": `import { Badge } from "@grasp-os/ui/components/badge";\n${notesCode["src/routes/index.tsx"] ?? ""}`,
     };
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
@@ -1782,7 +1792,7 @@ export const titles = action({
         const refused = await env.build.propose(app.id, "Notes");
         const fixed = await env.build.write(app.id, ${JSON.stringify(notesCode)});
         const proposed = await env.build.propose(app.id, "Notes");
-        const statuses = ({ check }) => ({ passed: check.passed, screens: check.screens.status, server: check.server.status, lint: check.lint.status });
+        const statuses = ({ check }) => ({ passed: check.passed, pages: check.pages.status, server: check.server.status, lint: check.lint.status });
         return {
           written: { errors: written.errors, diagnostics: written.diagnostics.map(({ file, rule, severity }) => ({ file, rule, severity })) },
           called,
@@ -1803,12 +1813,12 @@ export const titles = action({
         errors: 2,
         diagnostics: [
           {
-            file: "screens/notes.tsx",
+            file: "server/notes.ts",
             rule: "no-unused-vars",
             severity: "error",
           },
           {
-            file: "server/notes.ts",
+            file: "src/routes/index.tsx",
             rule: "no-unused-vars",
             severity: "error",
           },
@@ -1818,7 +1828,7 @@ export const titles = action({
       refused: {
         version: null,
         passed: false,
-        screens: "ok",
+        pages: "ok",
         server: "ok",
         lint: "failed",
       },
@@ -1845,7 +1855,7 @@ export const titles = action({
         "workflows/lib/take.ts": "export const take = 1;\n",
       }),
       alongside: writing({
-        "screens/desk.tsx": fixed,
+        "src/routes/index.tsx": fixed,
         "workflows/intake.workflow-tests.ts": "export default [];\n",
       }),
     };
@@ -1883,7 +1893,7 @@ export const titles = action({
         "workflows/outtake.workflow-tests.ts",
       ]),
       imported: noWorkflows(["workflows/lib/take.ts"]),
-      // Refused as a whole, naming only the workflow's file: the screen
+      // Refused as a whole, naming only the workflow's file: the page
       // beside it didn't land either.
       alongside: noWorkflows(["workflows/intake.workflow-tests.ts"]),
       unchanged: [],

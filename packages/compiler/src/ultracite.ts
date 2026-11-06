@@ -67,7 +67,7 @@ const unlintable = (file: string): Diagnostic => ({
   rule: "lint",
   severity: "error",
   message:
-    "Ultracite's lint ran out of room on this file: split this screen into components, or the file into smaller ones, and flatten anything nested hundreds deep.",
+    "Ultracite's lint ran out of room on this file: split this page into components, or the file into smaller ones, and flatten anything nested hundreds deep.",
 });
 
 const diagnosticOf = (

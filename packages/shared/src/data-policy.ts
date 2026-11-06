@@ -5,8 +5,8 @@ import type { AppId } from "./ids.ts";
 // Whether an App's data goes to code Grasp didn't serve: a portable host
 // (spec 10.7.1, the App's UI outside Grasp's shell, holding an App token),
 // whose code runs with the network a browser or a native app gives it.
-// An App's own screens run in Grasp's sandboxed frame and get its data
-// whatever this says (core's screen-delivery.ts), but `ordinary` also lets
+// An App's own pages run in Grasp's sandboxed frame and get its data
+// whatever this says (core's page-delivery.ts), but `ordinary` also lets
 // them open the links their App declares on a click, without the person
 // confirming each with the whole URL shown (core's app-link-route.ts).
 
@@ -44,7 +44,7 @@ export interface DataPolicyApi {
   read: (app: string) => Promise<DataPolicy>;
   /**
    * Says what the App's data is, under the policy generation the admin
-   * read (`DataPolicy.generation`): refused with `screen.review_outdated`
+   * read (`DataPolicy.generation`): refused with `page.review_outdated`
    * once it moved on, by a classification or a grant. `ordinary` holds
    * only for the permissions the App had when it was said: a permission
    * granted to the App afterwards makes its data `sensitive` again, in

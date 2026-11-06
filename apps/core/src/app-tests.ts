@@ -33,10 +33,10 @@ import {
 } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
+import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
-import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 import { isolateArgumentDepth } from "@grasp-os/shared/stores";
 import { eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -55,6 +55,7 @@ import type { OpenStore } from "./data-stores.ts";
 import { appTestFixtures } from "./db/core/schema.ts";
 import { callOperation } from "./operations.ts";
 import type { Invocation } from "./operations.ts";
+import { buildAppTests } from "./pages.ts";
 import { platformPlaceWaitMs } from "./platform-sandbox.ts";
 import { QuerySubscriptions } from "./query-subscriptions.ts";
 import type {
@@ -80,7 +81,6 @@ import {
   sandboxWaitMs,
   sessionHost,
 } from "./sandboxed.ts";
-import { buildAppTests } from "./screens.ts";
 import { Subscription } from "./subscription.ts";
 import { answerFixtureDecision } from "./workflows/fixture-decisions.ts";
 import { holdFixtureRunSession } from "./workflows/fixture-run-sessions.ts";
@@ -108,16 +108,16 @@ import type { FixtureRunStarted } from "./workflows/fixture-runs.ts";
 //   never the App's handlers, so a test can't run a function except
 //   through the host.
 // - A test's calls skip what a real call goes through: each is resolved
-//   against the App's release exactly as a screen's is
+//   against the App's release exactly as a page's is
 //   (`publicOperationOf`: public functions only, of this release and
 //   contract), then run through the operation host (`callOperation`) on
 //   the release's own runner, isolate and store host. Only the principal
 //   and the store are the fixture's. A principal's live query
-//   (`subscribe`) is followed by the realtime manager a screen's page
+//   (`subscribe`) is followed by the realtime manager a page's page
 //   follows one through (query-subscriptions.ts), each principal as a
 //   connection of its own: only who reads, the release and the store are
 //   the fixture's, so its snapshots are read as that principal, gated and
-//   ordered as a screen's are.
+//   ordered as a page's are.
 // - Tests read or change the App's data: each test runs on a store of its
 //   own, created empty for it with the release's schema and discarded
 //   after it. A fixture store is never in the store inventory, so
@@ -918,7 +918,7 @@ class FixtureSession extends TestTarget {
   }
 
   /**
-   * Calls a function as principal `name`, as a screen's call is resolved
+   * Calls a function as principal `name`, as a page's call is resolved
    * and run, and answers its result's JSON text. Never throws for the
    * call: a refusal is its result, as the caller would get it.
    */
@@ -932,7 +932,7 @@ class FixtureSession extends TestTarget {
 
   /**
    * Runs the call `request` names as principal `name`, with `role`, as a
-   * screen's call is resolved and run: its result, a refusal included.
+   * page's call is resolved and run: its result, a refusal included.
    * A live read (`live`) runs only a query, by its deadline, and is told
    * what the query read of the session's store.
    */
@@ -951,7 +951,7 @@ class FixtureSession extends TestTarget {
     const requestId = crypto.randomUUID();
     try {
       const call = readFunctionRequest(request);
-      // A live query follows a query only, as a screen's does.
+      // A live query follows a query only, as a page's does.
       if (live !== undefined && call.reference.kind !== "query") {
         throw operationErrors.create("contract.invalid_request");
       }
@@ -1034,7 +1034,7 @@ class FixtureSession extends TestTarget {
   }
 
   /**
-   * Starts, as principal `name`, the workflow `request` names (a screen's
+   * Starts, as principal `name`, the workflow `request` names (a page's
    * start's JSON text): the run, a real one of the workflow version the
    * release under test binds, with nothing of the organization's around it
    * (fixture-runs.ts). Answers the JSON text of an `OperationResult`: the
@@ -1196,7 +1196,7 @@ class FixtureSession extends TestTarget {
 
   /**
    * Principal `name`'s live queries: a connection of its own to the
-   * realtime manager, as a screen's page has (query-subscriptions.ts),
+   * realtime manager, as a page's page has (query-subscriptions.ts),
    * read as the principal, with its role, on the session's store, until
    * the session closes. Its reads are the test's own and bounded by its
    * deadline, so none is charged to a budget.
@@ -1255,7 +1255,7 @@ class FixtureSession extends TestTarget {
    * JSON text, as `call` takes it. Each push of core's (`{ revision,
    * result }`) goes to `onSnapshot`, and `onLost` is called once core lets
    * go of the subscription. Answers what releases it, or the refusal's
-   * result as JSON text, such as `screen.too_many_queries`; the session
+   * result as JSON text, such as `page.too_many_queries`; the session
    * releases whatever its test didn't as it closes. A refusal is
    * answered, never thrown: workerd takes a call that rejects once it was
    * passed callbacks for one that hung, and cancels it.
@@ -1284,7 +1284,7 @@ class FixtureSession extends TestTarget {
       }
       const { queries, reader } = this.#queriesOf(String(name), role);
       const callback = testCallback(onSnapshot, onLost, () => this.#closed);
-      // Refused (`screen.too_many_queries`), it throws before it holds the
+      // Refused (`page.too_many_queries`), it throws before it holds the
       // callback, which then holds nothing of the test's.
       const held = queries.subscribe(
         reader,

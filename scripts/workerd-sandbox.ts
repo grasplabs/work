@@ -17,7 +17,7 @@
  *   whole group (`SIGKILL`) and starts another.
  * - A call allocates without end. Its process's resident memory is read
  *   while it runs; past `memoryLimitBytes` it's killed and the App refused.
- *   Core's own platform code (the screen compiler, the package builder)
+ *   Core's own platform code (the page compiler, the package builder)
  *   may ask for more, up to `maxMemoryLimitBytes`, never App code: only
  *   a top-level session of an owner in `platformOwners` may ask, and only
  *   core reaches this supervisor.
@@ -183,7 +183,7 @@ export interface SandboxSupervisorOptions {
   memoryLimitBytes?: number;
   /**
    * The most a session may ask for (`memoryHeader`): core's platform code
-   * (the screen compiler, the package builder) needs more than App code.
+   * (the page compiler, the package builder) needs more than App code.
    */
   maxMemoryLimitBytes?: number;
   /**
@@ -273,9 +273,9 @@ const defaults = {
   // A Cloudflare isolate may use 128 MB; workerd itself takes about 40.
   memoryLimitBytes: 256 * MIB,
   /**
-   * The screen compiler type-checks with TypeScript, which on plain
+   * The page compiler type-checks with TypeScript, which on plain
    * workerd (no heap limit to collect against) grows well past what
-   * Cloudflare's 128 MB isolate holds it to: about 400 MB for one screen.
+   * Cloudflare's 128 MB isolate holds it to: about 400 MB for one page.
    * The builder's owner holds half the pool by default, so with four
    * processes, builds may hold up to 2 GiB together, beside App code's
    * 256 MiB each: what GRA-367's cgroup must leave room for.

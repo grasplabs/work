@@ -40,7 +40,7 @@ import {
 //   is kept while it is the App's current or pending version, for 90
 //   days after it last was (stamped as it stops being current, apps.ts,
 //   and by every sweep; or after its seal, if it never was), while an
-//   open screen's lease on it holds (15 minutes from the last renewal),
+//   open page's lease on it holds (15 minutes from the last renewal),
 //   while a workflow run of that version is active, while any pin holds
 //   it (a run, a compatible migration, a pinned trigger, an admin's legal
 //   hold), and once revoked, for good. Nothing App code does shortens
@@ -78,7 +78,7 @@ import {
 //   statement, and a sweep dequeues each only once its bytes are dealt
 //   with, page by page, so a sweep that stops or fails half-way leaves
 //   the rest queued for the next.
-// - Pins pile up: every screen leases its release over and over. A lapsed
+// - Pins pile up: every page leases its release over and over. A lapsed
 //   lease is deleted by the next sweep, and a release's pins with it.
 // - A release turns out to be dangerous: an admin of the organization
 //   revokes it, and it runs no more (`version.revoked`, checked on every
@@ -88,7 +88,7 @@ import {
 // - A demoted admin's session still revokes or holds: each write checks
 //   that they are still an active admin, in its own statement.
 
-/** How long an open screen's lease on its release lasts without renewal. */
+/** How long an open page's lease on its release lasts without renewal. */
 export const frameLeaseMs = 15 * 60_000;
 
 /** How long a release is kept after it was last current, at least. */
@@ -182,7 +182,7 @@ const sealedHash = async (env: Env, key: ReleaseKey): Promise<string> => {
 
 /**
  * Pins release `key` for `holder`, the platform's own (a run, a
- * migration, a trigger, an open screen), until `expiresAt` (a lease) or
+ * migration, a trigger, an open page), until `expiresAt` (a lease) or
  * until it is unpinned. Pinning a release that isn't sealed is refused
  * (`version.not_sealed`): the pin must keep something. A legal hold is
  * an admin's (`placeHold`), never placed here.
@@ -221,8 +221,8 @@ export const pinRelease = async (
 };
 
 /**
- * Leases release `key` for open screen `frame` from `now`: the lease
- * holds `frameLeaseMs` and is renewed by leasing again while the screen
+ * Leases release `key` for open page `frame` from `now`: the lease
+ * holds `frameLeaseMs` and is renewed by leasing again while the page
  * stays connected (spec 16.3).
  */
 export const leaseRelease = async (
@@ -359,7 +359,7 @@ export const releaseHold = async (
  * Revokes release `key`, as an admin of the organization: it runs no
  * more, from the next load and the next authorization of a call already
  * running (`version.revoked`), and it is kept, bytes and all. Audited
- * once, with its manifest hash and why. Its App's open screens are told
+ * once, with its manifest hash and why. Its App's open pages are told
  * to look again (access-revocations.ts), so a live query of a build of it
  * ends now, not at the App's next change.
  */

@@ -127,7 +127,7 @@ import type { StartFiles } from "./start-files.ts";
 //   `maxMessageBytes`, and nothing of it is kept as a message
 //   (`stored: null`). An attachment reaches the run only as a file of its
 //   own (GRA-1363), copied in as the start is admitted, as an App's file
-//   a screen hands its run is (start-files.ts): only where the
+//   a page hands its run is (start-files.ts): only where the
 //   workflow's input takes a file and its trigger maps the attachment's
 //   `file` there; only one a run file may be, its type shown by its bytes
 //   (never the label its sender gave it), its name one a run file may
@@ -159,7 +159,7 @@ import type { StartFiles } from "./start-files.ts";
 //
 // A reply to a run's mail, to the run's reply address
 // (`reply-<token>@<host>`, run-inboxes.ts), starts nothing: it is an
-// event for that run (`receiveReply`), admitted as an App screen's is
+// event for that run (`receiveReply`), admitted as an App page's is
 // (run-events.ts, `admitRunEvent`). Its address is looked up before any
 // trigger's or App's, and before the message is read. Threat model, and
 // how each is closed:
@@ -174,7 +174,7 @@ import type { StartFiles } from "./start-files.ts";
 // - A forged sender: the From header is data. The event's source and its
 //   sender (its share of the run's inbox, `inbox:<alias>`) are minted
 //   from the inbox, never from the message, so outsiders fill only that
-//   binding's share, never an App screen's. What Email Routing found of
+//   binding's share, never an App page's. What Email Routing found of
 //   SPF, DKIM and DMARC goes with it (authentication-results.ts: only
 //   its own ARC set, on top, is read), for the workflow to check; core
 //   refuses no reply on it. Its DMARC verdict only when `from`, as the

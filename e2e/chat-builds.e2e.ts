@@ -34,22 +34,19 @@ export const book = mutation({
   handler: async (ctx, args) => await ctx.db.insert("invoices", args),
 });
 `,
-
-  "screens.ts": `export default {
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-};
-`,
 };
 
-const screen = `import { Button } from "@grasp-os/ui/components/button";
+const appPage = `import { createFileRoute } from "@tanstack/react-router";
+import { Button } from "@grasp-os/ui/components/button";
 
-export default function Desk() {
+function Desk() {
   return (
     <main className="flex flex-col gap-4 p-6">
       <Button variant="outline">Approve</Button>
     </main>
   );
 }
+export const Route = createFileRoute("/")({ component: Desk });
 `;
 
 test("the side panel shows an App being built, and a builder makes its version current", async ({
@@ -64,7 +61,7 @@ test("the side panel shows an App being built, and a builder makes its version c
     const { version } = await api.apps.files.commit(
       app.id,
       {
-        "screens/desk.tsx": screen,
+        "src/routes/index.tsx": appPage,
         ...invoices,
       },
       "An invoice desk for invoices@"
@@ -82,7 +79,7 @@ test("the side panel shows an App being built, and a builder makes its version c
       `${name}: version ${version} waiting for review`
     );
     await expect(built.getByRole("region", { name: "Files" })).toHaveText(
-      /Added screens\/desk\.tsx/u
+      /Added src\/routes\/index\.tsx/u
     );
     await expect(built).toContainText(
       "Nothing runs yet: this would be the App's first current version."

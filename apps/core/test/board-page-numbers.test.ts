@@ -7,10 +7,10 @@ import {
   rowsShown,
   signalRows,
   topByHours,
-} from "../blueprints/board-page/files/components/board.ts";
-import type { WorkflowFigures } from "../blueprints/board-page/files/components/board.ts";
+} from "../blueprints/board-page/files/src/components/board.ts";
+import type { WorkflowFigures } from "../blueprints/board-page/files/src/components/board.ts";
 
-// What the board page shows of a snapshot's frozen figures (its screen
+// What the board page shows of a snapshot's frozen figures (its page
 // works it out): where the hours go now, before and after, the headline
 // and the signals in plain words. Pure logic, so tested on its own. What
 // can go wrong: a designed workflow that doesn't run yet counted at its

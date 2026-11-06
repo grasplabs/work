@@ -32,16 +32,15 @@ const a4 = { width: 794, height: 1123 };
 /** The pages in a PDF: its page objects, not the page tree (`/Pages`). */
 const pageObject = /\/Type\s*\/Page(?![a-z])/gu;
 
-/** The screen of `app`'s route `screen`, once it shows `heading`. */
-const openScreen = async (
+/** `app`, full page, once its first page shows `heading`. */
+const openPage = async (
   page: Page,
   app: string,
-  screen: string,
   heading: string
 ): Promise<FrameLocator> => {
-  await page.goto(`/apps/${app}/full?screen=${screen}`);
-  const frame = page.frameLocator(`iframe[title="${screen} app"]`);
-  // The first open builds the screen, which takes a while on a loaded machine.
+  await page.goto(`/apps/${app}/full`);
+  const frame = page.frameLocator('iframe[title="App"]');
+  // The first open builds the page, which takes a while on a loaded machine.
   await expect(frame.getByRole("heading", { name: heading })).toBeVisible({
     timeout: 20_000,
   });
@@ -109,28 +108,28 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
   }
 
   const page = await pageOf(admin);
-  const mapScreen = await openScreen(page, map, "map", "Workflow map");
+  const mapPage = await openPage(page, map, "Workflow map");
   for (let index = 1; index <= seeded; index += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one drawing at a time
     await draw(
-      mapScreen,
+      mapPage,
       `A workflow with a long name to wrap, number ${index} of run ${run}`,
       index * 10
     );
   }
-  const screen = await openScreen(page, app, "board", "Board page");
+  const appPage = await openPage(page, app, "Board page");
 
-  await screen.getByRole("combobox", { name: "Maturity" }).click();
-  await screen.getByRole("option", { name: "Maturity 2 of 5" }).click();
-  await screen.getByRole("button", { name: "Take a snapshot" }).click();
-  const board = screen.getByRole("article", { name: "Board page" });
+  await appPage.getByRole("combobox", { name: "Maturity" }).click();
+  await appPage.getByRole("option", { name: "Maturity 2 of 5" }).click();
+  await appPage.getByRole("button", { name: "Take a snapshot" }).click();
+  const board = appPage.getByRole("article", { name: "Board page" });
   await expect(board.getByText("Maturity 2 of 5")).toBeVisible();
   await expect(
     board.getByRole("table", { name: "Where the hours go" }).getByRole("row")
   ).toHaveCount(6);
 
-  await screen.getByLabel("Edit the decision needed").fill(decision);
-  await screen
+  await appPage.getByLabel("Edit the decision needed").fill(decision);
+  await appPage
     .getByLabel("Edit the narrative")
     .fill(
       Array.from(
@@ -139,24 +138,24 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
           `Line ${line + 1}: where we stand, what changed and what comes next.`
       ).join("\n")
     );
-  await screen.getByRole("button", { name: "Save" }).click();
+  await appPage.getByRole("button", { name: "Save" }).click();
   await expect(board.getByText(decision)).toBeVisible();
 
   // Printed on A4 (at 96 pixels an inch, without margins): the page alone,
-  // without the controls or the App's chrome. The screen's frame fills the
+  // without the controls or the App's chrome. The page's frame fills the
   // sheet and clips what doesn't fit, so the page must fit in the frame,
   // and the sheet be the only one.
   await page.setViewportSize(a4);
   await page.emulateMedia({ media: "print" });
   await expect(board).toBeVisible();
   await expect(
-    screen.getByRole("button", { name: "Take a snapshot" })
+    appPage.getByRole("button", { name: "Take a snapshot" })
   ).toBeHidden();
-  await expect(screen.getByLabel("Edit the narrative")).toBeHidden();
+  await expect(appPage.getByLabel("Edit the narrative")).toBeHidden();
   await expect(page.getByText("App page")).toBeHidden();
   const frame = page
     .frames()
-    .find((each) => each.url().includes("/screen-frame"));
+    .find((each) => each.url().includes("/page-frame"));
   const fit = await frame?.evaluate(() => ({
     height: document.documentElement.scrollHeight,
     room: window.innerHeight,
@@ -166,7 +165,7 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
   const pdf = await page.pdf({ format: "A4", printBackground: true });
   expect(pdf.toString("latin1").match(pageObject)).toHaveLength(1);
 
-  // Paper is light: printed from the dark theme, the screen's colours are
+  // Paper is light: printed from the dark theme, the page's colours are
   // the light theme's.
   const colours = async () =>
     await frame?.evaluate(() => ({

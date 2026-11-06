@@ -1,16 +1,16 @@
-import { screenLimits } from "@grasp-os/shared/screens";
+import { pageLimits } from "@grasp-os/shared/pages";
 import type {
   AppErrorEntry,
   AppErrorLog,
   ReportedEntry,
-} from "@grasp-os/shared/screens";
+} from "@grasp-os/shared/pages";
 
-// An App's error log: what went wrong in its screens, and what its server
+// An App's error log: what went wrong in its pages, and what its server
 // code wrote with `console` (server-logs.ts), for the builders and the
 // agent who fix it. It lives in the App's own Durable Object (in the EU
 // with the App), outside the facet its code runs in.
 //
-// A screen writes its reports itself, and the App's code its lines, so
+// A page writes its reports itself, and the App's code its lines, so
 // the log is bounded whatever they send: the same problem (or line) is one
 // entry with a count, only the newest different ones are kept, and what
 // comes in past the rate the host allows (app.ts, `admitReport` and
@@ -37,13 +37,13 @@ const sameProblem = (
   kept: AppErrorEntry,
   reported: ReportedProblem
 ): boolean => {
-  if (kept.source === "screen" && reported.source === "screen") {
+  if (kept.source === "page" && reported.source === "page") {
     return (
       kept.kind === reported.kind &&
       kept.message === reported.message &&
       kept.stack === reported.stack &&
       kept.version === reported.version &&
-      kept.screen === reported.screen
+      kept.path === reported.path
     );
   }
   if (kept.source === "server" && reported.source === "server") {
@@ -89,7 +89,7 @@ export class ErrorLog {
    * would each add the same problem as new, or count over each other.
    * The object's own ordering of requests doesn't cover it: without this,
    * two hundred reports sent at once come out as dozens of entries (the
-   * test of that in screen-bridge.test.ts fails).
+   * test of that in page-bridge.test.ts fails).
    */
   async #inTurn<T>(turn: () => Promise<T>): Promise<T> {
     const before = this.#written;
@@ -118,7 +118,7 @@ export class ErrorLog {
       let dropped: string | undefined;
       if (same !== undefined) {
         [dropped] = same;
-      } else if (kept.size >= screenLimits.keptReports) {
+      } else if (kept.size >= pageLimits.keptReports) {
         dropped = oldest;
       }
       await this.#storage.put({
@@ -167,7 +167,7 @@ export class ErrorLog {
       const entries = await this.#storage.list<AppErrorEntry>({
         prefix: entryPrefix,
         reverse: true,
-        limit: screenLimits.keptReports,
+        limit: pageLimits.keptReports,
       });
       const stored = (await this.#storage.get<number>(suppressedKey)) ?? 0;
       return {

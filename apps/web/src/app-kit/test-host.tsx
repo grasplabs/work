@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach } from "vite-plus/test";
 
-// What an App screen's kit parts (the data grid, the form fields) are
+// What an App page's kit parts (the data grid, the form fields) are
 // tested against: a real session client, as the platform mounts one, over
 // a host that answers each query and mutation as the test says. The host
 // is the outside system here; the client, the hooks and the kit are the
@@ -198,7 +198,7 @@ export const settle = async (ms = 0): Promise<void> => {
 
 let root: Root | undefined;
 
-// Unmounted after each test, so nothing a screen left pending (a search's
+// Unmounted after each test, so nothing a page left pending (a search's
 // settle timer) runs after the test file's page is gone.
 afterEach(() => {
   act(() => {
@@ -207,10 +207,10 @@ afterEach(() => {
   root = undefined;
 });
 
-/** Renders `screen` in a fresh page, under `client`. */
+/** Renders `page` in a fresh page, under `client`. */
 export const rendered = async (
   client: GraspClient,
-  screen: ReactNode
+  page: ReactNode
 ): Promise<void> => {
   root?.unmount();
   document.body.replaceChildren();
@@ -218,7 +218,7 @@ export const rendered = async (
   document.body.append(host);
   await act(async () => {
     root = createRoot(host);
-    root.render(<GraspProvider client={client}>{screen}</GraspProvider>);
+    root.render(<GraspProvider client={client}>{page}</GraspProvider>);
     await settle();
   });
 };

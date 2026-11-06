@@ -16,7 +16,7 @@ export const diagnosticCategories = [
   "design-system",
   /** Ultracite's rules: the code's quality and style (`lint`). */
   "code",
-  /** The App's layout: its screens, server, tests and file names. */
+  /** The App's layout: its pages, server, tests and file names. */
   "structure",
   /** Any other rule: the platform's own, never the App's to fix. */
   "internal",
@@ -26,7 +26,7 @@ export type DiagnosticCategory = (typeof diagnosticCategories)[number];
 
 /** The rules of the App's layout (`structure`). */
 const structureRules: ReadonlySet<string> = new Set([
-  "screens",
+  "pages",
   "server",
   "tests",
   "file-names",

@@ -16,8 +16,8 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // answer with no confirmation, a made-up one, one used before, one for
 // another decision, person or answer, one given against a review context
 // that changed since, one that expired, and the confirmation being taken
-// without its answer or its answer without it. The screen bridge's own
-// cases are in screen-workflow-decisions.test.ts.
+// without its answer or its answer without it. The page bridge's own
+// cases are in page-workflow-decisions.test.ts.
 
 const idp = mockIdp();
 

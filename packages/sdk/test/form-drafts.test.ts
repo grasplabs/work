@@ -1,5 +1,5 @@
 import { canonicalText } from "@grasp-os/shared/json";
-import { screenLimits } from "@grasp-os/shared/screen-limits";
+import { pageLimits } from "@grasp-os/shared/page-limits";
 import { FormApi } from "@tanstack/react-form";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -9,8 +9,8 @@ import { DraftStore, writeDraft } from "../src/form-drafts.ts";
 import type { DraftPersistence } from "../src/form-drafts.ts";
 import { FormBinding } from "../src/form.ts";
 import type { DraftSlot, FormApiOf } from "../src/form.ts";
+import { draftLookupMs, pageDrafts } from "../src/page-runtime.ts";
 import type { ArgsOf } from "../src/references.ts";
-import { draftLookupMs, pageDrafts } from "../src/screen-runtime.ts";
 import { isPlainObject } from "../src/value-descriptor.ts";
 import type { ValueDescriptor } from "../src/value-descriptor.ts";
 import { descriptorOf } from "../src/value-schema.ts";
@@ -1062,7 +1062,7 @@ describe("the drafts a frame starts with", () => {
       const persistence = pageDrafts(bridge);
       await vi.advanceTimersByTimeAsync(draftLookupMs);
       const started = await persistence;
-      const waitingMost = 2 * screenLimits.drafts.perApp;
+      const waitingMost = 2 * pageLimits.drafts.perApp;
       started.write("saved", null);
       for (let index = 0; index < 50; index += 1) {
         started.write(`dropped${index}`, null);
@@ -1262,7 +1262,7 @@ describe("the drafts the client keeps", () => {
   it("lets one App's oldest go past its count, never another App's", () => {
     const store = new DraftStore();
     store.put(appKey("other", 0), draft(Date.now()));
-    for (let index = 0; index < screenLimits.drafts.perApp + 1; index += 1) {
+    for (let index = 0; index < pageLimits.drafts.perApp + 1; index += 1) {
       store.put(appKey("busy", index), draft(Date.now() + index));
     }
     expect({
@@ -1298,14 +1298,14 @@ describe("the drafts the client keeps", () => {
     const now = Date.now();
     const initial: Record<string, string> = {};
     // Newest first, as the page hands them over.
-    for (let index = 0; index < screenLimits.drafts.perApp; index += 1) {
+    for (let index = 0; index < pageLimits.drafts.perApp; index += 1) {
       initial[`d${index}`] = writeDraft(draft(now - index));
     }
     const store = new DraftStore(page(initial).persistence, now);
     store.put("new", draft(now + 1));
     expect({
       newest: store.get("d0", now) !== undefined,
-      oldest: store.get(`d${screenLimits.drafts.perApp - 1}`, now),
+      oldest: store.get(`d${pageLimits.drafts.perApp - 1}`, now),
     }).toStrictEqual({ newest: true, oldest: undefined });
   });
 
@@ -1315,7 +1315,7 @@ describe("the drafts the client keeps", () => {
     store.put("small", draft(Date.now(), "x"));
     store.put(
       "small",
-      draft(Date.now(), "x".repeat(screenLimits.drafts.characters))
+      draft(Date.now(), "x".repeat(pageLimits.drafts.characters))
     );
     expect(kept.kept.has("small")).toBeFalsy();
     expect(store.get("small")).toBeDefined();
@@ -1324,16 +1324,16 @@ describe("the drafts the client keeps", () => {
   it("lets the oldest go past the count, and drops a day-old draft unread", () => {
     const store = new DraftStore();
     const start = Date.now();
-    for (let index = 0; index <= screenLimits.drafts.perApp; index += 1) {
+    for (let index = 0; index <= pageLimits.drafts.perApp; index += 1) {
       store.put(`d${index}`, draft(start + index));
     }
     expect(store.get("d0")).toBeUndefined();
-    expect(store.get(`d${screenLimits.drafts.perApp}`)).toBeDefined();
+    expect(store.get(`d${pageLimits.drafts.perApp}`)).toBeDefined();
 
     const now = Date.now();
     const old = new DraftStore(
       page({
-        old: writeDraft(draft(now - screenLimits.drafts.maxAgeMs - 1)),
+        old: writeDraft(draft(now - pageLimits.drafts.maxAgeMs - 1)),
         young: writeDraft(draft(now)),
         broken: "{",
       }).persistence,
@@ -1357,7 +1357,7 @@ describe("the drafts the client keeps", () => {
     store.put("open", draft(now, "x"));
     expect({
       soon: store.get("open", now + 1)?.values,
-      later: store.get("open", now + screenLimits.drafts.maxAgeMs + 1),
+      later: store.get("open", now + pageLimits.drafts.maxAgeMs + 1),
     }).toStrictEqual({ soon: { body: "x" }, later: undefined });
   });
 
@@ -1378,7 +1378,7 @@ describe("the drafts the client keeps", () => {
   it("keeps a draft whose text grows past the limit once escaped in memory only", () => {
     const kept = page();
     const store = new DraftStore(kept.persistence);
-    const quotes = '"'.repeat(Math.ceil(screenLimits.drafts.characters / 3));
+    const quotes = '"'.repeat(Math.ceil(pageLimits.drafts.characters / 3));
     store.put("escaped", draft(Date.now(), quotes));
     expect({
       page: kept.kept.has("escaped"),

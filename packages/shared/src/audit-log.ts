@@ -158,9 +158,9 @@ const typeRules: readonly {
   { action: "app.call", type: "action" },
   { action: "app.called", access: "read", type: "read" },
   { action: "app.called", type: "action" },
-  // Code refused an App's data (core's src/screen-delivery.ts): a screen
+  // Code refused an App's data (core's src/page-delivery.ts): a page
   // of a revoked release, or a portable host while the App's data isn't
-  // `ordinary`. An admin approving a screen's build or taking that back
+  // `ordinary`. An admin approving a page's build or taking that back
   // is no longer recorded, but past records stay decisions.
   { action: "app.artifact.refused", type: "action" },
   { action: "app.artifact", type: "decision" },
@@ -343,7 +343,7 @@ export const auditFilterSchema = z
     actorType: z.enum(actorTypes).optional(),
     /**
      * A person's or staff member's user ID, an agent's ID, an App's ID (its
-     * screens, server code and workflow runs) or a workflow run's ID.
+     * pages, server code and workflow runs) or a workflow run's ID.
      */
     actorId: identifierSchema.optional(),
     type: auditEventTypeSchema.optional(),

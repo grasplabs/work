@@ -1,5 +1,5 @@
 // A token bucket: `burst` tokens at most, refilled at `perMinute`, one
-// taken per request. Pure, so the same arithmetic bounds a screen's
+// taken per request. Pure, so the same arithmetic bounds a page's
 // traffic on the page (per frame) and in core (per person and App), where
 // it counts: a browser someone changed skips the page's.
 

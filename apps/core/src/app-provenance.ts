@@ -23,7 +23,7 @@ import { mayRead } from "./knowledge/access.ts";
 import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 
 // Provenance on sharing. An App keeps what it reads (in its storage, its
-// workflows' state, what its screens show), so sharing it must not reach
+// workflows' state, what its pages show), so sharing it must not reach
 // anyone who couldn't read that where it comes from.
 //
 // What an App may have read: every connection it was ever granted, and

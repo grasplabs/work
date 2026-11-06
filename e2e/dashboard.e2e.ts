@@ -19,7 +19,7 @@ import { pileOf, toCard } from "./pile.ts";
 // plan can't be taken back. What waits is a pile of
 // cards gone through one at a time, and what is settled on its own page
 // under it; what fills them is the held-write and approval journeys'
-// (chat, activity, screen approval).
+// (chat, activity, page approval).
 
 /** How long a page may take to show what core said. */
 const pageRead = { timeout: 20_000 };

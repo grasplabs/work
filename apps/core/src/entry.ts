@@ -22,11 +22,11 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { mailIngressPath } from "@grasp-os/shared/mail-ingress";
 import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
+import { pageFramePath } from "@grasp-os/shared/pages";
 import {
   connectVersionPath,
   provisionProbePath,
 } from "@grasp-os/shared/provision-probe";
-import { screenFramePath } from "@grasp-os/shared/screens";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
 
 import { adminCommandResponse } from "./admin-command.ts";
@@ -72,6 +72,7 @@ import { interviewStoryResponse } from "./onboarding/story.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import { transcriptionResponse } from "./onboarding/transcription.ts";
 import { packageArtifactResponse } from "./packages/serve.ts";
+import { pageFrameResponse, pageModuleResponse } from "./page-frame.ts";
 import { liveConnectionApp, portableLiveResponse } from "./portable-live.ts";
 import {
   connectVersionResponse,
@@ -79,7 +80,6 @@ import {
 } from "./provision-probe.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
-import { screenFrameResponse, screenModuleResponse } from "./screen-frame.ts";
 import {
   isDocsPath,
   isRefusedToProductPage,
@@ -175,7 +175,7 @@ const pageResponse = async (
  * The frontend's files, the docs among them (docs.ts); unknown paths get
  * index.html (single-page app). Never at a path the browser and the
  * static files would read differently: the browser matches the page's policy on the path as
- * written, so `/assets/..%2Fscreen-modules/…` passes as one of the
+ * written, so `/assets/..%2Fpage-modules/…` passes as one of the
  * frontend's files, while the static files decode it into another path,
  * from which core would answer. No file of the frontend has such a path.
  */
@@ -243,7 +243,7 @@ const linkResponse = async (
 };
 
 /**
- * The code screens' frames load: screens' modules and Apps' npm packages,
+ * The code pages' frames load: pages' modules and Apps' npm packages,
  * never to the product page itself (`isRefusedToProductPage`).
  */
 const frameCodeResponse = async (
@@ -259,9 +259,9 @@ const frameCodeResponse = async (
       requestId
     );
   }
-  const screenModule = await screenModuleResponse(env, url);
-  if (screenModule !== null) {
-    return screenModule;
+  const pageModule = await pageModuleResponse(env, url);
+  if (pageModule !== null) {
+    return pageModule;
   }
   return await packageArtifactResponse(env, request);
 };
@@ -297,9 +297,9 @@ const connectionRouteResponse = async (
 };
 
 /**
- * A call of an App's functions, from a screen's page or a portable host,
+ * A call of an App's functions, from a page's page or a portable host,
  * a portable host's live connection, or its token request, or a
- * screen's file channel request (app-file-route.ts); `undefined` for any
+ * page's file channel request (app-file-route.ts); `undefined` for any
  * other path.
  */
 const appCallResponse = async (
@@ -308,11 +308,11 @@ const appCallResponse = async (
   env: Env,
   requestId: string
 ): Promise<Response | undefined> => {
-  // A screen's call of one of its App's functions, or of a streaming
+  // A page's call of one of its App's functions, or of a streaming
   // action's (`<path>/<app>/<stream | attach | cancel>`).
-  const screenCall = await appFunctionRoute(request, env, pathname, requestId);
-  if (screenCall !== undefined) {
-    return screenCall;
+  const pageCall = await appFunctionRoute(request, env, pathname, requestId);
+  if (pageCall !== undefined) {
+    return pageCall;
   }
   const portableApp = portableCallApp(pathname);
   if (portableApp !== undefined) {
@@ -439,8 +439,8 @@ const route = async (
       return answer;
     }
   }
-  if (pathname === screenFramePath) {
-    return await screenFrameResponse(env, url);
+  if (pathname === pageFramePath) {
+    return await pageFrameResponse(env, url);
   }
   const frameCode = await frameCodeResponse(request, env, url, requestId);
   if (frameCode !== null) {
@@ -569,7 +569,7 @@ export const handleRequest = async (
     requestId
   );
   // One line per request. Only the path: query strings can carry tokens
-  // (a screen module's, a package artifact's), and so can a webhook
+  // (a page module's, a package artifact's), and so can a webhook
   // trigger's path, without it.
   log[level]("request", {
     requestId,

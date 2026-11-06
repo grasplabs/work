@@ -15,8 +15,8 @@ import {
 import { readAtMost } from "@grasp-os/shared/http";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { pageLeaseHeader } from "@grasp-os/shared/pages";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { screenLeaseHeader } from "@grasp-os/shared/screens";
 import { drizzle } from "drizzle-orm/d1";
 
 import { loadRelease } from "./app-releases.ts";
@@ -26,13 +26,13 @@ import { identify } from "./auth/identity.ts";
 import { policyOf } from "./data-policy.ts";
 import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
+import { delivering, leasedBuild, personRefusal } from "./page-delivery.ts";
+import { admitted } from "./pages-rpc.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import { delivering, leasedBuild, personRefusal } from "./screen-delivery.ts";
-import { admitted } from "./screens-rpc.ts";
 import { routeMember } from "./staff-audit.ts";
 
-// Core's link channel (spec 10.7.7, 32.3): whether a running App's screen,
+// Core's link channel (spec 10.7.7, 32.3): whether a running App's page,
 // through its page, may open a URL through one of its App's
 // `permission.links` declarations, and the record of each it opens. Core
 // never fetches or follows the URL: the page opens it in a context of its
@@ -47,7 +47,7 @@ import { routeMember } from "./staff-audit.ts";
 // dots, schemes, private networks, redirects). This route decides who is
 // asking and through what. Threat model, and how each is closed:
 //
-// - Another site, or a page of the deployment's that isn't a screen's,
+// - Another site, or a page of the deployment's that isn't a page's,
 //   asks: every request needs the frame's lease in a header, verified for
 //   the person and App, a `Sec-Fetch-Site` of the same origin when sent,
 //   and the deployment's own `Origin`.
@@ -60,17 +60,17 @@ import { routeMember } from "./staff-audit.ts";
 //   revocation are read on every request, inside `delivering`, which
 //   checks the lease's build still gets the App's data before and after. A check and its open each decide anew, so a
 //   revocation while the person reads the confirmation opens nothing.
-// - A screen opens what its App didn't declare: the origins are the
+// - A page opens what its App didn't declare: the origins are the
 //   current release's `permission.links` declaration's, never what the
 //   request says; a resource of another kind, or none, opens nothing.
-// - A screen sends what it read out in a URL: no admin reviews a screen's
+// - A page sends what it read out in a URL: no admin reviews a page's
 //   code, so unless an admin classified the App's data `ordinary`
 //   (data-policy.ts), and always once the App read restricted data, its
 //   links open only once the person confirmed each in the page's dialog,
 //   which shows the whole URL (`confirm` in a check's answer); an open
 //   claiming a click is refused (`link.confirmation_required`).
 // - A flood: each request counts against the person's requests of the
-//   App's screens (`admitted`) before anything else is read.
+//   App's pages (`admitted`) before anything else is read.
 // - The record holds what it shouldn't: each open is audited with its
 //   origin, resource, version and how it was asked, never its path or
 //   query, which may carry personal data.
@@ -110,7 +110,7 @@ export const linkRouteOf = (
 
 /** The HTTP status of each refusal that isn't a plain 403. */
 const statuses: Readonly<Record<string, number>> = {
-  "screen.rate_limited": 429,
+  "page.rate_limited": 429,
   "auth.unauthenticated": 401,
   "auth.principal_changed": 401,
   "app.not_found": 404,
@@ -124,7 +124,7 @@ const statusOf = (code: string): number =>
 
 /** Whether a request may come from where it did (see the header). */
 const fromOwnPage = (request: Request, env: Env): boolean => {
-  if (request.headers.get(screenLeaseHeader) === null) {
+  if (request.headers.get(pageLeaseHeader) === null) {
     return false;
   }
   const site = request.headers.get("sec-fetch-site");
@@ -266,7 +266,7 @@ const auditOpen = async (
 
 /**
  * A request of core's link channel (see the header), for the person
- * signed in, as their screen running the build its lease names. Answers
+ * signed in, as their page running the build its lease names. Answers
  * the URL to open, its origin and whether the person must confirm it.
  */
 export const appLinkResponse = async (
@@ -311,9 +311,9 @@ export const appLinkResponse = async (
       env,
       person.userId,
       app,
-      request.headers.get(screenLeaseHeader)
+      request.headers.get(pageLeaseHeader)
     );
-    // A lease that doesn't verify, for this person and App, is no screen
+    // A lease that doesn't verify, for this person and App, is no page
     // of theirs: nothing else opens links through the channel.
     if (build === undefined) {
       throw requestErrors.create("request.forbidden");

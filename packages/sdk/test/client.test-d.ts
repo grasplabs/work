@@ -49,7 +49,7 @@ export const useChecks = (): void => {
   void useQuery(api.notes.get, { noteId });
   // @ts-expect-error -- a mutation isn't a query
   void useQuery(api.notes.create, { title: "x" });
-  // @ts-expect-error -- an internal reference isn't callable from a screen
+  // @ts-expect-error -- an internal reference isn't callable from a page
   void useQuery(internal.notes.count, {});
 
   // A paginated list: its records inferred from the query's pages, its

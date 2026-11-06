@@ -74,7 +74,7 @@ export type Target =
       engine: string;
       place?: "connections" | "packages" | "versions";
     }
-  | { kind: "app"; app: string; screen?: string }
+  | { kind: "app"; app: string }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
   | { kind: "brain" }
@@ -653,7 +653,7 @@ const stoppedItems = (
     ];
   });
 
-/** What an App the person can open told them, opened on the App's page (the screen it named, if any). */
+/** What an App the person can open told them, opened on the App's page. */
 const appMessageItems = (
   notifications: NotificationsPage,
   me: string
@@ -662,7 +662,7 @@ const appMessageItems = (
     if (notification.type !== "app_message") {
       return [];
     }
-    const { app, appName, title, body, screen, at } = notification;
+    const { app, appName, title, body, at } = notification;
     return [
       {
         id: `appMessage:${notification.id}`,
@@ -674,8 +674,7 @@ const appMessageItems = (
           { label: t`App`, value: appName },
           { label: t`Sent`, value: formatDateTime(at) },
         ],
-        about:
-          screen === null ? { kind: "app", app } : { kind: "app", app, screen },
+        about: { kind: "app", app },
         forWhom: { person: me },
         date: at,
         urgent: false,

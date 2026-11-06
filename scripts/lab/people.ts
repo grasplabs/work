@@ -560,7 +560,7 @@ const hears = {
   "plain word":
     'You read the last two lines of an interview: what a person said, and the interviewer\'s reply. "yes" is true when the reply tells the person plainly that their answer was not usable, or that he needs a real answer, or asks them to answer for real or stop. It is false when the reply only asks a question again, laughs along, or goes on to something else.',
   purpose:
-    'You read the last two lines of an interview: a person asked what this is for or who reads it, and the interviewer replied. "yes" is true when the reply itself answers what they asked: it says plainly what the interview is for, and, when they asked who reads it, who does or does not see what they said. It is false when the reply dodges, points to a screen or a note for the answer, only says the question is fair, or goes on with the work.',
+    'You read the last two lines of an interview: a person asked what this is for or who reads it, and the interviewer replied. "yes" is true when the reply itself answers what they asked: it says plainly what the interview is for, and, when they asked who reads it, who does or does not see what they said. It is false when the reply dodges, points to a page or a note for the answer, only says the question is fair, or goes on with the work.',
 } as const;
 
 const heardSchema = z.object({ yes: z.boolean() });

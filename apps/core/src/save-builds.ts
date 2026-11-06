@@ -27,15 +27,15 @@ import { inspectDraft, withDraftReferences } from "./draft-references.ts";
 import type { DraftInspection } from "./draft-references.ts";
 import { hostModules } from "./host-modules.ts";
 import { keepLints, readLints } from "./module-cache.ts";
-import { platformRunner } from "./platform-sandbox.ts";
 import {
   buildRefreshMs,
-  buildScreens,
+  buildPages,
   checkAppCode,
   leaseSlackMs,
   withinBuildWait,
-} from "./screens.ts";
-import type { BuildProfile } from "./screens.ts";
+} from "./pages.ts";
+import type { BuildProfile } from "./pages.ts";
+import { platformRunner } from "./platform-sandbox.ts";
 
 type SavedBuilds = CommittedVersion["builds"];
 
@@ -57,7 +57,7 @@ const maxLeftoversNamed = 20;
 const maxLoggedMessage = 300;
 
 /**
- * What a save says of screens checked against stand-ins for the references
+ * What a save says of pages checked against stand-ins for the references
  * their server code didn't generate (`standIn`): checked for everything
  * else, never for their calls, so not checked as a whole.
  */
@@ -157,10 +157,10 @@ const savedBuild = async (
 };
 
 /**
- * Builds a saved version's screens into the build cache (screens.ts), so
+ * Builds a saved version's pages into the build cache (pages.ts), so
  * the version opens without building. Answers once done with how it
  * went, for whoever saved (an agent repairs what failed); none takes
- * longer than the build wait (`buildWaitMs` in screens.ts). Never throws, unless `signal` gave up on it: a build is never a reason
+ * longer than the build wait (`buildWaitMs` in pages.ts). Never throws, unless `signal` gave up on it: a build is never a reason
  * for a save to fail.
  */
 export const buildOnSave = async (
@@ -174,7 +174,7 @@ export const buildOnSave = async (
     /** `preview` for a chat's draft, `production` for a saved version. */
     readonly profile: BuildProfile;
     /**
-     * The inspection of its server code the references its screens import
+     * The inspection of its server code the references its pages import
      * are generated from (`inspectDraft`), when its caller shares one with
      * the server check: its own otherwise.
      */
@@ -183,18 +183,18 @@ export const buildOnSave = async (
      * Aborted once the build is no one's (a build job's lease lost): no
      * build starts the compiler after, and it throws its reason, rather
      * than report the builds it gave up as errors. A compile already
-     * running goes on (screens.ts, `cachedBuild`).
+     * running goes on (pages.ts, `cachedBuild`).
      */
     readonly signal?: AbortSignal;
   }
 ): Promise<SavedBuilds> => {
   const { files } = source;
   const options = { profile, signal };
-  const screens = await savedBuild(
-    "screens",
+  const pages = await savedBuild(
+    "pages",
     source,
     buildFiles,
-    // With the references its screens import, generated from these
+    // With the references its pages import, generated from these
     // files themselves: neither a save nor a draft is sealed yet.
     async () => {
       const { files: withReferences, standIn } = await withDraftReferences(
@@ -205,18 +205,13 @@ export const buildOnSave = async (
         options,
         inspection
       );
-      const built = await buildScreens(
-        env,
-        withReferences,
-        source.app,
-        options
-      );
+      const built = await buildPages(env, withReferences, source.app, options);
       return standIn ? { ...built, standIn: true as const } : built;
     },
     env,
     signal
   );
-  return { screens };
+  return { pages };
 };
 
 /** A diagnostic of the App's layout (`server`) about `file`, in core's words. */
@@ -260,9 +255,9 @@ const inspectionProblem = (
  * `files`' server code type-checked as its seal type-checks it
  * (`checkAppCode`, with every gate), against the references the seal
  * generates: from what its registration answers, inspected in the sandbox
- * as a save inspects it for its screens (`filesManifest`), with the
+ * as a save inspects it for its pages (`filesManifest`), with the
  * workflows it declares as the App binds them now. So what a check passes,
- * the seal's type check passes too. `inspection` is the one its screens'
+ * the seal's type check passes too. `inspection` is the one its pages'
  * references come from too, when its caller shares one (`inspectDraft`).
  *
  * Server code that doesn't build or register is type-checked all the same,
@@ -317,7 +312,7 @@ const checkedDraftCode = async (
 };
 
 /**
- * A draft's server code (`grasp.config.ts`, `screens.ts`, `values.ts`,
+ * A draft's server code (`grasp.config.ts`, `values.ts`,
  * `server/`), checked as a check reports it: type
  * errors and every gate a seal holds it to, against the references its
  * seal would generate (`checkedDraftCode`); its registration runs in the
@@ -326,7 +321,7 @@ const checkedDraftCode = async (
  * holds files under `app/`, which no commit takes (`app.v1_server`), each
  * named; `none` when it has no server code. Never throws, unless `signal`
  * gave up on it, as `buildOnSave`. `inspection` is the one its caller
- * shares with the screens' build (`inspectDraft`), its own otherwise.
+ * shares with the pages' build (`inspectDraft`), its own otherwise.
  */
 export const draftServerBuild = async (
   env: Env,
@@ -425,7 +420,7 @@ export const draftLintBuild = async (
     lintedFiles,
     async () => {
       const files = lintedFiles(source.files);
-      // What the design lint reads beside a screen or a component: the
+      // What the design lint reads beside a page or a component: the
       // App's others, which go with every call (`lint`'s `app`).
       const app = Object.fromEntries(
         Object.entries(files).filter(([path]) => isDesignLinted(path))

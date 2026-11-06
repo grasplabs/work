@@ -9,6 +9,8 @@ import {
 import { createRequire } from "node:module";
 import path from "node:path";
 
+import { buildFiles, routeTreePath } from "@grasp-os/compiler/inputs";
+import { routeTree } from "@grasp-os/compiler/route-tree";
 import {
   dataModelSource,
   generatedPaths,
@@ -29,8 +31,9 @@ import { examplesDir } from "./vite.config.ts";
 // checks an App: a block names its file after its language
 // (```ts server/tasks.ts), and a page's blocks are one App. Grasp
 // generates `server/_generated/` for it as the host does (inspecting
-// the App's registration for its references), and TypeScript 7 (tsgo)
-// type-checks the whole App against the SDK. A guide whose example no
+// the App's registration for its references), and its pages' route tree
+// as the compiler does, and TypeScript 7 (tsgo) type-checks the whole App
+// against the SDK. A guide whose example no
 // longer compiles fails here, in the pull request that broke it.
 //
 // Pages build on the App of "An App's project" (guides/project.md): their
@@ -131,10 +134,6 @@ const exportsOf = (module: unknown): Record<string, unknown> =>
 const generated = async (dir: string, files: Files): Promise<Files> => {
   const config = exportsOf(await import(path.join(dir, "grasp.config.ts")));
   const schema = exportsOf(await import(path.join(dir, "server/schema.ts")));
-  const screens =
-    "screens.ts" in files
-      ? exportsOf(await import(path.join(dir, "screens.ts")))
-      : {};
   // Each by its path under server/, without `.ts`, as the host's entry
   // registers them.
   const modules = Object.fromEntries(
@@ -154,7 +153,6 @@ const generated = async (dir: string, files: Files): Promise<Files> => {
   const parts = {
     config: config.default,
     schema: schema.default,
-    screens: screens.default,
     modules,
     migrations: [],
   } as Parameters<typeof registerApp>[0];
@@ -219,6 +217,25 @@ const typeCheck = (dir: string, compiler = tsgo): string => {
   );
 };
 
+/**
+ * The App's pages as the compiler routes them: its route files as the
+ * route generator leaves them, the root route it adds when there is none,
+ * and the route tree, which types their routes. Nothing for an App with
+ * no pages.
+ */
+const routed = async (files: Files): Promise<Files> => {
+  const built = buildFiles(files);
+  const tree = await routeTree(built);
+  if (tree.diagnostics.length > 0) {
+    throw new Error(
+      `The pages don't route: ${tree.diagnostics.map(({ message }) => message).join("; ")}`
+    );
+  }
+  return tree.source === undefined
+    ? {}
+    : { ...tree.routes, [routeTreePath]: tree.source };
+};
+
 /** The App `files` builds into, with what Grasp generates for it. */
 const typeErrors = async (page: string, files: Files): Promise<string> => {
   // One folder per page, side by side (vite.config.ts resolves each
@@ -230,6 +247,7 @@ const typeErrors = async (page: string, files: Files): Promise<string> => {
   rmSync(dir, { force: true, recursive: true });
   write(dir, {
     ...files,
+    ...(await routed(files)),
     ...symbolicModules(),
     [generatedPaths.server]: serverModuleSource,
     [generatedPaths.dataModel]: dataModelSource,

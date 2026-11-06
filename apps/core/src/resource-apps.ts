@@ -37,7 +37,7 @@ import { consumerFailure, declaredFingerprint } from "./store-operations.ts";
 //   checked as the admin approves and on every request. A contract or
 //   visibility changed since stops it (`contract_changed`, `grant_lost`),
 //   and the called release checks the fingerprint the call names again.
-// - The wrong identity: every call runs the called function as a screen's
+// - The wrong identity: every call runs the called function as a page's
 //   call of it runs (`callAppFunctionFrom`), for the person the calling
 //   invocation acts for, their role and teams read here from core, never
 //   anything App code sends, and as a member of the called App at most,
@@ -283,7 +283,7 @@ const callFor = async (
   const answer = await callApp(
     by,
     callee,
-    // As a screen sends it: text, bounded before it is read.
+    // As a page sends it: text, bounded before it is read.
     JSON.stringify({
       reference: { name: path, kind: operation.kind },
       input: args,
@@ -314,7 +314,7 @@ const callFor = async (
       // requests carry everything the chain read, and the caller's what it
       // read in turn.
       sources: caller.sources,
-      // A screen's call cancelled stops the Apps it calls too.
+      // A page's call cancelled stops the Apps it calls too.
       ...(caller.cancelled === undefined
         ? {}
         : { cancelled: caller.cancelled }),

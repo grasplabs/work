@@ -53,13 +53,13 @@ describe("security headers on the frontend", () => {
     }
   });
 
-  it("runs only the frontend's own script files: no inline script, eval, other origin or code of screens and packages", async () => {
+  it("runs only the frontend's own script files: no inline script, eval, other origin or code of pages and packages", async () => {
     for (const response of await eachPage()) {
       const policy = policyOf(response);
       expect(policy.get("default-src")).toStrictEqual(["'self'"]);
       // The deployment's origin as people reach it, not core's address:
       // only the build's directory and the theme script, so nothing under
-      // /screen-modules/ or /package-artifacts/.
+      // /page-modules/ or /package-artifacts/.
       expect(policy.get("script-src")).toStrictEqual([
         `${clientOrigin}/assets/`,
         `${clientOrigin}/theme.js`,
@@ -152,10 +152,10 @@ describe("security headers on the frontend", () => {
   });
 });
 
-// The document App screens run in: code nobody reviewed line by line, which
+// The document App pages run in: code nobody reviewed line by line, which
 // must reach nothing but the page that frames it.
-describe("security headers on the screen frame", () => {
-  it("frames screens only from the product's own origin", async () => {
+describe("security headers on the page frame", () => {
+  it("frames pages only from the product's own origin", async () => {
     for (const response of await eachPage()) {
       expect(policyOf(response).get("frame-src")).toStrictEqual(["'self'"]);
     }
@@ -163,8 +163,8 @@ describe("security headers on the screen frame", () => {
 
   it("is an opaque sandbox, framed only by the product page, that reaches nothing, parses no markup a script writes and runs no script but its build's", async () => {
     // Without a build: no script at all. With one, only that build's
-    // (screen-bridge.test.ts).
-    const policy = policyOf(await routed("/screen-frame"));
+    // (page-bridge.test.ts).
+    const policy = policyOf(await routed("/page-frame"));
     expect(Object.fromEntries(policy)).toStrictEqual({
       sandbox: ["allow-scripts"],
       "default-src": ["'none'"],
@@ -186,8 +186,8 @@ describe("security headers on the screen frame", () => {
 
   it("gives its policy to its own address only", async () => {
     const others = await Promise.all(
-      ["/screen-frame/", "/screen-frame.html", "/x/screen-frame"].map(
-        async (path) => policyOf(await routed(path)).get("script-src")
+      ["/page-frame/", "/page-frame.html", "/x/page-frame"].map(async (path) =>
+        policyOf(await routed(path)).get("script-src")
       )
     );
     expect(others).toStrictEqual(

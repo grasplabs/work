@@ -3,7 +3,7 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import { isPlainObject } from "./value-descriptor.ts";
 
-// The structured error a screen's queries, mutations and actions fail
+// The structured error a page's queries, mutations and actions fail
 // with (spec 10.1, 32.1): what core answered, as it answered it, or why
 // the session client refused or stopped before it had an answer. Never a
 // transport envelope, a cause or a stack.
@@ -121,15 +121,6 @@ const clientErrors = {
       "This stream is still running: wait for it to finish, or cancel it, before you run it again.",
     category: "contract",
   },
-  "navigation.invalid_screen": {
-    message:
-      "That isn't one of the App's screens: use one from the App's generated screens.",
-    category: "contract",
-  },
-  "navigation.unavailable": {
-    message: "This screen can't navigate: it isn't running in Grasp's shell.",
-    category: "contract",
-  },
   "stream.unavailable": {
     message: "Streaming actions can't run here.",
     category: "operational",
@@ -162,7 +153,7 @@ const clientErrors = {
   },
   "contract.mismatch": {
     message:
-      "This run belongs to another version of the workflow's contract than this screen was built for.",
+      "This run belongs to another version of the workflow's contract than this page was built for.",
     category: "contract",
   },
   "workflow.not_attached": {
@@ -198,7 +189,7 @@ const clientErrors = {
   },
   "decision.unavailable": {
     message:
-      "Decisions can't be answered here: this screen isn't running in Grasp's shell.",
+      "Decisions can't be answered here: this page isn't running in Grasp's shell.",
     category: "contract",
   },
   "decision.outcome_unknown": {
@@ -274,7 +265,7 @@ export const detailIssues = (
 /**
  * Sign-in refusals that don't mean the person lost access: the host had
  * no token to give yet. `auth.principal_changed` fences: core answers it
- * when the browser's session is someone else's than the screen's (its
+ * when the browser's session is someone else's than the page's (its
  * function route), so nothing held for the person before stays. The
  * client's own refusal under that code is unsent and fenced already, so
  * it never reaches the fence check.
@@ -291,8 +282,8 @@ const fencingCodes: ReadonlySet<string> = new Set([
   "role.forbidden",
   "app.not_found",
   "app.unreadable",
-  "screen.unreviewed",
-  "screen.revoked",
+  "page.unreviewed",
+  "page.revoked",
   "version.revoked",
   "permission.person_inactive",
   "app.not_running",
@@ -315,7 +306,7 @@ export const fences = (code: string): boolean =>
  * the App (`refusedBeforeCallCodes`) means it ran nothing.
  */
 export const nothingRanCodes: ReadonlySet<string> = new Set([
-  "screen.rate_limited",
+  "page.rate_limited",
   "operation.sandbox_busy",
   "operation.sandbox_unavailable",
   "mutation.concurrent_change",
@@ -380,7 +371,7 @@ export const receiptLinkOf = (
 
 /** Refusals sent before a call reached the App's code: nothing of it ran. */
 export const refusedBeforeCallCodes: ReadonlySet<string> = new Set([
-  "screen.rate_limited",
+  "page.rate_limited",
 ]);
 
 /**

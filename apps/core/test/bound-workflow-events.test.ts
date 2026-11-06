@@ -44,12 +44,12 @@ describe("a bound workflow's events", () => {
           alias: "documentUploaded",
           types: ["invoice.document.uploaded"],
         },
-        // The same binding, another of its types: no screen sends it.
+        // The same binding, another of its types: no page sends it.
         "await-scan": {
           alias: "documentUploaded",
           types: ["invoice.document.scanned"],
         },
-        // An `any` mixing the two: not every type is a screen's.
+        // An `any` mixing the two: not every type is a page's.
         "await-either": {
           alias: "documentUploaded",
           types: ["invoice.document.scanned", "invoice.document.uploaded"],
@@ -68,7 +68,7 @@ describe("a bound workflow's events", () => {
     });
   });
 
-  it("refuse a contract with two types a screen sends as corrupt", () => {
+  it("refuse a contract with two types a page sends as corrupt", () => {
     const data = JSON.stringify(uploaded.descriptor);
     expect(() =>
       boundEventsOf(
@@ -83,6 +83,6 @@ describe("a bound workflow's events", () => {
         ],
         {}
       )
-    ).toThrow("admits more than one type a screen sends");
+    ).toThrow("admits more than one type a page sends");
   });
 });

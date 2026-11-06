@@ -81,12 +81,16 @@ const defined = appDefinition({ name: "Invoice desk" });
 
 const first = {
   ...defined,
-  "screens/inbox.tsx": "export default () => <p>Inbox</p>;\n",
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => <p>Inbox</p>;
+
+export const Route = createFileRoute("/")({ component: Page });
+`,
   "AGENTS.md": "# Invoice desk — facturen, 請求書 🧾\n",
 };
 
 // Making a version with workflows current compiles them and runs their
-// tests, as "names the screens and workflows" does. That takes half a
+// tests, as "names the pages and workflows" does. That takes half a
 // second locally, and several times that on a loaded runner, closer to
 // the default five seconds than the rest of this file. Nothing polls or
 // sleeps; sixty seconds is room for a slow runner, as the other tests
@@ -95,10 +99,14 @@ describe("App code", { timeout: 60_000 }, () => {
   it("reads back every version exactly as it was committed", async () => {
     const { apps, userId } = await appsApi("builder");
     const app = await newApp(apps);
-    const v1 = await commit(apps, app.id, first, "First screen");
+    const v1 = await commit(apps, app.id, first, "First page");
     const v2 = await commit(apps, app.id, {
-      "screens/inbox.tsx": "export default () => <p>Invoices</p>;\n",
-      "components/row.tsx": "export const Row = () => null;\n",
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => <p>Invoices</p>;
+
+export const Route = createFileRoute("/")({ component: Page });
+`,
+      "src/components/row.tsx": "export const Row = () => null;\n",
       "AGENTS.md": null,
     });
 
@@ -109,8 +117,12 @@ describe("App code", { timeout: 60_000 }, () => {
     await expect(apps.files.read(app.id, 1)).resolves.toStrictEqual(first);
     await expect(apps.files.read(app.id, 2)).resolves.toStrictEqual({
       ...defined,
-      "screens/inbox.tsx": "export default () => <p>Invoices</p>;\n",
-      "components/row.tsx": "export const Row = () => null;\n",
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => <p>Invoices</p>;
+
+export const Route = createFileRoute("/")({ component: Page });
+`,
+      "src/components/row.tsx": "export const Row = () => null;\n",
     });
     // A version reads back as committed; the commit's answer adds how its
     // builds went (build-on-save.test.ts).
@@ -130,7 +142,7 @@ describe("App code", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       newestFirst: [
         [2, "Change"],
-        [1, "First screen"],
+        [1, "First page"],
       ],
       beforeTwo: [committedV1],
       one: committedV1,
@@ -145,7 +157,7 @@ describe("App code", { timeout: 60_000 }, () => {
     const afterFirst = await apps.files.read(app.id);
     await commit(apps, app.id, {
       "AGENTS.md": "# Second\n",
-      "screens/inbox.tsx": null,
+      "src/routes/index.tsx": null,
     });
 
     expect({
@@ -164,7 +176,7 @@ describe("App code", { timeout: 60_000 }, () => {
     await expect(
       Promise.all([
         outcome(commit(apps, app.id, { "AGENTS.md": "# Second\n" })),
-        outcome(commit(apps, app.id, { "screens/inbox.tsx": null })),
+        outcome(commit(apps, app.id, { "src/routes/index.tsx": null })),
         outcome(commit(apps, app.id, { "server/schema.ts": null })),
       ])
     ).resolves.toStrictEqual([
@@ -181,7 +193,11 @@ describe("App code", { timeout: 60_000 }, () => {
     // Pages alone: the first version gets an empty definition, named as
     // the App is, and the config and schema generated from it.
     await commit(apps, app.id, {
-      "screens/inbox.tsx": "export default () => null;\n",
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => null;
+
+export const Route = createFileRoute("/")({ component: Page });
+`,
     });
     const pagesOnly = await apps.files.read(app.id);
     // A config written by hand is generated over, whatever it held.
@@ -209,7 +225,11 @@ describe("App code", { timeout: 60_000 }, () => {
     }).toMatchObject({
       pagesOnly: {
         ...defined,
-        "screens/inbox.tsx": "export default () => null;\n",
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => null;
+
+export const Route = createFileRoute("/")({ component: Page });
+`,
       },
       config: defined["grasp.config.ts"],
       withoutDefinition: "app.definition_invalid",
@@ -240,12 +260,12 @@ describe("App code", { timeout: 60_000 }, () => {
   it("refuses paths that can't both exist: a file and its folder, or names differing only in case", async () => {
     const { apps } = await appsApi("builder");
     const app = await newApp(apps);
-    await commit(apps, app.id, { "components/card.tsx": "x" });
+    await commit(apps, app.id, { "src/components/card.tsx": "x" });
     const refusals: Record<string, string | null>[] = [
-      { components: "x" },
-      { "components/card.tsx/x.ts": "x" },
-      { "Components/Card.tsx": "x" },
-      { "Components/list.tsx": "x" },
+      { "src/components": "x" },
+      { "src/components/card.tsx/x.ts": "x" },
+      { "src/Components/Card.tsx": "x" },
+      { "src/Components/list.tsx": "x" },
       { "a/b.ts": "x", a: "x" },
     ];
     const outcomes: string[] = [];
@@ -258,16 +278,16 @@ describe("App code", { timeout: 60_000 }, () => {
     outcomes.push(
       await issuesOf(
         commit(apps, app.id, {
-          "components/card.tsx": null,
-          "components/card.tsx/index.ts": "x",
+          "src/components/card.tsx": null,
+          "src/components/card.tsx/index.ts": "x",
         })
       )
     );
     expect(outcomes).toStrictEqual([
-      "components: A file and a folder of the same name, with components/card.tsx",
-      "components/card.tsx/x.ts: A file and a folder of the same name, with components/card.tsx",
-      "Components/Card.tsx: Differs only in case from components/card.tsx",
-      "Components/list.tsx: Differs only in case from components/card.tsx",
+      "src/components: A file and a folder of the same name, with src/components/card.tsx",
+      "src/components/card.tsx/x.ts: A file and a folder of the same name, with src/components/card.tsx",
+      "src/Components/Card.tsx: Differs only in case from src/components/card.tsx",
+      "src/Components/list.tsx: Differs only in case from src/components/card.tsx",
       "a/b.ts: A file and a folder of the same name, with a",
       "ok",
     ]);
@@ -315,7 +335,7 @@ describe("App code", { timeout: 60_000 }, () => {
           racing,
           await api.whoami(),
           app.id,
-          { "AGENTS.md": "# Mine\n", "screens/mine.tsx": "x" },
+          { "AGENTS.md": "# Mine\n", "src/routes/mine.tsx": "x" },
           "Mine"
         )
       )
@@ -338,23 +358,39 @@ describe("App code", { timeout: 60_000 }, () => {
     const app = await newApp(apps);
     await commit(apps, app.id, first);
     await commit(apps, app.id, {
-      "screens/inbox.tsx": "export default () => null;\n",
-      "screens/detail.tsx": "export default () => <p>Detail</p>;\n",
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => null;
+
+export const Route = createFileRoute("/")({ component: Page });
+`,
+      "src/routes/detail.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => <p>Detail</p>;
+
+export const Route = createFileRoute("/detail")({ component: Page });
+`,
       "AGENTS.md": null,
     });
 
     await expect(apps.versions.diff(app.id, 1, 2)).resolves.toStrictEqual([
       { path: "AGENTS.md", change: "deleted", before: first["AGENTS.md"] },
       {
-        path: "screens/detail.tsx",
+        path: "src/routes/detail.tsx",
         change: "added",
-        after: "export default () => <p>Detail</p>;\n",
+        after: `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => <p>Detail</p>;
+
+export const Route = createFileRoute("/detail")({ component: Page });
+`,
       },
       {
-        path: "screens/inbox.tsx",
+        path: "src/routes/index.tsx",
         change: "modified",
-        before: first["screens/inbox.tsx"],
-        after: "export default () => null;\n",
+        before: first["src/routes/index.tsx"],
+        after: `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => null;
+
+export const Route = createFileRoute("/")({ component: Page });
+`,
       },
     ]);
     await expect(apps.versions.diff(app.id, 2, 2)).resolves.toStrictEqual([]);
@@ -397,16 +433,20 @@ describe("App code", { timeout: 60_000 }, () => {
     ]);
   });
 
-  it("names the screens of the version that runs, and only those", async () => {
+  it("names the pages of the version that runs, and only those", async () => {
     const { apps } = await appsApi("builder");
     const app = await newApp(apps);
     await commit(apps, app.id, first);
     const none = await apps.contents(app.id);
     await apps.versions.setCurrent(app.id, 1);
     await commit(apps, app.id, {
-      "screens/archive.tsx": "export default () => null;\n",
-      // Not a screen: code the screens share.
-      "screens/parts/row.tsx": "export const Row = () => null;\n",
+      "src/routes/archive.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => null;
+
+export const Route = createFileRoute("/archive")({ component: Page });
+`,
+      // Not a page: code the pages share.
+      "src/components/row.tsx": "export const Row = () => null;\n",
     });
     // Committed, not yet current: what runs is still version 1.
     const beforeCurrent = await apps.contents(app.id);
@@ -417,9 +457,9 @@ describe("App code", { timeout: 60_000 }, () => {
       beforeCurrent,
       current: await apps.contents(app.id),
     }).toStrictEqual({
-      none: { version: null, screens: [] },
-      beforeCurrent: { version: 1, screens: ["inbox"] },
-      current: { version: 2, screens: ["archive", "inbox"] },
+      none: { version: null, pages: false },
+      beforeCurrent: { version: 1, pages: true },
+      current: { version: 2, pages: true },
     });
     await expect(outcome(apps.contents("no-such-app"))).resolves.toBe(
       "app.not_found"
@@ -623,13 +663,13 @@ describe("App code", { timeout: 60_000 }, () => {
     const app = await newApp(apps);
     const paths = [
       "../server.ts",
-      "screens/../../x.ts",
+      "pages/../../x.ts",
       "/etc/passwd",
-      "screens//inbox.tsx",
-      "screens\\inbox.tsx",
+      "pages//inbox.tsx",
+      "pages\\inbox.tsx",
       "./AGENTS.md",
       ".env",
-      "screens/",
+      "pages/",
       "__proto__",
       `${"a/".repeat(appLimits.pathDepth)}x.ts`,
     ];
@@ -647,7 +687,7 @@ describe("App code", { timeout: 60_000 }, () => {
       Array.from(
         { length: Math.ceil(room / appLimits.fileLength) },
         (_, index) => [
-          `components/part-${index}.ts`,
+          `src/components/part-${index}.ts`,
           "x".repeat(
             Math.min(appLimits.fileLength, room - index * appLimits.fileLength)
           ),
@@ -673,7 +713,10 @@ describe("App code", { timeout: 60_000 }, () => {
     ]);
     // Deleting makes room.
     await expect(
-      commit(apps, app.id, { "components/part-0.ts": null, "AGENTS.md": "x" })
+      commit(apps, app.id, {
+        "src/components/part-0.ts": null,
+        "AGENTS.md": "x",
+      })
     ).resolves.toMatchObject({ version: 2 });
   });
 
@@ -687,7 +730,7 @@ describe("App code", { timeout: 60_000 }, () => {
       ...defined,
       ...Object.fromEntries(
         Array.from({ length: count }, (_, index) => [
-          `components/part-${index}.ts`,
+          `src/components/part-${index}.ts`,
           "x",
         ])
       ),
@@ -695,13 +738,13 @@ describe("App code", { timeout: 60_000 }, () => {
 
     // One after another: each is over the same version.
     const steps: [string, Record<string, string | null>][] = [
-      ["add", { "components/new.ts": "x" }],
-      ["grow", { "components/part-0.ts": "xx" }],
+      ["add", { "src/components/new.ts": "x" }],
+      ["grow", { "src/components/part-0.ts": "xx" }],
       // Still over them: no version until it's within them.
-      ["shrink", { "components/part-0.ts": null }],
+      ["shrink", { "src/components/part-0.ts": null }],
       [
         "shrink to fit",
-        { "components/part-0.ts": null, "components/part-1.ts": null },
+        { "src/components/part-0.ts": null, "src/components/part-1.ts": null },
       ],
     ];
     const outcomes: [string, string][] = [];

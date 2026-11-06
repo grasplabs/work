@@ -180,7 +180,7 @@ describe("a chat for an App", () => {
   } catch (error) {
     refused = error.code;
   }
-  await env.build.write(${JSON.stringify(named)}, { "screens/home.tsx": "export default () => null;\\n" });
+  await env.build.write(${JSON.stringify(named)}, { "src/routes/index.tsx": "import { createFileRoute } from \\"@tanstack/react-router\\";\\nconst Page = () => null;\\n\\nexport const Route = createFileRoute(\\"/\\")({ component: Page });\\n" });
   return refused;
 };`);
     });
@@ -210,8 +210,8 @@ describe("a chat for an App", () => {
           changed: [
             "definition.json",
             "grasp.config.ts",
-            "screens/home.tsx",
             "server/schema.ts",
+            "src/routes/index.tsx",
           ],
         },
       ],

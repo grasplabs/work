@@ -1112,15 +1112,18 @@ export const retitle = mutation({
 });
 `,
 
-    "screens/requests.tsx": `export default function Requests() {
+    "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Requests() {
   return <p>Requests</p>;
 }
+
+export const Route = createFileRoute("/")({ component: Requests });
 `,
   };
 
   /**
    * The App released by a builder in Sales, and an admin in Sales and
-   * Support who calls its mutations (`asAdmin`), as a screen calls them.
+   * Support who calls its mutations (`asAdmin`), as a page calls them.
    */
   const dataPage = async () => {
     const builder = await signedInApi(idp, "builder");

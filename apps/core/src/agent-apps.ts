@@ -34,7 +34,7 @@ import { inTurn, runSessionOf } from "./run-sessions.ts";
 
 /**
  * How long a chat's code waits for one of an App's functions: as long as a
- * screen does.
+ * page does.
  */
 const functionCallMs = 30_000;
 

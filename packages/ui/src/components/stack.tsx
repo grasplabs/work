@@ -1,5 +1,5 @@
 // Layout primitive, not in shadcn: children in a column with a gap from the
-// spacing scale. For composing a screen; it adds no page chrome.
+// spacing scale. For composing a page; it adds no page chrome.
 import { cn } from "@grasp-os/ui/lib/utils";
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";

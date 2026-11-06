@@ -54,10 +54,10 @@ import type { Infer, InferInput, ObjectInput, ValueShape } from "./values.ts";
 //   platform's own read-only ones (`permission.grasp`, `ctx.apps.grasp`);
 // - `people`: the organization's members (`ctx.people`), a flag on the
 //   App's `permissions`, never a declaration;
-// - `files`: what the App's screens may do with files;
+// - `files`: what the App's pages may do with files;
 // - `guests`: guest chats (`ctx.guests`).
 //
-// and `links`, the exact origins the App's screens may link to, which
+// and `links`, the exact origins the App's pages may link to, which
 // grants no network access at all.
 //
 // A declaration is a requirement, never a grant: it names an adapter
@@ -352,7 +352,7 @@ export interface AppPermission<
 }
 
 /**
- * A `files` permission (spec 10.7.5, 32.3): what the App's screens may do
+ * A `files` permission (spec 10.7.5, 32.3): what the App's pages may do
  * with files, through the host. Browser-facing: no function lists it.
  */
 export interface FilesPermission<
@@ -363,7 +363,7 @@ export interface FilesPermission<
 
 /**
  * A `links` permission (spec 10.7.7, 32.3): the exact HTTPS origins the
- * App's screens may link to. It grants no network access at all.
+ * App's pages may link to. It grants no network access at all.
  */
 export interface LinksPermission<
   Origins extends readonly string[] = readonly string[],
@@ -371,7 +371,7 @@ export interface LinksPermission<
   readonly origins: Origins;
 }
 
-/** A permission the App's screens use, never its functions. */
+/** A permission the App's pages use, never its functions. */
 export type BrowserPermission = FilesPermission | LinksPermission;
 
 /**
@@ -397,7 +397,7 @@ export interface WorkflowPermission<
   readonly input: ValueDescriptor;
   /**
    * The descriptor of the output a completed run gives. With the input, it
-   * is the contract the App's screens rely on: they get a reference to it
+   * is the contract the App's pages rely on: they get a reference to it
    * pinned to that contract's fingerprint (`workflows.<alias>` in
    * `@server/_generated/api`), and name it in what they ask of the host. The App's own
    * starts are checked against the bound version's input as they are
@@ -1199,7 +1199,7 @@ export const permission = Object.freeze({
     }) as GuestsPermission<Operations>;
   },
   /**
-   * What the App's screens may do with files through the host: upload,
+   * What the App's pages may do with files through the host: upload,
    * read, attach, delete. Never a function's.
    */
   files: <
@@ -1221,8 +1221,8 @@ export const permission = Object.freeze({
     }) as FilesPermission<Operations>;
   },
   /**
-   * The exact HTTPS origins the App's screens may link to. It grants no
-   * network access: a screen still has none.
+   * The exact HTTPS origins the App's pages may link to. It grants no
+   * network access: a page still has none.
    */
   links: <const Origins extends readonly [string, ...string[]]>(config: {
     readonly origins: Origins;

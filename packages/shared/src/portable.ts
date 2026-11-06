@@ -1,4 +1,4 @@
-import type { QuerySnapshotPush, SubscriptionApi } from "./screens.ts";
+import type { QuerySnapshotPush, SubscriptionApi } from "./pages.ts";
 
 // Where a portable host (spec 10.7.1: an App's UI outside Grasp's own
 // shell, as `new GraspClient({ url, getToken })` reaches it) gets its
@@ -62,7 +62,7 @@ export interface PortableLiveApi {
 /** A portable host's live queries of its App, as the token's person. */
 export interface PortableQueriesApi {
   /**
-   * Follows the query `request` names (`ScreenFrameApi.watchQuery`):
+   * Follows the query `request` names (`PageFrameApi.watchQuery`):
    * each result is pushed to `onSnapshot` until the subscription is
    * released, or core lets go of `onSnapshot`.
    */

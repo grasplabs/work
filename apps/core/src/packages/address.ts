@@ -2,7 +2,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { packageArtifactPath } from "@grasp-os/shared/packages";
 import type { PackageArtifactAddress } from "@grasp-os/shared/packages";
 
-import { accessQuery, windowedAccess } from "../screen-frame.ts";
+import { accessQuery, windowedAccess } from "../page-frame.ts";
 
 /** A browser artifact of an App's graph, as its address names it. */
 export interface ArtifactRef {
@@ -23,8 +23,8 @@ export const artifactSubject = ({
  * directory, on this deployment's origin, each file at its own path under
  * it, and the query each file is asked with, which carries a token core
  * made for exactly this artifact. The token is never in the path, which
- * traces keep whole (core's screen-frame.ts says why); it holds until the
- * end of the next window, like a published screen module's.
+ * traces keep whole (core's page-frame.ts says why); it holds until the
+ * end of the next window, like a published page module's.
  */
 export const packageArtifactAddress = async (
   env: Env,

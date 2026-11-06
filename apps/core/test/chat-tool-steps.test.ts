@@ -81,7 +81,7 @@ describe("a response's tool calls", () => {
     const long = "x".repeat(chatToolPreviewChars + 50);
     const written = response({
       name: "writeFile",
-      arguments: { app: "a", files: { "screens/desk.tsx": long } },
+      arguments: { app: "a", files: { "src/routes/index.tsx": long } },
     });
 
     const kept = chatMessageOf(1, written, new Date(0));
@@ -91,9 +91,11 @@ describe("a response's tool calls", () => {
     }).toStrictEqual({
       partial: {
         app: "a",
-        files: { "screens/desk.tsx": `${"x".repeat(chatToolPreviewChars)}…` },
+        files: {
+          "src/routes/index.tsx": `${"x".repeat(chatToolPreviewChars)}…`,
+        },
       },
-      kept: { app: "a", files: { "screens/desk.tsx": long } },
+      kept: { app: "a", files: { "src/routes/index.tsx": long } },
     });
   });
 });

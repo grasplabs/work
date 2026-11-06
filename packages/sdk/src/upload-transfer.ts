@@ -9,9 +9,9 @@ import type { ClientFiles, FileRef } from "./client-files.ts";
 // only what core confirmed: completed once core published the file,
 // cancelled once core acknowledged the cancellation, and completed after
 // a cancellation that publication won. It follows the client's fences:
-// a fence (the person's access or the screen's build changed) cancels the
+// a fence (the person's access or the page's build changed) cancels the
 // running upload and shows its refusal, and an upload that settles after
-// one is never shown completed, its file no use to the screen now.
+// one is never shown completed, its file no use to the page now.
 
 /** An upload's view, as `useUpload` shows it (spec 10.7.5). */
 export type UploadView =
@@ -135,7 +135,7 @@ export class UploadTransfer {
       bytesTotal: file.size,
     });
     // A fence while it runs cancels it: what it uploads is no use to the
-    // screen now, and an open upload holds one of the person's places.
+    // page now, and an open upload holds one of the person's places.
     const startedUnder = this.#fences.fences();
     const unfence = this.#fences.onFence(() => {
       running.cancel.abort();

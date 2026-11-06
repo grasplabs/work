@@ -10,9 +10,9 @@ import type { AppId } from "@grasp-os/shared/ids";
 
 import { filesManifest } from "./app-inspection.ts";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
-import type { BuildOptions } from "./screens.ts";
+import type { BuildOptions } from "./pages.ts";
 
-// What an App's screens import as `@server/_generated/api` (spec 8, 10.1): the public
+// What an App's pages import as `@server/_generated/api` (spec 8, 10.1): the public
 // references the host generates from its server code. They are data (each
 // function's name, and a mutation's or an action's kind and argument
 // descriptors) and grant nothing: core resolves every call by name in the
@@ -24,22 +24,21 @@ import type { BuildOptions } from "./screens.ts";
 // Generation is deterministic: the same manifest and identity always make
 // the same bytes. This module makes them from files as they are, which is
 // what a save and a draft's check build (save-builds.ts): nothing of them
-// is sealed. A running version's screens get them from its release
-// (screen-references.ts).
+// is sealed. A running version's pages get them from its release
+// (page-references.ts).
 
 /** Whether any of `files` names the references, so a build could import them. */
 const mentionsReferences = (files: Readonly<Record<string, string>>): boolean =>
   Object.entries(files).some(
     ([path, source]) =>
-      (path.startsWith("screens/") || path.startsWith("components/")) &&
-      source.includes("@server/_generated/api")
+      path.startsWith("src/") && source.includes("@server/_generated/api")
   );
 
 /**
- * `files` with the references their screens import as `@server/_generated/api`, as
- * `referencesOf` answers them: unchanged when no screen names them, when
+ * `files` with the references their pages import as `@server/_generated/api`, as
+ * `referencesOf` answers them: unchanged when no page names them, when
  * the files aren't of spec 8's layout, or when there are none (their
- * server code doesn't build or inspect: an expected error). A screen that
+ * server code doesn't build or inspect: an expected error). A page that
  * imports them then fails its build and says so, and the server build
  * says why.
  */
@@ -90,7 +89,7 @@ const referencesOf = async (
 };
 
 /**
- * `files` with the references their screens import as `@server/_generated/api`, generated
+ * `files` with the references their pages import as `@server/_generated/api`, generated
  * for `app`'s `version` from what `sourceOf` reads (see
  * `withReferencesText`).
  */
@@ -129,10 +128,10 @@ export type DraftInspection =
 /**
  * Inspects the server code of `files` once (`filesManifest`, without
  * whatever they hold under `.grasp/`, which is the host's to generate).
- * A draft's screens and its server check read the same inspection
+ * A draft's pages and its server check read the same inspection
  * (agent-builds.ts, `draftBuilds`), so they can never disagree on whether
  * the server code registered: a sandbox ending one of two inspections
- * would otherwise check the screens against stand-ins while the server
+ * would otherwise check the pages against stand-ins while the server
  * passed. Throws what isn't an expected error.
  */
 export const inspectDraft = async (
@@ -157,16 +156,16 @@ export const inspectDraft = async (
 /**
  * `files` as saved or drafted, for `app`'s `version` (a draft's base), with
  * the references their own server code generates, from `inspection`
- * (`inspectDraft`, run only when a screen imports them): never read from
+ * (`inspectDraft`, run only when a page imports them): never read from
  * a sealed release, which may hold other code, with the workflows they
  * declare as the App binds them now.
  *
  * While that server code doesn't build or register (an expected error),
- * its screens import the symbolic stand-ins inspection loads, typed
+ * its pages import the symbolic stand-ins inspection loads, typed
  * permissively (`symbolicModules`), and `standIn` says so: the server
- * build names the one reason, and a screen is checked for everything else
+ * build names the one reason, and a page is checked for everything else
  * rather than failing on each import of `@server/_generated/api`. Checked against
- * stand-ins, a screen is never passed (agent-builds.ts, `buildPassed`).
+ * stand-ins, a page is never passed (agent-builds.ts, `buildPassed`).
  */
 export const withDraftReferences = async (
   env: Env,

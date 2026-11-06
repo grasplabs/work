@@ -36,7 +36,8 @@ import {
   sdkReleaseManifests,
   sdkResourceBindings,
 } from "../src/db/core/schema.ts";
-import { buildAppCode, buildAppTests, buildScreens } from "../src/screens.ts";
+import { versionPageCodes } from "../src/page-references.ts";
+import { buildAppCode, buildAppTests, buildPages } from "../src/pages.ts";
 import { appDefinition, definitionOf } from "./app-definitions.ts";
 import type { AppSpec } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
@@ -571,6 +572,17 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
   it("is refused as sealed in another format, to seal again, not as tampering", async () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);
+    // Its pages, as a release sealed before pages were file routes holds
+    // them: under screens/, none under src/routes/.
+    const pages = async () =>
+      await failure(
+        async () =>
+          await versionPageCodes(env, fixture.app, 1, notesFiles(), {
+            unsealed: "refuse",
+          })
+      );
+    // In this format, that is an App without pages.
+    const current = await pages();
     await rewrite(fixture.app, release, {
       manifest: (manifest) => {
         manifest.formatVersion = releaseFormatVersion - 1;
@@ -582,11 +594,14 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
       Promise.all([
         failure(async () => await loadRelease(env, fixture.app, 1)),
         failure(async () => await seal(fixture)),
+        pages(),
       ])
     ).resolves.toStrictEqual([
       "version.format_unsupported",
       "version.format_unsupported",
+      "version.format_unsupported",
     ]);
+    expect(current).toBe("page.not_found");
   });
 
   it("is refused as another platform's when sealed for another protocol, not as tampering", async () => {
@@ -1280,10 +1295,10 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
     [
       "a path into the kit's packages, for its types",
-      'import type { runScreen } from "../node_modules/@grasp-os/sdk/src/screen-runtime.ts";\nexport type Reached = typeof runScreen;\n',
+      'import type { runPage } from "../node_modules/@grasp-os/sdk/src/page-runtime.ts";\nexport type Reached = typeof runPage;\n',
     ],
     [
-      "a module of the kit's screens, for its types",
+      "a module of the kit's pages, for its types",
       'import type { ReactNode } from "react";\nexport type Reached = ReactNode;\n',
     ],
     [
@@ -1398,7 +1413,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
   });
 
   it("refuses a test that runs a streaming action as one that answers once", async () => {
-    // A streaming action runs only for a screen following it (spec
+    // A streaming action runs only for a page following it (spec
     // 10.7.6): a test principal's `action` answers once, so its type
     // refuses one, as the host does (`operation.mode_mismatch`).
     const streamed = {
@@ -2026,7 +2041,7 @@ export const reach = action({
 const bootstrapModules = [
   "@grasp-os/sdk/client",
   "@grasp-os/sdk/host",
-  "@grasp-os/sdk/screen-runtime",
+  "@grasp-os/sdk/page-runtime",
 ] as const;
 
 /** How a file names a module: for its values, or for its types alone. */
@@ -2078,8 +2093,8 @@ const errorsOf = (built: object): string[] =>
     .diagnostics.filter(({ severity }) => severity === "error")
     .map(({ message }) => message);
 
-/** Types a screen may name that its values may not: only `{ v }` is the SDK root's. */
-const screenTypes =
+/** Types a page may name that its values may not: only `{ v }` is the SDK root's. */
+const pageTypes =
   'import type { ReturnOf } from "@grasp-os/sdk";\nimport type { ReactNode } from "react";\nexport type Shown = ReturnOf<never> | ReactNode;';
 
 /** Types other App code may name from a module its values may not reach. */
@@ -2088,38 +2103,50 @@ const codeTypes =
 
 /** Each kind of App file, the build that reads it, and what it holds besides. */
 const targets = {
-  "a screen": {
-    types: screenTypes,
-    file: "screens/notes.tsx",
+  "a page": {
+    types: pageTypes,
+    file: "src/routes/index.tsx",
     wrap: (lines: string) =>
-      `${lines}\nexport default function Notes() {\n  return null;\n}\n`,
+      `${lines}\nimport { createFileRoute } from "@tanstack/react-router";\n\nfunction Notes() {\n  return null;\n}\n\nexport const Route = createFileRoute("/")({ component: Notes });\n`,
     build: async (files: Record<string, string>) =>
-      await buildScreens(env, files, "app-test"),
+      await buildPages(env, files, "app-test"),
   },
   "a component": {
-    types: screenTypes,
-    file: "components/note.tsx",
+    types: pageTypes,
+    file: "src/components/note.tsx",
     others: {
-      "screens/notes.tsx":
-        'import { Note } from "../components/note";\n\nexport default function Notes() {\n  return <Note />;\n}\n',
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { Note } from "../components/note";
+
+function Notes() {
+  return <Note />;
+}
+
+export const Route = createFileRoute("/")({ component: Notes });
+`,
     },
     wrap: (lines: string) =>
       `${lines}\nexport function Note() {\n  return null;\n}\n`,
     build: async (files: Record<string, string>) =>
-      await buildScreens(env, files, "app-test"),
+      await buildPages(env, files, "app-test"),
   },
   "a declaration file": {
-    types: screenTypes,
+    types: pageTypes,
     file: "notes.d.ts",
     // Declarations name modules only for their types.
     typesOnly: true,
     others: {
-      "screens/notes.tsx":
-        "export default function Notes() {\n  return null;\n}\n",
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Notes() {
+  return null;
+}
+
+export const Route = createFileRoute("/")({ component: Notes });
+`,
     },
     wrap: (lines: string) => `${lines}\nexport type Declared = string;\n`,
     build: async (files: Record<string, string>) =>
-      await buildScreens(env, files, "app-test"),
+      await buildPages(env, files, "app-test"),
   },
   "an operation": {
     types: codeTypes,
@@ -2151,41 +2178,57 @@ const targets = {
   },
 } as const;
 
-/** A screen that imports `Props` by `line` and names it. */
-const screenShowingProps = (line: string): string =>
-  `${line}\nexport type Shown = Props;\nexport default function Notes() {\n  return null;\n}\n`;
+/** A page that imports `Props` by `line` and names it. */
+const pageShowingProps = (line: string): string =>
+  `import { createFileRoute } from "@tanstack/react-router";
+${line}\nexport type Shown = Props;\nfunction Notes() {\n  return null;\n}\n
 
-describe("screens", { timeout: 120_000 }, () => {
+export const Route = createFileRoute("/")({ component: Notes });
+`;
+
+describe("pages", { timeout: 120_000 }, () => {
   it("import a component kept in a folder whose name has a dot", async () => {
-    const built = await buildScreens(
+    const built = await buildPages(
       env,
       {
         ...notesFiles(),
-        "components/v1.0/title.tsx":
+        "src/components/v1.0/title.tsx":
           "export function Title() {\n  return <h1>Notes</h1>;\n}\n",
-        "screens/notes.tsx":
-          'import { Title } from "../components/v1.0/title.tsx";\n\nexport default function Notes() {\n  return <Title />;\n}\n',
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { Title } from "../components/v1.0/title.tsx";
+
+function Notes() {
+  return <Title />;
+}
+
+export const Route = createFileRoute("/")({ component: Notes });
+`,
       },
       "app-test"
     );
     expect(errorsOf(built)).toStrictEqual([]);
   });
 
-  it("can't keep anything but components under components/: each is refused by name", async () => {
+  it("can't keep anything but the front end's TypeScript under src/: each is refused by name", async () => {
     const strays = [
-      "components/styles.css",
-      "components/data.json",
+      "src/components/styles.css",
+      "src/components/data.json",
       // Never saved (a save refuses each), never a component.
-      "components/.hidden/title.tsx",
-      "components/../app.tsx",
-      "components//title.tsx",
+      "src/components/.hidden/title.tsx",
+      "src/components/../app.tsx",
+      "src/components//title.tsx",
     ];
-    const built = await buildScreens(
+    const built = await buildPages(
       env,
       {
         ...notesFiles(),
-        "screens/notes.tsx":
-          "export default function Notes() {\n  return null;\n}\n",
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Notes() {
+  return null;
+}
+
+export const Route = createFileRoute("/")({ component: Notes });
+`,
         ...Object.fromEntries(strays.map((path) => [path, "export {};\n"])),
       },
       "app-test"
@@ -2195,7 +2238,7 @@ describe("screens", { timeout: 120_000 }, () => {
         saidSchema
           .parse(built)
           .diagnostics.filter(({ message }) =>
-            message.includes("which holds only the App's components")
+            message.includes("which holds only the App's front end")
           )
           .map(({ file }) => file)
       )
@@ -2204,9 +2247,9 @@ describe("screens", { timeout: 120_000 }, () => {
 
   it("name for their types the App's own declarations, a folder's index among them", async () => {
     const declarations = {
-      "components/types/index.d.ts":
+      "src/components/types/index.d.ts":
         "export interface Props {\n  title: string;\n}\n",
-      "components/named.d.ts":
+      "src/components/named.d.ts":
         "export interface Props {\n  title: string;\n}\n",
     };
     const [folder, extension, outside] = await Promise.all(
@@ -2217,12 +2260,12 @@ describe("screens", { timeout: 120_000 }, () => {
         'import type { Props } from "../node_modules/@grasp-os/sdk/src";',
       ].map(
         async (line) =>
-          await buildScreens(
+          await buildPages(
             env,
             {
               ...notesFiles(),
               ...declarations,
-              "screens/notes.tsx": screenShowingProps(line),
+              "src/routes/index.tsx": pageShowingProps(line),
             },
             "app-test"
           )
@@ -2236,23 +2279,28 @@ describe("screens", { timeout: 120_000 }, () => {
       folder: [],
       extension: [],
       outside: [
-        '"../node_modules/@grasp-os/sdk/src" is not a file of this App\'s screens.',
+        '"../node_modules/@grasp-os/sdk/src" is not a file of this App\'s pages.',
       ],
     });
   });
 
-  it("refuse a screen's declaration naming a module by import() in a namespace", async () => {
+  it("refuse a page's declaration naming a module by import() in a namespace", async () => {
     // The declaration's import check refuses it before any type check;
     // the type check's resolution, which holds it as well, is tested on its
     // own (packages/compiler, type-check.test.ts).
     const files = {
       ...notesFiles(),
-      "screens/notes.tsx":
-        "export default function Notes() {\n  return null;\n}\n",
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Notes() {
+  return null;
+}
+
+export const Route = createFileRoute("/")({ component: Notes });
+`,
       "probe.d.ts":
         'declare namespace Probe {\n  type Server = typeof import("@grasp-os/sdk/server");\n}\n',
     };
-    const built = await buildScreens(env, files, "app-test");
+    const built = await buildPages(env, files, "app-test");
     expect(
       (built.ok ? [] : built.diagnostics)
         .filter(({ file }) => file === "probe.d.ts")
@@ -2264,12 +2312,12 @@ describe("screens", { timeout: 120_000 }, () => {
     [
       "imports inside it, in a declaration file",
       "leak.d.ts",
-      'declare module "x-probe" {\n  import type { runScreen } from "@grasp-os/sdk/screen-runtime";\n  import type { serverModule } from "@grasp-os/sdk/server";\n  global {\n    type Leak = [typeof runScreen, typeof serverModule];\n  }\n}\n',
+      'declare module "x-probe" {\n  import type { runPage } from "@grasp-os/sdk/page-runtime";\n  import type { serverModule } from "@grasp-os/sdk/server";\n  global {\n    type Leak = [typeof runPage, typeof serverModule];\n  }\n}\n',
     ],
     [
       "imports inside it, in a component's declarations",
-      "components/leak.d.ts",
-      'declare module "x-probe" {\n  import type { runScreen } from "@grasp-os/sdk/screen-runtime";\n  global {\n    type Leak = [typeof runScreen];\n  }\n}\n',
+      "src/components/leak.d.ts",
+      'declare module "x-probe" {\n  import type { runPage } from "@grasp-os/sdk/page-runtime";\n  global {\n    type Leak = [typeof runPage];\n  }\n}\n',
     ],
     [
       "one that shadows a kit module",
@@ -2277,12 +2325,18 @@ describe("screens", { timeout: 120_000 }, () => {
       'declare module "@grasp-os/sdk/react" {\n  export const useQuery: (reference: unknown) => unknown;\n}\n',
     ],
   ])("never declare a module by name: %s", async (_case, file, source) => {
-    const built = await buildScreens(
+    const built = await buildPages(
       env,
       {
         ...notesFiles(),
-        "screens/notes.tsx":
-          "export type Reached = unknown;\nexport default function Notes() {\n  return null;\n}\n",
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+export type Reached = unknown;
+function Notes() {
+  return null;
+}
+
+export const Route = createFileRoute("/")({ component: Notes });
+`,
         [file]: source,
       },
       "app-test"
@@ -2306,17 +2360,22 @@ describe("screens", { timeout: 120_000 }, () => {
       "export {};\ndeclare global {\n  var leak: number;\n}\n",
     ],
     [
-      "a screen",
-      "screens/globals.tsx",
+      "a page",
+      "src/routes/globals.tsx",
       "export {};\ndeclare global {\n  interface Window {\n    leak: number;\n  }\n}\n",
     ],
   ])("never declare globals, in %s", async (_case, file, source) => {
-    const built = await buildScreens(
+    const built = await buildPages(
       env,
       {
         ...notesFiles(),
-        "screens/notes.tsx":
-          "export default function Notes() {\n  return null;\n}\n",
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Notes() {
+  return null;
+}
+
+export const Route = createFileRoute("/")({ component: Notes });
+`,
         [file]: source,
       },
       "app-test"
@@ -2334,12 +2393,19 @@ describe("screens", { timeout: 120_000 }, () => {
   });
 
   it("read a declaration file as declarations: a const needs no value", async () => {
-    const built = await buildScreens(
+    const built = await buildPages(
       env,
       {
         ...notesFiles(),
-        "screens/notes.tsx":
-          'import type { Limit } from "../limits";\nexport type Shown = Limit;\nexport default function Notes() {\n  return null;\n}\n',
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import type { Limit } from "../../limits";
+export type Shown = Limit;
+function Notes() {
+  return null;
+}
+
+export const Route = createFileRoute("/")({ component: Notes });
+`,
         "limits.d.ts":
           "export const limit: number;\nexport type Limit = typeof limit;\n",
       },
@@ -2349,7 +2415,7 @@ describe("screens", { timeout: 120_000 }, () => {
   });
 
   it.each([
-    ["a screen", "screens/notes.tsx", "../"],
+    ["a page", "src/routes/index.tsx", "../"],
     ["a declaration file", "notes.d.ts", "./"],
   ])(
     "never name the kit's own files for their types in %s, by any path",
@@ -2357,19 +2423,20 @@ describe("screens", { timeout: 120_000 }, () => {
       const lines = [
         `/// <reference path="${up}node_modules/@grasp-os/sdk/src/client.ts" />`,
         '/// <reference types="node" />',
-        `export type R = typeof import("${up}node_modules/@grasp-os/sdk/src/screen-runtime.ts");`,
+        `export type R = typeof import("${up}node_modules/@grasp-os/sdk/src/page-runtime.ts");`,
         'import type * as C from "/node_modules/@grasp-os/sdk/src/client-core.ts";',
         `import type { serverModule } from "${up}node_modules/@grasp-os/sdk/src/server.ts";`,
         `import type { Doc } from "${up}node_modules/@grasp-os/sdk/src/database.ts";`,
         "export type Reached = typeof C | typeof serverModule | Doc<never>;",
       ].join("\n");
-      const screen = "export default function Notes() {\n  return null;\n}\n";
-      const built = await buildScreens(
+      const page =
+        'import { createFileRoute } from "@tanstack/react-router";\n\nfunction Notes() {\n  return null;\n}\n\nexport const Route = createFileRoute("/")({ component: Notes });\n';
+      const built = await buildPages(
         env,
         {
           ...notesFiles(),
-          "screens/notes.tsx":
-            file === "screens/notes.tsx" ? `${lines}\n${screen}` : screen,
+          "src/routes/index.tsx":
+            file === "src/routes/index.tsx" ? `${lines}\n${page}` : page,
           ...(file === "notes.d.ts" ? { [file]: lines } : {}),
         },
         "app-test"
@@ -2386,14 +2453,14 @@ describe("screens", { timeout: 120_000 }, () => {
         // directives, as the type check refuses them, all at once.
         imports: refused.length,
       }).toStrictEqual({ ok: false, imports: 6 });
-      const directives = await buildScreens(
+      const directives = await buildPages(
         env,
         {
           ...notesFiles(),
-          "screens/notes.tsx":
-            file === "screens/notes.tsx"
-              ? `${lines.split("\n").slice(0, 2).join("\n")}\n${screen}`
-              : screen,
+          "src/routes/index.tsx":
+            file === "src/routes/index.tsx"
+              ? `${lines.split("\n").slice(0, 2).join("\n")}\n${page}`
+              : page,
           ...(file === "notes.d.ts"
             ? { [file]: lines.split("\n").slice(0, 2).join("\n") }
             : {}),
@@ -2413,7 +2480,7 @@ describe("screens", { timeout: 120_000 }, () => {
   );
 
   it.each([
-    ["a screen", "screens/notes.tsx"],
+    ["a page", "src/routes/index.tsx"],
     ["a declaration file", "notes.d.ts"],
   ])(
     "never name the App's server code for its types in %s",
@@ -2421,22 +2488,23 @@ describe("screens", { timeout: 120_000 }, () => {
       const typeLines = [
         'import type { query } from "@server/_generated/server";',
         'import type { internal } from "@server/_generated/internal";',
-        'export type { create } from "../server/notes.ts";',
-        'export type Schema = typeof import("../server/schema.ts");',
+        'export type { create } from "../../server/notes.ts";',
+        'export type Schema = typeof import("../../server/schema.ts");',
       ];
-      const screen = "export default function Notes() {\n  return null;\n}\n";
-      const built = await buildScreens(
+      const page =
+        'import { createFileRoute } from "@tanstack/react-router";\n\nfunction Notes() {\n  return null;\n}\n\nexport const Route = createFileRoute("/")({ component: Notes });\n';
+      const built = await buildPages(
         env,
         {
           ...notesFiles(),
-          "screens/notes.tsx":
-            file === "screens/notes.tsx"
-              ? `${typeLines.join("\n")}\nexport type Q = typeof query | typeof internal;\n${screen}`
-              : screen,
+          "src/routes/index.tsx":
+            file === "src/routes/index.tsx"
+              ? `${typeLines.join("\n")}\nexport type Q = typeof query | typeof internal;\n${page}`
+              : page,
           ...(file === "notes.d.ts"
             ? {
                 [file]: typeLines
-                  .map((line) => line.replace("../", "./"))
+                  .map((line) => line.replace("../../", "./"))
                   .join("\n"),
               }
             : {}),
@@ -2450,7 +2518,7 @@ describe("screens", { timeout: 120_000 }, () => {
           .diagnostics.filter((diagnostic) => diagnostic.file === file)
           .map(({ message }) =>
             message.includes(
-              "is the App's server code, which screens never import"
+              "is the App's server code, which pages never import"
             )
           ),
       }).toStrictEqual({ ok: false, refused: [true, true, true, true] });
@@ -2466,33 +2534,37 @@ describe("screens", { timeout: 120_000 }, () => {
       "the internal references",
       'import { internal } from "@server/_generated/internal";',
     ],
-    ["the schema", 'import schema from "../server/schema.ts";'],
-    ["the config", 'import notes from "../grasp.config";'],
-    ["an operation", 'import { create } from "../server/notes.ts";'],
+    ["the schema", 'import schema from "../../server/schema.ts";'],
+    ["the config", 'import notes from "../../grasp.config";'],
+    ["an operation", 'import { create } from "../../server/notes.ts";'],
     [
       "an operation in a dotted folder",
-      'import { create } from "../server/v1.0/notes.ts";',
+      'import { create } from "../../server/v1.0/notes.ts";',
     ],
     [
       "a migration in a dotted folder",
-      'import derive from "../server/migrations/v1.0/derive.ts";',
+      'import derive from "../../server/migrations/v1.0/derive.ts";',
     ],
     ["the host's SDK", 'import { inspectApp } from "@grasp-os/sdk/host";'],
   ])(
     "never import %s: the build fails before it starts",
     async (_case, line) => {
-      const build = await buildScreens(
+      const build = await buildPages(
         env,
         {
           ...notesFiles(),
-          "screens/notes.tsx": `${line}\nexport default function Notes() {\n  return null;\n}\n`,
+          "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+${line}\nfunction Notes() {\n  return null;\n}\n
+
+export const Route = createFileRoute("/")({ component: Notes });
+`,
         },
         "app-test"
       );
       expect(build.ok).toBeFalsy();
       expect(build.diagnostics.map(({ message }) => message)).toStrictEqual([
         expect.stringContaining(
-          "is the App's server code, which screens never import"
+          "is the App's server code, which pages never import"
         ),
       ]);
     }

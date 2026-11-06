@@ -1,7 +1,7 @@
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 // The Notes App of spec 8 and 9.4, laid out as an App is in the product:
-// this file, `grasp.config.ts`, `screens.ts` and `server/` are its source;
+// this file, `grasp.config.ts` and `server/` are its source;
 // `.grasp/` holds what the host generates from it (references.test.ts
 // keeps it current).
 

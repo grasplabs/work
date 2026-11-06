@@ -27,7 +27,7 @@ export interface TypeCheckPlan {
    * typed `any` (`file:line:column`, `standInCallbacks`): never reported.
    */
   readonly lenient?: readonly string[];
-  /** Whether a passing build carries its diagnostics (a screens build's warnings). */
+  /** Whether a passing build carries its diagnostics (a pages build's warnings). */
   readonly carries?: boolean;
 }
 

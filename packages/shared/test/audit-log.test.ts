@@ -28,7 +28,7 @@ describe("audit event types", () => {
     expect(typeOf("audit.something_new")).toBeNull();
   });
 
-  it("files an admin's past word on an App's screens as a decision, code refused its data as an action, and the rest of an App as configuration", () => {
+  it("files an admin's past word on an App's pages as a decision, code refused its data as an action, and the rest of an App as configuration", () => {
     expect(
       [
         "app.artifact.approved",

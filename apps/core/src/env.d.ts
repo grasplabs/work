@@ -57,7 +57,7 @@ interface __BaseEnv_Env {
   SANDBOX_HOST?: Fetcher;
   /**
    * Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts),
-   * and for an extraction, a screen build and a package build on the
+   * and for an extraction, a page build and a package build on the
    * sandbox host (src/knowledge/extract.ts, src/platform-sandbox.ts).
    */
   SANDBOX_DEADLINE_MS?: string;
@@ -147,8 +147,8 @@ interface __BaseEnv_Env {
   /** Tests only: a shorter bound on one build of a save (src/save-builds.ts). */
   BUILD_WAIT_MS?: string;
   /**
-   * Tests only: a smaller CPU time to size a first screens build's batches
-   * to (src/screens.ts, `batchCpuMs`), never larger.
+   * Tests only: a smaller CPU time to size a first pages build's batches
+   * to (src/pages.ts, `batchCpuMs`), never larger.
    */
   BUILD_BATCH_CPU_MS?: string;
   /**

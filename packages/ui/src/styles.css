@@ -1,4 +1,4 @@
-/* Grasp OS theme. Shared by the frontend, the admin and every App screen. */
+/* Grasp OS theme. Shared by the frontend, the admin and every App page. */
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -7,7 +7,7 @@
 
 /*
  * Paper is light: in print the light theme applies, whatever the theme on
- * screen, so a page printed from the dark theme isn't light text on white.
+ * page, so a page printed from the dark theme isn't light text on white.
  */
 @custom-variant dark {
   @media screen {
@@ -54,7 +54,7 @@
     sans-serif;
   /*
    * Where the page loads Newsreader (the frontend and the admin bundle it).
-   * An App screen's frame loads no fonts, so there the serif falls back to
+   * An App page's frame loads no fonts, so there the serif falls back to
    * the sans, as the sans falls back to the system's: a system serif such
    * as Georgia has no light weight to set a title in.
    */
@@ -389,7 +389,7 @@
 
 /*
  * The brand's painted field (brand book, chapter 05), drawn by
- * <PaintedField painting pattern> for the one or two things on a screen
+ * <PaintedField painting pattern> for the one or two things on a page
  * that matter most. Four layers, never fewer: the painting's base colour,
  * so the field has its tone before the painting comes; the painting, an
  * image file of a few kB that a browser fetches only where a field is
@@ -399,7 +399,7 @@
  * text is the ink on a light painting and the canvas on a dark one. In
  * dark mode each light painting gives way to a dark one, so a field never
  * stands as a bright block on a dark page. The base colours are the
- * paintings' own, not the theme's. An App screen's frame loads no images
+ * paintings' own, not the theme's. An App page's frame loads no images
  * from here, so there a field is its base, grain and pattern.
  */
 @utility painted-field {

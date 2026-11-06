@@ -1,5 +1,5 @@
 /**
- * Lints App screens and components with @shadcn/lint's rules and Grasp's
+ * Lints App pages and components with @shadcn/lint's rules and Grasp's
  * own (design-rules.ts), as the repo lints its own code, through ESLint's
  * `Linter` (which needs no file system of its own) and oxc's parser
  * (eslint-parser.ts). Part of the lint isolate's lint (ultracite-worker.ts), so
@@ -8,8 +8,8 @@
  *
  * The rules read the project from disk: `components.json`, the theme and
  * the kit's component sources, for their variants, and the App's own
- * components a screen wraps the kit's in. Each lint writes them
- * (`DesignKit.lintProject`, and the App's screens and components) to
+ * components a page wraps the kit's in. Each lint writes them
+ * (`DesignKit.lintProject`, and the App's pages and components) to
  * `/tmp`, which in a Worker belongs to the request: concurrent lints
  * don't see each other's files.
  *
@@ -52,7 +52,7 @@ const root = "/tmp/app";
  * oxlint adds it too (scripts/package-definition-lib.ts).
  */
 export const designNote =
-  "Screens can't change the kit (@grasp-os/ui): use what it has, or build the look from plain elements.";
+  "Pages can't change the kit (@grasp-os/ui): use what it has, or build the look from plain elements.";
 
 const writeFiles = (files: Record<string, string>): void => {
   for (const [path, content] of Object.entries(files)) {
@@ -87,9 +87,9 @@ const toDiagnostic = (
 };
 
 /**
- * What the design lint says of each of `files`' screens and components
+ * What the design lint says of each of `files`' pages and components
  * (`isDesignLinted`), by path relative to the App, against `kit`, with
- * `app`, the App's screens and components, on disk for the rules to read.
+ * `app`, the App's pages and components, on disk for the rules to read.
  * Nothing of a file that doesn't parse: oxlint's lint says nothing of it
  * either, and the build says why.
  */

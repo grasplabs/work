@@ -3,14 +3,12 @@
 // together.
 import { registerApp } from "../../../src/runner.ts";
 import config from "../grasp.config.ts";
-import screens from "../screens.ts";
 import schema from "../server/schema.ts";
 import * as m0 from "../server/notes.ts";
 
 export default registerApp({
   config,
   schema,
-  screens,
   modules: { notes: m0 },
   migrations: [],
 });

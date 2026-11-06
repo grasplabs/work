@@ -48,7 +48,7 @@ import { runView } from "./workflows/run-view.ts";
 // sums, never a run or who started it. Each read is audited, and each
 // refused one with why. What an App reads here it may show to anyone who
 // uses it, even people who can't open the counted App: the grant exists to
-// publish these counts company-wide, and the admin's grant screen says so
+// publish these counts company-wide, and the admin's grant page says so
 // before they approve.
 //
 // An App's own measures are its own tables: `app_statistics` and

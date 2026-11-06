@@ -361,7 +361,7 @@ describe("sharing an App", () => {
         outcome(
           firstVersion(
             async (onVersion) =>
-              await anna.api.screens.watchVersion(app, onVersion)
+              await anna.api.pages.watchVersion(app, onVersion)
           )
         ),
         opens(owner),

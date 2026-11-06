@@ -1,11 +1,11 @@
-import { screenLimits } from "@grasp-os/shared/screen-limits";
+import { pageLimits } from "@grasp-os/shared/page-limits";
 
 import { isPlainObject, valueLimits } from "./value-descriptor.ts";
 
 // The session client's unsaved record-form drafts (GRA-254): what a person
 // typed and hasn't saved, kept outside the App's own modules so it outlives
 // the form that holds it. A draft survives the editor unmounting (another
-// note opened, the screen navigated), a newer record arriving, a refused
+// note opened, the page navigated), a newer record arriving, a refused
 // save (`data.conflict`) and, through the page, a refresh of the tab.
 //
 // The frame has an opaque origin and no storage of its own, so the page
@@ -39,7 +39,7 @@ import { isPlainObject, valueLimits } from "./value-descriptor.ts";
 // - A form that isn't the one on screen writes the draft: only the form
 //   that holds a key's claim writes it, taken when it mounts and let go
 //   when it unmounts, and every claim goes with `clear` (`#claims`).
-// - Drafts grow without bound: each is held to `screenLimits.drafts`'
+// - Drafts grow without bound: each is held to `pageLimits.drafts`'
 //   size (a larger one stays in the frame's memory only), the oldest go
 //   past the count, a day-old one is dropped unread. Every change is sent
 //   to the page as it happens, which gathers them into its writes, so a
@@ -208,7 +208,7 @@ export const readDraft = (text: string, now: number): FormDraft | undefined => {
     draftValues === undefined ||
     typeof conflict !== "boolean" ||
     typeof at !== "number" ||
-    now - at > screenLimits.drafts.maxAgeMs
+    now - at > pageLimits.drafts.maxAgeMs
   ) {
     return undefined;
   }
@@ -243,7 +243,7 @@ const appOf = (key: string): string => {
 
 /** Whether `text` fits one draft once JSON escapes it again on the port. */
 const fits = (text: string): boolean =>
-  JSON.stringify(text).length <= screenLimits.drafts.characters;
+  JSON.stringify(text).length <= pageLimits.drafts.characters;
 
 /**
  * A session client's drafts, by key: in memory for the frame's life, and
@@ -270,7 +270,7 @@ export class DraftStore {
       const draft = typeof text === "string" ? readDraft(text, now) : undefined;
       if (
         draft !== undefined &&
-        key.length <= screenLimits.drafts.keyCharacters
+        key.length <= pageLimits.drafts.keyCharacters
       ) {
         this.#drafts.set(key, draft);
       }
@@ -284,7 +284,7 @@ export class DraftStore {
    */
   get(key: string, now = Date.now()): FormDraft | undefined {
     const draft = this.#drafts.get(key);
-    return draft !== undefined && now - draft.at <= screenLimits.drafts.maxAgeMs
+    return draft !== undefined && now - draft.at <= pageLimits.drafts.maxAgeMs
       ? draft
       : undefined;
   }
@@ -299,7 +299,7 @@ export class DraftStore {
     this.#drafts.set(key, draft);
     const app = appOf(key);
     const apps = [...this.#drafts].filter(([other]) => appOf(other) === app);
-    if (apps.length > screenLimits.drafts.perApp) {
+    if (apps.length > pageLimits.drafts.perApp) {
       // The one written longest ago, whatever order they were kept in (a
       // page hands its drafts over newest first).
       let [oldest] = apps;
@@ -405,7 +405,7 @@ export class DraftStore {
     try {
       this.#persistence?.clear();
     } catch {
-      // Best effort: the page drops them too when it refuses the screen.
+      // Best effort: the page drops them too when it refuses the page.
     }
   }
 
@@ -414,7 +414,7 @@ export class DraftStore {
    * be serialized or written stays in memory, and the next is written.
    */
   #write(key: string): void {
-    if (key.length > screenLimits.drafts.keyCharacters) {
+    if (key.length > pageLimits.drafts.keyCharacters) {
       return;
     }
     const draft = this.#drafts.get(key);

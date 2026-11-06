@@ -31,7 +31,7 @@ const playMaking = (element: HTMLCanvasElement): (() => void) => {
     };
   }
   const box = element.getBoundingClientRect();
-  // As sharp as the screen is dense, read when it is drawn.
+  // As sharp as the page is dense, read when it is drawn.
   const sharp = Math.min(window.devicePixelRatio || 1, 2);
   element.width = Math.round(box.width * sharp);
   element.height = Math.round(box.height * sharp);

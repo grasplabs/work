@@ -2,8 +2,8 @@ import { appFilesPath } from "@grasp-os/shared/app-file-limits";
 import { catalogLogoPath } from "@grasp-os/shared/connect";
 import { strictTransportSecurity } from "@grasp-os/shared/http";
 import { isPackageArtifactPath } from "@grasp-os/shared/packages";
+import { pageFramePath, pageModulePath } from "@grasp-os/shared/pages";
 import { runFilesPath } from "@grasp-os/shared/run-files";
-import { screenFramePath, screenModulePath } from "@grasp-os/shared/screens";
 
 const policy = (directives: Record<string, string>): string =>
   Object.entries(directives)
@@ -20,7 +20,7 @@ const frontendAssets = "/assets/";
 const frontendTheme = "/theme.js";
 
 /**
- * The Content Security Policy of everything core serves but the screen
+ * The Content Security Policy of everything core serves but the page
  * frame, on a deployment people reach at `origin`. It matters for the
  * frontend's HTML, where it keeps an injected script from running or
  * sending the person's data elsewhere; on API responses it does nothing.
@@ -37,15 +37,15 @@ const frontendTheme = "/theme.js";
  *   what injected CSS could fetch to leak the page's text (a `url()` in a
  *   background or a font) still reaches only this origin (img-src, and
  *   font-src through default-src).
- * - Screens' modules and Apps' npm packages are served here
- *   for screens' frames, which have an opaque origin; run in this page,
+ * - Pages' modules and Apps' npm packages are served here
+ *   for pages' frames, which have an opaque origin; run in this page,
  *   with its origin and the person's session, they would turn any HTML
  *   injection into script, through a `<script src>` or a `srcdoc` frame
  *   (which inherits this policy). A source ending in `/` matches its path
  *   as a prefix, any other exactly; browsers stop matching paths after a
  *   redirect, and nothing on the frontend's paths redirects elsewhere.
  *   Browsers match the path as written, escapes and all, so core answers
- *   no path that decodes to another (`/assets/..%2Fscreen-modules/…`,
+ *   no path that decodes to another (`/assets/..%2Fpage-modules/…`,
  *   entry.ts). Core also refuses those paths to this page's own requests
  *   (`isRefusedToProductPage`), in case a browser lets one through.
  * - No workers: the frontend starts none.
@@ -53,9 +53,9 @@ const frontendTheme = "/theme.js";
  *   WebSocket to `/rpc`.
  * - Sign-in leaves for the IdP by top-level navigation, which the policy
  *   doesn't govern, so form-action needs no IdP hosts.
- * - Screens (App UIs) run in sandboxed frames of a document from this
- *   origin (screen-frame.ts), which has a policy of its own. A `srcdoc` or
- *   `data:` frame would inherit this one and couldn't run its screen.
+ * - Pages (App UIs) run in sandboxed frames of a document from this
+ *   origin (page-frame.ts), which has a policy of its own. A `srcdoc` or
+ *   `data:` frame would inherit this one and couldn't run its page.
  *
  * Paths are named with `origin` as people reach it (`SIGN_IN.origin`,
  * behind the router): a policy can name a path only with its host. So a
@@ -131,16 +131,16 @@ export const isDocsPath = (pathname: string): boolean =>
 
 /**
  * Whether `pathname` is where core serves code we didn't write: a
- * screen's modules or the files of an App's npm packages.
+ * page's modules or the files of an App's npm packages.
  */
 const isThirdPartyCodePath = (pathname: string): boolean =>
-  pathname === screenModulePath ||
-  pathname.startsWith(`${screenModulePath}/`) ||
+  pathname === pageModulePath ||
+  pathname.startsWith(`${pageModulePath}/`) ||
   isPackageArtifactPath(pathname);
 
 /**
  * Whether core refuses `request`: one the product page itself makes for
- * code we didn't write. Only screens' frames load it, and a frame's
+ * code we didn't write. Only pages' frames load it, and a frame's
  * origin is opaque (`sandbox allow-scripts`), so a browser never calls
  * their requests same-origin; one that is comes from the product page or
  * a frame of its origin, which the page's policy should already have
@@ -154,7 +154,7 @@ export const isRefusedToProductPage = (request: Request): boolean =>
   request.headers.get("sec-fetch-site") === "same-origin";
 
 /**
- * The policy of the document screens run in (screen-frame.ts), for one
+ * The policy of the document pages run in (page-frame.ts), for one
  * build: App code nobody reviewed line by line, so no network at all, and
  * no script but `scripts`, the hash sources of the document's own inline
  * scripts and the exact addresses of the build's modules.
@@ -163,11 +163,11 @@ export const isRefusedToProductPage = (request: Request): boolean =>
  *   opened on its own, not framed: no cookies, storage or DOM of this
  *   origin, no popups, no top-level navigation, no forms.
  * - Scripts only from `scripts`: no `'unsafe-inline'` (so no inline
- *   script or event handler the screen writes into its page), no `data:`
- *   or `blob:` module, no eval, no WebAssembly. A screen that renders HTML
+ *   script or event handler the page writes into its page), no `data:`
+ *   or `blob:` module, no eval, no WebAssembly. A page that renders HTML
  *   it was sent, or imports from a string, runs none of it.
  * - Styles inline and from `data:` URLs, images and fonts from `data:`:
- *   how a screen's CSS and assets come. Images from `blob:` too: a
+ *   how a page's CSS and assets come. Images from `blob:` too: a
  *   file's preview (spec 10.7.5), which the page hands the frame as a
  *   `Blob` and the frame shows through a URL of its own opaque origin,
  *   that no other document can load. Nothing to connect to (fetch,
@@ -178,32 +178,32 @@ export const isRefusedToProductPage = (request: Request): boolean =>
  * A sandboxed frame may still load another address in its own place. This
  * policy says nothing about that; the page's does (`frame-src 'self'`
  * above), so the frame gets no further than this origin, where the page
- * notices and stops the screen (the frontend's screen-host.ts).
+ * notices and stops the page (the frontend's page-host.ts).
  *
  * WebRTC is the one way out no directive closes in the browsers we test:
  * `connect-src` doesn't govern ICE, and `webrtc 'block'`, sent for the
  * browsers that come to enforce it, changes nothing yet. Chromium and
- * WebKit send a TURN server of the screen's choosing packets. So the
- * frame closes it itself, before any of the screen's code runs
- * (screen-frame.ts): its WebRTC interfaces are taken away, and the screen
+ * WebKit send a TURN server of the page's choosing packets. So the
+ * frame closes it itself, before any of the page's code runs
+ * (page-frame.ts): its WebRTC interfaces are taken away, and the page
  * can make no document of its own, the only place WebRTC (or a network
  * this policy doesn't govern) could come back from. That rests on this
  * policy: with Trusted Types and no policy allowed, every sink of the
  * HTML parser refuses a string, so no markup becomes a nested document,
  * and the bootstrap closes the ways that don't parse markup. A browser
- * that doesn't enforce Trusted Types is told so, and runs no screen. The
+ * that doesn't enforce Trusted Types is told so, and runs no page. The
  * compiler's no-peer-connections rule (@grasp-os/compiler's
  * design-rules.ts) only tells an author early; nothing relies on it. The
- * browser tests try every way, in every engine (e2e/screen-attacks.e2e.ts).
+ * browser tests try every way, in every engine (e2e/page-attacks.e2e.ts).
  *
- * What a screen is handed stays bounded besides: only what its person may
+ * What a page is handed stays bounded besides: only what its person may
  * already read through that App's functions, which reach only the
  * connections and resources an admin granted the App
- * (screen-delivery.ts). What this policy adds is that the code which runs
+ * (page-delivery.ts). What this policy adds is that the code which runs
  * is the build core leased, and that nothing it writes leaves the frame
  * but through its App (a declared link opens as app-link-route.ts says).
  */
-export const screenFramePolicy = (scripts: readonly string[]): string =>
+export const pageFramePolicy = (scripts: readonly string[]): string =>
   policy({
     sandbox: "allow-scripts",
     "default-src": "'none'",
@@ -218,8 +218,8 @@ export const screenFramePolicy = (scripts: readonly string[]): string =>
     "base-uri": "'none'",
     "frame-ancestors": "'self'",
     // Every sink of the HTML parser refuses a string, and no policy may
-    // make one it takes: a screen can't write markup into a nested
-    // document (screen-frame.ts). `webrtc 'block'` is the standard's
+    // make one it takes: a page can't write markup into a nested
+    // document (page-frame.ts). `webrtc 'block'` is the standard's
     // word on WebRTC, which no browser we test enforces yet.
     "require-trusted-types-for": "'script'",
     "trusted-types": "'none'",
@@ -234,7 +234,7 @@ export const screenFramePolicy = (scripts: readonly string[]): string =>
  * it on its own, as a document or a worker:
  *
  * - Script only from `origin`, the deployment's own, as people reach it
- *   (the artifact's origin, where screens' modules are served too); no
+ *   (the artifact's origin, where pages' modules are served too); no
  *   inline script, eval, `data:` or `blob:`. No workers at all.
  * - No connections at all. Nothing that legitimately runs under this
  *   policy needs one: documents are sandboxed and run no script, and
@@ -249,7 +249,7 @@ export const screenFramePolicy = (scripts: readonly string[]): string =>
  * - No Referer, as each address carries a token (packages/serve.ts).
  *
  * A policy sent with a script or a stylesheet says nothing about the page
- * that loads it: inside a screen's frame, the frame's policy (above)
+ * that loads it: inside a page's frame, the frame's policy (above)
  * governs what the code does, and it too allows no worker, no connection
  * and no image, font or stylesheet from anywhere.
  */
@@ -284,7 +284,7 @@ export const catalogLogoPolicy = `${policy({
  * deployment people reach at `origin`. HSTS goes only on https, since
  * browsers ignore it over http (local development). A route may send a
  * stricter referrer policy of its own, such as `no-referrer` where its
- * URL carries a secret; it is kept. So is the screen frame's policy,
+ * URL carries a secret; it is kept. So is the page frame's policy,
  * which names its build's scripts; a frame response without one runs no
  * script at all. Everything on the path of packages' artifacts gets their
  * policy and `no-referrer`, whatever the route sent; everything on the
@@ -316,18 +316,18 @@ export const setSecurityHeaders = (
     // loads nothing and isn't read by another site.
     headers.set("content-security-policy", "default-src 'none'; sandbox");
     headers.set("cross-origin-resource-policy", "same-origin");
-  } else if (url.pathname !== screenFramePath) {
+  } else if (url.pathname !== pageFramePath) {
     // The docs' answers carry their own, naming their inline code (docs.ts).
     if (!(isDocsPath(url.pathname) && headers.has("content-security-policy"))) {
       headers.set("content-security-policy", contentSecurityPolicy(origin));
     }
     // A page opened from another site keeps no handle on its opener, and
-    // that site none on it: a screen's frame could otherwise post what it
+    // that site none on it: a page's frame could otherwise post what it
     // read to `top.opener`, which no policy of its own stops. Popups the
     // page opens itself (a provider's sign-in) keep theirs.
     headers.set("cross-origin-opener-policy", "same-origin-allow-popups");
   } else if (!headers.has("content-security-policy")) {
-    headers.set("content-security-policy", screenFramePolicy([]));
+    headers.set("content-security-policy", pageFramePolicy([]));
   }
   headers.set("x-content-type-options", "nosniff");
   if (!artifact && headers.get("referrer-policy") !== "no-referrer") {

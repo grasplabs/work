@@ -8,11 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { loadBuiltinRelease } from "../src/builtins.ts";
 import { inspectDraft, withDraftReferences } from "../src/draft-references.ts";
-import {
-  buildComputeModules,
-  buildScreens,
-  checkAppCode,
-} from "../src/screens.ts";
+import { buildComputeModules, buildPages, checkAppCode } from "../src/pages.ts";
 
 // The type check is a gate: what it passes is sealed and run. These tests
 // hold the checker to what the platform's previous one (TypeScript 6's
@@ -76,43 +72,44 @@ const typeDiagnostics = (
 
 const blueprints = ["intake", "board-page", "workflow-map"];
 
-/** Mistakes in a screen's files, each a component of its own. */
-const screenMistakes: Record<string, string> = {
-  "components/m-assign.tsx": 'export const wrong: number = "x";\n',
-  "components/m-prop.tsx":
+/** Mistakes in a page's files, each a component of its own. */
+const pageMistakes: Record<string, string> = {
+  "src/components/m-assign.tsx": 'export const wrong: number = "x";\n',
+  "src/components/m-prop.tsx":
     'import { Button } from "@grasp-os/ui/components/button";\n\nexport const Wrong = () => <Button nope={1}>x</Button>;\n',
-  "components/m-hook.tsx":
+  "src/components/m-hook.tsx":
     'import { useQuery } from "@grasp-os/sdk/react";\n\nexport const wrong: number = useQuery;\n',
-  "components/m-export.tsx":
+  "src/components/m-export.tsx":
     'import { notThere } from "@grasp-os/sdk/react";\n\nexport const wrong = notThere;\n',
-  "components/m-implicit.tsx": "export const wrong = (x) => x;\n",
-  "components/m-undefined.tsx":
+  "src/components/m-implicit.tsx": "export const wrong = (x) => x;\n",
+  "src/components/m-undefined.tsx":
     "export const wrong = (a?: { b: number }) => a.b;\n",
-  "components/m-excess.tsx":
+  "src/components/m-excess.tsx":
     "export const wrong: { a: number } = { a: 1, b: 2 };\n",
-  "components/m-expected.tsx": "// @ts-expect-error\nexport const fine = 1;\n",
-  "components/m-state.tsx":
+  "src/components/m-expected.tsx":
+    "// @ts-expect-error\nexport const fine = 1;\n",
+  "src/components/m-state.tsx":
     'import { useState } from "react";\n\nexport const Wrong = () => {\n  const [value, set] = useState(0);\n  set("x");\n  return value;\n};\n',
-  "components/m-error.tsx":
+  "src/components/m-error.tsx":
     'import { GraspError } from "@grasp-os/sdk/react";\n\nexport const wrong: string = new GraspError("x").nope;\n',
-  "components/m-dom.tsx":
+  "src/components/m-dom.tsx":
     'export const wrong: HTMLInputElement = document.createElement("div");\n',
-  "components/m-api.tsx":
+  "src/components/m-api.tsx":
     'import { useQuery } from "@grasp-os/sdk/react";\n\nimport { api } from "@server/_generated/api";\n\nexport const Wrong = () => useQuery(api, 42 as unknown as { nope: true });\n',
-  "components/m-callback.tsx":
+  "src/components/m-callback.tsx":
     'import { useCallback } from "react";\n\nexport const useWrong = () => useCallback((event) => event, []);\n',
-  "components/m-null.tsx":
+  "src/components/m-null.tsx":
     'export const wrong = (): string => document.querySelector("a").href;\n',
-  "components/m-utf16.tsx":
+  "src/components/m-utf16.tsx":
     'const face = "😀😀"; export const wrong: number = face;\n',
-  "components/m-child.tsx":
+  "src/components/m-child.tsx":
     'import { Button } from "@grasp-os/ui/components/button";\n\nexport const Wrong = () => <Button>{{ a: 1 }}</Button>;\n',
-  "components/m-declared.d.ts":
+  "src/components/m-declared.d.ts":
     "export interface Wrong {\n  field: Missing;\n}\n",
-  // Modules the kit holds but doesn't give a screen, by name and by path.
-  "components/m-hidden.tsx":
+  // Modules the kit holds but doesn't give a page, by name and by path.
+  "src/components/m-hidden.tsx":
     'import type { ZodType } from "zod";\n\nexport type Wrong = ZodType;\n',
-  "components/m-hidden-path.tsx":
+  "src/components/m-hidden-path.tsx":
     'import type { useQuery } from "../node_modules/@grasp-os/sdk/src/react";\n\nexport type Wrong = typeof useQuery;\n',
 };
 
@@ -124,9 +121,9 @@ const serverMistakes: Record<string, string> = {
   "server/m-dom.ts": "export const wrong = (): string => document.title;\n",
   "server/m-implicit.ts": "export const wrong = (x) => x;\n",
   "server/m-undefined.ts": "export const wrong = (a?: { b: number }) => a.b;\n",
-  // Modules the kit holds but doesn't give server code: a screen's, a
+  // Modules the kit holds but doesn't give server code: a page's, a
   // library's, and the kit's files by path, relative, absolute and bare.
-  "server/m-screen-module.ts":
+  "server/m-page-module.ts":
     'import type { useQuery } from "@grasp-os/sdk/react";\n\nexport type Wrong = typeof useQuery;\n',
   "server/m-react.ts":
     'import type { ReactNode } from "react";\n\nexport type Wrong = ReactNode;\n',
@@ -167,24 +164,24 @@ export const total = compute({
  * its DOM lib is newer ("and 55 more" for "and 54 more").
  */
 const said: Record<string, string[]> = {
-  screens: [
-    "components/m-api.tsx:5:37 TS2345 error",
-    "components/m-assign.tsx:1:14 TS2322 error",
-    "components/m-callback.tsx:3:44 TS7006 error",
-    "components/m-child.tsx:3:39 TS2353 error",
-    "components/m-declared.d.ts:2:10 TS2304 error",
-    "components/m-dom.tsx:1:14 TS2740 error",
-    "components/m-error.tsx:3:45 TS2345 error",
-    "components/m-error.tsx:3:50 TS2339 error",
-    "components/m-excess.tsx:1:45 TS2353 error",
-    "components/m-expected.tsx:1:1 TS2578 error",
-    "components/m-export.tsx:1:10 TS2305 error",
-    "components/m-hook.tsx:3:14 TS2322 error",
-    "components/m-implicit.tsx:1:23 TS7006 error",
-    "components/m-null.tsx:1:36 TS2531 error",
-    "components/m-prop.tsx:3:36 TS2322 error",
-    "components/m-undefined.tsx:1:45 TS18048 error",
-    "components/m-utf16.tsx:1:35 TS2322 error",
+  pages: [
+    "src/components/m-api.tsx:5:37 TS2345 error",
+    "src/components/m-assign.tsx:1:14 TS2322 error",
+    "src/components/m-callback.tsx:3:44 TS7006 error",
+    "src/components/m-child.tsx:3:39 TS2353 error",
+    "src/components/m-declared.d.ts:2:10 TS2304 error",
+    "src/components/m-dom.tsx:1:14 TS2740 error",
+    "src/components/m-error.tsx:3:45 TS2345 error",
+    "src/components/m-error.tsx:3:50 TS2339 error",
+    "src/components/m-excess.tsx:1:45 TS2353 error",
+    "src/components/m-expected.tsx:1:1 TS2578 error",
+    "src/components/m-export.tsx:1:10 TS2305 error",
+    "src/components/m-hook.tsx:3:14 TS2322 error",
+    "src/components/m-implicit.tsx:1:23 TS7006 error",
+    "src/components/m-null.tsx:1:36 TS2531 error",
+    "src/components/m-prop.tsx:3:36 TS2322 error",
+    "src/components/m-undefined.tsx:1:45 TS18048 error",
+    "src/components/m-utf16.tsx:1:35 TS2322 error",
   ],
   server: [
     "server/m-assign.ts:1:14 TS2322 error",
@@ -196,9 +193,9 @@ const said: Record<string, string[]> = {
     "server/m-kit-absolute.ts:1:31 TS2307 error",
     "server/m-kit-path.ts:1:31 TS2307 error",
     "server/m-library.ts:1:30 TS2307 error",
+    "server/m-page-module.ts:1:31 TS2307 error",
     "server/m-react.ts:1:32 TS2307 error",
     "server/m-returns.ts:4:76 TS2322 error",
-    "server/m-screen-module.ts:1:31 TS2307 error",
     "server/m-undefined.ts:1:45 TS18048 error",
   ],
   compute: [
@@ -268,72 +265,68 @@ describe(
   { timeout: 300_000 },
   () => {
     it.each(blueprints)(
-      "passes the %s blueprint's screens and server code, as it did",
+      "passes the %s blueprint's pages and server code, as it did",
       async (id) => {
         const { app, files } = await blueprintApp(id);
-        const screens = await buildScreens(env, files, app);
+        const pages = await buildPages(env, files, app);
         const server = await checkAppCode(
           env,
           await sealedServer(app, files),
           app
         );
-        expect({ screens, server: server.ok }).toMatchObject({
-          screens: { ok: true, diagnostics: [] },
+        expect({ pages, server: server.ok }).toMatchObject({
+          pages: { ok: true, diagnostics: [] },
           server: true,
         });
       }
     );
 
-    it("gives a screen's mistakes, and refuses its paths into the kit before the check", async () => {
+    it("gives a page's mistakes, and refuses its paths into the kit before the check", async () => {
       const { app, files } = await blueprintApp("intake");
-      const built = await buildScreens(
-        env,
-        { ...files, ...screenMistakes },
-        app
-      );
-      const { found, said: was } = parity("screens", built);
+      const built = await buildPages(env, { ...files, ...pageMistakes }, app);
+      const { found, said: was } = parity("pages", built);
       expect(found).toStrictEqual(was);
       expect(
         importRefusals(built).filter((line) => line.includes("m-hidden"))
       ).toStrictEqual([
-        "components/m-hidden-path.tsx:1",
-        "components/m-hidden.tsx:1",
+        "src/components/m-hidden-path.tsx:1",
+        "src/components/m-hidden.tsx:1",
       ]);
     });
 
-    it("refuses every triple-slash directive in a screen's files but a reference path to one of the App's, however it is written", async () => {
+    it("refuses every triple-slash directive in a page's files but a reference path to one of the App's, however it is written", async () => {
       // TypeScript reads a directive's tag and attributes in any case and
       // order, so a gate that matched one spelling let the others reach
       // the kit the check hides, or a lib the page doesn't have.
       const kitFile = "../.kit/node_modules/@grasp-os/sdk/src/server.d.ts";
       const directives: Record<string, string> = {
-        "components/d-upper.tsx": `/// <REFERENCE path="${kitFile}" />\nexport const a = 1;\n`,
-        "components/d-upper-path.tsx": `/// <reference PATH="${kitFile}" />\nexport const b = 1;\n`,
-        "components/d-reordered.tsx": `/// <reference preserve="true" path="${kitFile}" />\nexport const c = 1;\n`,
-        "components/d-lib.tsx":
+        "src/components/d-upper.tsx": `/// <REFERENCE path="${kitFile}" />\nexport const a = 1;\n`,
+        "src/components/d-upper-path.tsx": `/// <reference PATH="${kitFile}" />\nexport const b = 1;\n`,
+        "src/components/d-reordered.tsx": `/// <reference preserve="true" path="${kitFile}" />\nexport const c = 1;\n`,
+        "src/components/d-lib.tsx":
           '/// <reference lib="webworker" />\nexport const d = 1;\n',
-        "components/d-types.tsx":
+        "src/components/d-types.tsx":
           '/// <reference types="node" />\nexport const e = 1;\n',
-        "components/d-amd.tsx":
+        "src/components/d-amd.tsx":
           '/// <amd-dependency path="x" />\nexport const f = 1;\n',
         "d-declared.d.ts": `/// <Reference Path="${kitFile}" />\nexport type G = 1;\n`,
-        // The one directive a screen's files may hold.
-        "components/d-own.tsx":
+        // The one directive a page's files may hold.
+        "src/components/d-own.tsx":
           '/// <reference path="./d-own-types.d.ts" />\nexport const h: Own = 1;\n',
-        "components/d-own-types.d.ts": "type Own = 1;\n",
+        "src/components/d-own-types.d.ts": "type Own = 1;\n",
       };
       const { app, files } = await blueprintApp("intake");
-      const built = await buildScreens(env, { ...files, ...directives }, app);
+      const built = await buildPages(env, { ...files, ...directives }, app);
       expect(
         importRefusals(built).filter((line) => /d-/u.test(line))
       ).toStrictEqual([
-        "components/d-amd.tsx:1",
-        "components/d-lib.tsx:1",
-        "components/d-reordered.tsx:1",
-        "components/d-types.tsx:1",
-        "components/d-upper-path.tsx:1",
-        "components/d-upper.tsx:1",
         "d-declared.d.ts:1",
+        "src/components/d-amd.tsx:1",
+        "src/components/d-lib.tsx:1",
+        "src/components/d-reordered.tsx:1",
+        "src/components/d-types.tsx:1",
+        "src/components/d-upper-path.tsx:1",
+        "src/components/d-upper.tsx:1",
       ]);
     });
 

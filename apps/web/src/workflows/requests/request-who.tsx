@@ -24,7 +24,7 @@ import { OpenRow, ShareBar, useRequestNames } from "./request-parts.tsx";
 // not found him yet stands out; and by person, only once an owner turned
 // people one by one on, for owners, counts only, with a search.
 
-/** Rows of people shown before "Show more": a screen's worth. */
+/** Rows of people shown before "Show more": a page's worth. */
 const pageRows = 20;
 
 /**

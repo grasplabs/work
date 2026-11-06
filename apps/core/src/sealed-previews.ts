@@ -18,10 +18,10 @@ import {
   operationErrors,
 } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
+import { jsonBytes } from "@grasp-os/shared/pages";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { roleErrors } from "@grasp-os/shared/roles";
-import { jsonBytes } from "@grasp-os/shared/screens";
 import { dataErrors } from "@grasp-os/shared/stores";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 import {
@@ -75,19 +75,19 @@ import {
 } from "./db/workspace/schema.ts";
 import { callOperation } from "./operations.ts";
 import type { Invocation } from "./operations.ts";
+import { isWorkflowRequest } from "./page-workflows.ts";
+import { appCodeAndTestFiles } from "./pages.ts";
 import { readWindow } from "./query-windows.ts";
 import { within } from "./release-retention.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
-import { isWorkflowRequest } from "./screen-workflows.ts";
-import { appCodeAndTestFiles } from "./screens.ts";
 import { schemaRefusal } from "./store-backfill.ts";
 import { isWorkflowQueryPath } from "./workflow-reference-queries.ts";
 import type { Draft } from "./workspace.ts";
 
 // A chat's preview of its draft of an App of spec 8's layout: the draft
-// sealed into a draft release, and every call of its screens, its live
+// sealed into a draft release, and every call of its pages, its live
 // queries and the chat's agent run on that release through the operation
-// host, as a screen's call runs on a version's release (app-functions.ts),
+// host, as a page's call runs on a version's release (app-functions.ts),
 // in the chat's Workspace object. Only the chat's own person reaches it,
 // while they build the App (chats-rpc.ts), and the chat's agent, acting
 // for them (agent-builds.ts). A draft is code nobody reviewed, written by
@@ -100,7 +100,7 @@ import type { Draft } from "./workspace.ts";
 //   fixture store that core's inventory never lists (`openFixtureStore`),
 //   so no release binds it and `openStore` never opens it. It starts
 //   empty, with the draft's schema, for the draft's server code alone: a
-//   write of its screens alone keeps it, and what it holds (`serverOf`).
+//   write of its pages alone keeps it, and what it holds (`serverOf`).
 // - The draft reads or writes its person's real preferences: the draft's
 //   `preferences.get` and `update` are answered by core as on a version
 //   (app-preferences.ts), but only from the preview's own store, named by
@@ -110,8 +110,8 @@ import type { Draft } from "./workspace.ts";
 // - A workflow reference's queries read runs through the App's binding of
 //   the workflow; a preview binds no resource, so they are refused
 //   (`resource.unavailable`) before anything is read, whatever the alias.
-// - A screen's `useWorkflow` starts, controls or follows a real run: its
-//   requests (screen-workflows.ts) are refused whole as the preview's side
+// - A page's `useWorkflow` starts, controls or follows a real run: its
+//   requests (page-workflows.ts) are refused whole as the preview's side
 //   effect (`app.preview_side_effect`), before the draft is loaded. That
 //   is no fault of the draft's, so its check doesn't fail for it, as it
 //   would for a contract error.
@@ -139,7 +139,7 @@ import type { Draft } from "./workspace.ts";
 //   is `app.preview_outdated` (`served`, chats-rpc.ts), a call already
 //   running commits nothing more (each protected step checks its preview
 //   is still the one running), and its store is discarded. A revision that
-//   changed only screens (`serverOf`) runs the same sealed code on the
+//   changed only pages (`serverOf`) runs the same sealed code on the
 //   same store: what was sealed is still what runs. Server code that
 //   doesn't seal takes nothing's place: the draft's frames run on the last
 //   server code of this preview that did, as the frames were built
@@ -170,7 +170,7 @@ import type { Draft } from "./workspace.ts";
 // store, with no resources, held by the preview that started it: one
 // invocation per person and key, which a start joins (with the same
 // input), an attach reads again without starting, and a cancel stops,
-// as a live screen's does (action-invocation.ts), read through the same
+// as a live page's does (action-invocation.ts), read through the same
 // latest-snapshot reader. So:
 // - It outlives its preview: dropping the preview cancels every
 //   invocation it holds, and each protected step of the run checks the
@@ -487,9 +487,9 @@ const receiptBytes = 16 * 1024;
 
 /**
  * The call `request` asks of a preview, as `options` take it: refused as
- * the preview's side effect when it is a screen's request of a workflow,
+ * the preview's side effect when it is a page's request of a workflow,
  * and as `contract.invalid_request` when it isn't of the kind asked for,
- * or reads a window but isn't a screen's query.
+ * or reads a window but isn't a page's query.
  */
 const previewRequestOf = (
   request: unknown,
@@ -502,7 +502,7 @@ const previewRequestOf = (
   if (options.kind !== undefined && call.reference.kind !== options.kind) {
     throw operationErrors.create("contract.invalid_request");
   }
-  // A window is a screen's, and a query's only, as on a version.
+  // A window is a page's, and a query's only, as on a version.
   if (
     call.window !== undefined &&
     (options.chargeWindow === undefined || call.reference.kind !== "query")
@@ -553,19 +553,19 @@ export interface PreviewCallOptions {
   /** When it must end, in milliseconds since the epoch. */
   readonly deadline?: number;
   /**
-   * Given, the call may read a paginated list's window (a screen's,
+   * Given, the call may read a paginated list's window (a page's,
    * query-windows.ts): what charges the person for its pages past what
-   * the caller paid, as for a version's screen (`WindowRequest.charge`).
+   * the caller paid, as for a version's page (`WindowRequest.charge`).
    */
   readonly chargeWindow?: (pages: number, whole: number) => Promise<void>;
   /**
    * Told what the draft's code threw that its caller hears only as
    * `internal.unexpected` (`Invocation.draftFailure`): for the agent's
-   * check, never for the screen's answer.
+   * check, never for the page's answer.
    */
   readonly draftFailure?: (message: string) => void;
   /**
-   * The revision of the screen that called, when it isn't the draft's
+   * The revision of the page that called, when it isn't the draft's
    * (`serves`): what its function writes with `console` is filed under
    * it, never under the draft's (server-logs.ts).
    */
@@ -586,7 +586,7 @@ const sealedAs = (draft: Pick<Draft, "base">): number => (draft.base ?? 0) + 1;
 /**
  * Whether a draft's seal reads the file at `path`: one its builds select
  * (`appCodeAndTestFiles`, the very selection its compile and type check
- * make), never decided by a list of its own. Of every other file (screens,
+ * make), never decided by a list of its own. Of every other file (pages,
  * components, anything else) the seal keeps only the whole tree's hash,
  * as provenance; nothing it runs or checks comes from them.
  */
@@ -597,7 +597,7 @@ const sealReads = (path: string): boolean =>
  * What of `draft` its draft release is sealed from, as text to compare:
  * the version it changes and every change of a file its seal reads
  * (`sealReads`). Two revisions with the same server code run on one
- * release and one store, so a write of a screen reaches its preview
+ * release and one store, so a write of a page reaches its preview
  * without a seal, and keeps what the preview's store holds.
  */
 const serverOf = ({ base, changes }: Pick<Draft, "base" | "changes">): string =>
@@ -619,7 +619,7 @@ const runsServerOf = (running: Running, draft: Draft): boolean =>
   running.server === serverOf(draft);
 
 /**
- * The `@server/_generated/api` references the screens of `files`, an App as `version` of
+ * The `@server/_generated/api` references the pages of `files`, an App as `version` of
  * `app` (a kept version of a chat's draft, or a version of the App),
  * import: generated from its draft release, sealed as the preview's is
  * (`sealDraftRelease`) and loaded back through the same checks, every
@@ -649,7 +649,7 @@ export const readOnlyReferences = async (
 };
 
 /**
- * The `@server/_generated/api` references the screens of `draft`, a kept version of a
+ * The `@server/_generated/api` references the pages of `draft`, a kept version of a
  * chat's draft of `app`, import (`readOnlyReferences`), as the version it
  * would become.
  */
@@ -720,7 +720,7 @@ export class SealedPreviews {
    * What each preview runs of the App's version a frame shows (a negative
    * revision), by `nameOf`, and what it seals of one now: a place apart
    * from the draft's (`#places`). A version is the App's own sealed code,
-   * which a frame shows in place of a draft whose screen doesn't build,
+   * which a frame shows in place of a draft whose pages don't build,
    * while the draft's server code seals for the next update: neither stops
    * the other, so the version's reads and store are never out of date.
    */
@@ -770,9 +770,9 @@ export class SealedPreviews {
   }
 
   /**
-   * Calls the function `request` names, as text as a screen sends it, in
+   * Calls the function `request` names, as text as a page sends it, in
    * the preview of `draft`, for `personId`, whose chat it is: resolved
-   * against the draft release as a screen's call is against a version's
+   * against the draft release as a page's call is against a version's
    * (`publicOperationOf`), then run by the operation host on the
    * preview's store, with no resources. Answers what the call answered,
    * or why it was refused, and what a query read of the store; never
@@ -945,7 +945,7 @@ export class SealedPreviews {
 
   /**
    * Who calls, and the organization's people (app-people.ts), as a live
-   * screen's read is answered: for the builder previewing the draft, once
+   * page's read is answered: for the builder previewing the draft, once
    * the preview's gate passes. Throws for a refusal; `call` answers it.
    */
   async #people(
@@ -968,7 +968,7 @@ export class SealedPreviews {
       this.#peopleOf(chatId, personId, app, running, {
         requestId,
         declared: release.app.people === true,
-        part: "screen",
+        part: "page",
       }),
       read,
       call.input
@@ -1165,7 +1165,7 @@ export class SealedPreviews {
       requestId,
       declared,
       part,
-    }: { requestId: string; declared: boolean; part: "server" | "screen" }
+    }: { requestId: string; declared: boolean; part: "server" | "page" }
   ): PeopleAccess {
     return memberPeople(this.#env, {
       app,
@@ -1187,9 +1187,9 @@ export class SealedPreviews {
     chatId: ChatId,
     app: AppId,
     /**
-     * The revision of the screen it runs for, which its lines are filed
+     * The revision of the page it runs for, which its lines are filed
      * under (the draft's now, unless said): one preview runs on across
-     * writes of its screens, so never the revision it started at.
+     * writes of its pages, so never the revision it started at.
      */
     revision: number | undefined,
     release: Release
@@ -1208,7 +1208,7 @@ export class SealedPreviews {
 
   /**
    * Starts, joins or (`attach`) reads again `personId`'s invocation of the
-   * streaming action `request` names (its text, as a screen sends it) in
+   * streaming action `request` names (its text, as a page sends it) in
    * the preview of `draft`, by the request's key (see the header), and
    * answers what its reader is sent: JSON lines of progress, then its
    * result, as a live invocation's (action-invocation.ts). A refusal of
@@ -1223,7 +1223,7 @@ export class SealedPreviews {
     draft: Draft,
     request: unknown,
     attach: boolean,
-    /** The revision of the screen that started it (`PreviewCallOptions.revision`). */
+    /** The revision of the page that started it (`PreviewCallOptions.revision`). */
     revision = draft.revision
   ): Promise<ReadableStream<Uint8Array>> {
     const { call, key } = streamRequestOf(request);
@@ -1485,7 +1485,7 @@ export class SealedPreviews {
 
   /**
    * The preview of `draft`: the one running, while it runs the draft's
-   * server code (a write of its screens alone changes none of it), or the
+   * server code (a write of its pages alone changes none of it), or the
    * one sealing it; otherwise a new one, which takes the place of the one
    * running once it seals (`#settle`). Only the draft's own server code
    * now is ever sealed anew, or a version of the App's: a call that read
@@ -2013,7 +2013,7 @@ export class SealedPreviews {
     if (sealing !== undefined && !runsServerOf(sealing, draft)) {
       this.#sealing.delete(name);
     }
-    // Only a write that changed the server code: one of screens alone
+    // Only a write that changed the server code: one of pages alone
     // leaves what runs as it was, in place of server code that doesn't
     // seal too.
     const running = this.#running.get(name);
@@ -2032,14 +2032,14 @@ export class SealedPreviews {
   }
 
   /**
-   * What a screen of the draft at `revision` calls, `draft` being the
+   * What a page of the draft at `revision` calls, `draft` being the
    * chat's draft of `app` now: the draft itself at its revision or at one
-   * since which only its screens changed (`serverOf`), so what it calls is
+   * since which only its pages changed (`serverOf`), so what it calls is
    * the very code and store the draft runs now; or, while the draft's
    * server code doesn't seal, what the preview runs (its `draft`), the
-   * last server code that did, which the draft's screens were built
+   * last server code that did, which the draft's pages were built
    * against meanwhile; with none, the draft itself, whose calls are then
-   * refused with why it doesn't seal. A frame keeps the last version of its screen that worked while
+   * refused with why it doesn't seal. A frame keeps the last version of its page that worked while
    * a write of it fails, and calls from there. Undefined, so
    * `app.preview_outdated`, for any other. After this object starts
    * again, only the draft's own revision, as it knows of no earlier one.

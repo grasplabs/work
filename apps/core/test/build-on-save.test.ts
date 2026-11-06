@@ -5,8 +5,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { sealRelease } from "../src/app-releases.ts";
 import { commitFiles, setCurrentVersion, versionFiles } from "../src/apps.ts";
+import { buildPages, versionPages } from "../src/pages.ts";
 import { buildOnSave, draftLintBuild } from "../src/save-builds.ts";
-import { buildScreens, screenCode } from "../src/screens.ts";
 import { holdingBuilds } from "./build-holds.ts";
 import { mockIdp } from "./idp.ts";
 import { notesFiles } from "./notes-client-app.ts";
@@ -20,13 +20,14 @@ import { outcome, signedInApi } from "./sign-in.ts";
 
 const idp = mockIdp();
 
-/** A screen that says `text`, on the kit. */
-const screen = (text: string): Record<string, string> => ({
-  "screens/desk.tsx": `import { Button } from "@grasp-os/ui/components/button";
+/** A page that says `text`, on the kit. */
+const page = (text: string): Record<string, string> => ({
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router"; import { Button } from "@grasp-os/ui/components/button";
 
-export default function Desk() {
+function Desk() {
   return <Button>${text}</Button>;
 }
+export const Route = createFileRoute("/")({ component: Desk });
 `,
 });
 
@@ -55,7 +56,7 @@ const newApp = async (
 };
 
 describe("building on save", { timeout: 60_000 }, () => {
-  it("builds a saved version's screens, so it opens without building", async () => {
+  it("builds a saved version's pages, so it opens without building", async () => {
     const builder = await signedInApi(idp, "builder");
     // Files no other test builds, so nothing is in the cache before.
     const unique = crypto.randomUUID();
@@ -63,29 +64,29 @@ describe("building on save", { timeout: 60_000 }, () => {
 
     const { version, builds } = await builder.api.apps.files.commit(
       app,
-      screen(unique),
+      page(unique),
       "Save"
     );
     const files = await versionFiles(env, appIdSchema.parse(app), version);
     const unbuilt = { ...env, LOADER: noBuilds };
 
     expect(builds).toStrictEqual({
-      screens: { status: "ok", diagnostics: [] },
+      pages: { status: "ok", diagnostics: [] },
     });
     // Opening it loads what the save built.
-    await expect(
-      buildScreens(unbuilt, files, "app-test")
-    ).resolves.toMatchObject({
-      ok: true,
-    });
+    await expect(buildPages(unbuilt, files, "app-test")).resolves.toMatchObject(
+      {
+        ok: true,
+      }
+    );
   });
 
-  it("builds a screen with an unused import: an unused name is the lint's, never the build's", async () => {
+  it("builds a page with an unused import: an unused name is the lint's, never the build's", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder);
     const unused = {
-      "screens/desk.tsx": `import { Badge } from "@grasp-os/ui/components/badge";
-${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
+      "src/routes/index.tsx": `import { Badge } from "@grasp-os/ui/components/badge";
+${page(crypto.randomUUID())["src/routes/index.tsx"] ?? ""}`,
     };
 
     const { builds } = await builder.api.apps.files.commit(
@@ -94,17 +95,18 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
       "Unused"
     );
 
-    expect(builds.screens).toStrictEqual({ status: "ok", diagnostics: [] });
+    expect(builds.pages).toStrictEqual({ status: "ok", diagnostics: [] });
   });
 
   it("tells whoever saved what doesn't build and where, and commits all the same", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder);
     const broken = {
-      "screens/desk.tsx": `export default function Desk() {
+      "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router"; function Desk() {
   const count: number = "three";
   return <p>{count}</p>;
 }
+export const Route = createFileRoute("/")({ component: Desk });
 `,
     };
 
@@ -114,17 +116,17 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
       "Broken"
     );
 
-    const { screens } = committed.builds;
+    const { pages } = committed.builds;
 
-    const [typeError] = screens.diagnostics;
+    const [typeError] = pages.diagnostics;
 
     expect({
-      screens: [screens.status, ...where(screens)],
+      pages: [pages.status, ...where(pages)],
       column: typeError?.column,
       message:
         typeError?.message.includes("not assignable to type 'number'") ?? false,
     }).toStrictEqual({
-      screens: ["failed", "screens/desk.tsx:2 TS2322 error"],
+      pages: ["failed", "src/routes/index.tsx:2 TS2322 error"],
       column: 9,
       message: true,
     });
@@ -133,7 +135,7 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
     ).resolves.toMatchObject({ version: committed.version });
   });
 
-  it("never says screens are ok that were checked without their server code's references, as it doesn't register", async () => {
+  it("never says pages are ok that were checked without their server code's references, as it doesn't register", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder);
     // Registration throws (never inspected before: no kept manifest).
@@ -146,8 +148,8 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
     );
 
     // Checked for everything else, and nothing else failed, but not ok:
-    // whoever reads the status alone isn't told the screens passed.
-    expect(builds.screens).toStrictEqual({
+    // whoever reads the status alone isn't told the pages passed.
+    expect(builds.pages).toStrictEqual({
       status: "error",
       diagnostics: [],
       error:
@@ -174,14 +176,14 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
       { ...env, LOADER: unreachable },
       by,
       app,
-      screen(crypto.randomUUID()),
+      page(crypto.randomUUID()),
       "Save"
     );
 
     expect(committed).toMatchObject({
       version: 1,
       builds: {
-        screens: {
+        pages: {
           status: "error",
           diagnostics: [],
           error:
@@ -193,19 +195,19 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
     expect(warned.mock.calls).toContainEqual([
       expect.objectContaining({
         event: "app.save_build_failed",
-        kind: "screens",
+        kind: "pages",
         errorName: "Error",
         errorMessage: "The compiler is unreachable",
       }),
     ]);
     const files = await versionFiles(env, appIdSchema.parse(app), 1);
-    await expect(buildScreens(env, files, "app-test")).resolves.toMatchObject({
+    await expect(buildPages(env, files, "app-test")).resolves.toMatchObject({
       ok: true,
     });
   });
 
   it("says a build that doesn't finish within its wait couldn't run, rather than wait on", async () => {
-    const files = screen(crypto.randomUUID());
+    const files = page(crypto.randomUUID());
     const held = Promise.withResolvers<boolean>();
     // The build cache, which answers only once the test lets it: the
     // build waits on its receipt before it starts.
@@ -235,7 +237,7 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
     );
     // Still held: the build that didn't finish has cached nothing, so its
     // first use builds it anew.
-    const firstUse = await buildScreens(
+    const firstUse = await buildPages(
       { ...env, LOADER: counting },
       files,
       "app-test"
@@ -245,7 +247,7 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
     expect({ builds, firstUse: firstUse.ok, rebuilt: built > 0 }).toStrictEqual(
       {
         builds: {
-          screens: {
+          pages: {
             status: "error",
             diagnostics: [],
             error:
@@ -273,34 +275,34 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
       { ...env, DB: holding, BUILD_WAIT_MS: "50" },
       by,
       app,
-      screen(crypto.randomUUID()),
+      page(crypto.randomUUID()),
       "Save"
     );
     held.resolve(true);
 
-    expect(committed.builds.screens.status).toBe("error");
+    expect(committed.builds.pages.status).toBe("error");
   });
 
-  it("makes a version current without waiting on a screen build, however long that takes", async () => {
+  it("makes a version current without waiting on a page build, however long that takes", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder);
     const by = await builder.api.whoami();
     const { version } = await builder.api.apps.files.commit(
       app,
-      screen(crypto.randomUUID()),
+      page(crypto.randomUUID()),
       "Save"
     );
     // Its server code, the config and schema of the definition its first
     // version got, sealed first, as a review would.
     await sealRelease(env, { app: appIdSchema.parse(app), version, by });
     const held = Promise.withResolvers<boolean>();
-    // Screen builds answer only once the test lets them: making the
-    // version current reads its files and workflows, never a screen build.
+    // Page builds answer only once the test lets them: making the
+    // version current reads its files and workflows, never a page build.
     const holding = holdingBuilds(env.DB, held.promise, (key) =>
-      key.startsWith("screen-builds/")
+      key.startsWith("page-builds/")
     );
 
-    // Answers while screen builds are still held.
+    // Answers while page builds are still held.
     const made = await setCurrentVersion(
       { ...env, DB: holding },
       by,
@@ -312,17 +314,16 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
     expect(made.currentVersion).toBe(version);
   });
 
-  it("answers a screen whose build doesn't finish within the build wait as still building, rather than wait on", async () => {
-    const files = screen(crypto.randomUUID());
+  it("answers a page whose build doesn't finish within the build wait as still building, rather than wait on", async () => {
+    const files = page(crypto.randomUUID());
     const held = Promise.withResolvers<boolean>();
     const holding = holdingBuilds(env.DB, held.promise);
 
     // What an open, a review or a preview builds through.
     const slow = await outcome(
-      screenCode(
+      versionPages(
         { ...env, DB: holding, BUILD_WAIT_MS: "50" },
         files,
-        "desk",
         1,
         "app-test",
         "production"
@@ -330,7 +331,7 @@ ${screen(crypto.randomUUID())["screens/desk.tsx"] ?? ""}`,
     );
     held.resolve(true);
 
-    expect(slow).toBe("screen.build_slow");
+    expect(slow).toBe("page.build_slow");
   });
 });
 
@@ -339,11 +340,11 @@ describe("a save's diagnostics", { timeout: 60_000 }, () => {
     [
       "limits",
       {
-        ...screen("desk"),
+        ...page("desk"),
         // More characters together than a build takes, each file within it.
         ...Object.fromEntries(
           ["a", "b", "c", "d", "e", "f"].map((name) => [
-            `components/${name}.ts`,
+            `src/components/${name}.ts`,
             `// ${"x".repeat(199_000)}\n`,
           ])
         ),
@@ -352,28 +353,28 @@ describe("a save's diagnostics", { timeout: 60_000 }, () => {
     [
       "imports",
       {
-        "screens/desk.tsx":
-          'import pad from "left-pad";\n\nexport default function Desk() {\n  return <p>{String(pad)}</p>;\n}\n',
+        "src/routes/index.tsx":
+          'import { createFileRoute } from "@tanstack/react-router"; import pad from "left-pad";\n\nfunction Desk() {\n  return <p>{String(pad)}</p>;\n}\nexport const Route = createFileRoute("/")({ component: Desk });\n',
       },
     ],
     [
       "compile",
       {
-        "screens/desk.tsx":
-          "export default function Desk() {\n  return <p>desk</p\n}\n",
+        "src/routes/index.tsx":
+          'import { createFileRoute } from "@tanstack/react-router"; function Desk() {\n  return <p>desk</p\n}\nexport const Route = createFileRoute("/")({ component: Desk });\n',
       },
     ],
     [
       "types",
       {
-        "screens/desk.tsx":
-          'export default function Desk() {\n  const count: number = "three";\n  return <p>{count}</p>;\n}\n',
+        "src/routes/index.tsx":
+          'import { createFileRoute } from "@tanstack/react-router"; function Desk() {\n  const count: number = "three";\n  return <p>{count}</p>;\n}\nexport const Route = createFileRoute("/")({ component: Desk });\n',
       },
     ],
     [
       "structure",
       {
-        "components/note.tsx":
+        "src/components/note.tsx":
           "export function Note() {\n  return <p>note</p>;\n}\n",
       },
     ],
@@ -391,7 +392,7 @@ describe("a save's diagnostics", { timeout: 60_000 }, () => {
         { profile: "production" }
       );
       expect(
-        builds.screens.diagnostics
+        builds.pages.diagnostics
           .filter(({ severity }) => severity === "error")
           .map((diagnostic) => diagnostic.category)
       ).toContain(category);
@@ -403,8 +404,8 @@ describe("a save's diagnostics", { timeout: 60_000 }, () => {
       app: appIdSchema.parse(crypto.randomUUID()),
       version: 1,
       files: {
-        "screens/desk.tsx":
-          'export default function Desk() {\n  debugger;\n  return <p className="bg-red-500">desk</p>;\n}\n',
+        "src/routes/index.tsx":
+          'import { createFileRoute } from "@tanstack/react-router"; function Desk() {\n  debugger;\n  return <p className="bg-red-500">desk</p>;\n}\nexport const Route = createFileRoute("/")({ component: Desk });\n',
       },
     });
 

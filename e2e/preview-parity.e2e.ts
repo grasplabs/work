@@ -32,19 +32,17 @@ const installedMs = 30_000;
 const pages = [
   {
     blueprint: "intake",
-    screen: "intake",
+    appPage: "intake",
     heading: "Intake",
     settled: "No drafts wait for review.",
   },
   {
     blueprint: "board-page",
-    screen: "board",
     heading: "Board page",
     settled: "No snapshots yet. Take the first one.",
   },
   {
     blueprint: "workflow-map",
-    screen: "map",
     heading: "Workflow map",
     settled: "No workflows yet. Draw the first one.",
   },
@@ -62,7 +60,7 @@ const settledMarkupOf = async (
   return await frame.locator("body").evaluate((body) => body.innerHTML);
 };
 
-for (const { blueprint, screen, heading, settled } of pages) {
+for (const { blueprint, heading, settled } of pages) {
   test(`renders the ${blueprint} page the same in a preview and published`, async ({
     pageOf,
   }) => {
@@ -93,15 +91,15 @@ for (const { blueprint, screen, heading, settled } of pages) {
     }
 
     const page = await pageOf(admin);
-    await page.goto(`/apps/${app}/full?screen=${screen}`);
+    await page.goto(`/apps/${app}/full`);
     const live = await settledMarkupOf(
-      page.frameLocator(`iframe[title="${screen} app"]`),
+      page.frameLocator('iframe[title="App"]'),
       settled
     );
 
     // A draft that renders as the version does: a file no page imports.
     await writeDraft(admin.userId, chat, app, 1, {
-      "components/parity.ts": "export const parity = true;\n",
+      "src/components/parity.ts": "export const parity = true;\n",
     });
     await page.goto(`/?chat=${chat}`);
     const preview = page

@@ -4,7 +4,7 @@ import { appDefinition } from "../apps/core/test/app-definitions.ts";
  * A contact list, as an App's chat writes one into its draft (the fake
  * model's `buildsApp`, e2e/model-scripts.ts): spec 8's layout, a table of
  * contacts, a query that lists them and a mutation that adds one, and a
- * screen that adds a contact by name and lists them live.
+ * page that adds a contact by name and lists them live.
  */
 export const contactsApp: Record<string, string> = {
   ...appDefinition({
@@ -34,12 +34,8 @@ export const add = mutation({
   handler: async (ctx, args) => await ctx.db.insert("contacts", args),
 });
 `,
-
-  "screens.ts": `export default {
-  screens: [{ name: "contacts", path: "/", source: "screens/contacts.tsx" }],
-};
-`,
-  "screens/contacts.tsx": `import { useMutation, useQuery } from "@grasp-os/sdk/react";
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import { useState } from "react";
@@ -51,7 +47,7 @@ const Contacts = () => {
   const [name, setName] = useState("");
   return (
     <main className="flex flex-col gap-4 p-6">
-      {/* No <form>: a screen's frame is sandboxed without forms, so
+      {/* No <form>: a page's frame is sandboxed without forms, so
           the browser submits nothing. */}
       <div className="flex gap-2">
         <Input
@@ -79,6 +75,6 @@ const Contacts = () => {
   );
 };
 
-export default Contacts;
+export const Route = createFileRoute("/")({ component: Contacts });
 `,
 };

@@ -27,7 +27,7 @@ import { auditedDuring } from "./sign-in.ts";
 // resource an admin binds to a workflow map), and the improvement signals
 // of the App workflows the map links to, read from the platform's
 // statistics (bound to the permission an admin grants). These tests go in
-// through the Apps' functions, as their screens call them, and start from
+// through the Apps' functions, as their pages call them, and start from
 // the ways it can fail: a number that isn't what the map and the runs say
 // (a run outside the window counted, the designed version taken for the
 // drawn one); a later save, run or day of signals changing a snapshot
@@ -49,7 +49,7 @@ describe("the board page", { timeout: 90_000 }, () => {
         })
       )
     );
-    // Each written as the map's screen would: drawn, designed, linked.
+    // Each written as the map's page would: drawn, designed, linked.
     const worst = async (index: number): Promise<void> => {
       const fields = {
         title: `${index}`.padEnd(200, "€"),

@@ -5,7 +5,7 @@ import { designRuleLevels } from "./design-rules.ts";
  * (usually an agent). Errors fail the build; warnings don't.
  */
 export interface Diagnostic {
-  /** The App file, e.g. `screens/desk.tsx`; absent when it is about the App as a whole. */
+  /** The App file, e.g. `src/routes/index.tsx`; absent when it is about the App as a whole. */
   file?: string;
   /** 1-based. */
   line?: number;

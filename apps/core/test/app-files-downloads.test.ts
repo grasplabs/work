@@ -58,16 +58,16 @@ const { openedApp, colleagueOf } = appsOf(mockIdp());
 
 describe("an App's files", { timeout: 120_000 }, () => {
   it("recovers an answer whose body broke partway under the same upload", async () => {
-    const { app, release, screen } = await openedApp();
+    const { app, release, page } = await openedApp();
     // The connection drops after the headers of the first start's and the
     // first finish's answers, a few bytes into their bodies.
     const broken = new Set<string>();
     const channel = fileChannel({
       app,
-      lease: screen.lease,
-      person: screen.named,
+      lease: page.lease,
+      person: page.named,
       fetch: async (path, init) => {
-        const response = await screen.fetch(path, init);
+        const response = await page.fetch(path, init);
         const step = path.endsWith("/finish") ? "finish" : path;
         if (
           (path.endsWith("/uploads") || path.endsWith("/finish")) &&
@@ -82,19 +82,19 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const bytes = png(fileLimits.chunkBytes + 5);
     const id = await upload(channel, blobOf(bytes, "image/png"));
     expect(broken.size).toBe(2);
-    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+    await expect(page.channel.describe("files", id)).resolves.toMatchObject({
       size: bytes.length,
     });
     await expect(fileStates(release)).resolves.toStrictEqual(["published:"]);
   });
 
   it("cancels an upload that failed for good after its start, so it holds none of the person's places", async () => {
-    const { app, release, screen } = await openedApp();
+    const { app, release, page } = await openedApp();
     // Every chunk is refused for good, with no answer lost to send again.
     const channel = fileChannel({
       app,
-      lease: screen.lease,
-      person: screen.named,
+      lease: page.lease,
+      person: page.named,
       fetch: async (path, init) => {
         if (path.includes("/chunks/")) {
           return await Promise.resolve(
@@ -104,7 +104,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
             )
           );
         }
-        return await screen.fetch(path, init);
+        return await page.fetch(path, init);
       },
     });
     const failed = await codeOf(upload(channel, blobOf(png(100), "image/png")));
@@ -118,14 +118,14 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("answers an upload whose finish was refused after core published it with its file", async () => {
-    const { app, release, screen } = await openedApp();
-    // Core publishes the file; the screen hears a refusal instead.
+    const { app, release, page } = await openedApp();
+    // Core publishes the file; the page hears a refusal instead.
     const channel = fileChannel({
       app,
-      lease: screen.lease,
-      person: screen.named,
+      lease: page.lease,
+      person: page.named,
       fetch: async (path, init) => {
-        const response = await screen.fetch(path, init);
+        const response = await page.fetch(path, init);
         if (path.endsWith("/finish")) {
           await response.body?.cancel();
           return Response.json(
@@ -138,16 +138,16 @@ describe("an App's files", { timeout: 120_000 }, () => {
     });
     const bytes = png(100);
     const id = await upload(channel, blobOf(bytes, "image/png"));
-    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+    await expect(page.channel.describe("files", id)).resolves.toMatchObject({
       size: bytes.length,
     });
     await expect(fileStates(release)).resolves.toStrictEqual(["published:"]);
   });
 
   it("answers a cancellation with what won: cancelled, or the file when publication came first", async () => {
-    const { app, client, api, release, screen } = await openedApp();
+    const { app, client, api, release, page } = await openedApp();
     const early = new AbortController();
-    const cancelled = screen.channel.upload(
+    const cancelled = page.channel.upload(
       "files",
       blobOf(png(3 * fileLimits.chunkBytes), "image/png"),
       "big.png",
@@ -164,7 +164,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     // Cancelled while its finish is under way, the finish reaching core
     // first: the file, which its uploader has.
     const late = new AbortController();
-    const id = await orderedChannel(screen, app, "finish").upload(
+    const id = await orderedChannel(page, app, "finish").upload(
       "files",
       blobOf(png(), "image/png"),
       "small.png",
@@ -195,9 +195,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("lets a cancellation sent while its upload is verified win, the file never readable", async () => {
-    const { app, release, screen } = await openedApp();
+    const { app, release, page } = await openedApp();
     const cancel = new AbortController();
-    const finishing = orderedChannel(screen, app, "cancel").upload(
+    const finishing = orderedChannel(page, app, "cancel").upload(
       "files",
       blobOf(png(), "image/png"),
       "late.png",
@@ -217,8 +217,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("answers a mutation sent again under its key as it did, though the file it detached is no longer the caller's to read", async () => {
-    const { builder, app, client, api, screen } = await openedApp();
-    const id = await upload(screen.channel, blobOf(png(), "image/png"));
+    const { builder, app, client, api, page } = await openedApp();
+    const id = await upload(page.channel, blobOf(png(), "image/png"));
     const pinned = await client.mutation(api.pin, { file: { id } });
     const colleague = await colleagueOf(builder, app);
     const unpin = async () =>
@@ -243,18 +243,18 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("settles a cancellation on core's answer, though the finish never answers", async () => {
-    const { app, release, screen } = await openedApp();
+    const { app, release, page } = await openedApp();
     const { promise: stalled, resolve: unstall } =
       Promise.withResolvers<null>();
     const channel = fileChannel({
       app,
-      lease: screen.lease,
-      person: screen.named,
+      lease: page.lease,
+      person: page.named,
       fetch: async (path, init) => {
         if (path.endsWith("/finish")) {
           await stalled;
         }
-        return await screen.fetch(path, init);
+        return await page.fetch(path, init);
       },
     });
     const cancel = new AbortController();
@@ -286,9 +286,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("keeps a key one file's, a deletion of a file already deleted keeping it too", async () => {
-    const { client, screen } = await openedApp();
-    const first = await upload(screen.channel, blobOf(png(), "image/png"));
-    const second = await upload(screen.channel, blobOf(png(32), "image/png"));
+    const { client, page } = await openedApp();
+    const first = await upload(page.channel, blobOf(png(), "image/png"));
+    const second = await upload(page.channel, blobOf(png(32), "image/png"));
     await client.files.delete(permissions.files, { id: first });
     const keyed = { idempotencyKey: "tidy-up" };
     // Deleted already: the deletion under the key answers as it did.
@@ -302,16 +302,16 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("cancels at once while a chunk's request is stalled, and sends a chunk stalled too long again", async () => {
-    const { app, release, screen } = await openedApp();
+    const { app, release, page } = await openedApp();
     const cancel = new AbortController();
     const quiet = fileChannel({
       app,
-      lease: screen.lease,
-      person: screen.named,
+      lease: page.lease,
+      person: page.named,
       fetch: async (path, init) =>
         path.includes("/chunks/")
           ? await neverAnswered(init)
-          : await screen.fetch(path, init),
+          : await page.fetch(path, init),
     });
     const { promise: late, resolve: giveUp } = Promise.withResolvers<string>();
     const timer = setTimeout(() => {
@@ -342,43 +342,43 @@ describe("an App's files", { timeout: 120_000 }, () => {
     let stalls = 0;
     const flaky = fileChannel({
       app,
-      lease: screen.lease,
-      person: screen.named,
+      lease: page.lease,
+      person: page.named,
       chunkMs: 300,
       fetch: async (path, init) => {
         if (path.endsWith("/chunks/1") && stalls === 0) {
           stalls += 1;
           return await neverAnswered(init);
         }
-        return await screen.fetch(path, init);
+        return await page.fetch(path, init);
       },
     });
     const bytes = png(fileLimits.chunkBytes + 5);
     const id = await upload(flaky, blobOf(bytes, "image/png"));
-    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+    await expect(page.channel.describe("files", id)).resolves.toMatchObject({
       size: bytes.length,
     });
   });
 
   it("cancels at once while its start is stalled, cancelling the upload the start made under its key", async () => {
-    const { app, release, screen } = await openedApp();
+    const { app, release, page } = await openedApp();
     const cancel = new AbortController();
     let starts = 0;
     const channel = fileChannel({
       app,
-      lease: screen.lease,
-      person: screen.named,
+      lease: page.lease,
+      person: page.named,
       fetch: async (path, init) => {
         if (path.endsWith("/uploads")) {
           starts += 1;
           if (starts === 1) {
             // It reaches core, which makes the upload; its answer never comes.
-            await screen.fetch(path, init);
+            await page.fetch(path, init);
             cancel.abort();
             return await neverAnswered(init);
           }
         }
-        return await screen.fetch(path, init);
+        return await page.fetch(path, init);
       },
     });
     const { promise: late, resolve: giveUp } = Promise.withResolvers<string>();
@@ -407,19 +407,19 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("answers a cancellation during its start as cancelled only once core says so", async () => {
-    const { app, release, screen } = await openedApp();
+    const { app, release, page } = await openedApp();
     const cancel = new AbortController();
     let starts = 0;
     const channel = fileChannel({
       app,
-      lease: screen.lease,
-      person: screen.named,
+      lease: page.lease,
+      person: page.named,
       fetch: async (path, init) => {
         if (path.endsWith("/uploads")) {
           starts += 1;
           if (starts === 1) {
             // It reaches core, which makes the upload; its answer never comes.
-            await screen.fetch(path, init);
+            await page.fetch(path, init);
             cancel.abort();
             return await neverAnswered(init);
           }
@@ -428,7 +428,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
             code: "internal.unavailable",
           });
         }
-        return await screen.fetch(path, init);
+        return await page.fetch(path, init);
       },
     });
     await expect(
@@ -446,11 +446,11 @@ describe("an App's files", { timeout: 120_000 }, () => {
     let sent = 0;
     const counting = fileChannel({
       app,
-      lease: screen.lease,
-      person: screen.named,
+      lease: page.lease,
+      person: page.named,
       fetch: async (path, init) => {
         sent += 1;
-        return await screen.fetch(path, init);
+        return await page.fetch(path, init);
       },
     });
     const early = new AbortController();
@@ -469,14 +469,14 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("cancels at once while asking core which chunks it holds is stalled, after a lost chunk or a finish that found one missing", async () => {
-    const { app, release, screen } = await openedApp();
+    const { app, release, page } = await openedApp();
     const stalledAfter = async (lose: "chunk" | "finish") => {
       const cancel = new AbortController();
       let chunks = 0;
       const channel = fileChannel({
         app,
-        lease: screen.lease,
-        person: screen.named,
+        lease: page.lease,
+        person: page.named,
         fetch: async (path, init) => {
           if (asksHeld(path, init)) {
             cancel.abort();
@@ -488,13 +488,13 @@ describe("an App's files", { timeout: 120_000 }, () => {
               // Answered without reaching core: the finish finds it missing.
               return new Response(null, { status: 204 });
             }
-            const response = await screen.fetch(path, init);
+            const response = await page.fetch(path, init);
             if (lose === "chunk" && chunks === 1) {
               throw new TypeError("The connection was reset.");
             }
             return response;
           }
-          return await screen.fetch(path, init);
+          return await page.fetch(path, init);
         },
       });
       const { promise: late, resolve: giveUp } =
@@ -528,9 +528,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("refuses to delete an upload that isn't finished: its uploader cancels it", async () => {
-    const { app, client, release, screen } = await openedApp();
+    const { app, client, release, page } = await openedApp();
     const file = await begunFile(
-      await rawChannel(screen, app).begin(declaration())
+      await rawChannel(page, app).begin(declaration())
     );
     await expect(
       codeOf(client.files.delete(permissions.files, { id: file }))
@@ -539,9 +539,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("refuses to delete a file a record holds, and deletes its uploader's own under a key", async () => {
-    const { client, api, screen } = await openedApp();
-    const held = await upload(screen.channel, blobOf(png(), "image/png"));
-    const loose = await upload(screen.channel, blobOf(png(32), "image/png"));
+    const { client, api, page } = await openedApp();
+    const held = await upload(page.channel, blobOf(png(), "image/png"));
+    const loose = await upload(page.channel, blobOf(png(32), "image/png"));
     const note = await client.mutation(api.create, { title: "Holder" });
     await client.mutation(api.attachFile, {
       id: note,
@@ -557,7 +557,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       Promise.all([
         codeOf(client.files.delete(permissions.files, { id: held })),
         codeOf(client.files.delete(permissions.files, { id: held }, keyed)),
-        codeOf(screen.channel.describe("files", loose)),
+        codeOf(page.channel.describe("files", loose)),
         codeOf(
           client.mutation(api.attachFile, {
             id: other,
@@ -575,8 +575,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("cleans up a file once nothing holds it for the orphan retention, and never one held again", async () => {
-    const { client, api, release, screen } = await openedApp();
-    const id = await upload(screen.channel, blobOf(png(), "image/png"));
+    const { client, api, release, page } = await openedApp();
+    const id = await upload(page.channel, blobOf(png(), "image/png"));
     const note = await client.mutation(api.create, { title: "Holder" });
     await client.mutation(api.attachFile, {
       id: note,
@@ -586,7 +586,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     // Its note deleted: kept through the orphan retention.
     await client.mutation(api.remove, { id: note, expectedRevision: 2 });
     await sweepIn(release, fileLimits.orphanMs - 60_000);
-    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+    await expect(page.channel.describe("files", id)).resolves.toMatchObject({
       id,
     });
     // Held again before it was cleaned up: the cleanup due is stale.
@@ -597,7 +597,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       file: { id },
     });
     await sweepIn(release, fileLimits.orphanMs + purgeGraceMs + 1);
-    await expect(screen.channel.describe("files", id)).resolves.toMatchObject({
+    await expect(page.channel.describe("files", id)).resolves.toMatchObject({
       id,
     });
     // Detached, and nothing holds it through the retention: deleted, then
@@ -609,15 +609,15 @@ describe("an App's files", { timeout: 120_000 }, () => {
     });
     await sweepIn(release, fileLimits.orphanMs + 1);
     await sweepIn(release, fileLimits.orphanMs + purgeGraceMs + 2);
-    await expect(codeOf(screen.channel.describe("files", id))).resolves.toBe(
+    await expect(codeOf(page.channel.describe("files", id))).resolves.toBe(
       "file.not_found"
     );
     await expect(storedObjects(release)).resolves.toStrictEqual([]);
   });
 
   it("expires an upload that wasn't finished in time, its start sent again answered so too", async () => {
-    const { app, release, screen } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, release, page } = await openedApp();
+    const raw = rawChannel(page, app);
     const declared = declaration();
     const file = await begunFile(await raw.begin(declared));
     // Past its time, before the alarm deleted it.
@@ -644,25 +644,25 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("delivers none of a download's remaining bytes once its file is deleted", async () => {
-    const { screen } = await openedApp();
+    const { page } = await openedApp();
     const id = await upload(
-      screen.channel,
+      page.channel,
       blobOf(png(2 * fileLimits.chunkBytes), "image/png")
     );
-    const response = await screen.channel.content("files", id);
+    const response = await page.channel.content("files", id);
     const reader = response.body?.getReader();
     const first: ReadableStreamReadResult<Uint8Array> | undefined =
       await reader?.read();
     expect(first?.value?.byteLength).toBe(fileLimits.chunkBytes);
-    await screen.channel.delete("files", id);
+    await page.channel.delete("files", id);
     await expect(reader?.read()).rejects.toThrow("That file isn't available.");
   });
 
   it("delivers none of a download's remaining bytes once its reader may no longer read it", async () => {
-    const { builder, app, client, api, screen } = await openedApp();
+    const { builder, app, client, api, page } = await openedApp();
     const colleague = await colleagueOf(builder, app);
     const id = await upload(
-      screen.channel,
+      page.channel,
       blobOf(png(2 * fileLimits.chunkBytes), "image/png")
     );
     const note = await client.mutation(api.create, { title: "Shared" });
@@ -671,7 +671,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
       expectedRevision: 1,
       file: { id },
     });
-    const response = await colleague.screen.channel.content("files", id);
+    const response = await colleague.page.channel.content("files", id);
     const reader = response.body?.getReader();
     await reader?.read();
     // Detached: the colleague reads it through no record any more.
@@ -684,12 +684,12 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("delivers none of a download's remaining bytes once its reader signed out", async () => {
-    const { builder, screen } = await openedApp();
+    const { builder, page } = await openedApp();
     const id = await upload(
-      screen.channel,
+      page.channel,
       blobOf(png(2 * fileLimits.chunkBytes), "image/png")
     );
-    const response = await screen.channel.content("files", id);
+    const response = await page.channel.content("files", id);
     const reader = response.body?.getReader();
     await reader?.read();
     await callAuth("/sign-out", builder.session, {});
@@ -697,12 +697,12 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("delivers none of a download's remaining bytes once another release of its App is current", async () => {
-    const { builder, app, screen } = await openedApp();
+    const { builder, app, page } = await openedApp();
     const id = await upload(
-      screen.channel,
+      page.channel,
       blobOf(png(2 * fileLimits.chunkBytes), "image/png")
     );
-    const response = await screen.channel.content("files", id);
+    const response = await page.channel.content("files", id);
     const reader = response.body?.getReader();
     await reader?.read();
     // The same files under a second version.
@@ -721,12 +721,12 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("delivers none of a download's remaining bytes once its release is revoked, and starts none after", async () => {
-    const { app, screen } = await openedApp();
+    const { app, page } = await openedApp();
     const id = await upload(
-      screen.channel,
+      page.channel,
       blobOf(png(2 * fileLimits.chunkBytes), "image/png")
     );
-    const response = await screen.channel.content("files", id);
+    const response = await page.channel.content("files", id);
     const reader = response.body?.getReader();
     await reader?.read();
     await revokeRelease(
@@ -738,20 +738,20 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await expect(reader?.read()).rejects.toThrow(
       "This version of the App was revoked."
     );
-    await expect(codeOf(screen.channel.describe("files", id))).resolves.toBe(
-      "screen.revoked"
+    await expect(codeOf(page.channel.describe("files", id))).resolves.toBe(
+      "page.revoked"
     );
   });
 
   it("ends a download that takes longer than a download may", async () => {
-    const { screen } = await openedApp();
+    const { page } = await openedApp();
     const id = await upload(
-      screen.channel,
+      page.channel,
       blobOf(png(2 * fileLimits.chunkBytes), "image/png")
     );
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
-      const response = await screen.channel.content("files", id);
+      const response = await page.channel.content("files", id);
       const reader = response.body?.getReader();
       await reader?.read();
       vi.setSystemTime(Date.now() + fileLimits.downloadMs + 1);
@@ -764,14 +764,14 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("saves a file under its checked type's extension, never one a browser would run", async () => {
-    const { app, screen } = await openedApp();
+    const { app, page } = await openedApp();
     const disposition = async (
       name: string,
       type: string,
       bytes: Uint8Array<ArrayBuffer>
     ) => {
-      const id = await upload(screen.channel, blobOf(bytes, type), name);
-      const response = await screen.channel.content("files", id);
+      const id = await upload(page.channel, blobOf(bytes, type), name);
+      const response = await page.channel.content("files", id);
       await response.body?.cancel();
       return {
         disposition: response.headers.get("content-disposition"),
@@ -799,7 +799,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     });
     // A name with a bidi override or another invisible character is no
     // file's name at all.
-    const raw = rawChannel(screen, app);
+    const raw = rawChannel(page, app);
     const refused = await Promise.all(
       [
         `invoice${String.fromCodePoint(0x20_2e)}txt.exe`,
@@ -910,8 +910,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("gives chunks a budget of their own, a refused one counting too", async () => {
-    const { app, screen } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, page } = await openedApp();
+    const raw = rawChannel(page, app);
     const file = crypto.randomUUID();
     // Twice the burst at once: each charged before anything else, so the
     // budget runs out whatever each costs after.
@@ -927,8 +927,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("keeps a chunk once recorded: a late write removes only its own object", async () => {
-    const { app, release, screen, builder } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, release, page, builder } = await openedApp();
+    const raw = rawChannel(page, app);
     const bytes = png(100);
     const sha = await sha256(bytes);
     const file = await begunFile(
@@ -979,7 +979,7 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await expect(
       statusOf(raw.put(file, 0, other, await sha256(other)))
     ).resolves.toBe(409);
-    const content = await screen.channel.content("files", file);
+    const content = await page.channel.content("files", file);
     const objects = await storedObjects(release);
     expect({
       bytes: await content.bytes(),
@@ -991,8 +991,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("records one of two writes of a chunk sent at once, and publishes only what it recorded", async () => {
-    const { app, release, screen } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, release, page } = await openedApp();
+    const raw = rawChannel(page, app);
     const mine = png(100);
     const theirs = png(100).fill(9, 8);
     const file = await begunFile(
@@ -1015,13 +1015,13 @@ describe("an App's files", { timeout: 120_000 }, () => {
       // The other write was recorded: rejected, never published.
       return;
     }
-    const content = await screen.channel.content("files", file);
+    const content = await page.channel.content("files", file);
     await expect(content.bytes()).resolves.toStrictEqual(mine);
   });
 
   it("keeps a chunk sent again while its first write still ran, whichever is recorded first", async () => {
-    const { app, release, screen, builder } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, release, page, builder } = await openedApp();
+    const raw = rawChannel(page, app);
     const bytes = png(100);
     const sha = await sha256(bytes);
     const file = await begunFile(
@@ -1091,8 +1091,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("keeps a chunk whose recording committed though its answer was lost", async () => {
-    const { app, release, screen } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, release, page } = await openedApp();
+    const raw = rawChannel(page, app);
     const bytes = png(100);
     const sha = await sha256(bytes);
     const file = await begunFile(
@@ -1125,13 +1125,13 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await expect(answerOf(await raw.finish(file))).resolves.toMatchObject({
       state: "published",
     });
-    const content = await screen.channel.content("files", file);
+    const content = await page.channel.content("files", file);
     await expect(content.bytes()).resolves.toStrictEqual(bytes);
   });
 
   it("removes a write's object once it had time to settle, when neither its recording nor the check after answered", async () => {
-    const { app, release, screen } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, release, page } = await openedApp();
+    const raw = rawChannel(page, app);
     const bytes = png(100);
     const sha = await sha256(bytes);
     const file = await begunFile(
@@ -1195,13 +1195,13 @@ describe("an App's files", { timeout: 120_000 }, () => {
       before: 2,
       after: 1,
     });
-    const content = await screen.channel.content("files", file);
+    const content = await page.channel.content("files", file);
     await expect(content.bytes()).resolves.toStrictEqual(bytes);
   });
 
   it("removes a losing write's object once it had time to settle, though its writer never did", async () => {
-    const { app, release, screen, builder } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, release, page, builder } = await openedApp();
+    const raw = rawChannel(page, app);
     const bytes = png(100);
     const sha = await sha256(bytes);
     const file = await begunFile(
@@ -1250,8 +1250,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("removes again a write's object that lands after the alarm removed it", async () => {
-    const { app, release, screen, builder } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, release, page, builder } = await openedApp();
+    const raw = rawChannel(page, app);
     const bytes = png(100);
     const sha = await sha256(bytes);
     const file = await begunFile(
@@ -1280,8 +1280,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("tries again at the alarm's next try to remove a write's object whose removal failed", async () => {
-    const { app, release, screen, builder } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, release, page, builder } = await openedApp();
+    const raw = rawChannel(page, app);
     const bytes = png(100);
     const sha = await sha256(bytes);
     const file = await begunFile(
@@ -1353,8 +1353,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("tries a failed removal again only after the retry's wait, however often the alarm comes", async () => {
-    const { app, release, screen, builder } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, release, page, builder } = await openedApp();
+    const raw = rawChannel(page, app);
     const bytes = png(100);
     const sha = await sha256(bytes);
     const file = await begunFile(
@@ -1410,8 +1410,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("tries again a failed removal behind a full page of writes removed already and kept for late puts", async () => {
-    const { app, release, screen, builder } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, release, page, builder } = await openedApp();
+    const raw = rawChannel(page, app);
     const bytes = png(100);
     const sha = await sha256(bytes);
     const file = await begunFile(
@@ -1465,8 +1465,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("ends only its own finish claim, never one another finish took once its own expired", async () => {
-    const { app, release, screen, builder } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, release, page, builder } = await openedApp();
+    const raw = rawChannel(page, app);
     const bytes = png(100);
     const sha = await sha256(bytes);
     const file = await begunFile(
@@ -1514,8 +1514,8 @@ describe("an App's files", { timeout: 120_000 }, () => {
   });
 
   it("checks an upload's bytes once however many finishes arrive at once, answering each with the file", async () => {
-    const { app, screen } = await openedApp();
-    const raw = rawChannel(screen, app);
+    const { app, page } = await openedApp();
+    const raw = rawChannel(page, app);
     const bytes = png(100);
     const sha = await sha256(bytes);
     const file = await begunFile(

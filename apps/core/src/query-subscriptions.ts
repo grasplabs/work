@@ -5,14 +5,14 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { OperationResult } from "@grasp-os/shared/operations";
-import type { Identity } from "@grasp-os/shared/rpc";
 import {
   jsonBytes,
   querySubscriptionLimits,
-  screenErrors,
-  screenLimits,
-} from "@grasp-os/shared/screens";
-import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
+  pageErrors,
+  pageLimits,
+} from "@grasp-os/shared/pages";
+import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
+import type { Identity } from "@grasp-os/shared/rpc";
 
 import { operationRoles } from "./app-access.ts";
 import {
@@ -24,18 +24,18 @@ import {
 } from "./app-functions.ts";
 import type { EvaluatedQuery } from "./app-functions.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
+import { delivering } from "./page-delivery.ts";
+import type { LeasedBuild } from "./page-delivery.ts";
 import { windowPages } from "./query-windows.ts";
-import { delivering } from "./screen-delivery.ts";
-import type { LeasedBuild } from "./screen-delivery.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { Subscription } from "./subscription.ts";
 
 // Live queries (spec 11): what one page's connection to core (one browser
-// tab) follows of its Apps' public queries, kept fresh by core. A screen
+// tab) follows of its Apps' public queries, kept fresh by core. A page
 // asks to follow a query (`watchQuery`); core reads it as the person and
 // pushes the result; the App's store tells core of every write that
 // changed a table the query read (store-watches.ts), and core reads it
-// again and pushes the new result. The screen never asks again, and no
+// again and pushes the new result. The page never asks again, and no
 // App code subscribes or broadcasts.
 // A paginated list (`usePaginatedQuery`) follows its window the same
 // way: the request names the extent, and every read reads the whole
@@ -44,17 +44,17 @@ import { Subscription } from "./subscription.ts";
 //
 // Who a connection reads for, and how, is its `LiveReads`: a page's are
 // the person behind its session, the App's current release and its
-// business store (`screenReads`); an App test principal's are the
+// business store (`pageReads`); an App test principal's are the
 // fixture's, on the test's own store (app-tests.ts). Everything else
 // here (ordering, gathering, watching, the gate before each push, the
 // bounds and releasing) is the same for both: a test follows a query
-// through exactly what a screen follows it through.
+// through exactly what a page follows it through.
 //
 // Delivery (spec 11.3): a query is read, then watched with the generation
 // of each table it read, compared on the spot with the store's own, so a
 // write between the read and the watch is never missed; changes are
 // gathered for a while and the query read once for all of them; each
-// subscription's pushes are numbered, the screen dropping any older than
+// subscription's pushes are numbered, the page dropping any older than
 // what it shows. Threat model, and how each is closed:
 //
 // - A snapshot reaches someone who lost access: every read runs as the
@@ -64,7 +64,7 @@ import { Subscription } from "./subscription.ts";
 //   only after the connection's access check (the person's role and the
 //   build's trust, read again). A refusal of either is pushed as the
 //   subscription's last result, which carries no data and makes the
-//   screen drop what it holds, and the subscription ends: its readers are
+//   page drop what it holds, and the subscription ends: its readers are
 //   let go of before anything is awaited, so nothing that waited to be
 //   pushed goes out after the refusal.
 // - A snapshot stays on screen after access is lost, because nothing
@@ -76,7 +76,7 @@ import { Subscription } from "./subscription.ts";
 //   tab and isolate.
 //   The connection reads the session again now (`forget`), then passes
 //   each of the App's queries through the gate: a refusal ends it as
-//   above, clearing the screen; roles that changed read it again. No
+//   above, clearing the page; roles that changed read it again. No
 //   periodic recheck. How each way this can fail is closed:
 //   - An event that names someone else, arrives twice or late, or that
 //     anyone forged closes nothing: it only makes the connection look,
@@ -111,15 +111,15 @@ import { Subscription } from "./subscription.ts";
 //   subscribing frame's own lease names, never another frame's.
 // - A snapshot can't be kept fresh: when the store can't be watched (its
 //   object unreachable, restarted, or at its bound) nothing more is
-//   pushed, and core lets go of the screen's callbacks, which tells the
-//   screen to follow again, from a fresh read, later. A watch the store
+//   pushed, and core lets go of the page's callbacks, which tells the
+//   page to follow again, from a fresh read, later. A watch the store
 //   lost without core hearing of it is found by a `rewatch` every
 //   `livenessMs`.
 // - Ordering and staleness after a reconnect: a new subscription starts
-//   from a fresh read; the screen orders pushes by subscription and
+//   from a fresh read; the page orders pushes by subscription and
 //   revision, so an older connection's late push is dropped.
 // - Fan-out cost: a connection follows at most `perConnection` queries
-//   (`screen.too_many_queries`), a person `perPerson` of one App's store,
+//   (`page.too_many_queries`), a person `perPerson` of one App's store,
 //   held by the store. Reads a write causes are charged to the person's
 //   `liveReads` budget of the App, held by the App's host across tabs;
 //   past it a read waits and gathers every change meanwhile; a paginated
@@ -150,7 +150,7 @@ const accessCacheMs = 1000;
  * with every torn read, so a writer making one write after another, each
  * landing while the last read was under way, is waited out rather than
  * dropped; only writes that keep landing past that let go of the query,
- * which the screen then follows again.
+ * which the page then follows again.
  */
 export const maxTornReads = 5;
 
@@ -173,8 +173,8 @@ const endsSubscription = (code: string): boolean =>
   code === "app.not_found" ||
   code === "app.unreadable" ||
   code === "app.not_running" ||
-  code === "screen.unreviewed" ||
-  code === "screen.revoked";
+  code === "page.unreviewed" ||
+  code === "page.revoked";
 
 /** A result as a push carries it: `{ ok, value }` or `{ ok, error }`. */
 type Result = OperationResult;
@@ -230,7 +230,7 @@ export interface SnapshotCallback {
   [Symbol.dispose]: () => void;
 }
 
-/** One screen's subscription to a query. */
+/** One page's subscription to a query. */
 interface Listener {
   readonly toPage: SnapshotCallback;
   /** The latest of its evaluation's pushes sent to it (`Snapshot.seq`). */
@@ -357,7 +357,7 @@ export interface LiveRead {
   readonly reads: EvaluatedQuery["reads"];
   /**
    * The revision its value carries, when it carries its own (a workflow
-   * run's snapshot, screen-workflows.ts): pushed under that revision, so a
+   * run's snapshot, page-workflows.ts): pushed under that revision, so a
    * control's receipt names the snapshot that settles it. Otherwise each
    * push is numbered after the last.
    */
@@ -417,7 +417,7 @@ export interface LiveReads<By extends Reader> {
  * current release inside the build's trust check, and charged to the
  * person's live reads of the App.
  */
-export const screenReads = (
+export const pageReads = (
   env: Env,
   check: SessionCheck,
   access: AccessCheck
@@ -591,12 +591,12 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     /**
      * Told once the subscription ends, released or ended by core (a
      * refusal, a store that can't be watched): what holds it for a frame
-     * forgets it then (screens-rpc.ts).
+     * forgets it then (pages-rpc.ts).
      */
     ended?: () => void
   ): Subscription {
     if (this.#count >= querySubscriptionLimits.perConnection) {
-      throw screenErrors.create("screen.too_many_queries");
+      throw pageErrors.create("page.too_many_queries");
     }
     const key = keyOf(app, build, by.userId, request);
     const evaluation =
@@ -626,7 +626,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       // A window already read, or being read, for another subscription:
       // this one, a Load
       // More's, gets only a read begun after it, never a result read
-      // before, which may be older than a smaller window the screen shows
+      // before, which may be older than a smaller window the page shows
       // already. A read on its way is not its; the next one is.
       listener.firstRead = evaluation.reads + 1;
       if (evaluation.running) {
@@ -811,7 +811,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         // charged to the reader's live reads (query-windows.ts).
         async (pages) => {
           if (!(await this.#reads.admit(by, app, pages))) {
-            throw screenErrors.create("screen.rate_limited");
+            throw pageErrors.create("page.rate_limited");
           }
         }
       );
@@ -836,7 +836,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     // A failure the host would answer differently later (the sandbox
     // busy or away, writes that kept tearing it) is not pushed as though
     // it were final, nor watched: what it read, if anything, isn't what an
-    // answer would read. The screen keeps what it shows and follows again.
+    // answer would read. The page keeps what it shows and follows again.
     if (!result.ok && result.error.retryable) {
       await this.#lose(evaluation);
       return;
@@ -899,12 +899,12 @@ export class QuerySubscriptions<By extends Reader = Identity> {
    * query-windows.ts), answering whether it did:
    *
    * - Its pages past what it paid found the person's live-read budget
-   *   spent (`screen.rate_limited`): it waits for the budget, as a read
+   *   spent (`page.rate_limited`): it waits for the budget, as a read
    *   the budget refuses up front does, still watched, the window shown
    *   kept.
    * - Writes kept tearing it (`query.concurrent_change`): one that showed
    *   nothing yet is refused, as its last push, so a Load More waiting on
-   *   it fails rather than wait forever, and the screen keeps the window
+   *   it fails rather than wait forever, and the page keeps the window
    *   it shows; one that showed a window is read again, on the person's
    *   live-read budget, still watched, the window shown kept.
    */
@@ -915,7 +915,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     if (!evaluation.window) {
       return false;
     }
-    if (result.error.code === "screen.rate_limited") {
+    if (result.error.code === "page.rate_limited") {
       this.#waitForBudget(evaluation);
       return true;
     }
@@ -1021,7 +1021,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     ]);
     // No answer of the roles or the access check (the database away for a
     // moment): refused as a failure to try again, which clears what the
-    // screen shows and has it follow again, never as a lost role, which
+    // page shows and has it follow again, never as a lost role, which
     // would sign the page out of the App for someone who still has it.
     const unanswered = [read, accessed].find(
       (settled): settled is PromiseRejectedResult =>
@@ -1052,7 +1052,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       (access === "revoked" || access === "unreviewed")
     ) {
       return {
-        refusal: refusalResult(screenErrors.create(`screen.${access}`)),
+        refusal: refusalResult(pageErrors.create(`page.${access}`)),
       };
     }
     if (read.value !== undefined && access === "outdated") {
@@ -1267,13 +1267,13 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
     evaluation.revision += 1;
     let push: QuerySnapshotPush = { revision: named, result };
-    let bytes = jsonBytes(push, screenLimits.answerBytes + 1);
-    if (bytes > screenLimits.answerBytes) {
+    let bytes = jsonBytes(push, pageLimits.answerBytes + 1);
+    if (bytes > pageLimits.answerBytes) {
       push = {
         revision: named,
-        result: refusalResult(screenErrors.create("screen.answer_too_large")),
+        result: refusalResult(pageErrors.create("page.answer_too_large")),
       };
-      bytes = jsonBytes(push, screenLimits.answerBytes);
+      bytes = jsonBytes(push, pageLimits.answerBytes);
     }
     const snapshot: Snapshot = {
       push,
@@ -1495,7 +1495,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
    * queries are then (`#lose`); its own check before each push stays.
    * `versioned`, if given, is called each time the App's host says another
    * of its versions was made current (`versionChanged`): a page following
-   * the App's version (screens-rpc.ts, `watchVersion`). An event missed
+   * the App's version (pages-rpc.ts, `watchVersion`). An event missed
    * while the host restarted is made up for by the look that follows.
    */
   follow(
@@ -1545,7 +1545,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
    * whatever changed before it followed is seen by that look. Let go of
    * by the host (restarted), it looks at once and follows again; when it
    * can't follow, the App's queries stop, as when a store can't be
-   * watched, and the screens follow again later.
+   * watched, and the pages follow again later.
    */
   #follow(
     userId: string,
@@ -1622,7 +1622,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         log.warn("query.follow_access_failed", errorFields(error));
         if (current()) {
           this.#following.delete(app);
-          // Its other callbacks too: let go of, so their screens follow
+          // Its other callbacks too: let go of, so their pages follow
           // again later, and nothing stays on screen unwatched.
           // A Set iterates safely as each lets go of its own entry.
           for (const { lose } of this.#looks.get(app) ?? []) {
@@ -1678,7 +1678,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   /**
    * The person's role in `app` may have dropped: reads the session again
    * now, and passes each of the App's queries through the gate, ending
-   * those it refuses (which clears their screens) and reading again those
+   * those it refuses (which clears their pages) and reading again those
    * whose roles changed. Changes nothing for someone whose access holds.
    */
   #revoked(app: AppId): void {
@@ -1757,14 +1757,14 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     if ("refusal" in gate) {
       await this.#end(evaluation, gate.refusal);
     } else if (before !== undefined && gate.roles !== before) {
-      // What its screens show was read under roles the person no longer
+      // What its pages show was read under roles the person no longer
       // has: ended with a result that carries nothing, pushed as the last
-      // however much waited (`#end`), so it clears the screen whatever a
-      // later read answers. It is no refusal of the person: the screen
+      // however much waited (`#end`), so it clears the page whatever a
+      // later read answers. It is no refusal of the person: the page
       // keeps following and follows again, from a read under their roles.
       await this.#end(
         evaluation,
-        refusalResult(screenErrors.create("screen.access_changed"))
+        refusalResult(pageErrors.create("page.access_changed"))
       );
     } else if (evaluation.followsDecisions) {
       // Who answers a decision is also by team, which an access notice
@@ -1835,7 +1835,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
 
   /**
    * Stops `evaluation` without a word: it can't be kept fresh now. Its
-   * subscriptions are let go of, which tells each screen to follow again.
+   * subscriptions are let go of, which tells each page to follow again.
    */
   async #lose(evaluation: Evaluation): Promise<void> {
     if (evaluation.closed) {

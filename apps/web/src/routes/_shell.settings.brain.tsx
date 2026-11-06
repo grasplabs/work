@@ -27,7 +27,7 @@ import { useCoreAction } from "../use-core-action.ts";
 
 // Settings → Brain: the company's groups of teams, the brain's regions
 // (core's brain-team-groups.ts). The prototype keeps its groups as data
-// and has no screen for them; this one is in its settings' language: a
+// and has no page for them; this one is in its settings' language: a
 // card with the groups, each named in a field, and every team beside the
 // group it is in. Grasp proposes groups on an admin's ask; nothing counts
 // until an admin confirms the set, which core keeps whole, with the set

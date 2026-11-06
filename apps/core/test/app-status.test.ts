@@ -24,7 +24,7 @@ import {
   jsonWorkflowAppsOf,
   runFor,
   runOnce,
-  screenOf,
+  pageOf,
   startCommand,
   startedOf,
 } from "./json-workflow-apps.ts";
@@ -41,7 +41,7 @@ import { firstVersion, outcome, signedInApi } from "./sign-in.ts";
 // a trigger or a run outliving the archive; a transition by someone who
 // lost their role, or one nobody audited; and an App restored straight
 // back to the people who use it. The runs are of an independent JSON
-// workflow bound to the App, started from its screen over core's
+// workflow bound to the App, started from its page over core's
 // function route. Gone with App workflows: a schedule an App's own
 // workflow declares, firing only while the App is published, and its own
 // workflows' detail and parameters read, never set, once archived.
@@ -54,14 +54,18 @@ const idp = mockIdp();
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 /**
- * A builder's App with a screen, its first version current, left a draft;
+ * A builder's App with a page, its first version current, left a draft;
  * shared with `user` to use.
  */
 const draftApp = async (builder: Person, user?: Person): Promise<string> => {
   const { id } = await builder.api.apps.create({ name: "Invoices" });
   const { version } = await builder.api.apps.files.commit(
     id,
-    { ...notesFiles, "screens/desk.tsx": "export default () => null;\n" },
+    {
+      ...notesFiles,
+      "src/routes/index.tsx":
+        'import { createFileRoute } from "@tanstack/react-router"; export const Route = createFileRoute("/")({ component: () => null });\n',
+    },
     "First version"
   );
   await builder.api.apps.versions.setCurrent(id, version);
@@ -81,11 +85,10 @@ const waysIn = async (person: Person, app: string) => {
   return {
     get: await outcome(person.api.apps.get(app)),
     contents: await outcome(person.api.apps.contents(app)),
-    open: await outcome(person.api.screens.open(app, "desk")),
+    open: await outcome(person.api.pages.open(app)),
     version: await outcome(
       firstVersion(
-        async (onVersion) =>
-          await person.api.screens.watchVersion(app, onVersion)
+        async (onVersion) => await person.api.pages.watchVersion(app, onVersion)
       )
     ),
     listed: listed.some(({ id }) => id === app),
@@ -112,7 +115,7 @@ const holdingApp = async () => await boundApp({ hold: "1 hour" });
 
 type Holding = Awaited<ReturnType<typeof holdingApp>>;
 
-/** A run of the App's workflow `person` starts from its screen. */
+/** A run of the App's workflow `person` starts from its page. */
 const startedFrom = async (
   { app, reference }: Holding,
   person: Signed
@@ -121,12 +124,12 @@ const startedFrom = async (
     await called(
       person,
       app,
-      await screenOf(person, app),
+      await pageOf(person, app),
       startCommand(reference)
     )
   ).runId;
 
-/** A run of the App's workflow, started from its screen, asleep in its hold. */
+/** A run of the App's workflow, started from its page, asleep in its hold. */
 const holdingRun = async (holding: Holding): Promise<string> => {
   const runId = await startedFrom(holding, holding.builder);
   await sleeping(runId, "hold:task");
@@ -199,7 +202,7 @@ describe("an App's status", () => {
     const builder = await signedInApi(idp, "builder");
     const app = await draftApp(builder);
 
-    const draft = await outcome(builder.api.screens.open(app, "desk"));
+    const draft = await outcome(builder.api.pages.open(app));
     await builder.api.apps.archive(app);
     const archived = await waysIn(builder, app);
 
@@ -700,7 +703,7 @@ describe("an App's status", () => {
     await expect(statusOf(holding, runId)).resolves.toBe("running");
   });
 
-  it("keeps an archived App's screen data and sharing as they are, an archive raced in included", async () => {
+  it("keeps an archived App's page data and sharing as they are, an archive raced in included", async () => {
     const [builder, admin, user] = await Promise.all([
       signedInApi(idp, "builder"),
       signedInApi(idp, "admin"),

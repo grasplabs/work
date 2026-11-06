@@ -195,7 +195,7 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   // The call ended (its caller went, or it was stopped): nothing the App's
   // code or its caller did wrong.
   "operation.ended": "operational",
-  // Cancelled by the person, or because no screen followed it any more.
+  // Cancelled by the person, or because no page followed it any more.
   "operation.cancelled": "operational",
   // Its host went away while it ran: what it did is unknown, not failed.
   "operation.outcome_unknown": "uncertain",

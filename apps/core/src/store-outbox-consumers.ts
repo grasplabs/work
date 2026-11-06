@@ -8,7 +8,7 @@ import { dispatchStartIntent } from "./workflow-start-intents.ts";
  * The consumers of each business store's outbox (data-store.ts): its
  * mutations' workflow starts (workflow-start-intents.ts),
  * notifications (workflow-notifications.ts) and sends to people
- * (app-notifications.ts), and the forms screens sent
+ * (app-notifications.ts), and the forms pages sent
  * as them, for their App's webhooks (app-webhook-queue.ts), each handed
  * over once its commit landed.
  */

@@ -11,7 +11,7 @@ import type { BindingKind } from "./format.ts";
 // this reads what the host has, within its limits, so a check can hold a
 // definition to it. The catalog holds contracts of more kinds than a
 // grasp-workflow/1 step binds (`bindingKinds`, format.ts): Apps and their
-// screens bind the rest.
+// pages bind the rest.
 
 /** Every kind of contract the host catalog holds. */
 export const contractKinds = [
@@ -77,7 +77,7 @@ export interface CatalogContract {
   >;
   /**
    * event: the event types it admits, each with the descriptor of its data
-   * and whether a person's screen may send it (`browser`): only those
+   * and whether a person's page may send it (`browser`): only those
    * become App references. A type without its data isn't admitted.
    */
   events?: Readonly<
@@ -130,7 +130,7 @@ export interface ResolvedContract {
   >;
   /** event: the types it admits. */
   eventTypes?: ReadonlySet<string>;
-  /** event: each admitted type's data schema, and whether a screen sends it. */
+  /** event: each admitted type's data schema, and whether a page sends it. */
   events?: ReadonlyMap<
     string,
     { data: ValueSchema<unknown, unknown>; browser: boolean }
@@ -279,14 +279,14 @@ const readEvents = (
     const event = ownData(value, type);
     const browser = ownData(event, "browser");
     if (typeof browser !== "boolean") {
-      return refuse("an event type that doesn't say whether a screen sends it");
+      return refuse("an event type that doesn't say whether a page sends it");
     }
     if (!isEventType(type)) {
       return refuse("an event type no run's inbox takes");
     }
     if (browser && [...events.values()].some((known) => known.browser)) {
-      // A binding's alias names the one type a screen may send.
-      return refuse("more than one event type a screen sends");
+      // A binding's alias names the one type a page may send.
+      return refuse("more than one event type a page sends");
     }
     events.set(type, {
       // Required: an event type is admitted only with its data's contract.

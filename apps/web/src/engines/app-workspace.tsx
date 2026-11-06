@@ -67,7 +67,7 @@ import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { useWide } from "../frame/wide.ts";
-import { useVersionPushes } from "../screens/use-version-pushes.ts";
+import { useVersionPushes } from "../pages/use-version-pushes.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import {
   AppChat,
@@ -95,7 +95,7 @@ const AppCode = lazy(async () => {
 // nothing here touches. A slim bar on top: back to the App, its name and
 // where it stands, what the main area shows (Preview, Code, Data,
 // Settings), the chat's panel, Share and Publish. The main area, by
-// default, previews the App as the App's chat has it: the compiled screens
+// default, previews the App as the App's chat has it: the compiled pages
 // of core's draft, which change nothing and read no real data; with no
 // changes (none asked for yet, or proposed), the App's latest version, the
 // one up for review included, built the same way, so builders always see

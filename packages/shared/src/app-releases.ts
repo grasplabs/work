@@ -17,12 +17,14 @@ import { defineErrorFamily } from "./errors.ts";
 /**
  * The format of `ReleaseManifest` and of the check evidence it names:
  * version 2 records the evidence (`checkEvidenceSchema`) every load
- * verifies. A release sealed in another format is refused as such
+ * verifies; version 3 seals an App's pages as its file routes in
+ * `src/routes/` (`pages.json`), where earlier ones sealed its screens. A
+ * release sealed in another format is refused as such
  * (`version.format_unsupported`), sealing it again included, since its
  * manifest is stored for good: a new version replaces it, and none is
  * read as this.
  */
-export const releaseFormatVersion = 2;
+export const releaseFormatVersion = 3;
 
 /**
  * The version of the protocol between the host and an App's isolate. The

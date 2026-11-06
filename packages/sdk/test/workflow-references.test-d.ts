@@ -30,7 +30,7 @@ import { useMutation, usePaginatedQuery, useQuery } from "../src/react.ts";
 import { workflows } from "./notes/server/_generated/api.ts";
 
 /**
- * How a screen sends an event to a run of `workflow`: one of that
+ * How a page sends an event to a run of `workflow`: one of that
  * workflow's own events, with its data, inferred from the event alone.
  */
 declare const send: <
@@ -179,7 +179,7 @@ const anyEvent: WorkflowEventReference = edited;
 void anyEvent;
 
 /**
- * How a screen answers a decision a run of its workflow is held at: the
+ * How a page answers a decision a run of its workflow is held at: the
  * exact wait, and a value inferred from that wait alone.
  */
 declare const respond: <Wait extends WorkflowDecisionWait>(

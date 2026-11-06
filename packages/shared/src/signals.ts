@@ -123,7 +123,7 @@ const unansweredSchema = z.object({
   evidence: z.object({
     searches: z.int(),
     /**
-     * How many different people, agents, App parts (screens or server
+     * How many different people, agents, App parts (pages or server
      * code) or runs searched it.
      */
     askers: z.int(),

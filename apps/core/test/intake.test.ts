@@ -711,7 +711,7 @@ interface Reading {
 
 /**
  * Starts `extract` for `person` through copy `app`'s binding, as its
- * screen starts it, with `input`, while `provider` answers its model,
+ * page starts it, with `input`, while `provider` answers its model,
  * and waits for the
  * run to end, as `admin` (who sees every workflow) reads it.
  */
@@ -832,7 +832,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
       await answering()
     );
     const output = foundSchema.parse(run.output);
-    // The screen keeps what the run found, as the builder reviewing it.
+    // The page keeps what the run found, as the builder reviewing it.
     const draft = idSchema.parse(
       valueOf(
         await call(admin, app, "drafts.propose", "mutation", {
@@ -896,7 +896,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
     const admin = await signedInApi(idp, "admin");
     const app = await copyOf(admin);
     const member = await memberOf(admin, app, "user", "user");
-    // A role in the App starts a run, as any start of its screen's; the
+    // A role in the App starts a run, as any start of its page's; the
     // workflow's model is called only for someone with a role in the
     // workflow, which an App's roles never give (workflow-resources.ts).
     const { run, provider } = await extracted(
@@ -939,7 +939,7 @@ const guest = async (body: unknown): Promise<unknown> => {
   return await response.json();
 };
 
-/** A chat as `chats.notes` reads it, for the screen to have it read. */
+/** A chat as `chats.notes` reads it, for the page to have it read. */
 const chatNotesSchema = z.object({
   source: z.object({
     title: z.string(),
@@ -986,7 +986,7 @@ describe("stakeholder chats", { timeout: 90_000 }, () => {
     });
     await guest({ action: "finish", token });
     const listed = valueOf(await call(admin, app, "chats.overview", "action"));
-    // The screen reads the chat as notes through the App's own action,
+    // The page reads the chat as notes through the App's own action,
     // then has the workflow read them.
     const read = chatNotesSchema.parse(
       valueOf(

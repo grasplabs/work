@@ -4,9 +4,9 @@ import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { appFunctionPath } from "@grasp-os/shared/pages";
 import { appTokenPath, portableFunctionPath } from "@grasp-os/shared/portable";
 import type { Role } from "@grasp-os/shared/roles";
-import { appFunctionPath } from "@grasp-os/shared/screens";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -641,7 +641,7 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     await expect(
       failureOf(client.mutation(notes.api.create, { title: "Leaked" }))
     ).resolves.toStrictEqual({
-      code: "screen.unreviewed",
+      code: "page.unreviewed",
       category: "authorization",
     });
 
@@ -659,7 +659,7 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     await expect(
       failureOf(client.query(notes.api.list, { pagination: {} }))
     ).resolves.toStrictEqual({
-      code: "screen.revoked",
+      code: "page.revoked",
       category: "authorization",
     });
   });

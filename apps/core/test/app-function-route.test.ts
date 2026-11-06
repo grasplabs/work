@@ -2,13 +2,13 @@ import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
-import type { Role } from "@grasp-os/shared/roles";
 import {
   appFunctionPath,
-  screenLeaseHeader,
-  screenLimits,
-  screenPersonHeader,
-} from "@grasp-os/shared/screens";
+  pageLeaseHeader,
+  pageLimits,
+  pagePersonHeader,
+} from "@grasp-os/shared/pages";
+import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -21,8 +21,8 @@ import { person } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { routed, signedIn, signedInApi, withSignIn } from "./sign-in.ts";
 
-// A running App's screen calling one of its App's functions over core's
-// plain request (app-function-route.ts), from the page's side: a screen
+// A running App's page calling one of its App's functions over core's
+// plain request (app-function-route.ts), from the page's side: a page
 // with the lease core gave its build calls through, no admin approving
 // it; one with no lease of core's, one with someone else's lease, another site, someone signed out or without
 // a role, a session that is someone else's than the frame's, and a body
@@ -57,9 +57,12 @@ export const titles = query({
 });
 `,
 
-  "screens/notes.tsx": `export default function Notes() {
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Notes() {
   return <p>Notes</p>;
 }
+
+export const Route = createFileRoute("/")({ component: Notes });
 `,
 };
 
@@ -69,8 +72,8 @@ const personApi = async (role: Role): Promise<Person> =>
   await signedInApi(idp, role);
 
 /**
- * A builder's Notes App, activated, with the lease core gave its screen's
- * build as the builder opened it: no admin approves a screen's build.
+ * A builder's Notes App, activated, with the lease core gave its page's
+ * build as the builder opened it: no admin approves a page's build.
  */
 const servedApp = async () => {
   const builder = await personApi("builder");
@@ -78,7 +81,7 @@ const servedApp = async () => {
   await published(id);
   const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
-  const { lease } = await builder.api.screens.open(id, "notes");
+  const { lease } = await builder.api.pages.open(id);
   const release = await loadRelease(env, id, version);
   return { builder, app: id, lease, release };
 };
@@ -87,7 +90,7 @@ type Served = Awaited<ReturnType<typeof servedApp>>;
 
 /**
  * `servedApp`, its data classified ordinary and shared with `other`: a
- * screen of it runs without a lease of the caller's, so a lease signed
+ * page of it runs without a lease of the caller's, so a lease signed
  * for the frame's person is no fence on its own.
  */
 const sharedOrdinaryApp = async () => {
@@ -104,7 +107,7 @@ const sharedOrdinaryApp = async () => {
   return { served, other };
 };
 
-/** A call's request, as the screen client writes it. */
+/** A call's request, as the page client writes it. */
 const requestFor = (
   { release }: Served,
   path: string,
@@ -151,8 +154,8 @@ const post = async (
       ...(as === undefined ? {} : { cookie: as.session }),
       ...(named === undefined || named === null
         ? {}
-        : { [screenPersonHeader]: named }),
-      ...(lease === undefined ? {} : { [screenLeaseHeader]: lease }),
+        : { [pagePersonHeader]: named }),
+      ...(lease === undefined ? {} : { [pageLeaseHeader]: lease }),
     },
     body,
   });
@@ -172,7 +175,7 @@ const resultOf = async (response: Response): Promise<unknown> => {
     : undefined;
 };
 
-/** The notes the App holds, as its builder's screen reads them. */
+/** The notes the App holds, as its builder's page reads them. */
 const titlesOf = async (served: Served): Promise<unknown> =>
   await resultOf(
     await post(served.app, requestFor(served, "notes.titles", {}), {
@@ -181,7 +184,7 @@ const titlesOf = async (served: Served): Promise<unknown> =>
     })
   );
 
-describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
+describe("a page calling its App's functions", { timeout: 120_000 }, () => {
   it("calls through for the build core leased, as the person signed in", async () => {
     const served = await servedApp();
     const created = await resultOf(
@@ -215,9 +218,9 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
         await post(served.app, create, { as, lease: other.lease })
       ),
     }).toStrictEqual({
-      noLease: { status: 403, code: "screen.unreviewed" },
-      forged: { status: 403, code: "screen.unreviewed" },
-      anotherApps: { status: 403, code: "screen.unreviewed" },
+      noLease: { status: 403, code: "page.unreviewed" },
+      forged: { status: 403, code: "page.unreviewed" },
+      anotherApps: { status: 403, code: "page.unreviewed" },
     });
     await expect(titlesOf(served)).resolves.toStrictEqual({
       ok: true,
@@ -250,7 +253,7 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       someoneElse: { status: 401, code: "auth.principal_changed" },
       // A page older than the header: out of date, not someone else.
-      nobodyNamed: { status: 403, code: "screen.reload_required" },
+      nobodyNamed: { status: 403, code: "page.reload_required" },
     });
     await expect(titlesOf(served)).resolves.toStrictEqual({
       ok: true,
@@ -293,7 +296,7 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
         }
         return seen;
       };
-      const { burst } = screenLimits.requests;
+      const { burst } = pageLimits.requests;
       const refused = {
         someoneElse: await statuses(
           { as: other, named: served.builder.userId, lease },
@@ -309,7 +312,7 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
         nobodyNamed: Array.from({ length: burst }, () => 403),
       });
       // Each still has their whole budget: the builder's open of the
-      // screen counted one.
+      // page counted one.
       expect({
         other: await statuses({ as: other, lease }, burst),
         builder: await statuses({ as: served.builder, lease }, burst - 1),
@@ -384,8 +387,8 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
     });
   });
 
-  it("refuses a person past their requests of the App's screens", async () => {
-    // The bucket fills again with time (`screenLimits.requests`), so the
+  it("refuses a person past their requests of the App's pages", async () => {
+    // The bucket fills again with time (`pageLimits.requests`), so the
     // clock is stopped: what is admitted is then exact, however long the
     // requests take. A fresh person and App, so no other test's count.
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
@@ -393,9 +396,9 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
       const served = await servedApp();
       const titles = requestFor(served, "notes.titles", {});
       const sent = { as: served.builder, lease: served.lease };
-      // Opening the screen counted one already.
+      // Opening the page counted one already.
       const statuses: number[] = [];
-      for (let count = 0; count < screenLimits.requests.burst; count += 1) {
+      for (let count = 0; count < pageLimits.requests.burst; count += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one request after another, as a page sends them
         const response = await post(served.app, titles, sent);
         statuses.push(response.status);
@@ -403,13 +406,13 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
         await response.body?.cancel();
       }
       expect(statuses).toStrictEqual([
-        ...Array.from({ length: screenLimits.requests.burst - 1 }, () => 200),
+        ...Array.from({ length: pageLimits.requests.burst - 1 }, () => 200),
         429,
       ]);
       const refused = await post(served.app, titles, sent);
       await expect(refusalOf(refused)).resolves.toStrictEqual({
         status: 429,
-        code: "screen.rate_limited",
+        code: "page.rate_limited",
       });
     } finally {
       vi.useRealTimers();
@@ -433,10 +436,10 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
           { as: served.builder, lease: served.lease }
         )
       )
-    ).resolves.toStrictEqual({ status: 403, code: "screen.revoked" });
+    ).resolves.toStrictEqual({ status: 403, code: "page.revoked" });
     // The page asks core on its own connection, and tears the frame down.
     await expect(
-      served.builder.api.screens.frame(served.app, served.lease).delivery()
+      served.builder.api.pages.frame(served.app, served.lease).delivery()
     ).resolves.toBe("revoked");
   });
 

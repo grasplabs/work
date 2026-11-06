@@ -14,7 +14,7 @@ import type { Json } from "./json.ts";
 // never what someone sent through a form.
 
 /**
- * The events an App sends its webhooks: a screen's form sent (a keyed
+ * The events an App sends its webhooks: a page's form sent (a keyed
  * mutation or action that answered), the App published by a builder, and
  * a version of it made current.
  */

@@ -17,7 +17,7 @@ import { notesFiles } from "./notes-client-app.ts";
 import { person } from "./sealed-apps.ts";
 
 // Live queries in an App's tests (`subscribe`, spec 28.2): a principal
-// follows a query through the realtime manager a screen's page follows
+// follows a query through the realtime manager a page's page follows
 // one through, on the test's own fixture store. What the tests here check
 // is what that host did: the spec's own example passes as written,
 // snapshots are read as the principal who follows, a refusal or a query
@@ -35,7 +35,7 @@ const pushOfNotes = z.object({
 /** The Notes App the session client's tests use, with a fixture. */
 const appFiles: Record<string, string> = {
   ...Object.fromEntries(
-    Object.entries(notesFiles).filter(([path]) => !path.startsWith("screens/"))
+    Object.entries(notesFiles).filter(([path]) => !path.startsWith("src/"))
   ),
   "tests/fixtures/notes.json": JSON.stringify({
     principals: {
@@ -267,18 +267,18 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       const live = await owner.subscribe(api.notes.list, page);
       await owner.mutation(api.notes.create, { title: "Still live" });
       await live.next((p) => p.items.length === 1);`,
-        "can't follow more at once than a screen's page may": `
+        "can't follow more at once than a page's page may": `
       const owner = await t.as("note-owner");
       for (let round = 0; round < 100; round += 1) {
         await owner.subscribe(api.notes.list, page);
       }
-      await t.rejectsCode(owner.subscribe(api.notes.list, page), "screen.too_many_queries");`,
+      await t.rejectsCode(owner.subscribe(api.notes.list, page), "page.too_many_queries");`,
       }),
     });
     await expect(failuresOf(built)).resolves.toStrictEqual([]);
   });
 
-  it("follow a query again when core can't keep it fresh, as a screen does, and fail one it never can", async () => {
+  it("follow a query again when core can't keep it fresh, as a page does, and fail one it never can", async () => {
     const built = await appWith({
       ...appFiles,
       "tests/lost.test.ts": suiteOf({

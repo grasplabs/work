@@ -1,6 +1,4 @@
 import type { App, FileDiff } from "@grasp-os/shared/apps";
-import type { ChatDraft } from "@grasp-os/shared/chat";
-import { screenPath } from "@grasp-os/shared/screens";
 import { i18n } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 
@@ -128,37 +126,4 @@ export const migrationFixturesText = ({
           ),
     failed: false,
   };
-};
-
-/**
- * The screens a draft changes and still has (its `changed` paths, less
- * the ones it deletes), by name, in order: a deleted screen has nothing
- * to preview.
- */
-export const changedScreens = ({
-  changed,
-  deleted,
-}: Pick<ChatDraft, "changed" | "deleted">): string[] =>
-  changed.flatMap((path) => {
-    const name = screenPath.exec(path)?.groups?.name;
-    return name === undefined || deleted.includes(path) ? [] : [name];
-  });
-
-/**
- * The screen a draft's preview shows: the one the person picked while the
- * draft still changes it, otherwise the first it changes; none when it
- * changes no screen, or only deletes some (core then shows the draft's
- * first). None either for an earlier `version` of the draft: the screens
- * are the latest's, which that version may not have, so core shows the
- * version's first.
- */
-export const previewedScreen = (
-  changed: readonly string[],
-  picked?: string,
-  version?: number
-): string | undefined => {
-  if (version !== undefined) {
-    return undefined;
-  }
-  return picked !== undefined && changed.includes(picked) ? picked : changed[0];
 };

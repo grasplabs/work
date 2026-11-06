@@ -28,7 +28,7 @@ import {
   pageTransport,
   reading,
   shown,
-} from "./screen-client.ts";
+} from "./page-client.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // Reads of a table its schema declares sensitive (core's
@@ -199,9 +199,12 @@ export const byPerson = query({
 });
 `,
 
-  "screens/pay.tsx": `export default function Pay() {
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+function Pay() {
   return <p>Pay</p>;
 }
+
+export const Route = createFileRoute("/")({ component: Pay });
 `,
 };
 
@@ -776,7 +779,7 @@ describe("a live query of a sensitive table", { timeout: 120_000 }, () => {
   it("is recorded on every push, not only the first", async () => {
     const opened = await openedApp(withSensitive(notesFiles, "notes"));
     const api = apiOf(opened.release);
-    const client = new GraspClient(pageTransport(opened, opened.screens));
+    const client = new GraspClient(pageTransport(opened, opened.pages));
     const after = await logHead();
     const list = reading(client, api.list, { pagination: { pageSize: 10 } });
     await eventually(() => {

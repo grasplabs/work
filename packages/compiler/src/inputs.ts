@@ -11,12 +11,28 @@ import {
 import { workflowModulesError } from "@grasp-os/shared/workflow-modules";
 
 import type { Diagnostic } from "./diagnostic.ts";
-import { screenReferences } from "./kit.ts";
+import { pageReferences } from "./kit.ts";
 
-/** Where an App's screens are: one `.tsx` file each (`screenFile`). */
-export const screensFolder = "screens/";
+/**
+ * Where an App's front end is, as an ordinary Vite React app's: its
+ * pages (`pagesFolder`) and its own code, `src/components/` and
+ * `src/lib/` by convention, all TypeScript.
+ */
+export const sourceFolder = "src/";
 
-export const screenFile = /^screens\/[\w-]+\.tsx$/u;
+/**
+ * Where an App's pages are: TanStack Router file routes, one `.tsx`
+ * file each (`index.tsx` is `/`, `tasks.$taskId.tsx` is `/tasks/$taskId`,
+ * `__root.tsx` the layout around them).
+ */
+export const pagesFolder = "src/routes/";
+
+/**
+ * The route tree TanStack's generator makes of the pages
+ * (route-tree.ts), as its convention names it: the host's, written into
+ * every build, never one of the App's files.
+ */
+export const routeTreePath = "src/routeTree.gen.ts";
 
 /** The extensions of the TypeScript an App's code is in. */
 export const codeExtensions = ["ts", "tsx"] as const;
@@ -33,12 +49,12 @@ export const isLintedCode = (path: string): boolean =>
   !path.endsWith(declarationExtension);
 /**
  * Types the App's code can use but that aren't code, e.g. its server's:
- * at its root, or among its components, in folders named as any App
- * path's may be (`appPathSegmentPattern`). Never compiled into a module,
- * so only a type import may name one (`declarationValueImportError`).
+ * at its root, or under `src/`, in folders named as any App path's may be
+ * (`appPathSegmentPattern`). Never compiled into a module, so only a type
+ * import may name one (`declarationValueImportError`).
  */
 export const declarationFile =
-  /^(?:[\w-]+|components\/(?:[\w-][\w.-]*\/)*[\w-][\w.-]*)\.d\.ts$/u;
+  /^(?:[\w-]+|src\/(?:[\w$()-][\w.$()-]*\/)*[\w$()-][\w.$()-]*)\.d\.ts$/u;
 
 /**
  * Whether every folder and file name in `path` is one an App's path may
@@ -77,44 +93,70 @@ export const strayFileMessage = (
 const typeScriptFile = /\.tsx?$/u;
 
 /**
- * The App's components, which its screens import: TypeScript (`.ts`,
- * `.tsx`, declarations included) anywhere under `components/`.
+ * The App's front end: TypeScript (`.ts`, `.tsx`, declarations included)
+ * anywhere under `src/`, its pages under `src/routes/` among it.
  */
-export const componentsFolder: CodeFolder = {
-  folder: "components/",
+export const sourceCode: CodeFolder = {
+  folder: sourceFolder,
   isFile: (path) =>
-    path.startsWith("components/") &&
+    path.startsWith(sourceFolder) &&
     typeScriptFile.test(path) &&
     hasAppPathSegments(path),
   holds:
-    "the App's components: TypeScript files (*.ts, *.tsx), in folders whose names don't start with a dot",
+    "the App's front end: TypeScript files (*.ts, *.tsx), in folders whose names don't start with a dot",
 };
 
-/**
- * Whether the design system's lint reads `path` (lint.ts): a screen or a
- * component, not a declaration.
- */
-export const isDesignLinted = (path: string): boolean =>
-  isLintedCode(path) &&
-  (screenFile.test(path) || componentsFolder.isFile(path));
+/** Whether `path` is one of the App's pages: a file route under `src/routes/`. */
+export const isPageFile = (path: string): boolean =>
+  path.startsWith(pagesFolder) &&
+  sourceCode.isFile(path) &&
+  !path.endsWith(declarationExtension);
+
+/** The root route, TanStack's `__root.tsx`: the layout every page renders in. */
+export const rootPage = `${pagesFolder}__root.tsx`;
 
 /**
- * The files a build reads: screens, components and declarations, and the
- * references the host generated for the App's server code, which screens
- * import as `@server/_generated/api`.
+ * Whether the design system's lint reads `path` (lint.ts): a page or
+ * anything else of the App's front end, not a declaration.
+ */
+export const isDesignLinted = (path: string): boolean =>
+  isLintedCode(path) && sourceCode.isFile(path);
+
+/**
+ * The root route of an App whose pages have none of their own:
+ * TanStack's default, which renders the route matched and nothing around
+ * it, as a root route without a component does.
+ */
+const defaultRoot = `import { createRootRoute } from "@tanstack/react-router";
+
+export const Route = createRootRoute();
+`;
+
+/**
+ * The files a build reads: the App's front end and declarations, and the
+ * references the host generated for the App's server code, which pages
+ * import as `@server/_generated/api`, with the default root route
+ * (`defaultRoot`) when the App's pages have none. Never a route tree of
+ * the App's own: the build writes the one its pages make
+ * (route-tree.ts).
  */
 export const buildFiles = (
   files: Record<string, string>
-): Record<string, string> =>
-  Object.fromEntries(
+): Record<string, string> => {
+  const read = Object.fromEntries(
     Object.entries(files).filter(
       ([path]) =>
-        screenFile.test(path) ||
-        path.startsWith(componentsFolder.folder) ||
-        declarationFile.test(path) ||
-        path === screenReferences.path
+        path !== routeTreePath &&
+        (path.startsWith(sourceFolder) ||
+          declarationFile.test(path) ||
+          path === pageReferences.path)
     )
   );
+  const routed = Object.keys(read).some((path) => isPageFile(path));
+  return routed && !Object.hasOwn(read, rootPage)
+    ? { ...read, [rootPage]: defaultRoot }
+    : read;
+};
 
 /**
  * The module the host generates from a JSON workflow's definition: one
@@ -242,14 +284,16 @@ export const hostGeneratedFolder = ".grasp/";
 
 /**
  * Whether `path` is one the host generates (`server/_generated/`,
- * `.grasp/`): never an App's own file, so an App's files never hold one.
+ * `.grasp/`, the route tree): never an App's own file, so an App's files
+ * never hold one.
  */
 export const isGeneratedPath = (path: string): boolean =>
   path.startsWith(generatedServerFolder) ||
-  path.startsWith(hostGeneratedFolder);
+  path.startsWith(hostGeneratedFolder) ||
+  path === routeTreePath;
 
 /**
- * Why a build of an App's server code (`appCodeFiles`) or screens
+ * Why a build of an App's server code (`appCodeFiles`) or pages
  * (`buildFiles`) is more than it takes: the App's own files held to the
  * App's limits (`limitErrors`), the host's generated modules to their own.
  */

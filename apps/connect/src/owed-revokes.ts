@@ -19,7 +19,7 @@ import { providerFor } from "./providers.ts";
 
 /**
  * The first wait before trying an owed revoke: long enough for a person
- * asked to connect again to finish its consent screen first, so a grant
+ * asked to connect again to finish its consent page first, so a grant
  * shared by the account isn't revoked under a reconnect still on its way
  * (src/revocations.ts also waits while a sign-in flow is open).
  */

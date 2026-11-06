@@ -23,7 +23,7 @@ import {
 
 // App roles: an App is private to its owner and the organization's
 // admins until a builder of it shares it with people or teams, as users
-// (its screens) or builders (its code and settings). The ways this could
+// (its pages) or builders (its code and settings). The ways this could
 // go wrong, tried below: someone without a role reaching an App or
 // learning it exists, a user changing code or settings or sharing it on,
 // someone becoming a builder whose role in the organization doesn't
@@ -40,12 +40,20 @@ const personApi = async (role: Role): Promise<Person> =>
 const files = {
   ...appDefinition({ name: "Desk", tables: {} }),
 
-  "screens/desk.tsx": "export default () => <p>Desk</p>;\n",
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => <p>Desk</p>;
+
+export const Route = createFileRoute("/")({ component: Page });
+`,
 };
 
-/** A screen that says `text`. */
-const screenSaying = (text: string): string =>
-  `export default () => <p>${text}</p>;\n`;
+/** The page at `path` that says `text`. */
+const pageSaying = (path: string, text: string): string =>
+  `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => <p>${text}</p>;\n
+
+export const Route = createFileRoute("${path}")({ component: Page });
+`;
 
 /** A released App of `owner`'s, sealed. */
 const newApp = async (owner: Person): Promise<string> => {
@@ -68,22 +76,22 @@ const functionOutcome = async (
 
 /** What `person` gets from each call their role in an App decides. */
 const callsOn = async ({ api }: Person, app: string) => ({
-  // What its screens use.
+  // What its pages use.
   get: await outcome(api.apps.get(app)),
   contents: await outcome(api.apps.contents(app)),
-  screen: await outcome(
+  page: await outcome(
     firstVersion(
-      async (onVersion) => await api.screens.watchVersion(app, onVersion)
+      async (onVersion) => await api.pages.watchVersion(app, onVersion)
     )
   ),
   report: await outcome(
-    api.screens.report(
+    api.pages.report(
       app,
-      { version: 1, screen: "desk" },
+      { version: 1, path: "/" },
       { kind: "error", message: "Oops" }
     )
   ),
-  open: await outcome(api.screens.open(app, "desk")),
+  open: await outcome(api.pages.open(app)),
   call: await functionOutcome({ api }, app),
   members: await outcome(api.apps.members.list(app)),
   // Its code and settings.
@@ -96,7 +104,7 @@ const callsOn = async ({ api }: Person, app: string) => ({
   diff: await outcome(api.apps.versions.diff(app, 1, 1)),
   propose: await outcome(api.apps.versions.propose(app, 1)),
   setCurrent: await outcome(api.apps.versions.setCurrent(app, 1)),
-  errors: await outcome(api.screens.errors(app)),
+  errors: await outcome(api.pages.errors(app)),
   permission: await outcome(
     api.permissions.request({
       ...outlook(app),
@@ -111,7 +119,7 @@ const callsOn = async ({ api }: Person, app: string) => ({
 const asUser = {
   get: "ok",
   contents: "ok",
-  screen: "ok",
+  page: "ok",
   report: "ok",
   open: "ok",
   // Past the role check: the App's release has no such function.
@@ -143,18 +151,18 @@ const lists = async ({ api }: Person, app: string): Promise<boolean> => {
   expect(contents).toStrictEqual(
     listed ? await api.apps.contents(app) : undefined
   );
-  // Its pages (its screens) are listed exactly when it is: someone who
-  // can't open the App never learns its pages, nor that it exists.
-  expect(contents?.screens ?? []).toStrictEqual(listed ? ["desk"] : []);
+  // Whether it has pages is said exactly when it is listed: someone who
+  // can't open the App never learns it has pages, nor that it exists.
+  expect(contents?.pages).toStrictEqual(listed ? true : undefined);
   return listed;
 };
 
 // Each test releases an App of its own and, through `callsOn`, makes some
-// thirty calls in a row, opening its screen among them: that builds the
-// screens of that App's version, which the build cache can't share across
+// thirty calls in a row, opening its page among them: that builds the
+// pages of that App's version, which the build cache can't share across
 // Apps (it keys builds by App). A loaded runner takes longer than the
 // default five seconds for that,
-// as screen-bridge.test.ts's tests do.
+// as page-bridge.test.ts's tests do.
 describe("App roles", { timeout: 60_000 }, () => {
   it("keep an App private to its owner and the admins", async () => {
     const owner = await personApi("builder");
@@ -192,7 +200,7 @@ describe("App roles", { timeout: 60_000 }, () => {
     ).resolves.toBe("ok");
   });
 
-  it("let a user work in an App's screens and nothing more, and a builder build it", async () => {
+  it("let a user work in an App's pages and nothing more, and a builder build it", async () => {
     const owner = await personApi("builder");
     const [user, builder] = await Promise.all([
       personApi("builder"),
@@ -293,14 +301,14 @@ describe("App roles", { timeout: 60_000 }, () => {
         outcome(ben.api.apps.files.read(app)),
       ])
     ).resolves.toStrictEqual(["role.forbidden", "ok", "ok"]);
-    // Ben, now in the team, finds its screens; someone in neither doesn't.
+    // Ben, now in the team, finds its pages; someone in neither doesn't.
     const outsider = await personApi("builder");
     await expect(
       Promise.all([lists(ben, app), lists(outsider, app)])
     ).resolves.toStrictEqual([true, false]);
   });
 
-  it("list a draft's screens to its builders only, and those of the version that is current", async () => {
+  it("list a draft's pages to its builders only, and those of the version that is current", async () => {
     const owner = await personApi("builder");
     const [user, builder] = await Promise.all([
       personApi("builder"),
@@ -321,11 +329,17 @@ describe("App roles", { timeout: 60_000 }, () => {
       id: builder.userId,
       role: "builder",
     });
-    // A version committed after the current one isn't listed: its screen
+    // A version committed after the current one isn't listed: its page
     // opens for nobody yet.
     await owner.api.apps.files.commit(
       app,
-      { "screens/later.tsx": "export default () => <p>Later</p>;\n" },
+      {
+        "src/routes/later.tsx": `import { createFileRoute } from "@tanstack/react-router";
+const Page = () => <p>Later</p>;
+
+export const Route = createFileRoute("/later")({ component: Page });
+`,
+      },
       "Later"
     );
 
@@ -338,7 +352,7 @@ describe("App roles", { timeout: 60_000 }, () => {
     );
   });
 
-  it("list each App once with its screens as its pages, however many screens it has", async () => {
+  it("list each App once with its pages as its pages, however many pages it has", async () => {
     const owner = await personApi("builder");
     const names = {
       oldest: `Oldest ${unique()}`,
@@ -362,11 +376,11 @@ describe("App roles", { timeout: 60_000 }, () => {
     ) {
       throw new Error("Four Apps were made");
     }
-    // Published, its screens committed out of their order.
+    // Published, its pages committed out of their order.
     await release(owner, oldest, {
       ...files,
-      "screens/zeta.tsx": screenSaying("Zeta"),
-      "screens/alpha.tsx": screenSaying("Alpha"),
+      "src/routes/zeta.tsx": pageSaying("/zeta", "Zeta"),
+      "src/routes/alpha.tsx": pageSaying("/alpha", "Alpha"),
     });
     // A draft that serves a business process.
     const { version } = await owner.api.apps.files.commit(
@@ -402,37 +416,37 @@ describe("App roles", { timeout: 60_000 }, () => {
           name: app.name,
           status: app.status,
           process: app.process,
-          pages: contents.screens,
+          pages: contents.pages,
         }))
     ).toStrictEqual([
-      // One App with three screens: one entry, its screens its pages.
+      // One App with three pages: one entry, its pages its pages.
       {
         id: oldest,
         name: names.oldest,
         status: "published",
         process: null,
-        pages: ["alpha", "desk", "zeta"],
+        pages: true,
       },
       {
         id: middle,
         name: names.middle,
         status: "draft",
         process: "o2c",
-        pages: ["desk"],
+        pages: true,
       },
       {
         id: newest,
         name: names.newest,
         status: "archived",
         process: null,
-        pages: ["desk"],
+        pages: true,
       },
       {
         id: empty,
         name: names.empty,
         status: "draft",
         process: null,
-        pages: [],
+        pages: false,
       },
     ]);
   });
@@ -664,7 +678,7 @@ describe("App roles", { timeout: 60_000 }, () => {
     await expect(outcome(person.api.apps.get(app))).resolves.toBe(
       "app.not_found"
     );
-    // Nor are its screens listed to them any longer.
+    // Nor are its pages listed to them any longer.
     await expect(lists(person, app)).resolves.toBeFalsy();
     const target = { type: "app", id: app };
     const actor = { type: "person", userId: owner.userId };

@@ -8,7 +8,7 @@
  *   App's config, so declaring the schema can't run server code, and the
  *   modules generated from it can't depend on what they are generated
  *   for;
- * - its server (`grasp.config.ts`, `screens.ts`, `server/**`): its own
+ * - its server (`grasp.config.ts`, `server/**`): its own
  *   server files, the schema and values, the SDK's root module and the
  *   generated modules under `server/_generated/`: no platform module, no
  *   Workers runtime, nothing with authority of its own. Each module under
@@ -34,8 +34,8 @@
  *   (`appCodeFiles`): core's test runner builds them on their own
  *   (`appTestFiles`).
  *
- * Screens never reach any of it: `screenImportError` says so, by name,
- * where a screen tries.
+ * Pages never reach any of it: `pageImportError` says so, by name,
+ * where a page tries.
  */
 import { appPathSegmentPattern } from "@grasp-os/shared/app-limits";
 
@@ -83,7 +83,7 @@ export const generatedModules = {
 
 /**
  * The entry the host runs an App's server from: its config, schema,
- * screens, server modules and migrations, registered together
+ * server modules and migrations, registered together
  * (`serverEntrySource`).
  */
 export const serverEntryPath = ".grasp/app.ts";
@@ -94,13 +94,10 @@ export const configPath = "grasp.config.ts";
 /** Where an App's schema is: generated from its definition. */
 export const schemaPath = "server/schema.ts";
 
-/** Where an App's screens are listed. */
-export const screensPath = "screens.ts";
-
 const schemaFiles: ReadonlySet<string> = new Set([schemaPath, "values.ts"]);
 
-/** The server files at the App's root: its config and its screens. */
-const rootServerFiles: ReadonlySet<string> = new Set([configPath, screensPath]);
+/** The server file at the App's root: its config. */
+const rootServerFiles: ReadonlySet<string> = new Set([configPath]);
 const generatedFile = /^(?:server\/_generated|\.grasp)\/[\w.-]+\.ts$/u;
 
 /** Where an App's migrations are. */
@@ -172,7 +169,7 @@ const serverModulePaths = (files: Iterable<string>): string[] =>
 
 /**
  * The entry the host runs an App's server from (`serverEntryPath`): the
- * App's config, schema and screens, with each of `files`' server modules
+ * App's config and schema, with each of `files`' server modules
  * and migrations (`registerApp`). Generated from the file list alone, so
  * the host has it before anything else is known of the App.
  */
@@ -182,7 +179,6 @@ export const serverEntrySource = (files: Iterable<string>): string => {
   const migrations = paths
     .filter((path) => migrationsFolder.isFile(path))
     .toSorted();
-  const hasScreens = paths.includes(screensPath);
   const imports = [
     ...modules.map(
       (module, index) =>
@@ -205,11 +201,11 @@ import { registerApp } from "@grasp-os/sdk/runner";
 
 import config from "../${configPath}";
 import schema from "../${schemaPath}";
-${hasScreens ? `import screens from "../${screensPath}";\n` : ""}${imports}
+${imports}
 export default registerApp({
   config,
   schema,
-${hasScreens ? "  screens,\n" : ""}  modules: {
+  modules: {
 ${entries}  },
   migrations: [${migrations.map((_path, index) => `migration${String(index)}`).join(", ")}],
 });
@@ -374,7 +370,7 @@ const described: Readonly<Record<AppCodeKind, string>> = {
   schema:
     "The schema (server/schema.ts, values.ts) imports only @grasp-os/sdk and each other",
   server:
-    "Server code (grasp.config.ts, screens.ts, server/) imports its own files, server/schema.ts, values.ts, server/migrations/, @grasp-os/sdk and the generated modules (@server/_generated/server, api, internal and dataModel)",
+    "Server code (grasp.config.ts, server/) imports its own files, server/schema.ts, values.ts, server/migrations/, @grasp-os/sdk and the generated modules (@server/_generated/server, api, internal and dataModel)",
   migration:
     "A migration (server/migrations/) imports only server/schema.ts, values.ts and @grasp-os/sdk",
   generated:
@@ -449,7 +445,7 @@ export const appCodeImport = (
     : { module };
 };
 
-/** The imports screens can never make, and why: the App's server. */
+/** The imports pages can never make, and why: the App's server. */
 const serverSpecifiers: ReadonlySet<string> = new Set([
   "@server/_generated/server",
   "@server/_generated/internal",
@@ -463,18 +459,18 @@ const serverSpecifiers: ReadonlySet<string> = new Set([
 
 /**
  * What only the platform's bootstrap imports (spec 10.7.1): the session
- * client and the frame's runtime. A screen that made its own client would
+ * client and the frame's runtime. A page that made its own client would
  * get its own caches and submissions beside the platform's.
  */
 const platformOnly: ReadonlySet<string> = new Set([
   "@grasp-os/sdk/client",
-  "@grasp-os/sdk/screen-runtime",
+  "@grasp-os/sdk/page-runtime",
 ]);
 
 /**
  * The modules only the platform's bootstrap imports (spec 10.7.1): the
  * session client a host makes, the host's own SDK and the frame's
- * runtime. No App code imports them, screens, server or tests, not
+ * runtime. No App code imports them, pages, server or tests, not
  * even for their types: a type names what the module
  * gives, and App code is never given it.
  */
@@ -482,10 +478,10 @@ const bootstrapOnly: ReadonlySet<string> = new Set([
   "@grasp-os/sdk/client",
   "@grasp-os/sdk/host",
   "@grasp-os/sdk/definition",
-  "@grasp-os/sdk/screen-runtime",
+  "@grasp-os/sdk/page-runtime",
 ]);
 
-/** A server file a screen's relative import would reach, by its path. */
+/** A server file a page's relative import would reach, by its path. */
 const serverPath = (
   importer: string,
   specifier: string
@@ -499,7 +495,7 @@ const serverPath = (
     }
   }
   const path = parts.join("/").replace(/\.tsx?$/u, "");
-  return ["values", "grasp.config", "screens"].includes(path) ||
+  return ["values", "grasp.config"].includes(path) ||
     path.startsWith("server/") ||
     path.startsWith(".grasp/")
     ? path
@@ -507,13 +503,13 @@ const serverPath = (
 };
 
 /**
- * Why a screen's import of `specifier` reaches the App's server code, or
+ * Why a page's import of `specifier` reaches the App's server code, or
  * undefined when it doesn't: a server constructor, an internal reference,
  * a platform-only module, the schema, the registration or an operation.
- * Screens get the App's server only through the references the host
+ * Pages get the App's server only through the references the host
  * extracts from it, never its code.
  */
-export const screenImportError = (
+export const pageImportError = (
   file: string,
   specifier: string | undefined
 ): string | undefined => {
@@ -521,7 +517,7 @@ export const screenImportError = (
     return undefined;
   }
   if (platformOnly.has(specifier)) {
-    return `"${specifier}" is the platform's: it makes the session client and mounts it around every screen. Use useClient() and the hooks of @grasp-os/sdk/react.`;
+    return `"${specifier}" is the platform's: it makes the session client and mounts it around every page. Use useClient() and the hooks of @grasp-os/sdk/react.`;
   }
   let reached: string | undefined;
   if (isRelative(specifier)) {
@@ -531,28 +527,28 @@ export const screenImportError = (
   }
   return reached === undefined
     ? undefined
-    : `"${specifier}" is the App's server code, which screens never import: what a screen calls comes from the App's references, never its handlers, config, schema, migrations or server modules.`;
+    : `"${specifier}" is the App's server code, which pages never import: what a page calls comes from the App's references, never its handlers, config, schema, migrations or server modules.`;
 };
 
 /**
  * Why a type-only import of `specifier` (`import type`, `export type …
  * from`, `typeof import()`) in `file` isn't allowed, or undefined when it
  * is. Types are erased, so they are held only to what the file must
- * never reach: for a screen, the App's server code, its internal
- * references and the platform's modules (`screenImportError`); for any
+ * never reach: for a page, the App's server code, its internal
+ * references and the platform's modules (`pageImportError`); for any
  * other App code, the bootstrap's modules (`bootstrapOnly`). Everything
  * else a type may name, as the type check reads it.
  */
 export const typeImportError = (
   file: string,
   specifier: string | undefined,
-  screen: boolean
+  page: boolean
 ): string | undefined => {
   if (specifier === undefined) {
     return undefined;
   }
-  if (screen) {
-    return screenImportError(file, specifier);
+  if (page) {
+    return pageImportError(file, specifier);
   }
   return bootstrapOnly.has(specifier)
     ? `"${specifier}" is the platform's bootstrap, which only the code that makes and mounts the client imports (spec 10.7.1): never an App's server code or tests, not even for its types.`

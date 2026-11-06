@@ -1446,7 +1446,7 @@ export const dependencyApprovals = async (
   const decides = await holdsApprove(env, by);
   const asked = subjectOfInput(input);
   // Who may approve packages reads any App's or workflow's, with its name,
-  // and nothing else of it: not its versions, screens, data or members.
+  // and nothing else of it: not its versions, pages, data or members.
   const names = decides ? await subjectNames(db, [asked]) : undefined;
   const knownName = names?.get(subjectKey(asked));
   const subject: NamedDependencySubject =

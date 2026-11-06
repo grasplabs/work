@@ -13,10 +13,10 @@ import type { PreviewBuilt } from "../src/preview-builds.ts";
 
 const app = appIdSchema.parse("a".repeat(32));
 
-/** An update at `revision`, its screen's module `entry`, as a build answers one. */
+/** An update at `revision`, its page's module `entry`, as a build answers one. */
 const builtAt = (revision: number, entry: string): PreviewUpdate => ({
   app,
-  refresh: { revision, screen: "desk", entry, modules: {}, css: "", kit: [] },
+  refresh: { revision, entry, modules: {}, css: "", kit: [] },
 });
 
 /** What an ask answered: its update's module, or the code of its refusal. */

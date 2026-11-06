@@ -1,6 +1,6 @@
 // How deep a value may nest, apart and with nothing imported: the SDK's
 // value checks, a store's records (stores.ts) and the limits on the Cap'n
-// Web wire (screen-limits.ts) all start from it, and the screen runtime
+// Web wire (page-limits.ts) all start from it, and the page runtime
 // carries only what it uses.
 
 /**

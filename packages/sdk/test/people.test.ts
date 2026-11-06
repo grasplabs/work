@@ -7,8 +7,8 @@ import { peopleOperations, peopleReferences } from "../src/people.ts";
 import type { PeopleDirectory } from "../src/people.ts";
 import { GraspProvider, usePeople } from "../src/react.ts";
 
-// The reads a screen makes through `useUser` and `usePeople` name their
-// read, and core checks what they take. And the directory a screen holds
+// The reads a page makes through `useUser` and `usePeople` name their
+// read, and core checks what they take. And the directory a page holds
 // is one per client, so an effect that depends on it doesn't run again on
 // every render.
 

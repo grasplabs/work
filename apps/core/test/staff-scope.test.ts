@@ -1,6 +1,6 @@
 import { auditExportPath } from "@grasp-os/shared/audit-log";
+import { appFunctionPath, pagePersonHeader } from "@grasp-os/shared/pages";
 import { appTokenPath } from "@grasp-os/shared/portable";
-import { appFunctionPath, screenPersonHeader } from "@grasp-os/shared/screens";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -166,7 +166,7 @@ describe("a Grasp staff session, whatever its scope", () => {
     const { builder, app, workflow } = await reportWorkflow();
     const { session, api } = await staffOn(env);
     const { userId } = await api.whoami();
-    const asScreen = { [screenPersonHeader]: userId };
+    const asPage = { [pagePersonHeader]: userId };
 
     expect({
       run: await outcome(api.workflowResources.start(workflow, startOf())),
@@ -179,12 +179,12 @@ describe("a Grasp staff session, whatever its scope", () => {
         api.knowledge.createCollection({ name: "Staff's", access: "everyone" })
       ),
       brain: await outcome(api.brain.addRecords([])),
-      screen: await outcome(api.screens.open(app, "main")),
-      functions: await postedAs(`${appFunctionPath}/${app}`, session, asScreen),
+      page: await outcome(api.pages.open(app)),
+      functions: await postedAs(`${appFunctionPath}/${app}`, session, asPage),
       stream: await postedAs(
         `${appFunctionPath}/${app}/stream`,
         session,
-        asScreen
+        asPage
       ),
       token: await postedAs(`${appTokenPath}/${app}`, session),
       runs: await runsOf(builder, workflow),
@@ -195,7 +195,7 @@ describe("a Grasp staff session, whatever its scope", () => {
       createApp: "role.forbidden",
       collection: "role.forbidden",
       brain: "role.forbidden",
-      screen: "role.forbidden",
+      page: "role.forbidden",
       functions: 401,
       stream: 401,
       token: 401,

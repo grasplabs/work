@@ -5,18 +5,18 @@ import { z } from "zod";
 import { test } from "./contexts.ts";
 import { recordCspViolations } from "./csp.ts";
 import { hostileName, seedHostileArtifact } from "./package-artifact.ts";
+import { serveAttacker } from "./page-app.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
-import { serveAttacker } from "./screen-app.ts";
 import { origin } from "./stack.ts";
 
 // Code this origin serves that we didn't write, run in the product page:
 // an HTML injection that can't run inline script points a script element,
-// a worker or a `srcdoc` frame at a screen's module or a file of an App's
+// a worker or a `srcdoc` frame at a page's module or a file of an App's
 // npm packages, which would then run with the page's origin and the
 // person's session. The page's policy names only the frontend's own files
 // (core's security-headers.ts), and core refuses the page's own requests
-// for either path. The screen these addresses belong to still loads them
+// for either path. The page these addresses belong to still loads them
 // in its frame. Each attempt causes a violation on purpose, so this file
 // uses plain `test`.
 
@@ -25,13 +25,16 @@ let builder: Person;
 let artifactAddress: string;
 let app: string;
 
-const plainScreen = `export default function Plain() {
+const plainPage = `import { createFileRoute } from "@tanstack/react-router";
+
+function Plain() {
   return (
     <main className="p-4">
       <h1 className="text-lg font-medium">Plain</h1>
     </main>
   );
 }
+export const Route = createFileRoute("/")({ component: Plain });
 `;
 
 test.beforeAll(async () => {
@@ -44,8 +47,8 @@ test.beforeAll(async () => {
   ).href;
   const { core, api } = apiOf(builder);
   try {
-    ({ id: app } = await api.apps.create({ name: "Plain screen" }));
-    await release(api, app, { "screens/plain.tsx": plainScreen }, "Plain");
+    ({ id: app } = await api.apps.create({ name: "Plain page" }));
+    await release(api, app, { "src/routes/index.tsx": plainPage }, "Plain");
   } finally {
     core[Symbol.dispose]();
   }
@@ -113,37 +116,37 @@ const attempt = async (
   }, url);
 
 /**
- * Opens the App's screen on `page` and waits for it to render, which it
- * does only once its frame has loaded its modules from /screen-modules/;
+ * Opens the App's page on `page` and waits for it to render, which it
+ * does only once its frame has loaded its modules from /page-modules/;
  * returns the address of one, token and all, from the frame's import map.
  */
-const openScreen = async (page: Page): Promise<string> => {
-  await page.goto(`/apps/${app}/full?screen=plain`);
-  const screen = page.frameLocator('iframe[title="plain app"]');
-  await expect(screen.getByRole("heading", { name: "Plain" })).toBeVisible({
+const openPage = async (page: Page): Promise<string> => {
+  await page.goto(`/apps/${app}/full`);
+  const appPage = page.frameLocator('iframe[title="App"]');
+  await expect(appPage.getByRole("heading", { name: "Plain" })).toBeVisible({
     timeout: 30_000,
   });
   const { imports } = importMap.parse(
     JSON.parse(
-      (await screen.locator('script[type="importmap"]').textContent()) ?? ""
+      (await appPage.locator('script[type="importmap"]').textContent()) ?? ""
     )
   );
   const address = Object.values(imports).find((imported) =>
-    new URL(imported).pathname.startsWith("/screen-modules/")
+    new URL(imported).pathname.startsWith("/page-modules/")
   );
   if (address === undefined) {
-    throw new Error("The screen's frame imports its modules");
+    throw new Error("The page's frame imports its modules");
   }
   return address;
 };
 
-test("the product page runs no screen module or package file, however its HTML is injected, and its screens still run theirs", async ({
+test("the product page runs no page module or package file, however its HTML is injected, and its pages still run theirs", async ({
   browserName,
   pageOf,
 }) => {
   const page = await pageOf(builder);
   const violations = await recordCspViolations(page);
-  const moduleAddress = await openScreen(page);
+  const moduleAddress = await openPage(page);
 
   const outcomes = {
     module: await attempt(page, moduleAddress),
@@ -190,17 +193,17 @@ test("the product page runs no screen module or package file, however its HTML i
   expect(attacker.hits).toStrictEqual([]);
 });
 
-test("the product page runs no screen module through an escaped path under its own files", async ({
+test("the product page runs no page module through an escaped path under its own files", async ({
   pageOf,
 }) => {
   const page = await pageOf(builder);
-  const moduleAddress = await openScreen(page);
+  const moduleAddress = await openPage(page);
   // The browser matches the policy on the path as written, so this passes
   // as one of the frontend's files; decoded, it is the module's address.
   // Core answers no such path.
   const escaped = moduleAddress.replace(
-    "/screen-modules/",
-    "/assets/..%2Fscreen-modules/"
+    "/page-modules/",
+    "/assets/..%2Fpage-modules/"
   );
 
   const outcome = await page.evaluate(async (address) => {

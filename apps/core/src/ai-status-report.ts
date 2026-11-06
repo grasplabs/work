@@ -37,7 +37,7 @@ import type { ProviderHealth } from "./model-usage.ts";
 // on the organization's Setup and as its spend on its AI use; it changes
 // nothing. Signed with a key derived for this purpose only
 // (console-signed.ts); nothing an App, a
-// screen or a run reaches serves it. Provider ids, models, times and
+// page or a run reaches serves it. Provider ids, models, times and
 // amounts only: never a key, its mask or an endpoint's address, which only
 // connect and the organization's admins see, and nothing of what a call
 // carried.

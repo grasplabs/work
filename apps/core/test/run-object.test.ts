@@ -18,7 +18,7 @@ import {
   jsonWorkflowAppsOf,
   outcomeOf,
   publishedWorkflow,
-  screenOf,
+  pageOf,
   staged,
   startCommand,
   startedBy,
@@ -39,7 +39,7 @@ import {
 //   attempts that sent a call tried once, and what one failed with)
 //   outliving the run: it goes with the run's purge, only
 //   the start's tombstone left, so nothing of a removed run is read again.
-// - A screen's cancel lost on the way to the engine (the engine refusing
+// - A page's cancel lost on the way to the engine (the engine refusing
 //   the stop): its receipt stays admitted, never shown as done, and is
 //   finished by the cancel asked again or by the clock's repair, the stop
 //   audited once whichever finishes it, the run terminated in the engine.
@@ -72,7 +72,7 @@ const stopsOf = async (run: string) => {
     .map(({ actor }) => actor.type);
 };
 
-/** Where `run`'s screen cancel receipt stands. */
+/** Where `run`'s page cancel receipt stands. */
 const receiptOf = async (run: string) =>
   await env.DB.prepare(
     "SELECT state FROM workflow_resource_run_controls WHERE run_id = ?"
@@ -144,11 +144,11 @@ describe("an independent workflow's run object", { timeout: 60_000 }, () => {
     });
   });
 
-  it("finishes a screen's cancel the engine refused to stop, once asked again or at the next repair, audited once", async () => {
+  it("finishes a page's cancel the engine refused to stop, once asked again or at the next repair, audited once", async () => {
     const { builder, app, workflow, reference } = await boundApp({
       hold: "1 hour",
     });
-    const lease = await screenOf(builder, app);
+    const lease = await pageOf(builder, app);
     const runIn = async () => {
       const { runId } = startedOf(
         await called(builder, app, lease, startCommand(reference))

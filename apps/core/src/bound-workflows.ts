@@ -125,7 +125,7 @@ const eventBindingOf = (
 /**
  * What the host resolves of each workflow `manifest` declares that `app`
  * binds now: its alias, and its pinned version's decisions and the events
- * a screen sends, by their binding's alias, with the listen tasks waiting
+ * a page sends, by their binding's alias, with the listen tasks waiting
  * on those events. A declared alias with no active binding, and a binding
  * the App's code doesn't declare, resolve to nothing.
  */

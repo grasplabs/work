@@ -117,7 +117,7 @@ import {
 //   (sharing.ts, `projectsOfSql`). Taking someone out of a project, an item
 //   out of it, or deleting it keeps a revocation for each App it reached in
 //   the same batch (access-revocations.ts), and moves each workflow's
-//   policy generation on, so open screens clear and admitted starts are
+//   policy generation on, so open pages clear and admitted starts are
 //   refused.
 // - A project's name leaking: a project isn't there for anyone not in it
 //   (`project.not_found`), and an item's sharing list names its project row
@@ -722,7 +722,7 @@ export const removeProject = async (
     async () =>
       await auditedBatch(env, db, [
         stillBuilds(db, project.id, by),
-        // Read before the shares go: the Apps whose screens look again.
+        // Read before the shares go: the Apps whose pages look again.
         revocationsOf(db, appsSharedWithProject(project.id), null, sql`1 = 1`),
         nextGenerationWhere(db, workflowsSharedWithProject(project.id)),
         db
@@ -828,7 +828,7 @@ export const addProjectMember = async (
 /**
  * Takes a person or team out of project `id`, for its builders: what is
  * shared with the project stops reaching them on their next call, their
- * open screens of its Apps look again, and its workflows' admitted starts
+ * open pages of its Apps look again, and its workflows' admitted starts
  * are refused. Taking out someone not in it changes nothing.
  */
 export const removeProjectMember = async (

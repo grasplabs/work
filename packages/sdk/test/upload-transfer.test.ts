@@ -10,7 +10,7 @@ import { UploadTransfer } from "../src/upload-transfer.ts";
 // frame, and what it answers (progress, a published file, a cancellation
 // that won or lost) is what the transfer must show, no more. One upload
 // at a time; a cancellation that publication beat resolves completed. A
-// fence (the person's access or the screen's build changed) cancels the
+// fence (the person's access or the page's build changed) cancels the
 // running upload, and what settles after one is never shown completed.
 
 /** An upload the page has under way, which the test settles. */
@@ -233,7 +233,7 @@ describe("an upload's transfer", () => {
     });
   });
 
-  it("shows the fence's refusal for an upload a fence cancelled, not a cancellation the screen asked for", async () => {
+  it("shows the fence's refusal for an upload a fence cancelled, not a cancellation the page asked for", async () => {
     const { client, upload } = page();
     const transfer = new UploadTransfer(clientInternals(client));
     const running = transfer.upload(client.files, resource, photo);

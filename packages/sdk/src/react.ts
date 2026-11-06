@@ -1,5 +1,5 @@
 /**
- * The React SDK of an App's screens (spec 10.1, 10.7.1): the platform's
+ * The React SDK of an App's pages (spec 10.1, 10.7.1): the platform's
  * session client in a component, and the App's queries, mutations and
  * actions through the references the host generated for it (`@server/_generated/api`).
  *
@@ -17,7 +17,7 @@
  * export default Notes;
  * ```
  *
- * The platform mounts one `GraspProvider` per App session; a screen never
+ * The platform mounts one `GraspProvider` per App session; a page never
  * makes a client or mounts a provider. Queries answer their declared
  * value directly, or `undefined` while loading or skipped (`"skip"`): a
  * `null` result is the App's data. A query's failure is thrown while
@@ -72,7 +72,6 @@ import type {
   FileView,
   UploadOptions,
 } from "./client-files.ts";
-import type { Navigate } from "./client-navigation.ts";
 import { readWorkflowReference, workflowChannel } from "./client-workflow.ts";
 import type { PaginationResult } from "./database.ts";
 import { useGraspForm } from "./form.ts";
@@ -123,16 +122,10 @@ export type {
 export type {
   AppErrorPayload,
   RunHandle,
-  ScreenProps,
   WorkflowEventReference,
   WorkflowReference,
   WorkflowWait,
 } from "./references.ts";
-export type {
-  Navigate,
-  NavigateOptions,
-  SurfaceNavigateOptions,
-} from "./client-navigation.ts";
 export type {
   Declaring,
   DeleteOptions,
@@ -168,8 +161,8 @@ export type {
 const ClientContext = createContext<GraspClient | null>(null);
 
 /**
- * Hands `client` to the screen below it. The platform mounts it once per
- * App session (screen-runtime.ts); App code never does.
+ * Hands `client` to the page below it. The platform mounts it once per
+ * App session (page-runtime.ts); App code never does.
  */
 export const GraspProvider = ({
   client,
@@ -187,7 +180,7 @@ export const useClient = (): GraspClient => {
   const client = use(ClientContext);
   if (client === null) {
     throw new Error(
-      "There is no Grasp client here: the platform mounts it around every screen."
+      "There is no Grasp client here: the platform mounts it around every page."
     );
   }
   return client;
@@ -221,7 +214,7 @@ const noSubscription = (): (() => void) => () => {
  * The current result of the query `reference` names with `args`, kept up
  * to date: its declared value, or `undefined` while it loads or when
  * `args` is `"skip"`. Check for loading with `=== undefined`. A failure
- * is thrown to the screen's error boundary.
+ * is thrown to the page's error boundary.
  */
 export const useQuery = <Reference extends QueryReference>(
   reference: Reference,
@@ -289,7 +282,7 @@ export interface PaginatedQueryOptions {
  * `loadMore`, stable, which loads `initialPageSize` more (or as many as
  * it is given). Changing `args` or `initialPageSize` starts the list
  * again; equal arguments in a new object don't. A failure is thrown to
- * the screen's error boundary, as a query's is.
+ * the page's error boundary, as a query's is.
  */
 export const usePaginatedQuery = <Reference extends QueryReference>(
   reference: Reference,
@@ -318,9 +311,9 @@ export const usePaginatedQuery = <Reference extends QueryReference>(
 };
 
 /**
- * Reads again every query of the screen that failed and is still read: for
- * a part of a screen that shows its own failure with a way to try again,
- * as `DataGrid` does. The screen's error boundary does the same.
+ * Reads again every query of the page that failed and is still read: for
+ * a part of a page that shows its own failure with a way to try again,
+ * as `DataGrid` does. The page's error boundary does the same.
  */
 export const useRetryFailed = (): (() => void) => {
   const internals = clientInternals(useClient());
@@ -342,23 +335,12 @@ export const useMutation = <Reference extends MutationReference>(
 };
 
 /**
- * How a screen opens another of its App's screens (spec 10.7.7): one
- * stable function, `navigate(screens.note, { id }, { replace? })`, with a
- * screen from the generated `screens` and its route input, which may be
- * left out only when it is empty or all defaults. Push by default;
- * `replace: true` replaces the current entry. Resolves once the host
- * accepted the navigation, not once the screen loaded. The screen it
- * opens gets the input as its `ScreenProps`.
- */
-export const useNavigate = (): Navigate => useClient().navigate;
-
-/**
- * Who is using the screen (`User`): their ID, name, address and roles in
+ * Who is using the page (`User`): their ID, name, address and roles in
  * the App (`builder`, `user`; none for a visitor the App was shared with,
  * whose `id` is their session's: key a visitor by `email`); `undefined`
  * while it loads. Core answers it from who is signed in, never from the
- * screen: show it, but decide what someone may do in the App's server
- * functions, with `ctx.auth.getUser()`, which no screen can change.
+ * page: show it, but decide what someone may do in the App's server
+ * functions, with `ctx.auth.getUser()`, which no page can change.
  */
 export const useUser = (): User | undefined =>
   useQuery(peopleReferences.user, {});
@@ -495,19 +477,19 @@ interface ShownFile {
  * The file `file` (or nothing, with `"skip"`) through `resource`, a files
  * resource the App declares with `read` (spec 10.7.5): `undefined` while
  * it loads or is skipped, then `{ file, name, mimeType, size, previewUrl }`.
- * A failure is thrown to the screen's error boundary, as a query's is.
+ * A failure is thrown to the page's error boundary, as a query's is.
  *
  * `null` once the file was deleted through this client while shown, as a
  * query answers `null` for a document that is gone: its preview revoked,
- * nothing read again, and nothing thrown. A screen that removes a file
+ * nothing read again, and nothing thrown. A page that removes a file
  * still shows it until its own data catches up (the row a live query
  * lists until the change reaches it), so its deletion is no failure.
  *
  * `previewUrl` is a local URL of a bounded raster image's preview, for an
- * `<img>`, or null; it is revoked when another file is shown, the screen
+ * `<img>`, or null; it is revoked when another file is shown, the page
  * leaves or the person's access changes, and is never a URL to the file
  * elsewhere. When the person's access changes (a fence), the refusal is
- * shown, and nothing is read again until the screen tries again.
+ * shown, and nothing is read again until the page tries again.
  */
 export const useFile = <Reference extends FilesReference>(
   resource: Declaring<Reference, "read">,
@@ -528,7 +510,7 @@ export const useFile = <Reference extends FilesReference>(
   const key = id === undefined ? undefined : `${resource.alias}/${id}`;
   // The fences as the hook's first render saw them: one between it and
   // the effect is caught by the effect, which never reads past it. After
-  // a fence the screen shows the refusal until it is mounted again.
+  // a fence the page shows the refusal until it is mounted again.
   const [seen, setSeen] = useState(() => ({
     client,
     fences: internals.fences(),
@@ -552,7 +534,7 @@ export const useFile = <Reference extends FilesReference>(
         previewUrl = null;
       }
     };
-    // A refusal stays until the screen is mounted again: a deletion that
+    // A refusal stays until the page is mounted again: a deletion that
     // finishes after it never turns it into the file gone.
     let refused = false;
     // Deleted through this client, once core recorded it: gone, never read

@@ -2,6 +2,8 @@
 import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { pageErrors } from "@grasp-os/shared/pages";
+import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
 import {
   accessEndedCloseCode,
   connectAgainCloseCode,
@@ -15,8 +17,6 @@ import type {
 import type { Identity } from "@grasp-os/shared/rpc";
 import { rpcCopyNodeBounds } from "@grasp-os/shared/rpc-accounting";
 import type { RpcAccountingLimits } from "@grasp-os/shared/rpc-accounting";
-import { screenErrors } from "@grasp-os/shared/screens";
-import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 
 import {
@@ -28,25 +28,25 @@ import { checkAppToken } from "./auth/app-tokens.ts";
 import type { TokenCheck } from "./auth/app-tokens.ts";
 import { errorResponse } from "./errors.ts";
 import { isStub } from "./page-callbacks.ts";
-import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
+import { deliveryAt, requireDelivery } from "./page-delivery.ts";
+import { isWorkflowRequest } from "./page-workflows.ts";
+import { admitted, stillHasRole } from "./pages-rpc.ts";
+import { QuerySubscriptions, pageReads } from "./query-subscriptions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { serveRpc } from "./rpc.ts";
-import { deliveryAt, requireDelivery } from "./screen-delivery.ts";
-import { isWorkflowRequest } from "./screen-workflows.ts";
-import { admitted, stillHasRole } from "./screens-rpc.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { auditStaffRoute, staffAudited } from "./staff-audit.ts";
 import type { Subscription } from "./subscription.ts";
 
 // A portable host's live connection (spec 10.7.1, 11): the App's UI
-// outside Grasp's shell follows the App's live queries as a screen does,
+// outside Grasp's shell follows the App's live queries as a page does,
 // over `GET /api/portable/app-live/<app>`, a WebSocket speaking Cap'n
 // Web. Browsers can't put `Authorization` on a WebSocket, and a token in
 // the URL would end up in logs, so the person's App token
 // (auth/app-tokens.ts) comes in the connection's first call
 // (`PortableLiveApi.connect`). What it then reaches is the frame's live
-// queries: the same `QuerySubscriptions` manager and `screenReads`, with
+// queries: the same `QuerySubscriptions` manager and `pageReads`, with
 // no build core leased (as the portable function route: only when the
 // App's data is `ordinary`, never once its release is revoked). Threat
 // model, and how each is closed:
@@ -220,7 +220,7 @@ export class PortableQueriesRpc
     const hasRole = stillHasRole(env, this.#check, app);
     this.#queries = new QuerySubscriptions(
       env,
-      screenReads(env, this.#check, async (by, id, build) => {
+      pageReads(env, this.#check, async (by, id, build) => {
         if (!(await hasRole())) {
           return "role";
         }
@@ -381,14 +381,14 @@ export class PortableQueriesRpc
       request.length > functionRequestMaxBytes ||
       !isStub(onSnapshot)
     ) {
-      throw screenErrors.create("screen.invalid");
+      throw pageErrors.create("page.invalid");
     }
     // No build core leased: the host's code isn't core's to deliver.
     await requireDelivery(env, by, id, undefined, {
       operation: "portable.watchQuery",
       stage: "admission",
     });
-    // Nor does it follow an App's workflows yet (screen-workflows.ts).
+    // Nor does it follow an App's workflows yet (page-workflows.ts).
     if (isWorkflowRequest(request)) {
       throw workflowResourceErrors.create("workflow.portable_unavailable");
     }

@@ -38,7 +38,7 @@ const runHandle = v.object({
   manifestHash: idText,
 });
 
-/** A run's status, as a screen sees it, compensation aside. */
+/** A run's status, as a page sees it, compensation aside. */
 const settledStatus = v.enum([
   "queued",
   "running",

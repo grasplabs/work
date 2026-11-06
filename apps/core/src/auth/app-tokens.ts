@@ -30,7 +30,7 @@ import type { SignedInSession } from "./identity.ts";
 //   that person may do there. Each call is still counted against that
 //   person's request budget of the App, and a replayed mutation under the
 //   same idempotency key is the same submission, not a second save. That
-//   budget is shared with the person's own screens, so a thief can also
+//   budget is shared with the person's own pages, so a thief can also
 //   use it up for those minutes: accepted. Binding a token to a key its
 //   host holds (DPoP) is not done: a browser host could not keep such a
 //   key from its own page's script either.
@@ -185,7 +185,7 @@ export const checkAppToken = async (
   if (!read.success) {
     // A key made in another isolate within the last few seconds isn't
     // read here yet (token-keys.ts): its holder tries again, it isn't
-    // told to sign in, which would clear what its screens hold.
+    // told to sign in, which would clear what its pages hold.
     return tokenKeysOf(env).takeStale(token)
       ? { ok: false, reason: "keys_pending" }
       : invalid;

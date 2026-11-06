@@ -2,7 +2,7 @@ import { v } from "@grasp-os/sdk";
 import { preferenceOperations } from "@grasp-os/sdk/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
+import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
 import { env } from "cloudflare:workers";
 
 import { appDefinition, preferencesOf, redefined } from "./app-definitions.ts";
@@ -55,7 +55,7 @@ export const livePushes = () => {
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
-/** The App's notes, its functions and a screen that reads them live. */
+/** The App's notes, its functions and a page that reads them live. */
 export const notesFiles = (marker: string): Record<string, string> => ({
   ...appDefinition({
     name: "Notes",
@@ -89,7 +89,7 @@ export const titles = query({
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title).sort(),
 });
 
-/** The notes, page by page: what a screen's \`usePaginatedQuery\` reads. */
+/** The notes, page by page: what a page's \`usePaginatedQuery\` reads. */
 export const list = query({
   args: { pagination: paginationOptionsValidator },
   returns: paginationResultValidator(doc("notes")),
@@ -265,13 +265,16 @@ export const consult = action({
 });
 `,
 
-  "screens/desk.tsx": `import { useQuery } from "@grasp-os/sdk/react";
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@grasp-os/sdk/react";
 import { api } from "@server/_generated/api";
 
-export default function Desk() {
+function Desk() {
   const titles = useQuery(api.notes.titles, {});
   return <main>{titles === undefined ? "Loading" : titles.join(", ")}</main>;
 }
+
+export const Route = createFileRoute("/")({ component: Desk });
 `,
 });
 
@@ -312,16 +315,14 @@ export const preferenceReference = (name: "get" | "update") => {
   return { name: operation.path, kind: operation.kind };
 };
 
-/** An App with preferences and no tables, and one screen. */
+/** An App with preferences and no tables, and one page. */
 export const deskFiles = (marker = "Desk"): Record<string, string> => ({
   ...appDefinition({ name: "Desk", preferences: preferencesSource }),
-  "screens.ts": `export default {
-  screens: [{ name: "desk", path: "/", source: "screens/desk.tsx" }],
-};
-`,
-  "screens/desk.tsx": `const Desk = () => <main>${marker}</main>;
+  "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 
-export default Desk;
+const Desk = () => <main>${marker}</main>;
+
+export const Route = createFileRoute("/")({ component: Desk });
 `,
 });
 
@@ -365,7 +366,7 @@ export const deskDraft = async (builder: Person) => {
   await release(builder, id, deskFiles());
   const app = appIdSchema.parse(id);
   const draft = await chatWithDraft(builder, app, {
-    "screens/desk.tsx": deskFiles("Drafted")["screens/desk.tsx"] ?? "",
+    "src/routes/index.tsx": deskFiles("Drafted")["src/routes/index.tsx"] ?? "",
   });
   return { app, ...draft };
 };

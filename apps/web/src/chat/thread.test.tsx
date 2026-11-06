@@ -253,7 +253,7 @@ describe(ChatThread, () => {
             codeBefore: 0,
             input: {
               app: "app_1",
-              files: { "screens/desk.tsx": "export default" },
+              files: { "src/routes/index.tsx": "export default" },
             },
           },
           {
@@ -270,7 +270,7 @@ describe(ChatThread, () => {
         id: 3,
         role: "result",
         callId: "write",
-        text: 'Returned:\n{"changed":["screens/desk.tsx"]}',
+        text: 'Returned:\n{"changed":["src/routes/index.tsx"]}',
         failed: false,
         at,
       },
@@ -286,13 +286,13 @@ describe(ChatThread, () => {
 
     expect({
       lines,
-      given: opened?.includes('"screens/desk.tsx": "export default"'),
-      came: opened?.includes('{"changed":["screens/desk.tsx"]}'),
+      given: opened?.includes('"src/routes/index.tsx": "export default"'),
+      came: opened?.includes('{"changed":["src/routes/index.tsx"]}'),
       code: document.body.textContent.includes("Code step"),
     }).toStrictEqual({
       // The search has no result yet, and Grasp has stopped: it never ran.
       lines: [
-        "Wrote screens/desk.tsx",
+        "Wrote src/routes/index.tsx",
         "Searching the brain for expense policyStopped",
       ],
       given: true,
@@ -331,7 +331,7 @@ describe(ChatThread, () => {
             codeBefore: 0,
             input: {
               app: "app_1",
-              files: { "screens/desk.tsx": "", "app.ts": "" },
+              files: { "src/routes/index.tsx": "", "app.ts": "" },
             },
           },
           {

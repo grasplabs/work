@@ -88,13 +88,20 @@ const none = (): boolean => false;
 const generated = (file: string): boolean => file.startsWith(".grasp/");
 
 /**
+ * The pages' route tree, which the host generates (route-tree.ts): it
+ * registers their router with `@tanstack/react-router`, as its own
+ * module declarations do (inputs.ts `routeTreePath`).
+ */
+const routeTree = (file: string): boolean => file === "src/routeTree.gen.ts";
+
+/**
  * The kinds of code, as each tsconfig's `grasp.kind` names it. Server
  * code's migrations are checked for what they name, not yet for their
  * own type errors (compiler `checkAppCode`, GRA-690); and the host's
  * generated modules are its own.
  */
 const kinds: Readonly<Record<string, Kind>> = {
-  screens: { reports: every, steered: none, declares: none, lenient: none },
+  pages: { reports: every, steered: none, declares: routeTree, lenient: none },
   server: {
     reports: every,
     steered: (file) => !generated(file),

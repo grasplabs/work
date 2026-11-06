@@ -39,8 +39,8 @@ import type { RunEventDelivery } from "./workflows/run-events.ts";
 // A mutation's workflow notifications (spec 10.7.4): `ctx.notify(event,
 // { runId, data })`, staged as an intent of its commit in its store's
 // outbox (operations.ts) and delivered from there, after the commit, into
-// the run's inbox (workflows/run-events.ts), the inbox a screen's send
-// reaches too (screen-workflows.ts). Threat model, and how each is closed:
+// the run's inbox (workflows/run-events.ts), the inbox a page's send
+// reaches too (page-workflows.ts). Threat model, and how each is closed:
 //
 // - A notification outliving a mutation that didn't commit: it is an
 //   outbox entry written in its commit's transaction with its records and
@@ -82,7 +82,7 @@ import type { RunEventDelivery } from "./workflows/run-events.ts";
 //   the App, its release and the person (`sourceOf`), its ID from the run,
 //   binding, source and delivery key, its time as the run accepts it.
 // - One sender filling the run's inbox: the App and the person are one
-//   sender, as their screen's sends are (`senderOf`), held to that
+//   sender, as their page's sends are (`senderOf`), held to that
 //   sender's share of the inbox.
 // - A notification dropped unrecorded: one refused for good (the run
 //   ended, the grant revoked, the run's inbox refusing it as invalid) is
@@ -139,7 +139,7 @@ const sourceOf = (intent: NotifyIntent): string =>
 
 /**
  * Who a notification counts against in a run's inbox: the App and the
- * person, as their screen's sends do.
+ * person, as their page's sends do.
  */
 const senderOf = (intent: Pick<NotifyIntent, "app" | "principal">): string =>
   `app:${intent.app}:person:${intent.principal}`;

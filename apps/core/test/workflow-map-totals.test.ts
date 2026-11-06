@@ -5,10 +5,10 @@ import {
   formatHours,
   stepHours,
   totalsOf,
-} from "../blueprints/workflow-map/files/components/totals.ts";
-import type { Step } from "../blueprints/workflow-map/files/components/totals.ts";
+} from "../blueprints/workflow-map/files/src/components/totals.ts";
+import type { Step } from "../blueprints/workflow-map/files/src/components/totals.ts";
 
-// The workflow map's numbers (its screen works them out): a workflow's
+// The workflow map's numbers (its page works them out): a workflow's
 // hours a week, people and handovers, and a designed workflow's expected
 // gain against the drawn one. Pure logic, so tested on its own.
 

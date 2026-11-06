@@ -81,10 +81,10 @@ const invalid = () =>
   workflowResourceErrors.create("workflow.app_binding_invalid");
 
 /**
- * Tells App `app`'s screens following its workflows to read them again
+ * Tells App `app`'s pages following its workflows to read them again
  * (app.ts, `workflowPolicyChanged`): a binding changed what each watch may
- * show and what its person may start (screen-workflows.ts). Best effort:
- * the change stands if the App can't be reached, and its screens read
+ * show and what its person may start (page-workflows.ts). Best effort:
+ * the change stands if the App can't be reached, and its pages read
  * again at their runs' next change.
  */
 const tellBindingChanged = async (env: Env, app: string): Promise<void> => {
@@ -359,7 +359,7 @@ export const startAppBinding = async (
   beforeAdmit?: () => void,
   /** The agent whose call made it, whose chat's restricted mode it takes. */
   agent: StartingAgent | null = null,
-  /** The App files it may hand its run: a screen's start's only (GRA-885). */
+  /** The App files it may hand its run: a page's start's only (GRA-885). */
   files?: StartFiles
 ): Promise<WorkflowStart> => {
   if (authority.subject.type !== "app" || typeof alias !== "string") {
@@ -399,8 +399,8 @@ export const startAppBinding = async (
 
 /**
  * That App `app`'s active binding of `alias` names exactly workflow
- * version `pin`, as SQL: what a screen's run, and a run a mutation
- * notifies, are read through (screen-workflows.ts,
+ * version `pin`, as SQL: what a page's run, and a run a mutation
+ * notifies, are read through (page-workflows.ts,
  * workflow-notifications.ts).
  */
 export const bindingPinnedSql = (

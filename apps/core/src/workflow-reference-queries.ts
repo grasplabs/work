@@ -48,15 +48,15 @@ import {
   resourceDecisionPending,
 } from "./decisions/decisions.ts";
 import { appHost } from "./durable-objects.ts";
+import { followableOrigins } from "./page-workflows.ts";
 import { windowPages } from "./query-windows.ts";
-import { followableOrigins } from "./screen-workflows.ts";
 import { loadWorkflowBuild } from "./workflow-builds.ts";
 import { historyEntries } from "./workflows/history.ts";
 import { detailsRemoved } from "./workflows/retention.ts";
 import { sealedStepOf, sealedStepsOf } from "./workflows/sealed-steps.ts";
 import type { SealedSteps } from "./workflows/sealed-steps.ts";
 
-// A workflow reference's ordinary queries, as an App's screens read them
+// A workflow reference's ordinary queries, as an App's pages read them
 // (spec 10.7.2): `workflows.<alias>.queries.runs`, `.history`,
 // `.decisions` and `.decision`, whose arguments and answers the SDK
 // declares (workflow-queries.ts) and generates into `@server/_generated/api`. They aren't
@@ -94,9 +94,9 @@ import type { SealedSteps } from "./workflows/sealed-steps.ts";
 //   platform defines as it is, any other as `workflow.step_failed`, so no
 //   code can be made of what the run read. A task is named
 //   only by an ID the version's sealed build declares.
-// - A run offered as followable that a screen can't follow: a row's
+// - A run offered as followable that a page can't follow: a row's
 //   `canWatch` is true only for a run the reference's `useWorkflow` would
-//   show now (screen-workflows.ts): of the version the release pins, while
+//   show now (page-workflows.ts): of the version the release pins, while
 //   the binding names it, started by an App version declaring the same
 //   contract, and a returned restricted run only through an App that is
 //   restricted itself. It tells nothing past the row: the caller already
@@ -216,7 +216,7 @@ export interface WorkflowQueryCaller {
   readonly staff?: boolean;
 }
 
-/** A run's status as a screen sees it, from what core keeps of it. */
+/** A run's status as a page sees it, from what core keeps of it. */
 const publicStatus = {
   starting: "queued",
   running: "running",
@@ -303,8 +303,8 @@ const returnedRestricted = (row: RunsRow): boolean =>
   row.restricted && (row.status === "completed" || row.status === "failed");
 
 /**
- * Which of `rows`, runs of the caller's on a page, their screen can follow
- * through the reference's `useWorkflow` now, as screen-workflows.ts serves
+ * Which of `rows`, runs of the caller's on a page, their page can follow
+ * through the reference's `useWorkflow` now, as page-workflows.ts serves
  * a watch: a run of exactly the version the release pins, while the App's
  * binding names it, started by an App version whose contract the release
  * still declares, once it returned not restricted unless the App is, and
@@ -568,7 +568,7 @@ const historyRunOf = async (
   return row;
 };
 
-/** A history entry's error, as a screen reads one: never the workflow's text. */
+/** A history entry's error, as a page reads one: never the workflow's text. */
 const errorRow = (error: { code: string; message: string }): Json => ({
   code: error.code,
   message: error.message,
@@ -1042,7 +1042,7 @@ const decisionsPage = async (
         },
         // Listed only while the caller may answer it and it takes answers.
         // Answerable only where the run's restricted mode is the App's
-        // (workflows/screen-decisions.ts, `appDecision`).
+        // (workflows/page-decisions.ts, `appDecision`).
         wait: decisionWaitOf(row, named, row.restricted === appRestricted),
       });
     }
@@ -1104,7 +1104,7 @@ const decisionDetail = async (
     return null;
   }
   // Answerable only where the run's restricted mode is the App's
-  // (workflows/screen-decisions.ts, `appDecision`).
+  // (workflows/page-decisions.ts, `appDecision`).
   const canRespond = row.restricted === appRestricted;
   return {
     key: named.key,

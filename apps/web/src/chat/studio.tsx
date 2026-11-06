@@ -6,10 +6,9 @@ import { EyeIcon } from "lucide-react";
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
-import { PreviewFrame } from "../screens/screen-frame.tsx";
-import type { ScreenEnded } from "../screens/screen-frame.tsx";
-import { useVersionPushes } from "../screens/use-version-pushes.ts";
-import { changedScreens, previewedScreen } from "./builds-state.ts";
+import { PreviewFrame } from "../pages/page-frame.tsx";
+import type { PageEnded } from "../pages/page-frame.tsx";
+import { useVersionPushes } from "../pages/use-version-pushes.ts";
 import { changesApp } from "./builds.tsx";
 import type { NamedDraft } from "./builds.tsx";
 import { DraftVersionBar, shownVersion } from "./draft-versions.tsx";
@@ -22,19 +21,18 @@ import type { ShownVersion } from "./draft-versions.tsx";
 // App's name and the way to the App itself. The bar is the App's own top
 // row, as tall as the page sidebar's, so the two read as one line. On a
 // narrow window the chat and the App take turns, chosen on top. Unlike
-// the prototype's, what shows is the compiled screen of core's draft, as
+// the prototype's, what shows is the compiled page of core's draft, as
 // a preview: it changes nothing and reads no real data.
 
 /**
- * The preview of App `app` as the chat's `draft` has it: its first screen,
- * or one it changes the person picks; of the draft's earlier `version`
- * when they opened one, read-only, at that version's first screen (the
- * screens to pick are the latest's). With no draft, or one that changes
- * nothing, core previews the App's latest version, so the App always
- * shows. Each of the draft's writes comes into the frame it has open,
- * keeping what the screen holds, and starts afresh one that failed to
- * start (screen-frame.tsx); another screen or version starts it afresh,
- * as its key says.
+ * The preview of App `app` as the chat's `draft` has it: its pages, as
+ * one single page app the person moves through as they would the App; of
+ * the draft's earlier `version` when they opened one, read-only. With no
+ * draft, or one that changes nothing, core previews the App's latest
+ * version, so the App always shows. Each of the draft's writes comes into
+ * the frame it has open, keeping what the pages hold and the route they
+ * show, and starts afresh one that failed to start (page-frame.tsx);
+ * another version starts it afresh, as its key says.
  */
 export const DraftPreview = ({
   chatId,
@@ -52,65 +50,22 @@ export const DraftPreview = ({
   name: string;
   version: number | undefined;
   /** Told once the frame failed (`PreviewFrame`). */
-  onEnded?: ScreenEnded;
+  onEnded?: PageEnded;
   /** Told the App's version the frame shows (`PreviewFrame`). */
-  onShows?: (appVersion: number | undefined, screen: string) => void;
+  onShows?: (appVersion: number | undefined) => void;
 }) => {
-  const [picked, setPicked] = useState<string>();
   const { t } = useLingui();
-  const screens = draft === undefined ? [] : changedScreens(draft);
-  const screen = previewedScreen(screens, picked, version);
-  // The page the open frame was opened for, and the one core said it
-  // shows: a frame opened for none shows the App's first, and one opened
-  // for a page that didn't build shows another in its place. Naming the
-  // page it shows (a write to it, or the person picking it) keeps the
-  // frame, which is asked for that page from then on (`askedFor`, the one
-  // page its updates ask for): what the page holds stays. Another page or
-  // version opens the frame afresh, as its key says.
-  const [framed, setFramed] = useState({ app, screen, version });
-  const [showing, setShowing] = useState<string>();
-  const keeps =
-    framed.app === app &&
-    framed.version === version &&
-    (framed.screen === screen || (screen !== undefined && screen === showing));
-  if (!keeps) {
-    setFramed({ app, screen, version });
-    setShowing(undefined);
-  }
-  const open = keeps ? framed : { app, screen, version };
   return (
     <section
       aria-label={t`Preview of ${name}`}
       className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border"
     >
-      {screens.length > 1 && version === undefined ? (
-        <div className="flex flex-wrap gap-1 border-b p-2">
-          {screens.map((one) => (
-            <Button
-              aria-pressed={one === screen}
-              key={one}
-              onClick={() => {
-                setPicked(one);
-              }}
-              size="sm"
-              variant={one === screen ? "secondary" : "ghost"}
-            >
-              {one}
-            </Button>
-          ))}
-        </div>
-      ) : null}
       <PreviewFrame
         app={app}
         chatId={chatId}
-        key={`${open.app}:${open.screen ?? ""}:${open.version ?? ""}`}
-        onShows={(appVersion, shown) => {
-          setShowing(shown);
-          onShows?.(appVersion, shown);
-        }}
+        key={`${app}:${version ?? ""}`}
+        {...(onShows === undefined ? {} : { onShows })}
         {...(draft === undefined ? {} : { revision: draft.revision })}
-        {...(open.screen === undefined ? {} : { screen: open.screen })}
-        {...(screen === undefined ? {} : { askedFor: screen })}
         {...(version === undefined ? {} : { version })}
         {...(onEnded === undefined ? {} : { onEnded })}
       />
@@ -121,7 +76,7 @@ export const DraftPreview = ({
 /**
  * The App's top row: its name and which version of the chat's draft shows
  * (`DraftVersionBar`), then the way to the App, where its people meet it
- * (and an admin approves its screens' code). Its padding and the button's
+ * (and an admin approves its pages' code). Its padding and the button's
  * height are the page sidebar's top row's (`PageSidebarTop`), so its line
  * continues that one. On a narrow screen the version controls wrap under
  * the name rather than run over the way to the App.

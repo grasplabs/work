@@ -14,12 +14,12 @@ import { useEffect, useRef, useState } from "react";
 import { confirmGate } from "./confirm-gate.ts";
 import type { ConfirmGate } from "./confirm-gate.ts";
 
-// The page's confirmation of a link an App's screen asks to open (spec
+// The page's confirmation of a link an App's page asks to open (spec
 // 10.7.7, decision 2 on GRA-259), when the person didn't just click in
-// the screen, or core wants each link confirmed (its App's data isn't
+// the page, or core wants each link confirmed (its App's data isn't
 // `ordinary`, or it read restricted data). Grasp's own dialog, outside
 // the frame: it names only the origin core checked, in ASCII, never text
-// of the screen's, so a look-alike name shows as the punycode it is; when
+// of the page's, so a look-alike name shows as the punycode it is; when
 // core wants it confirmed, the whole URL too, as core parsed it, so the
 // person sees what it would carry out. Open counts only as the
 // gate says (confirm-gate.ts): never for a click or key on its way.
@@ -33,7 +33,7 @@ export interface PendingLink {
 
 /**
  * How long Open stays disabled once the dialog shows, and after every
- * press or key while it is: a click already on its way, which a screen
+ * press or key while it is: a click already on its way, which a page
  * could time its request for, never confirms.
  */
 const confirmDelayMs = 1000;
@@ -128,7 +128,7 @@ export const LinkConfirmDialog = ({
             disabled={ready !== pending}
             onClick={(event) => {
               const opened = gate.current;
-              // A click with no pointer behind it (`detail` 0: a screen
+              // A click with no pointer behind it (`detail` 0: a page
               // reader's activate, or a key) counts as a press of its own
               // as it lands, when no press of the button came before it.
               const clickedAt =

@@ -1,4 +1,4 @@
-import { compilerVersion, isAppLayout } from "@grasp-os/compiler";
+import { compilerVersion, isAppLayout, isPageFile } from "@grasp-os/compiler";
 import {
   sdkProtocolVersion,
   versionErrors,
@@ -12,7 +12,6 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { screenPath } from "@grasp-os/shared/screens";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -21,8 +20,8 @@ import { z } from "zod";
 import {
   artifactDigest,
   readBackRelease,
-  sealedScreen,
-  sealedScreenNames,
+  sealedPage,
+  sealsPages,
 } from "./app-releases.ts";
 import type { VerifiedObservations } from "./apps.ts";
 import {
@@ -45,7 +44,7 @@ import {
   appCandidates,
   appVersions,
   permissions,
-  screenPolicies,
+  pagePolicies,
 } from "./db/core/schema.ts";
 
 // Candidates (spec 22.1, 22.2): one frozen version of an App on its way to
@@ -107,7 +106,7 @@ export const candidateLeaseMs = 10 * 60_000;
 export const maxCandidateAttempts = 3;
 
 /** The format of a candidate's report. */
-const reportFormatVersion = 2;
+const reportFormatVersion = 3;
 
 /** A candidate, as core keeps it. */
 export type CandidateRow = typeof appCandidates.$inferSelect;
@@ -123,7 +122,7 @@ const blockedCodes: ReadonlySet<string> = new Set([
   "migration.busy",
   "migration.pending",
   "operation.deadline_exceeded",
-  "screen.build_slow",
+  "page.build_slow",
   "version.seal_busy",
   "version.not_sealed",
   "version.seal_conflict",
@@ -461,7 +460,7 @@ const endUnlessLost = async (
 /**
  * What held of the App's authority as `row` was verified: a hash of its
  * active permissions (each as granted), whether an admin approved the
- * version, and its screens' data policy. Evidence of what held then,
+ * version, and its pages' data policy. Evidence of what held then,
  * never a decision: making it current and every call read their own.
  */
 const authorityOf = async (env: Env, row: CandidateRow) => {
@@ -499,11 +498,11 @@ const authorityOf = async (env: Env, row: CandidateRow) => {
       .get(),
     db
       .select({
-        output: screenPolicies.output,
-        generation: screenPolicies.generation,
+        output: pagePolicies.output,
+        generation: pagePolicies.generation,
       })
-      .from(screenPolicies)
-      .where(eq(screenPolicies.appId, row.appId))
+      .from(pagePolicies)
+      .where(eq(pagePolicies.appId, row.appId))
       .get(),
   ]);
   return {
@@ -517,7 +516,7 @@ const authorityOf = async (env: Env, row: CandidateRow) => {
     ),
     permissionCount: granted.length,
     approved: version?.approved ?? null,
-    screenPolicy: policy ?? null,
+    pagePolicy: policy ?? null,
   };
 };
 
@@ -558,37 +557,30 @@ const rollbackEligible = async (
 };
 
 /**
- * The screens `app`'s sealed `version` carries, each as the hash its build
- * is approved by, read back from the release (`sealedScreen`): the screens
- * of its `files`, no more and no fewer, or the release is refused
- * (`version.artifact_corrupt`), as a release that sealed other screens
- * than its source holds can't have been sealed by this release.
+ * The hash the build of the pages `app`'s sealed `version` carries is
+ * approved by, read back from the release (`sealedPage`), or null for a
+ * version without pages: sealed exactly when its `files` have pages,
+ * or the release is refused (`version.artifact_corrupt`), as a release
+ * that sealed other pages than its source holds can't have been sealed
+ * by this release.
  */
-const sealedScreensOf = async (
+const sealedPagesOf = async (
   env: Env,
   app: AppId,
   version: number,
   files: Record<string, string>
-): Promise<{ screen: string; artifact: string }[]> => {
-  const sealedNames = await sealedScreenNames(env, app, version);
-  const named = sealedNames.toSorted();
-  const wanted = Object.keys(files)
-    .flatMap((path) => {
-      const name = screenPath.exec(path)?.groups?.name;
-      return name === undefined ? [] : [name];
-    })
-    .toSorted();
-  if (canonicalText(named) !== canonicalText(wanted)) {
+): Promise<string | null> => {
+  const wanted = Object.keys(files).some((path) => isPageFile(path));
+  if ((await sealsPages(env, app, version)) !== wanted) {
     throw versionErrors.create("version.artifact_corrupt", {
-      path: "screens/",
+      path: "pages.json",
     });
   }
-  return await Promise.all(
-    named.map(async (name) => {
-      const { screen, artifact } = await sealedScreen(env, app, version, name);
-      return { screen, artifact };
-    })
-  );
+  if (!wanted) {
+    return null;
+  }
+  const { artifact } = await sealedPage(env, app, version);
+  return artifact;
 };
 
 /**
@@ -618,10 +610,10 @@ const reportOf = async (
     ? await readBackRelease(env, app, row.version)
     : undefined;
   const replaces = row.basedOn === 0 ? null : row.basedOn;
-  const screens =
+  const pages =
     sealed === undefined
-      ? []
-      : await sealedScreensOf(env, app, row.version, files);
+      ? null
+      : await sealedPagesOf(env, app, row.version, files);
   return canonicalText({
     formatVersion: reportFormatVersion,
     candidate: {
@@ -643,9 +635,9 @@ const reportOf = async (
             migrationEvidence: await sha256Hex(
               canonicalText(sealed.manifest.migrationEvidence)
             ),
-            // What each screen was built to and sealed as: the hash an
+            // What each page was built to and sealed as: the hash an
             // admin approves, read back from the release.
-            screens,
+            pages,
             artifacts: {
               count: sealed.manifest.artifacts.length,
               // A digest of the manifest's entries (path, sha256, size),

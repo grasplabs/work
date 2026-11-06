@@ -1668,7 +1668,7 @@ describe("runs started by a restricted App", () => {
     });
     const runId = await starter.start(serving);
     const held = await heldFor(ada, runId);
-    // Paused while it waits for its person, as a screen's pause asks it.
+    // Paused while it waits for its person, as a page's pause asks it.
     await runEngine(env).pause(runId, 1);
     await vi.waitFor(
       async () => {

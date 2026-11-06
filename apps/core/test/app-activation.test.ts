@@ -109,7 +109,7 @@ const appWith = async (files: Record<string, string>) => {
   return { owner, app: id };
 };
 
-/** Calls `path` of `release` for `by`, as a screen sends it. */
+/** Calls `path` of `release` for `by`, as a page sends it. */
 const call = async (
   by: Caller,
   release: Release,

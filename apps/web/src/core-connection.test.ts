@@ -18,7 +18,7 @@ import {
 } from "./core-connection.ts";
 import type { SessionEnded } from "./core-connection.ts";
 import { CoreTimeoutError } from "./core.ts";
-import { tabLink } from "./screens/tab-link.ts";
+import { tabLink } from "./pages/tab-link.ts";
 
 // The tab's one connection to core (spec 11.2), shared by the shell and
 // every App frame, with a stand-in for core: what each new connection

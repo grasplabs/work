@@ -1,0 +1,435 @@
+import { platformLimits } from "./platform-limits.ts";
+import { valueDepth } from "./value-depth.ts";
+
+// The limits and the frame's start, as the page, core and the frame's own
+// runtime all name them. Apart from the rest of what pages share
+// (pages.ts), importing only constants (the depth a value may nest, the
+// platform's limits): the runtime is loaded into every frame, and carries
+// only what it uses.
+
+/** Where the frontend frames pages from: a document core serves. */
+export const pageFramePath = "/page-frame";
+
+/**
+ * The languages a page's frame may be told the page speaks (its `lang`
+ * query): the frontend's own. Its document says it, so the kit's helpers
+ * (@grasp-os/ui) speak it too; anything else is English.
+ */
+export const pageLanguages = ["en", "de", "nl", "es", "fr"] as const;
+
+/** One of `pageLanguages`. */
+export type PageLanguage = (typeof pageLanguages)[number];
+
+/** `value` as a language a frame speaks, or English. */
+export const pageLanguageOf = (value: unknown): PageLanguage =>
+  pageLanguages.find((language) => language === value) ?? "en";
+
+/**
+ * Where a running App's page calls one of its App's functions (core's
+ * app-function-route.ts): `POST <path>/<app ID>`, the request as the body.
+ */
+export const appFunctionPath = "/api/app-functions";
+
+/**
+ * What a running App's page does with one of its streaming actions
+ * (spec 10.7.6), each `POST <appFunctionPath>/<app ID>/<what>` with the
+ * call as the body: start it (or join it under the same key), attach to
+ * it again after a lost connection without ever starting it, or cancel
+ * it. The first two answer its frames, one JSON line each.
+ */
+export const streamCallActions = ["stream", "attach", "cancel"] as const;
+
+/** One of `streamCallActions`. */
+export type StreamCallAction = (typeof streamCallActions)[number];
+
+/** The header that carries the frame's lease on a function call. */
+export const pageLeaseHeader = "x-grasp-page-lease";
+
+/**
+ * The header that names, on a function call, the person the page's frame
+ * was opened for: core refuses the call when the session cookie is
+ * someone else's (`auth.principal_changed`).
+ */
+export const pagePersonHeader = "x-grasp-page-person";
+
+/** Where core serves a page's modules to its frame, each by its hash. */
+export const pageModulePath = "/page-modules";
+
+/**
+ * The levels Cap'n Web counts around a value a page sends, through its
+ * bridge to a page or over a browser's connection to core. Measured
+ * with capnweb 0.12.0, which refuses a message once a level's depth
+ * reaches `maxDepth`, counting from 0 at the message's expression:
+ *
+ * - the call's list of arguments is one level;
+ * - a navigation's target (`PagesApi.navigate` and `open`'s
+ *   `{ route, input }`) is another, so its input `valueDepth` levels deep
+ *   ends at depth `valueDepth + 1`.
+ *
+ * A value passed straight as an argument (a run's input, a decision's
+ * answer, a function call's request) has one level around it, and an
+ * answer, the message's own expression, none. Arrays and objects count
+ * alike. So a value passed straight may be one level deeper than values
+ * nest, on purpose: refused where it is checked (no schema nests deeper
+ * than `valueDepth`), as bounding each shape apart would take a limit of
+ * each call's own. App code in an isolate sends deeper shapes (a write
+ * around a record's field) and has a bound of its own:
+ * `isolateArgumentDepth` (stores.ts).
+ */
+const rpcWrapperLevels = 2;
+
+/**
+ * How deep a call's argument may be once it arrives, the value it refers
+ * to in place (@grasp-os/shared/rpc-target): as deep as one message lets
+ * a direct argument be, the call's list of arguments apart, so a call
+ * sent whole in one message is never refused for its depth.
+ */
+export const rpcArgumentDepth = valueDepth + rpcWrapperLevels - 1;
+
+/**
+ * Room in one of Cap'n Web's messages for what wraps a value: the message
+ * kind, its IDs and the call's path, a few hundred code units at most.
+ */
+const rpcEnvelopeSize = 4 * 1024;
+
+/**
+ * The longest message a frame may send over its port, in UTF-16 code
+ * units: a public operation's output (the larger of its input and output)
+ * and the envelope around it. The largest input fits even as Cap'n Web
+ * writes it, each array bracketed twice, which at most doubles its text.
+ */
+const rpcMessageMaxSize = platformLimits.operationOutputBytes + rpcEnvelopeSize;
+
+/**
+ * The limits of a page's start and traffic, in one place. They are the
+ * product's defaults: nothing an App declares or a frame sends raises
+ * them. Each is in the unit it names; a count of characters is never
+ * applied as a count of bytes.
+ */
+export const pageLimits = {
+  /** How long each stage of a page's start may take: ready, then mounted. */
+  stageMs: platformLimits.pageStageMs,
+  /**
+   * How long the page waits for core to hand over a page's build before
+   * the frame starts: past core's own wait for a build (15 s), so core
+   * says why first when it can.
+   */
+  openMs: 20_000,
+  /**
+   * How long the page waits for core to open a preview of a chat's draft:
+   * its first open may seal the draft's server code as well as build its
+   * page, which on staging took about 10 s (November 2026), so one
+   * server invocation's wall time and a moment more, for core to say why
+   * first (`page.build_slow`). Each write after that comes into the
+   * open frame without opening it again.
+   */
+  previewOpenMs: platformLimits.serverInvocationWallMs + 5000,
+  /**
+   * The limits on what a frame sends over its port. A message's size is
+   * its text's, in UTF-16 code units, held by the accountant on the port
+   * (the page's page-bridge.ts); its depth and digits by Cap'n Web. A
+   * browser's connection to core takes the depth and the digits too (core's
+   * rpc.ts).
+   *
+   * The depth bounds how far Cap'n Web recurses into each message from
+   * an untrusted side, so it is no deeper than a value may nest plus the
+   * levels a page's call wraps it in: a value as deep as values may be
+   * arrives, one level deeper ends the session. Each level more lets
+   * every message recurse once more; what a message holds in all stays
+   * bounded by its size.
+   *
+   * It bounds one message, not the value a call ends up with: a message
+   * can refer to what earlier ones sent (Cap'n Web's pipelining), so a
+   * value built over several messages can be deeper and bigger. Each
+   * target a side calls holds what its methods get to the same depth and
+   * size (`rpcArgumentDepth`, @grasp-os/shared/rpc-target).
+   */
+  rpc: {
+    maxDepth: valueDepth + rpcWrapperLevels,
+    maxMessageSize: rpcMessageMaxSize,
+    maxBigIntDigits: 32,
+  },
+  /** A server call's arguments, as UTF-8 JSON, in bytes. */
+  inputBytes: platformLimits.operationInputBytes,
+  /** A server call's answer, as UTF-8 JSON, in bytes: more is paged. */
+  answerBytes: platformLimits.operationOutputBytes,
+  /**
+   * The most characters of where in an App its frame is
+   * (`pageHrefSchema`): what the page carries in its own address, as a
+   * browser's address bar comfortably holds it.
+   */
+  hrefLength: 2048,
+  /**
+   * How often a frame may change its leave guard (spec 10.7.7); changes
+   * past it are gathered, the newest passed on once the bucket refills.
+   */
+  leaveGuards: { burst: 10, perMinute: 60 },
+  /**
+   * How often a frame's router may move the page's address: past it, the
+   * page keeps the address it has until the next move it takes, so a
+   * frame can't flood the page's history.
+   */
+  navigations: { burst: 20, perMinute: 120 },
+  /** A person's requests of one App's pages (subscriptions apart). */
+  requests: {
+    burst: platformLimits.browserRequestBurst,
+    perMinute: platformLimits.browserRequestsPerMinute,
+  },
+  /** The problems kept of what one person's pages of an App report. */
+  callerReports: { burst: 20, perMinute: 20 },
+  /**
+   * A person's unsaved record-form drafts of one App, which the page keeps
+   * for the tab (session storage) so a refresh doesn't lose them (the
+   * page's form-drafts.ts). A draft is the editable values, their
+   * baseline and the rest of the save's arguments as JSON text:
+   *
+   * - `characters`: one draft's text, in UTF-16 code units, as JSON
+   *   escapes it again on the port (`JSON.stringify` of the text, which
+   *   the client measures before it sends one), so it always fits one
+   *   message (`rpc.maxMessageSize`) with its key and the call around it.
+   *   A larger draft stays in the frame's memory, however much of it is
+   *   escaped.
+   * - `perApp`: drafts kept per person and App; the oldest goes first.
+   * - `appCharacters`: one App's share of `total`, so no App alone can
+   *   crowd out another's drafts; within one message too, so a page
+   *   is handed all of its App's drafts at once.
+   * - `total`: characters kept of every App's drafts in the tab together;
+   *   past it, the oldest draft in the tab goes, whichever App's.
+   * - `keyCharacters`: the frame's name for a draft.
+   * - `maxAgeMs`: a draft older than this is dropped, unread.
+   * - `burst`/`perMinute`: how often a frame may ask for its drafts; more
+   *   are answered with none. Its changes the page gathers instead.
+   */
+  drafts: {
+    characters: 192 * 1024,
+    perApp: 20,
+    appCharacters: 240 * 1024,
+    total: 2 * 1024 * 1024,
+    keyCharacters: 512,
+    maxAgeMs: 24 * 60 * 60 * 1000,
+    burst: 20,
+    perMinute: 240,
+  },
+  /** The problems kept of what all of an App's pages report. */
+  appReports: { burst: 200, perMinute: 200 },
+  /** How many different problems an App's error log keeps. */
+  keptReports: 100,
+  /** The most one problem report may carry, in characters. */
+  report: { message: 2000, stack: 8000 },
+  /**
+   * What a port holds of messages nobody has read yet, in number and in
+   * characters together (four of the longest): they are read as they
+   * come, so more than this is a side sending faster than it is heard.
+   */
+  portQueue: { messages: 256, characters: 4 * rpcMessageMaxSize },
+  /**
+   * What a frame's unreleased pushes and unanswered calls may hold at once,
+   * in bytes of heap as the page's accountant estimates them
+   * (@grasp-os/shared/rpc-accounting): room for a call with the largest
+   * input a page may send (`inputBytes`, at most about 4 MB once parsed
+   * into tiny values) and as much again, and no more.
+   */
+  rpcHeldBytes: 8 * 1024 * 1024,
+} as const;
+
+// A page starts in two stages, each bound to this load of the frame and
+// each within `pageLimits.stageMs`:
+//
+// 1. The frame's own document (core's page-frame.ts) says it listens
+//    (`pageFrameReady`), with the `load` its address carried.
+// 2. The page hands it the page (`pageFrameMessage`); once that has
+//    loaded and rendered for the first time, the runtime says so
+//    (`pageFrameMounted`), with the same `load`, the hash of the code it
+//    was handed and the page's name for this start of the frame.
+//
+// The page reads either only from its own frame's window, whose origin is
+// opaque, and only with the values it made up for this start. That tells
+// a page that started from one that didn't, or from another frame's or
+// an earlier load's; it says nothing about the page's code, which could
+// send `mounted` itself. Nothing is trusted because a frame said so.
+
+/**
+ * What the frame posts to the page once it listens for its page:
+ * `{ type, load, supported }`, with the `load` its address carried, so the
+ * page can tell this load of the frame from an earlier one, and whether
+ * the browser can run a page at all.
+ */
+export const pageFrameReady = "grasp:page-ready";
+
+/**
+ * What the page posts the frame, with a `MessagePort`, to start the
+ * page: `{ type, load, artifact, generation }`. The frame's document
+ * holds the page's code already (core's page-frame.ts), for the build
+ * its address named; it starts only if `artifact` is that build.
+ */
+export const pageFrameMessage = "grasp:page";
+
+/**
+ * What the runtime posts to the page once the page has rendered for the
+ * first time: `{ type, load, artifact, generation }`, as it was handed
+ * them.
+ */
+export const pageFrameMounted = "grasp:page-mounted";
+
+/** Past any limit: what a value that can't be measured counts as. */
+const unmeasured = Number.POSITIVE_INFINITY;
+
+/** The bytes of `text` as a JSON string, in UTF-8. */
+const textBytes = (text: string): number =>
+  new TextEncoder().encode(JSON.stringify(text)).byteLength;
+
+/** Whether `value` is an object written with braces, and nothing more. */
+const isPlainObject = (value: object): boolean => {
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+/** Whether `value` may hold others: an object, but a date or bytes. */
+const isHolder = (value: unknown): value is object =>
+  typeof value === "object" &&
+  value !== null &&
+  !(value instanceof Date) &&
+  !(value instanceof Uint8Array);
+
+/** The bytes of a value that holds no other. */
+const leafBytes = (value: unknown): number => {
+  if (typeof value === "string") {
+    return textBytes(value);
+  }
+  if (typeof value === "bigint") {
+    // As its digits, in a string.
+    return value.toString().length + 2;
+  }
+  if (typeof value === "boolean") {
+    return String(value).length;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value).length : "null".length;
+  }
+  if (value === null || value === undefined) {
+    return "null".length;
+  }
+  if (value instanceof Date) {
+    return textBytes(new Date(0).toISOString());
+  }
+  if (value instanceof Uint8Array) {
+    // As the base64 it travels as.
+    return Math.ceil(value.byteLength / 3) * 4 + 2;
+  }
+  // A function or a symbol has no measure.
+  return unmeasured;
+};
+
+/**
+ * An error's or a plain object's keys and values, as they travel; for
+ * anything else, `undefined`.
+ */
+const entriesOf = (value: object): [string, unknown][] | undefined => {
+  if (value instanceof Error) {
+    // An error travels with its name, message and stack, which JSON
+    // itself would leave out, and with whatever else was put on it.
+    return [
+      ["name", value.name],
+      ["message", value.message],
+      ["stack", value.stack],
+      ...Object.entries(value),
+    ];
+  }
+  return isPlainObject(value) ? Object.entries(value) : undefined;
+};
+
+/**
+ * What an array, an error or a plain object holds, as its members are
+ * written: an array's elements, or an object's keys and values; for
+ * anything else, `undefined`.
+ */
+const membersOf = (
+  value: object
+): { keys: string[] | undefined; held: unknown[] } | undefined => {
+  if (Array.isArray(value)) {
+    return { keys: undefined, held: value };
+  }
+  const entries = entriesOf(value);
+  if (entries === undefined) {
+    return undefined;
+  }
+  // As JSON, a member with no value isn't written.
+  const written = entries.filter(([, held]) => held !== undefined);
+  return {
+    keys: written.map(([key]) => key),
+    held: written.map(([, held]) => held),
+  };
+};
+
+/**
+ * The bytes a holder adds around its members: brackets, commas, and an
+ * object's keys with their colons.
+ */
+const holderBytes = (members: {
+  keys: string[] | undefined;
+  held: unknown[];
+}): number => {
+  const commas = Math.max(0, members.held.length - 1);
+  const keys =
+    members.keys?.reduce((sum, key) => sum + textBytes(key) + 1, 0) ?? 0;
+  return 2 + commas + keys;
+};
+
+/** A step of the walk: measure a value, or leave a holder. */
+type Step = { value: unknown } | { left: object };
+
+/**
+ * How many bytes `value` takes as UTF-8 JSON, or past any limit once that
+ * is more than `limit`: the limit a call's arguments and answer are held
+ * to, so it must never come out smaller than what travels. It reads the
+ * value itself, calling nothing on it but the getters of a plain object.
+ * Bytes count as their base64, a big integer as its digits, an error as
+ * its name, message and stack. Anything it has no measure for is past any
+ * limit: a map, a set, a buffer, an instance of a class, a function, or a
+ * value that holds itself.
+ *
+ * It walks with a stack of its own, so a value nested however deep can't
+ * exhaust the call stack, and stops once past `limit`, so a value held
+ * many times over (as each is written out) costs no more than the limit.
+ */
+export const jsonBytes = (value: unknown, limit: number): number => {
+  const steps: Step[] = [{ value }];
+  // The holders the walk is inside of: one it meets again has no end.
+  const holders = new Set<object>();
+  let bytes = 0;
+  while (steps.length > 0) {
+    const step = steps.pop();
+    if (step === undefined) {
+      break;
+    }
+    if ("left" in step) {
+      holders.delete(step.left);
+      continue;
+    }
+    const { value: next } = step;
+    if (isHolder(next)) {
+      const members = membersOf(next);
+      if (members === undefined || holders.has(next)) {
+        return unmeasured;
+      }
+      bytes += holderBytes(members);
+      // Before its members are queued: it counts a byte at least for each.
+      if (bytes > limit) {
+        return unmeasured;
+      }
+      holders.add(next);
+      steps.push({ left: next });
+      // One at a time, not spread: a long array would pass too many
+      // arguments at once.
+      for (const inner of members.held) {
+        steps.push({ value: inner });
+      }
+    } else {
+      bytes += leafBytes(next);
+    }
+    if (bytes > limit) {
+      return unmeasured;
+    }
+  }
+  return bytes;
+};

@@ -7,16 +7,16 @@ import { peopleIn } from "./people.ts";
 // An App, end to end, as a builder makes one: New App, what to build, the
 // App's own chat building it (the stack's scripted model reads Grasp's
 // reference, writes the App's files and says it's ready, e2e/
-// model-scripts.ts), the draft's screen in the workspace's preview, then
+// model-scripts.ts), the draft's page in the workspace's preview, then
 // Publish changes, as the chat never proposed it, and its review made
 // current and published. Shared with someone as a user, they open the
-// live App and add a contact on its screen, which the App's data shows
+// live App and add a contact on its page, which the App's data shows
 // its builder.
 
 /** A turn of the agent's, its model's calls and the tools they call. */
 const agentTurn = { timeout: 30_000 };
 
-/** A screen's first build, or a read from core on a loaded stack. */
+/** A page's first build, or a read from core on a loaded stack. */
 const built = { timeout: 20_000 };
 
 // Never tried again, as the serial journeys aren't (playwright.config.ts):
@@ -57,7 +57,7 @@ test("a builder has an App built in its chat, publishes it, and someone it is sh
   ).toBeVisible(agentTurn);
   await expect(chat.getByText(appReady)).toBeVisible(agentTurn);
 
-  // The preview is the draft's screen, on a store of its own.
+  // The preview is the draft's page, on a store of its own.
   const preview = page.getByRole("region", { name: /^Preview of /u });
   const frame = preview.frameLocator("iframe");
   // Its first load waits for core to build the draft, behind any update
@@ -104,14 +104,14 @@ test("a builder has an App built in its chat, publishes it, and someone it is sh
   await expect(
     used.getByRole("heading", { level: 1, name: opener })
   ).toBeVisible(built);
-  const screen = used.frameLocator('iframe[title="contacts app"]');
-  const contacts = screen
+  const appPage = used.frameLocator('iframe[title="App"]');
+  const contacts = appPage
     .getByRole("list", { name: "Contacts" })
     .getByRole("listitem");
-  await expect(screen.getByLabel("Contact's name")).toBeVisible(built);
+  await expect(appPage.getByLabel("Contact's name")).toBeVisible(built);
   await expect(contacts).toHaveCount(0);
-  await screen.getByLabel("Contact's name").fill("Grace Hopper");
-  await screen.getByRole("button", { name: "Add contact" }).click();
+  await appPage.getByLabel("Contact's name").fill("Grace Hopper");
+  await appPage.getByRole("button", { name: "Add contact" }).click();
   await expect(contacts).toHaveText(["Grace Hopper"], built);
 
   // The App's data shows its builder the contact they added.

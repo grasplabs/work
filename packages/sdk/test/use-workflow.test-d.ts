@@ -202,7 +202,7 @@ declare const json: Record<string, unknown>;
  * `send` (spec 10.4.6): the data is inferred from the event reference,
  * never widened by what the caller passes; another workflow's event, a
  * string, an object made up and data as unknown or loose JSON are
- * refused; a workflow that declares no event a screen sends has nothing
+ * refused; a workflow that declares no event a page sends has nothing
  * `send` takes.
  */
 export const useSendChecks = (): void => {

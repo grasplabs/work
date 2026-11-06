@@ -21,7 +21,7 @@ import { AppCode } from "./app-code.tsx";
 
 // An App's Code, in its workspace, against core's Apps API as the page
 // reaches it over RPC, faked: version 1 is current and version 2, up for
-// review, changes one line of grasp.config.ts, adds a screen and deletes old.ts.
+// review, changes one line of grasp.config.ts, adds a page and deletes old.ts.
 // Core's diff is the files as they were and are, as its `diffFiles`
 // gives them; the page diffs them (@pierre/diffs), and what it drew is read
 // from the shadow roots it draws in.
@@ -76,7 +76,7 @@ const smallVersions: Versions = {
   2: {
     "grasp.config.ts": appV2,
     "schema.ts": schemaText,
-    "screens/inbox.tsx": inboxText,
+    "src/routes/inbox.tsx": inboxText,
   },
 };
 
@@ -129,7 +129,7 @@ const draftAt: Record<number, AppFiles> = {
   2: {
     "grasp.config.ts": appV1,
     "server/notes.ts": notesAt(25),
-    "screens/inbox.tsx": inboxText,
+    "src/routes/inbox.tsx": inboxText,
   },
 };
 
@@ -371,7 +371,7 @@ describe("An App's Code", () => {
         "zeta.ts": schemaText,
         "server/b.ts": schemaText,
         "server/a/deep.ts": schemaText,
-        "screens/inbox.tsx": inboxText,
+        "src/routes/inbox.tsx": inboxText,
       },
     });
     const all = treeShown();
@@ -386,17 +386,25 @@ describe("An App's Code", () => {
 
     expect({ all, folded, again: treeShown() }).toStrictEqual({
       all: [
-        "screens",
-        "inbox.tsx",
         "server",
         "a",
         "deep.ts",
         "b.ts",
+        "src",
+        "routes",
+        "inbox.tsx",
         "grasp.config.ts",
         "zeta.ts",
       ],
       folded: {
-        tree: ["screens", "inbox.tsx", "server", "grasp.config.ts", "zeta.ts"],
+        tree: [
+          "server",
+          "src",
+          "routes",
+          "inbox.tsx",
+          "grasp.config.ts",
+          "zeta.ts",
+        ],
         expanded: "false",
       },
       again: all,
@@ -429,7 +437,7 @@ describe("An App's Code", () => {
       picked,
       current: { path: pathShown(), open: openInTree() },
     }).toStrictEqual({
-      picked: { path: ["screens", "inbox.tsx"], open: "inbox.tsx" },
+      picked: { path: ["src", "routes", "inbox.tsx"], open: "inbox.tsx" },
       current: { path: ["old.ts"], open: "old.ts" },
     });
   });
@@ -459,10 +467,11 @@ describe("An App's Code", () => {
     }).toStrictEqual({
       first: ["server", "notes.ts", "grasp.config.ts"],
       written: [
-        "screens",
-        "inbox.tsx",
         "server",
         "notes.ts",
+        "src",
+        "routes",
+        "inbox.tsx",
         "grasp.config.ts",
       ],
       open: "notes.ts",
@@ -490,12 +499,12 @@ describe("An App's Code", () => {
         "-1",
         "export const legacy = true;",
       ]),
-      added: holdsAll(changeShown("screens/inbox.tsx"), [
+      added: holdsAll(changeShown("src/routes/inbox.tsx"), [
         "+1",
         "export default function Inbox() {}",
       ]),
     }).toStrictEqual({
-      files: ["grasp.config.ts", "old.ts", "screens/inbox.tsx"],
+      files: ["grasp.config.ts", "old.ts", "src/routes/inbox.tsx"],
       modified: true,
       deleted: true,
       added: true,
@@ -528,7 +537,7 @@ describe("An App's Code", () => {
       files: changedFiles(),
       added: changedFiles().every((path) => changeShown(path).includes("+")),
     }).toStrictEqual({
-      files: ["grasp.config.ts", "schema.ts", "screens/inbox.tsx"],
+      files: ["grasp.config.ts", "schema.ts", "src/routes/inbox.tsx"],
       added: true,
     });
   });

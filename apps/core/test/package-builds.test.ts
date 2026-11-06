@@ -1409,7 +1409,7 @@ describe("what a build names and keeps", () => {
       // As the bundler writes it back: `::before` as `:before`.
       refused: ["*", ":before", "body", "[data-slot=button]"].map(
         (selector) =>
-          `the stylesheet ${reset}.css styles every "${selector}" on the screen, the kit's own included: scope its rules under the package's own classes`
+          `the stylesheet ${reset}.css styles every "${selector}" on the page, the kit's own included: scope its rules under the package's own classes`
       ),
       taken: `${scoped}.css`,
     });

@@ -28,8 +28,6 @@ import type { FileTransport } from "./client-files.ts";
 import { ClientLinks } from "./client-links.ts";
 import type { LinkTransport } from "./client-links.ts";
 import { PortableLive } from "./client-live.ts";
-import { navigateThrough } from "./client-navigation.ts";
-import type { Navigate, NavigationTransport } from "./client-navigation.ts";
 import { PortableTransport } from "./client-portable.ts";
 import type {
   PortableClientOptions,
@@ -47,14 +45,14 @@ import type {
 } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
-// The session client (spec 10.1, 10.7.1): the one object a screen's
+// The session client (spec 10.1, 10.7.1): the one object a page's
 // queries, mutations and actions go through. The platform makes one per
-// App session and mounts it (screen-runtime.ts); App code reaches it
+// App session and mounts it (page-runtime.ts); App code reaches it
 // through `useClient()` and the hooks of `@grasp-os/sdk/react`, and gets
 // direct values and structured errors (client-error.ts), never a
 // transport envelope.
 //
-// It owns what every screen would otherwise write again: reading the
+// It owns what every page would otherwise write again: reading the
 // generated reference, normalizing the arguments with the same native
 // interpreter the host uses, one logical submission per explicit call,
 // receipt recovery after a lost response, and live queries (spec 11):
@@ -93,7 +91,7 @@ import { isPlainObject } from "./value-descriptor.ts";
 //   nobody follows the query. Reads are numbered too, an answer older
 //   than the one shown dropped, and a push counts every read sent before
 //   it as older, so none of them replaces it once nobody follows.
-// - A lost connection leaves a screen silently stale, or hammers core:
+// - A lost connection leaves a page silently stale, or hammers core:
 //   once core lets go of a subscription, the query keeps its last
 //   authorized snapshot and follows again after a delay from 250 ms up
 //   to 30 seconds, fully jittered; a fresh subscription starts with a
@@ -214,10 +212,11 @@ export interface ClientTransport {
   /** How links open (client-links.ts); a client without it opens none. */
   links?: LinkTransport;
   /**
-   * How the client asks the trusted host to open another of the App's
-   * screens (client-navigation.ts); a client without it navigates nowhere.
+   * Tells the trusted host whether a form holds unsaved edits or a
+   * submission whose outcome isn't known yet, so it confirms once before
+   * leaving the App (`guardLeave`).
    */
-  navigation?: NavigationTransport;
+  leaveGuard?: (guarded: boolean) => void;
   /**
    * How the client asks the trusted host to answer a decision, after the
    * person confirms it in the host's own UI (the page, for a frame); a
@@ -474,7 +473,7 @@ const retryDelay = (attempt: number): number => {
 
 /**
  * How long to wait for a request budget to give back a request, when a
- * refusal as `screen.rate_limited` didn't say.
+ * refusal as `page.rate_limited` didn't say.
  */
 const rateLimitedWaitMs = 1000;
 
@@ -485,10 +484,7 @@ const rateLimitedWaitMs = 1000;
  */
 const waitAfter = (settled: Settled, attempt: number): number => {
   const backoff = retryDelay(attempt);
-  if (
-    settled.kind !== "failed" ||
-    settled.error.code !== "screen.rate_limited"
-  ) {
+  if (settled.kind !== "failed" || settled.error.code !== "page.rate_limited") {
     return backoff;
   }
   const said = retryAfterOf(settled.error.details) ?? rateLimitedWaitMs;
@@ -643,7 +639,7 @@ const worthRetrying = (settled: Settled): boolean =>
  * dropped: nothing read under the old roles is shown again
  * (`#accessChanged`), and the query is followed again under the new.
  */
-const accessChangedCode = "screen.access_changed";
+const accessChangedCode = "page.access_changed";
 
 /**
  * Refusals after which following a query again would only be refused
@@ -653,8 +649,8 @@ const accessChangedCode = "screen.access_changed";
 const endsFollowing = (code: string): boolean =>
   code.startsWith("version.") ||
   code === "app.not_running" ||
-  code === "screen.too_many_queries" ||
-  code === "screen.invalid" ||
+  code === "page.too_many_queries" ||
+  code === "page.invalid" ||
   code.startsWith("contract.");
 
 /** The least wait before following a query again. */
@@ -1425,27 +1421,9 @@ export class GraspClient {
   readonly #deletedFiles = new Set<string>();
   /**
    * What holds unsaved edits or an unknown outcome now (`guardLeave`):
-   * the host confirms leaving the screen while any does.
+   * the host confirms leaving the App while any does.
    */
   readonly #leaveGuards = new Set<object>();
-
-  /**
-   * Opens another of the App's screens through the trusted host (spec
-   * 10.7.7, `useNavigate`): `screen` from the generated `screens`, its
-   * route input (left out only for an empty or all-default input), and
-   * `{ replace }` to replace the current entry rather than push one, or
-   * `{ surface }` to open one of its declared surfaces with that
-   * surface's input (spec 34.1). Resolves once the host accepted the
-   * navigation, not once the screen loaded. One function for the client's
-   * life, so a screen's callbacks can keep it.
-   */
-  readonly navigate: Navigate = async (
-    screen: unknown,
-    input?: unknown,
-    options?: unknown
-  ): Promise<void> => {
-    await navigateThrough(this.#transport?.navigation, screen, input, options);
-  };
 
   /**
    * The App's files: downloading and deleting them through a files
@@ -1465,14 +1443,14 @@ export class GraspClient {
    * bootstrap makes one per App session and mounts it with
    * `GraspProvider`; generated App code never makes one.
    *
-   * Over a `ClientTransport`, for the platform only (screen-runtime.ts).
-   * By design, not isolation: screen code shares the frame and could make
+   * Over a `ClientTransport`, for the platform only (page-runtime.ts).
+   * By design, not isolation: page code shares the frame and could make
    * one, but gets nothing from it that `bridge()` doesn't already give it.
    */
   /**
    * Says whether `holder` (a form) holds unsaved edits or a submission
    * whose outcome isn't known now: the host is told once whether any does,
-   * each time that changes, and confirms leaving the screen while any does.
+   * each time that changes, and confirms leaving the App while any does.
    */
   guardLeave(holder: object, guarded: boolean): void {
     const before = this.#leaveGuards.size > 0;
@@ -1483,7 +1461,7 @@ export class GraspClient {
     }
     const after = this.#leaveGuards.size > 0;
     if (before !== after) {
-      this.#transport?.navigation?.leaveGuard(after);
+      this.#transport?.leaveGuard?.(after);
     }
   }
 
@@ -1519,11 +1497,11 @@ export class GraspClient {
     } else {
       throw new TypeError("A client takes { url, getToken }.");
     }
-    // A portable host opens no links yet: only a screen's page does.
+    // A portable host opens no links yet: only a page's page does.
     this.links = new ClientLinks(this.#transport?.links);
-    // A portable host moves no files yet: only a screen's page does.
+    // A portable host moves no files yet: only a page's page does.
     // A refusal fences the client only if no fence came since its request
-    // started: a late one would undo what the screen recovered since.
+    // started: a late one would undo what the page recovered since.
     this.files = new ClientFiles(
       this.#transport?.files,
       (error, startedUnder) => {
@@ -2182,7 +2160,7 @@ export class GraspClient {
 
   /**
    * No one reads `pager` now: its window and its Load More stop, and the
-   * list ends. A later reader, such as a screen that switched its
+   * list ends. A later reader, such as a page that switched its
    * arguments away and back, starts it again at its first page with no
    * Load More's failure of before (`usePaginatedQuery`).
    */
@@ -2766,7 +2744,7 @@ export class GraspClient {
         }
         const waitingForBudget =
           settled.kind === "failed" &&
-          settled.error.code === "screen.rate_limited" &&
+          settled.error.code === "page.rate_limited" &&
           Date.now() - started < submissionBudgetMs;
         const keepTrying =
           entry.listeners.size > 0 ||
@@ -2928,7 +2906,7 @@ export class GraspClient {
   }
 
   /**
-   * The person's roles in the App dropped (`screen.access_changed`,
+   * The person's roles in the App dropped (`page.access_changed`,
    * pushed as a followed query's last result): what any query of the App
    * keeps that nobody reads was read under the old roles: forgotten, so
    * whoever reads it next reads it afresh, under the new. One read but

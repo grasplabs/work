@@ -1,7 +1,7 @@
 {
   "name": "@grasp-os/compiler",
   "private": true,
-  "description": "App compiler: builds an App's screens into ES modules and CSS, in its own isolate",
+  "description": "App compiler: builds an App's pages into ES modules and CSS, in its own isolate",
   "license": "AGPL-3.0-only",
   "type": "module",
   "imports": {
@@ -24,7 +24,9 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./css": "./src/packages/css.ts"
+    "./css": "./src/packages/css.ts",
+    "./inputs": "./src/inputs.ts",
+    "./route-tree": "./src/route-tree.ts"
   },
   "scripts": {
     "build": "node build.ts"
@@ -36,6 +38,8 @@
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",
     "@shadcn/lint": "catalog:",
+    "@tanstack/react-router": "catalog:",
+    "@tanstack/router-generator": "catalog:",
     "@tsrs/wasm": "catalog:",
     "@tybys/wasm-util": "catalog:",
     "@typescript-eslint/scope-manager": "catalog:",

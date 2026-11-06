@@ -1,7 +1,7 @@
+import { rpcArgumentDepth } from "@grasp-os/shared/pages";
 import type { RpcAccountingLimits } from "@grasp-os/shared/rpc-accounting";
 import { heldPool, rpcCopyNodeBounds } from "@grasp-os/shared/rpc-accounting";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
-import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 
 import { noteCall } from "./call-context.ts";
 

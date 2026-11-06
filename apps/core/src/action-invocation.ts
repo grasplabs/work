@@ -60,7 +60,7 @@ import { requireNotRevoked } from "./release-runner.ts";
 //   ever reads; one whose receipt expired is refused
 //   (`submission.expired`) while its tombstone is kept. Past the
 //   tombstone the key is new (see `streamTombstoneMs`).
-// - A screen starts invocations without end: one person runs at most
+// - A page starts invocations without end: one person runs at most
 //   `streamMaxRunning` streaming and `actionMaxRunning` plain ones at once
 //   per App (held in the App's object, which keeps the holds through a
 //   restart; a start past them records nothing), a plain one for at most
@@ -110,7 +110,7 @@ export interface InvocationOpen {
   /** Only read what already runs or ran; never start it. */
   readonly attach: boolean;
   /**
-   * A screen's form, sent as this action under its key: told to the App's
+   * A page's form, sent as this action under its key: told to the App's
    * webhooks once the run it starts succeeds, whoever reads it
    * (app-webhook-queue.ts), named by the public action the run's own
    * checked release resolved (`invokeAppAction`'s `path`), never by a
@@ -349,7 +349,7 @@ export const readerOf = (live: Live): ReadableStream<Uint8Array> => {
 
 /**
  * `result`, saying why when a cancel was the object's own, because no one
- * followed it: a screen that comes back sees that, not its own cancel.
+ * followed it: a page that comes back sees that, not its own cancel.
  */
 export const withReason = (
   result: OperationResult,

@@ -134,7 +134,7 @@ export const deliver = async (
  * write there too, on their own schedule. The mail a test delivers arms
  * the clock (index.ts), which after each file's reset starts empty and
  * runs every task as soon as it is armed. Its sweeps then write their
- * cursors (`builds-sweep.json`, `screen-frames-sweep.json`) while the
+ * cursors (`builds-sweep.json`, `page-frames-sweep.json`) while the
  * test is still going.
  */
 export const storedObjects = async (): Promise<string[]> => {

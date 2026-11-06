@@ -3,7 +3,7 @@ import type { AppSpec } from "../apps/core/test/app-definitions.ts";
 
 /**
  * The Notes App of spec 8 and 9.4, as a builder writes it: a schema, its
- * operations and registration, and a screen on the React SDK
+ * operations and registration, and a page on the React SDK
  * (`@grasp-os/sdk/react`) that reaches them only through the references
  * the host generates (`@server/_generated/api`).
  */
@@ -134,16 +134,6 @@ export const detachFile = mutation({
   },
 });
 `;
-
-const screensList = `export default {
-  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
-};
-`;
-
-/** The screens' list, for screens whose route takes input. */
-const screensWithInput = `import { v } from "@grasp-os/sdk";
-
-${screensList}`;
 
 const attachmentsList = `import { GraspError, useClient, useFile, useMutation, useUpload } from "@grasp-os/sdk/react";
 import type { FileRef } from "@grasp-os/sdk/react";
@@ -355,7 +345,8 @@ export function NoteEditor({ note }: { note: Note }) {
 }
 `;
 
-const screen = `import { useMutation, usePaginatedQuery, useQuery } from "@grasp-os/sdk/react";
+const appPage = `import { createFileRoute } from "@tanstack/react-router";
+import { useMutation, usePaginatedQuery, useQuery } from "@grasp-os/sdk/react";
 import type { Id } from "@grasp-os/sdk";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
@@ -383,7 +374,7 @@ function SelectedNote({ id }: { id: Id<"notes"> }) {
   );
 }
 
-export default function Notes() {
+function Notes() {
   // A live list, five notes at a time: kept current as notes are saved,
   // edited and deleted anywhere, never with a note twice or missing.
   const { items, hasMore, isLoading, loadMore } = usePaginatedQuery(
@@ -431,6 +422,7 @@ export default function Notes() {
     </main>
   );
 }
+export const Route = createFileRoute("/")({ component: Notes });
 `;
 
 const importNote = `import { GraspError, useAction } from "@grasp-os/sdk/react";
@@ -473,16 +465,15 @@ export const noteFields = {
 };
 `,
   "server/notes.ts": operations,
-
-  "screens.ts": screensList,
-  "components/import-note.tsx": importNote,
-  "components/create-note.tsx": createNote,
-  "components/note-editor.tsx": noteEditor,
-  "components/attachments.tsx": attachmentsList,
-  "screens/notes.tsx": screen,
+  "src/components/import-note.tsx": importNote,
+  "src/components/create-note.tsx": createNote,
+  "src/components/note-editor.tsx": noteEditor,
+  "src/components/attachments.tsx": attachmentsList,
+  "src/routes/index.tsx": appPage,
 });
 
-const unaskedScreen = `import { GraspError, useClient } from "@grasp-os/sdk/react";
+const unaskedPage = `import { createFileRoute } from "@tanstack/react-router";
+import { GraspError, useClient } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useEffect, useState } from "react";
 import { permissions } from "@server/_generated/api";
@@ -491,10 +482,10 @@ import { permissions } from "@server/_generated/api";
 const someFile = { id: "00000000-0000-4000-8000-000000000000" };
 
 /**
- * A screen that downloads a file a while after it opens, without anyone
+ * A page that downloads a file a while after it opens, without anyone
  * asking, and again on a click.
  */
-export default function Notes() {
+function Notes() {
   const client = useClient();
   const [unasked, setUnasked] = useState("waiting");
   const [asked, setAsked] = useState("waiting");
@@ -521,9 +512,11 @@ export default function Notes() {
     </main>
   );
 }
+export const Route = createFileRoute("/")({ component: Notes });
 `;
 
-const fileViewScreen = `import { useClient, useFile, useUpload } from "@grasp-os/sdk/react";
+const fileViewPage = `import { createFileRoute } from "@tanstack/react-router";
+import { useClient, useFile, useUpload } from "@grasp-os/sdk/react";
 import type { FileRef } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
@@ -559,7 +552,7 @@ function Shown({
 }
 
 /** A file uploaded, then shown. */
-export default function Notes() {
+function Notes() {
   const upload = useUpload(permissions.files);
   const client = useClient();
   const [file, setFile] = useState<FileRef | null>(null);
@@ -622,36 +615,38 @@ export default function Notes() {
     </main>
   );
 }
+export const Route = createFileRoute("/")({ component: Notes });
 `;
 
 /**
- * The Notes App with a screen that shows an uploaded file, for what
+ * The Notes App with a page that shows an uploaded file, for what
  * `useFile` shows as it renders, hides and deletes it.
  */
 export const fileViewFiles = (): Record<string, string> => ({
   ...notesAppFiles(),
-  "screens/notes.tsx": fileViewScreen,
+  "src/routes/index.tsx": fileViewPage,
 });
 
 /**
- * The Notes App with a screen that downloads unasked, for what a download
+ * The Notes App with a page that downloads unasked, for what a download
  * needs: a click.
  */
 export const unaskedDownloadFiles = (): Record<string, string> => ({
   ...notesAppFiles(),
-  "screens/notes.tsx": unaskedScreen,
+  "src/routes/index.tsx": unaskedPage,
 });
 
-const linksScreen = `import { GraspError, useClient } from "@grasp-os/sdk/react";
+const linksPage = `import { createFileRoute } from "@tanstack/react-router";
+import { GraspError, useClient } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
 import { permissions } from "@server/_generated/api";
 
 /**
- * A screen that opens its help site on a click, opens it a while after
+ * A page that opens its help site on a click, opens it a while after
  * the click (its activation spent), and tries a site it didn't declare.
  */
-export default function Notes() {
+function Notes() {
   const client = useClient();
   const [outcome, setOutcome] = useState("waiting");
   const open = async (url: string) => {
@@ -682,15 +677,16 @@ export default function Notes() {
     </main>
   );
 }
+export const Route = createFileRoute("/")({ component: Notes });
 `;
 
 /**
- * The Notes App with a screen that opens links through a help site it
+ * The Notes App with a page that opens links through a help site it
  * declares, for what opening one needs: a click, or the person's say.
  */
 export const linksFiles = (): Record<string, string> => ({
   ...notesAppFiles(),
-  // The help site its screens may link to, and nothing else.
+  // The help site its pages may link to, and nothing else.
   ...appDefinition({
     ...notesSpec,
     permissions: [
@@ -698,218 +694,193 @@ export const linksFiles = (): Record<string, string> => ({
       'permission.links({ origins: ["https://help.example.com"] })',
     ],
   }),
-  "screens/notes.tsx": linksScreen,
+  "src/routes/index.tsx": linksPage,
 });
 
 /**
- * The Notes App with two more screens to move between (spec 10.7.7): a
- * start screen that opens a note by its route, and the note's screen,
- * which gets the note's ID as its route input, holds a form, and goes back.
+ * The Notes App with two more pages to move between: a start page that
+ * links to a note, and the note's page at `/notes/$id`, which gets the
+ * note's ID from its address, holds a form, and links back.
  */
 export const navigationFiles = (): Record<string, string> => ({
   ...notesAppFiles(),
-  "screens.ts": screensWithInput.replace(
-    '  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],',
-    `  screens: [
-    { name: "notes", path: "/", source: "screens/notes.tsx" },
-    { name: "start", path: "/start", source: "screens/home.tsx" },
-    { name: "note", path: "/notes/:id", source: "screens/note.tsx", input: v.object({ id: v.string() }) },
-  ],`
-  ),
-  "screens/home.tsx": `import { useNavigate } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
-import { screens } from "@server/_generated/api";
+  "src/routes/start.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
 
-export default function Start() {
-  const navigate = useNavigate();
+function Start() {
   return (
     <main className="flex flex-col gap-3 p-6">
       <h1>Start</h1>
-      <Button onClick={() => void navigate(screens.note, { id: "n42" })}>Open note n42</Button>
-      <Button onClick={() => void navigate(screens.note, { id: "n42" }, { replace: true })}>Open note n42 in place</Button>
+      <Link params={{ id: "n42" }} to="/notes/$id">Open note n42</Link>
     </main>
   );
 }
+export const Route = createFileRoute("/start")({ component: Start });
 `,
-  "screens/note.tsx": `import { useState } from "react";
-import { useForm, useNavigate } from "@grasp-os/sdk/react";
-import type { ScreenProps } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
+  "src/routes/notes.$id.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
+import { useForm } from "@grasp-os/sdk/react";
 import { Form, TextField } from "@grasp-os/ui/form";
-import { api, screens } from "@server/_generated/api";
+import { api } from "@server/_generated/api";
 
-export default function Note({ input }: ScreenProps<typeof screens.note>) {
-  const navigate = useNavigate();
-  const [refused, setRefused] = useState(0);
+function Note() {
+  const { id } = Route.useParams();
   const form = useForm(api.notes.create, { defaultValues: { title: "", body: "" } });
   return (
     <main className="flex flex-col gap-3 p-6">
-      <h1>Note {input.id}</h1>
+      <h1>Note {id}</h1>
       <Form aria-label="Draft" form={form}>
         <TextField form={form} label="Title" name="title" />
       </Form>
-      <Button onClick={() => void navigate(screens.start).catch(() => setRefused((count) => count + 1))}>Back to start</Button>
-      <Button onClick={() => void navigate(screens.note, { id: input.id }).catch(() => setRefused((count) => count + 1))}>Open this note again</Button>
-      <p>Refused {refused}</p>
+      <Link to="/start">Back to start</Link>
     </main>
   );
 }
+export const Route = createFileRoute("/notes/$id")({ component: Note });
 `,
 });
 
 /**
- * The navigation fixture with surfaces (spec 34.1): the start screen as a
- * panel (named to list after the note's panel, which needs input, so the
- * chat's side panel must pass that one over) and the App's settings, the note as a panel and a deep link, and
- * the list in the sidebar. The start screen also opens the note's panel.
+ * The navigation fixture with surfaces: the start page as a panel, the
+ * list in the sidebar, and preferences as the App's settings.
  */
 export const surfaceFiles = (): Record<string, string> => {
   const files = navigationFiles();
   return {
     ...files,
-    "screens.ts": (files["screens.ts"] ?? "").replace(
-      "input: v.object({ id: v.string() }) },\n  ],\n",
-      `input: v.object({ id: v.string() }) },
-    { name: "prefs", path: "/prefs", source: "screens/prefs.tsx", input: v.object({ section: v.enum(["general", "billing"]).default("general") }) },
-  ],
-  surfaces: [
-    { name: "start", kind: "panel", screen: "start", title: "Start beside", input: v.object({}) },
-    { name: "peek", kind: "panel", screen: "note", title: "Peek", input: v.object({ id: v.string() }) },
-    { name: "all", kind: "sidebar", screen: "notes", title: "All notes", input: v.object({}) },
-    { name: "prefs", kind: "settings", screen: "prefs", title: "Preferences", input: v.object({ section: v.enum(["general", "billing"]).default("general") }) },
-    { name: "shared", kind: "deepLink", screen: "note", title: "Shared note", input: v.object({ id: v.string() }) },
-  ],
-`
-    ),
-    "screens/prefs.tsx": `import type { ScreenProps } from "@grasp-os/sdk/react";
-import type { screens } from "@server/_generated/api";
+    "src/routes/index.tsx": `${files["src/routes/index.tsx"] ?? ""}
+export const surface = { kind: "sidebar", title: "All notes" };
+`,
+    "src/routes/start.tsx": `${files["src/routes/start.tsx"] ?? ""}
+export const surface = { kind: "panel", title: "Start beside" };
+`,
+    "src/routes/prefs.tsx": `import { createFileRoute } from "@tanstack/react-router";
 
-export default function Prefs({ input }: ScreenProps<typeof screens.prefs>) {
+function Prefs() {
   return (
     <main className="p-6">
-      <h1>Preferences {input.section}</h1>
+      <h1>Preferences</h1>
     </main>
   );
 }
+export const Route = createFileRoute("/prefs")({ component: Prefs });
+export const surface = { kind: "settings", title: "Options" };
 `,
-    "screens/home.tsx": (files["screens/home.tsx"] ?? "")
-      .replace(
-        'import { screens } from "@server/_generated/api";',
-        'import { screens } from "@server/_generated/api";\nimport { useState } from "react";'
-      )
-      .replace(
-        "  const navigate = useNavigate();",
-        '  const navigate = useNavigate();\n  const [peek, setPeek] = useState("Peek not asked");'
-      )
-      .replace(
-        "    </main>",
-        `      <Button onClick={() => void navigate(screens.note, { id: "n9" }, { surface: "peek" }).then(() => setPeek("Peek opened"), () => setPeek("Peek refused"))}>Peek at note n9</Button>
-      <p>{peek}</p>
-      <Button onClick={() => void navigate(screens.prefs, {}, { surface: "prefs" })}>Open preferences</Button>
-      <Button onClick={() => void navigate(screens.prefs, { section: "billing" }, { surface: "prefs" })}>Open billing preferences</Button>
-      <Button onClick={() => { setTimeout(() => { void navigate(screens.note, { id: "n77" }); }, 1500); }}>Open note n77 later</Button>
-      <Button onClick={() => { setTimeout(() => { void navigate(screens.notes); }, 1500); }}>Open the list later</Button>
-      <Button onPointerDown={() => void navigate(screens.note, { id: "down" })} onPointerUp={() => { setTimeout(() => { void navigate(screens.note, { id: "up" }); }, 1500); }}>Press and lift</Button>
-      <input aria-label="Keys" onKeyDown={(event) => { if (event.repeat) { setTimeout(() => { void navigate(screens.note, { id: "held" }); }, 1500); } else { void navigate(screens.note, { id: "pressed" }); } }} />
-    </main>`
-      ),
   };
 };
 
+/** A hop that opens the next as it mounts, up to `hopLimit`. */
+const hopLimit = 5;
+
 /**
- * The Notes App with screens that navigate without the person acting
- * (spec 10.7.7): a start screen that opens the first hop as it mounts, a
- * launch screen that opens it on a click, and a hop screen that opens the
- * next one each time it starts.
+ * The Notes App with pages that move the App without the person acting:
+ * a start page that opens the first hop as it mounts, a launch page that
+ * opens one on a click, and hops that each open the next as they mount,
+ * plain, focusing themselves, or forging every sign of the person acting
+ * they can.
  */
 export const hoppingFiles = (): Record<string, string> => ({
   ...notesAppFiles(),
-  "screens.ts": screensWithInput.replace(
-    '  screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],',
-    `  screens: [
-    { name: "notes", path: "/", source: "screens/notes.tsx" },
-    { name: "start", path: "/start", source: "screens/takeoff.tsx" },
-    { name: "launch", path: "/launch", source: "screens/launch.tsx" },
-    { name: "hop", path: "/hops/:n", source: "screens/hop.tsx", input: v.object({ n: v.string() }) },
-    { name: "focusHop", path: "/focus-hops/:n", source: "screens/focus-hop.tsx", input: v.object({ n: v.string() }) },
-    { name: "forge", path: "/forges/:n", source: "screens/forge.tsx", input: v.object({ n: v.string() }) },
-  ],`
-  ),
-  "screens/takeoff.tsx": `import { useEffect } from "react";
-import { useNavigate } from "@grasp-os/sdk/react";
-import { screens } from "@server/_generated/api";
+  "src/routes/takeoff.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
 
-export default function Takeoff() {
+function Takeoff() {
   const navigate = useNavigate();
   useEffect(() => {
-    void navigate(screens.hop, { n: "1" }).catch(() => undefined);
+    void navigate({ to: "/hops/$n", params: { n: "1" } });
   }, [navigate]);
   return <main className="p-6"><h1>Takeoff</h1></main>;
 }
+export const Route = createFileRoute("/takeoff")({ component: Takeoff });
 `,
-  "screens/launch.tsx": `import { useNavigate } from "@grasp-os/sdk/react";
+  // A page that moves on a press and again on its release, and on a key's
+  // first press and again on each of its repeats: one act each, the
+  // press's, whatever the rest asks.
+  "src/routes/keys.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button } from "@grasp-os/ui/components/button";
-import { screens } from "@server/_generated/api";
 
-export default function Launch() {
+function Keys() {
   const navigate = useNavigate();
   return (
-    <main className="p-6">
-      <h1>Launch</h1>
-      <Button onClick={() => void navigate(screens.hop, { n: "1" })}>Start hopping</Button>
-      <Button onClick={() => void navigate(screens.focusHop, { n: "1" })}>Start focused hopping</Button>
-      <Button onClick={() => void navigate(screens.forge, { n: "1" })}>Start forging</Button>
+    <main className="flex flex-col gap-3 p-6">
+      <h1>Keys</h1>
+      <Button
+        onPointerDown={() => void navigate({ to: "/keys", hash: "down" })}
+        onPointerUp={() => void navigate({ to: "/keys", hash: "up" })}
+      >
+        Press and lift
+      </Button>
+      <input
+        aria-label="Keys"
+        onKeyDown={(event) =>
+          void navigate({ to: "/keys", hash: event.repeat ? "held" : "pressed" })
+        }
+      />
     </main>
   );
 }
+export const Route = createFileRoute("/keys")({ component: Keys });
 `,
-  "screens/hop.tsx": `import { useEffect } from "react";
-import { useNavigate } from "@grasp-os/sdk/react";
-import type { ScreenProps } from "@grasp-os/sdk/react";
-import { screens } from "@server/_generated/api";
+  "src/routes/launch.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
 
-export default function Hop({ input }: ScreenProps<typeof screens.hop>) {
+function Launch() {
+  return (
+    <main className="flex flex-col gap-3 p-6">
+      <h1>Launch</h1>
+      <Link params={{ n: "1" }} to="/hops/$n">Start hopping</Link>
+      <Link params={{ n: "1" }} to="/focus-hops/$n">Start focused hopping</Link>
+      <Link params={{ n: "1" }} to="/forges/$n">Start forging</Link>
+    </main>
+  );
+}
+export const Route = createFileRoute("/launch")({ component: Launch });
+`,
+  "src/routes/hops.$n.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
+
+function Hop() {
+  const { n } = Route.useParams();
   const navigate = useNavigate();
   useEffect(() => {
-    void navigate(screens.hop, { n: String(Number(input.n) + 1) }).catch(() => undefined);
-  }, [navigate, input.n]);
-  return <main className="p-6"><h1>Hop {input.n}</h1></main>;
+    if (Number(n) < ${hopLimit}) {
+      void navigate({ to: "/hops/$n", params: { n: String(Number(n) + 1) } });
+    }
+  }, [navigate, n]);
+  return <main className="p-6"><h1>Hop {n}</h1></main>;
 }
+export const Route = createFileRoute("/hops/$n")({ component: Hop });
 `,
   // A hop that focuses its own field as it mounts, while the click that
   // opened the first is still active, so the page sees the person acting
   // in its frame, then navigates.
-  "screens/focus-hop.tsx": `import { useEffect, useRef } from "react";
-import { useNavigate } from "@grasp-os/sdk/react";
-import type { ScreenProps } from "@grasp-os/sdk/react";
-import { screens } from "@server/_generated/api";
+  "src/routes/focus-hops.$n.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
 
-export default function FocusHop({ input }: ScreenProps<typeof screens.focusHop>) {
+function FocusHop() {
+  const { n } = Route.useParams();
   const navigate = useNavigate();
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => {
     field.current?.focus();
-    void navigate(screens.focusHop, { n: String(Number(input.n) + 1) }).catch(() => undefined);
-  }, [navigate, input.n]);
+    if (Number(n) < ${hopLimit}) {
+      void navigate({ to: "/focus-hops/$n", params: { n: String(Number(n) + 1) } });
+    }
+  }, [navigate, n]);
   return (
     <main className="p-6">
-      <h1>Focus hop {input.n}</h1>
+      <h1>Focus hop {n}</h1>
       <input aria-label="Where" ref={field} />
     </main>
   );
 }
+export const Route = createFileRoute("/focus-hops/$n")({ component: FocusHop });
 `,
   // A hop that tries every way its code has to pass for the person
   // acting: it patches the prototypes the frame's document reports acts
   // with (dropping what an act report looks like), listens first to stop
   // input reaching anyone else, dispatches input of its own, posts
   // act-shaped messages to the page, and focuses itself, then navigates.
-  // Its "Go back" button is the person's own act, which must still count.
-  "screens/forge.tsx": `import { useEffect, useRef } from "react";
-import { useNavigate } from "@grasp-os/sdk/react";
-import type { ScreenProps } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
-import { screens } from "@server/_generated/api";
+  // Its "Go back" link is the person's own act, which must still count.
+  "src/routes/forges.$n.tsx": `import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
 
 const forge = () => {
   const post = MessagePort.prototype.postMessage;
@@ -929,21 +900,25 @@ const forge = () => {
   parent.postMessage({ type: "act" }, "*");
 };
 
-export default function Forge({ input }: ScreenProps<typeof screens.forge>) {
+function Forge() {
+  const { n } = Route.useParams();
   const navigate = useNavigate();
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => {
     forge();
     field.current?.focus();
-    void navigate(screens.forge, { n: String(Number(input.n) + 1) }).catch(() => undefined);
-  }, [navigate, input.n]);
+    if (Number(n) < ${hopLimit}) {
+      void navigate({ to: "/forges/$n", params: { n: String(Number(n) + 1) } });
+    }
+  }, [navigate, n]);
   return (
     <main className="p-6">
-      <h1>Forge {input.n}</h1>
+      <h1>Forge {n}</h1>
       <input aria-label="Where" ref={field} />
-      <Button onClick={() => void navigate(screens.launch, {})}>Go back</Button>
+      <Link to="/launch">Go back</Link>
     </main>
   );
 }
+export const Route = createFileRoute("/forges/$n")({ component: Forge });
 `,
 });

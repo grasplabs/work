@@ -24,11 +24,11 @@ import type { OnboardingGateApi } from "./onboarding-gate.ts";
 import type { OnboardingApi } from "./onboarding.ts";
 import type { OrgSettingsApi } from "./org-settings.ts";
 import type { OrganizationApi } from "./organization.ts";
+import type { PagesApi } from "./pages.ts";
 import type { PermissionsApi } from "./permissions.ts";
 import type { ProjectsApi } from "./projects.ts";
 import type { ResourceBindingsApi, TemplatesApi } from "./resource-bindings.ts";
 import type { Role } from "./roles.ts";
-import type { ScreensApi } from "./screens.ts";
 import type { SessionsApi } from "./sign-in.ts";
 import type { SignalsApi } from "./signals.ts";
 import type { StephenRequestsApi } from "./stephen-requests.ts";
@@ -165,8 +165,8 @@ export interface SessionApi {
    * permission of its own, which no role gives.
    */
   readonly dependencies: DependenciesApi;
-  /** Apps' screens: their builds, their servers and their error logs. */
-  readonly screens: ScreensApi;
+  /** Apps' pages: their builds, their servers and their error logs. */
+  readonly pages: PagesApi;
   /** What an App's data is to code Grasp didn't serve: a portable host. */
   readonly dataPolicy: DataPolicyApi;
   /** The organization's members: offboarding. Admins only. */

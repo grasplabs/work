@@ -26,7 +26,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { AppSettings } from "./app-settings.tsx";
 import type { AppSettingsSection } from "./app-settings.tsx";
 
-// An App's settings against core's `apps` and `screens` as the page
+// An App's settings against core's `apps` and `pages` as the page
 // reaches them over RPC (the boundary from the web app), faked: the
 // sections each viewer sees, linked where they stand (the workspace or the
 // settings page), and General, which only its builders change, archiving
@@ -55,7 +55,7 @@ const billing: ListedConnection = {
   },
 };
 
-/** Core's `apps` and `screens` for one App, as someone with `role` in it reads it. */
+/** Core's `apps` and `pages` for one App, as someone with `role` in it reads it. */
 const fakeCore = (
   role: ViewedApp["role"],
   status: AppStatus = "published",
@@ -118,7 +118,7 @@ const fakeCore = (
         },
       },
     },
-    screens: {
+    pages: {
       surfaces: async () => {
         await Promise.resolve();
         if (surfacesRefused) {
@@ -185,18 +185,18 @@ const opened = async (
   section?: AppSettingsSection,
   role: Identity["role"] = "user"
 ) => {
-  const { apps, screens, dependencies, permissions, connections } = fake;
+  const { apps, pages, dependencies, permissions, connections } = fake;
   const core = {
     withSession: async <T,>(
       action: (session: {
         apps: typeof apps;
-        screens: typeof screens;
+        pages: typeof pages;
         dependencies: typeof dependencies;
         permissions: typeof permissions;
         connections: typeof connections;
       }) => Promise<T>
     ): Promise<T> =>
-      await action({ apps, screens, dependencies, permissions, connections }),
+      await action({ apps, pages, dependencies, permissions, connections }),
   };
   const rootRoute = createRootRoute({
     loader: async () => await apps.get(),

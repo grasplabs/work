@@ -1,5 +1,5 @@
 import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
-import { screenLimits } from "@grasp-os/shared/screens";
+import { pageLimits } from "@grasp-os/shared/pages";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -32,9 +32,9 @@ import { signedInApi } from "./sign-in.ts";
 // whose server code fails at run time, the preview in the person's side
 // panel runs into it, and the agent's next check fails with it, so the
 // agent fixes it and checks again, with no one stepping in. The side
-// panel is played here as the page plays it (screen-host.ts): it follows
+// panel is played here as the page plays it (page-host.ts): it follows
 // the chat, previews the draft at each write, calls its server as the
-// screen does, and reports what went wrong. The agent can also call the
+// page does, and reports what went wrong. The agent can also call the
 // draft's server itself (`env.build.call`), in the same preview. What
 // either sees is text the draft's code wrote, so these tests also write
 // it as an attack, and check that it reaches the model only as data in a
@@ -190,7 +190,7 @@ const returned = (text: string | undefined): unknown =>
 
 /**
  * The side panel, previewing the chat's draft once it is at `revision`:
- * its screen reads `desk.total`, and reports the rejection it got, if any.
+ * its page reads `desk.total`, and reports the rejection it got, if any.
  */
 const previewAt = async (
   person: Person,
@@ -217,8 +217,8 @@ const previewAt = async (
     )
   );
   if (typeof total !== "number") {
-    // What the draft's screen reports is its code's text: the attacker's.
-    await chats.previewReport(chatId, app, revision, "desk", {
+    // What the draft's page reports is its code's text: the attacker's.
+    await chats.previewReport(chatId, app, revision, "/", {
       kind: "rejection",
       message: `The total couldn't be read. ${attack}`,
     });
@@ -388,8 +388,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
               "contract.invalid_return: The operation returned something its contract doesn't allow.",
           },
           {
-            source: "screen",
-            at: "desk",
+            source: "page",
+            at: "/",
             message: `The total couldn't be read. ${attack}`,
           },
         ],
@@ -414,7 +414,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
           passed: checked.passed,
           lint: checked.lint.status,
           seen: checked.preview.seen,
-          // The screen's own report may land in the same moment: the
+          // The page's own report may land in the same moment: the
           // server's failure is kept first.
           first: checked.preview.problems.map(({ source, at }) => ({ source, at }))[0],
         };
@@ -469,7 +469,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       says("It fails."),
     ]);
     const id = chatIdSchema.parse(chatId);
-    // The side panel has the draft open, and its screen works.
+    // The side panel has the draft open, and its page works.
     await stub.saveDraft(
       id,
       app,
@@ -481,7 +481,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     );
     await previewAt(builder, chatId, 1);
     const reported = async (kind: "warning" | "console", message: string) => {
-      await builder.api.chats.previewReport(chatId, app, 1, "desk", {
+      await builder.api.chats.previewReport(chatId, app, 1, "/", {
         kind,
         message,
       });
@@ -496,7 +496,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     // More warnings than a revision keeps, then the draft's own
     // console.error: the warnings never take its place.
     for (let count = 0; count < 10; count += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one report after another, as a screen sends them
+      // oxlint-disable-next-line no-await-in-loop -- one report after another, as a page sends them
       await reported("warning", `Warning number ${count}`);
     }
     await reported("console", "The desk couldn't be drawn.");
@@ -520,12 +520,12 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     const { builder, app, chatId, stub } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-        await env.build.write(app.id, { "screens/desk.tsx": "export default function Desk() { return (" });
+        await env.build.write(app.id, { "src/routes/index.tsx": "function Desk() { return (" });
         const started = Date.now();
         const { check: checked } = await env.build.propose(app.id, "A desk");
         return {
           passed: checked.passed,
-          screens: checked.screens.status,
+          pages: checked.pages.status,
           seen: checked.preview.seen,
           elapsed: Date.now() - started,
         };
@@ -545,7 +545,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     await previewAt(builder, chatId, 1);
 
     await stub.ask(chatIdSchema.parse(chatId), {
-      text: "Change the invoice desk's screen",
+      text: "Change the invoice desk's page",
       model,
     });
 
@@ -553,19 +553,19 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     const { elapsed, ...result } = z
       .object({
         passed: z.boolean(),
-        screens: z.string(),
+        pages: z.string(),
         seen: z.boolean(),
         elapsed: z.number(),
       })
       .parse(returned(checked?.text));
     expect({ result, quick: elapsed < 2500 }).toStrictEqual({
-      result: { passed: false, screens: "failed", seen: false },
+      result: { passed: false, pages: "failed", seen: false },
       // Well under the preview wait of 3 seconds.
       quick: true,
     });
   });
 
-  it("fails a check for each problem its preview ran into, a function's failure and a screen's report, only of the revision it previewed", async () => {
+  it("fails a check for each problem its preview ran into, a function's failure and a page's report, only of the revision it previewed", async () => {
     const { builder, app, chatId, stub } = await setUp([], false);
     const id = chatIdSchema.parse(chatId);
     const { chats } = builder.api;
@@ -587,7 +587,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       const { problems } = await stub.previewReports(id, app, revision, 0);
       return problems.map(({ source }) => source);
     };
-    /** The draft's total, as its screen reads it: its value, or code. */
+    /** The draft's total, as its page reads it: its value, or code. */
     const read = async (revision: number): Promise<unknown> =>
       answerOf(
         await chats.previewFunction(
@@ -602,7 +602,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
         )
       );
     const reportOn = async (revision: number, message: string) => {
-      await chats.previewReport(chatId, app, revision, "desk", {
+      await chats.previewReport(chatId, app, revision, "/", {
         kind: "rejection",
         message,
       });
@@ -617,15 +617,15 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     const failed = await read(first);
     const ownFailure = await sources(first);
 
-    // A screen's report of what it couldn't show: the draft's too.
+    // A page's report of what it couldn't show: the draft's too.
     const second = await writeDraft(first);
     await reportOn(second, "Unhandled: the total couldn't be read");
     const reported = await sources(second);
 
-    // A screen failing in a loop fills the list and no more.
+    // A page failing in a loop fills the list and no more.
     const third = await writeDraft(second);
     for (let count = 0; count < 15; count += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one report after another, as a screen sends them
+      // oxlint-disable-next-line no-await-in-loop -- one report after another, as a page sends them
       await reportOn(third, `TypeError number ${count}`);
     }
     const { length: looping } = await sources(third);
@@ -651,7 +651,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       answeredAtOnce: true,
       failed: "contract.invalid_return",
       ownFailure: ["server"],
-      reported: ["screen"],
+      reported: ["page"],
       looping: 10,
       moved: [],
     });
@@ -705,11 +705,11 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     await talk("again");
     await talk("and again");
     const thrice = await logged(50);
-    // A screen reporting in a loop, each message past what one keeps.
-    const long = "x".repeat(screenLimits.report.message + 1000);
+    // A page reporting in a loop, each message past what one keeps.
+    const long = "x".repeat(pageLimits.report.message + 1000);
     for (let count = 0; count < 15; count += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one report after another, as a screen sends them
-      await chats.previewReport(chatId, app, revision, "desk", {
+      // oxlint-disable-next-line no-await-in-loop -- one report after another, as a page sends them
+      await chats.previewReport(chatId, app, revision, "/", {
         kind: "error",
         message: `${String(count)} ${long}`,
       });
@@ -738,7 +738,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       newest: "line 19",
       oldest: "line 10",
       problems: 10,
-      longest: screenLimits.report.message,
+      longest: pageLimits.report.message,
     });
   });
 
@@ -982,7 +982,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
           const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
           await env.build.write(app.id, ${JSON.stringify(agentWritten(spec8Notes))});
           const answered = [];
-          for (let call = 0; call < ${screenLimits.requests.burst + 5}; call += 1) {
+          for (let call = 0; call < ${pageLimits.requests.burst + 5}; call += 1) {
             try {
               const result = await env.build.call(app.id, "notes.titles");
               answered.push(result.ok ? "ok" : result.code);
@@ -1002,8 +1002,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
 
       const results = await codeResults(stub, chatId);
       const answered = z.array(z.string()).parse(returned(results[0]?.text));
-      expect(answered.slice(0, screenLimits.requests.burst)).toStrictEqual(
-        Array.from({ length: screenLimits.requests.burst }, () => "ok")
+      expect(answered.slice(0, pageLimits.requests.burst)).toStrictEqual(
+        Array.from({ length: pageLimits.requests.burst }, () => "ok")
       );
       expect(answered.at(-1)).toBe("refused");
     } finally {

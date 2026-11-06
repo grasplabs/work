@@ -473,7 +473,7 @@ describe("a test whose events Vitest delivers unreliably", () => {
 
   it("leaves the run alone when the test's result arrives before its start", async () => {
     const { reporter, written, state } = ending();
-    const bridge = file("screen-bridge");
+    const bridge = file("page-bridge");
     const flood = test(bridge, "passes on twenty reports", { timeout: 20 });
     reporter.onTestRunStart();
     elsewhere(reporter);

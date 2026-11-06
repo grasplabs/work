@@ -7,39 +7,39 @@ import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 
 // An App as its people use it at /apps/<id>: its bar with its name and
-// its screens as tabs, its screen under the bar, and no chat; and its
+// its pages as tabs, its page under the bar, and no chat; and its
 // workspace at /apps/<id>/edit, where its builders build it with the chat
 // docked beside a preview, publish and unpublish it, and restore it once
 // archived. Its settings are a page of their own, and a section of the
 // workspace. Only its builders edit, publish or restore it, and a draft is
 // theirs alone.
 
-/** A screen that says which it is, `title`. */
-const screenSaying = (title: string) => `export default function Screen() {
+/** The page at `path` that says which it is, `title`, and links to `other`. */
+const pageSaying = (
+  path: string,
+  title: string,
+  other: string
+) => `import { createFileRoute, Link } from "@tanstack/react-router";
+
+function Page() {
   return (
     <main className="p-4">
       <h2 className="text-lg font-medium">${title}</h2>
+      <Link to="${other}">Go to ${other}</Link>
     </main>
   );
 }
+export const Route = createFileRoute("${path}")({ component: Page });
 `;
 
-/** Two screens, `board` and `list`, and nothing else. */
-const twoScreens = {
+/** Two pages, the board at `/` and the list at `/list`, and nothing else. */
+const twoPages = {
   ...appDefinition({
     name: "Boards",
     tables: { marks: { fields: { at: "v.number()" } } },
   }),
-
-  "screens.ts": `export default {
-  screens: [
-    { name: "board", path: "/", source: "screens/board.tsx" },
-    { name: "list", path: "/list", source: "screens/list.tsx" },
-  ],
-};
-`,
-  "screens/board.tsx": screenSaying("The board"),
-  "screens/list.tsx": screenSaying("The list"),
+  "src/routes/index.tsx": pageSaying("/", "The board", "/list"),
+  "src/routes/list.tsx": pageSaying("/list", "The list", "/"),
 };
 
 /** A new App named `name`, released (so published) with `files` if any. */
@@ -60,39 +60,43 @@ const newApp = async (
   }
 };
 
-/** A screen of the App in its frame, once built, saying `title`. */
-const screenShowing = async (page: Page, screen: string, title: string) => {
-  const frame = page.frameLocator(`iframe[title="${screen} app"]`);
-  // The first open builds the screen, which on a loaded machine takes a
-  // while (screens.e2e.ts).
+/** The App in its frame, once built, on the page saying `title`. */
+const pageShowing = async (page: Page, title: string) => {
+  const frame = page.frameLocator('iframe[title="App"]');
+  // The first open builds the page, which on a loaded machine takes a
+  // while (pages.e2e.ts).
   await expect(frame.getByRole("heading", { name: title })).toBeVisible({
     timeout: 20_000,
   });
+  return frame;
 };
 
-test("a builder uses the live App, moves between its screens, and publishes and unpublishes it in its workspace", async ({
+test("a builder uses the live App, moves between its pages, and publishes and unpublishes it in its workspace", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("appPage");
   const name = `Boards ${crypto.randomUUID()}`;
-  const app = await newApp(builder, name, twoScreens);
+  const app = await newApp(builder, name, twoPages);
   const page = await pageOf(builder);
   await page.goto(`/apps/${app}`);
 
   await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-  // Its first screen opens first; the other is a tab away.
-  await screenShowing(page, "board", "The board");
-  // The App's name heads the page once: the screen's frame, open now,
+  // Its first page, `/`, opens first.
+  const frame = await pageShowing(page, "The board");
+  // The App's name heads the page once: the page's frame, open now,
   // names it a level below.
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(name);
-  const screens = page.getByRole("navigation", { name: "Pages" });
-  await expect(screens.getByRole("link", { name: "board" })).toHaveAttribute(
-    "aria-current",
-    "page"
-  );
-  await screens.getByRole("link", { name: "list" }).click();
-  await expect(page).toHaveURL(new RegExp(`/apps/${app}\\?screen=list$`, "u"));
-  await screenShowing(page, "list", "The list");
+  // A link in the App moves it, and the page's address with it: back
+  // goes back to where it was.
+  await frame.getByRole("link", { name: "Go to /list" }).click();
+  await expect(page).toHaveURL(new RegExp(`/apps/${app}/pages/list$`, "u"));
+  await pageShowing(page, "The list");
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/apps/${app}$`, "u"));
+  await pageShowing(page, "The board");
+  // Its address opens it there again.
+  await page.goto(`/apps/${app}/pages/list`);
+  await pageShowing(page, "The list");
 
   // The live App is its people's: no chat and nothing to publish here.
   await expect(page.getByRole("textbox", { name: "Ask Grasp" })).toHaveCount(0);
@@ -149,7 +153,7 @@ test("a builder renames an App and says what it is for in its settings, archives
   const { builder, user } = peopleIn("appPage");
   const name = `Settings ${crypto.randomUUID()}`;
   const renamed = `Renamed ${crypto.randomUUID()}`;
-  const app = await newApp(builder, name, twoScreens);
+  const app = await newApp(builder, name, twoPages);
   const page = await pageOf(builder);
   await page.goto(`/apps/${app}/settings`);
 
@@ -206,7 +210,7 @@ test("someone an App is shared with as a user reads its settings and changes non
 }) => {
   const { builder, colleague } = peopleIn("appPage");
   const name = `Read ${crypto.randomUUID()}`;
-  const app = await newApp(builder, name, twoScreens);
+  const app = await newApp(builder, name, twoPages);
   const { core, api } = apiOf(builder);
   try {
     await api.apps.members.add(app, {
@@ -275,12 +279,12 @@ test("an App with nothing built yet has no page, and its builder builds it in it
   ).toBeVisible();
 });
 
-test("an archived App opens no screen, and its builder restores it as a draft in its workspace", async ({
+test("an archived App opens no page, and its builder restores it as a draft in its workspace", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("appPage");
   const name = `Archived ${crypto.randomUUID()}`;
-  const app = await newApp(builder, name, twoScreens);
+  const app = await newApp(builder, name, twoPages);
   const { core, api } = apiOf(builder);
   try {
     await api.apps.archive(app);
@@ -301,5 +305,5 @@ test("an archived App opens no screen, and its builder restores it as a draft in
   await expect(page.getByRole("button", { name: "Publish" })).toBeEnabled();
 
   await page.goto(`/apps/${app}`);
-  await screenShowing(page, "board", "The board");
+  await pageShowing(page, "The board");
 });

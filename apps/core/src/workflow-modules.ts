@@ -25,9 +25,9 @@ import type { WorkflowVersionAction } from "@grasp-os/shared/workflow-resources"
 import type { ContractLookup } from "@grasp-os/workflow-schema/catalog";
 import { z } from "zod";
 
+import { buildComputeModules, withinBuildWait } from "./pages.ts";
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv } from "./sandboxed.ts";
-import { buildComputeModules, withinBuildWait } from "./screens.ts";
 
 // A JSON workflow's own modules (platform specification 13.6, 32.4):
 // TypeScript files under `code/`, published with the definition, whose

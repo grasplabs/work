@@ -57,6 +57,13 @@ import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { callOperation } from "./operations.ts";
 import type { Invocation, ProgressSink, UseRefusal } from "./operations.ts";
+import {
+  answerWorkflowCommand,
+  isWorkflowRequest,
+  readWorkflowRequest,
+  readWorkflowWatch,
+  watchesWorkflow,
+} from "./page-workflows.ts";
 import { readWindow } from "./query-windows.ts";
 import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
@@ -67,13 +74,6 @@ import type {
   RunOrigin,
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
-import {
-  answerWorkflowCommand,
-  isWorkflowRequest,
-  readWorkflowRequest,
-  readWorkflowWatch,
-  watchesWorkflow,
-} from "./screen-workflows.ts";
 import { keptSensitiveReads } from "./sensitive-reads.ts";
 import { appWorkflowNotifications } from "./workflow-notifications.ts";
 import {
@@ -117,12 +117,12 @@ interface FunctionCaller {
   readonly agent?: CallingAgent;
   /**
    * The Apps whose calls this one was made through (resource-apps.ts),
-   * the first App's first: none for a screen's or an agent's own call.
+   * the first App's first: none for a page's or an agent's own call.
    */
   readonly chain?: readonly AppId[] | undefined;
   /**
    * How the invocation's app resources call another App's function
-   * (`BindingCaller.callApp`): as a screen's call of it runs. None, and
+   * (`BindingCaller.callApp`): as a page's call of it runs. None, and
    * they call nothing.
    */
   readonly callApp?: AppFunctionCall;
@@ -399,7 +399,7 @@ const isOverBytes = (text: string, max: number): boolean =>
   text.length > max ||
   (text.length * 3 > max && encoder.encode(text).byteLength > max);
 
-/** A call's request, as a screen or agent sends it (spec 32.6). */
+/** A call's request, as a page or agent sends it (spec 32.6). */
 const functionRequestSchema = z
   .strictObject({
     // A function's name and kind, nothing more: resolved in the release
@@ -412,7 +412,7 @@ const functionRequestSchema = z
     idempotencyKey: z.string().optional(),
     /**
      * A paginated list's window (query-windows.ts): the query read from the
-     * start for at most `extent` records, for a screen only.
+     * start for at most `extent` records, for a page only.
      */
     window: z
       .strictObject({ extent: z.int().min(1).max(liveWindowMaxItems) })
@@ -523,7 +523,7 @@ export const refusalOf = (
 interface FunctionCallOptions {
   readonly deadline: number;
   /**
-   * Whether a keyed mutation's call is a screen's form, told to the App's
+   * Whether a keyed mutation's call is a page's form, told to the App's
    * webhooks: its commit carries it (`CallOptions.commitIntent`), so it is
    * told once it committed, once per submission, and never unless it did.
    * A query, an action or what the mutation calls is never told.
@@ -535,7 +535,7 @@ interface FunctionCallOptions {
   /** Only this kind of function may be called (a live query's). */
   readonly kind?: FunctionRequest["reference"]["kind"];
   /**
-   * Given, the call may read a paginated list's window (a screen's): what
+   * Given, the call may read a paginated list's window (a page's): what
    * charges the person for its pages past what the caller paid
    * (`WindowRequest.charge`).
    */
@@ -557,7 +557,7 @@ interface FunctionCallOptions {
   readonly requireHolds?: () => void;
   /** The run a call from its chain started from (`FunctionCaller.runOrigin`). */
   readonly runOrigin?: RunOrigin;
-  /** Aborted once the calling screen's call is cancelled (`FunctionCaller.cancelled`). */
+  /** Aborted once the calling page's call is cancelled (`FunctionCaller.cancelled`). */
   readonly cancelled?: AbortSignal;
   /**
    * The calling invocation's sources, for a call from another App's
@@ -592,7 +592,7 @@ const callAllowed = (
   if (kind !== undefined && call.reference.kind !== kind) {
     throw operationErrors.create("contract.invalid_request");
   }
-  // A window is a screen's, and a query's only.
+  // A window is a page's, and a query's only.
   if (
     call.window !== undefined &&
     (!windowed || call.reference.kind !== "query")
@@ -796,7 +796,7 @@ const answeredPreferences = async (
 
 /**
  * A read of who calls or of the organization's people (app-people.ts),
- * as a screen of App `app` makes it, answered as `callFunction` answers a
+ * as a page of App `app` makes it, answered as `callFunction` answers a
  * call: for the App the call came through (never one its reference
  * names), once the caller passes the gate a call core answers itself
  * passes.
@@ -844,10 +844,10 @@ const answeredPeople = async (
         roles: async () => await operationRoles(env, by, app),
         declared: release.app.people === true,
         // An agent's read is the agent's, for its person; any other is the
-        // App's screen's.
+        // App's page's.
         actor:
           agent === undefined
-            ? { type: "app", appId: app, part: "screen" }
+            ? { type: "app", appId: app, part: "page" }
             : delegateActorOf({
                 subject: {
                   type: "agent",
@@ -1031,7 +1031,7 @@ const callFunction = async (
     const observed = observedInvocation(invocation, release, observeReads);
     const hosted = hostedRelease(env, release);
     const reference = { path, kind: call.reference.kind };
-    // A screen's keyed mutation: its form, committed with its writes.
+    // A page's keyed mutation: its form, committed with its writes.
     const submittedCall = call;
     const submittedKey = call.idempotencyKey;
     const submittedApp = appId;
@@ -1190,7 +1190,7 @@ export const visitorInvocation = async (
  * as the App itself: only a public query or mutation of the version the
  * visitor's grant is on, never an action (which reaches resources) and
  * never core's own workflow or preference queries, which are a member's.
- * `request` is the call as the screen client wrote it, as text.
+ * `request` is the call as the page client wrote it, as text.
  */
 export const callVisitorFunction = async (
   env: Env,
@@ -1296,7 +1296,7 @@ export const callAppFunction = async (
   });
 
 /**
- * A screen's command of a workflow its App binds (screen-workflows.ts),
+ * A page's command of a workflow its App binds (page-workflows.ts),
  * answered as a call is: a watch sent as a call is no call.
  */
 const workflowCommandAnswer = async (
@@ -1333,7 +1333,7 @@ const workflowCommandAnswer = async (
 };
 
 /**
- * A screen's watch of a workflow its App binds (screen-workflows.ts), read
+ * A page's watch of a workflow its App binds (page-workflows.ts), read
  * as a live query is, with the revision a run's snapshot carries: a
  * command sent as a watch is no query.
  */
@@ -1378,11 +1378,11 @@ const workflowWatchRead = async (
 };
 
 /**
- * Calls a public function of App `app` for a screen of `by`'s, as
+ * Calls a public function of App `app` for a page of `by`'s, as
  * `callAppFunction` calls it, or reads a query's paginated window for it
  * (query-windows.ts). Never throws.
  */
-export const callScreenFunction = async (
+export const callPageFunction = async (
   env: Env,
   by: Pick<Identity, "userId" | "role" | "teams"> &
     Partial<Pick<Identity, "staff">>,
@@ -1430,7 +1430,7 @@ export const asksPreferenceWindow = (request: unknown): boolean => {
 /**
  * Whether `request` calls one of a workflow reference's queries
  * (workflow-reference-queries.ts), or watches a workflow's run or binding
- * (screen-workflows.ts): they read no store, so a live one is read again
+ * (page-workflows.ts): they read no store, so a live one is read again
  * when the person's runs of the App change, not on a write.
  */
 export const callsWorkflowQuery = (request: unknown): boolean => {
@@ -1446,7 +1446,7 @@ export const callsWorkflowQuery = (request: unknown): boolean => {
 
 /**
  * Whether `request` calls a workflow reference's decision queries, or
- * watches a run (screen-workflows.ts), which a reviewer may watch only
+ * watches a run (page-workflows.ts), which a reviewer may watch only
  * while one of its decisions asks them: read again when a decision of one
  * of the App's runs changes, for whomever it asks (run-changes.ts,
  * `tellDecisionFollowers`).
@@ -1548,7 +1548,7 @@ export const invokeAppAction = async (
   readonly effects: number;
   /**
    * The public action it ran, as the checked release it ran resolved it:
-   * what a screen's form sent as it names (action-invocation.ts).
+   * what a page's form sent as it names (action-invocation.ts).
    */
   readonly path?: string;
 }> => {
@@ -1572,7 +1572,7 @@ export const invokeAppAction = async (
       requestId,
       deadline,
       cancelled,
-      // Another App's function, as a screen's call of it runs.
+      // Another App's function, as a page's call of it runs.
       callApp: async (person, called, appRequest, appOptions) =>
         await callFunction(env, person, called, appRequest, appOptions),
     });

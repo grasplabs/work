@@ -26,9 +26,9 @@ import type { WorkflowQueryName } from "./workflow-queries.ts";
 // - `server/_generated/internal.ts` (`@server/_generated/internal`): the
 //   `internal` tree, for the App's own server code only.
 // - `server/_generated/api.ts` (`@server/_generated/api`): the public
-//   `api`, `workflows`, the permissions its screens use
-//   (`permissions.files`, `permissions.links`), its `screens`, and
-//   `preferences` when it declares them. What a browser gets: data and
+//   `api`, `workflows`, the permissions its pages use
+//   (`permissions.files`, `permissions.links`), and `preferences` when it
+//   declares them. What a browser gets: data and
 //   types, extracted from descriptors, with no handler, schema or server
 //   code in it.
 // - `.grasp/contracts.json`: the App's manifest, each function's
@@ -55,11 +55,12 @@ export const generatedPaths = {
 } as const;
 
 /**
- * The format of `contracts.json`: 3 since its manifest carries `surfaces`
- * (spec 34.1). A release whose contracts are of another format doesn't
- * load: a new version replaces it.
+ * The format of `contracts.json`: 4 since its manifest carries no pages
+ * or surfaces, which are the App's file routes'. A release whose
+ * contracts are of another format doesn't load: a new version replaces
+ * it.
  */
-export const contractsFormatVersion = 3;
+export const contractsFormatVersion = 4;
 
 /**
  * The fingerprint of `operation`'s exact contract: the SHA-256, in hex, of
@@ -232,7 +233,7 @@ const sealedWorkflow = (value: unknown): WorkflowBindingExtras => {
 /**
  * What the host resolved of each workflow a release declares, read back
  * from its sealed contracts (`contracts.json`'s `workflows`): so the
- * references a sealed version's screens get are generated from what its
+ * references a sealed version's pages get are generated from what its
  * seal resolved, whatever its bindings say now. Throws on anything else.
  */
 export const readSealedWorkflows = (
@@ -863,7 +864,7 @@ const workflowTypeOf = (workflow: BoundWorkflow): string => {
 
 /**
  * The reference to `workflow`, as the data a generated module holds: what
- * a screen's `@server/_generated/api` imports under `workflows.<alias>`.
+ * a page's `@server/_generated/api` imports under `workflows.<alias>`.
  */
 export const workflowReferenceOf = async (
   identity: ReleaseIdentity,
@@ -1005,48 +1006,6 @@ const referencesText = async (
       : `export const permissions: {\n${resourceTypes.join("\n")}\n} = frozen({\n${resourceValues.join("\n")}\n});\n`
   );
 
-  const screens = Object.values(manifest.screens).toSorted((a, b) =>
-    a.name < b.name ? -1 : 1
-  );
-  // Each screen's declared surfaces (spec 34.1), by name, as screens are:
-  // the same bytes whatever order the manifest's keys come in.
-  const surfacesOf = (screen: string) =>
-    Object.values(manifest.surfaces)
-      .filter((surface) => surface.screen === screen)
-      .toSorted((a, b) => (a.name < b.name ? -1 : 1));
-  const surfaceTypes = (screen: string): string => {
-    const own = surfacesOf(screen);
-    return own.length === 0
-      ? ""
-      : `, { ${own.map((surface) => `readonly ${key(surface.name)}: ${valueTypeOf(surface.input, "input")}`).join("; ")} }`;
-  };
-  const screenTypes = screens.map(
-    (screen) =>
-      `  readonly ${key(screen.name)}: ScreenReference<${JSON.stringify(screen.name)}, ${valueTypeOf(screen.input, "input")}, ${valueTypeOf(screen.input, "output")}${surfaceTypes(screen.name)}>;`
-  );
-  const screenValues = screens.map(
-    (screen) =>
-      `  ${key(screen.name)}: ${dataOf(
-        {
-          name: screen.name,
-          path: screen.path,
-          input: screen.input,
-          surfaces: Object.fromEntries(
-            surfacesOf(screen.name).map((surface) => [
-              surface.name,
-              { kind: surface.kind, input: surface.input },
-            ])
-          ),
-        },
-        1
-      )},`
-  );
-  parts.push(
-    screens.length === 0
-      ? "export const screens: Readonly<Record<never, never>> = frozen({});\n"
-      : `export const screens: {\n${screenTypes.join("\n")}\n} = frozen({\n${screenValues.join("\n")}\n});\n`
-  );
-
   // Only when declared: an App without preferences has no export to import.
   // `get` and `update`, generated as any function reference is
   // (preference-operations.ts), and nothing else (spec 10.7.7).
@@ -1071,7 +1030,6 @@ const referencesText = async (
     "FilesReference",
     "LinksReference",
     "OperationReference",
-    "ScreenReference",
     "WorkflowDecisionDetail",
     "WorkflowDecisionInboxItem",
     "WorkflowDecisionReference",
@@ -1234,6 +1192,6 @@ export const symbolicModules = (): Record<string, string> => {
 `;
   return {
     [generatedPaths.internal]: `${standInImport}${prelude}${standInTree}\nexport const internal = ${symbolicTree} as unknown as StandIn;\n`,
-    [generatedPaths.api]: `${standInImport}${prelude}${standInTree}\nexport const api = ${symbolicTree} as unknown as StandIn;\nexport const workflows: any = Object.freeze({});\nexport const permissions: any = Object.freeze({});\nexport const screens: any = Object.freeze({});\nexport const preferences: any = Object.freeze({});\n`,
+    [generatedPaths.api]: `${standInImport}${prelude}${standInTree}\nexport const api = ${symbolicTree} as unknown as StandIn;\nexport const workflows: any = Object.freeze({});\nexport const permissions: any = Object.freeze({});\nexport const preferences: any = Object.freeze({});\n`,
   };
 };

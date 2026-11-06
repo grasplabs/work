@@ -383,8 +383,8 @@ const ReviewDetails = ({
           </h4>
           <Badge variant="destructive">
             {review.handsFilesToWorkflows === null
-              ? t`Its code can't be read: its screens and server code may hand files people can read to the workflows it binds`
-              : t`Its screens and server code may hand files people can read to the workflows it binds`}
+              ? t`Its code can't be read: its pages and server code may hand files people can read to the workflows it binds`
+              : t`Its pages and server code may hand files people can read to the workflows it binds`}
           </Badge>
         </section>
       )}

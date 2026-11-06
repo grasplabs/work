@@ -51,7 +51,7 @@ import {
   readTree,
   storeBlueprintTree,
   storeTree,
-  screensIn,
+  hasPages,
   supersededBy,
   toApp,
   toVersion,
@@ -594,7 +594,7 @@ export const createFromBlueprint = async (
     // (`madeCurrent`) only when an admin approved it, unlike a version its
     // builder commits; otherwise approved as any version is.
     approved: blueprint.approved ? 1 : null,
-    screens: screensIn(files),
+    pages: hasPages(files),
     proposedBy: null,
   };
   const db = drizzle(env.DB);
@@ -941,7 +941,7 @@ export const acceptBlueprintUpdate = async (
     message: `Updated from the blueprint ${blueprint.name}.`,
     createdAt: new Date(),
     approved: null,
-    screens: screensIn(files),
+    pages: hasPages(files),
     proposedBy: null,
   };
   // Nothing of the App's files changes when each of the blueprint's

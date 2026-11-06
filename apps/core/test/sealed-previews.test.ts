@@ -1,7 +1,7 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalText } from "@grasp-os/shared/json";
-import { screenLimits } from "@grasp-os/shared/screens";
-import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
+import { pageLimits } from "@grasp-os/shared/pages";
+import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -12,6 +12,7 @@ import { ChatsRpc } from "../src/chats-rpc.ts";
 import { openStore } from "../src/data-stores.ts";
 import { openTestRun } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
+import { appModulesOf, loadFrame } from "./page-frames.ts";
 import {
   answerHashOf,
   livePushes,
@@ -28,13 +29,12 @@ import {
   previewStores,
   requestFor,
 } from "./previews.ts";
-import { appModulesOf, loadFrame } from "./screen-frames.ts";
 import { calledAs, failure } from "./sealed-apps.ts";
 import { auditedDuring, signedInApi } from "./sign-in.ts";
 
 // A chat's preview of its draft of an App of spec 8's layout
 // (sealed-previews.ts): the draft sealed into a draft release, and every
-// call of its screens, its live queries and the chat's agent run on it
+// call of its pages, its live queries and the chat's agent run on it
 // through the operation host, on a store of the preview's own. These
 // tests start from the ways it can fail (the threat model on GRA-652):
 // the draft reads or writes the App's data, reaches an outside system,
@@ -73,7 +73,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
           await requestFor(builder, { chatId, app, revision: at }, path, input)
         )
       );
-    // The screen builds with the references its draft release generates.
+    // The page builds with the references its draft release generates.
     const bundle = await chats.preview(chatId, app);
     const first = {
       created: typeof (await call(revision, "notes.create", {
@@ -122,7 +122,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     expect({
       modules: appModulesOf(
         (await loadFrame(bundle)) ?? { modules: {} }
-      ).includes("app~screens~desk.js"),
+      ).includes("app~src~routes~index.js"),
       first,
       opened,
       sealed,
@@ -162,7 +162,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
     });
   });
 
-  it("refuses a screen's workflow requests as a preview's side effect: it starts, controls and follows no run", async () => {
+  it("refuses a page's workflow requests as a preview's side effect: it starts, controls and follows no run", async () => {
     const { builder, app, chatId, revision } = await setUp();
     const workflow = {
       resourceId: app,
@@ -479,7 +479,7 @@ export class App extends DurableObject {
         "server/notes.ts": notesFiles("drafted")["server/notes.ts"] ?? "",
       });
       const codes: string[] = [];
-      for (let count = 0; count <= screenLimits.requests.burst; count += 1) {
+      for (let count = 0; count <= pageLimits.requests.burst; count += 1) {
         codes.push(
           // oxlint-disable-next-line no-await-in-loop -- one request after another
           await failure(
@@ -493,7 +493,7 @@ export class App extends DurableObject {
           )
         );
       }
-      expect(codes.at(-1)).toBe("screen.rate_limited");
+      expect(codes.at(-1)).toBe("page.rate_limited");
       expect(codes.slice(0, -1).every((code) => code === "ok")).toBeTruthy();
     } finally {
       vi.useRealTimers();

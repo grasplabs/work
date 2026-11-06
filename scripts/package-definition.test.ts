@@ -75,24 +75,24 @@ const confirmations = `import { workflows } from "@server/_generated/api";
 export const { confirmed } = workflows.archiveNotes.events;
 `;
 
-/** A screen, which has the DOM as its frame does. */
-const notesScreen = `const Notes = () => <p>{window.location.pathname}</p>;
+/** A page, which has the DOM as its frame does. */
+const notesPage = `import { createFileRoute } from "@tanstack/react-router";
 
-export default Notes;
+const Notes = () => <p>{window.location.pathname}</p>;
+
+export const Route = createFileRoute("/")({ component: Notes });
 `;
 
 /** The Notes fixture's source, as an App version's tree holds it. */
 const notesFiles = (): Record<string, string> => ({
   ...Object.fromEntries(
-    [
-      "grasp.config.ts",
-      "screens.ts",
-      "server/schema.ts",
-      "server/notes.ts",
-    ].map((file) => [file, readFileSync(path.join(notesDir, file), "utf-8")])
+    ["grasp.config.ts", "server/schema.ts", "server/notes.ts"].map((file) => [
+      file,
+      readFileSync(path.join(notesDir, file), "utf-8"),
+    ])
   ),
   "server/confirmations.ts": confirmations,
-  "screens/notes.tsx": notesScreen,
+  "src/routes/index.tsx": notesPage,
 });
 
 /**
@@ -660,8 +660,6 @@ describe(
         app: [
           "app/.grasp/contracts.json",
           "app/grasp.config.ts",
-          "app/screens.ts",
-          "app/screens/notes.tsx",
           "app/server/_generated/api.ts",
           "app/server/_generated/dataModel.ts",
           "app/server/_generated/internal.ts",
@@ -669,7 +667,12 @@ describe(
           "app/server/confirmations.ts",
           "app/server/notes.ts",
           "app/server/schema.ts",
-          "app/tsconfig.screens.json",
+          // Its pages' route tree and root route, as the platform's build
+          // gives them.
+          "app/src/routeTree.gen.ts",
+          "app/src/routes/__root.tsx",
+          "app/src/routes/index.tsx",
+          "app/tsconfig.pages.json",
           "app/tsconfig.server.json",
         ],
         workflow: [
@@ -717,8 +720,8 @@ describe(
       const valid: Record<string, string> = {
         "workflows/greet/1.0.0/code/pattern.ts":
           "export const check = (text: string): void => {\n  if (text) /[//] @ts-ignore/u.test(text);\n};\n",
-        "app/screens/prose.tsx":
-          "/// The notes screen.\n/// <summary>Notes</summary>\nexport const notes = 1;\n",
+        "app/src/components/prose.tsx":
+          "/// The notes page.\n/// <summary>Notes</summary>\nexport const notes = 1;\n",
         // A declaration file read as declarations, as the platform reads it.
         "app/declared.d.ts":
           "export const limit: number;\nexport type Limit = typeof limit;\n",
@@ -740,11 +743,11 @@ describe(
       };
 
       // What the platform's check refuses, each in a file of its own: a
-      // type error in a screen and in a compute module; server code and a
+      // type error in a page and in a compute module; server code and a
       // compute module reaching the DOM, which their isolate lacks; and a
       // compute module importing what its kind may not.
       const mistyped: Record<string, string> = {
-        "app/screens/typo.tsx": 'export const count: number = "none";\n',
+        "app/src/components/typo.tsx": 'export const count: number = "none";\n',
         "workflows/greet/1.0.0/code/typo.ts":
           "export const half = (value: number): string => value / 2;\n",
         "workflows/greet/1.0.0/code/window.ts":
@@ -756,18 +759,18 @@ describe(
         // A package the SDK imports, which a compute module itself may not.
         "workflows/greet/1.0.0/code/zod.ts":
           'import { z } from "zod";\n\nexport const name = z.string();\n',
-        // A directive below the top of a screen, which TypeScript ignores
+        // A directive below the top of a page, which TypeScript ignores
         // but the platform refuses wherever it stands.
-        "app/screens/late.tsx":
+        "app/src/components/late.tsx":
           'export const late = 1;\n/// <reference types="node" />\n',
       };
       // And what its build refuses before any check: every way a file
       // could steer the check, in server code and a compute module alike.
       const steering: Record<string, string> = {
-        // Globals a screen declares, which the platform refuses in every
+        // Globals a page declares, which the platform refuses in every
         // kind of App code; and server code the parser refuses, or that
         // names a missing file, each refused once.
-        "app/screens/globals.tsx":
+        "app/src/components/globals.tsx":
           "export {};\ndeclare global {\n  interface Window {\n    leak: number;\n  }\n}\n",
         "app/server/unparsed.ts": "export const = ;\n",
         "app/server/reference.ts":
@@ -847,8 +850,8 @@ describe(
           status: 1,
           problems: {
             "app/server/document.ts": ["TS2584"],
-            "app/screens/late.tsx": ["imports"],
-            "app/screens/typo.tsx": ["TS2322"],
+            "app/src/components/late.tsx": ["imports"],
+            "app/src/components/typo.tsx": ["TS2322"],
             "workflows/greet/1.0.0/code/kit.ts": ["TS2307"],
             "workflows/greet/1.0.0/code/typo.ts": ["TS2322"],
             "workflows/greet/1.0.0/code/window.ts": ["TS2304"],
@@ -1561,7 +1564,7 @@ describe(
       // a GraphQL template, whose query both leave as written.
       const written = tidy({
         ...blueprintFiles("workflow-map"),
-        "components/count.tsx": `import type { ReactNode } from "react";
+        "src/components/count.tsx": `import type { ReactNode } from "react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { api } from "@server/_generated/api";
 
@@ -1572,7 +1575,7 @@ export const Count = ({ children }: { children: ReactNode }) => (
   </p>
 );
 `,
-        "components/query.ts": `const gql = String.raw;
+        "src/components/query.ts": `const gql = String.raw;
 
 export const query = gql\`
   query{ teams { name   } }
@@ -1625,8 +1628,8 @@ export function zero(a: number): number {
 }
 `;
       const found = {
-        "components/findings.ts": findings,
-        "components/comments.ts": `/* eslint no-ternary: "error" */
+        "src/components/findings.ts": findings,
+        "src/components/comments.ts": `/* eslint no-ternary: "error" */
 export const label = (on: boolean): string => (on ? "On" : "Off");
 
 // oxlint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1634,7 +1637,7 @@ export const anything = (value: any): unknown => value;
 `,
         // An inline config comment over several lines keeps them: the
         // disable comment above it covers its first line, not the code.
-        "components/spanning.ts": `export const stop = (): void => {
+        "src/components/spanning.ts": `export const stop = (): void => {
   // oxlint-disable-next-line no-debugger
   /* eslint
     no-console: "off"
@@ -1649,11 +1652,11 @@ test("counts", () => {
 `,
         // Unused names: an import, a local and a parameter after the last
         // one used, but not one before it, nor a name a type reads.
-        "components/unused.ts": unusedNames,
+        "src/components/unused.ts": unusedNames,
         // What only the App's other files say (a default or a name they
         // lack, a file importing itself), which Grasp's lint, a file at a
         // time, can't read: neither finds it (`leftOut`).
-        "components/imports.ts": `import comments from "./comments";
+        "src/components/imports.ts": `import comments from "./comments";
 import * as spanning from "./spanning";
 import * as imports from "./imports";
 
@@ -1672,9 +1675,9 @@ export const imported = [comments, spanning.missing, imports];
         rmSync(path.join(out, "app", file));
       }
       // Unused names are the lint's, never the typecheck's, as Grasp's
-      // builds pass them: in screens and components, and in server code.
+      // builds pass them: in pages and components, and in server code.
       const unusedFiles = {
-        "components/unused.ts": unusedNames,
+        "src/components/unused.ts": unusedNames,
         "server/unused.ts": `import { v } from "@grasp-os/sdk";
 
 export const later = (): number => {
@@ -1690,8 +1693,8 @@ export const later = (): number => {
       for (const file of Object.keys(unusedFiles)) {
         rmSync(path.join(out, "app", file));
       }
-      // And the design system's lint, as Grasp's screen build runs it
-      // (apps/core/test/screen-checks.test.ts, on the same files): a raw
+      // And the design system's lint, as Grasp's page build runs it
+      // (apps/core/test/page-checks.test.ts, on the same files): a raw
       // colour and a kit component restyled (@shadcn/lint), a remote image
       // (the compiler's own rules), and its cases (design-cases.ts).
       const off = `import { Button } from "@grasp-os/ui/components/button";
@@ -1703,9 +1706,9 @@ export const Off = () => (
   </p>
 );
 `;
-      write("app/screens/off.tsx", off);
+      write("app/src/components/off.tsx", off);
       const design = run(out, "lint", "--format=json");
-      rmSync(path.join(out, "app/screens/off.tsx"));
+      rmSync(path.join(out, "app/src/components/off.tsx"));
       for (const [file, source] of Object.entries(designCases)) {
         write(`app/${file}`, source);
       }
@@ -1725,21 +1728,21 @@ export const Off = () => (
         rmSync(path.join(out, "app", file));
       }
       // And the format: what isn't formatted fails its check.
-      write("app/components/spaced.ts", "export const  spaced = 1\n");
+      write("app/src/components/spaced.ts", "export const  spaced = 1\n");
       const unformatted = run(out, "format:check");
 
       const foundRules = [
-        "app/components/findings.ts error func-style",
-        "app/components/findings.ts error no-debugger",
-        "app/components/findings.ts error oxc/const-comparisons",
-        "app/components/findings.ts error oxc/no-accumulating-spread",
-        "app/components/findings.ts error unicorn/no-array-for-each",
-        "app/components/spanning.ts error no-debugger",
-        "app/components/spanning.ts error no-inline-comments",
-        "app/components/unused.ts error no-unused-vars",
-        "app/components/unused.ts error no-unused-vars",
-        "app/components/unused.ts error no-unused-vars",
-        "app/components/unused.ts error no-unused-vars",
+        "app/src/components/findings.ts error func-style",
+        "app/src/components/findings.ts error no-debugger",
+        "app/src/components/findings.ts error oxc/const-comparisons",
+        "app/src/components/findings.ts error oxc/no-accumulating-spread",
+        "app/src/components/findings.ts error unicorn/no-array-for-each",
+        "app/src/components/spanning.ts error no-debugger",
+        "app/src/components/spanning.ts error no-inline-comments",
+        "app/src/components/unused.ts error no-unused-vars",
+        "app/src/components/unused.ts error no-unused-vars",
+        "app/src/components/unused.ts error no-unused-vars",
+        "app/src/components/unused.ts error no-unused-vars",
         "app/tests/count.test.ts error vitest/prefer-strict-equal",
         "app/tests/count.test.ts error vitest/prefer-to-be",
         "app/tests/count.test.ts error vitest/prefer-to-have-length",
@@ -1778,9 +1781,9 @@ export const Off = () => (
         design: {
           status: 1,
           rules: [
-            "app/screens/off.tsx error grasp/no-remote-resources",
-            "app/screens/off.tsx error shadcn/no-raw-colors",
-            "app/screens/off.tsx error shadcn/no-restyle",
+            "app/src/components/off.tsx error grasp/no-remote-resources",
+            "app/src/components/off.tsx error shadcn/no-raw-colors",
+            "app/src/components/off.tsx error shadcn/no-restyle",
           ],
         },
         cases: { design: designFindings, grasp: [], project: [] },

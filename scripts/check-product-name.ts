@@ -3,7 +3,7 @@
  * never Grasp OS (GRA-143): the frontend's translation catalogs, HTML
  * pages and manifests, the skills and templates the platform sends or
  * shows, and the built-in Apps' files, which the root lint leaves to the
- * screen build (vite.config.ts). Strings in other code are held by the
+ * page build (vite.config.ts). Strings in other code are held by the
  * lint (`grasp/no-old-product-name`).
  */
 import { execFileSync } from "node:child_process";

@@ -185,7 +185,7 @@ const referencedPath = (file: string, reference: string): string => {
  * however written: a reference into the kit, a type package, a lib the
  * page doesn't have, an AMD directive. The import checks hold every
  * import a file writes; these are how it would name a module without
- * one. A suppression (`@ts-expect-error`) is no directive here: a screen
+ * one. A suppression (`@ts-expect-error`) is no directive here: a page
  * may hold one.
  */
 export const referenceError = (

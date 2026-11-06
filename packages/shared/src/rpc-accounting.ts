@@ -11,7 +11,7 @@
 // messages under 50 bytes each put hundreds of MB on the heap, and a
 // `["pull", id]` resolves one the same way with no call. A core isolate
 // has 128 MB and `CoreRpc` is reachable signed out, so this is an
-// unauthenticated crash; the screen bridge has it in the browser too.
+// unauthenticated crash; the page bridge has it in the browser too.
 //
 // Cap'n Web gives no hook on what it expands, so the bound is held at the
 // transport, which sees every message as text: the one source of truth for
@@ -61,7 +61,7 @@ export interface RpcAccountingLimits {
 
 /**
  * The node bounds a Cap'n Web session holds a peer to, for core's
- * connection and the screen bridge alike. A node is a node whatever the
+ * connection and the page bridge alike. A node is a node whatever the
  * transport, so the same counts fit a 128 MB core isolate and a browser
  * tab; each transport adds its own `maxMessageBytes`.
  *

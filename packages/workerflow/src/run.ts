@@ -309,7 +309,7 @@ export interface EventCommand {
    */
   reserved?: boolean;
   /**
-   * Who sent it, as its host names senders apart (an App's screen for a
+   * Who sent it, as its host names senders apart (an App's page for a
    * person, a mutation): its events hold no more than their share of the
    * inbox (`maxSenderEvents`, `maxSenderBytes`), besides the inbox's own
    * limits, so no one sender crowds out the others. None for an event

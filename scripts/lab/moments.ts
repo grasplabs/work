@@ -34,7 +34,7 @@ export const signalRules = {
     "He asks what the first thing is they do in that step, or to take the step apart.",
   "judgment word": "He asks what they look at to know it is okay.",
   "look it up":
-    "He asks where they look it up: which system, screen, file or person.",
+    "He asks where they look it up: which system, page, file or person.",
   "then done": "He asks who uses it or gets it after them.",
   idea: "He says in a word or two that he noted it, and asks what happens today. He does not discuss the idea.",
   complaint:
@@ -416,7 +416,7 @@ const ORDER_NOTES_NL: [FactTag, string][] = [
 ];
 const ORDER_NOTES: [FactTag, string][] = [
   ["step", "You type the order into the order system."],
-  ["system", "You use the order system on your own screen."],
+  ["system", "You use the order system on your own page."],
   ["handoff", "The order goes to the warehouse as a pick list."],
 ];
 const CLAIM_NOTES: [FactTag, string][] = [
@@ -556,7 +556,7 @@ export const handMoments: readonly Moment[] = [
   moment("planning-detour", "detour", PLANNING, "steps", 6, [
     ...OPENED_PLANNING,
     "S: Where do you make the plan?",
-    "P: In the planning board, on the big screen. We only got that screen after the move, the old office was a disaster, we sat above a bakery and it was so hot in summer. My colleague brought a fan from home, and then the fuse blew, twice.",
+    "P: In the planning board, on the big page. We only got that page after the move, the old office was a disaster, we sat above a bakery and it was so hot in summer. My colleague brought a fan from home, and then the fuse blew, twice.",
   ]),
   moment(
     "claims-wrap-up",

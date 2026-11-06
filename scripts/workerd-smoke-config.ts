@@ -137,7 +137,7 @@ const core :Workerd.Worker = (
     ${durableObjectBindings.join(",\n    ")},
     ${d1Bindings(d1DatabasesOf(coreWranglerConfig)).join(",\n    ")},
     ${r2Bindings(r2BucketsOf(coreWranglerConfig)).join(",\n    ")},
-    # No LOADER (experimental in workerd): apps, screens and sealed workflow
+    # No LOADER (experimental in workerd): apps, pages and sealed workflow
     # runs need workerd's --experimental. The workflow engine itself is a
     # Durable Object (WORKFLOW_RUNS), bound with the others.
   ],

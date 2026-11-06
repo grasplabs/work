@@ -26,7 +26,7 @@ import { signedInApi } from "./sign-in.ts";
 //   it, past any bounded base, to code that trusts its caller.
 // - A method answers a function, or data holding a target, a stub or a
 //   function: each is as callable by the browser as a target is.
-// - A target only a call hands out (`chats.watch`, `screens.frame`)
+// - A target only a call hands out (`chats.watch`, `pages.frame`)
 //   is never looked at, because nothing gets to it without arguments.
 //
 // So the objects are built as rpc.ts builds them for a connection
@@ -285,18 +285,18 @@ const calls = {
     await page.pushed;
     return subscription;
   },
-  "authenticate.screens.watchVersion": async (screens, { app, held }) => {
+  "authenticate.pages.watchVersion": async (pages, { app, held }) => {
     const page = pageStub();
     const subscription = holding(
       held,
-      await screens.watchVersion(app, page.stub)
+      await pages.watchVersion(app, page.stub)
     );
     await page.pushed;
     return subscription;
   },
-  "authenticate.screens.frame": async (screens, { app, held }) =>
-    holding(held, await screens.frame(app, "")),
-  "authenticate.screens.frame.watchQuery": async (frame, { held }) => {
+  "authenticate.pages.frame": async (pages, { app, held }) =>
+    holding(held, await pages.frame(app, "")),
+  "authenticate.pages.frame.watchQuery": async (frame, { held }) => {
     const page = pageStub();
     const subscription = holding(held, await frame.watchQuery("{}", page.stub));
     await page.pushed;
@@ -528,9 +528,9 @@ describe("what a browser reaches over core's connection", () => {
         "authenticate: SessionRpc",
         "authenticate.apps.files: AppFilesRpc",
         "authenticate.chats.watch: Subscription",
-        "authenticate.screens.frame: ScreenFrameRpc",
-        "authenticate.screens.frame.watchQuery: Subscription",
-        "authenticate.screens.watchVersion: Subscription",
+        "authenticate.pages.frame: PageFrameRpc",
+        "authenticate.pages.frame.watchQuery: Subscription",
+        "authenticate.pages.watchVersion: Subscription",
         "authenticate.chats.previewWatchQuery: Subscription",
         "authenticate.chats.previewStream: Subscription",
       ])

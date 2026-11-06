@@ -12,7 +12,7 @@ import {
   following,
   jsonWorkflowAppsOf,
   runFor,
-  screenOf,
+  pageOf,
   settles,
   startCommand,
   startedOf,
@@ -20,8 +20,8 @@ import {
 } from "./json-workflow-apps.ts";
 import type { Person, WorkflowReference } from "./json-workflow-apps.ts";
 
-// A JSON workflow run's snapshot, as the App's screen that started it
-// follows it (screen-workflows.ts `runSnapshot`): one read of one moment
+// A JSON workflow run's snapshot, as the App's page that started it
+// follows it (page-workflows.ts `runSnapshot`): one read of one moment
 // of the run, under a revision every change moves on. What could go wrong,
 // tried below: what the run waits for lost while it is paused, a change
 // that leaves the revision as it was, an ended run still offering
@@ -30,7 +30,7 @@ import type { Person, WorkflowReference } from "./json-workflow-apps.ts";
 // failed run past its retention saying something else of why than the run
 // itself, or anything of what it read. Waits, controls, pending controls,
 // failures within retention, who sees a run and another App's runs are
-// covered in screen-typed-workflows.test.ts.
+// covered in page-typed-workflows.test.ts.
 
 const idp = mockIdp();
 
@@ -59,7 +59,7 @@ const snapshotSchema = z.object({
 
 type Snapshot = z.infer<typeof snapshotSchema> & { revision: number };
 
-/** Follows run `runId` on `person`'s screen: each snapshot it was shown. */
+/** Follows run `runId` on `person`'s page: each snapshot it was shown. */
 const followedRun = async (
   person: Person,
   app: string,
@@ -113,7 +113,7 @@ describe("a JSON workflow run's snapshot", { timeout: 120_000 }, () => {
     const { builder, app, workflow, reference } = await boundApp({
       hold: "1 hour",
     });
-    const lease = await screenOf(builder, app);
+    const lease = await pageOf(builder, app);
     const { runId } = startedOf(
       await called(builder, app, lease, startCommand(reference))
     );
@@ -129,7 +129,7 @@ describe("a JSON workflow run's snapshot", { timeout: 120_000 }, () => {
     );
     // Paused once its pause has settled. The row says paused as the
     // engine's notification is projected; the pause is settled by
-    // whichever of the screen's request or that notification first reads
+    // whichever of the page's request or that notification first reads
     // from the engine that it took the pause (resource-runs.ts,
     // `settleResourceControls`), in a write of its own, so a snapshot may
     // show the run paused with its pause still applying.
@@ -204,7 +204,7 @@ describe("a JSON workflow run's snapshot", { timeout: 120_000 }, () => {
           status: { $expr: 'input.who.split("")[9999].toUpperCase()' },
         }),
     });
-    const lease = await screenOf(builder, app);
+    const lease = await pageOf(builder, app);
     const { runId } = startedOf(
       await called(builder, app, lease, startCommand(reference))
     );

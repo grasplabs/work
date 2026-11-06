@@ -18,7 +18,7 @@ import type { Diagnostic as TscDiagnostic } from "@tsrs/wasm/core";
 import { generatedModules, serverSdkImports } from "./app-code.ts";
 import type { Diagnostic } from "./diagnostic.ts";
 import { computeSdkImports } from "./imports.ts";
-import { screenReferences } from "./kit.ts";
+import { pageReferences } from "./kit.ts";
 
 /** A tsconfig's `compilerOptions`, as JSON. */
 export type CompilerOptions = Readonly<Record<string, unknown>>;
@@ -30,7 +30,7 @@ export type CompilerOptions = Readonly<Record<string, unknown>>;
  */
 export const compilerOptions = {
   target: "es2022",
-  // `Symbol.dispose`: Cap'n Web's callbacks and stubs, which screens pass
+  // `Symbol.dispose`: Cap'n Web's callbacks and stubs, which pages pass
   // to and get from their server, are disposable.
   lib: ["es2024", "dom", "esnext.disposable"],
   module: "esnext",
@@ -49,8 +49,8 @@ export const compilerOptions = {
   // diagnostics count, so the kit's declarations' don't (`typeCheck`).
   skipLibCheck: false,
   types: [],
-  // The App's generated references, as its screens import them.
-  paths: { [screenReferences.specifier]: [`./${screenReferences.path}`] },
+  // The App's generated references, as its pages import them.
+  paths: { [pageReferences.specifier]: [`./${pageReferences.path}`] },
 } as const satisfies CompilerOptions;
 
 /**
@@ -67,13 +67,13 @@ export interface TypeTarget {
 /** Code the host generated, checked against its SDK as it imports it. */
 export const generatedTarget: TypeTarget = {
   options: compilerOptions,
-  mapped: new Set([screenReferences.specifier]),
+  mapped: new Set([pageReferences.specifier]),
 };
 
-/** A screen's files: the DOM's lib, the kit's modules (`allowed`). */
-export const screenTarget = (allowed: ReadonlySet<string>): TypeTarget => ({
+/** A page's files: the DOM's lib, the kit's modules (`allowed`). */
+export const pageTarget = (allowed: ReadonlySet<string>): TypeTarget => ({
   options: compilerOptions,
-  mapped: new Set([screenReferences.specifier]),
+  mapped: new Set([pageReferences.specifier]),
   allowed,
 });
 
@@ -298,7 +298,7 @@ export const diagnosticsOfRun = (
 
 /**
  * Type-checks the App files of `request` (paths relative to the App, e.g.
- * `screens/desk.tsx`) against `kit`, with tsrs's `module`, and the App's
+ * `src/routes/index.tsx`) against `kit`, with tsrs's `module`, and the App's
  * own declaration files among them, which are checked too. Only the App
  * files' diagnostics and the program's own count, never the kit's. A run
  * that crashed (a type that recurses past the stack) or ended otherwise

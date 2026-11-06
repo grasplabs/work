@@ -191,7 +191,7 @@ describe(
         .where(eq(appCandidateReports.candidateId, made?.id ?? ""))
         .get();
       const expected = canonicalText({
-        formatVersion: 2,
+        formatVersion: 3,
         candidate: {
           id: made?.id,
           appId: app,
@@ -208,7 +208,8 @@ describe(
           migrationEvidence: await sha256Hex(
             canonicalText(release.manifest.migrationEvidence)
           ),
-          screens: [],
+          // A version without pages seals none.
+          pages: null,
           artifacts: {
             count: release.manifest.artifacts.length,
             readBack: await sha256Hex(
@@ -228,7 +229,7 @@ describe(
           permissions: await sha256Hex(canonicalText([])),
           permissionCount: 0,
           approved: null,
-          screenPolicy: null,
+          pagePolicy: null,
         },
         environment: {
           compilerVersion,

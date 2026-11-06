@@ -5,7 +5,7 @@
  * the supervisor (workerd-sandbox.ts) and the builder core's build makes.
  * Plain workerd ignores an isolate's CPU limit, so a package that holds
  * or exhausts the builder must never run in core's own process. (The
- * screen compiler's own on-prem tests are core's test/on-prem/builds.test.ts.)
+ * page compiler's own on-prem tests are core's test/on-prem/builds.test.ts.)
  */
 import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";

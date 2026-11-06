@@ -2,12 +2,12 @@ import { passedBound } from "@grasp-os/shared/value-bounds";
 import type { ValueBounds } from "@grasp-os/shared/value-bounds";
 
 // What crosses into and out of App code as structured clone carries it:
-// plain data only, within bounds, and never a big integer, which screens
+// plain data only, within bounds, and never a big integer, which pages
 // and workflows (whose values are JSON's) can't hold.
 
 /**
  * What an App method answers: plain data, as structured clone carries it.
- * Never a stub, a function or an RpcTarget: an answer goes on to screens
+ * Never a stub, a function or an RpcTarget: an answer goes on to pages
  * and workflows, and must not hand them a way into the App.
  */
 export type AppAnswer = Rpc.Serializable<unknown>;
@@ -15,7 +15,7 @@ export type AppAnswer = Rpc.Serializable<unknown>;
 /**
  * How deep and how big plain data may be by default: as deep as Cap'n
  * Web reads a message by default, the deepest any reader of ours takes
- * (a browser's connection, a screen's frame), and as big as the longest
+ * (a browser's connection, a page's frame), and as big as the longest
  * message workerd's RPC or Cap'n Web carries. A bound on the walk and the
  * clone after it, not on what an App may answer, which its readers bound.
  */
@@ -142,7 +142,7 @@ const heldBy = (value: object): unknown[] => {
  * Whether `value` holds a big integer anywhere within it: a big integer, a
  * boxed one or a typed array of them, at any depth, in a map, a set or an
  * error's cause. No value of an App's calls or answers may: they reach
- * screens and workflows, whose values are JSON's.
+ * pages and workflows, whose values are JSON's.
  *
  * What's walked is what structured clone carries of `value`, as RPC does:
  * a getter read once into plain data, no proxy, and none of the keys it

@@ -129,7 +129,7 @@ export const valueLimits = {
   /**
    * How deep a descriptor nests, and so how deep a value is read, its leaf
    * included. Cap'n Web's limit on an untrusted connection
-   * (`screenLimits.rpc.maxDepth`) is this plus the levels a screen's call
+   * (`pageLimits.rpc.maxDepth`) is this plus the levels a page's call
    * wraps a value in, so a value this deep crosses the wire.
    */
   depth: valueDepth,

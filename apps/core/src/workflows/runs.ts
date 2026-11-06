@@ -438,7 +438,7 @@ const outcomeOf = (
  * end is audited with its row, once: completed; failed, with its report
  * (its own, or one saying it stopped) and its owner notified; cancelled,
  * which a cancel has audited already, unless the engine ended it without
- * one. Screens are told of every change of status. An ended run's
+ * one. Pages are told of every change of status. An ended run's
  * outcome is captured for the Brain with its end.
  */
 export const projectStatus = async (

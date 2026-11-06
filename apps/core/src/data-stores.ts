@@ -124,7 +124,7 @@ import type {
 //   core's inventory says.
 // - A store is deleted under a sealed release that may still run on it (a
 //   current or pending version, a rollback target, a pinned run, an open
-//   screen's lease): refused (`data.store_bound`) while any release an App
+//   page's lease): refused (`data.store_bound`) while any release an App
 //   keeps is bound to it (`sdk_resource_bindings`, whose rows retention
 //   deletes with their release), read in the statement that marks the
 //   store closing, before its object is touched; a seal's binding in turn
@@ -558,7 +558,7 @@ export const requireStoreManager = async (
 /**
  * That some sealed release is bound to store `id` (`sdk_resource_bindings`):
  * a retained consumer, which may still run (as current or pending, a
- * rollback target, a pinned run or an open screen's lease). Retention
+ * rollback target, a pinned run or an open page's lease). Retention
  * deletes a release's bindings with it (release-retention.ts), so a
  * binding is there exactly while its release is kept.
  */

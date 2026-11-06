@@ -38,7 +38,7 @@ import { keptSensitiveReads } from "./sensitive-reads.ts";
 // canonical owner of the store's schema and operations. A consumer copies
 // no schema and gets no storage authority: it reaches the store only by
 // asking that App's release to run one of its public operations, as the
-// App's own screens do. Threat model, and how each is closed:
+// App's own pages do. Threat model, and how each is closed:
 //
 // - Calling an operation that isn't public, or one that reaches outside:
 //   only a public query or mutation of the owning App's current release

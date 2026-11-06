@@ -224,11 +224,6 @@ export interface PeopleNotification {
   readonly title: string;
   /** At most 1000 characters. */
   readonly body?: string;
-  /**
-   * The App's screen it opens on, by name (`"orders"`); the App's first
-   * when it names none, or one the App doesn't have. Never a URL.
-   */
-  readonly link?: string;
 }
 
 /**
@@ -477,10 +472,10 @@ export type StreamActionCtx<
 /** A streaming action's `emit`. */
 export interface StreamEmit<Progress> {
   /**
-   * Publishes `progress` as the action's latest snapshot, for the screen
+   * Publishes `progress` as the action's latest snapshot, for the page
    * that runs it: validated against the action's `stream` schema, and no
    * larger than an operation's result. Each snapshot is complete, so the
-   * host may skip one a slow screen hasn't read yet for a newer one: emit
+   * host may skip one a slow page hasn't read yet for a newer one: emit
    * the whole state (the text so far), never a delta, and keep critical
    * events in a mutation or a workflow, never in progress. Rejects once
    * the action is cancelled or has ended (`operation.cancelled`,
@@ -617,7 +612,7 @@ export interface ActionDefinition<
 /**
  * A streaming action's declaration (spec 10.7.6): an action's, and the
  * schema of the progress snapshots its handler emits (`ctx.emit`). It
- * runs only in the foreground, for a screen following it (`useStream`).
+ * runs only in the foreground, for a page following it (`useStream`).
  */
 export interface StreamActionDefinition<
   Shape extends ValueShape,

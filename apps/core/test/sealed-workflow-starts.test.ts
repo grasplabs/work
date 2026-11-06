@@ -11,7 +11,7 @@ import { z } from "zod";
 
 import {
   callAppFunction,
-  callScreenFunction,
+  callPageFunction,
   evaluateAppQuery,
 } from "../src/app-functions.ts";
 import {
@@ -19,9 +19,9 @@ import {
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
 import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { readWorkflowWatch } from "../src/page-workflows.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
-import { readWorkflowWatch } from "../src/screen-workflows.ts";
 import {
   readWorkflowWindow,
   workflowQueryOf,
@@ -413,7 +413,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       const { result } =
         window === undefined
           ? await callAppFunction(env, who, app, request)
-          : await callScreenFunction(
+          : await callPageFunction(
               env,
               who,
               app,
@@ -560,7 +560,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       const { result } =
         window === undefined
           ? await callAppFunction(env, bob, first.app, request)
-          : await callScreenFunction(
+          : await callPageFunction(
               env,
               bob,
               first.app,
@@ -1016,7 +1016,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       const { result } =
         window === undefined
           ? await callAppFunction(env, who, app, request)
-          : await callScreenFunction(
+          : await callPageFunction(
               env,
               who,
               app,
@@ -1371,7 +1371,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       const { result } =
         window === undefined
           ? await callAppFunction(env, bob, fixture.app, request)
-          : await callScreenFunction(
+          : await callPageFunction(
               env,
               bob,
               fixture.app,

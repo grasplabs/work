@@ -13,7 +13,7 @@ import type { PortableToken } from "./client-portable.ts";
 
 // A portable host's live connection to core (spec 11; core's
 // portable-live.ts): one WebSocket per App, speaking Cap'n Web, which the
-// client follows that App's queries over, as a screen follows them over
+// client follows that App's queries over, as a page follows them over
 // its frame. The person's App token goes in the connection's first call,
 // never in the URL; the browser's cookies, which it sends with the
 // upgrade whatever the client does, are never read by core.

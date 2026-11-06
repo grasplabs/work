@@ -1623,7 +1623,7 @@
   --icon-wait: 0.25s;
 }
 
-/* The lid opens and the line under the screen is drawn. */
+/* The lid opens and the line under the page is drawn. */
 .lucide-laptop > :nth-child(1) {
   --icon-move: icon-from;
   --icon-tall: 0.4;

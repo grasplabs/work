@@ -59,7 +59,7 @@ const review: VersionReview = {
   },
   proposedBy: null,
   current: 1,
-  files: [{ path: "screens/list.tsx", change: "modified" }],
+  files: [{ path: "src/routes/index.tsx", change: "modified" }],
   server: null,
   serverFiles: [],
   migrations: [],

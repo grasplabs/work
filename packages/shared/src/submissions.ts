@@ -49,7 +49,7 @@ export const submissionErrors = defineErrorFamily({
 /**
  * What a committed submission can still have to tell others, through its
  * outbox (committed in its batch): a notification for a workflow run, a
- * workflow run to start, people to tell (`app.notify`), or a screen's form to its App's webhooks. Each is handed over after the commit, never as
+ * workflow run to start, people to tell (`app.notify`), or a page's form to its App's webhooks. Each is handed over after the commit, never as
  * part of it: no change spans the store and a run. A kind is staged only
  * once something takes it (its consumer). Its content is defined where it
  * is delivered.

@@ -8,7 +8,7 @@ import { functionRequestMaxBytes } from "./operation-limits.ts";
 // published App at its own link (`appLinkSchema`), once they sign in with
 // a code core mails them. Only an address the App's builders listed, or
 // one at a domain they listed, can ask for a code. A visitor's session
-// opens that one App's screens and nothing else. Its screens call only the
+// opens that one App's pages and nothing else. Its pages call only the
 // functions the App's builders granted visitors, for the version they
 // granted them on, and those run as the App itself, never as a member
 // (core's app-visitor-calls.ts).
@@ -152,7 +152,7 @@ export const appVisitorRequestSchema = z.discriminatedUnion("action", [
     token: appVisitorTokenSchema,
   }),
   /**
-   * A call of one of the App's functions from its screen, as the screen
+   * A call of one of the App's functions from its page, as the page
    * client writes it (`request`, JSON text), with the lease its frame was
    * opened with.
    */

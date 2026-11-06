@@ -9,7 +9,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { callAppFunction, callScreenFunction } from "../src/app-functions.ts";
+import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
@@ -18,8 +18,8 @@ import {
   sdkReleaseManifests,
   sdkResourceBindings,
 } from "../src/db/core/schema.ts";
+import { deliveryOf, standingOf } from "../src/page-delivery.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { deliveryOf, standingOf } from "../src/screen-delivery.ts";
 import { appDefinition } from "./app-definitions.ts";
 import { deepFiles, fieldDepth } from "./deep-records.ts";
 import { appWith, artifactKey, person, seal } from "./sealed-apps.ts";
@@ -327,7 +327,7 @@ const referenceTo = (release: Release, path: string) => {
 
 type Caller = Fixture["owner"];
 
-/** Calls `path` of the fixture's App for `by`, as a screen sends it. */
+/** Calls `path` of the fixture's App for `by`, as a page sends it. */
 const call = async (
   { app, release }: Sealed,
   by: Caller,
@@ -614,7 +614,7 @@ describe("another App's store", { timeout: 120_000 }, () => {
 // or contract; a call of an internal function; arguments the function
 // doesn't take; a page still open after a publish, calling a function the
 // new version changed or dropped; a lease kept from an older version, which
-// never makes core run that version's code (screen-delivery.test.ts
+// never makes core run that version's code (page-delivery.test.ts
 // replays one through the page's route). Calls between Apps stay pinned by
 // their reviewed binding (app-function-calls.test.ts).
 describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
@@ -811,12 +811,12 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
     await commitFiles(env, notes.owner, notes.app, files, "Rename");
     await seal(notes, 2);
     await setCurrentVersion(env, notes.owner, notes.app, 2);
-    const fromScreen = async (
+    const fromPage = async (
       reference: ReturnType<typeof referenceTo>,
       input: unknown
     ): Promise<string> =>
       codeOf(
-        await callScreenFunction(
+        await callPageFunction(
           env,
           notes.owner,
           notes.app,
@@ -831,9 +831,9 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
       await call(notes, notes.owner, "notes.create", { title: "Kept" })
     );
     const before = {
-      changed: await fromScreen(opened.get, { id: noteId }),
-      renamed: await fromScreen(opened.get, { noteId }),
-      gone: await fromScreen(opened.bump, {}),
+      changed: await fromPage(opened.get, { id: noteId }),
+      renamed: await fromPage(opened.get, { noteId }),
+      gone: await fromPage(opened.bump, {}),
     };
     // Version 1's release revoked: the calls are version 2's, so they go on,
     // while a build opened on version 1 gets nothing more.
@@ -845,7 +845,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
     );
     expect({
       before,
-      afterRevoked: await fromScreen(opened.get, { noteId }),
+      afterRevoked: await fromPage(opened.get, { noteId }),
       oldBuild: deliveryOf(
         await standingOf(env, notes.app, {
           artifact: "a".repeat(64),

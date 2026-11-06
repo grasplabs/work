@@ -29,7 +29,7 @@ import { inList } from "./db/d1.ts";
 import { appHost } from "./durable-objects.ts";
 import { projectsOfSql } from "./project-sql.ts";
 
-// Telling an App's open screens that someone's access to it may have
+// Telling an App's open pages that someone's access to it may have
 // dropped (spec 11.4). Our own writes that can take a role in an App away
 // (unsharing it or lowering whom it is shared with, app-members.ts; a
 // member removed from the organization or given a lower role, members.ts)
@@ -45,7 +45,7 @@ import { projectsOfSql } from "./project-sql.ts";
 // the plugin's own batch, so they look the Apps up after it and call
 // `accessMayHaveDropped`. The App's host tells each connection of those people that
 // follows the App's live queries, and the connection checks their access
-// again at once (query-subscriptions.ts): a screen of someone who lost it
+// again at once (query-subscriptions.ts): a page of someone who lost it
 // is cleared within the event's delivery, with no commit and no periodic
 // recheck needed.
 //
@@ -61,7 +61,7 @@ import { projectsOfSql } from "./project-sql.ts";
 // anything: what the person may do is decided by the role the change
 // already wrote, which a connection checks again within its session
 // recheck (seconds) before anything more is pushed; the rows only clear
-// what their open screens show sooner than that, an idle one included.
+// what their open pages show sooner than that, an idle one included.
 //
 // The event says only "look again", never who lost what: the connection's
 // own check, read now, decides. So an event that names too many people,
@@ -101,7 +101,7 @@ const withRetries = async <T>(attempt: () => Promise<T>): Promise<T> => {
 /**
  * Keeps a revocation `app`'s host couldn't be told of, for the clock
  * trigger to tell it again (`retryAccessRevocations`). A database away
- * too is logged: the screens then fall back on the check before each push.
+ * too is logged: the pages then fall back on the check before each push.
  */
 const keepForLater = async (
   env: Env,
@@ -183,7 +183,7 @@ const accessMayHaveDropped = async (
 /**
  * Tells `app`'s host that another of its versions was made current
  * (apps.ts, `makeCurrent`), once that committed, so the pages that follow
- * its version read it again (screens-rpc.ts, `watchVersion`); tried again
+ * its version read it again (pages-rpc.ts, `watchVersion`); tried again
  * after `retryDelaysMs` while the host can't be reached. A host that
  * restarted meanwhile let go of every connection, and each looks again
  * as it follows anew, reading the version then. One that still can't be
@@ -454,7 +454,7 @@ const retriedAtOnce = 100;
 /**
  * How long a kept revocation is told for: a day, counted from when it was
  * kept, however often it was tried. One whose host is away longer
- * is logged and dropped; the screens then fall back on the check before
+ * is logged and dropped; the pages then fall back on the check before
  * each push.
  */
 const keptForMs = 24 * 60 * 60 * 1000;
@@ -677,7 +677,7 @@ const appsSharedWithAnyone = async (env: Env): Promise<AppId[]> => {
  * Residual, accepted (GRA-564, GRA-635): a database away for longer than
  * the lookup's retries loses this event, logged. Nothing leaks: every push
  * still checks access first, so nothing new reaches the person; their
- * screen is only cleared later. Our own writes keep it in their batch
+ * page is only cleared later. Our own writes keep it in their batch
  * (`revocationsOf`); Better Auth's team endpoints stay best effort while
  * the plugin is native: our hook runs after its commit, so can't join it.
  */

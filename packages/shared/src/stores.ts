@@ -75,7 +75,7 @@ export const documentMaxDepth = valueDepth;
  * (the operation channel, its forwarders, a test's or an action's host):
  * a write's request (`WriteRequest`) around its fields around a field as
  * deep as a record keeps, the deepest shape any of them takes. Deeper
- * than a screen's (`rpcArgumentDepth`, which nothing on a page needs past
+ * than a page's (`rpcArgumentDepth`, which nothing on a page needs past
  * `valueDepth`), so a write a store keeps is never refused on its way.
  */
 export const isolateArgumentDepth = documentMaxDepth + 2;
@@ -301,7 +301,7 @@ export type Claimed =
 export const commitMaxIntents = 16;
 
 /**
- * A workflow notification or start a commit stages, or the form a screen
+ * A workflow notification or start a commit stages, or the form a page
  * sent as the mutation, for its App's webhooks: its content is defined
  * where it is delivered.
  */
@@ -401,7 +401,7 @@ export const commitSchema = z
     guards: z.array(revisionGuardSchema).max(commitMaxGuards).default([]),
     readSet: readSetSchema.default({}),
     writes: z.array(storeWriteSchema).max(commitMaxWrites),
-    // What App code stages, and the one form a screen's call adds.
+    // What App code stages, and the one form a page's call adds.
     intents: z
       .array(storeIntentSchema)
       .max(commitMaxIntents + 1)

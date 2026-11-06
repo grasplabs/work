@@ -18,7 +18,7 @@ import type { signedInApi } from "./sign-in.ts";
 
 // A chat's preview of its draft of an App of spec 8's layout, as a test
 // drives it (sealed-previews.ts): a draft written as the chat's agent
-// writes one, and calls of its functions as a screen of the draft sends
+// writes one, and calls of its functions as a page of the draft sends
 // them, by references read from the draft release the chat keeps.
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
@@ -137,7 +137,7 @@ const keptContracts = async (
 };
 
 /**
- * The call of `path` with `input` as a screen of the draft at `revision`
+ * The call of `path` with `input` as a page of the draft at `revision`
  * sends it: its reference read from the contracts of the draft release
  * the chat's object keeps, sealed first if it isn't yet.
  */
