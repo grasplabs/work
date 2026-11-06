@@ -349,15 +349,17 @@ const removeTicket = mutation({
 });
 
 const pageFrom = query({
-  args: { cursor: v.string().nullable() },
+  args: { cursor: v.string().nullable(), search: v.string().optional() },
   returns: v.object({
     titles: v.array(v.string()),
     next: v.string().nullable(),
   }),
-  handler: async (ctx, { cursor }) => {
-    const read: TitlePage = await ctx.db
-      .query("requests")
-      .paginate({ pageSize: 1, cursor });
+  handler: async (ctx, { cursor, search }) => {
+    const read: TitlePage = await (
+      search === undefined
+        ? ctx.db.query("requests")
+        : ctx.db.search("requests", search)
+    ).paginate({ pageSize: 1, cursor });
     return {
       titles: read.items.map(({ title }) => title),
       next: read.nextCursor,
@@ -981,46 +983,74 @@ describe("writing a table whose read rules are its write rules", () => {
   });
 });
 
-describe("a page's cursor", () => {
-  it("pages on under the teams the person has now, and a forged one reaches no row the rules keep from them", async () => {
+/** `of.ada`'s page from `cursor` (its titles and next cursor), or its refusal. */
+const adaPage = async (
+  of: World,
+  cursor: unknown,
+  search?: string
+): Promise<unknown> =>
+  outcome(
+    await call(of, of.ada, "pageFrom", {
+      cursor,
+      ...(search === undefined ? {} : { search }),
+    })
+  );
+
+/** The next cursor of `page`, which must have one. */
+const nextOf = (page: unknown): string => {
+  const next = fieldOf(page, "next");
+  if (typeof next !== "string") {
+    throw new TypeError("No next page");
+  }
+  return next;
+};
+
+/** `cursor` ending at record `id`, by its ID alone, as a caller could make it. */
+const forgedAt = (cursor: string, id: string): string => {
+  const held = z
+    .record(z.string(), z.unknown())
+    .parse(JSON.parse(new TextDecoder().decode(fromBase64Url(cursor))));
+  return toBase64Url(
+    new TextEncoder().encode(JSON.stringify({ ...held, id, values: undefined }))
+  );
+};
+
+describe("a forged cursor", () => {
+  it("ends at no row the rules keep from its reader, in a query or a search", async () => {
     const of = await world();
     const ids = await filled(of);
-    /** Ada's page from `cursor` (its titles and the next cursor), or its refusal. */
-    const pageAt = async (cursor: unknown): Promise<unknown> =>
-      outcome(await call(of, of.ada, "pageFrom", { cursor }));
-    const first = await pageAt(null);
-    const cursor = fieldOf(first, "next");
-    if (typeof cursor !== "string") {
-      throw new TypeError("No second page");
-    }
-    // The cursor at a row Ada can't read, by its ID alone: as missing as
-    // a row that never was, never a page after it.
-    const held = z
-      .record(z.string(), z.unknown())
-      .parse(JSON.parse(new TextDecoder().decode(fromBase64Url(cursor))));
-    const forged = toBase64Url(
-      new TextEncoder().encode(
-        JSON.stringify({
-          ...held,
-          id: idIn(ids, "board alpha"),
-          values: undefined,
-        })
-      )
-    );
-    const atHidden = await pageAt(forged);
+    const hidden = idIn(ids, "board alpha");
+    const queried = nextOf(await adaPage(of, null));
+    const searched = nextOf(await adaPage(of, null, "alpha"));
+    // As missing as a row that never was: never a page after it, nor its
+    // relevance to seek by.
+    expect({
+      query: await adaPage(of, forgedAt(queried, hidden)),
+      search: await adaPage(of, forgedAt(searched, hidden), "alpha"),
+    }).toStrictEqual({
+      query: "data.cursor_expired",
+      search: "data.cursor_expired",
+    });
+  });
+});
+
+describe("a person's teams changing", () => {
+  it("pages on under the teams they have now", async () => {
+    const of = await world();
+    await filled(of);
+    const first = await adaPage(of, null);
     await joinTeam(of.support, of.ada);
     const rest: unknown[] = [];
-    let next: unknown = cursor;
+    let next: unknown = nextOf(first);
     while (typeof next === "string") {
       // One page after the other.
       // oxlint-disable-next-line no-await-in-loop -- see above
-      const page = await pageAt(next);
+      const page = await adaPage(of, next);
       rest.push(fieldOf(page, "titles"));
       next = fieldOf(page, "next");
     }
-    expect({ first: fieldOf(first, "titles"), atHidden, rest }).toStrictEqual({
+    expect({ first: fieldOf(first, "titles"), rest }).toStrictEqual({
       first: ["sales lead alpha"],
-      atHidden: "data.cursor_expired",
       // Support's ticket too, now Ada is in support.
       rest: [
         ["sales follow up alpha"],

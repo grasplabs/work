@@ -38,8 +38,8 @@ import type {
 //   one state is read again, `windowMaxReads` times at most, then refused
 //   as `query.concurrent_change` (retryable), never answered torn or in
 //   part. A cursor of core's own refused between pages (the App's
-//   version, its schema or a searched table moved meanwhile) is a torn
-//   read too. The store can't hold one state across the pages: each
+//   version or its schema moved meanwhile, or a search's anchor record
+//   went) is a torn read too. The store can't hold one state across the pages: each
 //   is a sandboxed run of App code, and holding the store's writes for it
 //   would let one person's list stall every writer of the App. So a list
 //   on a table written faster than its window reads settles as that

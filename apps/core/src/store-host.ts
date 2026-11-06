@@ -3400,16 +3400,6 @@ export class StoreHost {
     if (terminal.kind !== "paginate") {
       throw new Error("Not a page");
     }
-    // A search's cursor holds its table's generation (store-cursors.ts):
-    // one from before a write to it is expired, never sought on scores
-    // that moved.
-    const searchGenerationOf = (
-      generations: Record<string, number>
-    ): number | null =>
-      query.search === undefined ? null : (generations[query.table] ?? 0);
-    const opened = searchGenerationOf(
-      this.#generationsOf(pinned, [query.table])
-    );
     const binding: CursorBinding = {
       table: query.table,
       index: query.index,
@@ -3419,7 +3409,6 @@ export class StoreHost {
       search: query.search ?? null,
       schemaHash: reader.schemaHash,
       resourceVersion: reader.consumer.resourceVersion,
-      searchGeneration: opened,
     };
     const anchor =
       terminal.cursor === null
@@ -3438,20 +3427,11 @@ export class StoreHost {
       (statements) =>
         indexRequired(() => readPage(statements, pinned, reader, query, anchor))
     );
-    const searchGeneration = searchGenerationOf(generations);
-    // A write landed while the cursor was decoded: the page read sought on
-    // scores that moved.
-    if (anchor !== null && searchGeneration !== opened) {
-      throw dataErrors.create("data.cursor_expired");
-    }
     const value: PageAnswer =
       read.hasMore && read.last !== undefined
         ? {
             items: read.items,
-            nextCursor: await encodeCursor(
-              { ...binding, searchGeneration },
-              read.last
-            ),
+            nextCursor: await encodeCursor(binding, read.last),
             hasMore: true,
           }
         : { items: read.items, nextCursor: null, hasMore: false };

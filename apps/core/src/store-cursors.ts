@@ -49,9 +49,16 @@ import type { Anchor } from "./store-queries.ts";
 //   a query, and needn't, since nothing a cursor positions is beyond what
 //   they may read anyway. Nor is it bound to a caller, for that reason.
 // - A cursor outlives what made it (spec 9.2: the App's version, the
-//   schema it is pinned to, the expressions' version, and a search's
-//   table generation, as relevance moves with any write): the generation
+//   schema it is pinned to, the expressions' version): the generation
 //   hash differs, so it is `data.cursor_expired` and the list starts over.
+//   Everything it hashes is known to the App's builder anyway.
+// - A cursor tells how often a table is written: a search's table
+//   generation (its write count) has no place in a cursor, as a small
+//   number under an unsalted hash is read back by trying each. A search
+//   pages by keyset as a query does: the next page starts after its
+//   anchor record's relevance as it is now, so a record whose relevance
+//   moved between pages may move past or into a later page, as a record
+//   changed between a query's pages may.
 // - A cursor grows without bound: at most `cursorMaxLength` characters (a
 //   longer one is refused at the boundary as `data.invalid_query`); when
 //   the last record's values wouldn't fit, the cursor holds only its ID,
@@ -69,12 +76,6 @@ export interface CursorBinding {
   readonly schemaHash: string;
   /** The version of the App that read the page. */
   readonly resourceVersion: number;
-  /**
-   * For a search, its table's generation when the page was read: a
-   * search's order is its relevance, which any write to the table moves.
-   * Null for a query's, whose keyset is the record's own values.
-   */
-  readonly searchGeneration: number | null;
 }
 
 const anchorValueSchema = z.union([
@@ -129,7 +130,6 @@ const hashesOf = async (
     schemaHash: binding.schemaHash,
     resourceVersion: binding.resourceVersion,
     emitterVersion,
-    searchGeneration: binding.searchGeneration,
   }),
 });
 

@@ -49,6 +49,12 @@ export const store = sqliteTable(
      */
     inventoriedAt: integer("inventoried_at"),
     /**
+     * Unused since cursors became plain keyset cursors (store-cursors.ts).
+     * Kept for one release so a rolled-back core, which still signs its
+     * cursors with it, keeps paging; dropped in the release after.
+     */
+    cursorKey: text("cursor_key"),
+    /**
      * The store's data contract (store-host.ts, `defineTables`): every
      * table and field of every schema the store accepted, as a canonical
      * schema manifest, and its hash. Every record the store holds, and

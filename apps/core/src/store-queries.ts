@@ -1275,8 +1275,9 @@ const requireRecordTerminal = (query: QueryRequest): void => {
 // search ranks more than that; then every record read counts against it
 // as any query's does. A page's cursor anchors at its last record's ID,
 // and the next page starts after that record's relevance, read again
-// (`searchSeekOf`); relevance moves as the table changes, so a cursor
-// expires with any write to its table (store-cursors.ts).
+// (`searchSeekOf`) as it is now: relevance moves as the table changes, so
+// a record changed between pages may move past or into a later page, as
+// a page of any query may.
 
 /** The search index `query` reads, or `data.invalid_query`. */
 const searchOf = (

@@ -1,1 +1,0 @@
-ALTER TABLE `sdk_store` DROP COLUMN `cursor_key`;

@@ -1656,9 +1656,9 @@ const buildDeclaration = `/**
  * \`.order("desc")\`). For a search box, declare
  * a search index (\`addIndex\` with \`search\`, over \`["name", "notes"]\`) and read
  * \`ctx.db.search("customers", text)\`: best match first, \`.filter(...)\`
- * and \`.paginate(...)\` as a query, though a search's cursor expires after
- * any write to the table (\`data.cursor_expired\`): load it again from the
- * first page then. For totals per status or month,
+ * and \`.paginate(...)\` as a query; a search's cursor expires when the
+ * record it ends at is gone or no longer matches (\`data.cursor_expired\`):
+ * load it again from the first page then. For totals per status or month,
  * \`.group({ by: ["status"], sum: ["amount"], avg: ["amount"] })\` (one or
  * two fields, at most 100 groups). To show a record's related records,
  * \`.with("customer")\` on a query or search loads what its \`v.id\` fields

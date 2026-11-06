@@ -27,8 +27,8 @@ import {
 } from "./store-schemas.ts";
 
 // A search index through the life of its store (store-search.ts): a
-// search's pages expire with any write to its table, rather than seek on
-// relevance that moved; a record's old text leaves the store's pages in
+// search's pages go on after a write to its table from their record's
+// relevance as it is now, and expire when that record goes; a record's old text leaves the store's pages in
 // the same write as its change or deletion; a cascade and a migration's
 // rewrite reach the
 // index as any write does; and a deleted store's purge drops the index
@@ -159,7 +159,7 @@ const outcome = async (read: Promise<unknown>): Promise<unknown> => {
 };
 
 describe("a search's pages", () => {
-  it("expire with a write to the table, and start again whole", async () => {
+  it("go on after a write to the table, and expire when the record they end at goes", async () => {
     const store = await newStore();
     const { schemaHash } = await store.defineTables(v1);
     await insert(store, schemaHash, "alpha one", "alpha two", "alpha three");
@@ -174,41 +174,50 @@ describe("a search's pages", () => {
     const first = await db
       .search("notes", "alpha")
       .paginate({ pageSize: 2, cursor: null });
-    // A write that matches nothing still moves every record's relevance.
+    // A write that matches nothing still moves every record's relevance:
+    // the next page starts after the last record's relevance as it is now.
+    // These titles are alike in length, so their order holds.
     await insert(store, schemaHash, "beta");
-    const second = await outcome(
-      db
-        .search("notes", "alpha")
-        .paginate({ pageSize: 2, cursor: first.nextCursor })
-    );
-    const again: string[] = [];
-    let cursor: string | null = null;
-    do {
+    const titles = first.items.map((note) => note.title);
+    let cursor = first.nextCursor;
+    while (cursor !== null) {
       // One page after the other.
       // oxlint-disable-next-line no-await-in-loop -- see above
-      const page: PaginationResult<{ title: string }> = await db
+      const page: PaginationResult<{ _id: string; title: string }> = await db
         .search("notes", "alpha")
-        .paginate({
-          pageSize: 2,
-          cursor,
-        });
-      again.push(...page.items.map((note) => note.title));
+        .paginate({ pageSize: 2, cursor });
+      titles.push(...page.items.map((note) => note.title));
       ({ nextCursor: cursor } = page);
-    } while (cursor !== null);
+    }
+    // The record a cursor ends at goes: it no longer applies.
+    const again = await db
+      .search("notes", "alpha")
+      .paginate({ pageSize: 2, cursor: null });
+    const last = again.items.at(-1);
+    await commit(store, schemaHash, [
+      {
+        op: "delete",
+        table: "notes",
+        id: last?._id ?? "",
+        expectedRevision: last?._rev ?? 1,
+      },
+    ]);
     expect({
-      first: first.items.length,
-      second,
-      again: again.toSorted(),
+      titles: titles.toSorted(),
+      gone: await outcome(
+        db
+          .search("notes", "alpha")
+          .paginate({ pageSize: 2, cursor: again.nextCursor })
+      ),
     }).toStrictEqual({
-      first: 2,
-      second: "data.cursor_expired",
-      again: [
+      titles: [
         "alpha five",
         "alpha four",
         "alpha one",
         "alpha three",
         "alpha two",
       ],
+      gone: "data.cursor_expired",
     });
   });
 
