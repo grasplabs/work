@@ -114,11 +114,13 @@ test("a builder has an App built in its chat, publishes it, and someone it is sh
   await appPage.getByRole("button", { name: "Add contact" }).click();
   await expect(contacts).toHaveText(["Grace Hopper"], built);
 
-  // The App's data shows its builder the contact they added.
+  // The App's data shows its builder the contact they added, among the
+  // records of its table.
   await page
     .getByRole("navigation", { name: "Workspace views" })
     .getByRole("link", { name: "Data" })
     .click();
+  await page.getByRole("tab", { name: "Records" }).click();
   await expect(page.getByRole("cell", { name: "Grace Hopper" })).toBeVisible(
     built
   );

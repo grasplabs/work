@@ -3054,6 +3054,58 @@
   --icon-wide: 0.3;
 }
 
+/* The a comes up and its tail is drawn round it. */
+.lucide-at-sign > :nth-child(1) {
+  --icon-move: icon-pop;
+}
+.lucide-at-sign > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 60 100;
+  --icon-from: 61.5;
+  --icon-time: 0.5s;
+  --icon-wait: 0.08s;
+}
+
+/* The shield rises to guard and settles. */
+.lucide-shield > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-y: -2px;
+}
+
+/* The table's header and first column are drawn across it. */
+.lucide-table-2 > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 18 100;
+  --icon-from: 19.5;
+  --icon-time: 0.35s;
+}
+.lucide-table-2 > :nth-child(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 18 100;
+  --icon-from: 19.5;
+  --icon-time: 0.35s;
+  --icon-wait: 0.1s;
+}
+
+/* The knob slides to the other side and back. */
+.lucide-toggle-left > :nth-child(1) {
+  --icon-move: icon-there;
+  --icon-x: 6px;
+}
+
+/* The stem is drawn down and the bar lands on it. */
+.lucide-type > :nth-child(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 16 100;
+  --icon-from: 17.5;
+  --icon-time: 0.35s;
+}
+.lucide-type > :nth-child(2) {
+  --icon-move: icon-land;
+  --icon-y: -3px;
+  --icon-fade: 0;
+}
+
 /* The app's own icons, drawn on Lucide's grid. */
 
 /* Integrations (frame/integrations-icon.tsx): the three apps come up one by
