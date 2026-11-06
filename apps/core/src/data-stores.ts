@@ -1,4 +1,4 @@
-import type { SchemaAnswer } from "@grasp-os/sdk/host";
+import type { SchemaAnswer, SchemaIds } from "@grasp-os/sdk/host";
 import type { RecordChangePage } from "@grasp-os/shared/app-data";
 import type { App } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
@@ -171,7 +171,8 @@ export interface OpenStore {
     manifest: string,
     consumer?: SchemaConsumer,
     migrations?: StoreMigration[],
-    answers?: SchemaAnswer[]
+    answers?: SchemaAnswer[],
+    ids?: SchemaIds
   ) => Promise<DefinedTables>;
   /**
    * Applies the change schema `schemaHash` makes, for `consumer`, when it
@@ -994,8 +995,15 @@ const storeClient = (
   const stub = inJurisdiction(env, env.DATA_STORES).getByName(storeId);
   return {
     id: storeId,
-    defineTables: async (manifest, consumer, migrations, answers) =>
-      await stub.defineTables(storeId, manifest, consumer, migrations, answers),
+    defineTables: async (manifest, consumer, migrations, answers, ids) =>
+      await stub.defineTables(
+        storeId,
+        manifest,
+        consumer,
+        migrations,
+        answers,
+        ids
+      ),
     activate: async (schemaHash, consumer, owed) =>
       await stub.activateReady(storeId, schemaHash, consumer, owed),
     get: async (table, recordId) => await stub.get(storeId, table, recordId),

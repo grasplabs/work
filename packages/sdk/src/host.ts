@@ -78,7 +78,9 @@ export type {
   RefusedPlan,
   ReservedFields,
   SchemaAnswer,
+  SchemaIds,
   SchemaPlan,
+  TableIds,
 } from "./schema-plan.ts";
 export {
   manifestMaxBytes,

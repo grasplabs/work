@@ -256,6 +256,13 @@ export const schemas = sqliteTable("sdk_schemas", {
    * migration's output fits the contract it ran under.
    */
   supersededAt: integer("superseded_at"),
+  /**
+   * The stable IDs of its tables and fields by name, as the App's
+   * definition gave them (sdk schema-plan.ts, `SchemaIds`), as JSON; `{}`
+   * for a schema applied without (a workflow's). What tells a rename
+   * (store-host.ts, `#contractIds`).
+   */
+  fieldIds: text("field_ids").notNull().default("{}"),
 });
 
 /**

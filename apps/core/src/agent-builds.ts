@@ -47,7 +47,6 @@ import {
   draftFiles,
   draftOverLatest,
   editableApp,
-  heldDefinitions,
   versionFiles,
   latestVersion,
   proposeDraft,
@@ -1153,8 +1152,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         if ("problem" in result) {
           return { ok: false, problem: result.problem };
         }
-        // Saved as any write is, and refused as one is: a rename of a
-        // field a version of the App has among it (`withDefinitionCode`).
+        // Saved as any write is, and refused as one is
+        // (`withDefinitionCode`).
         let saved: DraftWrite;
         try {
           saved = await this.#save(
@@ -1193,7 +1192,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
    * agent fixes next.
    */
   async #save(
-    { id, name, currentVersion }: Pick<App, "id" | "name" | "currentVersion">,
+    { id, name }: Pick<App, "id" | "name">,
     draft: Draft,
     files: Map<string, string>,
     changes: Record<string, string | null>
@@ -1202,7 +1201,6 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       base: draft.base,
       changes: {},
     });
-    const held = await heldDefinitions(this.env, id, currentVersion, base);
     // Changed in place (`applyChanges`): the draft as it is written, its
     // TypeScript fixed and formatted first (`tidied`).
     // The definition and the code generated from it are kept as generated,
@@ -1223,8 +1221,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           : await tidied(this.env, id, Object.fromEntries(code))),
         ...Object.fromEntries(generated),
       },
-      name,
-      held
+      name
     );
     refuseAppWorkflows(
       written.flatMap(([path, content]) => (content === null ? [] : [path]))
@@ -1786,6 +1783,7 @@ build: {
           accepted: boolean;
           addedTables: string[];
           addedFields: { table: string; field: string }[];
+          renamedFields: { table: string; from: string; to: string }[];
           widenedFields: { table: string; field: string }[];
           checks: { table: string; field: string; answered: boolean }[];
           keptFields: { table: string; field: string }[];

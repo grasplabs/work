@@ -95,6 +95,11 @@ const notes = (
 
 const v1 = notes(noteFields);
 
+/** The IDs of the Notes table `t1` with `fields`' IDs by name. */
+const notesIds = (fields: Record<string, string>) => ({
+  notes: { id: "t1", fields },
+});
+
 /** The plan's contract, or a failed test. */
 const contractOf = (plan: SchemaPlan): SchemaManifest => {
   if (!plan.accepted) {
@@ -624,23 +629,110 @@ describe("a change the store checks every record for", () => {
     }
   });
 
-  test("a rename takes the old field's value, and keeps the old field", () => {
+  test("a field renamed by its ID moves its values to the new name, the old one leaving", () => {
     const before = notes({ ...noteFields, body: v.string() });
     const after = notes({ ...noteFields, text: v.string() });
-    const renames = [{ table: "notes", from: "body", to: "text" }];
-    const plan = planSchemaChange(before, after, { renames });
+    const plan = planSchemaChange(before, after, {
+      ids: {
+        contract: notesIds({ title: "f1", body: "f2" }),
+        target: notesIds({ title: "f1", text: "f2" }),
+      },
+    });
     expect(plan).toMatchObject({
       accepted: true,
       activates: true,
-      renames,
-      retainedFields: [{ table: "notes", field: "body" }],
+      renames: [{ table: "notes", from: "body", to: "text" }],
+      retainedFields: [],
     });
     expect(plan.checks).toStrictEqual([
       { table: "notes", field: "text", answer: null, from: "body" },
     ]);
-    expect(contractOf(plan).tables.notes?.fields.body?.presence).toBe(
-      "optional"
+    expect(
+      Object.keys(contractOf(plan).tables.notes?.fields ?? {})
+    ).toStrictEqual(["archivedAt", "text", "title"]);
+    // A version that still writes the old name no longer fits.
+    expect(schemaCovered(contractOf(plan), before)).toBeFalsy();
+    // Without IDs, every name is its own: the old field is kept.
+    expect(planSchemaChange(before, after)).toMatchObject({
+      renames: [],
+      retainedFields: [{ table: "notes", field: "body" }],
+    });
+  });
+
+  test("a rename back, as a rollback makes, moves the values back", () => {
+    const withBody = notes({ ...noteFields, body: v.string() });
+    const withText = notes({ ...noteFields, text: v.string() });
+    const bodyIds = notesIds({ title: "f1", body: "f2" });
+    const textIds = notesIds({ title: "f1", text: "f2" });
+    const renamed = contractOf(
+      planSchemaChange(withBody, withText, {
+        ids: { contract: bodyIds, target: textIds },
+      })
     );
+    const back = planSchemaChange(renamed, withBody, {
+      ids: { contract: textIds, target: bodyIds },
+    });
+    expect(back).toMatchObject({
+      accepted: true,
+      renames: [{ table: "notes", from: "text", to: "body" }],
+    });
+    expect(schemaCovered(contractOf(back), withBody)).toBeTruthy();
+    expect(schemaCovered(contractOf(back), withText)).toBeFalsy();
+  });
+
+  test("a rename with a narrower type checks the moved values, a record lacking one taking the answer", () => {
+    const before = notes({ ...noteFields, body: v.string().optional() });
+    const after = notes({ ...noteFields, text: v.string().max(10) });
+    const answer = { table: "notes", field: "text", value: "none" };
+    const plan = planSchemaChange(before, after, {
+      answers: [answer],
+      ids: {
+        contract: notesIds({ title: "f1", body: "f2" }),
+        target: notesIds({ title: "f1", text: "f2" }),
+      },
+    });
+    expect(plan.checks).toStrictEqual([
+      { table: "notes", field: "text", answer, from: "body" },
+    ]);
+  });
+
+  test("a name the contract holds for another field or table is refused, as is a table renamed", () => {
+    const before = notes({ ...noteFields, body: v.string() });
+    // `body` is another field now, the first one renamed to `text`.
+    const reused = notes({ ...noteFields, body: v.string(), text: v.string() });
+    expect(
+      refusedOf(
+        planSchemaChange(before, reused, {
+          ids: {
+            contract: notesIds({ title: "f1", body: "f2" }),
+            target: notesIds({ title: "f1", body: "f3", text: "f2" }),
+          },
+        })
+      )
+    ).toStrictEqual([{ table: "notes", field: "body", reason: "id_changed" }]);
+    const otherTable = { notes: { id: "t2", fields: { title: "f1" } } };
+    expect(
+      refusedOf(
+        planSchemaChange(before, before, {
+          ids: { contract: notesIds({ title: "f1" }), target: otherTable },
+        })
+      )
+    ).toStrictEqual([{ table: "notes", reason: "id_changed" }]);
+    const memos = schemaManifest(
+      defineSchema({ memos: defineTable({ ...noteFields, body: v.string() }) })
+    );
+    expect(
+      refusedOf(
+        planSchemaChange(before, memos, {
+          ids: {
+            contract: notesIds({ title: "f1", body: "f2" }),
+            target: {
+              memos: { id: "t1", fields: { title: "f1", body: "f2" } },
+            },
+          },
+        })
+      )
+    ).toStrictEqual([{ table: "memos", reason: "table_renamed" }]);
   });
 });
 

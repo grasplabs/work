@@ -17,7 +17,11 @@ import {
   schemaHash,
   symbolicModules,
 } from "@grasp-os/sdk/host";
-import type { AppManifest, WorkflowBindingExtras } from "@grasp-os/sdk/host";
+import type {
+  AppManifest,
+  SchemaIds,
+  WorkflowBindingExtras,
+} from "@grasp-os/sdk/host";
 import {
   checkEvidencePath,
   releaseFormatVersion,
@@ -46,6 +50,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { heldDefinition, schemaIdsOf } from "./app-definition.ts";
 import {
   builtCode,
   checkedCode,
@@ -1199,8 +1204,11 @@ export const sealedEvidence = async (
 const boundStore = async (
   env: Env,
   request: SealRequest,
-  manifest: AppManifest,
-  schema: string
+  {
+    manifest,
+    schema,
+    ids,
+  }: { manifest: AppManifest; schema: string; ids: SchemaIds }
 ): Promise<{ binding: DataStoreBinding; contract: AppliedContract } | null> => {
   if (!needsStore(manifest)) {
     return null;
@@ -1232,7 +1240,8 @@ const boundStore = async (
         toSchema,
       })
     ),
-    (manifest.answers ?? []).map((answer) => ({ ...answer }))
+    (manifest.answers ?? []).map((answer) => ({ ...answer })),
+    ids
   );
   if (defined.schemaHash !== schema) {
     throw new Error("The store defined another schema than the App's");
@@ -1616,7 +1625,14 @@ export const sealRelease = async (
     files,
     "production"
   );
-  const bound = await boundStore(env, request, built.manifest, built.schema);
+  // The stable IDs of its tables and fields, from its definition: a field
+  // renamed keeps its values on the store (store-host.ts, `defineTables`).
+  const definition = heldDefinition(new Map(Object.entries(files)));
+  const bound = await boundStore(env, request, {
+    manifest: built.manifest,
+    schema: built.schema,
+    ids: definition === null ? {} : schemaIdsOf(definition),
+  });
   const store = bound?.binding ?? null;
   await request.building?.();
   // Every page built and sealed with the release, so none is compiled

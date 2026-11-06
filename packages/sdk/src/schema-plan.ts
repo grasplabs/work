@@ -65,9 +65,13 @@ import { validateValue } from "./value-interpreter.ts";
 //   a backfill's default for the records that lack it, never written over
 //   a value they hold), or by an explicit migration, a per-row function
 //   in code (below), the one way to reshape what records hold;
-// - a field renamed (`renames`, a seam for the App definition's stable
-//   field IDs): the new field takes the old one's value, which stays in
-//   the record, its field kept as optional;
+// - a field renamed: the App definition gives every table and field a
+//   stable ID (`ids`), so a field the contract holds under one name and
+//   the target declares under another is the same field. Its values move
+//   to the new name in every record, the old name leaving the record and
+//   the contract alike, so every version that still declares it is left
+//   behind (and a rollback to one moves them back). A record that lacks
+//   the old field is checked as one lacking the new one would be;
 // - a changed access mode or row rule (`ruleChanges`): no record changes.
 //   The store reads and writes every table under the access and rules its
 //   contract holds, whichever version is pinned (store-host.ts,
@@ -85,6 +89,10 @@ import { validateValue } from "./value-interpreter.ts";
 //   rule reads (`rule_field_rewritten`): who sees a record changes only
 //   through writes, which pass the rules before and after
 //   (store-rules.ts);
+// - a name the contract holds for one table or field, declared for
+//   another (`id_changed`: the records' values under it are the other's),
+//   and a table renamed (`table_renamed`: the store keeps a table's
+//   records by its name, and no change moves them yet);
 // - a field the store reserved (`reserved`: one a pending target added
 //   before an admin abandoned it, whose values the records it filled in
 //   keep), added again with another descriptor than it had
@@ -118,6 +126,8 @@ export type PlanRefusalReason =
   | "rule_field_rewritten"
   | "migration_table_invalid"
   | "values_disjoint"
+  | "id_changed"
+  | "table_renamed"
   | "contract_invalid";
 
 /** One change refused, and why. */
@@ -152,9 +162,9 @@ export interface SchemaAnswer extends PlannedField {
 
 /**
  * A field whose records the store checks before the contract takes it
- * (see the header): every record must fit its new descriptor, given the
- * App's `answer` where it doesn't, or, for a field renamed, the value of
- * the field it was renamed `from`. When records still don't fit, the
+ * (see the header): every record must fit its new descriptor, given, for
+ * a field renamed, the value of the field it was renamed `from`, and the
+ * App's `answer` where it lacks one. When records still don't fit, the
  * store asks for a value or a migration.
  */
 export interface PlannedCheck extends PlannedField {
@@ -162,7 +172,7 @@ export interface PlannedCheck extends PlannedField {
   readonly from: string | null;
 }
 
-/** A field renamed: `to` takes `from`'s value (see the header). */
+/** A field renamed: its values move from `from` to `to` (see the header). */
 export interface PlannedRename {
   readonly table: string;
   readonly from: string;
@@ -183,7 +193,7 @@ export interface PlannedChanges {
   readonly widenedFields: readonly PlannedField[];
   /** Fields every record must fit before the contract takes them. */
   readonly checks: readonly PlannedCheck[];
-  /** Fields renamed; each new name is checked too. */
+  /** Fields renamed; each new name is checked, and each old one leaves. */
   readonly renames: readonly PlannedRename[];
   /** Tables whose access mode or row rules change. */
   readonly ruleChanges: readonly string[];
@@ -230,6 +240,15 @@ export type ReservedFields = Readonly<
   Record<string, Readonly<Record<string, ValueDescriptor>>>
 >;
 
+/** A table's stable ID, and its fields' by name (an App definition's). */
+export interface TableIds {
+  readonly id: string;
+  readonly fields: Readonly<Record<string, string>>;
+}
+
+/** The stable IDs of a schema's tables and fields, by table name. */
+export type SchemaIds = Readonly<Record<string, TableIds>>;
+
 /** What a change is planned with, besides the contract and the target. */
 export interface PlanOptions {
   /** The fields the store reserved. */
@@ -238,8 +257,11 @@ export interface PlanOptions {
   readonly migrated?: ReadonlySet<string>;
   /** The App's answers for fields a narrowing may not fit. */
   readonly answers?: readonly SchemaAnswer[];
-  /** Fields renamed, as the App definition's stable IDs tell them. */
-  readonly renames?: readonly PlannedRename[];
+  /**
+   * The stable IDs of the contract's tables and fields and the target's,
+   * which tell a rename (see the header); none, and every name is its own.
+   */
+  readonly ids?: { readonly contract: SchemaIds; readonly target: SchemaIds };
 }
 
 /** The contract of a store that holds nothing yet. */
@@ -533,24 +555,27 @@ const ruleFields = (rules: RowRules | undefined): Set<string> =>
  * (`declared`) merged in: every field it declares as it declares it (the
  * contract's own where they are the same up to enum order, so no
  * reordering moves the contract), every other the contract holds kept,
- * as optional (see the header); its indexes, search index, access and
- * rules.
+ * as optional, but those renamed (`moved`, see the header); its indexes,
+ * search index, access and rules.
  */
 const mergedTable = (
   kept: ManifestTable,
-  declared: ManifestTable
+  declared: ManifestTable,
+  moved: ReadonlySet<string>
 ): ManifestTable => ({
   fields: mapOf([
-    ...Object.entries(kept.fields).map(([field, descriptor]) => {
-      const now = own(declared.fields, field);
-      if (now === undefined) {
-        return [field, relaxed(descriptor)] as const;
-      }
-      return [
-        field,
-        sameUpToEnumOrder(descriptor, now) ? descriptor : now,
-      ] as const;
-    }),
+    ...Object.entries(kept.fields)
+      .filter(([field]) => !moved.has(field))
+      .map(([field, descriptor]) => {
+        const now = own(declared.fields, field);
+        if (now === undefined) {
+          return [field, relaxed(descriptor)] as const;
+        }
+        return [
+          field,
+          sameUpToEnumOrder(descriptor, now) ? descriptor : now,
+        ] as const;
+      }),
     ...Object.entries(declared.fields).filter(
       ([field]) => own(kept.fields, field) === undefined
     ),
@@ -563,17 +588,24 @@ const mergedTable = (
   ...(declared.rules === undefined ? {} : { rules: declared.rules }),
 });
 
-/** The contract after a change: the union, read back canonical. */
+/**
+ * The contract after a change: the union, but the fields `renames` move
+ * from, read back canonical.
+ */
 const unionOf = (
   contract: SchemaManifest,
-  target: SchemaManifest
+  target: SchemaManifest,
+  renames: readonly PlannedRename[]
 ): SchemaManifest | undefined => {
   const tables = mapOf([
     ...Object.entries(contract.tables).map(([name, kept]) => {
       const declared = own(target.tables, name);
+      const moved = new Set(
+        renames.filter(({ table }) => table === name).map(({ from }) => from)
+      );
       return [
         name,
-        declared === undefined ? kept : mergedTable(kept, declared),
+        declared === undefined ? kept : mergedTable(kept, declared, moved),
       ] as const;
     }),
     ...Object.entries(target.tables).filter(
@@ -623,6 +655,8 @@ interface TableContext {
   readonly answers: ReadonlyMap<string, SchemaAnswer>;
   /** Fields renamed on this table, by their new name: the old one. */
   readonly renamedFrom: ReadonlyMap<string, string>;
+  /** The old names of this table's fields renamed: they leave. */
+  readonly moved: ReadonlySet<string>;
   /** The fields the table's row rules read, before or after. */
   readonly ruleFields: ReadonlySet<string>;
 }
@@ -697,10 +731,10 @@ const classifyMigrated = (
 
 /**
  * A check of `field` of `table`, which records must fit as `after`
- * describes it, answered by the App's answer for it or, for a field
- * renamed, by the field it was renamed from. Refused when the answer
- * would rewrite a field a row rule reads, or one the store's reference
- * or file index reads.
+ * describes it, given, for a field renamed, the field it was renamed
+ * from, and the App's answer for it where a record lacks it. Refused
+ * when that would rewrite a field a row rule reads, or one the store's
+ * reference or file index reads.
  */
 const checkOf = (
   change: FieldChange & { readonly after: ValueDescriptor },
@@ -709,7 +743,7 @@ const checkOf = (
 ): void => {
   const { table, field } = change;
   const from = context.renamedFrom.get(field) ?? null;
-  const answer = from === null ? (context.answers.get(field) ?? null) : null;
+  const answer = context.answers.get(field) ?? null;
   // A value, a rename or a default fill all write the field.
   const rewrites =
     answer !== null || from !== null || change.after.presence === "default";
@@ -770,8 +804,10 @@ const classifyField = (
     refused.push({ table, field, reason: "reserved_field_changed" });
   } else if (context.migrated && classifyMigrated(change, outcomes)) {
     // A migrated table's own rules.
+  } else if (after === undefined && context.moved.has(field)) {
+    // Renamed: its values move to the new name.
   } else if (after === undefined) {
-    // Left out, or renamed: kept, its values with it.
+    // Left out: kept, its values with it.
     retainedFields.push({ table, field });
   } else if (change.change === "added" || before === undefined) {
     classifyAdded({ ...change, after }, context, outcomes);
@@ -799,6 +835,108 @@ const migratedTablesRefused = (
         own(target.tables, table) === undefined
     )
     .map((table) => ({ table, reason: "migration_table_invalid" }));
+
+/**
+ * The field `id` of a table the contract holds as `kept` (its IDs
+ * `keptIds`): its name there, when exactly one field has that ID; null
+ * for none; undefined when several do, which no store's contract holds.
+ */
+const heldName = (
+  kept: ManifestTable,
+  keptIds: TableIds,
+  id: string
+): string | null | undefined => {
+  const named = Object.entries(keptIds.fields).flatMap(([name, heldId]) =>
+    heldId === id && own(kept.fields, name) !== undefined ? [name] : []
+  );
+  if (named.length > 1) {
+    return undefined;
+  }
+  return named[0] ?? null;
+};
+
+/**
+ * The renames of `table` (as the target declares it, `declared`) that
+ * the IDs tell: a field the target declares under a name the contract
+ * lacks, which the contract holds under another. A name the contract
+ * holds with another ID than the target's is refused (`id_changed`).
+ */
+const tableRenames = (
+  table: string,
+  kept: ManifestTable,
+  declared: ManifestTable,
+  ids: { readonly kept: TableIds; readonly declared: TableIds },
+  refused: PlanRefusal[]
+): PlannedRename[] =>
+  Object.entries(ids.declared.fields).flatMap(([field, id]) => {
+    if (own(declared.fields, field) === undefined) {
+      return [];
+    }
+    if (own(kept.fields, field) !== undefined) {
+      const heldId = own(ids.kept.fields, field);
+      if (heldId !== undefined && heldId !== id) {
+        refused.push({ table, field, reason: "id_changed" });
+      }
+      return [];
+    }
+    const from = heldName(kept, ids.kept, id);
+    if (from === undefined) {
+      refused.push({ table, field, reason: "id_changed" });
+      return [];
+    }
+    // A name the target still declares is another field's: refused as
+    // such where the target names it.
+    return from === null || own(declared.fields, from) !== undefined
+      ? []
+      : [{ table, from, to: field }];
+  });
+
+/**
+ * The renames `ids` tell (`tableRenames`) of the tables on both sides; a
+ * table the contract holds under a name the target lacks, renamed, or a
+ * table name the contract holds with another ID, is refused (see the
+ * header).
+ */
+const renamesByIds = (
+  before: SchemaManifest,
+  target: SchemaManifest,
+  ids: { readonly contract: SchemaIds; readonly target: SchemaIds },
+  refused: PlanRefusal[]
+): PlannedRename[] =>
+  Object.entries(target.tables).flatMap(([table, declared]) => {
+    const declaredIds = own(ids.target, table);
+    if (declaredIds === undefined) {
+      return [];
+    }
+    const kept = own(before.tables, table);
+    const keptIds = own(ids.contract, table);
+    if (kept === undefined) {
+      const renamed = Object.entries(ids.contract).some(
+        ([name, held]) =>
+          held.id === declaredIds.id &&
+          own(before.tables, name) !== undefined &&
+          own(target.tables, name) === undefined
+      );
+      if (renamed) {
+        refused.push({ table, reason: "table_renamed" });
+      }
+      return [];
+    }
+    if (keptIds === undefined) {
+      return [];
+    }
+    if (keptIds.id !== declaredIds.id) {
+      refused.push({ table, reason: "id_changed" });
+      return [];
+    }
+    return tableRenames(
+      table,
+      kept,
+      declared,
+      { kept: keptIds, declared: declaredIds },
+      refused
+    );
+  });
 
 /**
  * The renames that apply: of a table on both sides, from a field the
@@ -860,6 +998,11 @@ const contextOf = (
     options.renames
       .filter((rename) => rename.table === table)
       .map(({ from, to }) => [to, from])
+  ),
+  moved: new Set(
+    options.renames
+      .filter((rename) => rename.table === table)
+      .map(({ from }) => from)
   ),
   ruleFields: new Set([
     ...ruleFields(own(before.tables, table)?.rules),
@@ -970,7 +1113,9 @@ export const planSchemaChange = (
   const renames = renamesOf(
     before,
     target,
-    options.renames ?? [],
+    options.ids === undefined
+      ? []
+      : renamesByIds(before, target, options.ids, outcomes.refused),
     outcomes.refused
   );
   const answers = options.answers ?? [];
@@ -1000,7 +1145,7 @@ export const planSchemaChange = (
   if (refused.length > 0) {
     return { accepted: false, refused, ...changes };
   }
-  const union = unionOf(before, target);
+  const union = unionOf(before, target, renames);
   if (union === undefined) {
     return {
       accepted: false,

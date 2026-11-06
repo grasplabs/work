@@ -1,6 +1,7 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import { appErrors } from "@grasp-os/shared/apps";
 import { chatIdSchema } from "@grasp-os/shared/ids";
+import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { runInDurableObject } from "cloudflare:test";
@@ -102,6 +103,62 @@ const findApp = `const [app] = (await env.apps.list()).filter(({ name }) => name
 
 /** A diagnostic of the App's layout about `file`, as a write reports it. */
 const layout = (file: string | null) => ({ file, rule: "server" });
+
+/** The Notes App with a nickname, and a mutation that notes one with it. */
+const nicknamedFiles: Record<string, string | null> = {
+  ...definedWith(notesFiles, {
+    op: "addField",
+    table: "notes",
+    name: "nickname",
+    type: "v.string().optional()",
+  }),
+  "server/nicknames.ts": `import { v } from "@grasp-os/sdk";
+import { mutation } from "@server/_generated/server";
+
+export const create = mutation({
+  args: { title: v.string(), nickname: v.string() },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});
+`,
+};
+
+/**
+ * `files` with field `from` of the notes renamed `to` in their
+ * definition.json, its ID kept, as an export or a builder writes it by
+ * hand, and nothing in code naming it.
+ */
+const fieldRenamed = (
+  files: Record<string, string | null>,
+  from: string,
+  to: string
+): Record<string, string | null> => ({
+  ...redefined(
+    Object.fromEntries(
+      Object.entries(files).flatMap(([path, content]) =>
+        content === null ? [] : [[path, content]]
+      )
+    ),
+    (definition) => ({
+      ...definition,
+      tables: definition.tables.map((table) => ({
+        ...table,
+        fields: table.fields.map((field) =>
+          field.name === from ? { ...field, name: to } : field
+        ),
+      })),
+    })
+  ),
+  "server/nicknames.ts": null,
+});
+
+/** What an App's function answered, or a failed test. */
+const valueOf = (result: OperationResult): unknown => {
+  if (!result.ok) {
+    throw new Error(`Refused: ${result.error.code}`);
+  }
+  return result.value;
+};
 
 /** What a code step returned, as JSON. */
 const returned = (text: string | undefined): unknown =>
@@ -597,9 +654,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
         const definition = async () => JSON.parse((await env.build.files(app.id)).files["definition.json"]);
         const steps = {};
-        // A field the released version has holds the note's value under
-        // its name: refused, saying what to do instead.
-        steps.released = await env.build.define(app.id, { op: "renameField", table: "notes", field: "title", name: "heading" });
         // A field the note lacks: checked against it, answered or not.
         const unanswered = await env.build.define(app.id, { op: "addField", table: "notes", name: "category", type: "v.string()" });
         steps.unanswered = unanswered.ok && unanswered.plan.checks;
@@ -614,6 +668,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         steps.afterRename = (await definition()).answers.length;
         const sensitive = await env.build.define(app.id, { op: "setAccess", table: "notes", access: { read: "owner", write: "owner" }, sensitive: true });
         steps.sensitive = sensitive.ok && sensitive.plan.sensitiveTables;
+        // A field the released version has: the note's value moves with it.
+        const released = await env.build.define(app.id, { op: "renameField", table: "notes", field: "title", name: "heading" });
+        steps.released = released.ok && released.plan.renamedFields;
         return steps;
       };`),
       says("Defined."),
@@ -645,12 +702,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await chat.ask("Give the notes a category");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    const steps = z
-      .object({
-        released: z.object({ ok: z.literal(false), problem: z.string() }),
-      })
-      .loose()
-      .parse(returned(result?.text));
     const events = await allEvents();
     const defined = events.filter(
       ({ action, detail }) =>
@@ -659,25 +710,22 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         detail.method === "build.define"
     );
     expect({
-      ...steps,
-      released: steps.released.problem.includes(
-        "Only a field this draft added renames"
-      ),
+      ...z.object({}).loose().parse(returned(result?.text)),
       audited: defined.map(({ detail }) => [detail.op, detail.table]),
     }).toStrictEqual({
-      released: true,
       unanswered: [{ table: "notes", field: "category", answered: false }],
       answered: [{ table: "notes", field: "category", answered: true }],
       answers: 1,
       renamed: [{ table: "notes", field: "topic", answered: true }],
       afterRename: 1,
       sensitive: ["notes"],
+      released: [{ table: "notes", from: "title", to: "heading" }],
       audited: [
-        ["renameField", "notes"],
         ["addField", "notes"],
         ["changeField", "notes"],
         ["renameField", "notes"],
         ["setAccess", "notes"],
+        ["renameField", "notes"],
       ],
     });
   });
@@ -748,39 +796,71 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
-  it("renames no field a version that ran had, after a rollback to one without it too", async () => {
-    const { builder, chat, grant } = await setUp([
-      codeStep(`export default async (self, env) => {
-        const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
-        return await env.build.define(app.id, { op: "renameField", table: "notes", field: "nickname", name: "displayName" });
-      };`),
-      says("Renamed."),
-    ]);
+  it("keeps a field's values through a rename, after a rollback to a version without it", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const person = await builder.api.whoami();
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
     await published(app);
-    // Version 2 ran with a nickname, which people may have filled in;
-    // then the App was rolled back to version 1, which has none.
+    // Version 2 ran with a nickname, which a note holds; then the App was
+    // rolled back to version 1, which has none.
     await release(builder, app, notesFiles);
+    await release(builder, app, nicknamedFiles);
+    const id = valueOf(
+      await calledAs(
+        person,
+        app,
+        { name: "nicknames.create", kind: "mutation" },
+        { title: "Plan", nickname: "Ace" }
+      )
+    );
+    await builder.api.apps.versions.setCurrent(app, 1);
+
+    // Version 3, from version 2's files, renames the nickname, by hand in
+    // definition.json as an export or a builder would: its ID kept.
     await release(
       builder,
       app,
-      definedWith(notesFiles, {
-        op: "addField",
-        table: "notes",
-        name: "nickname",
-        type: "v.string().optional()",
-      })
+      fieldRenamed(nicknamedFiles, "nickname", "displayName")
     );
-    await builder.api.apps.versions.setCurrent(app, 1);
-    await grant();
 
-    await chat.ask("Call the nickname a display name");
+    expect(
+      valueOf(
+        await calledAs(
+          person,
+          app,
+          { name: "notes.get", kind: "query" },
+          { id }
+        )
+      )
+    ).toMatchObject({ title: "Plan", displayName: "Ace" });
+  });
 
-    const [result] = await codeResults(chat.stub, chat.chat.id);
-    const refused = z
-      .object({ ok: z.literal(false), problem: z.string() })
-      .parse(returned(result?.text));
-    expect(refused.problem).toContain("`notes.nickname` is in a version");
+  it("keeps a field's values past a version that renamed it and never ran", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const person = await builder.api.whoami();
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await published(app);
+    await release(builder, app, nicknamedFiles);
+    const id = valueOf(
+      await calledAs(
+        person,
+        app,
+        { name: "nicknames.create", kind: "mutation" },
+        { title: "Plan", nickname: "Ace" }
+      )
+    );
+    // Version 2 calls it an alias, and is never made current; version 3,
+    // a display name.
+    const aliased = fieldRenamed(nicknamedFiles, "nickname", "alias");
+    await builder.api.apps.files.commit(app, aliased, "Alias");
+
+    await release(builder, app, fieldRenamed(aliased, "alias", "displayName"));
+
+    const note = valueOf(
+      await calledAs(person, app, { name: "notes.get", kind: "query" }, { id })
+    );
+    expect(note).toMatchObject({ title: "Plan", displayName: "Ace" });
+    expect(note).not.toHaveProperty("nickname");
   });
 
   it("keeps a draft's answer for a field whose type the version people use doesn't have yet, whatever that version answered", async () => {
@@ -820,48 +900,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       checks: [{ table: "notes", field: "category", answered: true }],
       answers: ["general"],
     });
-  });
-
-  it("refuses a commit that renames a field a version has, as the definition tools do", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const { id: app } = await builder.api.apps.create({ name: "Notes" });
-    await published(app);
-    const nicknamed = definedWith(notesFiles, {
-      op: "addField",
-      table: "notes",
-      name: "nickname",
-      type: "v.string().optional()",
-    });
-    await release(builder, app, nicknamed);
-    // Its definition.json written by hand, as an export or a builder
-    // would: the field's ID kept, its name changed.
-    const renamed = redefined(nicknamed, (definition) => ({
-      ...definition,
-      tables: definition.tables.map((table) => ({
-        ...table,
-        fields: table.fields.map((field) =>
-          field.name === "nickname" ? { ...field, name: "displayName" } : field
-        ),
-      })),
-    }));
-
-    const refused: unknown = await builder.api.apps.files
-      .commit(app, renamed, "Rename")
-      .then(
-        () => null,
-        (error: unknown) => error
-      );
-
-    const { code, details } = z
-      .object({
-        code: z.string(),
-        details: z.object({ issues: z.array(z.string()) }),
-      })
-      .parse(refused);
-    expect(code).toBe("app.definition_invalid");
-    expect(details.issues.join(" ")).toContain(
-      "`notes.nickname` is in a version of the App"
-    );
   });
 
   it("keeps no change that leaves a file as the base has it", async () => {

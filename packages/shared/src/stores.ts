@@ -721,6 +721,22 @@ export const schemaAnswerSchema = z.strictObject({
 /** The most answers one schema is applied with. */
 export const schemaAnswersMax = 64;
 
+/** A table's or field's stable ID, as an App's definition gives it. */
+const stableIdSchema = z.string().min(1).max(64);
+
+/**
+ * The stable IDs of a schema's tables and fields by name (the SDK's
+ * `SchemaIds`, schema-plan.ts), as an App's definition gives them: what
+ * tells the store a rename.
+ */
+export const schemaIdsSchema = z.record(
+  tableNameSchema,
+  z.strictObject({
+    id: stableIdSchema,
+    fields: z.record(fieldNameSchema, stableIdSchema),
+  })
+);
+
 /**
  * Why a record doesn't fit a field a schema change checks: it lacks the
  * field where it's required and no value was given for it (`missing`),

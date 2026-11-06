@@ -38,10 +38,13 @@ import { validates } from "./store-queries.ts";
 // - Data lost or a value guessed: the platform never writes over a value
 //   a record holds. It only gives a record what it lacks (a field it
 //   doesn't hold or holds as null): the field's default, a nested
-//   default, a renamed field's value, or the App's value for the field
-//   (`SchemaAnswer`, a backfill's default), and only when that fits. A
-//   value that doesn't fit is reported, and only an explicit migration,
-//   code the App's builders write and review, reshapes it. Nothing is
+//   default, or the App's value for the field (`SchemaAnswer`, a
+//   backfill's default), and only when that fits. A field renamed (by its
+//   stable ID, sdk schema-plan.ts) moves: its value leaves the old name
+//   for the new one, which no record holds before (the contract lacks
+//   it), whole and only when it fits; a rollback moves it back. A value
+//   that doesn't fit is reported, and only an explicit migration, code
+//   the App's builders write and review, reshapes it. Nothing else is
 //   removed: a field the schema leaves out stays in every record and in
 //   the contract. Every write is recorded in the store's change history
 //   (source `schema_change`) as any write is.
@@ -157,34 +160,41 @@ type FieldSettled =
   | { readonly reason: SchemaCheckReason };
 
 /**
- * What a field the record lacks takes (it doesn't hold it, or holds null):
- * the value of the field it was renamed from, or the App's value for it,
- * when that fits, with its nested defaults filled in as a write would
- * store it (`withDefaultsFilled`), so the record's size is checked as it
- * is stored.
+ * What a field the record lacks takes (it doesn't hold it, or holds
+ * null): the App's value for it, when that fits, with its nested defaults
+ * filled in as a write would store it (`withDefaultsFilled`), so the
+ * record's size is checked as it is stored.
  */
-const givenField = (
-  checked: CheckedField,
-  fields: StoreFields,
-  present: boolean
-): FieldSettled => {
-  const { descriptor, check } = checked;
-  // A field renamed takes the old field's value; any other, the App's.
-  const from = check?.from ?? null;
-  let given: unknown = check?.answer?.value;
-  if (from !== null) {
-    given = Object.hasOwn(fields, from) ? fields[from] : undefined;
-  }
+const givenField = (checked: CheckedField, present: boolean): FieldSettled => {
+  const given: unknown = checked.check?.answer?.value;
   if (given === undefined) {
     return { reason: present ? "invalid" : "missing" };
   }
-  return validates(descriptor, given)
-    ? { value: withDefaultsFilled(descriptor, given) }
+  return validates(checked.descriptor, given)
+    ? { value: withDefaultsFilled(checked.descriptor, given) }
     : { reason: "unfit" };
 };
 
 /**
- * The value `checked` takes in a record holding `fields`: kept where it
+ * The value a field renamed takes from the field it was renamed `from`,
+ * which the record holds, when it fits; null leaves it lacking. A value
+ * that doesn't fit is the record's own: a migration's to reshape.
+ */
+const movedField = (
+  { descriptor }: CheckedField,
+  fields: StoreFields,
+  from: string
+): FieldSettled | null => {
+  const value = fields[from] ?? null;
+  if (validates(descriptor, value)) {
+    return { value: withDefaultsFilled(descriptor, value) };
+  }
+  return value === null ? null : { reason: "invalid" };
+};
+
+/**
+ * The value `checked` takes in a record holding `fields`: for a field
+ * renamed, the value it held under its old name; otherwise kept where it
  * fits (its nested defaults filled in where they are missing), or, where
  * the record lacks it, its default or what `givenField` gives it; a
  * failure where none of those fits. Never over a value the record holds.
@@ -195,6 +205,15 @@ const settledField = (
 ): FieldSettled => {
   const { field, descriptor } = checked;
   const present = Object.hasOwn(fields, field);
+  const from = checked.check?.from ?? null;
+  if (from !== null && Object.hasOwn(fields, from)) {
+    // The new name is one the contract lacks, so no record holds it.
+    const moved = present ? { reason: "invalid" as const } : null;
+    const settled = moved ?? movedField(checked, fields, from);
+    if (settled !== null) {
+      return settled;
+    }
+  }
   const value = present ? (fields[field] ?? null) : null;
   if (present && validates(descriptor, value)) {
     const filled = withDefaultsFilled(descriptor, value);
@@ -212,31 +231,39 @@ const settledField = (
     // A value the record holds, which doesn't fit: a migration's.
     return { reason: "invalid" };
   }
-  return givenField(checked, fields, present);
+  return givenField(checked, present);
 };
 
 /**
  * A record of `steps`' table as the change leaves it: every checked field
- * settled from the record as it was (an answer reading another field
- * reads what the record held, never a value another answer just made).
+ * settled from the record as it was (a rename reading another field reads
+ * what the record held, never a value another check just made), and the
+ * old name of every field renamed gone.
  */
 const settledRecord = (steps: TableSteps, fields: StoreFields): Settled => {
   const failures: { field: string; reason: SchemaCheckReason }[] = [];
-  const after: Record<string, unknown> = { ...fields };
-  let changed = false;
+  const moved = new Set(
+    steps.fields.flatMap(({ check }) =>
+      check?.from === undefined || check.from === null ? [] : [check.from]
+    )
+  );
+  const after = new Map<string, unknown>(
+    Object.entries(fields).filter(([field]) => !moved.has(field))
+  );
+  let changed = after.size < Object.keys(fields).length;
   for (const checked of steps.fields) {
     const settled = settledField(checked, fields);
     if ("reason" in settled) {
       failures.push({ field: checked.field, reason: settled.reason });
     } else if ("value" in settled) {
-      after[checked.field] = settled.value;
+      after.set(checked.field, settled.value);
       changed = true;
     }
   }
   if (failures.length > 0) {
     return { failures };
   }
-  const settled = storedFieldsSchema.parse(after);
+  const settled = storedFieldsSchema.parse(Object.fromEntries(after));
   if (
     changed &&
     encoder.encode(canonicalJson(settled)).byteLength > documentMaxBytes

@@ -1,0 +1,1 @@
+ALTER TABLE `sdk_schemas` ADD `field_ids` text DEFAULT '{}' NOT NULL;

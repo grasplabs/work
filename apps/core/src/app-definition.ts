@@ -12,6 +12,7 @@ import type {
   DefinitionOperation,
 } from "@grasp-os/sdk/definition";
 import { planSchemaChange } from "@grasp-os/sdk/host";
+import type { SchemaIds } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import { z } from "zod";
 
@@ -68,46 +69,18 @@ export const definitionChanges = (
 });
 
 /**
- * Why `definition` renames a field one of the App's versions has (`held`:
- * the current one, and the commit a change starts from, which may have
- * run and been rolled back from), or undefined. Such a field may hold
- * values in the App's records, which stay under its old name until a
- * rename can carry them by its stable ID (GRA-1602): only a field the
- * change itself added renames.
- */
-export const renameRefusal = (
-  definition: AppDefinition,
-  held: readonly (AppDefinition | null)[]
-): string | undefined => {
-  for (const version of held) {
-    for (const table of version?.tables ?? []) {
-      const now = definition.tables.find(({ id }) => id === table.id);
-      for (const field of table.fields) {
-        const renamed = now?.fields.find(({ id }) => id === field.id);
-        if (renamed !== undefined && renamed.name !== field.name) {
-          return `\`${table.name}.${field.name}\` is in a version of the App, and its records may hold values under that name, which a rename doesn't carry yet. Only a field this draft added renames. Keep its name, or add a field with the new name and copy the values with a migration in server/migrations/.`;
-        }
-      }
-    }
-  }
-  return undefined;
-};
-
-/**
  * `files` with their config and schema as their definition generates
  * them, changed in place. Files with no definition yet, the first of the
  * App named `name` (one of pages alone too), get an empty one. Refused
  * (`app.definition_invalid`) when they hold a config or a schema but no
- * definition, a definition that isn't one, have lost the one they had
- * (`had`), or rename a field a version of the App has (`held`, see
- * `renameRefusal`): every write of a definition comes through here, the
+ * definition, a definition that isn't one, or have lost the one they had
+ * (`had`): every write of a definition comes through here, the
  * definition tools' and a commit's alike.
  */
 export const withDefinitionCode = (
   files: Map<string, string>,
   name: string,
-  had: boolean,
-  held: readonly (AppDefinition | null)[] = []
+  had: boolean
 ): void => {
   const text = files.get(definitionPath);
   if (text === undefined) {
@@ -132,10 +105,6 @@ export const withDefinitionCode = (
     throw appErrors.create("app.definition_invalid", {
       issues: [read.problem],
     });
-  }
-  const renamed = renameRefusal(read.definition, held);
-  if (renamed !== undefined) {
-    throw appErrors.create("app.definition_invalid", { issues: [renamed] });
   }
   for (const [path, source] of Object.entries(
     definitionSources(read.definition)
@@ -163,6 +132,24 @@ export const definitionRefusal = (error: unknown): string | undefined => {
     ? parsed.data.issues.join(" ")
     : appErrors.create("app.definition_invalid").message;
 };
+
+/**
+ * The stable IDs of `definition`'s tables and fields, by name: what the
+ * store tells a rename by (sdk schema-plan.ts, store-host.ts
+ * `defineTables`), so a renamed field keeps its values.
+ */
+export const schemaIdsOf = (definition: AppDefinition): SchemaIds =>
+  Object.fromEntries(
+    definition.tables.map((table) => [
+      table.name,
+      {
+        id: table.id,
+        fields: Object.fromEntries(
+          table.fields.map((field) => [field.name, field.id])
+        ),
+      },
+    ])
+  );
 
 /** The definition `files` hold, or null for none or one that doesn't read. */
 export const heldDefinition = (
@@ -195,6 +182,8 @@ export interface DefinitionPlan {
   accepted: boolean;
   addedTables: string[];
   addedFields: PlanField[];
+  /** Fields renamed: every record's value moves from the old name to the new. */
+  renamedFields: { table: string; from: string; to: string }[];
   /** Fields every record still fits: nothing to check. */
   widenedFields: PlanField[];
   /** Fields every record is checked against, and whether one lacking it takes an answer. */
@@ -230,12 +219,23 @@ export const definitionPlan = (
   const plan = planSchemaChange(
     before === null ? null : definitionManifest(before).schema,
     target.schema,
-    { answers: target.answers ?? [] }
+    {
+      answers: target.answers ?? [],
+      ids: {
+        contract: before === null ? {} : schemaIdsOf(before),
+        target: schemaIdsOf(after),
+      },
+    }
   );
   return {
     accepted: plan.accepted,
     addedTables: [...plan.addedTables],
     addedFields: fieldsOf(plan.addedFields),
+    renamedFields: plan.renames.map(({ table, from, to }) => ({
+      table,
+      from,
+      to,
+    })),
     widenedFields: fieldsOf(plan.widenedFields),
     checks: plan.checks.map(({ table, field, answer }) => ({
       table,

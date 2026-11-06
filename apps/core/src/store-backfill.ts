@@ -1,4 +1,4 @@
-import type { SchemaAnswer } from "@grasp-os/sdk/host";
+import type { SchemaAnswer, SchemaIds } from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
@@ -354,11 +354,18 @@ export const defineSchemaOnStore = async (
   manifest: string,
   consumer: SchemaConsumer,
   migrations: StoreMigration[] = [],
-  answers: SchemaAnswer[] = []
+  answers: SchemaAnswer[] = [],
+  ids: SchemaIds = {}
 ): Promise<DefinedTables> => {
   let defined: DefinedTables;
   try {
-    defined = await store.defineTables(manifest, consumer, migrations, answers);
+    defined = await store.defineTables(
+      manifest,
+      consumer,
+      migrations,
+      answers,
+      ids
+    );
   } catch (error) {
     if (
       isExpectedError(error) &&
