@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import {
   mkdirSync,
   readFileSync,
@@ -162,6 +162,15 @@ const tsgo = path.join(
   "bin/tsc"
 );
 
+/**
+ * How tsc ends when it found type errors, with or without writing
+ * output; any other unsuccessful end checked nothing.
+ */
+const typeErrorsFound: ReadonlySet<number> = new Set([1, 2]);
+
+/** One of tsc's diagnostics, as `--pretty false` prints it. */
+const diagnostic = /\berror TS\d+:/u;
+
 const tsconfig = {
   extends: path.join(import.meta.dirname, "../../tsconfig.base.json"),
   compilerOptions: {
@@ -170,6 +179,31 @@ const tsconfig = {
     paths: { "@server/_generated/*": ["./server/_generated/*.ts"] },
   },
   include: ["**/*.ts", "**/*.tsx"],
+};
+
+/**
+ * The type errors tsgo finds in the project in `dir`: none when it exits
+ * 0, its diagnostics when it exits for having found some. Any other end
+ * (a crash, a signal, a refused config, an error exit that prints no
+ * diagnostic) throws: it checked nothing.
+ */
+const typeCheck = (dir: string, compiler = tsgo): string => {
+  const run = spawnSync(compiler, ["-p", dir, "--pretty", "false"], {
+    encoding: "utf-8",
+  });
+  if (run.status === 0) {
+    return "";
+  }
+  if (
+    run.status !== null &&
+    typeErrorsFound.has(run.status) &&
+    diagnostic.test(run.stdout)
+  ) {
+    return run.stdout;
+  }
+  throw new Error(
+    `tsgo didn't finish its check (${run.error?.message ?? `exit ${String(run.status ?? run.signal)}`}): ${run.stderr}${run.stdout}`
+  );
 };
 
 /** The App `files` builds into, with what Grasp generates for it. */
@@ -189,15 +223,7 @@ const typeErrors = async (page: string, files: Files): Promise<string> => {
     "tsconfig.json": JSON.stringify(tsconfig),
   });
   write(dir, await generated(dir, files));
-  try {
-    execFileSync(tsgo, ["-p", dir, "--pretty", "false"], { encoding: "utf-8" });
-    return "";
-  } catch (error) {
-    // tsgo prints what it found, and exits with an error for it.
-    return error instanceof Error && "stdout" in error
-      ? String(error.stdout)
-      : String(error);
-  }
+  return typeCheck(dir);
 };
 
 const base = filesOf(basePage);
@@ -211,6 +237,25 @@ describe("the guides' code", () => {
   it.each(withCode)("type-checks in %s", async (page) => {
     const files = page === basePage ? base : { ...base, ...filesOf(page) };
     await expect(typeErrors(page, files)).resolves.toBe("");
+  });
+
+  it("answers the type errors tsgo finds", () => {
+    const dir = path.join(examplesDir, "type-error");
+    rmSync(dir, { force: true, recursive: true });
+    write(dir, {
+      "index.ts": 'export const count: number = "one";\n',
+      "tsconfig.json": JSON.stringify(tsconfig),
+    });
+
+    expect(typeCheck(dir)).toContain("error TS2322:");
+  });
+
+  it("fails when the check doesn't finish, whatever it printed", () => {
+    // Node runs `-p <dir>` as code, fails on it, and prints only to
+    // stderr: as a compiler that crashes does.
+    expect(() => typeCheck(examplesDir, process.execPath)).toThrow(
+      "tsgo didn't finish its check"
+    );
   });
 
   it("reads a TypeScript block as the file it names", () => {

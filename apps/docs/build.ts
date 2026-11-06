@@ -28,9 +28,9 @@ import path from "node:path";
 
 import { defaultTreeAdapter, parse } from "parse5";
 import type { DefaultTreeAdapterTypes } from "parse5";
-import { Application } from "typedoc";
-import type { TypeDocOptions } from "typedoc";
-import type { PluginOptions } from "typedoc-plugin-markdown";
+
+import { writeReference } from "./reference.ts";
+import type { ReferenceOptions } from "./reference.ts";
 
 const root = import.meta.dirname;
 const sdk = path.join(root, "../../packages/sdk");
@@ -57,13 +57,15 @@ const modules: Readonly<Record<string, string>> = {
 /** A module's page, by its file: the root's is `sdk`, beside the index. */
 const pageOf = (file: string): string => (file === "index" ? "sdk" : file);
 
-/** TypeDoc's options, and its Markdown plugin's. */
-const referenceOptions: Partial<TypeDocOptions & PluginOptions> = {
+/**
+ * The reference's options. A broken `{@link}` or a doc comment TypeDoc
+ * can't read fails the build, as a type error would (reference.ts).
+ */
+const referenceOptions: ReferenceOptions = {
   entryPoints: Object.keys(modules).map((file) =>
     path.join(sdk, "src", `${file}.ts`)
   ),
   tsconfig: path.join(sdk, "tsconfig.json"),
-  plugin: ["typedoc-plugin-markdown"],
   out: reference,
   readme: "none",
   router: "module",
@@ -92,22 +94,11 @@ const referenceOptions: Partial<TypeDocOptions & PluginOptions> = {
   excludeInternal: true,
   hideBreadcrumbs: true,
   hidePageHeader: true,
-  // A broken `{@link}` or a doc comment TypeDoc can't read fails the
-  // build, as a type error would.
-  treatValidationWarningsAsErrors: true,
 };
 
 const buildReference = async (): Promise<void> => {
   rmSync(reference, { force: true, recursive: true });
-  const app = await Application.bootstrapWithPlugins(referenceOptions);
-  const project = await app.convert();
-  if (project === undefined) {
-    throw new Error("TypeDoc could not read the SDK.");
-  }
-  for (const module of project.children ?? []) {
-    module.name = pageOf(module.name);
-  }
-  await app.generateOutputs(project);
+  await writeReference(referenceOptions, pageOf);
 };
 
 /** `text`'s hash as a policy names it: `'sha256-<base64>'`. */
