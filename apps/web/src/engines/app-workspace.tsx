@@ -1069,13 +1069,14 @@ const Building = ({
       void router.invalidate();
     }
   }, [router, running, draftChanges]);
-  // Core refused the chat followed (deleted, or not the person's): the
-  // App's own chat takes its place. Core merely out of reach keeps it.
+  // Core has no such chat (deleted, or not the person's): the App's own
+  // chat takes its place. Core out of reach, or refusing to follow it for
+  // now (too many of the person's pages follow chats), keeps it, saying why.
   useEffect(() => {
-    if (chatId !== undefined && followed.refused === true) {
+    if (chatId !== undefined && followed.gone === true) {
       onChatGone(chatId);
     }
-  }, [chatId, followed.refused, onChatGone]);
+  }, [chatId, followed.gone, onChatGone]);
   return (
     <div className="flex min-h-0 flex-1 flex-col text-sm">
       <WorkspaceBar

@@ -10,8 +10,11 @@ import type {
 } from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { authoritySchema } from "@grasp-os/shared/permissions";
+import { routerSecretHeader } from "@grasp-os/shared/router";
+import type { CoreApi } from "@grasp-os/shared/rpc";
+import { newWebSocketRpcSession } from "capnweb";
 import { runInDurableObject } from "cloudflare:test";
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { bindingsFor } from "../src/bindings.ts";
@@ -29,7 +32,9 @@ import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
+import { closeWhenTestEnds } from "./open-sockets.ts";
 import { fullScan } from "./query-plans.ts";
+import { clientOrigin } from "./sign-in-config.ts";
 import { callAuth, openRpc, outcome, signedInApi } from "./sign-in.ts";
 import { connectDb } from "./test-env.ts";
 
@@ -75,6 +80,35 @@ const envOf = (instance: object): object => {
     throw new TypeError("The Workspace object has no env");
   }
   return objectEnv;
+};
+
+/**
+ * A page of the person signed in as `cookie`, connected as a browser's
+ * is: a request of its own, which ends once the page closes (a reload,
+ * a tab shut), not with the test's.
+ */
+const pageOf = async (cookie: string) => {
+  const response = await exports.default.fetch("https://core/rpc", {
+    headers: {
+      Upgrade: "websocket",
+      Origin: clientOrigin,
+      cookie,
+      [routerSecretHeader]: env.ROUTER_SECRET,
+    },
+  });
+  const socket = response.webSocket;
+  if (!socket) {
+    throw new Error(`Expected a WebSocket, got ${response.status}`);
+  }
+  socket.accept();
+  closeWhenTestEnds(socket);
+  const core = newWebSocketRpcSession<CoreApi>(socket);
+  return {
+    chats: core.authenticate().chats,
+    close: () => {
+      socket.close();
+    },
+  };
 };
 
 /** Follows a chat, keeping every update. */
@@ -1456,5 +1490,32 @@ describe("chats", () => {
     // Releasing one frees its slot.
     await watches[0]?.subscription.release();
     await expect(outcome(follow(ann.chats, chat.id))).resolves.toBe("ok");
+  });
+
+  it("free their slots in their person's object once the page that followed them closes", async () => {
+    const ann = await person();
+    const chat = await ann.chats.create("Reloaded");
+    // Pages that each followed the chat and closed without letting go, as
+    // many watches as the object keeps at once: a person who reloaded
+    // over and over, or opened and shut tabs.
+    for (const _page of Array.from({ length: 5 })) {
+      // oxlint-disable-next-line no-await-in-loop -- one page after another, as a person reloads
+      const page = await pageOf(ann.session);
+      // oxlint-disable-next-line no-await-in-loop -- one page after another, as a person reloads
+      await Promise.all(
+        Array.from(
+          { length: 10 },
+          async () => await follow(page.chats, chat.id)
+        )
+      );
+      page.close();
+    }
+    // The next page follows the chat: the closed pages' watches are gone.
+    await vi.waitFor(
+      async () => {
+        await expect(outcome(follow(ann.chats, chat.id))).resolves.toBe("ok");
+      },
+      { timeout: 10_000 }
+    );
   });
 });

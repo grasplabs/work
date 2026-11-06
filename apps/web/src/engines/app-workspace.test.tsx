@@ -938,6 +938,40 @@ describe(AppWorkspace, () => {
     expect(askedForApp).toStrictEqual(["invoice-desk"]);
   });
 
+  it("keeps the chat handed over when core won't follow it for now, saying why, rather than opening another", async () => {
+    const { askedForApp } = await opened(
+      fakeApps("draft").apps,
+      identityOf(false),
+      "chat-handed-over",
+      async () => {
+        await Promise.resolve();
+        // The chat is the person's, but too many of their pages follow
+        // chats at once.
+        throw Object.assign(
+          new Error(
+            "Too many of your pages follow chats at once. Close some, then try again."
+          ),
+          { code: "agent.too_many_watches" }
+        );
+      }
+    );
+    await settled();
+
+    expect({
+      askedForApp,
+      says: says(
+        "Too many of your pages follow chats at once. Close some, then try again."
+      ),
+      openInChat: document
+        .querySelector('a[aria-label="Open in Chat"]')
+        ?.getAttribute("href"),
+    }).toStrictEqual({
+      askedForApp: [],
+      says: true,
+      openInChat: "/?chat=chat-handed-over&panel=true",
+    });
+  });
+
   it("asks core for the App's chat again when the one this tab kept is gone", async () => {
     setActiveChat("chat-kept-gone", appSlot("invoice-desk"));
     const { askedForApp } = await opened(

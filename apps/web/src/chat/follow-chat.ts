@@ -1,3 +1,4 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import {
   applyOutput,
   applyPartial,
@@ -115,15 +116,16 @@ const releaseQuietly = async (subscription: {
 
 /**
  * Follows `chatId` over `core`: `onUpdate` gets every update, `onFailed`
- * why following stopped for good (the chat is gone, say), and whether core
- * refused it (`refused`) rather than being out of reach. Returns what
- * stops it.
+ * why following stopped for good, and whether that is because core has no
+ * such chat for the person (`gone`: deleted, or not theirs). Any other
+ * refusal (too many pages following chats, say) leaves the chat theirs, and
+ * only says why. Returns what stops it.
  */
 export const followChat = (
   core: CoreConnection,
   chatId: string,
   onUpdate: (update: ChatUpdate) => void,
-  onFailed: (reason: string, refused: boolean) => void
+  onFailed: (reason: string, gone: boolean) => void
 ): (() => void) => {
   let closed = false;
   let after: number | null = null;
@@ -169,7 +171,10 @@ export const followChat = (
       }
     } catch (error) {
       if (!closed) {
-        onFailed(failureText(error), !isTransient(error));
+        onFailed(
+          failureText(error),
+          agentErrors.codeOf(error) === "agent.chat_not_found"
+        );
       }
     }
   };
