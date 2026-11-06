@@ -373,6 +373,35 @@ const receiptsOf = async (runId: string) => {
     .map(({ detail }) => detail?.outcome);
 };
 
+/**
+ * Revokes `approval`, workflow `id`'s decision binding, by `admin`, in the
+ * write that keeps its run's decision: as an admin's revocation landing
+ * after the open last looked at the binding and before the run asks
+ * anyone, which no call of `revokeWorkflowBinding` can be timed to hit.
+ */
+const revokedAsOpened = async (
+  id: string,
+  approval: string,
+  admin: Identity
+): Promise<void> => {
+  const trigger = `revoke_as_opened_${unique().replaceAll("-", "_")}`;
+  await env.DB.prepare(
+    `CREATE TRIGGER ${trigger} AFTER INSERT ON workflow_decisions WHEN NEW.resource_run_id IN (SELECT id FROM workflow_resource_runs WHERE workflow_resource_id = '${id}') BEGIN UPDATE workflow_binding_approvals SET status = 'revoked', revoked_by = '${admin.userId}', revoked_at = ${Date.now()} WHERE id = '${approval}'; END`
+  ).run();
+};
+
+/**
+ * Pins, to each run of workflow `id` as it starts, a source the chat it
+ * started from had read and its agent can no longer read, as a start
+ * from a chat pins what the chat read (workflow-starts.ts).
+ */
+const startedFromUnreadableChat = async (id: string): Promise<void> => {
+  const trigger = `chat_pinned_${unique().replaceAll("-", "_")}`;
+  await env.DB.prepare(
+    `CREATE TRIGGER ${trigger} AFTER INSERT ON workflow_resource_runs WHEN NEW.workflow_resource_id = '${id}' BEGIN INSERT INTO run_chat_sources (run_id, source_id, workspace_id, chat_id, agent_id, person_id) VALUES (NEW.id, '${crypto.randomUUID()}', '${crypto.randomUUID()}', '${crypto.randomUUID()}', '${crypto.randomUUID()}', NEW.principal_id); END`
+  ).run();
+};
+
 /** How often decision `decision` was opened, as the audit log has it. */
 const openings = async (decision: string): Promise<number> => {
   const events = await allEvents();
@@ -1044,20 +1073,51 @@ describe("asking the people a JSON workflow's decision is for", () => {
 });
 
 describe("authority behind a JSON workflow's decision", () => {
-  it("refuses the outcome once the binding is revoked while the run waits, never taking it as approved", async () => {
-    const { admin, owner, reviewer, workflow, approval } =
-      await approvalWorkflow();
-    const runId = await started(owner, workflow.id, 5000);
-    const decision = await openedBy(runId);
-    await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
-    await confirmedAnswer(reviewer, decision, { approved: true });
-    const run = await ended(owner, workflow.id, runId);
+  it("refuses the outcome once the binding is revoked, as its decision opens or while the run waits, never taking it as approved", async () => {
+    // While it waits: its people asked, then the binding revoked.
+    const waits = await approvalWorkflow();
+    const waiting = await started(waits.owner, waits.workflow.id, 5000);
+    const decision = await openedBy(waiting);
+    await vi.waitFor(
+      async () => {
+        await expect(asksOf(decision)).resolves.toHaveLength(1);
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    await revokeWorkflowBinding(
+      env,
+      waits.admin,
+      waits.workflow.id,
+      waits.approval.id
+    );
+    await confirmedAnswer(waits.reviewer, decision, { approved: true });
+    const waited = await ended(waits.owner, waits.workflow.id, waiting);
+    // As it opens: revoked the moment its decision is kept, after the
+    // open's last look at the binding and before its people are asked.
+    const opens = await approvalWorkflow();
+    await revokedAsOpened(opens.workflow.id, opens.approval.id, opens.admin);
+    const opening = await started(opens.owner, opens.workflow.id, 5000);
+    const opened = await openedBy(opening);
+    const refused = await ended(opens.owner, opens.workflow.id, opening);
     expect({
-      end: endOf(run),
-      receipts: await receiptsOf(runId),
+      waits: { end: endOf(waited), receipts: await receiptsOf(waiting) },
+      opens: {
+        end: endOf(refused),
+        receipts: await receiptsOf(opening),
+        asks: await asksOf(opened),
+      },
     }).toStrictEqual({
-      end: { status: "failed", code: "workflow.call_denied" },
-      receipts: ["opened", "workflow.call_denied"],
+      waits: {
+        end: { status: "failed", code: "workflow.call_denied" },
+        receipts: ["opened", "workflow.call_denied"],
+      },
+      // Its people never shown what it asks; its refusal kept as the
+      // answer's would be.
+      opens: {
+        end: { status: "failed", code: "workflow.call_denied" },
+        receipts: ["opened", "workflow.call_denied"],
+        asks: [],
+      },
     });
   });
 
@@ -1071,9 +1131,29 @@ describe("authority behind a JSON workflow's decision", () => {
     expect({
       end: endOf(run),
       decisions: await decisionsOf(runId),
+      receipts: await receiptsOf(runId),
     }).toStrictEqual({
       end: { status: "failed", code: "workflow.call_denied" },
       decisions: [],
+      receipts: ["workflow.call_denied"],
+    });
+  });
+
+  it("refuses to open a decision once the run's evidence can no longer be read, its refusal kept", async () => {
+    const { owner, workflow } = await approvalWorkflow();
+    // Started from a chat that had read a source its agent can no longer
+    // read: its input may carry it, and a decision shows it to others.
+    await startedFromUnreadableChat(workflow.id);
+    const runId = await started(owner, workflow.id, 5000);
+    const run = await ended(owner, workflow.id, runId);
+    expect({
+      end: endOf(run),
+      decisions: await decisionsOf(runId),
+      receipts: await receiptsOf(runId),
+    }).toStrictEqual({
+      end: { status: "failed", code: "brain.revoked" },
+      decisions: [],
+      receipts: ["brain.revoked"],
     });
   });
 
