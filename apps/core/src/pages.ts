@@ -12,12 +12,14 @@ import {
   limitErrors,
   computeModuleErrors,
   computePackagesFile,
+  packageModulesFile,
   expressionTypeCheck,
   generatedWorkflowErrors,
   pageIncrementKeys,
   withTypeCheck,
 } from "@grasp-os/compiler";
 import type {
+  PackageTarget,
   AppCodeBuild,
   BuildMetrics,
   CompileTarget,
@@ -52,9 +54,12 @@ import {
   throughCache,
 } from "./build-cache.ts";
 import type { CacheEnv, CacheOutcome } from "./build-cache.ts";
+import { appPackageModules } from "./packages/build.ts";
+import type { PackageBuildEnv } from "./packages/build.ts";
 import type { FrameCode } from "./page-frame.ts";
 import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
-import type { PlatformEnv, PlatformRunner } from "./platform-sandbox.ts";
+import type { PlatformRunner } from "./platform-sandbox.ts";
+import { sessionHost } from "./sandboxed.ts";
 
 /**
  * The longest anything waits for one build. A warm build takes
@@ -118,8 +123,11 @@ interface FailedBuild {
   diagnostics: Diagnostic[];
 }
 
-/** What building reads from core's env: the sandbox, and the cache (in R2, in the EU). */
-export type BuildEnv = PlatformEnv & CacheEnv;
+/**
+ * What building reads from core's env: the sandbox, the cache (in R2, in
+ * the EU), and what bundles an App's approved packages (packages/build.ts).
+ */
+export type BuildEnv = PackageBuildEnv;
 
 /**
  * Which build profile a build is for (spec 19.2.1): `production`, what a
@@ -538,6 +546,26 @@ const cachedBuild = async <Build>(
 };
 
 /**
+ * `select`, handing the build the App's approved packages too, bundled for
+ * `target` (packages/build.ts `appPackageModules`): what its code may
+ * import of npm, and nothing else.
+ */
+const withPackages = async (
+  env: BuildEnv,
+  app: string,
+  target: PackageTarget,
+  select: (files: AppFiles) => AppFiles
+): Promise<(files: AppFiles) => AppFiles> => {
+  // Refused where nothing bounds a build, before anything is read: as
+  // the build itself would be.
+  sessionHost(env);
+  const bundled = await appPackageModules(env, app, target);
+  return bundled === undefined
+    ? select
+    : (files) => ({ ...select(files), [packageModulesFile]: bundled });
+};
+
+/**
  * Builds an App's pages into ES modules and their CSS, in the compiler's
  * isolate. The modules import the release's kit modules (`kitModules(env.ASSETS)`);
  * `pages` in the result names the ones each page needs. A build is
@@ -554,7 +582,7 @@ export const buildPages = async (
     env,
     "page",
     appFiles,
-    buildFiles,
+    await withPackages(env, whose, "browser", buildFiles),
     whose,
     options
   );
@@ -577,7 +605,7 @@ export const buildAppCode = async (
     env,
     "app",
     appFiles,
-    appCodeFiles,
+    await withPackages(env, whose, "worker", appCodeFiles),
     whose,
     options
   );
@@ -609,7 +637,7 @@ export const checkAppCode = async (
     env,
     "app-check",
     appFiles,
-    appCodeAndTestFiles,
+    await withPackages(env, whose, "worker", appCodeAndTestFiles),
     whose,
     options
   );
@@ -630,7 +658,7 @@ export const buildAppTests = async (
     env,
     "app-tests",
     appFiles,
-    appTestFiles,
+    await withPackages(env, whose, "worker", appTestFiles),
     whose
   );
 

@@ -4,25 +4,21 @@ import { z } from "zod";
 
 import { test } from "./contexts.ts";
 import { recordCspViolations } from "./csp.ts";
-import { hostileName, seedHostileArtifact } from "./package-artifact.ts";
 import { serveAttacker } from "./page-app.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
-import { origin } from "./stack.ts";
 
 // Code this origin serves that we didn't write, run in the product page:
 // an HTML injection that can't run inline script points a script element,
-// a worker or a `srcdoc` frame at a page's module or a file of an App's
-// npm packages, which would then run with the page's origin and the
-// person's session. The page's policy names only the frontend's own files
-// (core's security-headers.ts), and core refuses the page's own requests
-// for either path. The page these addresses belong to still loads them
-// in its frame. Each attempt causes a violation on purpose, so this file
-// uses plain `test`.
+// a worker or a `srcdoc` frame at a page's module, which would then run
+// with the page's origin and the person's session. The page's policy
+// names only the frontend's own files (core's security-headers.ts), and
+// core refuses the page's own requests for its path. The page these
+// addresses belong to still loads them in its frame. Each attempt causes
+// a violation on purpose, so this file uses plain `test`.
 
 let attacker: Awaited<ReturnType<typeof serveAttacker>>;
 let builder: Person;
-let artifactAddress: string;
 let app: string;
 
 const plainPage = `import { createFileRoute } from "@tanstack/react-router";
@@ -40,11 +36,6 @@ export const Route = createFileRoute("/")({ component: Plain });
 test.beforeAll(async () => {
   attacker = await serveAttacker();
   ({ builder } = peopleIn("productPageScripts"));
-  const seeded = await seedHostileArtifact(builder, attacker.url);
-  artifactAddress = new URL(
-    `${seeded.address.directory}${hostileName}.js${seeded.address.query}`,
-    origin
-  ).href;
   const { core, api } = apiOf(builder);
   try {
     ({ id: app } = await api.apps.create({ name: "Plain page" }));
@@ -140,7 +131,7 @@ const openPage = async (page: Page): Promise<string> => {
   return address;
 };
 
-test("the product page runs no page module or package file, however its HTML is injected, and its pages still run theirs", async ({
+test("the product page runs no page module, however its HTML is injected, and its pages still run theirs", async ({
   browserName,
   pageOf,
 }) => {
@@ -150,18 +141,17 @@ test("the product page runs no page module or package file, however its HTML is 
 
   const outcomes = {
     module: await attempt(page, moduleAddress),
-    artifact: await attempt(page, artifactAddress),
   };
   const refused = {
     script: "refused",
     worker: "refused",
     fetch: "403",
   };
-  expect(outcomes).toStrictEqual({ module: refused, artifact: refused });
+  expect(outcomes).toStrictEqual({ module: refused });
 
   // Refused by the page's policy, not by some other failure to load: the
   // script element in the page and the one in the `srcdoc` frame (each
-  // document reports its own), and the worker, for both addresses.
+  // document reports its own), and the worker.
   // Firefox runs Playwright's init script in no `srcdoc` frame, so there
   // the frame's violation reaches only the console, which names the frame.
   const framedInConsole = (address: string): number =>
@@ -184,12 +174,8 @@ test("the product page runs no page module or package file, however its HTML is 
   await expect
     .poll(() => ({
       module: reported(moduleAddress),
-      artifact: reported(artifactAddress),
     }))
-    .toStrictEqual({
-      module: { script: 2, worker: 1 },
-      artifact: { script: 2, worker: 1 },
-    });
+    .toStrictEqual({ module: { script: 2, worker: 1 } });
   expect(attacker.hits).toStrictEqual([]);
 });
 

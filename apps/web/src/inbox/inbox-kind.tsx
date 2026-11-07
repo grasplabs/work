@@ -12,7 +12,6 @@ import {
   KeyRoundIcon,
   LockKeyholeIcon,
   MailWarningIcon,
-  PackageIcon,
   PencilLineIcon,
   PlayIcon,
   RocketIcon,
@@ -60,14 +59,13 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
     context: "inbox item kind: a change whose answer was lost",
   }),
   permissionRequest: msg({ message: "Permission", context: "inbox item kind" }),
-  packages: msg({ message: "Packages", context: "inbox item kind" }),
   stoppedSchedule: msg({
     message: "Stopped schedule",
     context: "inbox item kind",
   }),
-  revokedPackage: msg({
-    message: "Malware",
-    context: "inbox item kind: packages revoked as malware",
+  packageNotice: msg({
+    message: "Packages",
+    context: "inbox item kind: what a scan found of approved packages",
   }),
   stoppedEvents: msg({
     message: "Not hearing",
@@ -100,9 +98,8 @@ export const kindIcon: Record<InboxKind, LucideIcon> = {
   heldStart: PlayIcon,
   unknownOutcome: CircleHelpIcon,
   permissionRequest: LockKeyholeIcon,
-  packages: PackageIcon,
   stoppedSchedule: CalendarOffIcon,
-  revokedPackage: ShieldAlertIcon,
+  packageNotice: ShieldAlertIcon,
   stoppedEvents: MailWarningIcon,
   appMessage: BellIcon,
   bindingApproval: LockKeyholeIcon,

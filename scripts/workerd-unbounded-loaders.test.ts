@@ -54,15 +54,10 @@ describe("App code no sandbox bounds, on plain workerd", () => {
     expect(refused).toContain("No sandbox bounds App code here");
   });
 
-  it("refuses to resolve or build an App's packages where no sandbox host is bound", async () => {
-    const refused = [await refusal("resolve"), await refusal("build")];
-    expect(refused).toStrictEqual([
-      expect.stringContaining(
-        "SandboxUnavailableError: No sandbox bounds App code here"
-      ),
-      expect.stringContaining(
-        "SandboxUnavailableError: No sandbox bounds App code here"
-      ),
-    ]);
+  it("refuses to build approved packages where no sandbox host is bound", async () => {
+    const refused = await refusal("build");
+    expect(refused).toContain(
+      "SandboxUnavailableError: No sandbox bounds App code here"
+    );
   });
 });

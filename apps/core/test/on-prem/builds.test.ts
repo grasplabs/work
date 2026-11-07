@@ -1,10 +1,10 @@
+import { npmRegistryOrigin } from "@grasp-os/shared/dependencies";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { packageLimitsOf } from "@grasp-os/shared/packages";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { packageBuilder } from "../../src/packages/builder.ts";
+import { runBuilder } from "../../src/packages/build.ts";
 import { buildPages } from "../../src/pages.ts";
 import { builderOwner, platformRunner } from "../../src/platform-sandbox.ts";
 import { sandboxCpuHeader } from "../../src/sandbox-headers.ts";
@@ -100,18 +100,30 @@ describe("a build task's CPU on-prem", () => {
       "app-test"
     );
     const compiled = asked.length;
-    const inspected = await packageBuilder(watched)("app:cpu-test").inspect(
-      packageLimitsOf({}),
-      []
+    // A lock with nothing to build: the builder answers why, after the
+    // call this asks the sandbox host to start.
+    const answer = await runBuilder(
+      watched,
+      "app:cpu-test",
+      {
+        lockfileVersion: 2,
+        registry: npmRegistryOrigin,
+        requested: {},
+        direct: {},
+        entries: ["missing"],
+        packages: {},
+      },
+      [],
+      "worker"
     );
     expect({
       built: built.ok,
-      inspected,
+      answered: typeof answer === "object" && answer !== null,
       compiler: asked.slice(0, compiled),
       builder: asked.slice(compiled),
     }).toStrictEqual({
       built: true,
-      inspected: [],
+      answered: true,
       // The compiler's call, then the type checker's.
       compiler: [
         String(platformLimits.compilerTaskCpuMs),

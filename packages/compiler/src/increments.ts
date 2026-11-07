@@ -3,7 +3,12 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ClassSite } from "./classes.ts";
 import type { Diagnostic } from "./diagnostic.ts";
 import { buildFiles, declarationFile, sourceCode } from "./inputs.ts";
-import { pageReferences } from "./kit.ts";
+import {
+  bundledPackagesOf,
+  packageModulesByName,
+  packageModulesFile,
+  pageReferences,
+} from "./kit.ts";
 
 // What a pages build keeps of each of its files, so the next build of
 // files that changed only in part reuses it (spec 19.2, GRA-958): each
@@ -114,7 +119,9 @@ export const moduleKey = async ({
  * types may name (`typeFiles`), the build's files and its declarations.
  */
 export const pageSources = (
-  app: Readonly<Record<string, string>>
+  app: Readonly<Record<string, string>>,
+  /** The flat names of the App's approved packages' modules (`packageModulesByName`). */
+  packages: Iterable<string> = []
 ): {
   sources: [string, string][];
   known: string[];
@@ -123,10 +130,11 @@ export const pageSources = (
   const sources = Object.entries(app)
     .filter(([path]) => sourceCode.isFile(path) || path === pageReferences.path)
     .filter(([path]) => !declarationFile.test(path));
+  const approved = [...packages];
   return {
     sources,
-    known: sources.map(([path]) => path),
-    typeFiles: Object.keys(app),
+    known: [...sources.map(([path]) => path), ...approved],
+    typeFiles: [...Object.keys(app), ...approved],
   };
 };
 
@@ -232,8 +240,12 @@ export const pageIncrementKeys = async (
   files: Readonly<Record<string, string>>,
   preview: boolean
 ): Promise<{ modules: Record<string, string> }> => {
-  const app = buildFiles({ ...files });
-  const { sources, known, typeFiles } = pageSources(app);
+  const { [packageModulesFile]: bundled, ...given } = files;
+  const app = buildFiles(given);
+  const { sources, known, typeFiles } = pageSources(
+    app,
+    packageModulesByName(bundledPackagesOf(bundled)).keys()
+  );
   const modules = await Promise.all(
     sources.map(
       async ([path, source]) =>

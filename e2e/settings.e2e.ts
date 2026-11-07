@@ -89,7 +89,7 @@ test("someone who isn't an admin opens Settings on their profile, with only thei
   await expect(page).toHaveURL(/\/settings\/profile$/u);
   await expect(
     page.getByRole("navigation", { name: "Settings" }).getByRole("link")
-  ).toHaveText(["Packages", "Profile", "Security"]);
+  ).toHaveText(["Profile", "Security"]);
 });
 
 test("on a phone the sections are one control above the section", async ({

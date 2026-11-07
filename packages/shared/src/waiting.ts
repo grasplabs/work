@@ -8,8 +8,6 @@ import type {
 } from "./connect.ts";
 import { unknownOutcomeKeySchema } from "./connect.ts";
 import type { DecisionView } from "./decisions.ts";
-import { dependencyDecisionSchema } from "./dependencies.ts";
-import type { DependencyRequest } from "./dependencies.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { HeldStart } from "./held-starts.ts";
 import { identifierSchema } from "./ids.ts";
@@ -18,7 +16,7 @@ import type {
   AppMessageNotification,
   EventsStoppedNotification,
   GapAskedNotification,
-  PackageRevokedNotification,
+  PackageNotification,
   TriggerStoppedNotification,
 } from "./notifications.ts";
 import { grantReviewSchema } from "./permissions.ts";
@@ -43,11 +41,8 @@ export const waitingErrors = defineErrorFamily({
     "That isn't a verdict one of the kinds of what waits takes.",
 });
 
-/** Who an item waits on: the person themself, an admin, or whoever holds a permission. */
-export type WaitsOn =
-  | { type: "person"; userId: string }
-  | { type: "admin" }
-  | { type: "permission"; permission: "dependencies.approve" };
+/** Who an item waits on: the person themself, or an admin. */
+export type WaitsOn = { type: "person"; userId: string } | { type: "admin" };
 
 interface ItemBase {
   /** Stable from one read to the next: its kind and what it is about, e.g. `heldWrite:<id>`. */
@@ -93,15 +88,6 @@ export interface PermissionRequestItem extends ItemBase {
   reviewedVersion: number | null;
 }
 
-/** Packages proposed for an App or workflow, which someone given the permission approves. */
-export interface PackagesItem extends ItemBase {
-  kind: "packages";
-  verdicts: ("approve" | "reject")[];
-  request: DependencyRequest;
-  /** The policy generation it was read under: a decision names it. */
-  policyGeneration: number;
-}
-
 /** A version of an App up for review, for the person who answers for the App: made current under Versions in the App's details. */
 export interface GoLiveItem extends ItemBase {
   kind: "goLive";
@@ -141,11 +127,11 @@ export interface StoppedScheduleItem extends ItemBase {
   notification: TriggerStoppedNotification;
 }
 
-/** Packages of an App or workflow the person builds or approved, revoked as malware: replaced where they build it. */
-export interface RevokedPackageItem extends ItemBase {
-  kind: "revokedPackage";
+/** Packages of an App or workflow the person builds, revoked as malware or newly advised against. */
+export interface PackageNoticeItem extends ItemBase {
+  kind: "packageNotice";
   verdicts: never[];
-  notification: PackageRevokedNotification;
+  notification: PackageNotification;
 }
 
 /**
@@ -203,12 +189,11 @@ export type WaitingItem =
   | HeldWriteItem
   | UnknownOutcomeItem
   | PermissionRequestItem
-  | PackagesItem
   | GoLiveItem
   | WorkflowGoLiveItem
   | OpenQuestionItem
   | StoppedScheduleItem
-  | RevokedPackageItem
+  | PackageNoticeItem
   | StoppedEventsItem
   | AppMessageItem
   | BindingApprovalItem
@@ -226,7 +211,6 @@ export const waitingParts = [
   "held",
   "outcomes",
   "requests",
-  "packages",
   "versions",
   "workflowGoLives",
   "notifications",
@@ -296,12 +280,6 @@ export const waitingVerdictSchema = z.union([
     verdict: z.literal("reject"),
   }),
   z.strictObject({
-    kind: z.literal("packages"),
-    id: identifierSchema,
-    verdict: z.enum(["approve", "reject"]),
-    reviewed: dependencyDecisionSchema.shape.reviewed,
-  }),
-  z.strictObject({
     kind: z.literal("workflowGoLive"),
     workflow: identifierSchema,
     version: z.int().min(1),
@@ -322,8 +300,7 @@ export interface WaitingApi {
   /**
    * Everything that waits on the person now, each kind as its own API
    * lists it for them: permission requests and apps to approve only for
-   * the organization's own admins, packages only for whoever holds
-   * `dependencies.approve`. Reading it marks nothing read.
+   * the organization's own admins. Reading it marks nothing read.
    */
   list: () => Promise<WaitingFeed>;
   /**

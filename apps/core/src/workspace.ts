@@ -3797,8 +3797,30 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * Tells the agent of `personId`'s own chat how the packages it asked for
+   * there were decided (packages/requests.ts), as `connectionDecided` does
+   * a connection: a notice for its turn under way or its next, and the
+   * page reads what waits again. No turn starts.
+   */
+  async packagesDecided(
+    chatId: unknown,
+    personId: string,
+    decision: "approved" | "denied"
+  ): Promise<void> {
+    const chat = this.#ownChat(chatId, personId);
+    await this.#note(
+      chat.id,
+      decision === "approved"
+        ? "The npm packages you asked for were approved: code that imports them builds now."
+        : "The npm packages you asked for were denied. Don't ask for them again unless the person says so."
+    );
+    this.heldChanged(chat.id);
+  }
+
+  /**
    * Refuses a chat that isn't `personId`'s own, as if there were none: for
-   * what core keeps of a chat elsewhere (its connection requests).
+   * what core keeps of a chat elsewhere (its connection and package
+   * requests).
    */
   requireChat(chatId: unknown, personId: string): ChatId {
     return this.#ownChat(chatId, personId).id;

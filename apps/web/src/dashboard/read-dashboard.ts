@@ -91,7 +91,7 @@ export const readWaiting = async (
     const listed = read.items.flatMap((item) =>
       item.kind === "openQuestion" ||
       item.kind === "stoppedSchedule" ||
-      item.kind === "revokedPackage" ||
+      item.kind === "packageNotice" ||
       item.kind === "stoppedEvents" ||
       item.kind === "appMessage"
         ? [item.notification]
@@ -146,13 +146,6 @@ export const readWaiting = async (
     ),
     versions: partOf(feed, "versions", (read) => ofKind(read, "goLive")),
     requests,
-    dependencies: partOf(feed, "packages", (read) => {
-      const items = ofKind(read, "packages");
-      return {
-        policyGeneration: items[0]?.policyGeneration ?? 0,
-        requests: items.map(({ request }) => request),
-      };
-    }),
     heldStarts: partOf(feed, "heldStarts", (read) =>
       ofKind(read, "heldStart").map(({ start }) => start)
     ),

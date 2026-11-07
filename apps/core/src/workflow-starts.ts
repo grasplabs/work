@@ -273,7 +273,7 @@ export interface StartAuthorization {
    */
   holds: SQL;
   /**
-   * That the approved graph its version seals is still approved or retired
+   * That the graph its version seals is still approved
    * (GRA-665), as SQL, part of `holds`: read on its own as the admitting
    * batch runs, to say a refusal was this one. Always true for a version
    * that seals none.

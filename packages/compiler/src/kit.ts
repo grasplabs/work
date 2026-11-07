@@ -203,13 +203,117 @@ export const packageModulePrefix = "pkg~";
  * of its own, so no package module is ever an SDK, runner or workflow
  * module (GRA-665).
  */
-export const packageModuleName = (entry: string): string =>
+export const packageModuleName = (entry: string, graphHash?: string): string =>
   // `~` as `@` first, so `~` stands only for `/`: no two entries (`a~b` and
   // `a/b`, say) share a name, in only the characters a release artifact's
   // path takes. An entry (`packageEntrySchema`) has `@` only as its first
   // character, a scope's, and never starts with `~`, so an `@` after the
-  // first is always a `~`.
-  `${packageModulePrefix}${entry.replaceAll("~", "@").replaceAll("/", "~")}.js`;
+  // first is always a `~`. An App's carries its graph's hash, so what
+  // serves or loads a build can tell whose approval it stands on
+  // (`graphsOfModules`).
+  `${packageModulePrefix}${graphHash === undefined ? "" : `${graphHash}~`}${entry.replaceAll("~", "@").replaceAll("/", "~")}.js`;
+
+const appPackageModule = /^pkg~(?<graph>[0-9a-f]{64})~/u;
+
+/** The graphs an App build's modules (`names`) bundle approved packages of. */
+export const graphsOfModules = (names: Iterable<string>): string[] => [
+  ...new Set(
+    [...names].flatMap((name) => {
+      const graph = appPackageModule.exec(name)?.groups?.graph;
+      return graph === undefined ? [] : [graph];
+    })
+  ),
+];
+
+/**
+ * Where core hands an App's page or server build its approved packages,
+ * each entry already bundled for where it runs (packages/build.ts in
+ * core), as JSON `{ graphHash, modules: { [entry]: code } }`: never an
+ * App file, and part of what the build is cached by, as every file is.
+ */
+export const packageModulesFile = ".grasp/package-modules.json";
+
+/**
+ * The modules of React and React DOM the kit provides, by specifier: a
+ * page's packages import these from the kit, never a copy of their own.
+ */
+export const kitPeers = [
+  "react",
+  "react/jsx-runtime",
+  "react/compiler-runtime",
+  "react-dom",
+  "react-dom/client",
+];
+
+/** An App build's approved packages, read from `packageModulesFile`. */
+export interface BundledPackages {
+  graphHash: string;
+  /** Each entry's module code. */
+  modules: Record<string, string>;
+}
+
+/**
+ * The approved packages `text` (`packageModulesFile`) hands a build;
+ * none for a build without, or for text that isn't in its shape.
+ */
+export const bundledPackagesOf = (
+  text: string | undefined
+): BundledPackages | undefined => {
+  if (text === undefined) {
+    return undefined;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const graphHash: unknown = Reflect.get(value, "graphHash");
+  const modules: unknown = Reflect.get(value, "modules");
+  if (
+    typeof graphHash !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(graphHash) ||
+    typeof modules !== "object" ||
+    modules === null
+  ) {
+    return undefined;
+  }
+  const entries = Object.entries(modules).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string"
+  );
+  return { graphHash, modules: Object.fromEntries(entries) };
+};
+
+/** The entries `text` (`packageModulesFile`) hands a build, by name. */
+export const packageEntriesOf = (text: string | undefined): string[] =>
+  Object.keys(bundledPackagesOf(text)?.modules ?? {});
+
+/** Each bundled entry, by the flat name its module is loaded under. */
+export const packageModulesByName = (
+  bundled: BundledPackages | undefined
+): Map<string, string> =>
+  new Map(
+    Object.entries(bundled?.modules ?? {}).map(([entry, code]) => [
+      packageModuleName(entry, bundled?.graphHash),
+      code,
+    ])
+  );
+
+/** The flat name of `specifier`'s module among `known`, if it is an approved package's. */
+export const packageModuleIn = (
+  known: ReadonlySet<string>,
+  specifier: string
+): string | undefined => {
+  const suffix = packageModuleName(specifier).slice(packageModulePrefix.length);
+  return [...known].find(
+    (name) =>
+      appPackageModule.test(name) &&
+      name.slice(packageModulePrefix.length + 65) === suffix
+  );
+};
 
 /**
  * Where core names, among a compute build's files, the approved package

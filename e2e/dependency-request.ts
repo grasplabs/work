@@ -1,63 +1,63 @@
 /**
- * A request for an App's npm packages, as core's resolver leaves one, for
+ * A request for an App's npm packages, as the chat's agent leaves one, for
  * the e2e stack. Resolving reaches the npm registry through connect, which
- * a local stack can't point at a fake (package-artifact.ts says the same),
- * and nothing else may hand core a graph: so the request is written to
- * core's database as the resolver would have proposed it, waiting, or
- * approved as a person's decision leaves it.
+ * a local stack can't point at a fake, and nothing else may hand core a
+ * lock: so the request is written to core's database as the agent's
+ * resolve would have proposed it, waiting in `chat`.
  */
-import {
-  canonicalGraph,
-  dependencyGraphHash,
-  dependencySummaryDirect,
-  packageKey,
-} from "@grasp-os/shared/dependencies";
-import type {
-  DependencyGraph,
-  DependencyTarget,
-} from "@grasp-os/shared/dependencies";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { npmRegistryOrigin } from "@grasp-os/shared/dependencies";
+import { graspLockHash } from "@grasp-os/shared/packages";
+import type { GraspLock } from "@grasp-os/shared/packages";
 
 import { execute, quoted } from "./connections-seed.ts";
-
-/** The policy generation now, as core reads it: none yet is 0. */
-const generationNow =
-  "(SELECT COALESCE(MAX(generation), 0) FROM dependency_policy)";
 
 /** Writes the request; returns its ID and its graph's hash. */
 export const seedDependencyRequest = async ({
   app,
   requestedBy,
+  chat,
   purpose,
-  targets,
-  graph,
-  approved,
+  packages,
 }: {
   app: string;
   requestedBy: string;
+  chat: string;
   purpose: string;
-  targets: DependencyTarget[];
-  graph: DependencyGraph;
-  approved: boolean;
+  /** Each package, by name: its exact version, with no dependencies of its own. */
+  packages: Record<string, string>;
 }): Promise<{ id: string; graphHash: string }> => {
-  const canonical = canonicalGraph(graph);
-  const graphHash = await dependencyGraphHash(canonical);
+  const lock: GraspLock = {
+    lockfileVersion: 2,
+    registry: npmRegistryOrigin,
+    requested: packages,
+    direct: packages,
+    entries: Object.keys(packages),
+    packages: Object.fromEntries(
+      Object.entries(packages).map(([name, version]) => [
+        `${name}@${version}`,
+        {
+          name,
+          version,
+          integrity: `sha512-${"A".repeat(86)}==`,
+          license: "MIT",
+          publishedAt: "2026-01-01T00:00:00.000Z",
+          dependencies: {},
+        },
+      ])
+    ),
+  };
+  const graphHash = await graspLockHash(lock);
   const id = crypto.randomUUID();
-  const now = Date.now();
-  const snapshot = canonicalJson({
-    graph: canonical,
-    findings: [],
-    refused: [],
+  const via = JSON.stringify({
+    type: "agent",
+    agentId: "chat-agent",
+    onBehalfOf: requestedBy,
+    workspaceId: `person:${requestedBy}`,
+    chatId: chat,
   });
-  const summary = JSON.stringify({
-    direct: canonical.direct.slice(0, dependencySummaryDirect).map(packageKey),
-    findings: [],
-  });
-  const decided = approved
-    ? `${quoted(requestedBy)}, ${now}, ${generationNow}`
-    : "NULL, NULL, NULL";
+  const count = Object.keys(packages).length;
   await execute(
-    `INSERT INTO dependency_requests (id, subject_type, subject_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation, decided_by, decided_at, decided_generation, reason) VALUES (${quoted(id)}, 'app', ${quoted(app)}, 'rev-1', ${quoted(graphHash)}, ${quoted(JSON.stringify(targets.toSorted()))}, ${quoted(purpose)}, ${quoted(snapshot)}, ${quoted(summary)}, ${canonical.direct.length}, ${canonical.packages.length}, 0, 0, NULL, ${quoted(approved ? "approved" : "pending")}, ${quoted(requestedBy)}, NULL, ${now}, ${generationNow}, ${decided}, NULL)`,
+    `INSERT INTO dependency_requests (id, subject_type, subject_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation) VALUES (${quoted(id)}, 'app', ${quoted(app)}, '', ${quoted(graphHash)}, '[]', ${quoted(purpose)}, ${quoted(JSON.stringify({ lock, findings: [], removed: [] }))}, ${quoted(JSON.stringify({ direct: [], findings: [] }))}, ${count}, ${count}, 0, 0, NULL, 'pending', ${quoted(requestedBy)}, ${quoted(via)}, ${Date.now()}, 0)`,
     "core"
   );
   return { id, graphHash };

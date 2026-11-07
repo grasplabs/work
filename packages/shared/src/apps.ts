@@ -175,7 +175,6 @@ export const reservedAppLinks: ReadonlySet<string> = new Set([
   "models",
   "notifications",
   "onboarding",
-  "package-artifacts",
   "projects",
   "rpc",
   "page-frame",

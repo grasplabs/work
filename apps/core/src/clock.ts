@@ -21,7 +21,6 @@ import { sweepChannelSignals } from "./channels/signals.ts";
 import { sweepStephenRequests } from "./channels/stephen-requests.ts";
 import { drainAuditOutboxesNoticing } from "./connector-source-notices.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
-import { recheckMalware } from "./dependencies/requests.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { sweepGuestChats } from "./guests.ts";
 import { sweepHeldStartInputs } from "./held-starts.ts";
@@ -33,7 +32,7 @@ import { sweepLegacyPreviewStores } from "./legacy-preview-stores.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
 import { checkReadings } from "./onboarding/documents.ts";
-import { sweepPackageFiles } from "./packages/cleanup.ts";
+import { rescanPackages } from "./packages/rescan.ts";
 import { sweepPageFrames } from "./page-frame.ts";
 import { sweepBuilds } from "./pages.ts";
 import { retryErasures } from "./person-erasure.ts";
@@ -277,18 +276,9 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepSpokenLines,
   },
-  {
-    name: "packages.files",
-    period: "quarterHour",
-    run: sweepPackageFiles,
-  },
-  // Approved packages checked again for malware reported since, a bounded
-  // number of graphs a run (src/dependencies/requests.ts).
-  {
-    name: "dependencies.malware",
-    period: "quarterHour",
-    run: recheckMalware,
-  },
+  // Approved packages scanned again for malware and advisories reported
+  // since, a few a run (src/packages/rescan.ts).
+  { name: "packages.rescan", period: "quarterHour", run: rescanPackages },
   { name: "apps.releases", period: "quarterHour", run: sweepReleases },
   // Model usage past its retention (src/model-usage.ts).
   { name: "models.usage", period: "quarterHour", run: sweepModelUsage },

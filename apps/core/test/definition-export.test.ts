@@ -1,11 +1,9 @@
 import { generatedWorkflowEntry } from "@grasp-os/compiler";
 import { readAppManifest } from "@grasp-os/sdk/host";
 import { canonicalText } from "@grasp-os/shared/json";
-import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -13,9 +11,7 @@ import { publishVersion } from "../src/app-publish.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { exportAppDefinition } from "../src/definition-export.ts";
-import { grantApprover } from "../src/dependencies/approvers.ts";
-import { policyGeneration } from "../src/dependencies/policy.ts";
-import { decideDependency } from "../src/dependencies/requests.ts";
+import { decideDependency } from "../src/packages/requests.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
 import { loadWorkflowBuild } from "../src/workflow-builds.ts";
 import {
@@ -141,18 +137,15 @@ export const total = compute({
 });
 `;
 
-/** `by`'s request for workflow `id`'s packages `dependencies`, approved by `admin`. */
+/** `by`'s request for workflow `id`'s packages `dependencies`, approved by `by`, its builder. */
 const approvedFor = async (
   by: Acting,
-  admin: Identity,
   id: string,
   intent: { dependencies: Record<string, string>; entries?: string[] }
 ) => {
-  const { request } = await resolveDependencies(env, by, {
+  const request = await resolveDependencies(env, by, {
     workflow: id,
-    sourceRevision: "rev-1",
     purpose: "Double the quarter's total.",
-    targets: ["computation"],
     ...intent,
     // As a resolve takes them: name and range pairs.
     dependencies: Object.entries(intent.dependencies).map(([name, range]) => ({
@@ -160,12 +153,9 @@ const approvedFor = async (
       range,
     })),
   });
-  await decideDependency(env, admin, request.id, {
+  await decideDependency(env, by, request.id, {
     approved: true,
-    reviewed: {
-      graphHash: request.graphHash,
-      policyGeneration: await policyGeneration(drizzle(env.DB)),
-    },
+    graphHash: request.graphHash,
   });
   return request.graphHash;
 };
@@ -177,8 +167,6 @@ const approvedFor = async (
 const appSealingPackage = async (license: string) => {
   const fixture = await appWith(files(), "Requests");
   const { owner, app } = fixture;
-  const admin = await person("admin");
-  await grantApprover(env, admin, { type: "person", userId: admin.userId });
   const pkg = `double-${unique()}`;
   await publish({
     name: pkg,
@@ -187,7 +175,7 @@ const appSealingPackage = async (license: string) => {
     files: { "index.js": "export const double = (value) => value * 2;" },
   });
   const workflow = await createWorkflowResource(env, owner, `p-${unique()}`);
-  const graphHash = await approvedFor(owner, admin, workflow.id, {
+  const graphHash = await approvedFor(owner, workflow.id, {
     dependencies: { [pkg]: "^1.0.0" },
   });
   await publishWorkflowVersion(
@@ -209,7 +197,7 @@ const appSealingPackage = async (license: string) => {
   });
   await seal(fixture);
   await publishVersion(env, owner, app, 1);
-  return { owner, app, admin, pkg, workflow, graphHash };
+  return { owner, app, pkg, workflow, graphHash };
 };
 
 /** A refusal's code and details, as these tests read them. */
@@ -421,7 +409,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
   });
 
   it("carries a version's approved packages, which publish again only once the graph is approved for the workflow publishing them", async () => {
-    const { owner, app, admin, pkg, workflow, graphHash } =
+    const { owner, app, pkg, workflow, graphHash } =
       await appSealingPackage("MIT");
 
     const exported = await exportAppDefinition(env, owner, app);
@@ -456,8 +444,8 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     // The exported graph is never taken as approved for another workflow.
     const unapproved = await outcome(publishCopy(packages.graphHash));
     // Asked for at the lock's exact versions, and approved anew.
-    const asked = await approvedFor(builder, admin, copy.id, {
-      dependencies: packages.lock?.direct ?? {},
+    const asked = await approvedFor(builder, copy.id, {
+      dependencies: packages.lock.direct,
       entries: [...packages.entries],
     });
     const republished = await publishCopy(asked);
@@ -468,12 +456,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       republished.manifestHash
     );
     expect({
-      packages: {
-        ...packages,
-        lock: packages.lock === null ? null : { direct: packages.lock.direct },
-      },
-      lockPinsNoBuild:
-        packages.lock !== null && !("artifacts" in packages.lock),
+      packages: { ...packages, lock: { direct: packages.lock.direct } },
       unapproved,
       sameGraph: asked === packages.graphHash,
       sealed: loaded.packages,
@@ -483,7 +466,6 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
         entries: [pkg],
         lock: { direct: { [pkg]: "1.0.0" } },
       },
-      lockPinsNoBuild: true,
       unapproved: "dependency.approval_required",
       sameGraph: true,
       sealed: { graphHash },
@@ -494,7 +476,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     const { owner, app, workflow } = await appSealingPackage("MIT");
     const exportWithLock = async (lock: string) => {
       await env.DB.prepare(
-        "UPDATE dependency_locks SET lock = ? WHERE subject_type = 'workflow' AND subject_id = ?"
+        "UPDATE dependency_requests SET snapshot = ? WHERE subject_type = 'workflow' AND subject_id = ?"
       )
         .bind(lock, workflow.id)
         .run();

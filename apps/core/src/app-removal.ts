@@ -21,6 +21,7 @@ import {
   permissions,
 } from "./db/core/schema.ts";
 import { forgetAppEntry } from "./knowledge/apps-collection.ts";
+import { withdrawnWith } from "./packages/approvals.ts";
 import { requireNotStaff } from "./sharing.ts";
 import {
   stopsUnsettled,
@@ -254,6 +255,13 @@ export const removeApp = async (
       detail: { name: found.name },
     }),
     ...endedWith(db, found.id, by.userId, now),
+    ...withdrawnWith(
+      db,
+      actorOf(by),
+      { type: "app", id: found.id },
+      removedSql(found.id),
+      now
+    ),
   ]);
   if (removed === undefined) {
     throw appErrors.create("app.conflict");

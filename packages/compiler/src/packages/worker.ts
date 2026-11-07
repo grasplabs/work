@@ -2,148 +2,85 @@ import { chunkBytes, readWhole } from "@grasp-os/shared/chunks";
 import type { ChunkRead } from "@grasp-os/shared/chunks";
 /**
  * The package builder, as it runs in its own isolate (a Dynamic Worker
- * core starts for each use, see `startPackageBuilder`): no bindings, no
- * network, no Node.js compatibility, and a CPU limit. It is handed npm
- * tarballs as bytes, checks each against its integrity hash, unpacks it
- * in memory and reads or bundles it; nothing it is handed ever runs. This
- * is the quarantine a package's bytes stay in until a person approved
- * them, and where approved ones are built.
+ * core starts for each build, see `startPackageBuilder`): no bindings, no
+ * network, no Node.js compatibility, and a CPU limit. It is handed an
+ * approved lock and its tarballs, which core checked against the lock's
+ * integrity, and bundles them (build.ts); nothing it is handed ever runs.
  *
  * esbuild is its WebAssembly build, loaded with the isolate as a compiled
  * module (`esbuild.wasm`, from core's static assets): this isolate can't
  * compile WebAssembly from bytes, and doesn't need to.
  */
 import type {
+  GraspLock,
   PackageBuildAnswer,
-  PackageInspection,
-  PackageLimits,
   PackageTarball,
 } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { assertNoBindings } from "../authority.ts";
-import { buildTarget } from "./build.ts";
-import type { BuildRequest } from "./build.ts";
+import { buildLock } from "./build.ts";
+import type { PackageTarget } from "./build.ts";
 import esbuildWasm from "./esbuild.wasm";
-import { inspectPackage } from "./inspect.ts";
-
-/** What core asks the builder to inspect. */
-export interface InspectRequest {
-  limits: PackageLimits;
-  packages: PackageTarball[];
-}
-
-export type { BuildRequest } from "./build.ts";
 
 /** A tarball as the on-prem sandbox host hands it over: its size, not its bytes. */
-export type TarballHeader = Omit<PackageTarball, "tarball"> & { size: number };
+export interface TarballHeader {
+  key: string;
+  size: number;
+}
 
-/**
- * Writes the next chunk of the artifact's file at `path`, at most
- * `chunkBytes` of it.
- */
-type WriteChunk = (path: string, chunk: Uint8Array) => Promise<unknown>;
+/** Writes the next chunk of entry `entry`'s module, at most `chunkBytes`. */
+type WriteChunk = (entry: string, chunk: Uint8Array) => Promise<unknown>;
 
-/** The most tarballs one request may hand over. */
-const maxHeaders = 10_000;
-
-/**
- * Each tarball `headers` names, read through `read` a chunk at a time,
- * whole and in order. A chunk that isn't bytes, is empty or runs past the
- * tarball's size fails the call, as a tarball that doesn't match its
- * integrity would.
- */
-const readTarballs = async (
-  headers: readonly TarballHeader[],
-  read: ChunkRead
-): Promise<PackageTarball[]> => {
-  if (headers.length > maxHeaders) {
-    throw new TypeError("The tarballs aren't in the expected shape.");
-  }
-  const tarballs: PackageTarball[] = [];
-  for (const { key, name, version, integrity, size } of headers) {
-    if (!Number.isSafeInteger(size) || size <= 0) {
-      throw new TypeError(`The tarball of ${key} has no size.`);
-    }
-    // In order: each tarball after the one before.
-    // oxlint-disable-next-line no-await-in-loop
-    const tarball = await readWhole(read, key, size);
-    tarballs.push({ key, name, version, integrity, tarball });
-  }
-  return tarballs;
-};
+const encoder = new TextEncoder();
 
 export default class PackageBuilder extends WorkerEntrypoint {
-  /**
-   * Unpacks and reads each tarball, one after another, without running
-   * any of it: what each says it needs, and why it can't be used.
-   */
+  /** Builds each entry of `lock` from `tarballs` (build.ts). */
   // RPC exposes prototype methods only, so these can't be static.
-  async inspect({
-    limits,
-    packages,
-  }: InspectRequest): Promise<PackageInspection[]> {
+  async build(
+    lock: GraspLock,
+    tarballs: PackageTarball[],
+    target: PackageTarget
+  ): Promise<PackageBuildAnswer> {
     assertNoBindings(this.env, this.ctx.props, "The package builder");
-    const inspected: PackageInspection[] = [];
-    for (const tarball of packages) {
-      // One at a time: each holds its unpacked files in memory.
-      // oxlint-disable-next-line no-await-in-loop
-      inspected.push(await inspectPackage(tarball, limits));
-    }
-    return inspected;
-  }
-
-  /** Builds one target of an approved lock (build.ts). */
-  async build(request: BuildRequest): Promise<PackageBuildAnswer> {
-    assertNoBindings(this.env, this.ctx.props, "The package builder");
-    return await buildTarget(request, esbuildWasm);
+    return await buildLock(lock, tarballs, target, esbuildWasm);
   }
 
   /**
-   * `inspect`, with the tarballs read through `read`: on the on-prem
-   * sandbox host, where one message can't carry both this module and a
-   * graph's tarballs (apps/core/src/packages/builder.ts).
-   */
-  async inspectRead(
-    limits: PackageLimits,
-    headers: TarballHeader[],
-    read: ChunkRead
-  ): Promise<PackageInspection[]> {
-    // Before a tarball is read: the isolate is checked as it is called.
-    assertNoBindings(this.env, this.ctx.props, "The package builder");
-    return await this.inspect({
-      limits,
-      packages: await readTarballs(headers, read),
-    });
-  }
-
-  /**
-   * `build`, with the tarballs read through `read` and the artifact's
-   * files written back through `write`, a chunk at a time: what it answers
-   * has no files of its own, as the artifact may be larger than a
-   * message.
+   * `build`, with the tarballs read through `read` and each module written
+   * back through `write`, a chunk at a time, on the on-prem sandbox host,
+   * where one message carries neither (apps/core/src/packages/builder.ts):
+   * the answer's modules are then empty.
    */
   async buildRead(
-    request: Omit<BuildRequest, "packages"> & { packages: TarballHeader[] },
+    lock: GraspLock,
+    headers: TarballHeader[],
     read: ChunkRead,
-    write: WriteChunk
+    write: WriteChunk,
+    target: PackageTarget
   ): Promise<PackageBuildAnswer> {
     // Before a tarball is read: the isolate is checked as it is called.
     assertNoBindings(this.env, this.ctx.props, "The package builder");
-    const answer = await this.build({
-      ...request,
-      packages: await readTarballs(request.packages, read),
-    });
+    const tarballs: PackageTarball[] = [];
+    for (const { key, size } of headers) {
+      // In order: each tarball after the one before.
+      // oxlint-disable-next-line no-await-in-loop
+      tarballs.push({ key, tarball: await readWhole(read, key, size) });
+    }
+    const answer = await this.build(lock, tarballs, target);
     if (!answer.ok) {
       return answer;
     }
-    for (const [path, bytes] of Object.entries(answer.files)) {
+    const modules: Record<string, string> = {};
+    for (const [entry, text] of Object.entries(answer.modules)) {
+      const bytes = encoder.encode(text);
       for (let at = 0; at < bytes.byteLength; at += chunkBytes) {
-        // In order: core appends each chunk to the file's last.
+        // In order: core appends each chunk to the module's last.
         // oxlint-disable-next-line no-await-in-loop
-        await write(path, bytes.slice(at, at + chunkBytes));
+        await write(entry, bytes.slice(at, at + chunkBytes));
       }
+      modules[entry] = "";
     }
-    return { ...answer, files: {} };
+    return { ok: true, modules, refused: answer.refused };
   }
 }

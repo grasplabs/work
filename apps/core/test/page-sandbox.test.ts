@@ -417,18 +417,11 @@ describe(
         [{ files: {}, options: {} }],
       ],
       [
-        "the package builder's inspection",
-        packageBuilderCode,
-        packageBuilderSettings,
-        "inspect",
-        [{ limits: {}, packages: [] }],
-      ],
-      [
         "the package builder's build",
         packageBuilderCode,
         packageBuilderSettings,
         "build",
-        [{}],
+        [{ entries: [], packages: {} }, [], "worker"],
       ],
     ] as const)(
       "refuse %s in an isolate handed a binding",
@@ -440,44 +433,34 @@ describe(
       }
     );
 
-    it.each([
-      [
-        "an inspection's",
-        "inspectRead",
-        (read: () => Promise<Uint8Array>) => [{}, [header], read],
-      ],
-      [
-        "a build's",
-        "buildRead",
-        (read: () => Promise<Uint8Array>) => [
-          { packages: [header] },
-          read,
-          async () => {
-            // Nothing is written.
-          },
-        ],
-      ],
-    ] as const)(
-      "refuse %s tarballs in an isolate handed a binding before reading a byte of them",
-      async (_case, method, argsWith) => {
-        let reads = 0;
-        const read = async (): Promise<Uint8Array> => {
-          reads += 1;
-          return await Promise.resolve(new Uint8Array(0));
-        };
-        const bound = env.LOADER.load(
-          loaderCode(
-            await packageBuilderCode(env.ASSETS),
-            packageBuilderSettings,
-            { DB: "a credential" }
-          )
-        ).getEntrypoint();
-        await expect(refusalOf(bound, method, argsWith(read))).resolves.toBe(
-          "refused"
-        );
-        expect(reads).toBe(0);
-      }
-    );
+    it("refuses a build's tarballs in an isolate handed a binding before reading a byte of them", async () => {
+      let reads = 0;
+      const read = async (): Promise<Uint8Array> => {
+        reads += 1;
+        return await Promise.resolve(new Uint8Array(0));
+      };
+      const bound = env.LOADER.load(
+        loaderCode(
+          await packageBuilderCode(env.ASSETS),
+          packageBuilderSettings,
+          { DB: "a credential" }
+        )
+      ).getEntrypoint();
+      const refused = await refusalOf(bound, "buildRead", [
+        { entries: [header.key], packages: {} },
+        [{ key: header.key, size: 1 }],
+        read,
+        async () => {
+          // Nothing is written.
+        },
+        "worker",
+      ]);
+
+      expect({ refused, reads }).toStrictEqual({
+        refused: "refused",
+        reads: 0,
+      });
+    });
 
     it("refuses to compile behind an entrypoint handed props", async () => {
       const code = loaderCode(

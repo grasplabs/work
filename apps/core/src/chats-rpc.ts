@@ -31,6 +31,7 @@ import type {
   DraftDataModel,
   IndexUse,
 } from "@grasp-os/shared/data-model";
+import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -76,6 +77,7 @@ import { withReferencesText } from "./draft-references.ts";
 import { draftReferences } from "./draft-runs.ts";
 import { workspace } from "./durable-objects.ts";
 import { modelSettings, modelEffortsOf } from "./models.ts";
+import { chatPackageRequests } from "./packages/requests.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
 import { leaseFor } from "./page-delivery.ts";
@@ -1080,6 +1082,22 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   /** The person's own chat `chatId`, or refused as if there were none. */
   async #ownChat(userId: string, chatId: unknown): Promise<ChatId> {
     return await this.#chatsOf(userId).requireChat(chatIdOf(chatId), userId);
+  }
+
+  /**
+   * The npm packages the chat's agent asked for that wait for a decision,
+   * each on a card the person decides with `dependencies.decide`.
+   */
+  async packageRequests(chatId: string): Promise<DependencyRequest[]> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await chatPackageRequests(
+          this.#env,
+          person.userId,
+          await this.#ownChat(person.userId, chatId)
+        )
+    );
   }
 
   async connectionRequests(chatId: string): Promise<ChatConnectionRequest[]> {

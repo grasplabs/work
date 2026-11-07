@@ -2,7 +2,7 @@ import { appWebhookEvents } from "@grasp-os/shared/app-webhooks";
 import type { AppWebhookEvent } from "@grasp-os/shared/app-webhooks";
 import type { AgentProposer } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
-import type { DependencySummary } from "@grasp-os/shared/dependencies";
+import type { DependencyFinding } from "@grasp-os/shared/dependencies";
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeSignalKinds } from "@grasp-os/shared/knowledge-signals";
 import type {
@@ -1143,6 +1143,13 @@ export const sdkReleaseManifests = sqliteTable(
      * which this release refuses as of another format.
      */
     sealId: text("seal_id"),
+    /**
+     * The hashes of the approved package graphs the release bundles, in
+     * its server modules and its pages alike: what keeps a replaced
+     * approval in force (packages/approvals.ts). Null for a release sealed
+     * before it was recorded, taken as keeping every graph of its App.
+     */
+    packageGraphs: text("package_graphs", { mode: "json" }).$type<string[]>(),
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
 );
@@ -2543,19 +2550,24 @@ export const workflowDecisionConfirmations = sqliteTable(
 );
 
 /**
- * npm packages proposed for an App (src/dependencies/requests.ts), one row
- * per request. What was asked never changes: the App, where the packages
- * would run (`targets`, a sorted JSON array), the graph's hash, the whole
- * review (`snapshot`: the graph, findings and refusals, as JSON, up to
- * 512 KiB, so no list reads it) and the little of it a list shows
- * (`summary`). `source_revision` says which revision of the source the
- * graph was resolved from: provenance, not part of what is approved.
- * `status` moves from `pending` once, in one conditional update, to a
- * person's decision (`approved`, `denied`), which keeps who made it, when,
- * why and under which policy generation. A decided row is never deleted;
- * a pending one is deleted when another proposal for the App takes its
- * place, and its audit event keeps its ID and hash. An approval is this
- * row: another decision on the same graph is another request.
+ * npm packages asked for an App or a workflow (src/packages/requests.ts),
+ * one row per request. What was asked never changes: the subject, the
+ * graph's hash, and the review (`snapshot`: the lock and its findings, as
+ * JSON). `status` moves from `pending` once, in one conditional update,
+ * to a builder's decision (`approved`, `denied`), which keeps who made it,
+ * when and why. A subject has one current approval: approving another
+ * retires it (`retired`), still in force for what was built on it; the
+ * clock's rescan revokes every row of a graph reported as malware, and an
+ * App's removal or a workflow's deletion withdraws its own (`revoked`,
+ * `ended_at`, `ended_reason`). A decided row is never
+ * deleted; a pending one is deleted when another request for the subject
+ * takes its place, and its audit event keeps its ID and hash.
+ *
+ * Unused since GRA-1636, kept for a rollback to the release before and
+ * dropped by GRA-1547 (expand, then contract): `source_revision`,
+ * `targets`, `summary`, `refused`, `previous`, `policy_generation`,
+ * `decided_generation`, `ended_by`, `ended_generation`, written only as
+ * the NOT NULL ones must be.
  */
 export const dependencyRequests = sqliteTable(
   "dependency_requests",
@@ -2573,7 +2585,9 @@ export const dependencyRequests = sqliteTable(
     targets: text().notNull(),
     purpose: text().notNull(),
     snapshot: text().notNull(),
-    summary: text({ mode: "json" }).$type<DependencySummary>().notNull(),
+    summary: text({ mode: "json" })
+      .$type<{ direct: string[]; findings: DependencyFinding[] }>()
+      .notNull(),
     /** How many packages it asks for directly, and brings in all. */
     direct: integer().notNull(),
     packages: integer().notNull(),
@@ -2589,6 +2603,14 @@ export const dependencyRequests = sqliteTable(
     requestedVia: text("requested_via", {
       mode: "json",
     }).$type<AgentProposer>(),
+    /**
+     * Every chat whose agent asked for it, the first included: each shows
+     * its card and is told the decision. Null for a request asked before
+     * it was recorded, whose one chat is `requested_via`'s.
+     */
+    requestedIn: text("requested_in", {
+      mode: "json",
+    }).$type<AgentProposer[]>(),
     requestedAt: timestamp("requested_at").notNull(),
     /** The policy generation it was asked under. */
     policyGeneration: integer("policy_generation").notNull(),
@@ -2607,11 +2629,16 @@ export const dependencyRequests = sqliteTable(
     endedGeneration: integer("ended_generation"),
     endedReason: text("ended_reason"),
     /**
-     * When an approval in force was last found clean of malware reported
-     * since (OSV.dev and the registry's advisories), by the periodic
-     * re-check (`recheckMalware`, requests.ts): null until it was.
+     * When an approval was last scanned for malware and advisories by the
+     * clock (src/packages/rescan.ts): null until it was.
      */
     malwareCheckedAt: timestamp("malware_checked_at"),
+    /**
+     * The IDs of the advisories known of an approval's packages: those its
+     * review showed as it was approved, and each a rescan told its
+     * builders of since. Null while it isn't approved.
+     */
+    advisories: text({ mode: "json" }).$type<string[]>(),
   },
   (table) => [
     // One request waits per subject: a second pending row is refused.
@@ -2680,6 +2707,9 @@ export const adminCommands = sqliteTable("admin_commands", {
 });
 
 /**
+ * Unused since GRA-1636: nothing reads or writes it; kept for a rollback
+ * to the release before, and dropped by GRA-1547 (expand, then contract).
+ *
  * The dependency policy generation, in its one row (`id` is `policy`;
  * none yet counts as 0). It goes up, in the batch that makes the change,
  * each time who holds `dependencies.approve` changes. A decision lands
@@ -2693,7 +2723,11 @@ export const dependencyPolicy = sqliteTable("dependency_policy", {
 });
 
 /**
- * Who holds `dependencies.approve` (src/dependencies/approvers.ts): a
+ * Unused since GRA-1636, when the App's builder came to approve its
+ * packages: nothing reads or writes it; kept for a rollback to the
+ * release before, and dropped by GRA-1547 (expand, then contract).
+ *
+ * Who held `dependencies.approve` (src/dependencies/approvers.ts): a
  * member (`subject_type` `person`, `subject_id` their user ID) or a team.
  * One row per grant, never deleted, so who granted and who revoked stays
  * readable; only its status and the revoke columns ever change. Whether
@@ -2721,6 +2755,10 @@ export const dependencyApprovers = sqliteTable(
 );
 
 /**
+ * Unused since GRA-1636, when the lock moved into its request's snapshot:
+ * nothing reads or writes it; kept for a rollback to the release before,
+ * and dropped by GRA-1547 (expand, then contract).
+ *
  * The exact lock (`grasp.lock.json`) the resolver produced for one of an
  * App's dependency graphs (src/packages/resolve.ts), by the graph's hash:
  * what a build of an approved graph unpacks, by integrity, and with which
@@ -2759,6 +2797,11 @@ export const dependencyLocks = sqliteTable(
 );
 
 /**
+ * Unused since GRA-1636, when core stopped keeping tarballs and package
+ * builds of its own: nothing reads or writes it; kept for a rollback to
+ * the release before, and dropped by GRA-1547 (expand, then contract),
+ * with the `npm-tarballs/` and `package-builds/` objects.
+ *
  * Files of the deployment's package store that may no longer be needed,
  * recorded before they could be left behind (src/packages/cleanup.ts): a
  * tarball (`kind` `tarball`, `key` its integrity) as it is stored, and the
@@ -2819,6 +2862,9 @@ export const buildReceipts = sqliteTable("build_receipts", {
 });
 
 /**
+ * Unused since GRA-1636: nothing reads or writes it; kept for a rollback
+ * to the release before, and dropped by GRA-1547 (expand, then contract).
+ *
  * The one build under way of each target of an App's graph
  * (src/packages/build.ts): a build takes its lease before it builds, and
  * gives it back when it ends; another of the same App, graph and target
@@ -2856,6 +2902,9 @@ export const dependencyBuildLeases = sqliteTable(
 );
 
 /**
+ * Unused since GRA-1636: nothing reads or writes it; kept for a rollback
+ * to the release before, and dropped by GRA-1547 (expand, then contract).
+ *
  * Each refused admission the audit trail recorded, once per App, graph,
  * set of targets, policy generation in force and reason
  * (src/dependencies/requests.ts):
@@ -3189,6 +3238,7 @@ export const notifications = sqliteTable(
         "gap_asked",
         "trigger_stopped",
         "package_revoked",
+        "package_advisory",
         "events_stopped",
         "app_message",
       ],

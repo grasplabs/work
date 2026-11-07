@@ -1,7 +1,7 @@
 /**
  * The package builder on the on-prem sandbox, on plain workerd: a
  * stand-in core (apps/core/test/workerd/builds-worker.ts) runs the same
- * `packageBuilder` a resolve and a build run, with `SANDBOX_HOST` bound to
+ * `runBuilder` a build runs, with `SANDBOX_HOST` bound to
  * the supervisor (workerd-sandbox.ts) and the builder core's build makes.
  * Plain workerd ignores an isolate's CPU limit, so a package that holds
  * or exhausts the builder must never run in core's own process. (The
@@ -40,26 +40,12 @@ const outcomeSchema = z.object({
   ms: z.number(),
 });
 
-const builtFileSchema = z.object({
-  bytes: z.number(),
-  sha256: z.string().regex(/^[0-9a-f]{64}$/u),
-});
-
-/** What the stand-in says of each file a build returned. */
-const builtFilesSchema = z
+/** What the stand-in says of each module a build returned. */
+const builtModulesSchema = z
   .array(
-    z.object({
-      path: z.string(),
-      described: builtFileSchema,
-      returned: builtFileSchema,
-      holdsExport: z.boolean(),
-    })
+    z.object({ entry: z.string(), bytes: z.number(), holdsExport: z.boolean() })
   )
   .min(1);
-
-const inspectionsSchema = z.array(
-  z.object({ key: z.string(), refusals: z.array(z.string()).optional() })
-);
 
 describe("the package builder on the on-prem sandbox", () => {
   let supervisor: SandboxSupervisor;
@@ -114,7 +100,7 @@ describe("the package builder on the on-prem sandbox", () => {
 
   const call = async (
     query: string,
-    route = "/inspect",
+    route = "/build",
     url = coreUrl
   ): Promise<z.infer<typeof outcomeSchema>> => {
     const response = await fetch(`${url}${route.slice(1)}?${query}`, {
@@ -133,21 +119,13 @@ describe("the package builder on the on-prem sandbox", () => {
     return Date.now() - started;
   };
 
-  it("unpacks and reads a package on the sandbox host, not in core", async () => {
+  it("builds a package on the sandbox host, not in core", async () => {
     const outcome = await call("package=plain");
 
     expect({
       status: outcome.status,
-      inspected: inspectionsSchema
-        .parse(outcome.value)
-        .map(({ key, refusals }) => ({
-          key,
-          refusals,
-        })),
-    }).toStrictEqual({
-      status: "ok",
-      inspected: [{ key: "plain-package@1.0.0", refusals: [] }],
-    });
+      built: builtModulesSchema.parse(outcome.value).map(({ entry }) => entry),
+    }).toStrictEqual({ status: "ok", built: ["plain-package"] });
   }, 60_000);
 
   it("reads a tarball larger than one message to the sandbox carries, whole and in order", async () => {
@@ -155,34 +133,39 @@ describe("the package builder on the on-prem sandbox", () => {
 
     expect({
       status: outcome.status,
-      refusals: inspectionsSchema.parse(outcome.value)[0]?.refusals,
-    }).toStrictEqual({ status: "ok", refusals: [] });
+      built: builtModulesSchema.parse(outcome.value).length,
+    }).toStrictEqual({ status: "ok", built: 1 });
   }, 60_000);
 
   it("refuses a decompression bomb with a reason, unpacking only up to its limit", async () => {
     const outcome = await call("package=bomb");
-    const [inspection] = inspectionsSchema.parse(outcome.value);
 
-    expect(outcome.status).toBe("ok");
-    expect(inspection?.refusals).toStrictEqual([
-      expect.stringContaining("unpacks to more than"),
-    ]);
+    expect(outcome).toMatchObject({
+      status: "ok",
+      value: {
+        ok: false,
+        refusals: [expect.stringContaining("unpack to more than")],
+      },
+    });
   }, 60_000);
 
   it("refuses a second read of a tarball's start, so the builder reads each chunk once", async () => {
     const outcome = await call("builder=reread");
 
-    expect(outcome.value).toStrictEqual([{ key: "refused" }]);
+    expect(outcome.value).toStrictEqual({ ok: false, refusals: ["refused"] });
   }, 60_000);
 
   it("lets the builder read a tarball of several chunks only on, from where it left off", async () => {
     const outcome = await call("builder=rereadLater&package=large");
 
-    expect(outcome.value).toStrictEqual([{ key: "read refused refused" }]);
+    expect(outcome.value).toStrictEqual({
+      ok: false,
+      refusals: ["read refused refused"],
+    });
   }, 60_000);
 
   it("reads the builder's code from core's assets once, however many calls it makes", async () => {
-    const outcome = await call("package=plain", "/inspect-twice");
+    const outcome = await call("package=plain", "/build-twice");
 
     expect({ status: outcome.status, read: outcome.value }).toStrictEqual({
       status: "ok",
@@ -218,37 +201,26 @@ describe("the package builder on the on-prem sandbox", () => {
     expect(app.ms).toBeLessThan(2000);
   }, 60_000);
 
-  it("builds an approved lock on the sandbox host and puts back every file it wrote, whole and in order, as the artifact describes it", async () => {
-    const outcome = await call("package=built", "/build");
+  it("builds an approved lock on the sandbox host and puts back each module it wrote, whole and in order", async () => {
+    const outcome = await call("package=built");
 
     expect(outcome).toMatchObject({ status: "ok" });
 
-    const files = builtFilesSchema.parse(outcome.value);
-    const exported = files.find(({ holdsExport }) => holdsExport);
+    const [built] = builtModulesSchema.parse(outcome.value);
 
     expect({
-      // Each file as the artifact describes it: its length and SHA-256.
-      returned: files.map(({ path: file, returned }) => ({
-        file,
-        ...returned,
-      })),
-      // The file holding the package's export took more than one chunk.
-      exportedPastOneChunk: (exported?.returned.bytes ?? 0) > 1024 * 1024,
-    }).toStrictEqual({
-      returned: files.map(({ path: file, described }) => ({
-        file,
-        ...described,
-      })),
-      exportedPastOneChunk: true,
-    });
+      holdsExport: built?.holdsExport,
+      // The module took more than one chunk to write back.
+      pastOneChunk: (built?.bytes ?? 0) > 1024 * 1024,
+    }).toStrictEqual({ holdsExport: true, pastOneChunk: true });
   }, 60_000);
 
-  it("takes no more of an artifact written back than it may be", async () => {
-    const outcome = await call("builder=overwrite", "/build");
+  it("takes no more of the modules written back than they may be", async () => {
+    const outcome = await call("builder=overwrite");
 
     expect(outcome.value).toStrictEqual({
       ok: false,
-      refusals: [`written ${2 * 1024 * 1024}`],
+      refusals: [`written ${8 * 1024 * 1024}`],
     });
   }, 60_000);
 
@@ -304,11 +276,11 @@ describe("the package builder on the on-prem sandbox", () => {
   it("holds one App's builds to part of the builders' share, so another App's build still runs", async () => {
     // The builders' share of four processes is two. One App's build holds
     // one; its build from another isolate of core waits for that one.
-    const held = call("builder=busy&app=app-a", "/inspect", wideUrl);
+    const held = call("builder=busy&app=app-a", "/build", wideUrl);
     await expect
       .poll(() => wide.stats().subOwnerPlaces, { timeout: 5000, interval: 50 })
       .toBe(1);
-    const waiting = call("builder=busy&app=app-a", "/inspect", otherUrl);
+    const waiting = call("builder=busy&app=app-a", "/build", otherUrl);
     await expect
       .poll(() => wide.stats().waitingForOwners, {
         timeout: 5000,
@@ -317,7 +289,7 @@ describe("the package builder on the on-prem sandbox", () => {
       .toBe(1);
     // The other place is another App's, while the first App's builds hold
     // theirs and wait.
-    const other = await call("builder=busy&app=app-b", "/inspect", wideUrl);
+    const other = await call("builder=busy&app=app-b", "/build", wideUrl);
     const [first, second] = await Promise.all([held, waiting]);
 
     expect({

@@ -102,10 +102,6 @@ const shown = async () => {
     reconnect: { state: "ready", data: [] },
     versions: { state: "ready", data: [] },
     requests: undefined,
-    dependencies: {
-      state: "ready",
-      data: { policyGeneration: 1, requests: [] },
-    },
     decisions: { state: "ready", data: [] },
     workflowGoLives: { state: "ready", data: [] },
     heldStarts: { state: "ready", data: [] },

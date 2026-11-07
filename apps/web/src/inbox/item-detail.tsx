@@ -1,4 +1,3 @@
-import type { DependencyReview } from "@grasp-os/shared/dependencies";
 import type { WorkflowBindingTarget } from "@grasp-os/shared/workflow-resources";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -10,7 +9,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
-import { ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 import { ArrowLeftIcon, ArrowUpRightIcon } from "lucide-react";
@@ -26,7 +24,6 @@ import {
   useShown,
 } from "../chat/held-writes.tsx";
 import type { Session } from "../core.ts";
-import { PackagesDetails } from "../dashboard/dependency-requests.tsx";
 import { isUnresolvable, OutcomeDetails } from "../dashboard/outcome-card.tsx";
 import { RequestDetails } from "../dashboard/pile-cards.tsx";
 import { ErrorText } from "../error-text.tsx";
@@ -663,78 +660,6 @@ const RequestItem = ({
   );
 };
 
-/** Packages for an App: approving waits until the whole graph was shown, and names it. */
-const PackagesItem = ({
-  frame,
-  source,
-}: {
-  frame: Frame;
-  source: Extract<InboxSource, { type: "packages" }>;
-}) => {
-  const { t } = useLingui();
-  const router = useRouter();
-  const { request, policyGeneration } = source;
-  const { busy, failure, run } = useCoreAction();
-  const [review, setReview] = useState<DependencyReview>();
-  const hintId = useId();
-  const subjectName = request.subject.name;
-  const who = frame.item.context;
-  // Read again once it is decided. A refused decision stays, with why:
-  // reading again would take the item, and the reason, away.
-  const decide = async (approved: boolean, said: string): Promise<void> => {
-    await run(async (session) => {
-      await session.dependencies.decide(request.id, {
-        approved,
-        // The graph the person was shown in full, once they were.
-        reviewed: {
-          graphHash: review?.graphHash ?? request.graphHash,
-          policyGeneration,
-        },
-      });
-      frame.onSaid(said);
-      await router.invalidate({ sync: true });
-    });
-  };
-  return (
-    <ItemFrame
-      acts={[
-        {
-          label: t`Approve`,
-          name: t`Approve the packages for ${ph({ app: subjectName })}`,
-          disabled: review === undefined,
-          describedBy: review === undefined ? hintId : undefined,
-          onPress: async () => {
-            await decide(true, t`Approved: ${who}.`);
-          },
-        },
-        {
-          label: t`Reject`,
-          name: t`Reject the packages for ${ph({ app: subjectName })}`,
-          onPress: async () => {
-            await decide(false, t`Rejected: ${who}.`);
-          },
-        },
-      ]}
-      busy={busy}
-      extra={
-        <PackagesDetails
-          busy={busy}
-          hintId={hintId}
-          onShow={() => {
-            void run(async (session) => {
-              setReview(await session.dependencies.get(request.id));
-            });
-          }}
-          request={request}
-          review={review}
-        />
-      }
-      failure={failure}
-      frame={frame}
-    />
-  );
-};
-
 /**
  * A version of a workflow asked to go live: approved or sent back here,
  * through the workflow's lifecycle, which checks again that the person
@@ -850,7 +775,6 @@ const ElsewhereItem = ({ frame }: { frame: Frame }) => {
     reconnect: t`Sign in again`,
     asked: t`Answer in the brain`,
     decision: t`Review and answer`,
-    revoked: t`Remove the package`,
     stoppedEvents: t`Open the connection`,
     appMessage: t`Open the App`,
   };
@@ -879,9 +803,6 @@ export const ItemDetail = (frame: Frame) => {
   }
   if (source.type === "request") {
     return <RequestItem frame={frame} source={source} />;
-  }
-  if (source.type === "packages") {
-    return <PackagesItem frame={frame} source={source} />;
   }
   if (source.type === "workflowGoLive") {
     return <WorkflowGoLiveDetail frame={frame} source={source} />;

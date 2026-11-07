@@ -250,24 +250,17 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   { action: "dependency.denied", text: msg`Denied packages` },
   { action: "dependency.built", text: msg`Built approved packages` },
   {
-    action: "dependency.pin_dropped",
-    text: msg`Dropped a kept build of approved packages`,
-  },
-  {
-    action: "dependency.lock_targets_changed",
-    text: msg`Changed what is built of approved packages`,
-  },
-  {
     action: "dependency.superseded",
     text: msg`Replaced a request for packages`,
   },
+  { action: "dependency.revoked", text: msg`Revoked packages as malware` },
   {
-    action: "dependency.withdrawn",
-    text: msg`Withdrew a request for packages`,
+    action: "dependency.advisory_found",
+    text: msg`Found a new advisory against approved packages`,
   },
   {
-    action: "dependency.admission_refused",
-    text: msg`Was refused packages nobody approved`,
+    action: "dependency.approval_refused",
+    text: msg`Was refused approving packages that couldn't be checked`,
   },
   {
     action: "dependency.malware_refused",

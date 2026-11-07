@@ -24,6 +24,7 @@ import {
   sdkReleasePins,
   sdkResourceBindings,
 } from "./db/core/schema.ts";
+import { unusedRetiredWithdrawn } from "./packages/approvals.ts";
 import {
   requireMemberAdmin,
   requireStillAdmin,
@@ -61,6 +62,9 @@ import { collectArtifacts, sweepArtifacts } from "./sealed-artifacts.ts";
 //   (`sweepArtifacts`).
 // - A deletion goes unrecorded: each is audited
 //   (`app.release.deleted`), in the batch that deletes the row.
+// - Replaced package approvals scanned for ever: one no kept release
+//   bundles any more is withdrawn in that batch (packages/approvals.ts
+//   `unusedRetiredWithdrawn`).
 // - Pins pile up: every page leases its release over and over. A lapsed
 //   lease is deleted by the next sweep, and a release's pins with it.
 // - A release turns out to be dangerous: an admin of the organization
@@ -448,6 +452,9 @@ const deleteRelease = async (
           gone
         )
       ),
+    // A replaced approval of its packages that this was the last kept
+    // release of ends with it.
+    ...unusedRetiredWithdrawn(db, key.app, now),
   ]);
   if (deleted.length === 0) {
     return false;

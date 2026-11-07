@@ -395,7 +395,7 @@ describe("pages", { timeout: 60_000 }, () => {
     }).toStrictEqual({ sameLength: true, bounded: true, sources: [5, 5] });
   });
 
-  it("lets a frame run no other build's module: an older version's, another App's, another kit set's, a package's or a file's", async () => {
+  it("lets a frame run no other build's module: an older version's, another App's, another kit set's or a file's", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
     const older = await loadFrame(await builder.api.pages.open(app));
@@ -442,9 +442,6 @@ export const Route = createFileRoute("/")({ component: Plain });
             `${origin}/page-modules/kit/${modulePartsOf(address).hash}.js`
         )
       ).some(Boolean),
-      package: allowed([
-        `${origin}/package-artifacts/${app}/${"c".repeat(64)}/${"d".repeat(64)}/index.js`,
-      ]).some(Boolean),
       file: allowed([
         `${origin}${appFilesPath}/${"e".repeat(32)}/content`,
       ]).some(Boolean),
@@ -454,7 +451,6 @@ export const Route = createFileRoute("/")({ component: Plain });
       another: false,
       dotSegments: false,
       sharedKit: false,
-      package: false,
       file: false,
     });
   });
