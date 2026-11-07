@@ -2731,6 +2731,13 @@ export class GraspClient {
     for (const entry of this.#queries.values()) {
       entry.stale = true;
       entry.changes += 1;
+      // Kept for a remount but followed by no one: core pushes it
+      // nothing, so what it holds may be from before the change. The
+      // next reader waits for it afresh, never starting from that (a
+      // form whose defaults come from it would save an old revision).
+      if (entry.live === undefined && entry.listeners.size === 0) {
+        show(entry, loading);
+      }
     }
   }
 

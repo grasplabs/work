@@ -141,6 +141,36 @@ describe("live queries", { timeout: 120_000 }, () => {
     });
   });
 
+  it("shows a query no one followed through a change this page saved afresh, never as it was before", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const id = await client.mutation(api.create, { title: "First" });
+    const note = reading(client, api.get, { id });
+    await eventually(() => {
+      expect(note.now().value).toMatchObject({ _rev: 1 });
+    });
+    // Nobody reads the note now, as when another note is opened: it is
+    // kept for a remount, but followed by no one.
+    note.stop();
+    await scheduler.wait(0);
+    await client.mutation(api.update, {
+      id,
+      expectedRevision: 1,
+      title: "Second",
+      body: "",
+    });
+
+    // Opened again: never the revision from before the change, which an
+    // editor would take as its starting point.
+    const again = reading(client, api.get, { id });
+    const first = again.now().value;
+    await eventually(() => {
+      expect(again.now().value).toMatchObject({ _rev: 2, title: "Second" });
+    });
+    expect(first).toBeUndefined();
+  });
+
   it("never lets a late answer of a read replace a newer push, followed or no longer", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
