@@ -15,6 +15,10 @@ import { useCore } from "../use-core.ts";
 // re-read that fails leaves the last good answer in place, saying it
 // couldn't be refreshed, with a way to read it again.
 
+/** The live App's tables and the version they're read at: one read for every view of them. */
+export const readTables = async (session: Session, app: string) =>
+  await session.apps.data.tables(app);
+
 /**
  * A read's answer, and, while it shows what was read before because the
  * latest re-read failed, why that failed and a way to read again.

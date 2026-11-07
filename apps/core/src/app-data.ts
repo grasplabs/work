@@ -48,6 +48,7 @@ import type { SensitiveReadContext } from "./sensitive-reads.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { requireNotStaff } from "./sharing.ts";
+import type { TableFacts } from "./store-host.ts";
 import type { QueryAnswer } from "./store-queries.ts";
 import { StoreReader } from "./store-reader.ts";
 
@@ -231,13 +232,22 @@ const fieldOf = ([name, descriptor]: [
 
 /** A table as the browser lists it, sensitive as the store holds it. */
 const tableView =
-  (sensitive: ReadonlySet<string>) =>
+  (facts: Readonly<Record<string, TableFacts>>) =>
   ([name, table]: [string, ManifestTable]): AppDataTable => ({
     name,
     read: table.access.read,
     write: table.access.write,
-    sensitive: sensitive.has(name),
+    sensitive: facts[name]?.sensitive ?? false,
     fields: Object.entries(table.fields).map(fieldOf),
+    // Every record of the table, which the browser shows a builder only
+    // where its access gives them all: never for a table of owners' own
+    // records, or one whose row rules narrow what each person reads.
+    records:
+      table.rules === undefined &&
+      (table.access.read === "appMembers" ||
+        table.access.read === "appBuilders")
+        ? (facts[name]?.records ?? 0)
+        : null,
   });
 
 /** A read document's managed fields, and its own. */
@@ -970,7 +980,7 @@ export class AppDataRpc extends CoreRpcTarget implements AppDataApi {
         : {
             version: store.version,
             tables: Object.entries(store.tables).map(
-              tableView(new Set(await store.store.sensitiveTables()))
+              tableView(await store.store.tableFacts())
             ),
           };
     });

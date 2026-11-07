@@ -40,6 +40,8 @@ export interface ModuleRecord {
   kit: string[];
   /** Its Tailwind class candidates (candidates.ts). */
   candidates: string[];
+  /** The App's functions it calls, `api.deals.list` as `deals.list` (index-uses.ts). */
+  calls: string[];
 }
 
 /** What a build is handed of earlier ones, or keeps of its own: records by key. */
@@ -194,6 +196,8 @@ export const moduleRecordOf = (
         app: value.app,
         kit: value.kit,
         candidates: value.candidates,
+        // One kept before it was recorded calls nothing that's known.
+        calls: "calls" in value && isStrings(value.calls) ? value.calls : [],
       }
     : undefined;
 

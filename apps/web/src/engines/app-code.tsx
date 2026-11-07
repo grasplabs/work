@@ -18,16 +18,14 @@ import {
   ToggleGroupItem,
 } from "@grasp-os/ui/components/toggle-group";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { CheckIcon, CopyIcon, MessageSquareIcon } from "lucide-react";
-import { Fragment, useEffect, useEffectEvent, useState } from "react";
+import { CheckIcon, CopyIcon } from "lucide-react";
+import { Fragment, useState } from "react";
 import type { ReactNode } from "react";
 
 import { useCopy } from "../copy.ts";
-import type { Session } from "../core.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { useCore } from "../use-core.ts";
 import {
   CodeDiff,
   CodeFile,
@@ -37,6 +35,7 @@ import {
   onlyFinalNewline,
 } from "./code-view.tsx";
 import type { DiffLayout } from "./code-view.tsx";
+import { useCoreRead } from "./use-core-read.ts";
 
 // An App's code in its workspace, for its builders (app-workspace.tsx's
 // Code view), as a code editor shows a project, read-only: the files of
@@ -182,10 +181,8 @@ const FileBar = ({ path, text }: { path: string; text: string }) => {
 
 /** The editor's frame: what it shows, on the page's muted ground. */
 const EditorFrame = ({ children }: { children: ReactNode }) => (
-  <div className="bg-muted flex min-h-0 flex-1 flex-col p-3">
-    <div className="bg-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border md:flex-row">
-      {children}
-    </div>
+  <div className="bg-card flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
+    {children}
   </div>
 );
 
@@ -359,46 +356,6 @@ const ChangesView = ({
   );
 };
 
-/**
- * What `read` read for `key`, read again whenever `key` changes; nothing
- * while it is read, unless an earlier read of the same `scope` landed:
- * that one stays until the new one does, so what is shown doesn't blink
- * away at each write.
- */
-const useCoreRead = <T,>(
-  key: string,
-  read: (session: Session) => Promise<T>,
-  scope?: string
-): Loaded<T> | undefined => {
-  const core = useCore();
-  const [held, setHeld] = useState<{
-    key: string;
-    scope: string | undefined;
-    loaded: Loaded<T>;
-  }>();
-  const onRead = useEffectEvent(
-    async (signal: AbortSignal): Promise<Loaded<T>> =>
-      await loadFromCore(core, read, signal)
-  );
-  useEffect(() => {
-    const left = new AbortController();
-    const load = async (): Promise<void> => {
-      const loaded = await onRead(left.signal);
-      if (!left.signal.aborted) {
-        setHeld({ key, scope, loaded });
-      }
-    };
-    void load();
-    return () => {
-      left.abort();
-    };
-  }, [key, scope]);
-  if (held?.key === key) {
-    return held.loaded;
-  }
-  return scope !== undefined && held?.scope === scope ? held.loaded : undefined;
-};
-
 /** A read not done: that it is being read, or why it failed. */
 const ReadState = ({ loaded }: { loaded: Loaded<unknown> | undefined }) => (
   <div className="p-4">
@@ -522,21 +479,10 @@ const Choice = <T extends string>({
   </ToggleGroup>
 );
 
-/** The read-only note, at the end of the view's bar. */
-const ReadOnlyNote = () => (
-  <p className="text-muted-foreground flex min-w-0 flex-1 basis-56 items-center justify-end gap-1.5 text-xs">
-    <MessageSquareIcon aria-hidden="true" className="size-3.5 flex-none" />
-    <span className="truncate">
-      <Trans>Read-only. Changes to the code go through the chat.</Trans>
-    </span>
-  </p>
-);
-
-/** The view's bar, over what it shows: its choices, and the note. */
-const CodeBar = ({ children }: { children?: ReactNode }) => (
+/** The view's bar, over what it shows: its choices. */
+const CodeBar = ({ children }: { children: ReactNode }) => (
   <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2">
     {children}
-    <ReadOnlyNote />
   </div>
 );
 
@@ -677,7 +623,6 @@ export const AppCode = ({
   if (building !== undefined) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <CodeBar />
         <ChatDraftFiles
           app={app.id}
           chatId={building.chatId}

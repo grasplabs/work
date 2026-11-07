@@ -922,7 +922,7 @@ describe(
             { "server/notes.ts": changed },
             [],
             revision,
-            runId
+            { runId }
           );
           try {
             await opening;

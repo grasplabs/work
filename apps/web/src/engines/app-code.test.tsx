@@ -353,14 +353,10 @@ describe("An App's Code", () => {
       current: codeShown().includes("export const limit = 10;"),
       path: pathShown(),
       open: openInTree(),
-      readOnly: document.body.textContent.includes(
-        "Read-only. Changes to the code go through the chat."
-      ),
     }).toStrictEqual({
       current: false,
       path: ["grasp.config.ts"],
       open: "grasp.config.ts",
-      readOnly: true,
     });
   });
 
@@ -460,9 +456,6 @@ describe("An App's Code", () => {
       first,
       written: treeShown(),
       open: openInTree(),
-      readOnly: document.body.textContent.includes(
-        "Read-only. Changes to the code go through the chat."
-      ),
       versionsOffered: named("button", "Current (version 1)") !== undefined,
     }).toStrictEqual({
       first: ["server", "notes.ts", "grasp.config.ts"],
@@ -475,7 +468,6 @@ describe("An App's Code", () => {
         "grasp.config.ts",
       ],
       open: "notes.ts",
-      readOnly: true,
       versionsOffered: false,
     });
   });

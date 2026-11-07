@@ -73,6 +73,8 @@ import type {
   IncrementalBuild,
   ModuleRecord,
 } from "./increments.ts";
+import { collectApiCalls, collectIndexReads } from "./index-uses.ts";
+import type { IndexRead } from "./index-uses.ts";
 import {
   appCodeLimitErrors,
   buildFiles,
@@ -137,9 +139,16 @@ export type PageBuild =
       closure: PageClosure;
       surfaces: SurfaceManifest[];
       css: string;
+      /** The App's functions each page file calls, by its path (index-uses.ts). */
+      calls: Record<string, string[]>;
       diagnostics: Diagnostic[];
     }
-  | { ok: false; diagnostics: Diagnostic[] };
+  | {
+      ok: false;
+      diagnostics: Diagnostic[];
+      /** What each page file that compiled as far as its parse calls. */
+      calls?: Record<string, string[]>;
+    };
 
 /** The line a React Compiler error points at in its code frame: `> 3 |`. */
 const framedLine = /^> *(?<line>\d+) \|/mu;
@@ -249,15 +258,22 @@ const compileFile = (
   typeFiles: ReadonlySet<string>,
   { unparsed, untyped }: { unparsed: Set<string>; untyped: Set<string> },
   refresh = false
-): { code: string; imported: ModuleImports } | { errors: Diagnostic[] } => {
+):
+  | { code: string; imported: ModuleImports; calls: Set<string> }
+  | { errors: Diagnostic[]; calls: string[] } => {
   const imports: ImportSite[] = [];
   const directives: DirectiveSite[] = [];
+  const calls = new Set<string>();
   let compiled: string;
   try {
     compiled = compileModule(
       source,
       path,
-      [collectImports(imports), collectDirectives(directives)],
+      [
+        collectImports(imports),
+        collectDirectives(directives),
+        collectApiCalls(calls),
+      ],
       { refresh }
     );
   } catch (error) {
@@ -266,6 +282,7 @@ const compileFile = (
     }
     const message = messageIn(path, error);
     return {
+      calls: [],
       errors: [
         problem("compile", compileMessage(message), {
           file: path,
@@ -298,7 +315,7 @@ const compileFile = (
     }
   }
   if (errors.length > 0) {
-    return { errors };
+    return { errors, calls: [...calls].toSorted() };
   }
   const imported: ModuleImports = { app: new Set(), kit: new Set() };
   try {
@@ -306,15 +323,16 @@ const compileFile = (
       rewriteImports(path, files, kit, imported),
     ]);
     if (!refresh) {
-      return { code, imported };
+      return { code, imported, calls };
     }
     imported.kit.add(kitModuleName(previewRefresh));
-    return { code: `${refreshHeader(path)}${code}`, imported };
+    return { code: `${refreshHeader(path)}${code}`, imported, calls };
   } catch (error) {
     // An import only the compiled code makes, refused: its JSX runtime.
     untyped.add(path);
     return {
       errors: [problem("imports", messageIn(path, error), { file: path })],
+      calls: [...calls].toSorted(),
     };
   }
 };
@@ -376,7 +394,7 @@ const transformSource = (
   }: { known: ReadonlySet<string>; typeFiles: ReadonlySet<string> },
   flags: { unparsed: Set<string>; untyped: Set<string> },
   preview: boolean
-): { record: ModuleRecord } | { errors: Diagnostic[] } => {
+): { record: ModuleRecord } | { errors: Diagnostic[]; calls: string[] } => {
   const result = compileFile(path, source, known, typeFiles, flags, preview);
   if (!("code" in result)) {
     return result;
@@ -392,6 +410,7 @@ const transformSource = (
         path === pageReferences.path || path === routeTreePath
           ? []
           : extractCandidates(source),
+      calls: [...result.calls].toSorted(),
     },
   };
 };
@@ -590,6 +609,7 @@ export const buildPagesIncrementally = async (
   const modules: Record<string, string> = {};
   const imports = new Map<string, ModuleImports>();
   const candidates: string[] = [];
+  const calls: Record<string, string[]> = {};
   const errors: Diagnostic[] = [];
   // The files the parser refused, whose checks past the break are guesses.
   const unparsed = new Set<string>();
@@ -616,6 +636,9 @@ export const buildPagesIncrementally = async (
     modules[name] = record.code;
     imports.set(name, { app: new Set(record.app), kit: new Set(record.kit) });
     candidates.push(...record.candidates);
+    if (record.calls.length > 0) {
+      calls[record.path] = record.calls;
+    }
   };
   for (const [path, source, key] of keyed) {
     // A transform is reused only under the key this build works out for
@@ -639,6 +662,10 @@ export const buildPagesIncrementally = async (
       metrics.compiled += 1;
     } else {
       errors.push(...result.errors);
+      // What it calls is read all the same: the parse got that far.
+      if (result.calls.length > 0) {
+        calls[path] = result.calls;
+      }
     }
   }
   // The route tree, compiled afresh: it changes with the pages' paths,
@@ -682,7 +709,7 @@ export const buildPagesIncrementally = async (
       )
     : undefined;
   if (errors.some((diagnostic) => isError(diagnostic))) {
-    return done({ ok: false, diagnostics: errors }, typeCheck);
+    return done({ ok: false, diagnostics: errors, calls }, typeCheck);
   }
   const kitModules = kitModulesFor(
     [...imports.values()].flatMap(({ kit: imported }) => [...imported])
@@ -697,6 +724,7 @@ export const buildPagesIncrementally = async (
       closure: pageClosure(entry, imports, preview),
       surfaces: tree.surfaces,
       css,
+      calls,
       diagnostics: errors,
     },
     typeCheck
@@ -987,7 +1015,12 @@ export const buildComputeModules = (
  * flat name, the host's generated modules among them; or why it failed.
  */
 export type AppCodeBuild =
-  | { ok: true; modules: Record<string, string> }
+  | {
+      ok: true;
+      modules: Record<string, string>;
+      /** The indexes its functions read (index-uses.ts). */
+      indexReads?: IndexRead[];
+    }
   | { ok: false; diagnostics: Diagnostic[] };
 
 /** `typeImportError` and `typeFileError` for App code, as `appCodeImport` answers. */
@@ -1012,7 +1045,9 @@ const compileAppCodeFile = (
   files: ReadonlySet<string>,
   unparsed: Set<string>,
   /** What its types may name by path: every file the build was given. */
-  typeFiles: ReadonlySet<string> = files
+  typeFiles: ReadonlySet<string> = files,
+  /** Where the indexes its functions read are listed. */
+  reads: IndexRead[] = []
 ): { code: string } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
   const directives: DirectiveSite[] = [];
@@ -1021,6 +1056,7 @@ const compileAppCodeFile = (
     compiled = stripTypes(source, path, [
       collectImports(imports),
       collectDirectives(directives),
+      collectIndexReads(path, reads),
     ]);
   } catch (error) {
     if (parseFailed(error)) {
@@ -1133,6 +1169,7 @@ const buildAppCodeNoting = (
     ([path]) => appCodeKind(path) !== undefined
   );
   const named = new Map<string, string>();
+  const indexReads: IndexRead[] = [];
   for (const [path, source] of compiled) {
     const name = appModuleName(path);
     const taken = named.get(name);
@@ -1147,7 +1184,14 @@ const buildAppCodeNoting = (
       continue;
     }
     named.set(name, path);
-    const result = compileAppCodeFile(path, source, known, unparsed);
+    const result = compileAppCodeFile(
+      path,
+      source,
+      known,
+      unparsed,
+      known,
+      indexReads
+    );
     if ("code" in result) {
       modules[name] = result.code;
     } else {
@@ -1156,7 +1200,7 @@ const buildAppCodeNoting = (
   }
   return errors.length > 0
     ? { ok: false, diagnostics: errors }
-    : { ok: true, modules };
+    : { ok: true, modules, indexReads };
 };
 
 /**

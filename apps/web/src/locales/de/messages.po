@@ -258,6 +258,10 @@ msgstr "{binding}: {actions} auf {object}, wartet auf einen Admin (vom Agenten a
 msgid "{browser} on {system}"
 msgstr "{browser} auf {system}"
 
+#: src/engines/app-data-model.tsx
+msgid "{changeCount, plural, one {# change to publish} other {# changes to publish}}"
+msgstr "{changeCount, plural, one {# Änderung zu veröffentlichen} other {# Änderungen zu veröffentlichen}}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{chosen} it is. This takes about {minutes} minutes. Ready to start?"
 msgstr "Dann {chosen}. Das dauert etwa {minutes} Minuten. Wollen wir anfangen?"
@@ -555,6 +559,10 @@ msgstr "{failed, plural, one {# fehlgeschlagen in den letzten {days} Tagen} othe
 msgid "{failed, plural, one {# failed run} other {# failed runs}} of {name}"
 msgstr "{failed, plural, one {# fehlgeschlagener Lauf} other {# fehlgeschlagene Läufe}} von {name}"
 
+#: src/engines/data-model-changes.tsx
+msgid "{field} in {table} needs a change in code before this can be published."
+msgstr "{field} in {table} braucht eine Änderung im Code, bevor dies veröffentlicht werden kann."
+
 #: src/onboarding/document-drop.tsx
 msgid "{file} removed"
 msgstr "{file} entfernt"
@@ -822,6 +830,10 @@ msgstr "{name} ist eingeladen, aber noch nicht interviewt."
 msgid "{name} is named, but not seen in use yet."
 msgstr "{name} wird genannt, ist aber noch nicht im Einsatz gesehen."
 
+#: src/engines/field-editor.tsx
+msgid "{name} is now at place {place}."
+msgstr "{name} ist jetzt an Stelle {place}."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "{name} is removed. {count, plural, one {# personal connection was disconnected.} other {# personal connections were disconnected.}}"
 msgstr "{name} ist entfernt. {count, plural, one {# persönliche Verbindung wurde getrennt.} other {# persönliche Verbindungen wurden getrennt.}}"
@@ -873,6 +885,10 @@ msgstr "{name}: Version {version} wartet auf Prüfung"
 #: src/brain/brain-atlas.ts
 msgid "{names} work here. No work of theirs came up yet."
 msgstr "{names} arbeiten hier. Von ihrer Arbeit kam noch nichts vor."
+
+#: src/engines/app-data-model.tsx
+msgid "{needs, plural, one {# needs you} other {# need you}}"
+msgstr "{needs, plural, one {# braucht dich} other {# brauchen dich}}"
 
 #: src/knowledge/purge.tsx
 msgid "{occurrences, plural, one {# occurrence removed} other {# occurrences removed}}"
@@ -963,6 +979,18 @@ msgstr "{place} von {count}"
 #: src/tour/tour-layer.tsx
 msgid "{position} of {count}"
 msgstr "{position} von {count}"
+
+#: src/engines/indexes-view.tsx
+msgid "{query} (on {routes})"
+msgstr "{query} (auf {routes})"
+
+#: src/engines/indexes-view.tsx
+msgid "{query} reads the index {index}, which this table doesn’t have."
+msgstr "{query} liest den Index {index}, den diese Tabelle nicht hat."
+
+#: src/engines/indexes-view.tsx
+msgid "{query} searches this table, which has no search."
+msgstr "{query} durchsucht diese Tabelle, die keine Suche hat."
 
 #: src/interview/closed.tsx
 msgid "{rating} of 5"
@@ -1113,6 +1141,14 @@ msgstr "{subject}: {actions} auf {object}"
 #: src/brain/brain-atlas.ts
 msgid "{sunk, plural, one {# of them is a time waster, as the team said it.} other {# of them are time wasters, as the teams said them.}}"
 msgstr "{sunk, plural, one {# davon ist ein Zeitfresser, wie das Team es sagte.} other {# davon sind Zeitfresser, wie die Teams es sagten.}}"
+
+#: src/engines/data-model-changes.tsx
+msgid "{table} already holds records. What should the ones without {missing} get?"
+msgstr "{table} enthält bereits Datensätze. Was sollen die ohne {missing} bekommen?"
+
+#: src/engines/data-model-changes.tsx
+msgid "{table} needs a change in code before this can be published."
+msgstr "{table} braucht eine Änderung im Code, bevor dies veröffentlicht werden kann."
 
 #: src/onboarding/setup-steps.tsx
 msgid "{talked, plural, one {I talked with # person.} other {I talked with # people.}}"
@@ -1419,9 +1455,17 @@ msgstr "Eine Datenmigration hat die Datensätze dieser App nach dieser Version u
 msgid "A data migration moved this App's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
 msgstr "Eine Datenmigration hat die Datensätze dieser App nach dieser Version umgestellt, daher kann sie nicht wieder aktuell gemacht werden. Aufbewahrte Versionen, die noch zu ihnen passen: {versions}."
 
+#: src/engines/field-kinds.tsx
+msgid "A day and time"
+msgstr "Ein Tag und eine Uhrzeit"
+
 #: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
 msgstr "Eine Entscheidung wurde Personen vorgelegt oder beantwortet"
+
+#: src/engines/field-kinds.tsx
+msgid "A document or an image"
+msgstr "Ein Dokument oder ein Bild"
 
 #: src/engines/app-status.tsx
 msgid "A draft: only its builders open it, and its triggers don't fire, until it is published."
@@ -1431,6 +1475,10 @@ msgstr "Ein Entwurf: Nur seine Builder öffnen ihn, und seine Auslöser greifen 
 msgctxt "memory record kind"
 msgid "A fact"
 msgstr "Eine Tatsache"
+
+#: src/engines/data-model-changes.tsx
+msgid "A field of this kind can't be given a value here. Make it optional, or ask in the chat for a change in code."
+msgstr "Einem Feld dieser Art kann hier kein Wert gegeben werden. Mach es optional oder bitte im Chat um eine Änderung im Code."
 
 #: src/pages/page-files.ts
 msgid "A file is downloaded only when you ask for it, with a click."
@@ -1511,6 +1559,10 @@ msgstr "Eine neue Datei in Google Drive"
 msgid "A new file in Microsoft 365"
 msgstr "Eine neue Datei in Microsoft 365"
 
+#: src/engines/field-editor.tsx
+msgid "A new record starts as"
+msgstr "Ein neuer Datensatz beginnt mit"
+
 #: src/engines/app-webhooks.tsx
 msgctxt "a webhook event: a version of the App was made current"
 msgid "A new version goes live"
@@ -1564,6 +1616,10 @@ msgstr "Ein Tool mit Lesen läuft ohne Nachfrage. Ein Aufruf eines Tools mit Sch
 #: src/routes/_shell.settings.billing.tsx
 msgid "A receipt each time a payment goes through."
 msgstr "Ein Beleg bei jeder erfolgreichen Zahlung."
+
+#: src/engines/field-kinds.tsx
+msgid "A record of another table"
+msgstr "Ein Datensatz einer anderen Tabelle"
 
 #: src/engines/store-change-errors.ts
 msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
@@ -1652,6 +1708,10 @@ msgstr "Ein Team, mit dem sie nicht mehr geteilt ist"
 msgid "A team without a lead gets its links on the first day, and I ask each person what they do."
 msgstr "Ein Team ohne Teamleitung bekommt seine Links am ersten Tag, und ich frage jede Person, was sie macht."
 
+#: src/engines/field-kinds.tsx
+msgid "A tick: yes or no"
+msgstr "Ein Häkchen: ja oder nein"
+
 #: src/connections/connect-dialog.tsx
 msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
 msgstr "Ein eingeschaltetes Werkzeug beginnt mit Lesen, wo Composio angibt, dass es nur liest; Grasp prüft das nicht. Ein Werkzeug mit Lesen läuft ohne Nachfrage. Ein Aufruf eines Werkzeugs mit Schreiben aus einem Chat oder durch eine Person, die eine App nutzt, wartet auf deren Bestätigung; ein Workflow-Lauf führt ihn als einen seiner Schritte aus. Klicken Sie auf das Abzeichen eines Werkzeugs, um es zu ändern. Setzen Sie ein Werkzeug nur auf Lesen, wenn es nichts ändert: falsch markiert, ändert es Dinge ohne Nachfrage."
@@ -1663,6 +1723,10 @@ msgstr "Ein Thema"
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "A trigger starts a run on its own, as whoever made it. Adding one asks an admin to allow it to start this workflow, and one on a connection to read its events there: it starts nothing until they do."
 msgstr "Ein Auslöser startet von selbst einen Lauf, im Namen der Person, die ihn erstellt hat. Wer einen hinzufügt, bittet damit einen Admin, ihm das Starten dieses Workflows zu erlauben, und einem Auslöser an einer Verbindung, dort deren Ereignisse zu lesen: Bis dahin startet er nichts."
+
+#: src/engines/field-kinds.tsx
+msgid "A type the App's code declares"
+msgstr "Ein Typ, den der Code der App festlegt"
 
 #: src/workflows/version-source.tsx
 msgid "A version's definition and source"
@@ -1740,6 +1804,15 @@ msgstr "Zu Tools"
 msgctxt "memory record state"
 msgid "Accepted"
 msgstr "Akzeptiert"
+
+#: src/engines/app-data-model.tsx
+msgctxt "who reaches a table's records"
+msgid "Access"
+msgstr "Zugriff"
+
+#: src/engines/access-view.tsx
+msgid "Access to {name}"
+msgstr "Zugriff auf {name}"
 
 #: src/connections/revocations-by-hand.tsx
 msgid "Access to remove by hand"
@@ -1822,6 +1895,7 @@ msgstr "Aktivität: alles in Traces ansehen"
 msgid "Actor ID"
 msgstr "Akteur-ID"
 
+#: src/engines/indexes-view.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/team-members-dialog.tsx
@@ -1873,6 +1947,10 @@ msgstr "Widget hinzufügen"
 msgid "Add an HTTP connection"
 msgstr "HTTP-Verbindung hinzufügen"
 
+#: src/engines/indexes-view.tsx
+msgid "Add an index"
+msgstr "Index hinzufügen"
+
 #: src/engines/app-integrations.tsx
 msgid "Add an integration"
 msgstr "Integration hinzufügen"
@@ -1885,9 +1963,17 @@ msgstr "Freigebende hinzufügen"
 msgid "Add as"
 msgstr "Hinzufügen als"
 
+#: src/engines/field-editor.tsx
+msgid "Add field"
+msgstr "Feld hinzufügen"
+
 #: src/connections/http-connections.tsx
 msgid "Add HTTP connection"
 msgstr "HTTP-Verbindung hinzufügen"
+
+#: src/engines/indexes-view.tsx
+msgid "Add index"
+msgstr "Index hinzufügen"
 
 #: src/workflows/module-files.tsx
 msgid "Add module"
@@ -1896,6 +1982,14 @@ msgstr "Modul hinzufügen"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Add one so invoices are paid when they come."
 msgstr "Fügen Sie eine hinzu, damit Rechnungen gleich bezahlt werden."
+
+#: src/engines/field-editor.tsx
+msgid "Add option"
+msgstr "Option hinzufügen"
+
+#: src/engines/indexes-view.tsx
+msgid "Add search"
+msgstr "Suche hinzufügen"
 
 #: src/projects/project-people.tsx
 msgid "Add someone"
@@ -1986,6 +2080,14 @@ msgstr "Adresse"
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Address, the part before the @"
 msgstr "Adresse, der Teil vor dem @"
+
+#: src/engines/data-model-changes.tsx
+msgid "Adds {field} to {table}."
+msgstr "Fügt {field} zu {table} hinzu."
+
+#: src/engines/data-model-changes.tsx
+msgid "Adds the table {table}."
+msgstr "Fügt die Tabelle {table} hinzu."
 
 #: src/brain/brain.ts
 msgctxt "note property"
@@ -2124,6 +2226,10 @@ msgstr "Alle Teams"
 msgid "Allow at least one method."
 msgstr "Erlauben Sie mindestens eine Methode."
 
+#: src/engines/field-editor.tsx
+msgid "Allow decimals"
+msgstr "Dezimalzahlen erlauben"
+
 #: src/interview/sound-check.tsx
 msgid "Allow the microphone when your browser asks."
 msgstr "Erlauben Sie das Mikrofon, wenn Ihr Browser fragt."
@@ -2151,6 +2257,10 @@ msgstr "Also, das ist der Plan."
 #: src/workflows/delete-workflow.tsx
 msgid "Also release its name, so a new workflow can take it."
 msgstr "Auch seinen Namen freigeben, damit ein neuer Workflow ihn nehmen kann."
+
+#: src/engines/field-kinds.tsx
+msgid "Amounts, counts and scores"
+msgstr "Beträge, Anzahlen und Punktzahlen"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -2193,6 +2303,10 @@ msgstr "Ein Admin hat das Lesen dieser Ereignisse abgelehnt oder wieder entzogen
 msgid "An admin refused or took back its start: it starts nothing."
 msgstr "Ein Admin hat das Starten abgelehnt oder wieder entzogen: Er startet nichts."
 
+#: src/engines/field-kinds.tsx
+msgid "An amount in a currency"
+msgstr "Ein Betrag in einer Währung"
+
 #: src/workflows/requests/request-plan.tsx
 msgid "An answer"
 msgstr "Eine Antwort"
@@ -2212,6 +2326,10 @@ msgstr "Eine archivierte App bleibt, wie sie ist, und geht offline: Niemand öff
 #: src/engines/app-settings.tsx
 msgid "An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft."
 msgstr "Eine archivierte App bleibt, wie sie war, und geht offline: Niemand öffnet sie, ihre Auslöser stoppen und ihre unvollendeten Läufe werden abgebrochen. Ein Builder kann sie als Entwurf wiederherstellen."
+
+#: src/engines/field-kinds.tsx
+msgid "An email address"
+msgstr "Eine E-Mail-Adresse"
 
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "An email to its own address"
@@ -2241,6 +2359,14 @@ msgstr "Eine Erfahrung"
 #: src/engines/app-webhooks.tsx
 msgid "An https address on the public internet, with no user name, password or IP address in it."
 msgstr "Eine https-Adresse im öffentlichen Internet, ohne Benutzernamen, Passwort oder IP-Adresse darin."
+
+#: src/engines/indexes-view.tsx
+msgid "An index keeps records in order of a field, so queries that sort or filter by it stay fast. Search finds records by their words."
+msgstr "Ein Index hält Datensätze nach einem Feld geordnet, damit Abfragen, die danach sortieren oder filtern, schnell bleiben. Die Suche findet Datensätze nach ihren Wörtern."
+
+#: src/engines/indexes-view.tsx
+msgid "An index, to sort and filter by a field"
+msgstr "Einen Index, um nach einem Feld zu sortieren und zu filtern"
 
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
@@ -2640,6 +2766,10 @@ msgstr "Setzen Sie als Aktion die Spam-Konfidenzstufe (SCL) auf „Spamfilterung
 msgid "As of {date}."
 msgstr "Stand: {date}."
 
+#: src/engines/access-view.tsx
+msgid "As the App's code sets it"
+msgstr "Wie es der Code der App festlegt"
+
 #: src/settings/ai-providers.tsx
 msgid "As your endpoint names it, such as llama-3.3-70b."
 msgstr "So, wie Ihr Endpunkt es nennt, etwa llama-3.3-70b."
@@ -2932,6 +3062,10 @@ msgstr "Vor der Arbeit: was Sie mir über KI erzählt haben."
 msgid "Before we start, which language do you prefer?"
 msgstr "Bevor wir anfangen: Welche Sprache ist Ihnen lieber?"
 
+#: src/engines/data-model-changes.tsx
+msgid "Before you make this change"
+msgstr "Bevor du diese Änderung vornimmst"
+
 #: src/chat/builds.tsx
 msgid "Being built"
 msgstr "Im Aufbau"
@@ -3194,12 +3328,15 @@ msgstr "Starten nicht möglich: {unread}"
 #: src/connections/request-app-dialog.tsx
 #: src/decision-confirmation.tsx
 #: src/engines/app-access-requests.tsx
+#: src/engines/app-data-model.tsx
 #: src/engines/app-remove.tsx
 #: src/engines/app-sharing.tsx
 #: src/engines/app-status.tsx
 #: src/engines/app-versions.tsx
 #: src/engines/app-workflows.tsx
 #: src/engines/blueprints.tsx
+#: src/engines/data-model-changes.tsx
+#: src/engines/field-editor.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/release-controls.tsx
 #: src/inbox/item-detail.tsx
@@ -3291,6 +3428,10 @@ msgstr "Änderung"
 #: src/interview/words.ts
 msgid "Change “{was}” to “{now}”."
 msgstr "Bitte „{was}“ in „{now}“ ändern."
+
+#: src/engines/app-data-model.tsx
+msgid "Change {name}"
+msgstr "{name} ändern"
 
 #: src/dashboard/widget-ask.tsx
 msgid "Change {title}"
@@ -3468,6 +3609,10 @@ msgstr "Änderungen seit {when}"
 msgid "Changes to the App's stores"
 msgstr "Änderungen an den Speichern der App"
 
+#: src/engines/data-model-changes.tsx
+msgid "Changes who can see and change the records of {table}."
+msgstr "Ändert, wer die Datensätze von {table} sehen und ändern kann."
+
 #: src/chat/thread.tsx
 msgid "Changing the App's definition"
 msgstr "Ändert die Definition der App"
@@ -3586,6 +3731,11 @@ msgstr "Wird mit Ihren Zahlen abgeglichen …"
 msgid "Checking…"
 msgstr "Wird geprüft…"
 
+#: src/engines/field-kinds.tsx
+msgctxt "a kind of field"
+msgid "Choice"
+msgstr "Auswahl"
+
 #: src/engines/resource-bindings.tsx
 msgid "Choose a collection"
 msgstr "Sammlung wählen"
@@ -3686,10 +3836,12 @@ msgstr "Filter zurücksetzen"
 #: src/dashboard/widget-block.tsx
 #: src/engines/app-access-requests.tsx
 #: src/engines/app-chat.tsx
+#: src/engines/app-data-model.tsx
 #: src/engines/app-data.tsx
 #: src/engines/app-workflows.tsx
 #: src/engines/app-workspace.tsx
 #: src/engines/blueprints.tsx
+#: src/engines/data-model-changes.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/release-controls.tsx
 #: src/engines/resource-bindings.tsx
@@ -4255,6 +4407,10 @@ msgstr "Sammlung erstellen"
 msgid "Create document"
 msgstr "Dokument erstellen"
 
+#: src/engines/app-data-model.tsx
+msgid "Create table"
+msgstr "Tabelle erstellen"
+
 #: src/settings/teams.tsx
 msgid "Create team"
 msgstr "Team erstellen"
@@ -4331,6 +4487,15 @@ msgstr "Daten und Analysen"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Data location"
 msgstr "Datenstandort"
+
+#: src/engines/app-data-model.tsx
+msgid "Data model"
+msgstr "Datenmodell"
+
+#: src/engines/field-kinds.tsx
+msgctxt "a kind of field"
+msgid "Date"
+msgstr "Datum"
 
 #: src/dashboard/runs-widget.tsx
 msgid "Day"
@@ -4452,6 +4617,10 @@ msgstr "Auslöser löschen"
 #: src/workflows/delete-workflow.tsx
 msgid "Delete the workflow"
 msgstr "Workflow löschen"
+
+#: src/engines/field-editor.tsx
+msgid "Delete this record too"
+msgstr "Diesen Datensatz ebenfalls löschen"
 
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Delete this trigger?"
@@ -4658,6 +4827,10 @@ msgstr "Erledigt Dinge für Personen in {name}"
 msgctxt "inbox item kind"
 msgid "Domain"
 msgstr "Domain"
+
+#: src/engines/field-editor.tsx
+msgid "Don’t allow it while this record links to it"
+msgstr "Nicht erlauben, solange dieser Datensatz darauf verweist"
 
 #: src/knowledge/uploads.tsx
 msgid "Don’t upload interview recordings or their captions: interviews go through the interview flow."
@@ -4876,6 +5049,11 @@ msgstr "Ein Workflow wird bearbeitet"
 msgid "Email"
 msgstr "E-Mail"
 
+#: src/engines/field-kinds.tsx
+msgctxt "a kind of field"
+msgid "Email"
+msgstr "E-Mail"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Email and calendar"
@@ -4896,6 +5074,10 @@ msgstr "Mitarbeitende"
 #: src/brain/brain.ts
 msgid "Employee interviews"
 msgstr "Interviews mit Mitarbeitenden"
+
+#: src/engines/field-editor.tsx
+msgid "Empty"
+msgstr "Leer"
 
 #: src/settings/staff-access.tsx
 msgid "End access"
@@ -5064,8 +5246,14 @@ msgid "Everyone it is shared with, and their agents, read it as accepted. Yours 
 msgstr "Alle, mit denen es geteilt wird, und ihre Agenten lesen es als akzeptiert. Dein eigener Eintrag bleibt, wie er ist."
 
 #: src/chat/builds.tsx
+#: src/engines/access-view.tsx
 msgid "everyone who uses the App"
 msgstr "allen, die die App nutzen"
+
+#: src/engines/access-view.tsx
+#: src/engines/app-data-model.tsx
+msgid "Everyone who uses the App"
+msgstr "Alle, die die App nutzen"
 
 #: src/people/people-teams-picker.tsx
 msgid "Everyone with the {name} role"
@@ -5133,8 +5321,11 @@ msgstr "Erwarteter Ertrag"
 msgid "Export"
 msgstr "Exportieren"
 
-#: src/activity/audit-log.tsx
 #: src/engines/app-data.tsx
+msgid "Export as CSV"
+msgstr "Als CSV exportieren"
+
+#: src/activity/audit-log.tsx
 #: src/settings/audit-archive.tsx
 msgid "Export CSV"
 msgstr "CSV exportieren"
@@ -5242,11 +5433,41 @@ msgstr "Weniger als fünf Personen: wird nicht einzeln gezeigt."
 msgid "Fewer than five people: this isn't shown on its own."
 msgstr "Weniger als fünf Personen: Das wird nicht einzeln gezeigt."
 
+#: src/engines/field-editor.tsx
+msgid "Fewest characters"
+msgstr "Mindestens Zeichen"
+
+#: src/engines/indexes-view.tsx
+msgid "Field"
+msgstr "Feld"
+
 #: src/engines/app-data.tsx
 msgid "Field for {column}"
 msgstr "Feld für {column}"
 
+#: src/engines/field-editor.tsx
+msgid "Field name"
+msgstr "Feldname"
+
+#: src/engines/field-editor.tsx
+msgid "Fields"
+msgstr "Felder"
+
+#: src/engines/app-data-model.tsx
+msgctxt "a table's fields"
+msgid "Fields"
+msgstr "Felder"
+
+#: src/engines/indexes-view.tsx
+msgid "Fields to search"
+msgstr "Zu durchsuchende Felder"
+
 #: src/labels.ts
+msgid "File"
+msgstr "Datei"
+
+#: src/engines/field-kinds.tsx
+msgctxt "a kind of field"
 msgid "File"
 msgstr "Datei"
 
@@ -5326,10 +5547,6 @@ msgstr "Finanzen"
 msgctxt "kind of app"
 msgid "Finance and accounting"
 msgstr "Finanzen und Buchhaltung"
-
-#: src/engines/app-data.tsx
-msgid "Find"
-msgstr "Suchen"
 
 #: src/engines/app-data.tsx
 msgid "Find a record by its ID"
@@ -5585,6 +5802,10 @@ msgstr "Allgemein"
 msgctxt "programme stage"
 msgid "Getting ready"
 msgstr "In Vorbereitung"
+
+#: src/engines/data-model-changes.tsx
+msgid "Give a value"
+msgstr "Wert angeben"
 
 #: src/connections/http-connections.tsx
 msgid "Give it a name of at most {longest} characters."
@@ -6034,6 +6255,10 @@ msgctxt "thinking effort"
 msgid "High"
 msgstr "Hoch"
 
+#: src/engines/field-editor.tsx
+msgid "Highest"
+msgstr "Höchstwert"
+
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Hire-to-Retire"
@@ -6278,12 +6503,16 @@ msgid "Import"
 msgstr "Importieren"
 
 #: src/engines/app-data.tsx
-msgid "Import CSV"
-msgstr "CSV importieren"
+msgid "Import from CSV"
+msgstr "Aus CSV importieren"
 
 #: src/engines/app-data.tsx
 msgid "Import into {name}"
 msgstr "In {name} importieren"
+
+#: src/engines/app-data.tsx
+msgid "Import or export"
+msgstr "Importieren oder exportieren"
 
 #: src/onboarding/hr-leads.tsx
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
@@ -6337,6 +6566,15 @@ msgstr "In Ihrem Posteingang"
 #: src/inbox/inbox-page.tsx
 msgid "Inbox"
 msgstr "Posteingang"
+
+#: src/engines/indexes-view.tsx
+msgid "Indexes"
+msgstr "Indizes"
+
+#: src/engines/app-data-model.tsx
+msgctxt "a table's indexes"
+msgid "Indexes"
+msgstr "Indizes"
 
 #: src/chat/thread.tsx
 #: src/workflows/traced-run.tsx
@@ -6438,6 +6676,10 @@ msgstr "Es kann noch einmal gesendet werden, genau wie zuvor. Nichts wird rückg
 #: src/workflows/files-and-apps.tsx
 msgid "It can't start until you approve what each binding reaches, for the version it runs."
 msgstr "Er kann erst starten, wenn Sie freigeben, was jede Bindung erreicht, für die Version, die läuft."
+
+#: src/engines/data-model-changes.tsx
+msgid "It changes no record the App holds."
+msgstr "Es ändert keinen Datensatz der App."
 
 #: src/workflows/workflow-diagram.tsx
 msgid "It declares no tasks."
@@ -6873,6 +7115,14 @@ msgstr "Meinen Text behalten"
 msgid "Keeps failing"
 msgstr "Schlägt immer wieder fehl"
 
+#: src/engines/data-model-changes.tsx
+msgid "Keeps the records of {table}, though nothing reads them any more."
+msgstr "Behält die Datensätze von {table}, auch wenn nichts sie mehr liest."
+
+#: src/engines/data-model-changes.tsx
+msgid "Keeps the values of {field} in {table}, though nothing reads them any more."
+msgstr "Behält die Werte von {field} in {table}, auch wenn nichts sie mehr liest."
+
 #: src/settings/erasures.tsx
 msgid "Kept"
 msgstr "Übernommen"
@@ -6907,6 +7157,10 @@ msgstr "Art"
 #: src/brain/brain-transcript.tsx
 msgid "Kind of statement"
 msgstr "Art der Aussage"
+
+#: src/engines/field-editor.tsx
+msgid "Kinds of field"
+msgstr "Arten von Feldern"
 
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
@@ -7098,6 +7352,10 @@ msgstr "Version {version} von {who} live schalten"
 msgid "Let’s start"
 msgstr "Los geht’s"
 
+#: src/engines/data-model-changes.tsx
+msgid "Lets {field} in {table} hold more. Every record already fits."
+msgstr "Lässt {field} in {table} mehr aufnehmen. Jeder Datensatz passt bereits."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Licence"
 msgstr "Lizenz"
@@ -7144,6 +7402,15 @@ msgstr "Link"
 msgid "Link to {0}"
 msgstr "Link zu {0}"
 
+#: src/engines/field-kinds.tsx
+msgid "Link to {table}"
+msgstr "Verknüpfung mit {table}"
+
+#: src/engines/field-kinds.tsx
+msgctxt "a kind of field"
+msgid "Link to a table"
+msgstr "Verknüpfung mit einer Tabelle"
+
 #: src/settings/chat-accounts.tsx
 msgid "Link your {app} account {account}?"
 msgstr "Ihr {app}-Konto {account} verknüpfen?"
@@ -7160,6 +7427,7 @@ msgstr "Verknüpft {time}"
 msgid "Links can't be opened here."
 msgstr "Links können hier nicht geöffnet werden."
 
+#: src/engines/field-editor.tsx
 #: src/knowledge/document.tsx
 msgid "Links to"
 msgstr "Verweist auf"
@@ -7263,6 +7531,10 @@ msgstr "Kleinbuchstaben, Ziffern, Punkte, Bindestriche, Unterstriche und Pluszei
 msgid "Lower-case letters and digits, with single dashes between them; not the name of one of the workspace's pages."
 msgstr "Kleinbuchstaben und Ziffern, mit einzelnen Bindestrichen dazwischen; nicht der Name einer Seite des Workspace."
 
+#: src/engines/field-editor.tsx
+msgid "Lowest"
+msgstr "Mindestwert"
+
 #: src/engines/app-versions.tsx
 msgid "Made"
 msgstr "Erstellt"
@@ -7352,6 +7624,10 @@ msgstr "Aktuell machen"
 msgid "Make project"
 msgstr "Projekt erstellen"
 
+#: src/engines/data-model-changes.tsx
+msgid "Make the change"
+msgstr "Änderung vornehmen"
+
 #: src/chat/builds.tsx
 msgid "Make version {version} current"
 msgstr "Version {version} aktuell machen"
@@ -7367,6 +7643,10 @@ msgstr "Version {version} aktuell machen?"
 #: src/inbox/items.ts
 msgid "Make version {version} of {name} live?"
 msgstr "Version {version} von {name} live schalten?"
+
+#: src/engines/data-model-changes.tsx
+msgid "Makes {table} sensitive: its history keeps no values, and every read is recorded."
+msgstr "Macht {table} sensibel: Ihr Verlauf speichert keine Werte, und jeder Lesezugriff wird protokolliert."
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind: packages revoked as malware"
@@ -7528,6 +7808,11 @@ msgstr "Mittel"
 msgid "Modules"
 msgstr "Module"
 
+#: src/engines/field-kinds.tsx
+msgctxt "a kind of field"
+msgid "Money"
+msgstr "Geld"
+
 #: src/brain/brain.ts
 msgid "Monthly budget for AI"
 msgstr "Monatliches Budget für KI"
@@ -7587,10 +7872,6 @@ msgstr "Noch mehr dazu, was anders läuft."
 msgid "More people are asked about it in the next interviews."
 msgstr "In den nächsten Interviews werden mehr Menschen danach gefragt."
 
-#: src/engines/app-data.tsx
-msgid "More records"
-msgstr "Weitere Datensätze"
-
 #: src/brain/brain-atlas.ts
 msgid "More teams"
 msgstr "Weitere Teams"
@@ -7607,6 +7888,10 @@ msgstr "Es wurde mehr gesendet, als oben gezeigt wird. Lesen Sie genau, was gese
 msgid "More will be sent than is shown above. Read exactly what will be sent before you confirm."
 msgstr "Es wird mehr gesendet, als oben angezeigt wird. Lesen Sie genau, was gesendet wird, bevor Sie bestätigen."
 
+#: src/engines/field-editor.tsx
+msgid "Most characters"
+msgstr "Höchstens Zeichen"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Most people can’t name every tool they use, so a small app on the work laptops tells me. We set it up with you or your IT, or you skip it for now."
 msgstr "Die meisten Menschen können nicht jedes Tool nennen, das sie nutzen, deshalb sagt es mir eine kleine App auf den Arbeitslaptops. Wir richten sie mit Ihnen oder Ihrer IT ein, oder Sie überspringen das vorerst."
@@ -7614,6 +7899,10 @@ msgstr "Die meisten Menschen können nicht jedes Tool nennen, das sie nutzen, de
 #: src/dashboard/widget-board.tsx
 msgid "Move"
 msgstr "Verschieben"
+
+#: src/engines/field-editor.tsx
+msgid "Move {name}"
+msgstr "{name} verschieben"
 
 #: src/settings/ai-providers.tsx
 msgid "Move {name} down"
@@ -7626,6 +7915,10 @@ msgstr "{name} nach oben verschieben"
 #: src/dashboard/widget-board.tsx
 msgid "Move {title}: drag it, or use the arrow keys"
 msgstr "{title} verschieben: ziehen oder die Pfeiltasten verwenden"
+
+#: src/engines/field-editor.tsx
+msgid "Move {value}"
+msgstr "{value} verschieben"
 
 #: src/activity/audit-words.ts
 msgid "Moved old entries out of the audit trail"
@@ -7646,7 +7939,9 @@ msgid "Muted"
 msgstr "Stumm"
 
 #: src/connections/http-connections.tsx
+#: src/engines/app-data-model.tsx
 #: src/engines/app-settings.tsx
+#: src/engines/field-editor.tsx
 #: src/knowledge/new-collection.tsx
 #: src/knowledge/new-document.tsx
 #: src/onboarding/interviews-progress.tsx
@@ -7788,6 +8083,10 @@ msgstr "Neue Sammlung"
 msgid "New document"
 msgstr "Neues Dokument"
 
+#: src/engines/field-editor.tsx
+msgid "New field"
+msgstr "Neues Feld"
+
 #: src/routes/_shell.settings.brain.tsx
 msgid "New group"
 msgstr "Neue Gruppe"
@@ -7808,6 +8107,10 @@ msgstr "Neue E-Mail in Google"
 msgid "New mail in Microsoft 365"
 msgstr "Neue E-Mail in Microsoft 365"
 
+#: src/engines/field-editor.tsx
+msgid "New option"
+msgstr "Neue Option"
+
 #: src/projects/project-dialog.tsx
 #: src/routes/_shell.projects.index.tsx
 msgid "New project"
@@ -7816,6 +8119,10 @@ msgstr "Neues Projekt"
 #: src/dashboard/dependency-requests.tsx
 msgid "New since the last approval: {added}"
 msgstr "Neu seit der letzten Genehmigung: {added}"
+
+#: src/engines/app-data-model.tsx
+msgid "New table"
+msgstr "Neue Tabelle"
 
 #: src/settings/teams.tsx
 msgid "New team"
@@ -7868,6 +8175,7 @@ msgstr "Nächster Schritt"
 msgid "Next week"
 msgstr "Nächste Woche"
 
+#: src/engines/field-editor.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "No"
 msgstr "Nein"
@@ -8085,6 +8393,10 @@ msgstr "Keine Berechtigungen."
 msgid "No projects yet"
 msgstr "Noch keine Projekte"
 
+#: src/engines/indexes-view.tsx
+msgid "No query uses it yet"
+msgstr "Noch keine Abfrage nutzt ihn"
+
 #: src/engines/store-change-errors.ts
 msgid "No record is to blame, so an admin can only abandon the change, in the App's settings."
 msgstr "Kein Datensatz ist schuld, daher kann ein Admin die Änderung nur in den Einstellungen der App verwerfen."
@@ -8134,6 +8446,10 @@ msgstr "Noch kein Stakeholder benannt"
 #: src/engines/app-data.tsx
 msgid "No tables"
 msgstr "Keine Tabellen"
+
+#: src/engines/app-data-model.tsx
+msgid "No tables yet"
+msgstr "Noch keine Tabellen"
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "No teams"
@@ -8197,6 +8513,10 @@ msgstr "Noch keine Workflows"
 msgid "No: its hash or its link to the event before it doesn't match."
 msgstr "Nein: Sein Hash oder seine Verknüpfung zum vorherigen Ereignis stimmt nicht."
 
+#: src/engines/access-view.tsx
+msgid "Nobody"
+msgstr "Niemand"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Niemand hat rechtzeitig geantwortet, daher ist diese Entscheidung geschlossen."
@@ -8216,6 +8536,10 @@ msgstr "Niemand mit diesem Namen"
 #: src/workflows/delete-workflow.tsx
 msgid "Nobody can open or start it again. Its versions are kept but never served. This can't be undone."
 msgstr "Niemand kann ihn wieder öffnen oder starten. Seine Versionen bleiben erhalten, werden aber nie mehr ausgeliefert. Das lässt sich nicht rückgängig machen."
+
+#: src/engines/access-view.tsx
+msgid "Nobody changes the records in {table}, Sam included."
+msgstr "Niemand ändert die Datensätze in {table}, auch Sam nicht."
 
 #: src/people/people-teams-picker.tsx
 #: src/projects/project-people.tsx
@@ -8261,6 +8585,10 @@ msgstr "Niemand hat {doc} in {where} {days, plural, one {am letzten Tag} other {
 #: src/dashboard/signals.tsx
 msgid "Nobody reads it"
 msgstr "Niemand liest es"
+
+#: src/engines/access-view.tsx
+msgid "Nobody sees the records in {table}, Sam included."
+msgstr "Niemand sieht die Datensätze in {table}, auch Sam nicht."
 
 #: src/settings/erasures.tsx
 msgid "Nobody was removed."
@@ -8674,6 +9002,11 @@ msgstr "jetzt"
 msgid "Number"
 msgstr "Zahl"
 
+#: src/engines/field-kinds.tsx
+msgctxt "a kind of field"
+msgid "Number"
+msgstr "Zahl"
+
 #: src/workflows/figures.tsx
 msgid "of them wait for a decision"
 msgstr "davon warten auf eine Entscheidung"
@@ -8822,6 +9155,10 @@ msgstr "Einer pro Zeile, bis zu {most}: ein Name, jede andere Form davon, eine E
 msgid "One moment"
 msgstr "Einen Moment"
 
+#: src/engines/field-kinds.tsx
+msgid "One of a list of options"
+msgstr "Eine aus einer Liste von Optionen"
+
 #: src/interview/words.ts
 msgid "One real case"
 msgstr "Ein echter Fall"
@@ -8878,6 +9215,11 @@ msgstr "Nur wer Pakete genehmigen darf, sieht, was im ganzen Workspace genehmigt
 msgid "Only someone signed in to the workspace opens it."
 msgstr "Nur wer im Workspace angemeldet ist, öffnet ihn."
 
+#: src/engines/access-view.tsx
+#: src/engines/app-data-model.tsx
+msgid "Only the App's builders"
+msgstr "Nur die Builder der App"
+
 #: src/onboarding/review-parts.tsx
 msgid "Only the first way"
 msgstr "Nur der erste Weg"
@@ -8897,6 +9239,14 @@ msgstr "Nur die Personen, an die sich diese Entscheidung richtet, können sie be
 #: src/workflows/run-detail.tsx
 msgid "Only the person it ran for and the organization's admins see what it returned or why it failed."
 msgstr "Nur die Person, für die er lief, und die Admins der Organisation sehen, was er zurückgab oder warum er fehlschlug."
+
+#: src/engines/app-data-model.tsx
+msgid "Only the person who added each record"
+msgstr "Nur die Person, die den Datensatz hinzugefügt hat"
+
+#: src/engines/access-view.tsx
+msgid "Only the person who added the record"
+msgstr "Nur die Person, die den Datensatz hinzugefügt hat"
 
 #: src/onboarding/review-parts.tsx
 msgid "Only the second way"
@@ -9129,6 +9479,14 @@ msgstr "Operationen"
 msgctxt "business process"
 msgid "Opportunity-to-Cash"
 msgstr "Opportunity-to-Cash"
+
+#: src/engines/field-editor.tsx
+msgid "Option {place}"
+msgstr "Option {place}"
+
+#: src/engines/field-editor.tsx
+msgid "Options"
+msgstr "Optionen"
 
 #: src/engines/app-settings.tsx
 msgctxt "the settings an app offers itself"
@@ -9525,6 +9883,11 @@ msgstr "Angefragte Berechtigungen"
 msgid "Person"
 msgstr "Person"
 
+#: src/engines/field-kinds.tsx
+msgctxt "a kind of field"
+msgid "Person"
+msgstr "Person"
+
 #: src/settings/erasures.tsx
 msgid "Personal connections"
 msgstr "Persönliche Verbindungen"
@@ -9532,6 +9895,18 @@ msgstr "Persönliche Verbindungen"
 #: src/settings/erasures.tsx
 msgid "Personal Knowledge and memories"
 msgstr "Persönliches Wissen und Erinnerungen"
+
+#: src/engines/field-editor.tsx
+msgid "Pick a table"
+msgstr "Tabelle auswählen"
+
+#: src/engines/data-model-changes.tsx
+msgid "Pick one"
+msgstr "Eine auswählen"
+
+#: src/engines/field-editor.tsx
+msgid "Picked up {name}, at place {place}."
+msgstr "{name} aufgenommen, an Stelle {place}."
 
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
@@ -9598,11 +9973,6 @@ msgstr "Prag"
 #: src/interview/read-back.tsx
 msgid "Press a line to change it, take out what is wrong, or type what is missing. What you leave in is what counts."
 msgstr "Drücken Sie auf eine Zeile, um sie zu ändern, nehmen Sie heraus, was nicht stimmt, oder tippen Sie, was fehlt. Was Sie stehen lassen, zählt."
-
-#: src/engines/app-workspace.tsx
-msgctxt "an app's draft, not live"
-msgid "Preview"
-msgstr "Vorschau"
 
 #: src/engines/app-workspace.tsx
 msgctxt "an app's workspace view"
@@ -9777,6 +10147,14 @@ msgstr "Personenbezogene Daten bereinigen"
 #: src/knowledge/purge.tsx
 msgid "Purge personal data from {collection}"
 msgstr "Personenbezogene Daten aus {collection} bereinigen"
+
+#: src/engines/field-editor.tsx
+msgid "Put {name} back where it was."
+msgstr "{name} zurück an seinen Platz gelegt."
+
+#: src/engines/field-editor.tsx
+msgid "Put {name} down at place {place}."
+msgstr "{name} an Stelle {place} abgelegt."
 
 #: src/interview/read-back.tsx
 msgid "Put back"
@@ -9969,10 +10347,6 @@ msgstr "Gelesen, was sich verbessern ließe"
 msgid "Read-only"
 msgstr "Nur lesen"
 
-#: src/engines/app-code.tsx
-msgid "Read-only. Changes to the code go through the chat."
-msgstr "Nur lesen. Änderungen am Code laufen über den Chat."
-
 #: src/onboarding/document-drop.tsx
 msgid "Reading"
 msgstr "Wird gelesen"
@@ -10060,18 +10434,31 @@ msgstr "Datensatz"
 msgid "Record {id}"
 msgstr "Datensatz {id}"
 
-#: src/engines/app-data.tsx
-msgid "Record ID"
-msgstr "Datensatz-ID"
+#: src/engines/access-view.tsx
+msgid "Record every time someone looks at these records, and keep no past values"
+msgstr "Jeden Blick auf diese Datensätze festhalten und keine früheren Werte behalten"
 
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Record-to-Report"
 msgstr "Record-to-Report"
 
+#: src/engines/app-data-model.tsx
+msgctxt "a table's records"
+msgid "Records"
+msgstr "Datensätze"
+
 #: src/engines/store-changes.tsx
 msgid "Records checked: {scanned}. Filled in: {filled}."
 msgstr "Geprüfte Datensätze: {scanned}. Ausgefüllt: {filled}."
+
+#: src/engines/data-model-changes.tsx
+msgid "Records in {table} that lack {field} get “{value}”."
+msgstr "Datensätze in {table} ohne {field} bekommen „{value}“."
+
+#: src/engines/data-model-changes.tsx
+msgid "Records in {table} that lack {field} need a value before this can be published."
+msgstr "Datensätze in {table} ohne {field} brauchen einen Wert, bevor dies veröffentlicht werden kann."
 
 #: src/brain/gap-actions.tsx
 msgid "Redact it"
@@ -10179,6 +10566,8 @@ msgstr "Etwas merken"
 
 #: src/connections/tool-permissions.tsx
 #: src/engines/app-webhooks.tsx
+#: src/engines/data-model-changes.tsx
+#: src/engines/field-editor.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/package-approvers.tsx
@@ -10226,6 +10615,10 @@ msgstr "{named} als Freigebende entfernen"
 msgid "Remove {title} from the brain"
 msgstr "{title} aus dem Gehirn entfernen"
 
+#: src/engines/field-editor.tsx
+msgid "Remove {value}"
+msgstr "{value} entfernen"
+
 #: src/brain/forget.tsx
 msgid "Remove {what} from the brain?"
 msgstr "{what} aus dem Gehirn entfernen?"
@@ -10252,13 +10645,29 @@ msgstr "Entfernen"
 msgid "Remove link"
 msgstr "Link entfernen"
 
+#: src/engines/field-editor.tsx
+msgid "Remove spaces at the start and end"
+msgstr "Leerzeichen am Anfang und Ende entfernen"
+
+#: src/engines/app-data-model.tsx
+msgid "Remove table"
+msgstr "Tabelle entfernen"
+
 #: src/engines/blueprints.tsx
 msgid "Remove the blueprint {name}"
 msgstr "Blueprint {name} entfernen"
 
+#: src/engines/indexes-view.tsx
+msgid "Remove the index {indexName}"
+msgstr "Index {indexName} entfernen"
+
 #: src/inbox/item-detail.tsx
 msgid "Remove the package"
 msgstr "Paket entfernen"
+
+#: src/engines/indexes-view.tsx
+msgid "Remove the search"
+msgstr "Suche entfernen"
 
 #: src/brain/brain-article/kern.tsx
 #: src/brain/brain-transcript.tsx
@@ -10383,6 +10792,11 @@ msgstr "Anfragen"
 #: src/workflows/requests/request-detail.tsx
 msgid "Requests over time"
 msgstr "Anfragen im Zeitverlauf"
+
+#: src/engines/app-data-model.tsx
+#: src/engines/field-editor.tsx
+msgid "Required"
+msgstr "Pflicht"
 
 #: src/workflows/kept-state.tsx
 msgid "Reset"
@@ -10921,12 +11335,65 @@ msgstr "Als geschehen angegeben: {who}."
 msgid "sales-pipeline"
 msgstr "vertriebspipeline"
 
+#: src/engines/access-view.tsx
+msgid "Sam can change a record in {table} as one of these: {who}."
+msgstr "Sam kann einen Datensatz in {table} als eine dieser Personen ändern: {who}."
+
+#: src/engines/access-view.tsx
+msgid "Sam can change a record in {table} only as one of these: {who}; and also one of these: {also}."
+msgstr "Sam kann einen Datensatz in {table} nur als eine dieser Personen ändern: {who}; und zugleich als eine dieser: {also}."
+
+#: src/engines/access-view.tsx
+msgid "Sam can change only the records in {table} that Sam added."
+msgstr "Sam kann nur die Datensätze in {table} ändern, die Sam hinzugefügt hat."
+
+#: src/engines/access-view.tsx
+msgid "Sam can change only the records in {table} whose {field} is one of Sam's teams."
+msgstr "Sam kann nur die Datensätze in {table} ändern, deren {field} eines von Sams Teams ist."
+
+#: src/engines/access-view.tsx
+msgid "Sam can change only the records in {table} whose {field} is Sam."
+msgstr "Sam kann nur die Datensätze in {table} ändern, deren {field} Sam ist."
+
+#: src/engines/access-view.tsx
+msgid "Sam can change the records in {table} only as one of the App's builders."
+msgstr "Sam kann die Datensätze in {table} nur als einer der Builder der App ändern."
+
+#: src/engines/access-view.tsx
+msgid "Sam sees a record in {table} as one of these: {who}."
+msgstr "Sam sieht einen Datensatz in {table} als eine dieser Personen: {who}."
+
+#: src/engines/access-view.tsx
+msgid "Sam sees only the records in {table} that Sam added."
+msgstr "Sam sieht nur die Datensätze in {table}, die Sam hinzugefügt hat."
+
+#: src/engines/access-view.tsx
+msgid "Sam sees only the records in {table} whose {field} is one of Sam's teams."
+msgstr "Sam sieht nur die Datensätze in {table}, deren {field} eines von Sams Teams ist."
+
+#: src/engines/access-view.tsx
+msgid "Sam sees only the records in {table} whose {field} is Sam."
+msgstr "Sam sieht nur die Datensätze in {table}, deren {field} Sam ist."
+
+#: src/engines/access-view.tsx
+msgid "Sam sees the records in {table} only as one of the App's builders."
+msgstr "Sam sieht die Datensätze in {table} nur als einer der Builder der App."
+
+#: src/engines/access-view.tsx
+msgid "Sam, like everyone who uses the App, can change any record in {table}."
+msgstr "Sam kann, wie alle, die die App nutzen, jeden Datensatz in {table} ändern."
+
+#: src/engines/access-view.tsx
+msgid "Sam, like everyone who uses the App, sees every record in {table}."
+msgstr "Sam sieht, wie alle, die die App nutzen, jeden Datensatz in {table}."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Same version, different contents: {changed}"
 msgstr "Gleiche Version, anderer Inhalt: {changed}"
 
 #: src/brain/goals-editor.tsx
 #: src/chat/chat-more.tsx
+#: src/engines/field-editor.tsx
 #: src/knowledge/document.tsx
 #: src/projects/project-dialog.tsx
 #: src/workflows/resource-params.tsx
@@ -10936,6 +11403,10 @@ msgstr "Speichern"
 #: src/engines/blueprints.tsx
 msgid "Save {name} as a blueprint"
 msgstr "{name} als Blueprint speichern"
+
+#: src/engines/access-view.tsx
+msgid "Save access"
+msgstr "Zugriff speichern"
 
 #: src/engines/blueprints.tsx
 msgid "Save an App as a blueprint from its settings, and it shows here."
@@ -10968,6 +11439,11 @@ msgstr "Korrektur speichern"
 #: src/interview/composer.tsx
 msgid "Saved"
 msgstr "Gespeichert"
+
+#: src/engines/app-data-model.tsx
+#: src/engines/field-editor.tsx
+msgid "Saved as {named}"
+msgstr "Gespeichert als {named}"
 
 #: src/engines/blueprints.tsx
 msgid "Saved as a blueprint"
@@ -11058,6 +11534,10 @@ msgstr "Nach Name oder Art suchen"
 msgid "Search chats"
 msgstr "Chats durchsuchen"
 
+#: src/engines/indexes-view.tsx
+msgid "Search in {searched}"
+msgstr "Suche in {searched}"
+
 #: src/engines/app-integrations.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search integrations"
@@ -11104,6 +11584,10 @@ msgstr "Im Transkript suchen"
 #: src/chat/chat-window.tsx
 msgid "Search your chats, and open one."
 msgstr "Durchsuchen Sie Ihre Chats und öffnen Sie einen."
+
+#: src/engines/indexes-view.tsx
+msgid "Search, to find records by the words in them"
+msgstr "Eine Suche, um Datensätze nach ihren Wörtern zu finden"
 
 #: src/settings/audit-archive.tsx
 msgid "Searched above. After this, events move to the archive."
@@ -11328,6 +11812,11 @@ msgstr "Festgelegt in"
 msgid "Set in {source}"
 msgstr "Festgelegt in {source}"
 
+#: src/engines/field-kinds.tsx
+msgctxt "a kind of field"
+msgid "Set in code"
+msgstr "Im Code festgelegt"
+
 #: src/routes/_shell.settings.profile.tsx
 msgid "Set in your organization’s directory."
 msgstr "Im Verzeichnis Ihrer Organisation festgelegt."
@@ -11435,6 +11924,7 @@ msgid "Sharing"
 msgstr "Freigabe"
 
 #: src/brain/atlas-overlays.tsx
+#: src/engines/app-data-model.tsx
 msgid "Show"
 msgstr "Anzeigen"
 
@@ -11748,6 +12238,10 @@ msgstr "Jemand anderes"
 #: src/pages/page-frame.tsx
 msgid "Someone else signed in on this browser, so this page was stopped. Try again to open it as the person signed in now."
 msgstr "Jemand anderes hat sich in diesem Browser angemeldet, deshalb wurde diese Seite gestoppt. Versuchen Sie es erneut, um sie als die jetzt angemeldete Person zu öffnen."
+
+#: src/engines/field-kinds.tsx
+msgid "Someone in your organization"
+msgstr "Jemand in deiner Organisation"
 
 #: src/engines/app-settings.tsx
 msgid "Someone it is no longer shared with"
@@ -12184,6 +12678,14 @@ msgstr "System"
 msgid "Table"
 msgstr "Tabelle"
 
+#: src/engines/app-data-model.tsx
+msgid "Table name"
+msgstr "Tabellenname"
+
+#: src/engines/app-data-model.tsx
+msgid "Tables"
+msgstr "Tabellen"
+
 #: src/engines/app-integrations.tsx
 msgid "Take {integrationName} off {appName}"
 msgstr "{integrationName} von {appName} entfernen"
@@ -12268,6 +12770,10 @@ msgstr "Zielbild abgestimmt"
 #: src/activity/audit-log.tsx
 msgid "Target ID"
 msgstr "Ziel-ID"
+
+#: src/engines/app-data-model.tsx
+msgid "tasks"
+msgstr "aufgaben"
 
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
@@ -12382,6 +12888,11 @@ msgid "Testing"
 msgstr "Im Test"
 
 #: src/knowledge/document.tsx
+msgid "Text"
+msgstr "Text"
+
+#: src/engines/field-kinds.tsx
+msgctxt "a kind of field"
 msgid "Text"
 msgstr "Text"
 
@@ -12561,6 +13072,7 @@ msgid "The App's actions reach a model, an integration, knowledge or a template 
 msgstr "Die Aktionen der App erreichen ein Modell, eine Integration, Wissen oder eine Vorlage nur über eine Bindung, die ein Admin deiner Organisation genehmigt."
 
 #: src/chat/builds.tsx
+#: src/engines/access-view.tsx
 msgid "the App's builders"
 msgstr "den Buildern der App"
 
@@ -12652,6 +13164,10 @@ msgstr "Der Katalog der Integrationen konnte nicht gelesen werden, deshalb zeigt
 #: src/engines/store-changes.tsx
 msgid "The change to the store {name} was abandoned"
 msgstr "Die Änderung am Speicher {name} wurde verworfen"
+
+#: src/engines/indexes-view.tsx
+msgid "The chat adds indexes as it writes the App’s queries."
+msgstr "Der Chat fügt Indizes hinzu, während er die Abfragen der App schreibt."
 
 #: src/workflows/business-process.tsx
 msgid "The checks, reviews and records the regulator expects from you."
@@ -12905,8 +13421,17 @@ msgid "The people and teams who approve or deny the npm packages Apps and workfl
 msgstr "Die Personen und Teams, die die npm-Pakete freigeben oder ablehnen, die Apps und Workflows anfragen. Keine Rolle umfasst das, auch nicht Admin: Fügen Sie sich selbst hinzu, um Pakete freizugeben."
 
 #: src/chat/builds.tsx
+#: src/engines/access-view.tsx
 msgid "the person in {field}"
 msgstr "der Person in {field}"
+
+#: src/engines/access-view.tsx
+msgid "The person in {field}"
+msgstr "Die Person in {field}"
+
+#: src/engines/access-view.tsx
+msgid "the person who added it"
+msgstr "die Person, die ihn hinzugefügt hat"
 
 #: src/engines/resource-bindings.tsx
 msgid "The platform's statistics"
@@ -13040,6 +13565,14 @@ msgstr "Der Speicher behält seine Tabellen, wie sie sind, und nimmt wieder Änd
 #: src/settings/teams.tsx
 msgid "The team couldn't be created. Try again."
 msgstr "Das Team konnte nicht erstellt werden. Versuchen Sie es erneut."
+
+#: src/engines/access-view.tsx
+msgid "the team in {field}"
+msgstr "das Team in {field}"
+
+#: src/engines/access-view.tsx
+msgid "The team in {field}"
+msgstr "Das Team in {field}"
 
 #: src/settings/ai-providers.tsx
 msgid "The test didn't work. {model} didn't answer: {why}"
@@ -13487,14 +14020,6 @@ msgstr "Der gespeicherte Code dieser Seite stimmt nicht mehr mit dem veröffentl
 msgid "This store no longer exists, so there is nothing to abandon."
 msgstr "Diesen Speicher gibt es nicht mehr, daher gibt es nichts zu verwerfen."
 
-#: src/engines/app-data.tsx
-msgid "This table holds no records you may read."
-msgstr "Diese Tabelle enthält keine Datensätze, die du lesen darfst."
-
-#: src/engines/app-data.tsx
-msgid "This table is sensitive: its history keeps which fields changed, not their values."
-msgstr "Diese Tabelle ist sensibel: Ihr Verlauf speichert, welche Felder sich geändert haben, nicht ihre Werte."
-
 #: src/engines/store-change-errors.ts
 msgid "This version changes the App's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
 msgstr "Diese Version ändert die Daten der App mit einer Migration, und diese kann nicht abgeschlossen werden: Ihre Umwandlung ist fehlgeschlagen oder hat etwas geliefert, das die Tabelle nicht annimmt."
@@ -13624,6 +14149,10 @@ msgstr "An alle bei {company}"
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
 msgstr "Damit privat bleibt, wer gesprochen hat, fehlt ein Team, bis fünf seiner Leute gefragt wurden, und seine Zahl, bis drei gehört wurden. Beides heißt nicht, dass niemand teilgenommen hat."
 
+#: src/engines/field-editor.tsx
+msgid "To move an item, press space or enter, then the arrow keys. Press space or enter again to put it down, or escape to cancel."
+msgstr "Um einen Eintrag zu verschieben, drücken Sie die Leertaste oder Enter und dann die Pfeiltasten. Drücken Sie erneut die Leertaste oder Enter, um ihn abzulegen, oder Escape, um abzubrechen."
+
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "To start a run, POST its input as JSON to the URL, signed with the secret as <0>Standard Webhooks</0> describes, in the headers {headers}. A delivery more than five minutes old is refused."
 msgstr "Um einen Lauf zu starten, senden Sie seine Eingabe als JSON per POST an die URL, signiert mit dem Geheimnis, wie <0>Standard Webhooks</0> es beschreibt, in den Headern {headers}. Eine Zustellung, die älter als fünf Minuten ist, wird abgelehnt."
@@ -13752,6 +14281,7 @@ msgstr "Versuchen"
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/engines/app-chat.tsx
+#: src/engines/app-data.tsx
 #: src/engines/app-owner.tsx
 #: src/engines/app-settings.tsx
 #: src/frame/page-states.tsx
@@ -13797,6 +14327,7 @@ msgid "Two answers"
 msgstr "Zwei Antworten"
 
 #: src/activity/audit-log.tsx
+#: src/engines/field-editor.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Type"
 msgstr "Typ"
@@ -13928,10 +14459,6 @@ msgstr "Veröffentlichung aufheben"
 msgid "Unpublished changes"
 msgstr "Unveröffentlichte Änderungen"
 
-#: src/engines/app-workspace.tsx
-msgid "Unpublished changes: this preview changes nothing and reads no real data."
-msgstr "Unveröffentlichte Änderungen: Diese Vorschau ändert nichts und liest keine echten Daten."
-
 #: src/activity/audit-log.tsx
 #: src/dashboard/activity.tsx
 #: src/inbox/inbox-page.tsx
@@ -14040,6 +14567,10 @@ msgstr "Hat als Besucher eine Funktion einer App verwendet"
 msgid "Used by"
 msgstr "Verwendet von"
 
+#: src/engines/indexes-view.tsx
+msgid "Used by {queries}"
+msgstr "Genutzt von {queries}"
+
 #: src/labels.ts
 msgid "User"
 msgstr "Nutzer"
@@ -14056,6 +14587,10 @@ msgstr "UTC"
 #: src/workflows/kept-state.tsx
 msgid "Value"
 msgstr "Wert"
+
+#: src/engines/data-model-changes.tsx
+msgid "Value for {name}"
+msgstr "Wert für {name}"
 
 #: src/engines/app-data.tsx
 msgid "Values aren't kept: the table is sensitive."
@@ -14154,20 +14689,16 @@ msgid "Version {version} declares no binding to approve."
 msgstr "Version {version} deklariert keine Bindung zum Genehmigen."
 
 #: src/engines/app-workspace.tsx
-msgid "Version {version} is live: this preview changes nothing and reads no real data."
-msgstr "Version {version} ist live: Diese Vorschau ändert nichts und liest keine echten Daten."
+msgid "Version {version} is live"
+msgstr "Version {version} ist live"
 
 #: src/engines/app-workspace.tsx
 msgid "Version {version} is ready to publish"
 msgstr "Version {version} ist bereit zur Veröffentlichung"
 
 #: src/engines/app-workspace.tsx
-msgid "Version {version} is ready to publish: this preview changes nothing and reads no real data."
-msgstr "Version {version} ist bereit zur Veröffentlichung: Diese Vorschau ändert nichts und liest keine echten Daten."
-
-#: src/engines/app-workspace.tsx
-msgid "Version {version} isn't published or up for review: this preview changes nothing and reads no real data."
-msgstr "Version {version} ist weder veröffentlicht noch zur Prüfung vorgelegt: Diese Vorschau ändert nichts und liest keine echten Daten."
+msgid "Version {version} isn't published or up for review"
+msgstr "Version {version} ist weder veröffentlicht noch zur Prüfung vorgelegt"
 
 #: src/inbox/items.ts
 msgid "Version {version} of {name} is asked to go live. Once it is, nothing starts it until an admin approves what it reaches: each model, connection, store or collection it calls."
@@ -14673,6 +15204,10 @@ msgstr "Was seine Schritte für spätere Läufe behalten; jeder Lauf liest es be
 msgid "What its tools do, as its provider declares them. Apps and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
 msgstr "Was die Tools tun, wie der Anbieter sie angibt. Apps und Agenten nutzen nur, was ihnen erlaubt ist, und ein Tool, das etwas ändert, wartet auf die Bestätigung seiner Person."
 
+#: src/engines/field-editor.tsx
+msgid "What kind of field?"
+msgstr "Welche Art von Feld?"
+
 #: src/workflows/requests/request-detail.tsx
 msgid "What many ask"
 msgstr "Was viele fragen"
@@ -14879,13 +15414,29 @@ msgstr "Wenn es anders läuft"
 msgid "When it holds"
 msgstr "Wenn es zutrifft"
 
+#: src/engines/indexes-view.tsx
+msgid "When it last changed"
+msgstr "Wann er zuletzt geändert wurde"
+
+#: src/engines/indexes-view.tsx
+msgid "When it was added"
+msgstr "Wann er hinzugefügt wurde"
+
 #: src/workflows/trigger-description.ts
 msgid "When its webhook is called"
 msgstr "Wenn sein Webhook aufgerufen wird"
 
+#: src/engines/field-editor.tsx
+msgid "When the linked record is deleted"
+msgstr "Wenn der verknüpfte Datensatz gelöscht wird"
+
 #: src/knowledge/new-collection.tsx
 msgid "When to use it"
 msgstr "Wann sie zu verwenden ist"
+
+#: src/engines/app-data-model.tsx
+msgid "When you publish"
+msgstr "Wenn du veröffentlichst"
 
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "When, as a cron expression"
@@ -15026,6 +15577,18 @@ msgstr "Wer Pakete freigibt"
 msgid "Who can answer"
 msgstr "Wer antworten kann"
 
+#: src/engines/access-view.tsx
+msgid "Who can change them?"
+msgstr "Wer kann sie ändern?"
+
+#: src/engines/app-data-model.tsx
+msgid "Who can see and change its records"
+msgstr "Wer ihre Datensätze sehen und ändern kann"
+
+#: src/engines/access-view.tsx
+msgid "Who can see records in {name}?"
+msgstr "Wer kann Datensätze in {name} sehen?"
+
 #: src/settings/stephen-card.tsx
 msgid "Who can talk to him"
 msgstr "Wer mit ihm sprechen kann"
@@ -15147,6 +15710,10 @@ msgstr "Einen wartenden Lauf geweckt, dessen Weckruf nicht angekommen war"
 #: src/interview/words.ts
 msgid "Word"
 msgstr "Begriff"
+
+#: src/engines/field-kinds.tsx
+msgid "Words and sentences"
+msgstr "Wörter und Sätze"
 
 #: src/interview/words.ts
 msgid "Work of the team"
@@ -15393,6 +15960,7 @@ msgstr "In einem Dokument geschrieben"
 msgid "Wrote {file}"
 msgstr "{file} geschrieben"
 
+#: src/engines/field-editor.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Yes"
 msgstr "Ja"
@@ -15401,6 +15969,11 @@ msgstr "Ja"
 msgctxt "a team was interviewed"
 msgid "Yes"
 msgstr "Ja"
+
+#: src/engines/field-kinds.tsx
+msgctxt "a kind of field"
+msgid "Yes or no"
+msgstr "Ja oder nein"
 
 #: src/interview/sound-check.tsx
 msgid "Yes, I can hear you"

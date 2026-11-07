@@ -443,9 +443,7 @@ test("an App's workspace previews the App before its chat changes anything, then
     });
     // The bar names the version shown: committed, not proposed nor live.
     await expect(
-      page.getByText(
-        "Version 2 isn't published or up for review: this preview changes nothing and reads no real data."
-      )
+      page.getByText("Version 2 isn't published or up for review")
     ).toBeVisible();
 
     // Asked for one: the same preview shows it.

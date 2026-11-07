@@ -27,6 +27,11 @@ import type {
   PreviewShown,
   PreviewUpdate,
 } from "@grasp-os/shared/chat";
+import type {
+  DataModelChange,
+  DraftDataModel,
+  IndexUse,
+} from "@grasp-os/shared/data-model";
 import { authErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
@@ -45,8 +50,20 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
-import { draftOf, proposeChatDraft } from "./agent-builds.ts";
+import {
+  defineInDraft,
+  draftDefinitions,
+  draftOf,
+  proposeChatDraft,
+  saveDraftChanges,
+} from "./agent-builds.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
+import {
+  dataModelOf,
+  definitionPlan,
+  operationDetail,
+  usesOf,
+} from "./app-definition.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import {
   appFor,
@@ -80,7 +97,7 @@ import {
   windowCharger,
   withinAnswer,
 } from "./pages-rpc.ts";
-import { versionPages } from "./pages.ts";
+import { buildAppCode, buildPages, versionPages } from "./pages.ts";
 import type { BuiltPage } from "./pages.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { relayPreviewStream } from "./preview-stream-relay.ts";
@@ -698,6 +715,112 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         throw appErrors.create("app.draft_failed");
       }
       return version;
+    });
+  }
+
+  /**
+   * What uses each of the draft's indexes, from what the compiler found
+   * building its server code and its pages (cached by their files, as
+   * the preview and the draft's check build them): none where a build
+   * fails, or can't run now, which the data model is shown without.
+   */
+  async #indexUses(
+    app: string,
+    files: ReadonlyMap<string, string>
+  ): Promise<IndexUse[]> {
+    const given = Object.fromEntries(files);
+    try {
+      const [code, pages] = await Promise.all([
+        buildAppCode(this.#env, given, app),
+        // Compiled for what each page calls, not type-checked: a page that
+        // calls a function reads as calling it whether or not it builds.
+        buildPages(this.#env, given, app, {
+          profile: "preview",
+          checks: false,
+        }),
+      ]);
+      return usesOf(code.ok ? (code.indexReads ?? []) : [], pages.calls ?? {});
+    } catch (error) {
+      log.warn("data_model.index_uses_failed", { app, ...errorFields(error) });
+      return [];
+    }
+  }
+
+  /**
+   * The data model of the chat's draft of `app` (its definition), and
+   * what publishing it does to the App's records: only while the person
+   * builds the App, as for its files.
+   */
+  async dataModel(chatId: string, app: string): Promise<DraftDataModel> {
+    return await withPerson(this.#check, async (by) => {
+      const found = await appFor(this.#env, by, app, "builder");
+      const scope = {
+        workspaceId: personalWorkspaceId(by.userId),
+        chatId: await this.#ownChat(by.userId, chatId),
+      };
+      const held = await draftDefinitions(this.#env, scope, found);
+      if ("problem" in held) {
+        throw appErrors.create("app.definition_invalid", {
+          issues: [held.problem],
+        });
+      }
+      return {
+        model: dataModelOf(held.own),
+        plan: definitionPlan(held.before, held.own),
+        uses: await this.#indexUses(found.id, held.files),
+      };
+    });
+  }
+
+  /**
+   * Changes the definition in the chat's draft of `app` by `operation`,
+   * by the person themselves, as the chat's agent's definition tools do
+   * (agent-builds.ts, `defineInDraft`), audited as theirs: only while
+   * they build the App and it isn't archived. With `preview`, saves
+   * nothing: what it would make of the model, and the plan, to show
+   * before it is made.
+   */
+  async defineDraft(
+    chatId: string,
+    app: string,
+    operation: unknown,
+    preview = false
+  ): Promise<DataModelChange> {
+    return await withPerson(this.#check, async (by) => {
+      const found = await editableApp(this.#env, by, app);
+      const scope = {
+        workspaceId: personalWorkspaceId(by.userId),
+        chatId: await this.#ownChat(by.userId, chatId),
+      };
+      const defined = await defineInDraft(
+        this.#env,
+        scope,
+        found,
+        operation,
+        async (draft, files, changes) => {
+          if (!preview) {
+            await saveDraftChanges(
+              this.#env,
+              scope,
+              {
+                personId: by.userId,
+                actor: actorOf(by),
+                detail: operationDetail(operation),
+              },
+              found,
+              { draft, files, changes }
+            );
+          }
+        }
+      );
+      return defined.ok
+        ? {
+            ok: true,
+            model: dataModelOf(defined.definition),
+            plan: defined.plan,
+            change: defined.change,
+          }
+        : defined;
     });
   }
 

@@ -115,11 +115,7 @@ test("a builder uses the live App, moves between its pages, and publishes and un
   await expect(
     preview.getByText("Preview: changes nothing, reads no real data")
   ).toBeVisible();
-  await expect(
-    page.getByText(
-      "Version 1 is live: this preview changes nothing and reads no real data."
-    )
-  ).toBeVisible();
+  await expect(page.getByText("Version 1 is live")).toBeVisible();
   await expect(
     page.getByText("Unpublished changes", { exact: true })
   ).toHaveCount(0);

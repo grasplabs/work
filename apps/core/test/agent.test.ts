@@ -1425,7 +1425,7 @@ describe("chat agent code run leases", () => {
         { "a.md": "a" },
         [],
         revision,
-        runId
+        { runId }
       );
 
     // Open: written. Ended (completed, cancelled, timed out): refused.

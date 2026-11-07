@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { AppFiles } from "./apps.ts";
+import type { DataModelChange, DraftDataModel } from "./data-model.ts";
 import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
 import type {
@@ -382,6 +383,14 @@ export const definitionToolNames = [
   "setAccess",
   "addIndex",
   "addPermission",
+  "removeTable",
+  "removeField",
+  "removeIndex",
+  "removePermission",
+  "addPreference",
+  "changePreference",
+  "removePreference",
+  "moveField",
 ] as const;
 
 /**
@@ -1025,6 +1034,28 @@ export interface ChatsApi {
     app: string,
     message: string
   ) => Promise<number>;
+  /**
+   * The data model of the chat's draft of `app`, from its definition,
+   * and what publishing the draft does to the App's records: for the
+   * person while they build the App.
+   */
+  dataModel: (chatId: string, app: string) => Promise<DraftDataModel>;
+  /**
+   * Changes the definition of the chat's draft of `app` by `operation`
+   * (an operation of `@grasp-os/sdk/definition`, as the chat's agent's
+   * definition tools make them, or a few made as one: a field renamed and
+   * retyped), by the person themselves: the model after it, the plan, and
+   * what this change alone does (`change`), or the problem, which changed
+   * nothing. With
+   * `preview`, nothing is saved: what it would do, to show first. For the
+   * person while they build the App, unless it is archived.
+   */
+  defineDraft: (
+    chatId: string,
+    app: string,
+    operation: unknown,
+    preview?: boolean
+  ) => Promise<DataModelChange>;
   /**
    * The pages of the chat's draft of `app`, built, to preview: for the
    * person while they build the App, from a chat that changes it or is its

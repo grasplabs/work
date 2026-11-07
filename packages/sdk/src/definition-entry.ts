@@ -11,8 +11,13 @@ export {
   generatedFiles,
   readDefinition,
 } from "./definition.ts";
-export type { AppDefinition } from "./definition.ts";
-export type { FrozenJson } from "./value-descriptor.ts";
+export type {
+  AppDefinition,
+  DefinedField,
+  DefinedRule,
+  DefinedTable,
+} from "./definition.ts";
+export type { FrozenJson, ValueDescriptor } from "./value-descriptor.ts";
 export {
   applyOperation,
   tryOperation,
@@ -20,4 +25,4 @@ export {
   typeFrom,
 } from "./definition-operations.ts";
 export type { DefinitionOperation } from "./definition-operations.ts";
-export { definitionSources } from "./definition-source.ts";
+export { definitionSources, validatorSource } from "./definition-source.ts";

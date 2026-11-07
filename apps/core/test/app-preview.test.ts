@@ -84,7 +84,7 @@ const writeDraft = async (
     changes,
     [],
     revision,
-    await openTestRun(chatsOf(person), chatId)
+    { runId: await openTestRun(chatsOf(person), chatId) }
   );
   if (!saved) {
     throw new Error("The draft wasn't written");
@@ -399,7 +399,7 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       },
       [],
       0,
-      await openTestRun(chatsOf(builder), chatId)
+      { runId: await openTestRun(chatsOf(builder), chatId) }
     );
 
     expect({
@@ -427,7 +427,7 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       },
       [],
       0,
-      await openTestRun(chatsOf(builder), chatId)
+      { runId: await openTestRun(chatsOf(builder), chatId) }
     );
     let refused: unknown;
     try {

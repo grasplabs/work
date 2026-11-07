@@ -452,7 +452,7 @@ export class App extends DurableObject {
       },
       [],
       revision,
-      await openTestRun(chatsOf(builder), chatId)
+      { runId: await openTestRun(chatsOf(builder), chatId) }
     );
     // The next revision isn't sealed yet: the calls arrive together, each
     // runs, and none drops the seal another started.

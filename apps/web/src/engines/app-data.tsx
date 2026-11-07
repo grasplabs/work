@@ -18,6 +18,12 @@ import {
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/ui/components/dropdown-menu";
+import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -25,6 +31,17 @@ import {
 } from "@grasp-os/ui/components/empty";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@grasp-os/ui/components/input-group";
+import {
+  RecordGrid,
+  RecordGridHeader,
+  RecordGridValue,
+} from "@grasp-os/ui/components/record-grid";
+import type { RecordGridColumn } from "@grasp-os/ui/components/record-grid";
 import {
   Select,
   SelectContent,
@@ -39,24 +56,22 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@grasp-os/ui/components/sheet";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/ui/components/table";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { DownloadIcon, SearchIcon, UploadIcon } from "lucide-react";
+import {
+  ArrowUpDownIcon,
+  DownloadIcon,
+  SearchIcon,
+  UploadIcon,
+} from "lucide-react";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { downloadCsv } from "../csv.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
+import { formatDateTime, valueText } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
 // An App's data, for its builders and the admins (core's app-data.ts):
@@ -84,13 +99,6 @@ const unlessStale = async <T,>(
     throw error;
   }
 };
-
-/** Most fields a row of the records table shows; a record shows them all. */
-const shownFields = 6;
-
-/** A field's value as text: text as it is, anything else as JSON. */
-const valueText = (value: unknown): string =>
-  typeof value === "string" ? value : JSON.stringify(value);
 
 const ops = {
   insert: msg({ message: "Added", context: "a record was added" }),
@@ -514,37 +522,156 @@ const ImportDialog = ({
   );
 };
 
-/** One table's records, a page at a time, with export, import and find. */
-const TableData = ({
-  app,
-  table,
-  version,
+/** A column of a table's records: the field whose values it shows, and its header. */
+export interface RecordColumn {
+  field: string;
+  header: ReactNode;
+  width?: number;
+}
+
+/** A header that only names its column. */
+export const PlainHeader = ({ children }: { children: ReactNode }) => (
+  <RecordGridHeader>{children}</RecordGridHeader>
+);
+
+/** The grid's columns: each record's ID, which opens it, its fields, and when it last changed. */
+const recordColumns = (
+  columns: readonly RecordColumn[],
+  onOpen: (record: AppDataRecord) => void
+): RecordGridColumn<AppDataRecord>[] => [
+  {
+    id: "_id",
+    width: 96,
+    header: (
+      <PlainHeader>
+        <Trans>Record</Trans>
+      </PlainHeader>
+    ),
+    cell: (record) => (
+      <Button
+        onClick={() => {
+          onOpen(record);
+        }}
+        size="xs"
+        title={record.id}
+        variant="link"
+      >
+        {/* A UUIDv7 starts with its time, the same for records made
+            together: its end tells them apart. */}
+        <RecordGridValue tone="code">…{record.id.slice(-6)}</RecordGridValue>
+      </Button>
+    ),
+  },
+  ...columns.map(
+    ({ field, header, width }): RecordGridColumn<AppDataRecord> => ({
+      id: field,
+      header,
+      ...(width === undefined ? {} : { width }),
+      cell: (record) => {
+        const value = record.fields[field];
+        return value === undefined || value === null ? null : (
+          <RecordGridValue>{valueText(value)}</RecordGridValue>
+        );
+      },
+    })
+  ),
+  {
+    id: "_updatedAt",
+    width: 168,
+    header: (
+      <PlainHeader>
+        <Trans>Changed</Trans>
+      </PlainHeader>
+    ),
+    cell: (record) => (
+      <RecordGridValue tone="muted">
+        {formatDateTime(record.updatedAt)}
+      </RecordGridValue>
+    ),
+  },
+];
+
+/** What a read of records ran into: the App moved on, an ID found nothing, a failure. */
+const RecordNotes = ({
+  stale,
+  missing,
+  failure,
+  onRetry,
 }: {
-  app: string;
-  table: AppDataTable;
-  version: number;
+  stale: boolean;
+  missing: boolean;
+  failure: string | undefined;
+  /** Reads again what failed to load; none for a failure nothing reads again. */
+  onRetry?: () => void;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
+  return (
+    <>
+      {stale ? (
+        <div className="flex items-center gap-2 border-b px-3 py-2">
+          <ErrorText>
+            {t`This App changed. Reload to see its current version.`}
+          </ErrorText>
+          <Button
+            onClick={() => {
+              void router.invalidate();
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <Trans>Reload</Trans>
+          </Button>
+        </div>
+      ) : null}
+      {missing || failure !== undefined ? (
+        <div className="flex items-center gap-2 border-b px-3 py-2">
+          {missing ? (
+            <p className="text-muted-foreground text-sm">
+              <Trans>No record of this table has that ID.</Trans>
+            </p>
+          ) : null}
+          <ErrorText>{failure}</ErrorText>
+          {failure === undefined || onRetry === undefined ? null : (
+            <Button onClick={onRetry} size="sm" variant="outline">
+              <Trans>Try again</Trans>
+            </Button>
+          )}
+        </div>
+      ) : null}
+    </>
+  );
+};
+
+/**
+ * The records of `live`'s table, a page at a time, read apart from what
+ * else the page does: the first page at once, the next one on `handleEnd`
+ * (none while a read is out, once the last came, or after one failed),
+ * all again on `reload`; and how many there are, when that's known.
+ */
+const useRecordPages = (
+  app: string,
+  live: { table: AppDataTable; version: number } | undefined,
+  stale: boolean,
+  onStale: () => void
+) => {
   const { busy, failure, run } = useCoreAction();
-  // Core has another version current than the one this page read.
-  const [stale, setStale] = useState(false);
-  const onStale = () => {
-    setStale(true);
-  };
   const [records, setRecords] = useState<AppDataRecord[]>();
   const [cursor, setCursor] = useState<string | null>(null);
-  const [open, setOpen] = useState<AppDataRecord>();
-  const [importing, setImporting] = useState(false);
-  const [wanted, setWanted] = useState("");
-  const [missing, setMissing] = useState(false);
-  const columns = table.fields.slice(0, shownFields).map(({ name }) => name);
   const load = async (from: string | null) => {
+    if (live === undefined) {
+      return;
+    }
     const page = await run(
       async (session) =>
         await unlessStale(
           async () =>
-            await session.apps.data.records(app, table.name, version, from),
+            await session.apps.data.records(
+              app,
+              live.table.name,
+              live.version,
+              from
+            ),
           onStale
         )
     );
@@ -553,30 +680,171 @@ const TableData = ({
       setCursor(page.cursor);
     }
   };
-  if (records === undefined && !busy && failure === undefined && !stale) {
+  const idle = !busy && failure === undefined;
+  if (live !== undefined && records === undefined && idle && !stale) {
     void load(null);
   }
-  const exportTable = async () => {
-    const text = await run(
+  return {
+    records: records ?? [],
+    failure,
+    // The table's count, or, once the last page came, the records read.
+    total:
+      live?.table.records ?? (cursor === null ? records?.length : undefined),
+    /** Reads again the page that failed: the first, or the one after the last read. */
+    retry: () => {
+      void load(records === undefined ? null : cursor);
+    },
+    handleEnd: () => {
+      if (cursor !== null && idle) {
+        void load(cursor);
+      }
+    },
+    reload: () => {
+      void load(null);
+    },
+  };
+};
+
+/**
+ * The records bar's actions: one field that finds a record by its ID,
+ * and one menu to export the table's records, or import some.
+ */
+const RecordActions = ({
+  busy,
+  importable,
+  onFind,
+  onExport,
+  onImport,
+}: {
+  busy: boolean;
+  importable: boolean;
+  onFind: (id: string) => void;
+  onExport: () => void;
+  onImport: () => void;
+}) => {
+  const { t } = useLingui();
+  const [wanted, setWanted] = useState("");
+  return (
+    <>
+      <search>
+        <form
+          className="w-56"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (wanted.trim() !== "" && !busy) {
+              onFind(wanted);
+            }
+          }}
+        >
+          <InputGroup>
+            <InputGroupAddon>
+              <SearchIcon />
+            </InputGroupAddon>
+            <InputGroupInput
+              aria-label={t`Find a record by its ID`}
+              onChange={(event) => {
+                setWanted(event.target.value);
+              }}
+              placeholder={t`Find a record by its ID`}
+              type="search"
+              value={wanted}
+            />
+          </InputGroup>
+        </form>
+      </search>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          disabled={busy}
+          render={
+            <Button
+              aria-label={t`Import or export`}
+              size="icon-sm"
+              title={t`Import or export`}
+              variant="ghost"
+            />
+          }
+        >
+          <ArrowUpDownIcon />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={onExport}>
+            <DownloadIcon />
+            <Trans>Export as CSV</Trans>
+          </DropdownMenuItem>
+          {importable ? (
+            <DropdownMenuItem onClick={onImport}>
+              <UploadIcon />
+              <Trans>Import from CSV</Trans>
+            </DropdownMenuItem>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
+};
+
+/**
+ * One table's records in a grid, a page at a time, with find, export and
+ * import, the App's version `version` read: its columns the page's
+ * (`columns`, by field), and the start of the bar above it (`toolbar`)
+ * the page's too. The next page loads as the grid nears its last row, so
+ * a table of any size scrolls through. None for a table the version
+ * doesn't have (`table` undefined), or with no version.
+ */
+export const TableRecords = ({
+  app,
+  version,
+  table,
+  label,
+  columns,
+  toolbar,
+  instead,
+}: {
+  app: string;
+  version: number | null;
+  table: AppDataTable | undefined;
+  label: string;
+  columns: RecordColumn[];
+  toolbar?: ReactNode;
+  /** What the page shows in place of the records (the table's fields), if anything. */
+  instead?: ReactNode;
+}) => {
+  const router = useRouter();
+  // An export or a lookup that fails never stops the paging.
+  const action = useCoreAction();
+  // Core has another version current than the one this page read.
+  const [stale, setStale] = useState(false);
+  const onStale = () => {
+    setStale(true);
+  };
+  const [open, setOpen] = useState<AppDataRecord>();
+  const [importing, setImporting] = useState(false);
+  const [missing, setMissing] = useState(false);
+  const live =
+    table !== undefined && version !== null ? { table, version } : undefined;
+  const pages = useRecordPages(app, live, stale, onStale);
+  const exportTable = async (name: string) => {
+    const text = await action.run(
       async (session) =>
-        await new Response(
-          await session.apps.data.export(app, table.name)
-        ).text()
+        await new Response(await session.apps.data.export(app, name)).text()
     );
     if (text !== undefined) {
-      downloadCsv(text, `${table.name}.csv`);
+      downloadCsv(text, `${name}.csv`);
     }
   };
-  const find = async () => {
+  const find = async (wanted: string) => {
+    if (live === undefined) {
+      return;
+    }
     setMissing(false);
-    const found = await run(
+    const found = await action.run(
       async (session) =>
         await unlessStale(
           async () =>
             await session.apps.data.record(
               app,
-              table.name,
-              version,
+              live.table.name,
+              live.version,
               wanted.trim()
             ),
           onStale
@@ -588,152 +856,53 @@ const TableData = ({
       setOpen(found);
     }
   };
-  const canImport = table.write !== "none";
-  if (stale) {
-    return (
-      <div className="flex flex-col items-start gap-2">
-        <ErrorText>
-          {t`This App changed. Reload to see its current version.`}
-        </ErrorText>
-        <Button
-          onClick={() => {
-            void router.invalidate();
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans>Reload</Trans>
-        </Button>
-      </div>
-    );
-  }
+  const gridColumns = recordColumns(columns, setOpen);
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <form
-          className="flex flex-1 items-center gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void find();
-          }}
-        >
-          <Input
-            aria-label={t`Record ID`}
-            className="max-w-xs"
-            onChange={(event) => {
-              setWanted(event.target.value);
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-none flex-wrap items-center gap-2 border-b px-3 py-1.5">
+        {toolbar}
+        <div className="flex-1" />
+        {live === undefined || instead !== undefined ? null : (
+          <RecordActions
+            busy={action.busy}
+            importable={live.table.write !== "none"}
+            onExport={() => {
+              void exportTable(live.table.name);
             }}
-            placeholder={t`Find a record by its ID`}
-            value={wanted}
-          />
-          <Button
-            disabled={busy || wanted.trim() === ""}
-            size="sm"
-            type="submit"
-            variant="outline"
-          >
-            <SearchIcon data-icon="inline-start" />
-            <Trans>Find</Trans>
-          </Button>
-        </form>
-        <Button
-          disabled={busy}
-          onClick={() => {
-            void exportTable();
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <DownloadIcon data-icon="inline-start" />
-          <Trans>Export CSV</Trans>
-        </Button>
-        {canImport ? (
-          <Button
-            onClick={() => {
+            onFind={(id) => {
+              void find(id);
+            }}
+            onImport={() => {
               setImporting(true);
             }}
-            size="sm"
-            variant="outline"
-          >
-            <UploadIcon data-icon="inline-start" />
-            <Trans>Import CSV</Trans>
-          </Button>
-        ) : null}
+          />
+        )}
       </div>
-      {missing ? (
-        <p className="text-muted-foreground">
-          <Trans>No record of this table has that ID.</Trans>
-        </p>
+      {instead}
+      {instead === undefined ? (
+        <RecordNotes
+          failure={pages.failure ?? action.failure}
+          {...(pages.failure === undefined ? {} : { onRetry: pages.retry })}
+          missing={missing}
+          stale={stale}
+        />
       ) : null}
-      {failure === undefined ? null : <ErrorText>{failure}</ErrorText>}
-      {records?.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyTitle>
+      {instead === undefined ? (
+        <RecordGrid
+          columns={gridColumns}
+          empty={
+            <p className="text-muted-foreground px-3 py-6 text-sm">
               <Trans>No records</Trans>
-            </EmptyTitle>
-            <EmptyDescription>
-              <Trans>This table holds no records you may read.</Trans>
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>
-                <Trans>Record</Trans>
-              </TableHead>
-              {columns.map((column) => (
-                <TableHead key={column}>{column}</TableHead>
-              ))}
-              <TableHead>
-                <Trans>Changed</Trans>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {records?.map((record) => (
-              <TableRow key={record.id}>
-                {/* Opened by its ID, which every record has, whatever
-                    fields its table declares. */}
-                <TableCell>
-                  <Button
-                    onClick={() => {
-                      setOpen(record);
-                    }}
-                    size="sm"
-                    variant="link"
-                  >
-                    <span className="block max-w-32 truncate">{record.id}</span>
-                  </Button>
-                </TableCell>
-                {columns.map((column) => (
-                  <TableCell key={column}>
-                    <span className="block max-w-48 truncate">
-                      {valueText(record.fields[column] ?? "")}
-                    </span>
-                  </TableCell>
-                ))}
-                <TableCell>{formatDateTime(record.updatedAt)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
-      {cursor === null ? null : (
-        <Button
-          disabled={busy}
-          onClick={() => {
-            void load(cursor);
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans>More records</Trans>
-        </Button>
-      )}
-      {open === undefined ? null : (
+            </p>
+          }
+          label={label}
+          onEndReached={pages.handleEnd}
+          rowKey={(record) => record.id}
+          rows={pages.records}
+          total={pages.total}
+        />
+      ) : null}
+      {open === undefined || live === undefined ? null : (
         <RecordSheet
           app={app}
           onClose={() => {
@@ -742,29 +911,31 @@ const TableData = ({
           onStale={onStale}
           record={open}
           stale={stale}
-          table={table.name}
-          version={version}
+          table={live.table.name}
+          version={live.version}
         />
       )}
-      {importing ? (
+      {importing && live !== undefined ? (
         <ImportDialog
           app={app}
           onClose={() => {
             setImporting(false);
           }}
           onDone={() => {
-            void load(null);
+            pages.reload();
+            // The table list's counts, read again.
+            void router.invalidate();
           }}
           onStale={onStale}
-          table={table}
-          version={version}
+          table={live.table}
+          version={live.version}
         />
       ) : null}
     </div>
   );
 };
 
-/** An App's tables, one picked at a time. */
+/** An App's live tables, one picked at a time, and its records. */
 export const AppData = ({
   app,
   version,
@@ -797,43 +968,40 @@ export const AppData = ({
   }
   const items = tables.map(({ name }) => ({ value: name, label: name }));
   return (
-    <div className="flex flex-col gap-4">
-      <Select
-        items={items}
-        onValueChange={(value: unknown) => {
-          if (typeof value === "string") {
-            setPicked({ app, table: value });
-          }
-        }}
-        value={table.name}
-      >
-        <SelectTrigger aria-label={t`Table`} className="w-64">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      {table.sensitive ? (
-        <p className="text-muted-foreground">
-          <Trans>
-            This table is sensitive: its history keeps which fields changed, not
-            their values.
-          </Trans>
-        </p>
-      ) : null}
-      {/* Its own state for each App and table: nothing read of one
-          is shown, or kept, for another. */}
-      <TableData
-        app={app}
-        key={`${app}/${version}/${table.name}`}
-        table={table}
-        version={version}
-      />
-    </div>
+    <TableRecords
+      app={app}
+      // Its own state for each App and table: nothing read of one is
+      // shown, or kept, for another.
+      key={`${app}/${version}/${table.name}`}
+      columns={table.fields.map(({ name }) => ({
+        field: name,
+        header: <PlainHeader>{name}</PlainHeader>,
+      }))}
+      label={table.name}
+      table={table}
+      toolbar={
+        <Select
+          items={items}
+          onValueChange={(value: unknown) => {
+            if (typeof value === "string") {
+              setPicked({ app, table: value });
+            }
+          }}
+          value={table.name}
+        >
+          <SelectTrigger aria-label={t`Table`} className="w-56" size="sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {items.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      }
+      version={version}
+    />
   );
 };

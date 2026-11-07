@@ -63,7 +63,6 @@ import { useFollowedChat } from "../chat/chat-watch.ts";
 import { DraftVersionBar, shownVersion } from "../chat/draft-versions.tsx";
 import type { ShownVersion } from "../chat/draft-versions.tsx";
 import { DraftPreview } from "../chat/studio.tsx";
-import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { useWide } from "../frame/wide.ts";
@@ -76,13 +75,14 @@ import {
   useAppChatId,
 } from "./app-chat.tsx";
 import type { ChatBuilding } from "./app-code.tsx";
+import { AppDataModel } from "./app-data-model.tsx";
 import { AppData } from "./app-data.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { AppSettings, Read } from "./app-settings.tsx";
 import type { AppSettingsSection, StoreChangesRead } from "./app-settings.tsx";
 import { readMembers, sharesApp, ShareApp } from "./app-sharing.tsx";
 import { StatusBadge, useStatusMove } from "./app-status.tsx";
-import { useAppRead } from "./use-app-read.ts";
+import { readTables, useAppRead } from "./use-app-read.ts";
 
 // The Code view, with its renderer and highlighter, loads once it opens.
 const AppCode = lazy(async () => {
@@ -640,12 +640,6 @@ const PreviewBar = ({
   let says: ReactNode = null;
   let action: ReactNode = null;
   if (draft !== undefined) {
-    says = (
-      <Trans>
-        Unpublished changes: this preview changes nothing and reads no real
-        data.
-      </Trans>
-    );
     action = (
       <DraftVersionBar
         chatId={chatId}
@@ -656,12 +650,7 @@ const PreviewBar = ({
     );
   } else if (shows !== undefined && shows === pendingVersion) {
     const version = shows;
-    says = (
-      <Trans>
-        Version {version} is ready to publish: this preview changes nothing and
-        reads no real data.
-      </Trans>
-    );
+    says = <Trans>Version {version} is ready to publish</Trans>;
     action = (
       <ReviewAndPublish app={app} size="sm" version={shows}>
         <Trans>Review and publish</Trans>
@@ -669,27 +658,15 @@ const PreviewBar = ({
     );
   } else if (shows !== undefined && shows === currentVersion) {
     const version = shows;
-    says = (
-      <Trans>
-        Version {version} is live: this preview changes nothing and reads no
-        real data.
-      </Trans>
-    );
+    says = <Trans>Version {version} is live</Trans>;
   } else if (shows !== undefined) {
     const version = shows;
     says = (
-      <Trans>
-        Version {version} isn&apos;t published or up for review: this preview
-        changes nothing and reads no real data.
-      </Trans>
+      <Trans>Version {version} isn&apos;t published or up for review</Trans>
     );
   }
   return (
     <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-2">
-      <Badge variant="secondary">
-        <EyeIcon data-icon="inline-start" />
-        <Trans context="an app's draft, not live">Preview</Trans>
-      </Badge>
       <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
         {says}
       </span>
@@ -853,7 +830,7 @@ const PreviewArea = ({
         }}
         shown={version}
       />
-      <div className="bg-muted flex min-h-0 flex-1 flex-col p-3">
+      <div className="flex min-h-0 flex-1 flex-col">
         <DraftPreview
           app={app.id}
           chatId={chatId}
@@ -876,29 +853,56 @@ const PreviewArea = ({
   );
 };
 
-const readTables = async (session: Session, app: string) =>
-  await session.apps.data.tables(app);
-
-/** The App's data, for its builders: its tables, one at a time. */
-const DataArea = ({ app }: { app: string }) => {
+/** The live App's tables, one at a time, and their records. */
+const LiveData = ({ app }: { app: string }) => {
   const read = useAppRead(app, readTables);
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-6 md:px-6">
-        <Read read={read}>
-          {({ version, tables }) => (
-            <AppData
-              app={app}
-              key={`${app}/${version ?? ""}`}
-              tables={tables}
-              version={version}
-            />
-          )}
-        </Read>
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <Read read={read}>
+        {({ version, tables }) => (
+          <AppData
+            app={app}
+            key={`${app}/${version ?? ""}`}
+            tables={tables}
+            version={version}
+          />
+        )}
+      </Read>
     </div>
   );
 };
+
+/** The workspace's chat, and where its draft of the App stands: what the Data view changes. */
+interface ModelChat {
+  chatId: string;
+  /** The draft's revision: 0 while the chat has none. */
+  revision: number;
+  /** Whether the chat's agent is at work, writing the draft still. */
+  running: boolean;
+}
+
+/**
+ * The App's data, for its builders: its data model, changed in the
+ * chat's draft (`modelChat`), each table with its records; without a
+ * chat to change it in (an archived App), its live tables' records.
+ */
+const DataArea = ({
+  app,
+  modelChat,
+}: {
+  app: string;
+  modelChat: ModelChat | undefined;
+}) =>
+  modelChat === undefined ? (
+    <LiveData app={app} />
+  ) : (
+    <AppDataModel
+      app={app}
+      // Each chat's own model: what one chat made never shows in another's.
+      key={modelChat.chatId}
+      {...modelChat}
+    />
+  );
 
 /** What the main area holds besides the preview, which stays (hidden) so it doesn't load again. */
 const MainArea = ({
@@ -909,6 +913,7 @@ const MainArea = ({
   preview,
   storeChanges,
   building,
+  modelChat,
 }: {
   app: ViewedApp;
   view: WorkspaceView;
@@ -918,6 +923,8 @@ const MainArea = ({
   storeChanges: StoreChangesRead;
   /** The chat's draft the preview shows, which the code shows too. */
   building?: ChatBuilding;
+  /** The chat whose draft the Data view changes; none without one. */
+  modelChat?: ModelChat;
 }) => (
   <div className="flex h-full min-h-0 min-w-0 flex-col">
     <div
@@ -938,7 +945,11 @@ const MainArea = ({
         </Suspense>
       </div>
     ) : null}
-    {view === "data" ? <DataArea app={app.id} /> : null}
+    {view === "data" ? (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <DataArea app={app.id} modelChat={modelChat} />
+      </div>
+    ) : null}
     {view === "settings" ? (
       <AppSettings
         app={app}
@@ -1122,6 +1133,11 @@ const Building = ({
               chatId === undefined || draft === undefined
                 ? undefined
                 : { chatId, draft: draft.draft }
+            }
+            modelChat={
+              chatId === undefined
+                ? undefined
+                : { chatId, revision: draft?.draft.revision ?? 0, running }
             }
             identity={identity}
             storeChanges={storeChanges}

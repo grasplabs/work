@@ -6,6 +6,7 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./access-choices": "./src/access-choices.ts",
     "./admin-command": "./src/admin-command.ts",
     "./admin-kickoff": "./src/admin-kickoff.ts",
     "./admin-snapshot": "./src/admin-snapshot.ts",
@@ -53,6 +54,7 @@
     "./app-releases": "./src/app-releases.ts",
     "./apps": "./src/apps.ts",
     "./audit": "./src/audit.ts",
+    "./data-model": "./src/data-model.ts",
     "./audit-log": "./src/audit-log.ts",
     "./business-processes": "./src/business-processes.ts",
     "./brain": "./src/brain.ts",

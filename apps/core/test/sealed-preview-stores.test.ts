@@ -119,7 +119,7 @@ describe("previewing a draft of spec 8's layout", { timeout: 180_000 }, () => {
       },
       [],
       revision + 1,
-      await openTestRun(chatsOf(builder), chatId)
+      { runId: await openTestRun(chatsOf(builder), chatId) }
     );
     expect(next).toBeTruthy();
     await chats.previewFunction(

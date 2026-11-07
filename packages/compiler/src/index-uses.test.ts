@@ -1,0 +1,53 @@
+import { describe, expect, it } from "vite-plus/test";
+
+import { compileModule } from "./compile.ts";
+import { collectApiCalls, collectIndexReads } from "./index-uses.ts";
+import type { IndexRead } from "./index-uses.ts";
+
+// What an App's code reads of its indexes, found in the compile's own
+// parse: what the Data view says uses each index, and which nothing uses.
+
+describe("an App's index uses, as its build finds them", () => {
+  it("names each exported function's index and search, by table", () => {
+    const reads: IndexRead[] = [];
+    compileModule(
+      `import { query } from "@server/_generated/server";
+export const byStage = query({
+  args: {},
+  handler: async (ctx, args) =>
+    await ctx.db.query("deals").withIndex("by_stage", (range) => range.eq("stage", args.stage)).take(50),
+});
+export const find = query({
+  args: {},
+  handler: async (ctx, args) => await ctx.db.search("deals", args.text).take(20),
+});
+export const all = query({ args: {}, handler: async (ctx) => await ctx.db.query("deals").take(50) });
+const hidden = () => ctx.db.query("deals").withIndex("by_owner");
+`,
+      "server/deals.ts",
+      [collectIndexReads("server/deals.ts", reads)]
+    );
+    expect(reads).toStrictEqual([
+      { table: "deals", index: "by_stage", query: "deals.byStage" },
+      { table: "deals", index: null, query: "deals.find" },
+    ]);
+  });
+
+  it("names the functions a page calls through `api`", () => {
+    const calls = new Set<string>();
+    compileModule(
+      `import { api } from "@server/_generated/api";
+export const Pipeline = () => {
+  const rows = useQuery(api.deals.byStage, { stage: "Lead" });
+  const found = useQuery(api.deals.find, {});
+  return <p>{rows.length + found.length}</p>;
+};`,
+      "src/routes/pipeline.tsx",
+      [collectApiCalls(calls)]
+    );
+    expect([...calls].toSorted()).toStrictEqual([
+      "deals.byStage",
+      "deals.find",
+    ]);
+  });
+});

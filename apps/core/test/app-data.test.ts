@@ -59,6 +59,15 @@ const files: Record<string, string> = {
         fields: { text: "v.string()" },
         access: { read: "owner", write: "owner" },
       },
+      // Each task read by the person it's for alone: a row rule.
+      tasks: {
+        fields: { title: "v.string()", assignee: "v.person()" },
+        access: {
+          read: "appMembers",
+          write: "appMembers",
+          rows: { read: [{ kind: "person", field: "assignee" }] },
+        },
+      },
       labels: {
         fields: {
           name: "v.string()",
@@ -465,6 +474,35 @@ describe("an App's data, from its page", { timeout: 120_000 }, () => {
           action === "app.data.imported" && target?.id === app
       )
     ).toMatchObject([{ detail: { table: "notes", rows: 4 } }]);
+  });
+
+  it("counts each table's records as they are added and deleted, and gives no count where a person reads only some, by owner or a row rule", async () => {
+    const notes = await notesApp();
+    const { builder, app } = notes;
+    const counted = async () => {
+      const { tables } = await builder.api.apps.data.tables(app);
+      return Object.fromEntries(
+        tables.map(({ name, records }) => [name, records])
+      );
+    };
+    const before = await counted();
+    await builder.api.apps.data.import(app, "notes", {
+      version: notes.version,
+      csv: "Title\nFirst\nSecond\nThird\n",
+      mapping: { Title: "title" },
+    });
+    const held = await everyRecord(notes, "notes");
+    const first = held.find(({ fields }) => fields.title === "First");
+    await call(notes, builder, "notes.remove", { id: first?.id ?? "" });
+    await call(notes, builder, "notes.pin", { text: "mine" });
+
+    expect({ before, after: await counted() }).toStrictEqual({
+      before: { notes: 0, salaries: 0, pins: null, tasks: null, labels: 0 },
+      // Three imported, one deleted; an owner table's pins are each
+      // person's own, and each task its assignee's, so neither whole
+      // count is anybody's to see here.
+      after: { notes: 2, salaries: 0, pins: null, tasks: null, labels: 0 },
+    });
   });
 
   it("round-trips a table through its CSV export and an import", async () => {

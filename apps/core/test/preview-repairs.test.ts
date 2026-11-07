@@ -430,7 +430,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       desk(true),
       [],
       0,
-      await openTestRun(stub, chatIdSchema.parse(chatId))
+      { runId: await openTestRun(stub, chatIdSchema.parse(chatId)) }
     );
     await previewAt(builder, chatId, 1);
     // The next write and the check in one step: the panel previews the
@@ -470,15 +470,9 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     ]);
     const id = chatIdSchema.parse(chatId);
     // The side panel has the draft open, and its page works.
-    await stub.saveDraft(
-      id,
-      app,
-      1,
-      desk(true),
-      [],
-      0,
-      await openTestRun(stub, id)
-    );
+    await stub.saveDraft(id, app, 1, desk(true), [], 0, {
+      runId: await openTestRun(stub, id),
+    });
     await previewAt(builder, chatId, 1);
     const reported = async (kind: "warning" | "console", message: string) => {
       await builder.api.chats.previewReport(chatId, app, 1, "/", {
@@ -540,7 +534,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       desk(true),
       [],
       0,
-      await openTestRun(stub, chatIdSchema.parse(chatId))
+      { runId: await openTestRun(stub, chatIdSchema.parse(chatId)) }
     );
     await previewAt(builder, chatId, 1);
 
@@ -571,15 +565,9 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     const { chats } = builder.api;
     const appId = appIdSchema.parse(app);
     const writeDraft = async (revision: number, fixed = false) => {
-      await stub.saveDraft(
-        id,
-        app,
-        1,
-        desk(fixed),
-        [],
-        revision,
-        await openTestRun(stub, id)
-      );
+      await stub.saveDraft(id, app, 1, desk(fixed), [], revision, {
+        runId: await openTestRun(stub, id),
+      });
       return revision + 1;
     };
     /** Where each problem the preview of `revision` ran into comes from. */
@@ -663,15 +651,9 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     const appId = appIdSchema.parse(app);
     const { chats } = builder.api;
     const chatty = talkingDesk();
-    await stub.saveDraft(
-      id,
-      app,
-      1,
-      chatty,
-      [],
-      0,
-      await openTestRun(stub, id)
-    );
+    await stub.saveDraft(id, app, 1, chatty, [], 0, {
+      runId: await openTestRun(stub, id),
+    });
     const revision = 1;
     const talk = async (note: string): Promise<unknown> =>
       answerOf(
@@ -753,15 +735,9 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     const appId = appIdSchema.parse(app);
     const { chats } = builder.api;
     const writeDraft = async (revision: number) => {
-      await stub.saveDraft(
-        id,
-        app,
-        1,
-        talkingDesk(),
-        [],
-        revision,
-        await openTestRun(stub, id)
-      );
+      await stub.saveDraft(id, app, 1, talkingDesk(), [], revision, {
+        runId: await openTestRun(stub, id),
+      });
       return revision + 1;
     };
     const call = async (
@@ -931,15 +907,9 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     ]);
     const chat = chatIdSchema.parse(chatId);
     const appId = appIdSchema.parse(app);
-    await stub.saveDraft(
-      chat,
-      appId,
-      1,
-      spec8Notes,
-      [],
-      0,
-      await openTestRun(stub, chat)
-    );
+    await stub.saveDraft(chat, appId, 1, spec8Notes, [], 0, {
+      runId: await openTestRun(stub, chat),
+    });
     await stub.previewReferences(chat, builder.userId, appId, 1);
     await runInDurableObject(stub, (_instance, state) => {
       const [kept] = state.storage.sql

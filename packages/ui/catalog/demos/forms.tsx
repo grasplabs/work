@@ -18,6 +18,14 @@ import {
   ComboboxList,
 } from "@grasp-os/ui/components/combobox";
 import {
+  FieldTypeIcon,
+  FieldTypeGallery,
+  FieldTypePicker,
+  ModelFieldButton,
+  ModelTableItem,
+  ModelTableList,
+} from "@grasp-os/ui/components/data-model";
+import {
   Field,
   FieldDescription,
   FieldGroup,
@@ -53,6 +61,11 @@ import {
   SelectValue,
 } from "@grasp-os/ui/components/select";
 import { Slider } from "@grasp-os/ui/components/slider";
+import {
+  SortableItem,
+  SortableList,
+} from "@grasp-os/ui/components/sortable-list";
+import type { SortableWords } from "@grasp-os/ui/components/sortable-list";
 import { Switch } from "@grasp-os/ui/components/switch";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Toggle } from "@grasp-os/ui/components/toggle";
@@ -62,11 +75,17 @@ import {
 } from "@grasp-os/ui/components/toggle-group";
 import {
   BoldIcon,
+  CalendarIcon,
+  CircleDotIcon,
   CopyIcon,
+  HashIcon,
   ItalicIcon,
   SearchIcon,
+  Table2Icon,
+  TypeIcon,
   UnderlineIcon,
 } from "lucide-react";
+import { useState } from "react";
 
 const ButtonDemo = () => (
   <div className="flex flex-wrap gap-2">
@@ -258,12 +277,175 @@ const ToggleGroupDemo = () => (
   </div>
 );
 
+const fieldKinds = [
+  {
+    value: "text",
+    label: "Text",
+    description: "Words and sentences",
+    icon: <TypeIcon />,
+  },
+  {
+    value: "number",
+    label: "Number",
+    description: "Amounts and counts",
+    icon: <HashIcon />,
+  },
+  {
+    value: "date",
+    label: "Date",
+    description: "A day or a moment",
+    icon: <CalendarIcon />,
+  },
+  {
+    value: "choice",
+    label: "Choice",
+    description: "One of a list of options",
+    icon: <CircleDotIcon />,
+  },
+];
+
+/** What a screen reader hears as a demo's list is put in order. */
+const sortableWords: SortableWords = {
+  instructions:
+    "To move an item, press space or enter, then the arrow keys. Press space or enter again to put it down, or escape to cancel.",
+  picked: (name, place) => `Picked up ${name}, at place ${place}.`,
+  moved: (name, place) => `${name} is now at place ${place}.`,
+  dropped: (name, place) => `Put ${name} down at place ${place}.`,
+  cancelled: (name) => `Put ${name} back where it was.`,
+};
+
+/** `items` with the one `id` moved to `to`. */
+const movedTo = <Item extends { id: string }>(
+  items: readonly Item[],
+  id: string,
+  to: number
+): Item[] => {
+  const moved = items.find((item) => item.id === id);
+  const rest = items.filter((item) => item.id !== id);
+  return moved === undefined
+    ? [...items]
+    : [...rest.slice(0, to), moved, ...rest.slice(to)];
+};
+
+const SortableListDemo = () => {
+  const [options, setOptions] = useState([
+    { id: "open", name: "Open" },
+    { id: "waiting", name: "Waiting" },
+    { id: "done", name: "Done" },
+  ]);
+  return (
+    <SortableList
+      aria-label="Options"
+      className="w-64"
+      items={options}
+      onMove={(id, to) => {
+        setOptions(movedTo(options, id, to));
+      }}
+      words={sortableWords}
+    >
+      {options.map((option) => (
+        <SortableItem
+          handleLabel={`Move ${option.name}`}
+          id={option.id}
+          key={option.id}
+        >
+          <Input aria-label={option.name} defaultValue={option.name} />
+        </SortableItem>
+      ))}
+    </SortableList>
+  );
+};
+
+const DataModelDemo = () => {
+  const [table, setTable] = useState("tasks");
+  const [kind, setKind] = useState("text");
+  const [fields, setFields] = useState([
+    { id: "title", name: "title", kind: "text" },
+    { id: "estimate", name: "estimate", kind: "number" },
+    { id: "status", name: "status", kind: "choice" },
+  ]);
+  const [open, setOpen] = useState("title");
+  const picked = fieldKinds.find(({ value }) => value === kind);
+  return (
+    <div className="flex flex-wrap items-start gap-6">
+      <SortableList
+        aria-label="Fields"
+        className="w-64"
+        items={fields}
+        onMove={(id, to) => {
+          setFields(movedTo(fields, id, to));
+        }}
+        words={sortableWords}
+      >
+        {fields.map((field) => {
+          const shown = fieldKinds.find(({ value }) => value === field.kind);
+          return (
+            <SortableItem
+              handleLabel={`Move ${field.name}`}
+              id={field.id}
+              key={field.id}
+            >
+              <ModelFieldButton
+                active={open === field.id}
+                className="flex-1"
+                description={shown?.label}
+                icon={shown?.icon}
+                onClick={() => {
+                  setOpen(field.id);
+                }}
+              >
+                {field.name}
+              </ModelFieldButton>
+            </SortableItem>
+          );
+        })}
+      </SortableList>
+      <FieldTypeGallery
+        className="w-full max-w-lg"
+        label="Kinds of field"
+        onPick={setKind}
+        options={fieldKinds}
+      />
+      <nav aria-label="Tables" className="w-48">
+        <ModelTableList>
+          {["tasks", "projects"].map((name) => (
+            <ModelTableItem
+              active={table === name}
+              icon={<Table2Icon />}
+              key={name}
+              meta={name === "tasks" ? 4 : 2}
+              onClick={() => {
+                setTable(name);
+              }}
+            >
+              {name}
+            </ModelTableItem>
+          ))}
+        </ModelTableList>
+      </nav>
+      <div className="flex flex-col gap-3">
+        <FieldTypePicker
+          label="Type"
+          onValueChange={setKind}
+          options={fieldKinds}
+          value={kind}
+        />
+        <span className="flex items-center gap-2 text-sm">
+          <FieldTypeIcon>{picked?.icon}</FieldTypeIcon>
+          due
+        </span>
+      </div>
+    </div>
+  );
+};
+
 export const formDemos = {
   button: ButtonDemo,
   "button-group": ButtonGroupDemo,
   calendar: CalendarDemo,
   checkbox: CheckboxDemo,
   combobox: ComboboxDemo,
+  "data-model": DataModelDemo,
   field: FieldDemo,
   input: InputDemo,
   "input-group": InputGroupDemo,
@@ -272,6 +454,7 @@ export const formDemos = {
   "native-select": NativeSelectDemo,
   "radio-group": RadioGroupDemo,
   select: SelectDemo,
+  "sortable-list": SortableListDemo,
   slider: SliderDemo,
   switch: SwitchDemo,
   textarea: TextareaDemo,

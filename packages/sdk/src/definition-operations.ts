@@ -34,7 +34,7 @@ import { descriptorOf } from "./value-schema.ts";
 import { v } from "./values.ts";
 
 // The operations that change an App's definition (definition.ts): what
-// the chat's tools and, later, Grasp's own screens make. Each answers the
+// the chat's tools and the workspace's Data view make. Each answers the
 // definition after it, checked whole (`definitionManifest`), or throws
 // `AppDefinitionError` (or a builder's own error) saying what is wrong,
 // and changes nothing. Types are given as code would write them
@@ -110,6 +110,33 @@ export type DefinitionOperation =
       readonly op: "addPermission";
       /** A `permission.*(…)` expression, or `people`. */
       readonly permission: string;
+    }
+  | { readonly op: "removeTable"; readonly table: string }
+  | {
+      readonly op: "removeField";
+      readonly table: string;
+      readonly field: string;
+    }
+  | {
+      readonly op: "removeIndex";
+      readonly table: string;
+      /** The index's name; the search index, which has none, with `search`. */
+      readonly name?: string;
+      readonly search?: boolean;
+    }
+  | { readonly op: "removePermission"; readonly alias: string }
+  | {
+      readonly op: "addPreference" | "changePreference";
+      readonly name: string;
+      readonly type: string;
+    }
+  | { readonly op: "removePreference"; readonly name: string }
+  | {
+      readonly op: "moveField";
+      readonly table: string;
+      readonly field: string;
+      /** Where it goes among the table's fields, from 0. */
+      readonly to: number;
     };
 
 const refuse = (message: string): never => {
@@ -252,6 +279,272 @@ const withIndex = (
   });
 };
 
+/**
+ * The table named `name` gone, with its answers. Its records stay in the
+ * App's store, never dropped (schema-plan.ts): a table of that name added
+ * again later is a new table, with an ID of its own.
+ */
+const withoutTable = (
+  definition: AppDefinition,
+  name: string
+): AppDefinition => {
+  const table = tableNamed(definition, name);
+  return {
+    ...definition,
+    tables: definition.tables.filter(({ id }) => id !== table.id),
+    answers: definition.answers.filter((answer) => answer.table !== table.id),
+  };
+};
+
+/** What in `table` reads `field`: its indexes, its search index, its row rules. */
+const readersOf = (table: DefinedTable, field: DefinedField): string[] => {
+  const rules = [
+    ...(table.access.rows?.read ?? []),
+    ...(table.access.rows?.write ?? []),
+  ];
+  return [
+    ...table.indexes.flatMap((index) =>
+      index.fields.includes(field.id) ? [`the index \`${index.name}\``] : []
+    ),
+    ...(table.searchIndex?.includes(field.id) === true
+      ? ["the search index"]
+      : []),
+    ...(rules.some((rule) => "field" in rule && rule.field === field.id)
+      ? ["a row rule"]
+      : []),
+  ];
+};
+
+/**
+ * `table`'s field named `name` gone, with its answers; refused while an
+ * index, the search index or a row rule reads it, each named. Its values
+ * stay in the records, as a table's do.
+ */
+const withoutField = (
+  definition: AppDefinition,
+  table: DefinedTable,
+  name: string
+): AppDefinition => {
+  const field = fieldNamed(table, name);
+  const readers = readersOf(table, field);
+  if (readers.length > 0) {
+    return refuse(
+      `\`${table.name}.${field.name}\` is read by ${readers.join(", ")}: remove or change ${readers.length === 1 ? "it" : "them"} first.`
+    );
+  }
+  return {
+    ...withTable(definition, {
+      ...table,
+      fields: table.fields.filter(({ id }) => id !== field.id),
+    }),
+    answers: definition.answers.filter(
+      (answer) => answer.table !== table.id || answer.field !== field.id
+    ),
+  };
+};
+
+/** `definition` without the index `operation` names, or its table's search index. */
+const withoutIndex = (
+  definition: AppDefinition,
+  operation: Extract<DefinitionOperation, { op: "removeIndex" }>
+): AppDefinition => {
+  const table = tableNamed(definition, operation.table);
+  if (operation.search === true) {
+    if (table.searchIndex === undefined) {
+      return refuse(`\`${table.name}\` has no search index.`);
+    }
+    const { searchIndex: _removed, ...rest } = table;
+    return withTable(definition, rest);
+  }
+  if (!table.indexes.some((index) => index.name === operation.name)) {
+    return refuse(
+      `\`${table.name}\` has no index \`${operation.name ?? ""}\`. Its indexes: ${table.indexes.map((index) => `\`${index.name}\``).join(", ") || "none"}.`
+    );
+  }
+  return withTable(definition, {
+    ...table,
+    indexes: table.indexes.filter((index) => index.name !== operation.name),
+  });
+};
+
+/** `definition` without the permission whose alias is `alias`. */
+const withoutPermission = (
+  definition: AppDefinition,
+  alias: string
+): AppDefinition => {
+  if (!definition.permissions.some((held) => held.alias === alias)) {
+    return refuse(
+      `The App has no permission \`${alias}\`. Its permissions: ${definition.permissions.map((held) => `\`${typeof held.alias === "string" ? held.alias : ""}\``).join(", ") || "none yet"}.`
+    );
+  }
+  return {
+    ...definition,
+    permissions: definition.permissions.filter((held) => held.alias !== alias),
+  };
+};
+
+/** `definition` without what a removal names. */
+const removed = (
+  definition: AppDefinition,
+  operation: Extract<
+    DefinitionOperation,
+    { op: "removeTable" | "removeField" | "removeIndex" | "removePermission" }
+  >
+): AppDefinition => {
+  switch (operation.op) {
+    case "removeTable": {
+      return withoutTable(definition, operation.table);
+    }
+    case "removeField": {
+      return withoutField(
+        definition,
+        tableNamed(definition, operation.table),
+        operation.field
+      );
+    }
+    case "removeIndex": {
+      return withoutIndex(definition, operation);
+    }
+    case "removePermission": {
+      return withoutPermission(definition, operation.alias);
+    }
+    default: {
+      return refuse("That isn't a removal from a definition.");
+    }
+  }
+};
+
+/**
+ * `definition` with `operation`'s field moved to its place among its
+ * table's fields: the order the generated schema, and every grid, lists
+ * them in. Nothing a record holds changes.
+ */
+const withFieldMoved = (
+  definition: AppDefinition,
+  operation: Extract<DefinitionOperation, { op: "moveField" }>
+): AppDefinition => {
+  const table = tableNamed(definition, operation.table);
+  const field = fieldNamed(table, operation.field);
+  if (
+    !Number.isInteger(operation.to) ||
+    operation.to < 0 ||
+    operation.to >= table.fields.length
+  ) {
+    return refuse(
+      `\`${table.name}\` has ${table.fields.length} fields: a field moves to a place from 0 to ${table.fields.length - 1}.`
+    );
+  }
+  const rest = table.fields.filter(({ id }) => id !== field.id);
+  return withTable(definition, {
+    ...table,
+    fields: [
+      ...rest.slice(0, operation.to),
+      field,
+      ...rest.slice(operation.to),
+    ],
+  });
+};
+
+/** The preference named `name`. */
+const preferenceNamed = (
+  definition: AppDefinition,
+  name: string
+): DefinedField =>
+  definition.preferences.find((preference) => preference.name === name) ??
+  refuse(
+    `The App has no preference \`${name}\`. Its preferences: ${definition.preferences.map((preference) => `\`${preference.name}\``).join(", ") || "none yet"}.`
+  );
+
+/** `definition` with the change of its preferences `operation` makes. */
+const withPreference = (
+  definition: AppDefinition,
+  operation: Extract<
+    DefinitionOperation,
+    { op: "addPreference" | "changePreference" | "removePreference" }
+  >,
+  newId: () => string
+): AppDefinition => {
+  if (operation.op === "addPreference") {
+    if (definition.preferences.some(({ name }) => name === operation.name)) {
+      return refuse(
+        `The App has a preference \`${operation.name}\` already: change it with changePreference.`
+      );
+    }
+    return {
+      ...definition,
+      preferences: [
+        ...definition.preferences,
+        { id: newId(), name: operation.name, type: typeFrom(operation.type) },
+      ],
+    };
+  }
+  const held = preferenceNamed(definition, operation.name);
+  if (operation.op === "removePreference") {
+    return {
+      ...definition,
+      preferences: definition.preferences.filter(({ id }) => id !== held.id),
+    };
+  }
+  const type = typeFrom(operation.type);
+  return {
+    ...definition,
+    preferences: definition.preferences.map((preference) =>
+      preference.id === held.id ? { ...preference, type } : preference
+    ),
+  };
+};
+
+/** `definition` with the table `operation` adds, with new IDs from `newId`. */
+const withNewTable = (
+  definition: AppDefinition,
+  operation: Extract<DefinitionOperation, { op: "addTable" }>,
+  newId: () => string
+): AppDefinition => {
+  if (definition.tables.some((table) => table.name === operation.name)) {
+    return refuse(`The App has a table \`${operation.name}\` already.`);
+  }
+  const table: DefinedTable = {
+    id: newId(),
+    name: operation.name,
+    fields: Object.entries(operation.fields ?? {}).map(([name, type]) => ({
+      id: newId(),
+      name,
+      type: typeFrom(type),
+    })),
+    indexes: [],
+    access: { read: "none", write: "none" },
+  };
+  return {
+    ...definition,
+    tables: [
+      ...definition.tables,
+      operation.access === undefined
+        ? table
+        : { ...table, access: accessFrom(table, operation.access) },
+    ],
+  };
+};
+
+/** `definition` with the access `operation` sets on its table. */
+const withAccess = (
+  definition: AppDefinition,
+  operation: Extract<DefinitionOperation, { op: "setAccess" }>
+): AppDefinition => {
+  const table = tableNamed(definition, operation.table);
+  // Once declared sensitive, a table stays so: the store keeps its
+  // values out of the change history for good.
+  if (table.sensitive === true && operation.sensitive === false) {
+    return refuse(
+      `\`${table.name}\` is sensitive, and a table stays so once declared: leave \`sensitive\` out.`
+    );
+  }
+  return withTable(definition, {
+    ...table,
+    access: accessFrom(table, operation.access),
+    ...(operation.sensitive === true ? { sensitive: true as const } : {}),
+  });
+};
+
 /** The definition after `operation`, before it is checked. */
 const applied = (
   definition: AppDefinition,
@@ -260,29 +553,7 @@ const applied = (
 ): AppDefinition => {
   switch (operation.op) {
     case "addTable": {
-      if (definition.tables.some((table) => table.name === operation.name)) {
-        return refuse(`The App has a table \`${operation.name}\` already.`);
-      }
-      const table: DefinedTable = {
-        id: newId(),
-        name: operation.name,
-        fields: Object.entries(operation.fields ?? {}).map(([name, type]) => ({
-          id: newId(),
-          name,
-          type: typeFrom(type),
-        })),
-        indexes: [],
-        access: { read: "none", write: "none" },
-      };
-      return {
-        ...definition,
-        tables: [
-          ...definition.tables,
-          operation.access === undefined
-            ? table
-            : { ...table, access: accessFrom(table, operation.access) },
-        ],
-      };
+      return withNewTable(definition, operation, newId);
     }
     case "addField": {
       const table = tableNamed(definition, operation.table);
@@ -335,20 +606,11 @@ const applied = (
         ),
       });
     }
+    case "moveField": {
+      return withFieldMoved(definition, operation);
+    }
     case "setAccess": {
-      const table = tableNamed(definition, operation.table);
-      // Once declared sensitive, a table stays so: the store keeps its
-      // values out of the change history for good.
-      if (table.sensitive === true && operation.sensitive === false) {
-        return refuse(
-          `\`${table.name}\` is sensitive, and a table stays so once declared: leave \`sensitive\` out.`
-        );
-      }
-      return withTable(definition, {
-        ...table,
-        access: accessFrom(table, operation.access),
-        ...(operation.sensitive === true ? { sensitive: true as const } : {}),
-      });
+      return withAccess(definition, operation);
     }
     case "addIndex": {
       return withIndex(definition, operation);
@@ -366,6 +628,17 @@ const applied = (
         ...definition,
         permissions: [...definition.permissions, declared.data],
       };
+    }
+    case "removeTable":
+    case "removeField":
+    case "removeIndex":
+    case "removePermission": {
+      return removed(definition, operation);
+    }
+    case "addPreference":
+    case "changePreference":
+    case "removePreference": {
+      return withPreference(definition, operation, newId);
     }
     default: {
       return refuse("That isn't an operation on a definition.");

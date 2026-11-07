@@ -108,6 +108,12 @@ export interface AppDataTable {
   write: AppDataAccess;
   sensitive: boolean;
   fields: AppDataField[];
+  /**
+   * How many records it holds, kept by the store with every write; null
+   * where the browser shows each person only some of them (an owner
+   * table, or one with row rules).
+   */
+  records: number | null;
 }
 
 /**

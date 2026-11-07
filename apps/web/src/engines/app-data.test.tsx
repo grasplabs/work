@@ -44,6 +44,7 @@ const tableOf = (name: string, fields: string[]): AppDataTable => ({
     kind: "string",
     required: true,
   })),
+  records: 1,
 });
 
 /** The one record core holds of `table` in App `app`. */
@@ -62,12 +63,40 @@ const tables: Record<string, AppDataTable[]> = {
   second: [tableOf("bare", []), tableOf("notes", ["title"])],
 };
 
+/** Whether the next read of a second page fails, once. */
+let failSecondPage = false;
+
 /** The page, opened on App `first`, with a button opening `second`. */
 const shown = async () => {
   const apps = {
     data: {
-      records: async (app: string, table: string) => {
+      // The first App's notes come in two pages; every other table in one.
+      records: async (
+        app: string,
+        table: string,
+        _version: number,
+        cursor: string | null
+      ) => {
         await Promise.resolve();
+        if (failSecondPage && cursor === "page-2") {
+          failSecondPage = false;
+          throw new Error("The records couldn't be read.");
+        }
+        if (app === "first" && table === "notes" && cursor === null) {
+          return { records: [recordOf(app, table)], cursor: "page-2" };
+        }
+        if (cursor === "page-2") {
+          return {
+            records: [
+              {
+                ...recordOf(app, table),
+                id: `${app}-${table}-2`,
+                fields: { title: `${app}'s second ${table}` },
+              },
+            ],
+            cursor: null,
+          };
+        }
         return { records: [recordOf(app, table)], cursor: null };
       },
       history: async () => {
@@ -133,10 +162,28 @@ const settled = async () => {
   });
 };
 
-/** Presses the button whose text is `name`. */
+/** Picks the open menu's item whose text is `name`. */
+const pick = async (name: string) => {
+  const item = [...document.querySelectorAll('[role="menuitem"]')].find(
+    (each) => each.textContent?.trim() === name
+  );
+  if (!(item instanceof HTMLElement)) {
+    throw new Error(`No menu item ${name}`);
+  }
+  await act(async () => {
+    item.click();
+    await Promise.resolve();
+  });
+  await settled();
+};
+
+/** Presses the button whose text, or name, is `name`. */
 const press = async (name: string) => {
   const button = [...document.querySelectorAll("button")].find(
-    (each) => each.textContent?.trim() === name
+    (each) =>
+      each.textContent?.trim() === name ||
+      each.getAttribute("aria-label") === name ||
+      each.getAttribute("title") === name
   );
   if (button === undefined) {
     throw new Error(`No button ${name}`);
@@ -182,8 +229,44 @@ describe("an App's data page", () => {
     expect(document.body.textContent).toContain("first's notes");
 
     await press("Open second");
-    expect(document.body.textContent).toContain("second-bare-1");
-    expect(document.body.textContent).not.toContain("first-notes-1");
+    // Each record by its ID, the whole of it on the button that opens it.
+    expect({
+      second: document.querySelector('[title="second-bare-1"]') !== null,
+      first: document.querySelector('[title="first-notes-1"]') !== null,
+    }).toStrictEqual({ second: true, first: false });
+  });
+
+  it("loads a table's next page as its last rows come into view, until there is none", async () => {
+    await shown();
+    await settled();
+    await settled();
+
+    expect({
+      first: document.body.textContent.includes("first's notes"),
+      second: document.body.textContent.includes("first's second notes"),
+      rows: document.querySelectorAll('[role="table"] [role="row"]').length,
+    }).toStrictEqual({ first: true, second: true, rows: 3 });
+  });
+
+  it("reads a page that failed to load again on Try again, and goes on from it", async () => {
+    failSecondPage = true;
+    await shown();
+    await settled();
+    await settled();
+    const failed = {
+      said: document.body.textContent.includes("Try again"),
+      second: document.body.textContent.includes("first's second notes"),
+    };
+    await press("Try again");
+    await settled();
+
+    expect({
+      failed,
+      second: document.body.textContent.includes("first's second notes"),
+    }).toStrictEqual({
+      failed: { said: true, second: false },
+      second: true,
+    });
   });
 
   it("opens a record by its ID, in a table that declares no fields", async () => {
@@ -196,7 +279,8 @@ describe("an App's data page", () => {
   it("forgets a file's preview as soon as another is chosen, Import staying off until that one reads", async () => {
     await shown();
     await settled();
-    await press("Import CSV");
+    await press("Import or export");
+    await pick("Import from CSV");
     await choose("title\nFirst\n");
     expect(importable()).toBeTruthy();
 

@@ -372,6 +372,7 @@ const cast = {
   chatPreview: { builder: "builder" },
   previewParity: { admin: "admin" },
   appBuilt: { builder: "builder", user: "user" },
+  dataModel: { builder: "builder" },
   workflowDrawnDecides: { builder: "builder", admin: "admin", decider: "user" },
   languages: { member: "user" },
   iconMoves: { member: "user" },

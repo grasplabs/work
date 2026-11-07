@@ -225,15 +225,9 @@ const calls = {
     const { id } = await chats.create("Streamed");
     const chatId = chatIdSchema.parse(id);
     const chatsOf = workspace(env, personalWorkspaceId(userId));
-    await chatsOf.saveDraft(
-      chatId,
-      app,
-      1,
-      { "notes.md": "drafted" },
-      [],
-      0,
-      await openTestRun(chatsOf, chatId)
-    );
+    await chatsOf.saveDraft(chatId, app, 1, { "notes.md": "drafted" }, [], 0, {
+      runId: await openTestRun(chatsOf, chatId),
+    });
     const pushed = Promise.withResolvers<true>();
     const frames = new RpcStub(async () => {
       pushed.resolve(true);
@@ -266,15 +260,9 @@ const calls = {
     const { id } = await chats.create("Previewed");
     const chatId = chatIdSchema.parse(id);
     const chatsOf = workspace(env, personalWorkspaceId(userId));
-    await chatsOf.saveDraft(
-      chatId,
-      app,
-      1,
-      { "notes.md": "drafted" },
-      [],
-      0,
-      await openTestRun(chatsOf, chatId)
-    );
+    await chatsOf.saveDraft(chatId, app, 1, { "notes.md": "drafted" }, [], 0, {
+      runId: await openTestRun(chatsOf, chatId),
+    });
     const page = pageStub();
     // A draft that seals no release: its refusal, pushed at once, ends the
     // subscription, which is let go of after that, as a page does.
