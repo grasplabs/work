@@ -20,7 +20,6 @@ import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { publishVersion } from "../src/app-publish.ts";
-import { sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";

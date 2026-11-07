@@ -452,7 +452,6 @@ describe("shared bytes", { timeout: 120_000 }, () => {
           {
             app: fixture.app,
             version: 1,
-            store: fixture.store,
             by: fixture.owner,
           }
         )

@@ -407,6 +407,34 @@ describe(
       await expect(currentOf(app)).resolves.toBe(3);
     });
 
+    it("rolls back onto the App's own store, making no second one, sealed again or not", async () => {
+      const { owner, app } = await appWith(notesFiles());
+      await publishVersion(env, owner, app, 1);
+      const [own] = await defaultStores(app);
+      await commitFiles(env, owner, app, notesFiles("Notes 2"), "Second");
+      await publishVersion(env, owner, app, 2);
+      // A rollback to a release still kept seals nothing.
+      await publishVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 2);
+      // One whose release retention let go is sealed again, on the same store.
+      await sweptAway(app, 1);
+      const back = await publishVersion(env, owner, app, 1);
+      const bound = await env.DB.prepare(
+        "SELECT DISTINCT target_id AS store FROM sdk_resource_bindings WHERE resource_id = ? AND kind = 'store'"
+      )
+        .bind(app)
+        .all<{ store: string }>();
+      expect({
+        current: back.currentVersion,
+        stores: await defaultStores(app),
+        bound: bound.results.map(({ store }) => store),
+      }).toStrictEqual({
+        current: 1,
+        stores: [own],
+        bound: [own?.storeId],
+      });
+    });
+
     it("rolls back onto a fresh store once retention let go of the version and its store, and later versions share it", async () => {
       const { owner, app } = await appWith(notesFiles());
       await publishVersion(env, owner, app, 1);

@@ -3,8 +3,7 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { App } from "@grasp-os/shared/apps";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { storeIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, StoreId } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, sql } from "drizzle-orm";
@@ -23,12 +22,7 @@ import {
   versionFiles,
 } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
-import { createStore } from "./data-stores.ts";
-import {
-  appDefaultStores,
-  appVersions,
-  businessStores,
-} from "./db/core/schema.ts";
+import { appVersions } from "./db/core/schema.ts";
 import { requireMigrationEvidence } from "./migration-evidence.ts";
 
 // Publishing a version of an App (spec 8, 16, 22): one function, run by
@@ -74,82 +68,19 @@ import { requireMigrationEvidence } from "./migration-evidence.ts";
 //   (`editableApp`, and again in `makeCurrent` and `sealRelease`); made
 //   current by someone who couldn't grant the App's permissions, its
 //   version is unapproved until an admin approves (permissions.ts).
-// - A store another App's data is in: no request names a store. The App's
-//   one default store is the host's record (`app_default_stores`), created
-//   here the first time a version needs one; sealing then claims it for
-//   the App for good (`sdk_store_owners`).
+// - A store another App's data is in, or a second store of its own: no
+//   request names a store. Sealing binds the App's one store, keyed by the
+//   App (data-stores.ts, `appStoreFor`), and a rollback to a published
+//   version seals nothing; one whose release went is sealed again on that
+//   same store, or on its replacement once an admin deleted it.
 
 /** What a caller may expect is current: a version, or null for none. */
 const expectedSchema = z.int().min(1).nullable();
 
-/** The App's default store, if it has one yet, and whether it still lives. */
-const defaultStoreOf = async (
-  env: Env,
-  app: AppId
-): Promise<{ store: StoreId; live: boolean } | undefined> => {
-  const row = await drizzle(env.DB)
-    .select({
-      store: appDefaultStores.storeId,
-      deletedAt: businessStores.deletedAt,
-      exists: businessStores.id,
-    })
-    .from(appDefaultStores)
-    .leftJoin(businessStores, eq(businessStores.id, appDefaultStores.storeId))
-    .where(eq(appDefaultStores.appId, app))
-    .get();
-  return row === undefined
-    ? undefined
-    : {
-        store: storeIdSchema.parse(row.store),
-        live: row.exists !== null && row.deletedAt === null,
-      };
-};
-
 /**
- * The App's default store, created for `by` if it has none, or none that
- * still lives: a deleted default store is replaced by a new one, in one
- * conditional statement, so of two publishes replacing it at once one
- * record wins and both use its store; the other store stays empty and
- * claimed by no App. The versions sealed on the deleted store stay bound
- * to it and are refused as they are made current (`makeCurrent`): their
- * data is gone, and a fresh store isn't it.
- */
-const ensureDefaultStore = async (
-  env: Env,
-  by: Identity,
-  app: AppId
-): Promise<StoreId> => {
-  const existing = await defaultStoreOf(env, app);
-  if (existing?.live === true) {
-    return existing.store;
-  }
-  const created = await createStore(env, by);
-  const db = drizzle(env.DB);
-  await (existing === undefined
-    ? db
-        .insert(appDefaultStores)
-        .values({ appId: app, storeId: created, createdAt: new Date() })
-        .onConflictDoNothing({ target: appDefaultStores.appId })
-    : db
-        .update(appDefaultStores)
-        .set({ storeId: created, createdAt: new Date() })
-        .where(
-          and(
-            eq(appDefaultStores.appId, app),
-            eq(appDefaultStores.storeId, existing.store)
-          )
-        ));
-  const recorded = await defaultStoreOf(env, app);
-  if (recorded?.live !== true) {
-    throw new Error("The App's default store wasn't recorded");
-  }
-  return recorded.store;
-};
-
-/**
- * Seals `version` of `app` on the App's default store when it has one,
- * and when the App needs one (tables or preferences) but no default store
- * lives yet, on one created now. The sealed manifest's hash.
+ * Seals `version` of `app` on the App's one store (data-stores.ts,
+ * `appStoreFor`, created the first time a version needs it): the sealed
+ * manifest's hash.
  */
 const sealed = async (
   env: Env,
@@ -157,28 +88,8 @@ const sealed = async (
   app: AppId,
   version: number
 ): Promise<string> => {
-  const found = await defaultStoreOf(env, app);
-  const store = found?.live === true ? found.store : undefined;
-  try {
-    const release = await sealRelease(env, { app, version, store, by });
-    return release.manifestHash;
-  } catch (error) {
-    if (
-      store !== undefined ||
-      !isExpectedError(error) ||
-      error.code !== "version.store_unbound"
-    ) {
-      throw error;
-    }
-    const created = await ensureDefaultStore(env, by, app);
-    const release = await sealRelease(env, {
-      app,
-      version,
-      store: created,
-      by,
-    });
-    return release.manifestHash;
-  }
+  const release = await sealRelease(env, { app, version, by });
+  return release.manifestHash;
 };
 
 /**
