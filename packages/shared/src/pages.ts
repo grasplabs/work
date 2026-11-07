@@ -69,7 +69,7 @@ export const artifactSchema = z.string().regex(/^[0-9a-f]{64}$/u);
 /**
  * Whether code gets an App's data now: `open`; `revoked` once the release
  * it runs was revoked; `unreviewed` for code Grasp didn't serve (no lease
- * core signed: a portable host) while the App's data isn't `ordinary`
+ * core signed) while the App's data isn't `ordinary`
  * (@grasp-os/shared/data-policy). Core decides it again on every call and
  * every push.
  */

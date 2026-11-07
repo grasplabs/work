@@ -178,8 +178,7 @@ export class App extends DurableObject<Env> {
 
   /**
    * Audits what `refusal` names, with `entry`: a page's refusal of the
-   * App's data (who, which build, why, what and where), or a person's use
-   * of the App from a portable host (app-function-route.ts); unless it was
+   * App's data (who, which build, why, what and where); unless it was
    * audited within `refusalAuditMs`, so a page opened over and over, or
    * a page retrying, adds a row a window, not one a try. The check and the
    * write are one operation per refusal here: the same refusal arriving

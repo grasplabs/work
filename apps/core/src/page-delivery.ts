@@ -54,11 +54,9 @@ import { appHost } from "./durable-objects.ts";
 //
 // - A build of a release that was revoked (release-retention.ts): its
 //   pages get nothing more.
-// - Code core didn't serve: a call with no lease core signed, which is
-//   what a portable host (spec 10.7.1) makes, with an App token, from code
-//   with all the network its browser or app gives it. It gets the App's
-//   data only once an admin classified it `ordinary` (data-policy.ts),
-//   which a grant to the App takes back.
+// - Code core didn't serve: a call with no lease core signed. It gets the
+//   App's data only once an admin classified it `ordinary`
+//   (data-policy.ts), which a grant to the App takes back.
 //
 // What could go wrong, and what stops it:
 //

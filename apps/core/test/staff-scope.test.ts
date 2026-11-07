@@ -1,6 +1,5 @@
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import { appFunctionPath, pagePersonHeader } from "@grasp-os/shared/pages";
-import { appTokenPath } from "@grasp-os/shared/portable";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -40,7 +39,7 @@ import {
 // - A staff session acting in the workspace: starting a run, asking in a
 //   chat, calling an App's function, creating an App, writing Knowledge
 //   or the Brain, over `/rpc` or a route of its own (an App's function
-//   route, an App token for a portable host).
+//   route).
 // - A staff session reading the workspace: Apps, chats, members,
 //   Knowledge, the audit log.
 // - A staff session losing the onboarding it is there to run.
@@ -186,7 +185,6 @@ describe("a Grasp staff session, whatever its scope", () => {
         session,
         asPage
       ),
-      token: await postedAs(`${appTokenPath}/${app}`, session),
       runs: await runsOf(builder, workflow),
     }).toStrictEqual({
       run: "role.forbidden",
@@ -198,7 +196,6 @@ describe("a Grasp staff session, whatever its scope", () => {
       page: "role.forbidden",
       functions: 401,
       stream: 401,
-      token: 401,
       runs: 0,
     });
   });

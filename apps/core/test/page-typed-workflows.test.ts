@@ -2,14 +2,7 @@ import { v } from "@grasp-os/sdk";
 import { readWorkflowReference, workflowChannel } from "@grasp-os/sdk/host";
 import { expectedMessageOf } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import {
-  appTokenPath,
-  portableFunctionPath,
-  portableLivePath,
-} from "@grasp-os/shared/portable";
-import type { PortableLiveApi } from "@grasp-os/shared/portable";
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
-import { newWebSocketRpcSession } from "capnweb";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -40,7 +33,6 @@ import { tellQueryFollowers } from "../src/workflows/run-changes.ts";
 import { WorkflowRuns } from "../src/workflows/run-object.ts";
 import { grantReviewed } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { hostOrigin } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
 import {
   called,
@@ -60,12 +52,10 @@ import {
   wireOf,
 } from "./json-workflow-apps.ts";
 import type { Person } from "./json-workflow-apps.ts";
-import { closeWhenTestEnds } from "./open-sockets.ts";
 import { gate, heldEnd, rollingBackRun, withRollbacks } from "./rollbacks.ts";
 import { runInstance, sleeping, whileEngineRefuses, woken } from "./runs.ts";
 import { person as actingPerson } from "./sealed-apps.ts";
-import { clientOrigin } from "./sign-in-config.ts";
-import { auditedDuring, outcome, routed, unique } from "./sign-in.ts";
+import { auditedDuring, outcome, unique } from "./sign-in.ts";
 
 // A page's typed `useWorkflow` through the real host (spec 10.4,
 // page-workflows.ts; the threat model is on GRA-626): its starts and
@@ -2146,65 +2136,21 @@ describe(
       });
     });
 
-    it("refuses an App's workflows to its own server code's callers and to a portable host", async () => {
-      const { builder, admin, app, reference } = await boundApp({
+    it("refuses an App's workflows to its own server code's callers", async () => {
+      const { builder, app, reference } = await boundApp({
         hold: "1 hour",
       });
-      const { generation } = await admin.api.dataPolicy.read(app);
-      await admin.api.dataPolicy.classify(app, "ordinary", generation);
       const start = JSON.stringify({
         workflow: wireOf(reference),
         command: "start",
         input: { who: "Ada" },
         idempotencyKey: keyOf(),
       });
-      const issued = await routed(`${appTokenPath}/${app}`, {
-        method: "POST",
-        headers: {
-          origin: clientOrigin,
-          "content-type": "application/json",
-          cookie: builder.session,
-        },
-        body: "{}",
-      });
-      const { token } = z
-        .object({ token: z.string() })
-        .parse(await issued.json());
-      const portableCall = await routed(`${portableFunctionPath}/${app}`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${token}`,
-        },
-        body: start,
-      });
-      const upgraded = await routed(`${portableLivePath}/${app}`, {
-        headers: { Upgrade: "websocket", Origin: hostOrigin },
-      });
-      const socket = upgraded.webSocket;
-      if (!socket) {
-        throw new Error(`Expected a WebSocket, got ${upgraded.status}`);
-      }
-      socket.accept();
-      closeWhenTestEnds(socket);
-      const live = newWebSocketRpcSession<PortableLiveApi>(socket);
-      const portableWatch = await outcome(
-        live
-          .connect(token)
-          .watchQuery(
-            JSON.stringify({ workflow: wireOf(reference), watch: "binding" }),
-            () => {
-              // Never followed.
-            }
-          )
-      );
       expect({
         // An agent's or another App's call of the App, as its server takes it.
         agent: outcomeOf(
           await callAppFunction(env, builder.acting, app, start)
         ),
-        portableCall: outcomeOf(await portableCall.json()),
-        portableWatch,
         runs: await env.DB.prepare(
           "SELECT COUNT(*) AS runs FROM workflow_start_receipts WHERE invoker_id = ?"
         )
@@ -2212,8 +2158,6 @@ describe(
           .first<number>("runs"),
       }).toStrictEqual({
         agent: "contract.invalid_request",
-        portableCall: "workflow.portable_unavailable",
-        portableWatch: "workflow.portable_unavailable",
         runs: 0,
       });
     });

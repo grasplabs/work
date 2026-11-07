@@ -55,13 +55,13 @@ const reviewedUnder = (by: Identity, app: AppId, generation: number): SQL =>
 
 /**
  * Says what the App's data is to code Grasp didn't serve: `ordinary` is
- * an admin accepting that it goes to a portable host, and out in its
- * pages' declared links on a click (app-link-route.ts), `sensitive` takes
+ * an admin accepting that it goes to code Grasp didn't serve, and out in
+ * its pages' declared links on a click (app-link-route.ts), `sensitive` takes
  * that back. One write, only while `by` is still an admin, that moves the
  * App's policy generation on and is recorded on its own
  * (`app.output.classified`). Saying `sensitive` again tells the App's open
- * connections to look again (access-revocations.ts), so a portable host's
- * live query ends now. Saying what already holds changes, records and
+ * connections to look again (access-revocations.ts), so a live query
+ * ends now. Saying what already holds changes, records and
  * tells nothing.
  */
 export const classifyOutput = async (

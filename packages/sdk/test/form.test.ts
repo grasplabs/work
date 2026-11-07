@@ -334,9 +334,9 @@ describe("a form whose submission's outcome is unknown", () => {
       if (sent.length === 1) {
         return "unknown";
       }
-      // The host has no token to give for a moment: nothing ran.
+      // The host refuses it before it runs: nothing ran.
       return sent.length === 2
-        ? { refused: "auth.token_unavailable" }
+        ? { refused: "request.forbidden" }
         : { value: 3 };
     });
     const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });

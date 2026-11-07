@@ -167,7 +167,7 @@ export interface SessionApi {
   readonly dependencies: DependenciesApi;
   /** Apps' pages: their builds, their servers and their error logs. */
   readonly pages: PagesApi;
-  /** What an App's data is to code Grasp didn't serve: a portable host. */
+  /** What an App's data is to code Grasp didn't serve. */
   readonly dataPolicy: DataPolicyApi;
   /** The organization's members: offboarding. Admins only. */
   readonly members: MembersApi;

@@ -23,9 +23,8 @@ import type { AnySchema, DescriptorDraft } from "./value-schema.ts";
 //
 // Values are JSON and nothing else. There is deliberately no `any`, no
 // bytes, vector or BigInt, no coercion, and no callback to transform or
-// refine a value: a schema is data (its descriptor), so the browser, the
-// Worker and a portable host check the same thing. A business rule belongs
-// in the handler.
+// refine a value: a schema is data (its descriptor), so the browser and the
+// Worker check the same thing. A business rule belongs in the handler.
 //
 // The input and output inference below (which keys of an object may be left
 // out by a caller, and which a handler can rely on) is adapted from

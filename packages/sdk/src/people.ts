@@ -168,8 +168,7 @@ const referenceTo = <Name extends PeopleOperationName>(
  * The references a page reads through (`useUser`, `usePeople`). They
  * name no App: the page's page binds its calls to its own App, and core
  * answers them for that App and the person signed in there, whatever a
- * reference says. So they work in Grasp's own pages only; a portable
- * host reads who calls through one of the App's functions.
+ * reference says.
  */
 export const peopleReferences = Object.freeze({
   user: referenceTo("user"),

@@ -14,7 +14,6 @@ import { sweepTestFixtures } from "./app-tests.ts";
 import { sweepAppVisitors } from "./app-visitors.ts";
 import { drainWebhookDeliveries } from "./app-webhooks.ts";
 import { auditLog } from "./audit-log.ts";
-import { sweepTokenKeys } from "./auth/app-tokens.ts";
 import { reconcileRunCaptures } from "./brain-capture.ts";
 import { reconcileConsolidation } from "./brain-consolidation.ts";
 import { sweepChannelLinks } from "./channels/accounts.ts";
@@ -307,7 +306,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepTestFixtures,
   },
-  { name: "auth.token_keys", period: "quarterHour", run: sweepTokenKeys },
   // The audit log's retention alarm armed, if it isn't yet: retention
   // itself runs on that alarm (src/audit-log.ts), and a deployment that
   // appends nothing after a release still gets it.

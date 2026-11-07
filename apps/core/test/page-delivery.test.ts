@@ -46,7 +46,7 @@ import {
 // and reaches only its App's functions as its viewer. What still keeps the
 // data from code: its release revoked, as a call lands, a push or the next
 // call; and code core didn't serve (no lease of core's, a forged or
-// borrowed one: what a portable host sends), refused while the App's data
+// borrowed one), refused while the App's data
 // is `sensitive`, until an admin classifies it `ordinary`, which a grant
 // to the App takes back. The sample App runs for real, sealed as each
 // version becomes current, and what it holds stands for a client's data.

@@ -364,13 +364,6 @@ export const rpcParamNames: ParamNames = {
     "request": ["request"],
     "revoke": ["id"],
   },
-  "PortableLiveRpc": {
-    "connect": ["token"],
-  },
-  "PortableQueriesRpc": {
-    "renew": ["token"],
-    "watchQuery": ["request","onSnapshot"],
-  },
   "ProjectsRpc": {
     "addMember": ["id","member"],
     "create": ["project"],

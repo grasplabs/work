@@ -13,9 +13,8 @@ import { revocationsOf } from "./access-revocations.ts";
 import { apps, auditOutbox, pagePolicies } from "./db/core/schema.ts";
 
 // What an App's data is to code Grasp didn't serve (@grasp-os/shared/
-// data-policy): a portable host, with an App token, running code with all
-// the network its browser or app gives it. Its calls carry no lease core
-// signed, so the gate (page-delivery.ts) hands them the App's data only
+// data-policy): calls that carry no lease core signed, which the gate
+// (page-delivery.ts) hands the App's data only
 // once an admin classified it `ordinary` (data-policy-rpc.ts). An App's
 // own pages, which core serves into a sandboxed frame, get it whatever
 // this says.
@@ -147,7 +146,7 @@ export const widenedByGrant = (
  * of each App whose data the grant to `grantee` (none, for an agent's)
  * makes `sensitive` again (`widenedByGrant`), when `condition` holds:
  * their open connections are told to look again (access-revocations.ts),
- * so a portable host's live query ends now. Put it before
+ * so a live query ends now. Put it before
  * `widenedByGrant`'s statements, which take away the `ordinary` that
  * finds them. Returns the rows kept, for `tellKept`.
  */

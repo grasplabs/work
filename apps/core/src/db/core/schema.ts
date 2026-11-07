@@ -123,10 +123,10 @@ export const verifications = sqliteTable(
 );
 
 /**
- * Better Auth's JWT plugin's signing keys: the key pairs App tokens are
- * signed with (auth/app-tokens.ts), each private key encrypted with the
- * auth secret. A key is replaced once it expires; the tokens it signed
- * still verify while its row is kept.
+ * The signing keys of the removed App tokens. Nothing reads or writes it
+ * now; it stays until a later release drops it (expand, then contract),
+ * since the release before this one still runs against it while a deploy
+ * rolls out.
  */
 export const jwks = sqliteTable("jwks", {
   id: text().primaryKey(),
@@ -893,7 +893,7 @@ export const appMembers = sqliteTable(
 /**
  * An App's data policy (src/data-policy.ts), one row per App once
  * anything set it (none yet is `sensitive`, generation 0): what its data
- * is to code Grasp didn't serve, a portable host (`output`), and a
+ * is to code Grasp didn't serve (`output`), and a
  * generation that goes up, in the batch that makes the change, with every
  * change of `output` and every grant widening the App's reach. A
  * classification lands only under the generation its admin read.
