@@ -35,11 +35,12 @@ import {
   dispatchAppNotifyIntent,
 } from "../src/app-notifications.ts";
 import type { Release } from "../src/app-releases.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { listNotifications } from "../src/notifications.ts";
 import { callOperation } from "../src/operations.ts";
 import type { HostedApp, Invocation } from "../src/operations.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 
@@ -215,7 +216,7 @@ const fixture = async (): Promise<Fixture> => {
   )
     .bind(app, hash, text, Date.now())
     .run();
-  const storeId = await createStore(env, ada);
+  const storeId = await storeOfNewApp(env, ada);
   const store = await openStore(env, storeId);
   await store.defineTables(manifestText(manifest.schema));
   return {

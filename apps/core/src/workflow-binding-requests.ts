@@ -1,7 +1,10 @@
 import { collections } from "@grasp-os/brain/schema";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { workflowBindingTargetSchema } from "@grasp-os/shared/workflow-resources";
+import {
+  catalogBindingKinds,
+  workflowBindingTargetSchema,
+} from "@grasp-os/shared/workflow-resources";
 import type {
   EventIngressKind,
   ListedWorkflowBindingApproval,
@@ -30,14 +33,11 @@ import {
 import { modelSettings } from "./models.ts";
 import { requireMemberAdmin } from "./permissions.ts";
 import { latestTemplateVersions } from "./resource-templates.ts";
-import { servedIn, storeGrantFor } from "./store-operations.ts";
 import {
   approvalOf,
   approvalServing,
-  operationServesContract,
   requireTargetServes,
 } from "./workflow-bindings.ts";
-import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import type { PinnedBinding } from "./workflow-resources.ts";
 import { ingressOf } from "./workflows/run-inboxes.ts";
@@ -60,8 +60,7 @@ import { ingressOf } from "./workflows/run-inboxes.ts";
 //   approval is).
 // - A long or slow read: a connector's candidates are the contracts
 //   connect lists for each of the workflow's own connection grants (a
-//   Composio one read from its server), a store operation's the paths each
-//   of its own store grants lists, a template's the latest version of the
+//   Composio one read from its server), a template's the latest version of the
 //   `templatesOffered` newest templates; each checked before it is
 //   offered. So they are offered on one workflow's own read alone, never
 //   across workflows, where those kinds list without offers.
@@ -78,27 +77,14 @@ const pendingWorkflowsMax = 50;
  */
 const templatesOffered = 100;
 
-/** What an offer needs of a store operation: its kind and shapes. */
-type StoreOperationShape = Parameters<typeof operationServesContract>[0] & {
-  kind: string;
-};
-
 /** A target core offers, with what it names. */
 type Offered = PendingWorkflowBindings["bindings"][number]["offered"][number];
-
-/** The actions a permission row allows. */
-const actionsOf = (json: string): string[] => {
-  const parsed: unknown = JSON.parse(json);
-  return Array.isArray(parsed)
-    ? parsed.filter((action): action is string => typeof action === "string")
-    : [];
-};
 
 /** Workflow `id`'s own active permissions on objects of `type`, oldest first. */
 const heldOf = async (
   env: Env,
   id: string,
-  type: "collection" | "connection" | "store"
+  type: "collection" | "connection"
 ) =>
   await drizzle(env.DB)
     .select({
@@ -120,7 +106,7 @@ const heldOf = async (
 
 /**
  * What `target` names, as an offer of it and an approval of it are
- * listed: a connector's or store operation's by `grant`, the name of the
+ * listed: a connector's by `grant`, the name of the
  * workflow's own grant it goes through (its binding name), a Brain
  * collection by `grant`, the collection's name, a model by its ID; empty
  * where it names nothing, or its grant is gone.
@@ -132,9 +118,6 @@ const labelOf = (target: WorkflowBindingTarget, grant?: string): string => {
     }
     case "connector": {
       return grant === undefined ? "" : `${grant}: ${target.contract}`;
-    }
-    case "storeOperation": {
-      return grant === undefined ? "" : `${grant}: ${target.operation}`;
     }
     case "knowledge": {
       return grant ?? "";
@@ -220,78 +203,6 @@ const connectorTargets = async (env: Env, id: string): Promise<Offered[]> => {
   return offered;
 };
 
-/**
- * The public queries and mutations, by path, that store permission
- * `permissionId` of workflow `id` lists and its store serves now, as its
- * App's current release serves it. Read once for all its paths.
- */
-const servedOperations = async (
-  env: Env,
-  id: string,
-  permissionId: string,
-  paths: readonly string[]
-): Promise<{ path: string; operation: StoreOperationShape }[]> => {
-  const consumer = {
-    version: 1,
-    subject: { type: "workflow", id },
-    permissionId,
-  } as const;
-  const grant = await storeGrantFor(env, consumer);
-  if (grant === undefined) {
-    return [];
-  }
-  return paths.flatMap((path) => {
-    const served = servedIn(grant.release, path);
-    return served === undefined || !grant.actions.includes(path)
-      ? []
-      : [{ path, operation: served.operation }];
-  });
-};
-
-/**
- * The paths the workflow's own store permissions list whose operation
- * takes and returns exactly what operation contract `key` says, each as
- * the kind its store serves it: checked here as `requireTargetServes`
- * checks one, from one read of each store, so they aren't checked one by
- * one again (an approval checks its own afresh).
- */
-const operationTargets = async (
-  env: Env,
-  id: string,
-  key: string
-): Promise<Offered[]> => {
-  const contracts = await resolveCatalogKeys(env, [key]);
-  const contract = contracts.get(key)?.contract;
-  if (contract === undefined) {
-    return [];
-  }
-  const offered: Offered[] = [];
-  for (const row of await heldOf(env, id, "store")) {
-    // oxlint-disable-next-line no-await-in-loop -- one store read per grant, few
-    const served = await servedOperations(
-      env,
-      id,
-      row.id,
-      actionsOf(row.actions)
-    );
-    for (const { path, operation } of served) {
-      if (
-        (operation.kind === "query" || operation.kind === "mutation") &&
-        operationServesContract(operation, contract)
-      ) {
-        const target = {
-          kind: "storeOperation",
-          permissionId: row.id,
-          operation: path,
-          operationKind: operation.kind,
-        } as const;
-        offered.push({ target, label: labelOf(target, row.binding) });
-      }
-    }
-  }
-  return offered;
-};
-
 /** The newest templates' latest versions, each pinned by its content's hash. */
 const templateTargets = async (env: Env): Promise<Offered[]> => {
   const published = await latestTemplateVersions(env, templatesOffered);
@@ -305,7 +216,7 @@ const templateTargets = async (env: Env): Promise<Offered[]> => {
 
 /**
  * The targets core can pick for `binding` of workflow `id`, before they
- * are checked; a connector's, store operation's and template's only when
+ * are checked; a connector's and template's only when
  * `everyKind` (one workflow's own read).
  */
 const candidatesOf = async (
@@ -316,9 +227,7 @@ const candidatesOf = async (
 ): Promise<Offered[]> => {
   if (
     !everyKind &&
-    (binding.kind === "connector" ||
-      binding.kind === "operation" ||
-      binding.kind === "template")
+    (binding.kind === "connector" || binding.kind === "template")
   ) {
     return [];
   }
@@ -350,9 +259,6 @@ const candidatesOf = async (
     case "connector": {
       return await connectorTargets(env, id);
     }
-    case "operation": {
-      return await operationTargets(env, id, binding.contractId);
-    }
     case "template": {
       return await templateTargets(env);
     }
@@ -382,14 +288,8 @@ const offeredFor = async (
 ): Promise<Offered[]> => {
   const offered: Offered[] = [];
   for (const candidate of await candidatesOf(env, id, binding, everyKind)) {
-    // One an approval couldn't take as written (a path no operation could
-    // have) is never offered.
+    // One an approval couldn't take as written is never offered.
     if (!workflowBindingTargetSchema.safeParse(candidate.target).success) {
-      continue;
-    }
-    // Checked as it was read, its store read once (`operationTargets`).
-    if (candidate.target.kind === "storeOperation") {
-      offered.push(candidate);
       continue;
     }
     try {
@@ -578,16 +478,15 @@ export const workflowPendingBindings = async (
 /**
  * What the workflow's own active grants of the kinds a target goes
  * through are called, by permission ID: a Brain collection's by the
- * collection's name, a connection's or store's by its binding name.
+ * collection's name, a connection's by its binding name.
  */
 const grantNamesOf = async (
   env: Env,
   id: string
 ): Promise<Map<string, string>> => {
-  const [read, connections, stores] = await Promise.all([
+  const [read, connections] = await Promise.all([
     heldOf(env, id, "collection"),
     heldOf(env, id, "connection"),
-    heldOf(env, id, "store"),
   ]);
   const names = await collectionNames(
     env,
@@ -600,7 +499,7 @@ const grantNamesOf = async (
       grants.set(permissionId, name);
     }
   }
-  for (const { id: permissionId, binding } of [...connections, ...stores]) {
+  for (const { id: permissionId, binding } of connections) {
     grants.set(permissionId, binding);
   }
   return grants;
@@ -623,7 +522,11 @@ export const listWorkflowBindings = async (
       .where(
         and(
           eq(workflowBindingApprovals.workflowResourceId, workflow.id),
-          eq(workflowBindingApprovals.status, "active")
+          eq(workflowBindingApprovals.status, "active"),
+          // Of a kind still served: an `operation` approval left from
+          // before each App's store was its own serves nothing, and a
+          // later release removes it with its audit event.
+          inArray(workflowBindingApprovals.kind, [...catalogBindingKinds])
         )
       )
       .orderBy(asc(workflowBindingApprovals.alias)),

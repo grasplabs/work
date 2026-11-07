@@ -143,21 +143,10 @@ export interface FixtureStart {
    * binding's alias (fixture-calls.ts).
    */
   readonly modelsOf: (alias: string) => Readonly<Record<string, unknown>>;
-  /**
-   * The public operation of the release under test its fixture names for
-   * each of its operation bindings, by the binding's alias
-   * (fixture-calls.ts).
-   */
-  readonly operationsOf: (alias: string) => Readonly<Record<string, string>>;
-  /**
-   * Its test's own fixture store, made if it isn't yet: the only store its
-   * operation calls run on. Null for an App with no store.
-   */
-  readonly storeOf: () => Promise<string | null>;
   /** When its test's time is up (ms since the epoch). */
   readonly deadline: number;
   /** Told once its record is written: from then on, it is a run to remove. */
-  readonly recorded: (runId: string) => void;
+  readonly recorded: () => void;
 }
 
 /** A test's run as its start answers it. */
@@ -201,11 +190,6 @@ export const startFixtureRun = async (
     pin.version,
     test.paramsOf(resolved.alias)
   );
-  const operations = test.operationsOf(resolved.alias);
-  // Its test's store, only when the fixture serves an operation binding
-  // from it: a test that calls no store makes none.
-  const storeId =
-    Object.keys(operations).length === 0 ? null : await test.storeOf();
   const runId = crypto.randomUUID();
   // Recorded before the engine hears of it, so nothing runs unrecorded.
   await drizzle(env.DB)
@@ -223,12 +207,10 @@ export const startFixtureRun = async (
       params,
       deciders: JSON.stringify(test.decidersOf(resolved.alias)),
       models: JSON.stringify(test.modelsOf(resolved.alias)),
-      operations: JSON.stringify(operations),
-      storeId,
       createdAt: new Date(),
       deadline: new Date(test.deadline),
     });
-  test.recorded(runId);
+  test.recorded();
   try {
     await runEngine(env).createFixture({
       id: runId,

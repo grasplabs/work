@@ -28,7 +28,7 @@ import { invocationFor } from "../src/app-functions.ts";
 import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { callMaxNested } from "../src/call-limits.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import {
   callMaxDepth,
@@ -46,6 +46,7 @@ import type {
 } from "../src/operations.ts";
 import { hostedRelease } from "../src/release-runner.ts";
 import { appDefinition } from "./app-definitions.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 
@@ -654,7 +655,7 @@ interface Fixture {
 const notes = async (): Promise<Fixture> => {
   const owner = await person();
   const { id: appId } = await createApp(env, owner, { name: "Notes" });
-  const store = await openStore(env, await createStore(env, owner));
+  const store = await openStore(env, await storeOfNewApp(env, owner));
   await store.defineTables(manifestText(manifest.schema));
   return { owner, appId, store };
 };

@@ -109,7 +109,7 @@ import {
 /**
  * One use whose writes a model's answers may steer (GRA-718), as its
  * neighbouring use badge names it: a connector's alias and the operations
- * that may write; an App export's alias alone, as any of it may write.
+ * that may write; an unsealed action's alias alone, as any of it may write.
  */
 const SteeredWriteBadge = ({ write }: { write: SteeredWrite }) => {
   const target =

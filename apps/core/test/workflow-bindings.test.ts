@@ -1,13 +1,9 @@
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
-import {
-  releaseFormatVersion,
-  releaseManifestSchema,
-} from "@grasp-os/shared/app-releases";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
+import { canonicalJson } from "@grasp-os/shared/json";
 import type {
   Authority,
   PermissionRequest,
@@ -62,6 +58,7 @@ import type {
 } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
@@ -134,47 +131,6 @@ const nullValue = {
   kind: "null",
   presence: "required",
   nullable: false,
-};
-
-/**
- * Seals version `version` of App `app` with a manifest the release loader
- * reads as intact (revoked, if asked): what an operation's approval names.
- */
-const sealed = async (app: string, version: number, revoked = false) => {
-  const hash = "0".repeat(64);
-  const manifest = canonicalText(
-    releaseManifestSchema.parse({
-      formatVersion: releaseFormatVersion,
-      resourceId: app,
-      resourceVersion: version,
-      sourceTreeHash: hash,
-      schemaHash: hash,
-      contractHash: hash,
-      sdkVersion: "1.0.0",
-      uiVersion: "1.0.0",
-      compilerVersion: "1.0.0",
-      dependencyLockHash: hash,
-      target: "app",
-      dataStoreBindings: [],
-      artifacts: [{ path: "server.js", sha256: hash, bytes: 0 }],
-      bindings: [],
-      verificationReportHash: hash,
-      migrationEvidence: [],
-      artifactTrust: "unreviewed",
-    })
-  );
-  await env.DB.prepare(
-    "INSERT INTO sdk_release_manifests (app_id, version, manifest_hash, manifest, sealed_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?)"
-  )
-    .bind(
-      app,
-      version,
-      await sha256Hex(manifest),
-      manifest,
-      Date.now(),
-      revoked ? Date.now() : null
-    )
-    .run();
 };
 
 /** A model capability contract key of this test's own. */
@@ -429,7 +385,7 @@ describe("the host catalog", () => {
       incomplete: await outcome(
         publishCatalogContract(env, admin, {
           key: modelKey(),
-          kind: "operation",
+          kind: "decision",
         })
       ),
       tooLarge: await outcome(
@@ -1282,41 +1238,25 @@ describe("bindings waiting on an admin", () => {
   });
 });
 
-describe("approving an operation", () => {
+describe("approving a store's operation", () => {
   beforeAll(chooseModel);
 
-  it("takes no App's export as its target, whatever release or shape it names, and approves nothing", async () => {
+  // An App's store is its own: no workflow binding reaches it.
+  it("takes no App's store as its target, whatever the workflow's own grants, and approves nothing", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const key = `lookup-${unique()}`;
-    const descriptor = JSON.stringify(emptyObject);
-    await publishCatalogContract(env, admin, {
-      key,
-      kind: "operation",
-      input: descriptor,
-      output: descriptor,
-    });
-    const app = await appOf(ada);
-    await sealed(app, 1);
-    const workflow = await createWorkflowResource(env, ada, `op-${unique()}`);
-    await publishWorkflowVersion(env, ada, workflow.id, {
-      definition: documentOf({
-        bindings: { lookup: { kind: "operation", contract: key } },
-        steps: [{ id: "look", type: "do", binding: "lookup", arguments: {} }],
-      }),
-      basedOn: null,
-    });
-    // No permission names an App's export any more (an `app` permission
-    // is an agent's): one an old record left, by its ID.
-    const permissionId = crypto.randomUUID();
+    const key = await modelContract(admin);
+    const workflow = await workflowOf(ada, key);
+    const store = await storeOfNewApp(env, ada);
     const approved = await outcome(
       approveWorkflowBinding(env, admin, workflow.id, {
-        alias: "lookup",
+        alias: "summary",
         target: {
-          kind: "operation",
-          permissionId,
-          appVersion: 1,
-          export: "lookup",
+          kind: "storeOperation",
+          permissionId: crypto.randomUUID(),
+          storeId: store,
+          operation: "notes.list",
+          operationKind: "query",
         },
         reviewed: { version: 1 },
       })
@@ -1326,14 +1266,9 @@ describe("approving an operation", () => {
     )
       .bind(workflow.id)
       .first<{ count: number }>();
-    expect({
-      approved,
-      approvals: approvals?.count,
-      starts: await outcome(start(ada, workflow.id)),
-    }).toStrictEqual({
+    expect({ approved, approvals: approvals?.count }).toStrictEqual({
       approved: "workflow.binding_invalid",
       approvals: 0,
-      starts: "workflow.binding_unapproved",
     });
   });
 });

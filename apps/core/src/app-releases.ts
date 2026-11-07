@@ -58,9 +58,8 @@ import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
 import { checkEvidenceText, evidenceMatches } from "./check-evidence.ts";
-import { openStore, requireStoreManager } from "./data-stores.ts";
+import { appStoreFor, openStore } from "./data-stores.ts";
 import {
-  appDefaultStores,
   businessStoreVersions,
   sdkArtifactDeletions,
   sdkReleaseArtifacts,
@@ -82,7 +81,6 @@ import type { BuildProfile, BuiltPage, PageBuildResult } from "./pages.ts";
 import { finishDeletion, markArtifact } from "./release-retention.ts";
 import { defineSchemaOnStore, schemaStatus } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
-import { claimedFor, claimStore } from "./store-owners.ts";
 
 // Sealing an App's release (spec 8, 16): turning one version of an App of
 // spec 8's layout into an immutable manifest and the content-addressed
@@ -112,26 +110,19 @@ import { claimedFor, claimStore } from "./store-owners.ts";
 //   artifacts it names (check-evidence.ts).
 //   A new version is a new manifest; a sealed one never changes.
 // - A release reaches a store it shouldn't: no App code, request or
-//   manifest field names a store. The host that seals binds one, and
-//   records the binding apart from the manifest
-//   (`sdk_resource_bindings`); loading requires both to agree. A store
-//   serves one App for good: the first seal claims it
-//   (`sdk_store_owners`) before defining its tables, and retention never
-//   deletes the claim.
-// - Someone binds a store they don't manage, or one that doesn't exist:
-//   the sealer must manage the store and not be Grasp staff, as for
-//   sharing it (data-stores.ts), checked before any App code is
-//   inspected; and the store must be listed and live before it is
-//   claimed, so no claim is ever written for a store that isn't.
+//   manifest field names a store. The seal binds its App's own store, the
+//   one `app_default_stores` keys by the App (data-stores.ts,
+//   `appStoreFor`), and records the binding apart from the manifest
+//   (`sdk_resource_bindings`), only while that table still names the
+//   store for the App and it is live; loading requires both to agree. A
+//   store ID enters that table only as it is minted, so a store serves
+//   one App for good.
 // - A release vouches for itself: its trust is always `unreviewed` in the
 //   manifest; revocation is the host's record (`sdk_release_manifests`).
 //
-// - Someone seals an App they don't build, or binds a store they may not:
-//   `sealRelease` checks itself that `by` builds the App, then that they
-//   manage the store, unless it is the App's own default store, which the
-//   host chose for it (`app_default_stores`, app-activation.ts) and the
-//   App's builders bind by their builder rights. Which store to bind is its
-//   caller's choice, the host's, never App code's.
+// - Someone seals an App they don't build: `sealRelease` checks itself
+//   that `by` builds the App before anything else, its store's creation
+//   included.
 // - A load whose request is cancelled mid-read (workerd never settles it)
 //   holds every later load of that release in the isolate, or a load that
 //   failed or ran on past its time is served as verified: loads of one
@@ -185,13 +176,7 @@ const deepFreeze = <Value>(
 interface SealRequest {
   readonly app: AppId;
   readonly version: number;
-  /**
-   * The store the release reads and writes, which the host chose: needed
-   * when the App declares tables or preferences, and never anything App
-   * code names.
-   */
-  readonly store?: StoreId;
-  /** Who seals it: they must manage `store`, if one is given. */
+  /** Who seals it: one of the App's builders. */
   readonly by: Acting;
   /**
    * Called once its code is inspected and checked, before it is built
@@ -929,22 +914,6 @@ const requireAsTombstoned = async (
 /** The empty dependency lock: server code imports no packages. */
 const emptyLock = "{}";
 
-/** Whether `store` is App `app`'s own default store, as the host records it. */
-const isDefaultStore = async (
-  env: Env,
-  app: AppId,
-  store: StoreId
-): Promise<boolean> => {
-  const row = await drizzle(env.DB)
-    .select({ store: appDefaultStores.storeId })
-    .from(appDefaultStores)
-    .where(
-      and(eq(appDefaultStores.appId, app), eq(appDefaultStores.storeId, store))
-    )
-    .get();
-  return row !== undefined;
-};
-
 /**
  * The App needs a store: its schema has tables, or it declares
  * preferences, which its store keeps (app-preferences.ts).
@@ -1176,10 +1145,11 @@ export const sealedEvidence = async (
 };
 
 /**
- * The store release `request` binds, with the App's schema (`schema`, its
- * hash) applied to it for this version, and what that did to the store's
- * contract; or null for an App without tables or preferences;
- * `version.store_unbound` for one with either and no store. The store applies the schema only
+ * The store release `request` binds, its App's own (`appStoreFor`, created
+ * now if the App has none that lives), with the App's schema (`schema`,
+ * its hash) applied to it for this version, and what that did to the
+ * store's contract; or null for an App without tables or preferences.
+ * The store applies the schema only
  * when the change to its contract is safe (store-host.ts,
  * `defineTables`), and refuses one that needs a migration
  * (`migration.required`), so no release is sealed on a store whose data
@@ -1198,14 +1168,10 @@ const boundStore = async (
   if (!needsStore(manifest)) {
     return null;
   }
-  if (request.store === undefined) {
-    throw versionErrors.create("version.store_unbound");
-  }
-  // Listed and live first, then claimed before its tables are touched,
-  // so a seal that loses the store never defines its tables there, and
-  // no claim is ever written for a store that doesn't exist.
-  const opened = await openStore(env, request.store);
-  await claimStore(env, opened.id, request.app);
+  const opened = await openStore(
+    env,
+    await appStoreFor(env, request.by, request.app)
+  );
   // Its preferences checked against the store's preferences contract
   // first (store-host.ts, `definePreferences`): a version that changes one
   // people may have chosen is refused before its tables are touched. The
@@ -1566,8 +1532,7 @@ export const sealDraftRelease = async (
 /**
  * Seals the release of `request.app`'s `request.version` (see the header)
  * and answers it. A version sealed
- * already answers its release as sealed, whatever store is asked for now;
- * a seal racing another with a different manifest is refused
+ * already answers its release as sealed; a seal racing another with a different manifest is refused
  * (`version.seal_conflict`).
  */
 export const sealRelease = async (
@@ -1589,16 +1554,6 @@ export const sealRelease = async (
     .get();
   if (sealed !== undefined) {
     return await resealed(env, { app, version }, sealed.manifest);
-  }
-  // Before any App code is inspected: the App's own default store, which
-  // the host chose for it (`app_default_stores`), is bound by its builder
-  // rights; any other store only by someone who manages it, since a
-  // binding hands the App's callers its records.
-  if (
-    request.store !== undefined &&
-    !(await isDefaultStore(env, app, request.store))
-  ) {
-    await requireStoreManager(env, request.by, request.store);
   }
   const row = await findVersion(env, app, version);
   const files = await versionFiles(env, app, version);
@@ -1662,10 +1617,10 @@ export const sealRelease = async (
       ...(store === null
         ? []
         : [
-            // The target only while this App owns the store and it is live
-            // and not being deleted: otherwise NULL, which the column
-            // refuses, and the whole seal with it. So of a seal binding the
-            // store and its deletion's closing mark, one wins.
+            // The target only while it is this App's store, live and not
+            // being deleted: otherwise NULL, which the column refuses, and
+            // the whole seal with it. So of a seal binding the store and
+            // its deletion's closing mark, one wins.
             // The store's definition in core's inventory, numbered as it
             // first appears; the binding below names its version.
             db
@@ -1691,7 +1646,7 @@ export const sealRelease = async (
               resourceVersion: version,
               alias: store.alias,
               kind: "store" as const,
-              targetId: sql`(SELECT ${store.storeId} WHERE EXISTS (SELECT 1 FROM sdk_store_owners
+              targetId: sql`(SELECT ${store.storeId} WHERE EXISTS (SELECT 1 FROM app_default_stores
                 WHERE store_id = ${store.storeId} AND app_id = ${app})
                 AND ${liveStoreSql(sql`${store.storeId}`, Date.now())})`,
               schemaHash: store.schemaHash,
@@ -1719,10 +1674,8 @@ export const sealRelease = async (
     ]);
   } catch (error) {
     if (notNullFailed(error, "sdk_resource_bindings.target_id")) {
-      // Another App's, or being deleted (or gone) as the batch ran.
-      throw (await claimedFor(env, store?.storeId, app))
-        ? dataErrors.create("data.store_unavailable")
-        : versionErrors.create("version.store_bound_elsewhere");
+      // Being deleted (or gone), or replaced, as the batch ran.
+      throw dataErrors.create("data.store_unavailable");
     }
     if (notNullFailed(error, "sdk_release_manifests.manifest_hash")) {
       throw versionErrors.create("version.seal_busy");

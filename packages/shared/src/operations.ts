@@ -105,10 +105,6 @@ export const operationErrors = defineErrorFamily({
     "The arguments don't fit the contract of the resource's action.",
   "resource.item_not_found":
     "The resource has no such item, or none the App may read for this person.",
-  "resource.operation_failed":
-    "The store's operation refused the request or failed: its details name the store's own code.",
-  "resource.busy":
-    "The store's operation couldn't run just now. Try again shortly.",
   "resource.limit_reached":
     "The App used this resource as much as it may in one call, one minute, one hour or one day, holds as much of it open as it may at once, or made as deep, as round or as many calls between Apps as it may, so this request wasn't made. Its details name which.",
   "contract.invalid_resource_result":
@@ -169,8 +165,6 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "resource.invalid_args": "contract",
   "resource.declined": "domain",
   "resource.idempotency_conflict": "contract",
-  "resource.operation_failed": "domain",
-  "resource.busy": "operational",
   "resource.limit_reached": "operational",
   "data.write_denied": "authorization",
   "data.conflict": "domain",
@@ -230,9 +224,6 @@ const retryableCodes: ReadonlySet<string> = new Set([
   "resource.budget_busy",
   // Nothing was sent; a provider's rate comes back as its window passes.
   "resource.rate_limited",
-  // A shared store's operation that couldn't run now (busy, a concurrent
-  // change): nothing it did stands in the way of the same call again.
-  "resource.busy",
   "operation.sandbox_busy",
   "operation.sandbox_unavailable",
   // Nothing was published; the build runs on, cached for the next try.

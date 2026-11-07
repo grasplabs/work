@@ -195,7 +195,7 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   (`workflow.call_denied`). The person the run acts for must still be an
 //   active member before every step; a run an App's test started acts for
 //   its fixture's principal, whose role nothing changes.
-// - An effect repeated. A store operation's, a model's and an action's
+// - An effect repeated. A model's and an action's
 //   call goes out at most once per step, whatever its attempts
 //   (`SentCalls`, marked sent just before it leaves, after every check of
 //   its own, in the run's object, whose output gate holds the call until
@@ -220,9 +220,8 @@ import { requirePackagesAdmitted } from "./sealed-packages.ts";
 //   an App's test started makes only the calls its test serves
 //   (fixture-calls.ts, `fixtureCalls`), refused otherwise before its
 //   arguments are matched or audited (`resource.unavailable`); its model
-//   calls are answered by its fixture and its store calls run on its
-//   test's own store (`fixtureCall`), tried once as a real call is; and
-//   `makeCall` refuses every call of it again.
+//   calls are answered by its fixture (`fixtureCall`), tried once as a
+//   real call is; and `makeCall` refuses every call of it again.
 // - A catch taking what it mustn't (spec 13.7). The host keeps its own
 //   record of the failure no catch took yet (`#pending`), mapped by
 //   resource-errors.ts from what it knows. A failure the host made keeps
@@ -692,12 +691,7 @@ const itemsRecordSchema = z.object({
 type BoundCall = Extract<
   SealedCall,
   {
-    name:
-      | "grasp.connector"
-      | "grasp.operation"
-      | "grasp.model"
-      | "grasp.compute"
-      | "grasp.action";
+    name: "grasp.connector" | "grasp.model" | "grasp.compute" | "grasp.action";
   }
 >;
 
@@ -718,7 +712,6 @@ const callTemplateOf = (call: SealedCall): CallTemplate | undefined => {
     case "grasp.connector": {
       return { call, operation: call.operation, arguments: call.arguments };
     }
-    case "grasp.operation":
     case "grasp.compute":
     case "grasp.action": {
       return { call, operation: call.name, arguments: call.arguments };
@@ -747,12 +740,10 @@ const callTemplateOf = (call: SealedCall): CallTemplate | undefined => {
 };
 
 /**
- * The calls whose step makes them once only (spec 13.7): a store
- * operation, run by another App's release, a model request, and an
- * action, whose effects aren't proven idempotent as a whole.
+ * The calls whose step makes them once only (spec 13.7): a model request,
+ * and an action, whose effects aren't proven idempotent as a whole.
  */
 const triedOnceCalls: ReadonlySet<SealedCall["name"]> = new Set([
-  "grasp.operation",
   "grasp.model",
   "grasp.action",
 ]);
@@ -2869,13 +2860,6 @@ class SealedRun implements SealedRunKind {
           throw fixedMessage(error);
         }
       }
-      case "grasp.operation": {
-        return await this.#madeOrServed(
-          task,
-          { name: call.name, binding: call.binding, arguments: value },
-          effect
-        );
-      }
       case "grasp.model": {
         const parts = modelArgumentsSchema.parse(value);
         this.#reserveModelCall(
@@ -2929,9 +2913,9 @@ class SealedRun implements SealedRunKind {
   }
 
   /**
-   * A store or model call, made as a resource run's is; for a run an App's
-   * test started, served by its test instead (fixture-calls.ts): a model's
-   * answer from its fixture, a store's on its test's own store.
+   * A model call, made as a resource run's is; for a run an App's test
+   * started, served by its test instead (fixture-calls.ts): the answer
+   * its fixture gives.
    */
   async #madeOrServed(
     task: SealedTask,

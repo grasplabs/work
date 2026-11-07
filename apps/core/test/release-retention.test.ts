@@ -30,14 +30,7 @@ import {
 import { hostedRelease } from "../src/release-runner.ts";
 import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
-import {
-  appWith,
-  artifactKey,
-  failure,
-  person,
-  seal,
-  shareStoreWith,
-} from "./sealed-apps.ts";
+import { appWith, artifactKey, failure, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
 // How long sealed releases stay, and how one is revoked (spec 16.3),
@@ -878,11 +871,12 @@ describe("a deleted release", { timeout: 120_000 }, () => {
     )
       .bind(app)
       .run();
-    const other = await appWith(files("other"));
-    // Its owner manages the store too: only the claim refuses.
-    await shareStoreWith(fixture, other);
-    await expect(
-      failure(async () => await seal({ ...other, store }))
-    ).resolves.toBe("version.store_bound_elsewhere");
+    // Another App's seal, by someone who builds both: its own store.
+    const other = await appWith(files("other"), "Other", fixture.owner);
+    const sealed = await seal(other);
+    expect({
+      bound: sealed.store?.storeId,
+      apart: other.store !== store,
+    }).toStrictEqual({ bound: other.store, apart: true });
   });
 });

@@ -16,8 +16,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { accessedManifest, memberRoles, newRecordId } from "./store-schemas.ts";
 
 // Full-text search of a business store (store-search.ts, store-queries.ts
@@ -69,7 +70,7 @@ interface Fixture {
 }
 
 const storeWith = async (mode: AccessMode): Promise<Fixture> => {
-  const store = await openStore(env, await createStore(env, builder));
+  const store = await openStore(env, await storeOfNewApp(env, builder));
   const { schemaHash } = await store.defineTables(textOf(searchable, mode));
   return { store, schemaHash };
 };
@@ -403,7 +404,7 @@ describe("a search", () => {
   });
 
   it("is built over the records already there by a version that declares it", async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     const before = await store.defineTables(textOf(plain, "appMembers"));
     await insert({ store, schemaHash: before.schemaHash }, "ada", {
       name: "Initech",
@@ -502,7 +503,7 @@ describe("a search's bounds", () => {
   });
 
   it("refuses a table without a search index", async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     const { schemaHash } = await store.defineTables(
       textOf(plain, "appMembers")
     );

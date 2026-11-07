@@ -15,7 +15,6 @@ import {
   findApp,
   setCurrentVersion,
 } from "../../src/apps.ts";
-import { createStore } from "../../src/data-stores.ts";
 import { platformPlaceWaitMs } from "../../src/platform-sandbox.ts";
 import {
   sandboxOwnerHeader,
@@ -195,12 +194,7 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
     const built = await appWith(
       suiteOf(`t.equal(1, 1); // ${crypto.randomUUID()}`)
     );
-    await sealRelease(env, {
-      app: built.app,
-      version: 1,
-      store: await createStore(env, built.owner),
-      by: built.owner,
-    });
+    await sealRelease(env, { app: built.app, version: 1, by: built.owner });
     // The App's builds hold its part of the builder's share. It frees
     // only once the test build asked again after one build's own asks
     // for a place were over: asked again by activation, not by the build.

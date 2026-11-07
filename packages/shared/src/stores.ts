@@ -410,17 +410,6 @@ export const commitSchema = z
       .default([]),
     result: fieldValueSchema.default(null),
     /**
-     * The consumer whose call of a store's public operation this commit
-     * is (another App or a workflow, by ID and version): kept with the
-     * commit for as long as the store is. None for its own App's commits.
-     */
-    writer: z
-      .strictObject({
-        resourceId: identifierSchema,
-        resourceVersion: z.number().int().min(1),
-      })
-      .optional(),
-    /**
      * The App's files resources that declare `attach`, as its sealed
      * release says: a record may newly hold only a file uploaded through
      * one of them (core's file-host.ts). None, and it may newly hold none.
@@ -542,12 +531,6 @@ export interface StoredRecord {
   fields: Record<string, unknown>;
 }
 
-/** Whom a store is shared with, to manage it: a person or a team. */
-export const storeMemberSchema = z.strictObject({
-  type: z.enum(["person", "team"]),
-  id: identifierSchema,
-});
-
 export const dataErrors = defineErrorFamily({
   "data.invalid": "That change isn't valid for this store.",
   "data.invalid_schema": "That schema isn't one a store can hold.",
@@ -592,10 +575,6 @@ export const dataErrors = defineErrorFamily({
     "This record is being deleted, with the records that refer to it. It can't be changed or referred to meanwhile.",
   "data.store_bound":
     "This store can't be deleted while an App's kept versions read and write it.",
-  "data.store_consumed":
-    "Workflows or Apps call this store's operations through approvals. Revoke those approvals first, then delete the store.",
-  "data.store_managed_by_app":
-    "This store is an App's default store: the App's builders and the organization's admins manage it. Share the App instead.",
   "data.store_closing":
     "This store is already being deleted. Try again in a moment.",
   "data.store_in_use":

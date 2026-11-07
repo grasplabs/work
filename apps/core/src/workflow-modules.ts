@@ -15,7 +15,6 @@ import {
   connectorUseSchema,
   filesUseSchema,
   knowledgeUseSchema,
-  operationUseSchema,
   templateUseSchema,
   workflowModuleLimits,
 } from "@grasp-os/shared/workflow-modules";
@@ -32,7 +31,7 @@ import type { SandboxedEnv } from "./sandboxed.ts";
 // A JSON workflow's own modules (platform specification 13.6, 32.4):
 // TypeScript files under `code/`, published with the definition, whose
 // `compute()` exports its `grasp.compute` tasks call, and whose `action()`
-// exports its `grasp.operation` tasks call (resource-action.ts), each
+// exports its `grasp.action` tasks call (resource-action.ts), each
 // through a `local:code/<file>.ts#<export>` binding. An action's contract
 // also lists the workflow's own bindings it uses, which validation checks
 // against the definition and counts as referenced. This module builds them and
@@ -130,7 +129,6 @@ export const sealedUse = (use: ActionUse | SealedUse): SealedUse => {
         operations: Object.freeze([...use.operations]),
       });
     }
-    case "operation":
     case "template": {
       return Object.freeze({ alias: use.alias, kind: use.kind });
     }
@@ -357,7 +355,6 @@ export const versionActionsOf = (
               operations: [...use.operations],
             };
           }
-          case "operation":
           case "template": {
             return { alias: use.alias, kind: use.kind };
           }
@@ -374,14 +371,12 @@ export const versionActionsOf = (
 const descriptorObject = z.record(z.string(), z.json());
 
 /**
- * A use as the inspection answers it: a connector's and an operation's as
- * sealed, a model's output only as the descriptor itself, which the
+ * A use as the inspection answers it: a connector's as sealed, a model's output only as the descriptor itself, which the
  * version seals as canonical JSON (`sealedManifestUse`): never text it
  * would keep as it came.
  */
 const manifestUseSchema = z.discriminatedUnion("kind", [
   connectorUseSchema,
-  operationUseSchema,
   knowledgeUseSchema,
   templateUseSchema,
   filesUseSchema,

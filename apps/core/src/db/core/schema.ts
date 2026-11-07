@@ -556,35 +556,27 @@ export const auditOutboxRejected = sqliteTable(
 );
 
 /**
- * What each App, agent, independent workflow, business store and trigger
- * may use: one row per permission, never deleted, so who asked, who
- * granted and who revoked stays readable. Only its status and the grant
+ * What each App, agent, independent workflow and trigger may use: one row
+ * per permission, never deleted, so who asked, who granted and who revoked
+ * stays readable. Only its status and the grant
  * and revoke columns ever change.
  *
  * The object is stored by type: a connection is `object_id`, with
  * `resource` naming one resource in it or null for all of it; a collection
  * is `object_id`; a workflow is its workflow resource's ID in `object_id`;
- * an App (an agent's, to call its functions) and a store are their IDs in
- * `object_id`. `actions` is a
- * JSON array of action names.
+ * an App (an agent's, to call its functions) is its ID in `object_id`.
+ * `actions` is a JSON array of action names.
  */
 export const permissions = sqliteTable(
   "permissions",
   {
     id: text().primaryKey(),
     subjectType: text("subject_type", {
-      enum: ["app", "agent", "workflow", "store", "trigger"],
+      enum: ["app", "agent", "workflow", "trigger"],
     }).notNull(),
     subjectId: text("subject_id").notNull(),
     objectType: text("object_type", {
-      enum: [
-        "connection",
-        "collection",
-        "workflow",
-        "app",
-        "store",
-        "platform",
-      ],
+      enum: ["connection", "collection", "workflow", "app", "platform"],
     }).notNull(),
     objectId: text("object_id").notNull(),
     resource: text(),
@@ -1241,14 +1233,12 @@ export const sdkReleasePins = sqliteTable(
  * workflow version (`resource_id` a workflow resource's), the exact version
  * of another workflow it runs (`kind` `workflow`, `schema_hash` that
  * version's contract hash, workflow-resources.ts). A workflow version's
- * catalog binding names its contract key, and, for an `operation` binding
- * an admin approved with a store operation, the store, its definition and
- * the path that serve it (`approval_id`, workflow-bindings.ts): the single
- * binding inventory (spec 24).
+ * catalog binding names its contract key: the single binding inventory
+ * (spec 24).
  * Routing, not a grant: whoever calls is authorized on every call. Also
- * how a store finds the releases that still rely on it, and the consumers
- * whose approvals resolve to it: it can't be deleted while either does
- * (data-stores.ts), and retention deletes a release's rows here with it.
+ * how a store finds the releases that still rely on it: it can't be
+ * deleted while one does (data-stores.ts), and retention deletes a
+ * release's rows here with it.
  */
 export const sdkResourceBindings = sqliteTable(
   "sdk_resource_bindings",
@@ -1259,7 +1249,6 @@ export const sdkResourceBindings = sqliteTable(
     kind: text({
       enum: [
         "store",
-        "operation",
         "connector",
         "model",
         "decision",
@@ -1283,20 +1272,13 @@ export const sdkResourceBindings = sqliteTable(
      */
     contractId: text("contract_id"),
     /**
-     * For a consumer's public store-operation dependency (GRA-680): the
-     * operation's path in the store its approval resolved, which
-     * `target_id` then names; null otherwise.
+     * Unused since workflows lost their `operation` bindings: kept only
+     * until a later release drops it, with `approval_id` and the triggers
+     * that read both (migration 0183), as an older core may still run on
+     * this schema (expand, then contract).
      */
     targetPath: text("target_path"),
-    /**
-     * The approval this row's target projects (`workflow_binding_approvals`
-     * for a workflow's `operation` binding): written in the approval's own
-     * batch and reset when it is revoked or replaced, so the row names what
-     * serves the binding only while an approval does. Null for a target the
-     * seal or publication chose. Set exactly when `target_path` is, which
-     * the database enforces (migration 0183), so no store an approval
-     * resolved is named without it.
-     */
+    /** Unused, as `target_path` is. */
     approvalId: text("approval_id"),
   },
   (table) => [
@@ -1308,7 +1290,7 @@ export const sdkResourceBindings = sqliteTable(
 );
 
 /**
- * The definitions a business store serves, in core's inventory (spec 24):
+ * The definitions an App's store serves, in core's inventory (spec 24):
  * each distinct schema and operation manifest a sealed release bound the
  * store with, numbered per store as it first appears, with the source
  * tree of the release that first bound it. Written in the seal's batch
@@ -1336,16 +1318,9 @@ export const businessStoreVersions = sqliteTable(
 );
 
 /**
- * The one canonical owner of a store's schema and operations (spec 40.8),
- * the App whose first seal binds the store, claimed once and kept for
- * good: retention deletes releases and their bindings, never this. So a
- * store its App stopped using never comes to serve another App, which
- * would read what the first left behind.
- *
- * Workflows own no stores any more (GRA-1552): `workflowId` and the stores
- * it names, soft-deleted (migration `workflow_stores_removed`), stay only
- * until an older core no longer reads them (GRA-1613). Nothing writes a
- * workflow's claim, and a row without an App owns nothing.
+ * Who first claimed each store. Unused since each App has one store of its own: kept only until a later
+ * release drops it, as an older core may still run on this schema (expand,
+ * then contract).
  */
 export const sdkStoreOwners = sqliteTable(
   "sdk_store_owners",
@@ -1364,9 +1339,10 @@ export const sdkStoreOwners = sqliteTable(
 );
 
 /**
- * The stores workflows declared before workflows stopped owning stores
- * (GRA-1552). Nothing reads or writes it; it stays only until an older
- * core no longer reads it (GRA-1613).
+ * The stores workflows declared before workflows stopped owning stores.
+ * Unused since each App has one store of its own: kept only until a later
+ * release drops it, as an older core may still run on this schema (expand,
+ * then contract).
  */
 export const workflowStores = sqliteTable(
   "workflow_stores",
@@ -1380,10 +1356,12 @@ export const workflowStores = sqliteTable(
 );
 
 /**
- * The store an App of spec 8's layout runs on, one per App: created by the
- * host when it first seals a version of the App whose schema has tables
- * (app-activation.ts), and bound to every later version, so the App's data
- * outlives its versions. Never chosen by a request.
+ * The one store of each App of spec 8's layout, keyed by the App: created
+ * by the host when it first seals a version of the App that needs one
+ * (data-stores.ts, `appStoreFor`), in the batch that lists it in the
+ * inventory, and bound to every later version, so the App's data outlives
+ * its versions. A store ID enters here only as it is minted, so no store
+ * ever serves a second App. Never chosen by a request.
  */
 export const appDefaultStores = sqliteTable("app_default_stores", {
   appId: text("app_id").primaryKey(),
@@ -1471,15 +1449,12 @@ export const appTestRuns = sqliteTable(
      */
     models: text().notNull().default("{}"),
     /**
-     * Which public operation of the release under test serves each
-     * operation binding in its test, by the binding's alias, as JSON
-     * (workflows/fixture-calls.ts).
+     * Unused since a test's runs make no store calls: kept only until a
+     * later release drops it, with `store_id`, as an older core may still
+     * run on this schema (expand, then contract).
      */
     operations: text().notNull().default("{}"),
-    /**
-     * Its test's own fixture store (`app_test_fixtures`), the only store
-     * its operation calls run on; null for an App with no store.
-     */
+    /** Unused, as `operations` is. */
     storeId: text("store_id"),
   },
   (table) => [index("app_test_runs_deadline").on(table.deadline)]
@@ -3432,20 +3407,21 @@ export const guestMessages = sqliteTable(
 );
 
 /**
- * The deployment's business stores (src/data-stores.ts): an inventory,
- * never a copy of their records. Each store's records, receipts and
- * outbox live in its own Durable Object (src/data-store.ts), named by
- * this ID, which the host mints and which no App, workflow or run ID
- * becomes. `physical_namespace_role` says which namespace of objects
- * holds it. The active schema and operation hashes are filled in once a
+ * The deployment's stores, one per App (`app_default_stores`,
+ * src/data-stores.ts): an inventory, never a copy of their records. Each
+ * store's records, receipts and outbox live in its own Durable Object
+ * (src/data-store.ts), named by this ID, which the host mints and which no
+ * App, workflow or run ID becomes. `physical_namespace_role` says which
+ * namespace of objects holds it. The active schema and operation hashes are filled in once a
  * store activates a schema; until then they are null. A deleted store
  * keeps its row, with `deleted_at` set, and is never served again.
  */
 export const businessStores = sqliteTable("business_stores", {
   id: text().primaryKey(),
   /**
-   * The store's creator, the user who created it, and so its owner. Who
-   * owns each record is the record's own `_ownerId`, never this.
+   * The builder whose seal created it. It gives them nothing: the App's
+   * roles decide who reaches the store. Who owns each record is the
+   * record's own `_ownerId`, never this.
    */
   ownerId: text("owner_id").notNull(),
   /**
@@ -3458,7 +3434,11 @@ export const businessStores = sqliteTable("business_stores", {
   activeSchemaVersion: integer("active_schema_version"),
   activeSchemaHash: text("active_schema_hash"),
   activeOperationManifestHash: text("active_operation_manifest_hash"),
-  /** Moves on with every change of who may use the store. */
+  /**
+   * Unused since each App has one store of its own: kept only until a later
+   * release drops it, as an older core may still run on this schema (expand,
+   * then contract).
+   */
   policyGeneration: integer("policy_generation").notNull().default(1),
   physicalNamespaceRole: text("physical_namespace_role", {
     enum: ["data_store"],
@@ -3479,10 +3459,9 @@ export const businessStores = sqliteTable("business_stores", {
 });
 
 /**
- * Who manages each business store besides the organization's admins and
- * its creator (src/data-stores.ts): a person (`member_type` `person`,
- * `member_id` their user ID) or a team, in role `manage`. Unsharing
- * deletes the row; who did which is in the audit log.
+ * Whom a store was shared with to manage it. Unused since each App has one store of its own: kept only until a later
+ * release drops it, as an older core may still run on this schema (expand,
+ * then contract).
  */
 export const businessStoreMembers = sqliteTable(
   "business_store_members",
@@ -4429,9 +4408,9 @@ export const workflowResourceRunControlKeys = sqliteTable(
 
 /**
  * The host catalog of contracts independent workflows bind besides each
- * other (spec 13.2; src/workflow-catalog.ts): operation, connector, model
- * and decision contracts, each published once by an admin and never
- * changed, so a key always names the same descriptors. `contract` is the
+ * other (spec 13.2; src/workflow-catalog.ts): connector, model, decision
+ * and event contracts, among others, each published once by an admin and
+ * never changed, so a key always names the same descriptors. `contract` is the
  * canonical JSON a workflow's validation reads; `fingerprint` its SHA-256.
  */
 export const workflowCatalogContracts = sqliteTable(
@@ -4440,7 +4419,6 @@ export const workflowCatalogContracts = sqliteTable(
     key: text().primaryKey(),
     kind: text({
       enum: [
-        "operation",
         "connector",
         "model",
         "decision",
@@ -4477,7 +4455,6 @@ export const workflowBindingApprovals = sqliteTable(
     alias: text().notNull(),
     kind: text({
       enum: [
-        "operation",
         "connector",
         "model",
         "decision",

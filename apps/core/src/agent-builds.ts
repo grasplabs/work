@@ -1977,7 +1977,7 @@ build: {
    * grants it or not, and it allows nothing until then. \`binding\` is the
    * name the App's code reaches it by, such as \`MAIL\`. On a collection,
    * an App asks only to \`read\`: it never writes one (what it writes goes
-   * to a business store).
+   * to its own store).
    */
   requestPermission(app: string, request: {
     object:

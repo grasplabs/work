@@ -26,11 +26,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { operationRoles } from "../src/app-access.ts";
 import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { appMembers } from "../src/db/core/schema.ts";
 import { callOperation } from "../src/operations.ts";
 import type { HostedApp, Invocation, Runner } from "../src/operations.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { published } from "./apps.ts";
 
 // An App's server functions run through core's operation host
@@ -432,7 +433,7 @@ const notes = async (): Promise<Fixture> => {
   const owner = await person("builder");
   const { id: appId } = await createApp(env, owner, { name: "Notes" });
   await published(appId);
-  const store = await openStore(env, await createStore(env, owner));
+  const store = await openStore(env, await storeOfNewApp(env, owner));
   await store.defineTables(manifestText(manifest.schema));
   return { owner, appId, store };
 };

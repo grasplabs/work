@@ -12,7 +12,7 @@ import {
   proposeDraft,
   proposeVersion,
 } from "../src/apps.ts";
-import { shareStore } from "../src/data-stores.ts";
+import { deleteStore } from "../src/data-stores.ts";
 import { cancelRunsOf } from "../src/workflows/controls.ts";
 import { repairResourceStarts } from "../src/workflows/resource-runs.ts";
 import { racingDb } from "./apps.ts";
@@ -472,12 +472,7 @@ describe("an App's status", () => {
       commit: await outcome(
         builder.api.apps.files.commit(app, { "notes.md": "Later" }, "Later")
       ),
-      store: await outcome(
-        shareStore(env, other, defaultStore?.store ?? "", {
-          type: "person",
-          id: user.userId,
-        })
-      ),
+      store: await outcome(deleteStore(env, other, defaultStore?.store ?? "")),
       // Taking access away is never blocked.
       unshare: await outcome(
         builder.api.apps.members.remove(app, {

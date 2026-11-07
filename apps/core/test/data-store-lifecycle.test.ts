@@ -7,19 +7,12 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
-import {
-  createStore,
-  deleteStore,
-  openStore,
-  shareStore,
-  storeManagers,
-  unshareStore,
-} from "../src/data-stores.ts";
+import { deleteStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { storeClosingMs } from "../src/store-deletion.ts";
 import { StoreHost } from "../src/store-host.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { allEvents } from "./audit-events.ts";
-import { outcome } from "./sign-in.ts";
 import {
   manifestHash,
   memberRoles,
@@ -27,17 +20,16 @@ import {
   tablesManifest,
 } from "./store-schemas.ts";
 
-// A business store's lifecycle (data-stores.ts, store-host.ts), from the
-// threat model in data-stores.ts: who may create, share and delete a
-// store, that a store something still relies on can't be deleted, and
-// that a deleted store stays deleted. Each test makes its own people and
-// stores.
+// An App's store's lifecycle (data-stores.ts, store-host.ts), from the
+// threat model in data-stores.ts: who may delete a store, that a store
+// something still relies on can't be deleted, and that a deleted store
+// stays deleted. Each test makes its own people, Apps and stores.
 
 const dayMs = 24 * 60 * 60 * 1000;
 const schemaHash = await manifestHash(tablesManifest("notes"));
 
 /** A member of the organization in `role`, as their session has them. */
-const person = async (role: Role, teams: string[] = []): Promise<Acting> => {
+const person = async (role: Role): Promise<Acting> => {
   const userId = crypto.randomUUID();
   await env.DB.batch([
     // The organization, as the first sign-in makes it.
@@ -54,20 +46,9 @@ const person = async (role: Role, teams: string[] = []): Promise<Acting> => {
   return {
     userId,
     role,
-    teams: teams.map((id) => ({ id, name: "Team" })),
+    teams: [],
     staff: false,
   };
-};
-
-/** A team of the organization. */
-const newTeam = async (): Promise<string> => {
-  const id = crypto.randomUUID();
-  await env.DB.prepare(
-    "INSERT INTO teams (id, name, organization_id, created_at) VALUES (?, 'Team', 'organization', ?)"
-  )
-    .bind(id, Date.now())
-    .run();
-  return id;
 };
 
 const objectOf = (id: string) => env.DATA_STORES.getByName(id);
@@ -125,9 +106,9 @@ const commitNote = async (
   return await store.commit(commit);
 };
 
-/** A store `by` created, with a `notes` table. */
+/** The store of a new App `by` builds, with a `notes` table. */
 const storeOf = async (by: Acting): Promise<OpenStore> => {
-  const store = await openStore(env, await createStore(env, by));
+  const store = await openStore(env, await storeOfNewApp(env, by));
   await store.defineTables(tablesManifest("notes"));
   return store;
 };
@@ -198,75 +179,40 @@ const eventsOf = async (id: string): Promise<string[]> => {
     .map(({ action }) => action);
 };
 
-describe("creating stores", () => {
-  it("is for builders and admins, and audited", async () => {
-    const builder = await person("builder");
-    const admin = await person("admin");
-    const user = await person("user");
-
-    const built = await createStore(env, builder);
-    await createStore(env, admin);
-    await expect(createStore(env, user)).rejects.toMatchObject({
-      code: "role.forbidden",
-    });
-    await expect(eventsOf(built)).resolves.toStrictEqual(["store.created"]);
-  });
-});
-
 describe("deleting stores", () => {
-  it("is for those who manage the store, and nobody else learns it exists", async () => {
+  it("is for whoever builds the store's App, and nobody else learns it exists", async () => {
     const owner = await person("builder");
-    const team = await newTeam();
-    const byPerson = await person("builder");
-    const byTeam = await person("builder", [team]);
     const admin = await person("admin");
     const stranger = await person("builder");
-    const sharedUser = await person("user");
     const staff: Acting = { ...(await person("admin")), staff: true };
-
-    const stores = await Promise.all(
-      [owner, owner, owner, owner, owner].map(
-        async (by) => await createStore(env, by)
-      )
+    const [mine, viaAdmin, viaStaff] = await Promise.all(
+      [owner, owner, owner].map(async (by) => await storeOfNewApp(env, by))
     );
-    const [mine, viaPerson, viaTeam, viaAdmin, viaStaff] = stores;
     if (
       mine === undefined ||
-      viaPerson === undefined ||
-      viaTeam === undefined ||
       viaAdmin === undefined ||
       viaStaff === undefined
     ) {
       throw new Error("Stores missing");
     }
-    await shareStore(env, owner, viaPerson, {
-      type: "person",
-      id: byPerson.userId,
-    });
-    await shareStore(env, owner, viaTeam, { type: "team", id: team });
 
-    // Neither a builder it isn't shared with, nor a user, whatever they
-    // are shared as, learns of it.
+    // Neither a builder of another App, nor its owner once their role in
+    // the organization no longer builds, learns of it.
     await expect(deleteStore(env, stranger, mine)).rejects.toMatchObject({
       code: "data.store_unavailable",
     });
-    await expect(
-      shareStore(env, owner, mine, { type: "person", id: sharedUser.userId })
-    ).rejects.toMatchObject({ code: "data.invalid" });
     await expect(
       deleteStore(env, { ...owner, role: "user" }, mine)
     ).rejects.toMatchObject({ code: "data.store_unavailable" });
 
     await deleteStore(env, owner, mine);
-    await deleteStore(env, byPerson, viaPerson);
-    await deleteStore(env, byTeam, viaTeam);
     await deleteStore(env, admin, viaAdmin);
     // Whether a client's data is destroyed is the client's decision.
     await expect(deleteStore(env, staff, viaStaff)).rejects.toMatchObject({
       code: "role.forbidden",
     });
     await Promise.all(
-      [mine, viaPerson, viaTeam, viaAdmin].map(async (id) => {
+      [mine, viaAdmin].map(async (id) => {
         await expect(openStore(env, id)).rejects.toMatchObject({
           code: "data.store_unavailable",
         });
@@ -278,126 +224,10 @@ describe("deleting stores", () => {
     ]);
   });
 
-  it("stops at unsharing: someone unshared no longer manages it", async () => {
-    const owner = await person("builder");
-    const other = await person("builder");
-    const id = await createStore(env, owner);
-    await shareStore(env, owner, id, { type: "person", id: other.userId });
-    await unshareStore(env, owner, id, { type: "person", id: other.userId });
-    await expect(deleteStore(env, other, id)).rejects.toMatchObject({
-      code: "data.store_unavailable",
-    });
-    await expect(eventsOf(id)).resolves.toStrictEqual([
-      "store.created",
-      "store.member.added",
-      "store.member.removed",
-    ]);
-  });
-
-  it("never lets Grasp staff decide whom a store reaches", async () => {
-    const owner = await person("builder");
-    const other = await person("builder");
-    const staff: Acting = { ...(await person("admin")), staff: true };
-    const id = await createStore(env, owner);
-    await shareStore(env, owner, id, { type: "person", id: other.userId });
-    await expect(
-      shareStore(env, staff, id, { type: "person", id: other.userId })
-    ).rejects.toMatchObject({ code: "role.forbidden" });
-    await expect(
-      unshareStore(env, staff, id, { type: "person", id: other.userId })
-    ).rejects.toMatchObject({ code: "role.forbidden" });
-    await expect(storeManagers(env, owner, id)).resolves.toHaveLength(1);
-  });
-
-  it("lets only managers share, unshare and list managers, store by store", async () => {
-    const owner = await person("builder");
-    const manager = await person("builder");
-    const stranger = await person("builder");
-    const mine = await createStore(env, owner);
-    const other = await createStore(env, owner);
-    await shareStore(env, owner, mine, { type: "person", id: manager.userId });
-
-    const refused = await Promise.all(
-      [
-        shareStore(env, stranger, mine, {
-          type: "person",
-          id: stranger.userId,
-        }),
-        unshareStore(env, stranger, mine, {
-          type: "person",
-          id: manager.userId,
-        }),
-        storeManagers(env, stranger, mine),
-        // Managing one store grants nothing on another.
-        shareStore(env, manager, other, { type: "person", id: manager.userId }),
-        deleteStore(env, manager, other),
-      ].map(async (attempt) => await outcome(attempt))
-    );
-    expect(refused).toStrictEqual(
-      Array.from({ length: 5 }, () => "data.store_unavailable")
-    );
-    await expect(storeManagers(env, manager, mine)).resolves.toMatchObject([
-      {
-        type: "person",
-        id: manager.userId,
-        role: "manage",
-        addedBy: owner.userId,
-      },
-    ]);
-    // Never with its creator, who always manages it.
-    await expect(
-      shareStore(env, owner, mine, { type: "person", id: owner.userId })
-    ).rejects.toMatchObject({ code: "data.invalid" });
-  });
-
-  it("audits an agent's sharing as the agent, acting for the manager", async () => {
-    const owner = await person("builder");
-    const other = await person("builder");
-    const id = await createStore(env, owner);
-    const agent = {
-      type: "agent",
-      agentId: "chat-agent",
-      onBehalfOf: owner.userId,
-    } as const;
-    const viaAgent: Acting = { ...owner, actor: agent };
-    const member = { type: "person", id: other.userId } as const;
-    await shareStore(env, viaAgent, id, member);
-    await unshareStore(env, viaAgent, id, member);
-    const logged = await allEvents();
-    expect(
-      logged
-        .filter(({ target }) => target?.id === id)
-        .map(({ action, actor }) => ({ action, actor }))
-    ).toStrictEqual([
-      {
-        action: "store.created",
-        actor: { type: "person", userId: owner.userId },
-      },
-      { action: "store.member.added", actor: agent },
-      { action: "store.member.removed", actor: agent },
-    ]);
-  });
-
-  it("audits sharing and unsharing only when they change something", async () => {
-    const owner = await person("builder");
-    const other = await person("builder");
-    const id = await createStore(env, owner);
-    const member = { type: "person", id: other.userId } as const;
-    await shareStore(env, owner, id, member);
-    await shareStore(env, owner, id, member);
-    await unshareStore(env, owner, id, member);
-    await unshareStore(env, owner, id, member);
-    await expect(eventsOf(id)).resolves.toStrictEqual([
-      "store.created",
-      "store.member.added",
-      "store.member.removed",
-    ]);
-  });
-
   it("answers a store that doesn't exist and one not theirs alike", async () => {
     const owner = await person("builder");
     const stranger = await person("builder");
-    const id = await createStore(env, owner);
+    const id = await storeOfNewApp(env, owner);
     const missing = await deleteStore(env, stranger, crypto.randomUUID()).catch(
       (error: unknown) => error
     );

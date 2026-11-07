@@ -632,13 +632,10 @@ export const outbox = sqliteTable(
 );
 
 /**
- * Which consumer made each commit another App or a workflow made through
- * the store's public operations (core's store-operations.ts): its ID and
- * version, the person it acted for and the receipt it committed under,
- * written in the commit's own transaction. Unlike the receipt, which
- * retention turns into a tombstone, it stays while the store does: who
- * changed the store's records through a shared operation is always on
- * record. A commit of the store's own App names no consumer and adds none.
+ * Which consumer, another App or a workflow, made each commit through the
+ * store's public operations. Unused since each App's store is its own:
+ * kept only until a later release drops it, as an older core may still run
+ * on this schema (expand, then contract). The purge still clears it.
  */
 export const commitWriters = sqliteTable("sdk_commit_writers", {
   /** The commit's place in the store's order of commits. */

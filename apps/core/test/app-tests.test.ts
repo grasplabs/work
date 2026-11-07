@@ -20,12 +20,12 @@ import {
 } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import {
-  createStore,
   discardFixtureStore,
   openFixtureStore,
   openStore,
 } from "../src/data-stores.ts";
 import { appDefinition } from "./app-definitions.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { person } from "./sealed-apps.ts";
 
 // An App's tests (`appTest`, spec 28.2), as core runs them whenever a
@@ -596,13 +596,7 @@ export default appTest({
       "tests/notes.test.ts": passingSuite,
     });
     // Sealed where App code may run; made current where it may not.
-    const store = await createStore(env, built.owner);
-    await sealRelease(env, {
-      app: built.app,
-      version: 1,
-      store,
-      by: built.owner,
-    });
+    await sealRelease(env, { app: built.app, version: 1, by: built.owner });
     await expect(
       setCurrentVersion(unbounded, built.owner, built.app, 1)
     ).rejects.toMatchObject({ code: "version.tests_unavailable" });
@@ -612,13 +606,7 @@ export default appTest({
     /** Version 1 of an App with `files`, sealed where App code may run. */
     const sealedWith = async (files: Record<string, string>) => {
       const built = await appWith(files);
-      const store = await createStore(env, built.owner);
-      await sealRelease(env, {
-        app: built.app,
-        version: 1,
-        store,
-        by: built.owner,
-      });
+      await sealRelease(env, { app: built.app, version: 1, by: built.owner });
       return built;
     };
     // `appFiles` holds tests/fixtures/notes.json; a helper, but no suite.
@@ -730,7 +718,7 @@ describe("fixture stores", () => {
 
   it("never discard a store the inventory lists, whose data stays", async () => {
     const app = await sealed();
-    const store = await createStore(env, app.built.owner);
+    const store = await storeOfNewApp(env, app.built.owner);
     const opened = await openStore(env, store);
     await opened.defineTables(manifestText(app.release.app.schema), {
       resourceId: app.built.app,

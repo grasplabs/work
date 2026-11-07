@@ -38,7 +38,7 @@ import { useCoreAction } from "../use-core-action.ts";
 // of one; for a decision, the people, teams and roles who answer it, which core
 // can't pick; otherwise why nothing can be approved yet. The inbox and the
 // workflow's own page list them alike, but the inbox has no offers for the
-// kinds slow to read (a connector, a store operation, a template), so it
+// kinds slow to read (a connector, a template), so it
 // leads to the workflow's page for those. Core checks every approval
 // again: that the person is one of the organization's admins, and that the
 // target serves. The workflow's page lists the bindings approved in the
@@ -96,9 +96,6 @@ export const targetWords = (
     }
     case "connector": {
       return target.contract;
-    }
-    case "storeOperation": {
-      return target.operation;
     }
     case "template": {
       const { templateId, version } = target;
@@ -276,7 +273,7 @@ const DecidersChoice = ({
 
 /**
  * How one binding is approved: its deciders, a target offered, or why not
- * yet. With `elsewhere`, a connector, store operation or template offered
+ * yet. With `elsewhere`, a connector or template offered
  * nothing leads to the workflow's page, where they are offered targets.
  */
 const BindingChoice = ({
@@ -295,8 +292,7 @@ const BindingChoice = ({
     return <DecidersChoice alias={alias} busy={busy} onApprove={onApprove} />;
   }
   // The kinds offered their targets on the workflow's page alone.
-  const slow =
-    kind === "connector" || kind === "operation" || kind === "template";
+  const slow = kind === "connector" || kind === "template";
   if (first === undefined && slow && elsewhere !== undefined) {
     return (
       <Link

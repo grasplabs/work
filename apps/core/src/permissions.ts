@@ -8,7 +8,6 @@ import type {
 } from "@grasp-os/shared/audit";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { connectorEventActions } from "@grasp-os/shared/connect";
-import { isExpectedError } from "@grasp-os/shared/errors";
 import {
   appIdSchema,
   permissionIdSchema,
@@ -80,9 +79,7 @@ import {
   apps,
   appVersions,
   auditOutbox,
-  businessStores,
   permissions,
-  sdkStoreOwners,
   triggerResources,
   triggerResourceVersions,
   workflowResources,
@@ -124,9 +121,6 @@ const subjectColumns = (
     case "workflow": {
       return { subjectType: subject.type, subjectId: subject.workflowId };
     }
-    case "store": {
-      return { subjectType: subject.type, subjectId: subject.storeId };
-    }
     case "trigger": {
       return { subjectType: subject.type, subjectId: subject.triggerId };
     }
@@ -141,7 +135,6 @@ const subjectIdKeys = {
   app: "appId",
   agent: "agentId",
   workflow: "workflowId",
-  store: "storeId",
   trigger: "triggerId",
 } as const satisfies Record<PermissionSubjectType, string>;
 
@@ -173,13 +166,6 @@ const objectColumns = (object: PermissionObject) => {
       return {
         objectType: object.type,
         objectId: object.appId,
-        resource: null,
-      };
-    }
-    case "store": {
-      return {
-        objectType: object.type,
-        objectId: object.storeId,
         resource: null,
       };
     }
@@ -224,12 +210,6 @@ const objectOf = (row: Row): PermissionObject => {
       return permissionObjectSchema.parse({
         type: row.objectType,
         appId: row.objectId,
-      });
-    }
-    case "store": {
-      return permissionObjectSchema.parse({
-        type: row.objectType,
-        storeId: row.objectId,
       });
     }
     case "platform": {
@@ -444,11 +424,19 @@ const tellPolicyChanged = async (
   }
 };
 
+/**
+ * That a permission row is of a kind the platform serves, as SQL: not a
+ * store's own grant nor a grant on a store. Those are left from before each
+ * App's store was its own; nothing serves them, so every read takes them
+ * as not there, and a later release removes them with their audit events.
+ */
+const servedSql = sql`${permissions.subjectType} <> 'store' AND ${permissions.objectType} <> 'store'`;
+
 export const findRow = async (env: Env, id: string): Promise<Row | undefined> =>
   await drizzle(env.DB)
     .select()
     .from(permissions)
-    .where(eq(permissions.id, id))
+    .where(and(eq(permissions.id, id), servedSql))
     .get();
 
 /**
@@ -534,8 +522,8 @@ const requireCollection = async (
       ],
     });
   }
-  // Code that keeps what it reads (an App, an independent workflow, store
-  // or trigger) never gets it: only an agent, acting for its person.
+  // Code that keeps what it reads (an App, an independent workflow or
+  // trigger) never gets it: only an agent, acting for its person.
   if (found.source === "apps" && subject.type !== "agent") {
     throw permissionErrors.create("permission.invalid", {
       issues: [
@@ -562,14 +550,14 @@ const requireCollection = async (
 export interface PermissionRoles {
   app: (app: AppId, role: AppRole) => Promise<unknown>;
   resource: (
-    ref: { type: "workflow" | "store" | "trigger"; id: string },
+    ref: { type: "workflow" | "trigger"; id: string },
     needed: "user" | "builder"
   ) => Promise<unknown>;
 }
 
 /**
  * Refuses `by` unless they build `subject`: an App's builders, a
- * workflow's builders, a store's managers, a trigger's manager (`roles`).
+ * workflow's builders, a trigger's manager (`roles`).
  * An agent is the organization's own: any builder asks for it.
  */
 const requireSubjectBuilder = async (
@@ -589,10 +577,6 @@ const requireSubjectBuilder = async (
         { type: "workflow", id: subject.workflowId },
         "builder"
       );
-      break;
-    }
-    case "store": {
-      await roles.resource({ type: "store", id: subject.storeId }, "builder");
       break;
     }
     case "trigger": {
@@ -650,8 +634,8 @@ const requireSenderFits = (
 
 /**
  * Refuses an `app` permission for anyone but an agent: Apps don't call
- * each other, and a workflow or a store calls no App's functions through
- * a permission.
+ * each other, and a workflow calls no App's functions through a
+ * permission.
  */
 const requireAppCallerFits = (
   subject: PermissionSubject,
@@ -668,11 +652,10 @@ const requireAppCallerFits = (
  * Refuses an object `subject` has no use for: what the platform offers is
  * for an App's code; a trigger only starts, so it holds `start` on a
  * workflow, and a connector trigger its event's read on its connection,
- * and nothing else; only an App sends a workflow's runs events; a store's own code reaches connections and
- * collections alone. Only an agent writes a collection: an App, a workflow
- * and a store only read one (their collection stubs have no write), and
- * keep what they write in a business store, so `write` would give them
- * nothing an admin could see being granted.
+ * and nothing else; only an App sends a workflow's runs events. Only an
+ * agent writes a collection: an App and a workflow only read one (their
+ * collection stubs have no write), and keep what they write elsewhere, so
+ * `write` would give them nothing an admin could see being granted.
  */
 const requireObjectFits = (
   subject: PermissionSubject,
@@ -707,75 +690,7 @@ const requireObjectFits = (
     actions.includes("write")
   ) {
     refuseRequest(
-      "actions: Only an agent writes a collection. An App, a workflow or a store reads it, and keeps what it writes in a store."
-    );
-  }
-  if (
-    subject.type === "store" &&
-    object.type !== "connection" &&
-    object.type !== "collection"
-  ) {
-    refuseRequest("object: A store reaches connections and collections only.");
-  }
-  if (
-    object.type === "store" &&
-    subject.type !== "app" &&
-    subject.type !== "workflow"
-  ) {
-    refuseRequest(
-      "subject: An App or a workflow calls a store's public operations."
-    );
-  }
-};
-
-/** A store a request may not name, refused as one that doesn't exist. */
-const noSuchStore = () =>
-  permissionErrors.create("permission.invalid", {
-    issues: ["object.storeId: There's no such store."],
-  });
-
-/**
- * Refuses a store object unless `by` may name it (store-operations.ts):
- * a live store an App owns, which `by` has a role in (`roles.app`), so
- * they could call its public operations themselves; never the subject's
- * own App's store, whose functions it calls as itself. Anything else is
- * "no such store", as for one that doesn't exist.
- */
-const requireStoreObject = async (
-  env: Env,
-  subject: PermissionSubject,
-  object: PermissionObject,
-  roles: PermissionRoles
-): Promise<void> => {
-  if (object.type !== "store") {
-    return;
-  }
-  const row = await drizzle(env.DB)
-    .select({ owner: sdkStoreOwners.appId })
-    .from(businessStores)
-    .innerJoin(sdkStoreOwners, eq(sdkStoreOwners.storeId, businessStores.id))
-    .where(
-      and(
-        eq(businessStores.id, object.storeId),
-        isNull(businessStores.deletedAt)
-      )
-    )
-    .get();
-  const owner = appIdSchema.safeParse(row?.owner);
-  if (!owner.success) {
-    throw noSuchStore();
-  }
-  try {
-    await roles.app(owner.data, "user");
-  } catch (error) {
-    if (isExpectedError(error)) {
-      throw noSuchStore();
-    }
-    throw error;
-  }
-  if (subject.type === "app" && subject.appId === owner.data) {
-    refuseRequest(
-      "object.storeId: An App calls its own store's functions without one."
+      "actions: Only an agent writes a collection. An App or a workflow reads it, and keeps what it writes elsewhere."
     );
   }
 };
@@ -899,9 +814,128 @@ export const insertWhere = (
     .select(sql`SELECT ${sql.join(values, sql`, `)} WHERE ${condition}`);
 };
 
+/** A stored JSON list of strings, joined by spaces, as SQL. */
+const joined = (list: typeof permissions.actions): SQL =>
+  sql`(SELECT group_concat(value, ' ') FROM json_each(${list}))`;
+
 /**
- * Asks for a permission for an App, an agent, or an independent workflow,
- * store or trigger. It allows nothing until an admin grants it. Only the
+ * The ID of the audit event one statement stores for the permission row,
+ * as SQL: a random UUID (`fresh`, one per statement) whose last part is
+ * the permission's own ID's, so each row's event has its own ID, and every
+ * statement's are new. A UUID still: the version and variant are `fresh`'s,
+ * and a permission's ID is a UUID too.
+ */
+const eventIdSql = (fresh: string): SQL =>
+  sql`${fresh.slice(0, 24)} || lower(substr(${permissions.id}, 25, 12))`;
+
+/**
+ * What `auditDetail` records of a permission row, as SQL: its IDs by name
+ * (connectionId and resource; collectionId; workflowId; appId), its
+ * actions and its binding.
+ */
+const auditDetailSql = sql`json_patch(
+  json_object('subjectType', ${permissions.subjectType}, 'subjectId', ${permissions.subjectId}, 'objectType', ${permissions.objectType}),
+  CASE ${permissions.objectType}
+    WHEN 'connection' THEN json_patch(
+      json_object('connectionId', ${permissions.objectId}),
+      CASE WHEN ${permissions.resource} IS NULL THEN '{}' ELSE json_object('resource', ${permissions.resource}) END
+    )
+    WHEN 'collection' THEN json_object('collectionId', ${permissions.objectId})
+    WHEN 'app' THEN json_object('appId', ${permissions.objectId})
+    WHEN 'workflow' THEN json_object('workflowId', ${permissions.objectId})
+    ELSE '{}'
+  END
+)`;
+
+/**
+ * The statements revoking, for `by`, every permission row `held` finds,
+ * each audited as `permission.revoked` (with `reason` in its detail, when
+ * given), from the rows the batch itself finds, so none is revoked
+ * unaudited, whenever it landed.
+ */
+const revokedWhere = (
+  db: DrizzleD1Database,
+  by: Acting,
+  held: SQL | undefined,
+  reason?: string
+): [BatchItem<"sqlite">, BatchItem<"sqlite">] => {
+  const now = new Date();
+  const eventId = eventIdSql(crypto.randomUUID());
+  const event = sql`json_object(
+    'id', ${eventId},
+    'at', ${now.toISOString()},
+    'source', 'core',
+    'actor', json(${JSON.stringify(by.actor ?? actorOf(by))}),
+    'action', 'permission.revoked',
+    'target', json_object('type', 'permission', 'id', ${permissions.id}),
+    'provenance', json('[]'),
+    'detail', json_set(
+      ${auditDetailSql},
+      '$.actions', ${joined(permissions.actions)},
+      '$.binding', ${permissions.binding}${
+        reason === undefined ? sql`` : sql`, '$.reason', ${reason}`
+      }
+    )
+  )`;
+  return [
+    db
+      .insert(auditOutbox)
+      .select(
+        sql`SELECT ${eventId}, ${event}, ${now.getTime()} FROM ${permissions} WHERE ${held}`
+      ),
+    db
+      .update(permissions)
+      .set({ status: "revoked", revokedBy: by.userId, revokedAt: now })
+      .where(held),
+  ];
+};
+
+/**
+ * The statements revoking, for `by`, every permission of `subject` that
+ * isn't revoked yet, for the batch that removes `subject` (a trigger
+ * deleted), each audited (`revokedWhere`).
+ */
+export const revokedWith = (
+  db: DrizzleD1Database,
+  by: Acting,
+  subject: PermissionSubject
+): [BatchItem<"sqlite">, BatchItem<"sqlite">] =>
+  revokedWhere(
+    db,
+    by,
+    and(ofSubject(subject), ne(permissions.status, "revoked"))
+  );
+
+/**
+ * The statements revoking, for `by`, `subject`'s grants on a store that
+ * still hold binding name `binding`, each audited with the reason: left
+ * from before each App's store was its own, they serve nothing and every
+ * read takes them as not there (`servedSql`), yet the name stays taken
+ * among the subject's live permissions. So a request under that name
+ * frees it in its own batch. A later release removes the rest.
+ */
+const leftoverStoreGrantsRevoked = (
+  db: DrizzleD1Database,
+  by: Acting,
+  subject: PermissionSubject,
+  binding: string
+): [BatchItem<"sqlite">, BatchItem<"sqlite">] =>
+  revokedWhere(
+    db,
+    by,
+    and(
+      ofSubject(subject),
+      eq(permissions.binding, binding),
+      sql`${permissions.objectType} = 'store'`,
+      ne(permissions.status, "revoked"),
+      isNull(permissions.chatId)
+    ),
+    "binding kind removed"
+  );
+
+/**
+ * Asks for a permission for an App, an agent, or an independent workflow
+ * or trigger. It allows nothing until an admin grants it. Only the
  * subject's builders ask; a workflow only someone with a role in it names,
  * and an App an agent calls only someone with a role in that App
  * (`roles`), before anything says whether it exists.
@@ -936,7 +970,6 @@ export const requestPermission = async (
     // Only someone with a role in the App names it (`roles`).
     await roles.app(object.appId, "user");
   }
-  await requireStoreObject(env, subject, object, roles);
   await requireApps(env, subject, object);
   await requireCollection(env, subject, object, actions);
   const row: Row = {
@@ -974,6 +1007,7 @@ export const requestPermission = async (
     // Admitted last, with nothing slow left before the write.
     await admit?.();
     await auditedBatch(env, db, [
+      ...leftoverStoreGrantsRevoked(db, by, subject, binding),
       insertWhere(
         db,
         row,
@@ -1350,81 +1384,6 @@ export const grantPermission = async (
   return permission;
 };
 
-/** A stored JSON list of strings, joined by spaces, as SQL. */
-const joined = (list: typeof permissions.actions): SQL =>
-  sql`(SELECT group_concat(value, ' ') FROM json_each(${list}))`;
-
-/**
- * The ID of the audit event one statement stores for the permission row,
- * as SQL: a random UUID (`fresh`, one per statement) whose last part is
- * the permission's own ID's, so each row's event has its own ID, and every
- * statement's are new. A UUID still: the version and variant are `fresh`'s,
- * and a permission's ID is a UUID too.
- */
-const eventIdSql = (fresh: string): SQL =>
-  sql`${fresh.slice(0, 24)} || lower(substr(${permissions.id}, 25, 12))`;
-
-/**
- * What `auditDetail` records of a permission row, as SQL: its IDs by name
- * (connectionId and resource; collectionId; workflowId; appId), its
- * actions and its binding.
- */
-const auditDetailSql = sql`json_patch(
-  json_object('subjectType', ${permissions.subjectType}, 'subjectId', ${permissions.subjectId}, 'objectType', ${permissions.objectType}),
-  CASE ${permissions.objectType}
-    WHEN 'connection' THEN json_patch(
-      json_object('connectionId', ${permissions.objectId}),
-      CASE WHEN ${permissions.resource} IS NULL THEN '{}' ELSE json_object('resource', ${permissions.resource}) END
-    )
-    WHEN 'collection' THEN json_object('collectionId', ${permissions.objectId})
-    WHEN 'app' THEN json_object('appId', ${permissions.objectId})
-    WHEN 'workflow' THEN json_object('workflowId', ${permissions.objectId})
-    WHEN 'store' THEN json_object('storeId', ${permissions.objectId})
-    ELSE '{}'
-  END
-)`;
-
-/**
- * The statements revoking, for `by`, every permission of `subject` that
- * isn't revoked yet, for the batch that removes `subject` (a trigger
- * deleted): each audited as `permission.revoked`, from the rows the
- * batch itself finds, so none is revoked unaudited, whenever it landed.
- */
-export const revokedWith = (
-  db: DrizzleD1Database,
-  by: Acting,
-  subject: PermissionSubject
-): BatchItem<"sqlite">[] => {
-  const held = and(ofSubject(subject), ne(permissions.status, "revoked"));
-  const now = new Date();
-  const eventId = eventIdSql(crypto.randomUUID());
-  const event = sql`json_object(
-    'id', ${eventId},
-    'at', ${now.toISOString()},
-    'source', 'core',
-    'actor', json(${JSON.stringify(by.actor ?? actorOf(by))}),
-    'action', 'permission.revoked',
-    'target', json_object('type', 'permission', 'id', ${permissions.id}),
-    'provenance', json('[]'),
-    'detail', json_set(
-      ${auditDetailSql},
-      '$.actions', ${joined(permissions.actions)},
-      '$.binding', ${permissions.binding}
-    )
-  )`;
-  return [
-    db
-      .insert(auditOutbox)
-      .select(
-        sql`SELECT ${eventId}, ${event}, ${now.getTime()} FROM ${permissions} WHERE ${held}`
-      ),
-    db
-      .update(permissions)
-      .set({ status: "revoked", revokedBy: by.userId, revokedAt: now })
-      .where(held),
-  ];
-};
-
 /**
  * That `by` could grant a permission as the batch runs, as SQL: an admin
  * of the organization, not Grasp staff, still an admin then.
@@ -1437,12 +1396,10 @@ const canGrantSql = (by: Identity): SQL =>
  * as SQL on its row: any on a connection (core can't tell a connector's
  * writes from its reads; connect knows), or with an action other than
  * `read`, such as starting a workflow, inviting guests, or an agent
- * calling an App's functions that write. Any on a store too:
- * its actions are operation paths, and a mutation may be named `read`.
+ * calling an App's functions that write.
  */
 const changesThingsSql = or(
   eq(permissions.objectType, "connection"),
-  eq(permissions.objectType, "store"),
   sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value NOT IN ('read', 'statistics'))`
 );
 
@@ -1452,7 +1409,6 @@ const changesThingsSql = or(
  */
 const changesThings = (object: PermissionObject, action: string): boolean =>
   object.type === "connection" ||
-  object.type === "store" ||
   (action !== "read" && action !== "statistics");
 
 /**
@@ -1799,18 +1755,6 @@ export const listPermissions = async (
           or(
             ne(permissions.objectType, "app"),
             inArray(permissions.objectId, open)
-          ),
-          // A store's permission names the App that owns it, as its
-          // operations are its App's: listed only where that App is open.
-          or(
-            ne(permissions.objectType, "store"),
-            inArray(
-              permissions.objectId,
-              db
-                .select({ id: sdkStoreOwners.storeId })
-                .from(sdkStoreOwners)
-                .where(inArray(sdkStoreOwners.appId, open))
-            )
           )
         );
   const ofOne =
@@ -1828,7 +1772,15 @@ export const listPermissions = async (
     .from(permissions)
     // A chat's request for its person's own connection, and why its agent
     // asked, are that person's alone: never listed to admins or builders.
-    .where(and(ofOne, ofOpenApp, inStatus, eq(permissions.personal, false)))
+    .where(
+      and(
+        ofOne,
+        ofOpenApp,
+        inStatus,
+        eq(permissions.personal, false),
+        servedSql
+      )
+    )
     .orderBy(asc(permissions.requestedAt), asc(permissions.id));
   return rows.map((row) => toPermission(row));
 };

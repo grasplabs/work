@@ -1,39 +1,22 @@
-import { sha256Hex } from "@grasp-os/shared/encoding";
-import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { loadRelease } from "../app-releases.ts";
-import { openFixtureStore } from "../data-stores.ts";
-import {
-  appTestFixtures,
-  appTestRuns,
-  businessStores,
-} from "../db/core/schema.ts";
-import { callOperation } from "../operations.ts";
-import { hostedRelease } from "../release-runner.ts";
-import { consumerFailure, fenced, servedIn } from "../store-operations.ts";
-import { operationServesContract } from "../workflow-bindings.ts";
+import { appTestRuns } from "../db/core/schema.ts";
 import { bindingsOf } from "../workflow-resources.ts";
 import type { FixtureDecisionRun } from "./fixture-decisions.ts";
-import { fixtureRunSessionOf } from "./fixture-run-sessions.ts";
-import {
-  contractOf,
-  requireModelRequest,
-  requireShape,
-} from "./resource-calls.ts";
+import { requireModelRequest, requireShape } from "./resource-calls.ts";
 import type { BuiltCall, Effect } from "./resource-calls.ts";
 
-// The model and store calls of a run an App's test started (fixture-runs.ts,
+// The model calls of a run an App's test started (fixture-runs.ts,
 // `workflowTest`): the run's host builds each as it builds a real one, holds
 // it to the run's limits, then hands it here in place of `makeCall`
 // (sealed-run.ts, `#madeOrServed`). A test's
-// run never reaches a real model, a real store, the organization's data or
-// its budget. Threat model, and how each is closed
+// run never reaches a real model, the organization's data or its budget.
+// Threat model, and how each is closed
 // (workflow-test-calls.test.ts tries each):
 //
 // - A test's model call reaches a model, or spends budget: it is answered
@@ -43,54 +26,23 @@ import type { BuiltCall, Effect } from "./resource-calls.ts";
 //   no provider hears of it. A
 //   binding the fixture gives no answer fails the run
 //   (`workflow.test_unfixtured`): it never falls through to a real call.
-// - A test's store call reaches a real store or real data: it runs only on
-//   its test's own fixture store, whose ID its test's session recorded with
-//   the run (`app_test_runs.store_id`), read again from the record for each
-//   call, never from the isolate or the call. That store must be recorded
-//   as a fixture store of the same App and version (`app_test_fixtures`),
-//   and listed in no inventory (`business_stores`): a record naming a
-//   business store is refused (`resource.unavailable`) before anything
-//   opens it, and it is opened as a fixture store, never by `openStore`.
-//   No binding, approval, grant or permission is read, so nothing else can
-//   name a store.
 // - Any other call leaves the run's code: the host refuses a connector's,
 //   Knowledge's, a template's, a file's, an action's and an event's before
 //   it is built or audited (sealed-run.ts, `#call`, by `fixtureCalls`),
 //   and `makeCall` refuses every call of a test's run
-//   again (`fixture`), so none reaches connect, a model or a store even if
-//   the host's gate were wrong.
+//   again (`fixture`), so none reaches connect or a model even if the
+//   host's gate were wrong.
 // - An answer or call the real host wouldn't pass, so a test passes what a
 //   real run fails: a model request is checked as every model call is
 //   (`requireModelRequest`), and its answer against the task's own output
-//   schema (`requireShape`). A store call is checked against the binding's
-//   catalog contract, its arguments before it runs and its answer after,
-//   and the run's model call limit and its host calls apply as they do to
-//   any run's.
-// - It runs what the release doesn't serve, or a shape the contract
-//   doesn't take: the operation is the one the fixture names for the
-//   binding (`workflows.<alias>.operations.<binding>`), a public query or
-//   mutation of the release under test (`servedIn`), whose argument and
-//   return shapes are exactly the binding's contract's, as an approval's
-//   must be (`operationServesContract`). Anything else is
-//   `workflow.call_denied`. Whether it reads or writes isn't pinned: that
-//   is the admin's approval's to say (`operationKind`), which a test's run
-//   has none of, and a write reaches only the test's own store.
-// - It runs with more than a member's rights: as the run's fixture
-//   principal, a member of the App, never a builder, as a workflow's store
-//   call runs (store-operations.ts), with no resources bound.
-// - A retry repeats it: a store call commits under its step's key, as a
-//   real one does, and only while its attempt holds its lease (`fenced`).
-// - It outlives its test: a call reads the run's record first, and the
-//   record goes as the test ends, so a call after finds none
-//   (`operation.cancelled`); the store goes with the test's session too,
-//   and refuses every call once discarded (`DataStore.discardFixture`).
+//   schema (`requireShape`); the run's model call limit and its host calls
+//   apply as they do to any run's.
 // - It leaves traces in the organization's records: no receipt or audit
 //   event of a call is kept, as for a draft's test run (resource-calls.ts,
 //   `candidateAnswer`).
 
-/** What a test's fixture gives a run's model and operation bindings. */
+/** What a test's fixture gives a run's model bindings. */
 const answersSchema = z.record(z.string(), z.json());
-const operationsSchema = z.record(z.string(), z.string());
 
 const callDenied = () => workflowResourceErrors.create("workflow.call_denied");
 
@@ -107,13 +59,7 @@ const ownOf = <Value>(
 /** Run `runId`'s record, as its calls need it; `operation.cancelled` once gone. */
 const recordOf = async (env: Env, runId: string) => {
   const row = await drizzle(env.DB)
-    .select({
-      appId: appTestRuns.appId,
-      appVersion: appTestRuns.appVersion,
-      models: appTestRuns.models,
-      operations: appTestRuns.operations,
-      storeId: appTestRuns.storeId,
-    })
+    .select({ models: appTestRuns.models })
     .from(appTestRuns)
     .where(eq(appTestRuns.runId, runId))
     .get();
@@ -125,181 +71,38 @@ const recordOf = async (env: Env, runId: string) => {
 };
 
 /**
- * The catalog binding `alias` that `run`'s version declares, of the call's
- * kind: a test's run holds no approval, so the contract alone says what
- * the call takes.
+ * Refuses (`workflow.call_denied`) unless `run`'s version declares `alias`
+ * as a model binding: a test's run holds no approval to say more.
  */
-const bindingOf = async (
+const requireModelBinding = async (
   env: Env,
   run: FixtureDecisionRun,
-  alias: string,
-  kind: "model" | "operation"
-): Promise<{ contractId: string; fingerprint: string }> => {
+  alias: string
+): Promise<void> => {
   const versions = await bindingsOf(env, run.workflowId, run.version);
   const declared = versions.get(run.version) ?? [];
   const binding = declared.find((each) => each.alias === alias);
-  if (binding?.kind !== kind) {
+  if (binding?.kind !== "model") {
     throw callDenied();
   }
-  return binding;
-};
-
-/**
- * Fixture store `id`, if its test recorded it for this App and version
- * and no inventory lists it: never a business store.
- */
-const fixtureStoreOf = async (
-  env: Env,
-  id: string | null,
-  app: string,
-  version: number
-) => {
-  const parsed = storeIdSchema.safeParse(id);
-  if (!parsed.success) {
-    throw operationErrors.create("resource.unavailable");
-  }
-  const db = drizzle(env.DB);
-  const [recorded, listed] = await Promise.all([
-    db
-      .select({ storeId: appTestFixtures.storeId })
-      .from(appTestFixtures)
-      .where(
-        and(
-          eq(appTestFixtures.storeId, parsed.data),
-          eq(appTestFixtures.appId, app),
-          eq(appTestFixtures.version, version)
-        )
-      )
-      .get(),
-    db
-      .select({ id: businessStores.id })
-      .from(businessStores)
-      .where(eq(businessStores.id, parsed.data))
-      .get(),
-  ]);
-  if (recorded === undefined || listed !== undefined) {
-    throw operationErrors.create("resource.unavailable");
-  }
-  return openFixtureStore(env, parsed.data);
-};
-
-/**
- * Runs the operation of the release under test that the fixture names for
- * operation binding `call.binding`, on the test's own fixture store, as
- * the run's principal: its answer, as the binding's contract has it.
- */
-const fixtureOperation = async (
-  env: Env,
-  run: FixtureDecisionRun,
-  record: Awaited<ReturnType<typeof recordOf>>,
-  call: Extract<BuiltCall, { name: "grasp.operation" }>,
-  effect: Effect
-): Promise<Json> => {
-  const binding = await bindingOf(env, run, call.binding, "operation");
-  const path = ownOf(
-    operationsSchema.parse(JSON.parse(record.operations)),
-    call.binding
-  );
-  if (path === undefined) {
-    throw unfixtured();
-  }
-  const contract = await contractOf(env, binding);
-  const input = requireShape(contract.input, call.arguments, "arguments");
-  const release = await loadRelease(
-    env,
-    appIdSchema.parse(record.appId),
-    record.appVersion
-  );
-  const served = servedIn(release, path);
-  if (
-    served === undefined ||
-    !operationServesContract(served.operation, contract)
-  ) {
-    throw callDenied();
-  }
-  const store = await fixtureStoreOf(
-    env,
-    record.storeId,
-    record.appId,
-    record.appVersion
-  );
-  const consumer = {
-    resourceId: release.manifest.resourceId,
-    resourceVersion: release.manifest.resourceVersion,
-  };
-  // On-prem, a child of its suite's session, in its turn among the
-  // suite's calls (fixture-run-sessions.ts): never a place of its own,
-  // which the suite waiting for this run may leave none of.
-  const suite = fixtureRunSessionOf(run.runId);
-  const parentSession = suite?.parent();
-  const operate = async () => {
-    // Every check of its own passed: marked as it goes out, as a real
-    // store call is (resource-calls.ts), on a run host that tries it once.
-    effect.requireHolds();
-    effect.sending?.();
-    return await callOperation(
-      hostedRelease(env, release),
-      {
-        principal: run.principal,
-        // A test's fixture person, on a store only the test reaches.
-        actor: { type: "person", userId: run.principal },
-        // The test's store holds no one's data: nothing to record.
-        sensitiveReads: null,
-        consumer,
-        // The workflow's version, as a real workflow's store call names it.
-        writer: { resourceId: run.workflowId, resourceVersion: run.version },
-        store: fenced(store, effect.requireHolds),
-        requestId: crypto.randomUUID(),
-        deadline: effect.deadline,
-        runId: run.runId,
-        // A member of the App, never a builder, as a workflow's store call
-        // runs; once its record is gone (its test ended), nothing commits.
-        // In no team: a fixture's person is no member of the organization,
-        // so a table's `team` rules admit them to no row, where a real
-        // run's call reads its person's teams (store-operations.ts).
-        authorize: async () => {
-          await recordOf(env, run.runId);
-          effect.requireHolds();
-          return { appMember: true, appBuilder: false };
-        },
-      },
-      { path, kind: served.operation.kind },
-      input,
-      // The step's own key, hashed to a submission key's length, as a
-      // workflow's real store call sends it.
-      {
-        idempotencyKey: await sha256Hex(effect.key),
-        ...(parentSession === undefined ? {} : { parentSession }),
-      }
-    );
-  };
-  const result =
-    suite === undefined || parentSession === undefined
-      ? await operate()
-      : await suite.inTurn(operate);
-  if (!result.ok) {
-    throw consumerFailure(result.error);
-  }
-  return requireShape(contract.output, result.value, "output");
 };
 
 /**
  * The named calls a run an App's test started makes: its own
- * calculations, its decisions (fixture-decisions.ts), and the model and
- * store calls its test serves (`fixtureCall`). Every other is refused
- * before it is built, on either host of the run.
+ * calculations, its decisions (fixture-decisions.ts), and the model calls
+ * its test answers (`fixtureCall`). Every other is refused before it is
+ * built, on either host of the run.
  */
 export const fixtureCalls: ReadonlySet<string> = new Set([
   "grasp.compute",
   "grasp.decision",
   "grasp.model",
-  "grasp.operation",
 ]);
 
 /**
- * What model or operation call `call` of test run `run`'s task answers
- * (see the header): a model's answer from its fixture, an operation run on
- * its test's own store. Every other call is refused (`resource.unavailable`).
+ * What model call `call` of test run `run`'s task answers (see the
+ * header): the answer its fixture gives. Every other call is refused
+ * (`resource.unavailable`).
  */
 export const fixtureCall = async (
   env: Env,
@@ -309,7 +112,7 @@ export const fixtureCall = async (
 ): Promise<Json> => {
   const record = await recordOf(env, run.runId);
   if (call.name === "grasp.model") {
-    await bindingOf(env, run, call.binding, "model");
+    await requireModelBinding(env, run, call.binding);
     requireModelRequest(call);
     const answer = ownOf(
       answersSchema.parse(JSON.parse(record.models)),
@@ -322,9 +125,6 @@ export const fixtureCall = async (
     effect.requireHolds();
     effect.sending?.();
     return requireShape(JSON.stringify(call.outputSchema), answer, "output");
-  }
-  if (call.name === "grasp.operation") {
-    return await fixtureOperation(env, run, record, call, effect);
   }
   throw operationErrors.create("resource.unavailable");
 };

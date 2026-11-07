@@ -237,7 +237,7 @@ const published = async (by: Identity, draft: Draft) => {
     ...(draft.modules === undefined ? {} : { modules: draft.modules }),
   });
   const [version] = await workflowVersions(env, by, workflow.id);
-  return { workflow, executable: version?.build.hash !== undefined };
+  return { workflow, executable: version?.build?.hash !== undefined };
 };
 
 /** Starts version 1 of workflow `id` for `by`, on `startEnv`: its run's ID. */

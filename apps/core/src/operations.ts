@@ -274,15 +274,6 @@ export interface Invocation {
   /** The workflow run the call is made in, whose life keeps its receipt. */
   readonly runId: string | null;
   /**
-   * Another App or a workflow calling the store's public operation
-   * (store-operations.ts), by ID and version: each commit names it, in the
-   * store, for as long as the store is. None for the App's own calls.
-   */
-  readonly writer?: {
-    readonly resourceId: string;
-    readonly resourceVersion: number;
-  };
-  /**
    * The caller's roles in the App, read again on each call; throws when
    * they may no longer use it. The one admission (`admit`): called as the
    * call starts, just before each mutation commits and before each
@@ -300,8 +291,7 @@ export interface Invocation {
   /**
    * How core starts the workflows the App binds, for this call; none
    * started without it. A workflow run's call (app-functions.ts,
-   * `runInvocationFor`) and a store operation's (store-operations.ts) have
-   * none, so App code in a run's step starts nothing, now or after its
+   * `runInvocationFor`) has none, so App code in a run's step starts nothing, now or after its
    * commit (`resource.unavailable`): a start there would open a lineage of
    * its own, past its run's nesting, descendant, active-time and host-call
    * limits (GRA-669). Letting a run start one needs its root and depth
@@ -1534,13 +1524,6 @@ export interface ResourceContext {
    * effect, and never one App code chose.
    */
   readonly idempotencyKey: string;
-  /**
-   * On-prem, the sandbox session, by its call ID, the caller's function
-   * runs in: a call the adapter makes of a shared store's operation
-   * (resource-store.ts) runs in a child of it, never waiting for a process
-   * the caller holds while it waits.
-   */
-  readonly session?: string;
 }
 
 /**
@@ -1878,11 +1861,6 @@ const busyDetailsSchema = z.object({
   retryAfterSeconds: z.int().positive().max(3600),
 });
 
-/** What a shared store operation's failure tells App code: the store's code. */
-const storeFailureSchema = z.object({
-  code: z.string().min(1).max(200),
-});
-
 /** What a busy budget's refusal tells App code: when to ask again, if known. */
 const busyDetails = (
   details: unknown
@@ -1929,20 +1907,6 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   // refused or couldn't complete, each in the operation host's own words.
   if (isAdapterRefusal(code)) {
     return hostError(operationErrors.create(code));
-  }
-  // A shared store operation's own answer (store-operations.ts), or its
-  // failing for now, worth trying again: its code alone, which its
-  // contract gives every caller.
-  if (code === "resource.operation_failed" || code === "resource.busy") {
-    const details = storeFailureSchema.safeParse(
-      isExpectedError(error) ? error.details : undefined
-    );
-    return hostError(
-      operationErrors.create(
-        code,
-        details.success ? { code: details.data.code } : undefined
-      )
-    );
   }
   // Room held by runs under way, a provider's rate: worth trying again,
   // after the wait computed, the only detail passed on.
@@ -2078,7 +2042,6 @@ const resourceCall = async (
       requestId: run.invocation.requestId,
       deadline: run.invocation.deadline,
       idempotencyKey: key.join(":"),
-      ...(run.call.session === undefined ? {} : { session: run.call.session }),
     });
   } catch (error) {
     throw providerFailure(error, run.invocation.requestId);
@@ -3519,7 +3482,7 @@ const runMutation = async (
     // atomic with it: what the gate reads lives in core's D1 and the write
     // in the store's own Durable Object, with no transaction across the
     // two. The window is bounded to a call already admitted (accepted on
-    // GRA-500, as the store's on GRA-506, store-operations.ts).
+    // GRA-500).
     // oxlint-disable-next-line no-await-in-loop -- see above
     const current = await admit(invocation);
     // Its reads were scoped for roles the caller no longer has: run again
@@ -3550,9 +3513,6 @@ const runMutation = async (
                 ? intents
                 : [...intents, carriedWithin(staging, carried)],
             result: value,
-            ...(invocation.writer === undefined
-              ? {}
-              : { writer: { ...invocation.writer } }),
             attachable: resourcesDeclaring(run.app.manifest, "attach"),
           })
       );

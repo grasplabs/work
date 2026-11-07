@@ -26,11 +26,7 @@ import {
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import {
-  functionRequestMaxBytes,
-  storeOperationPathMaxLength,
-  storeOperationPathPattern,
-} from "@grasp-os/shared/operation-limits";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
@@ -83,7 +79,6 @@ import {
 } from "./sandboxed.ts";
 import { Subscription } from "./subscription.ts";
 import { answerFixtureDecision } from "./workflows/fixture-decisions.ts";
-import { holdFixtureRunSession } from "./workflows/fixture-run-sessions.ts";
 import {
   discardFixtureRuns,
   fixtureRunOutcome,
@@ -436,15 +431,6 @@ const fixtureSchema = z
               {
                 message: `A workflow's model answers are at most ${maxFixtureAnswers / 1024} KiB of JSON.`,
               }
-            )
-            .optional(),
-          operations: z
-            .record(
-              z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
-              z
-                .string()
-                .max(storeOperationPathMaxLength)
-                .regex(storeOperationPathPattern)
             )
             .optional(),
         })
@@ -839,8 +825,6 @@ class FixtureSession extends TestTarget {
    * them.
    */
   readonly #runs: FixtureRunStarted[] = [];
-  /** What lets go of its runs' way into the suite's session, at `close`. */
-  readonly #letGo: (() => void)[] = [];
   /**
    * The starts admitted against `maxRunsPerTest`, under way or done: one
    * is counted before it awaits anything, so starts at once can't each
@@ -1065,33 +1049,9 @@ class FixtureSession extends TestTarget {
             paramsOf: (alias) => this.#workflowOf(alias)?.params ?? {},
             decidersOf: (alias) => this.#workflowOf(alias)?.deciders ?? {},
             modelsOf: (alias) => this.#workflowOf(alias)?.models ?? {},
-            operationsOf: (alias) => this.#workflowOf(alias)?.operations ?? {},
-            storeOf: async () => {
-              if (this.#release.store === null) {
-                return null;
-              }
-              const store = await this.#storeOf();
-              return store.id;
-            },
             deadline: this.#endsAt,
-            recorded: (runId) => {
+            recorded: () => {
               recorded = true;
-              // Closed meanwhile: `close` let go of what it held already,
-              // and this run is discarded below, so it reaches nothing.
-              if (this.#closed) {
-                return;
-              }
-              // Its store calls run in this suite's session, in their turn
-              // among its calls, until the test ends (fixture-run-sessions.ts).
-              this.#letGo.push(
-                holdFixtureRunSession(runId, {
-                  parent: this.#parent,
-                  inTurn: async (work) =>
-                    this.#calls === undefined
-                      ? await work()
-                      : await this.#calls.run(this.#endsAt, work),
-                })
-              );
             },
           }
         );
@@ -1318,9 +1278,6 @@ class FixtureSession extends TestTarget {
    */
   async close(): Promise<void> {
     this.#closed = true;
-    for (const letGo of this.#letGo.splice(0)) {
-      letGo();
-    }
     // Its runs first: nothing of them runs on against a store discarded.
     const runs = this.#runs.splice(0).map(({ runId }) => runId);
     if (runs.length > 0) {

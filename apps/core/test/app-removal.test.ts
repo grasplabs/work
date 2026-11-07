@@ -7,7 +7,7 @@ import { removeApp } from "../src/app-removal.ts";
 import { updateApp } from "../src/app-settings.ts";
 import { appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { deleteStore, storeManagers } from "../src/data-stores.ts";
+import { deleteStore } from "../src/data-stores.ts";
 import { authorize } from "../src/knowledge/app-entries.ts";
 import { indexApps } from "../src/knowledge/apps-collection.ts";
 import { requestPermission } from "../src/permissions.ts";
@@ -25,8 +25,8 @@ import {
 
 // Removing an App (app-removal.ts), from its threat model: someone without
 // the right removes it; its work outlives it; it is reached afterwards;
-// its grants outlive it; it takes with it what it doesn't own (a store,
-// its records, its owner claim); a race with a restore; and its removal
+// its grants outlive it; it takes with it what it doesn't own (its store,
+// its records); a race with a restore; and its removal
 // goes unrecorded.
 
 const idp = mockIdp();
@@ -74,16 +74,13 @@ const acting = (
   expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
 });
 
-/** A store the App owns, its default store, with its inventory row. */
+/** The App's store, with its inventory row. */
 const ownedStore = async (app: string): Promise<string> => {
   const store = crypto.randomUUID();
   await env.DB.batch([
     env.DB.prepare(
       "INSERT INTO business_stores (id, owner_id, physical_namespace_role, created_at) VALUES (?, 'someone', 'data_store', ?)"
     ).bind(store, Date.now()),
-    env.DB.prepare(
-      "INSERT INTO sdk_store_owners (store_id, app_id, claimed_at) VALUES (?, ?, ?)"
-    ).bind(store, app, Date.now()),
     env.DB.prepare(
       "INSERT INTO app_default_stores (app_id, store_id, created_at) VALUES (?, ?, ?)"
     ).bind(app, store, Date.now()),
@@ -240,7 +237,7 @@ describe("removing an App", slow, () => {
     });
   });
 
-  it("leaves nothing of it to reach, ends its grants and members, keeps its store and the store's owner, and is recorded once", async () => {
+  it("leaves nothing of it to reach, ends its grants and members, keeps its store, and is recorded once", async () => {
     const [owner, user] = await Promise.all([
       personApi("builder"),
       personApi("user"),
@@ -277,8 +274,8 @@ describe("removing an App", slow, () => {
         "SELECT count(*) AS n FROM business_stores WHERE id = ? AND deleted_at IS NULL",
         store
       ),
-      claim: await rowCount(
-        "SELECT count(*) AS n FROM sdk_store_owners WHERE store_id = ? AND app_id = ?",
+      keyed: await rowCount(
+        "SELECT count(*) AS n FROM app_default_stores WHERE store_id = ? AND app_id = ?",
         store,
         app
       ),
@@ -291,11 +288,11 @@ describe("removing an App", slow, () => {
       members: 0,
       activeGrants: 0,
       store: 1,
-      claim: 1,
+      keyed: 1,
     });
   });
 
-  it("leaves its default store to the organization's admins, never staff or its owner, so its records are never stuck", async () => {
+  it("leaves its store to the organization's admins, never staff or its owner, so its records are never stuck", async () => {
     const [owner, admin] = await Promise.all([
       personApi("builder"),
       personApi("admin"),
@@ -304,17 +301,13 @@ describe("removing an App", slow, () => {
     const store = await ownedStore(app);
     await owner.api.apps.remove(app);
     // Its owner still builds in the organization, yet manages it no more.
-    const managers = await storeManagers(env, acting(admin, "admin"), store);
-
     expect({
-      managers,
       byOwner: await outcome(deleteStore(env, acting(owner, "builder"), store)),
       byStaff: await outcome(
         deleteStore(env, acting(admin, "admin", true), store)
       ),
       byAdmin: await outcome(deleteStore(env, acting(admin, "admin"), store)),
     }).toStrictEqual({
-      managers: [],
       byOwner: "data.store_unavailable",
       byStaff: "role.forbidden",
       byAdmin: "ok",

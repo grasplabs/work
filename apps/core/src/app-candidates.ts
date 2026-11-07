@@ -143,7 +143,6 @@ const rejectedCodes: ReadonlySet<string> = new Set([
   "version.manifest_corrupt",
   "version.mismatch",
   "version.revoked",
-  "version.store_bound_elsewhere",
 ]);
 
 /**

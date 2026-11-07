@@ -7,10 +7,11 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { backfillBatchSchema } from "../src/store-host.ts";
 import type { BackfillOutcome } from "../src/store-host.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { manifestHash, memberRoles, newRecordId } from "./store-schemas.ts";
 
 // Stores with a defaulted field pending (store-host.ts, `fillMissing`),
@@ -51,7 +52,7 @@ export const consumer = (resourceVersion: number) => ({
 });
 
 export const newStore = async (): Promise<OpenStore> =>
-  await openStore(env, await createStore(env, builder));
+  await openStore(env, await storeOfNewApp(env, builder));
 
 /** Commits `writes` for `by` (Ada) under a receipt of its own, pinned to `schemaHash`. */
 export const commit = async (

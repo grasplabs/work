@@ -129,7 +129,7 @@ const importPattern = /from "(?<module>[^"]+)"/gu;
 
 /** A version's executable identity; empty for one that isn't executable. */
 const identityOf = (version: WorkflowResourceVersion): string =>
-  version.build.hash;
+  version.build?.hash ?? "";
 
 /** U+2028 and U+2029, which end a line in source but not in a string. */
 const lineSeparators = String.fromCodePoint(0x20_28, 0x20_29);
@@ -242,7 +242,7 @@ describe("JSON workflow builds", () => {
     const source = files[generatedPath] ?? "";
     expect({
       // It type-checked and compiled: nothing in it broke out of a literal.
-      executable: version.build.hash !== undefined,
+      executable: version.build?.hash !== undefined,
       literals: hostile.every((text) => source.includes(JSON.stringify(text))),
     }).toStrictEqual({ executable: true, literals: true });
   });
@@ -560,7 +560,7 @@ describe("JSON workflow builds", () => {
     const saved = await publishWorkflowVersion(env, by, workflow.id, request);
     expect({
       stopped,
-      executable: saved.build.hash !== undefined,
+      executable: saved.build?.hash !== undefined,
     }).toStrictEqual({
       stopped: "workflow.build_slow",
       executable: true,

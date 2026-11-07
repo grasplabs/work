@@ -29,10 +29,6 @@ import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import { requireStepKey, runStubCall } from "../bindings.ts";
 import { permissions } from "../db/core/schema.ts";
 import { models } from "../models.ts";
-import {
-  approvalServing,
-  callApprovedStoreOperation,
-} from "../workflow-bindings.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import { writeJson } from "./bounded-json.ts";
 import { schemaOfDescriptor, takesExactly } from "./exact-values.ts";
@@ -63,10 +59,10 @@ import {
 import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 
 // The effects of a run of an independent workflow's sealed build
-// (platform specification 13.6): its `grasp.connector`, `grasp.operation`
-// and `grasp.model` calls, each through the target its start froze for
-// the call's binding, and only through connect, a business store's public
-// operation (store-operations.ts) or the model gateway, as every external call and model call of the platform.
+// (platform specification 13.6): its `grasp.connector` and `grasp.model`
+// calls, each through the target its start froze for the call's binding,
+// and only through connect or the model gateway, as every external call
+// and model call of the platform.
 //
 // Threat model, and how each is closed:
 //
@@ -81,12 +77,12 @@ import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 //   own grant; for a connector, once more just before the call goes to
 //   connect, with nothing but the attempt's lease after it. Then the
 //   permission itself, as every call of the platform: connect's capability
-//   (`authorize`, bindings.ts) and a store operation's (store-operations.ts).
+//   (`authorize`, bindings.ts).
 // - An effect repeated by a retry or a replay. A replay never calls: the
 //   step answers what it recorded. Each effect has its own idempotency
 //   key, its step's (`Effect.key`, the run and the task, so the same in
 //   every attempt and replay), which connect keys a side effect's stored
-//   result by, and a store operation commits under as its receipt's key.
+//   result by.
 //   A model call's step isn't retried
 //   (sealed-run.ts, `triedOnceCalls`): a model request is not idempotent.
 // - Arguments or answers that aren't the contract's. Arguments are checked
@@ -95,19 +91,11 @@ import type { FilesAnswer, FilesCallOperation } from "./run-files.ts";
 //   validator, which must take each exactly as it is
 //   (`workflow.call_invalid`); a model's answer against the task's own
 //   output schema, as sealed.
-// - Restricted data reaching a run that would pass it on. A run never
-//   enters restricted mode once it runs (restricted.ts): for one that
-//   isn't restricted, a store operation of a store whose App is
-//   restricted is refused before it runs, and its answer withheld if the
-//   App entered it meanwhile (`resource.unavailable`, workflow-
-//   bindings.ts).
 // - A restricted run (one a restricted App started) passing on what its
 //   start carried. Its connector calls carry its restricted mode to
 //   connect, which holds every one but a native connector's declared
 //   reads for its person (`connect.held`; the run waits for their
-//   decision, host.ts); and the App owning a store it calls an
-//   operation of is restricted before the input reaches it, audited with
-//   the run as provenance (`callApprovedStoreOperation`).
+//   decision, host.ts).
 // - A run's files leaving through a connector write (GRA-887). A write
 //   attaches files only where the operation's sealed contract records it
 //   takes them (`takesFiles`, which its approval compared with what the
@@ -157,11 +145,6 @@ export interface Effect {
 /** A task's call, its arguments built by the host (sealed-run.ts, `#sent`). */
 export type BuiltCall =
   | {
-      readonly name: "grasp.operation";
-      readonly binding: string;
-      readonly arguments: Json;
-    }
-  | {
       readonly name: "grasp.connector";
       readonly binding: string;
       readonly operation: string;
@@ -210,7 +193,6 @@ export type BuiltCall =
 
 /** The binding kind each call goes through. */
 const kindOf = {
-  "grasp.operation": "operation",
   "grasp.connector": "connector",
   "grasp.model": "model",
   "grasp.knowledge": "knowledge",
@@ -655,82 +637,6 @@ const callConnector = async (
 };
 
 /**
- * Calls the store operation the approval frozen with `binding` names
- * (`callApprovedStoreOperation`, workflow-bindings.ts), with `args`, as
- * the run's principal, under the effect's key: its answer, as the contract
- * has it. The approval must be the one its start froze, still active for
- * the run's version; the store, its operation and shape are read again for
- * the call, the run's authority and attempt before each protected step,
- * and nothing comes of a store whose App is restricted, before or after
- * the call (`resource.unavailable`).
- */
-const callStoreOperation = async (
-  env: Env,
-  run: CallingRun,
-  binding: FrozenCatalogBinding,
-  call: Extract<BuiltCall, { name: "grasp.operation" }>,
-  effect: Effect
-): Promise<Json> => {
-  const contract = await contractOf(env, binding);
-  const input = requireShape(contract.input, call.arguments, "arguments");
-  const approval = await approvalServing(
-    env,
-    run.workflowId,
-    run.version,
-    binding
-  );
-  if (approval?.id !== binding.approval) {
-    throw workflowResourceErrors.create("workflow.call_denied");
-  }
-  effect.requireHolds();
-  effect.sending?.();
-  const answer = await callApprovedStoreOperation(
-    env,
-    {
-      id: run.workflowId,
-      version: run.version,
-      approval,
-      restrictedRun: run.restricted ? run.runId : null,
-    },
-    input,
-    {
-      // As the run's own receipts name it: an independent run acts as no
-      // App, and its person is `principal`.
-      actor: { type: "system" },
-      principal: run.principal,
-      requestId: crypto.randomUUID(),
-      deadline: effect.deadline,
-      idempotencyKey: effect.key,
-      runId: run.runId,
-      stillAllowed: async () => {
-        await requireCallAuthority(env, run, binding);
-        effect.requireHolds();
-      },
-      requireHolds: effect.requireHolds,
-    }
-  );
-  return requireShape(contract.output, answer, "output");
-};
-
-/**
- * Calls the operation `binding`'s target names: a business store's public
- * operation, the only target an operation binding has (workflow-
- * resources.ts). Anything else serves nothing (`workflow.call_denied`).
- */
-const callOperation = async (
-  env: Env,
-  run: CallingRun,
-  binding: FrozenCatalogBinding,
-  call: Extract<BuiltCall, { name: "grasp.operation" }>,
-  effect: Effect
-): Promise<Json> => {
-  if (binding.target.kind !== "storeOperation") {
-    throw workflowResourceErrors.create("workflow.call_denied");
-  }
-  return await callStoreOperation(env, run, binding, call, effect);
-};
-
-/**
  * What model call `call` asks for, checked as every model call is, a test
  * run's included: its instructions as text (`workflow.call_invalid`
  * otherwise).
@@ -915,11 +821,10 @@ const filesWrites: ReadonlySet<string> = new Set(["open", "append", "finish"]);
 
 /**
  * Whether `call` may hand out what its run recalled: a connector call, a
- * store operation, a model call, or a file it writes (`filesWrites`).
+ * model call, or a file it writes (`filesWrites`).
  */
 const handsOut = (call: BuiltCall): boolean =>
   call.name === "grasp.connector" ||
-  call.name === "grasp.operation" ||
   call.name === "grasp.model" ||
   (call.name === "grasp.files" && filesWrites.has(call.operation));
 
@@ -968,11 +873,6 @@ const candidateAnswer = async (
       requireShape(shape.input, call.arguments, "arguments");
       return requireShape(shape.output, answer, "output");
     }
-    case "grasp.operation": {
-      const contract = await contractOf(env, binding);
-      requireShape(contract.input, call.arguments, "arguments");
-      return requireShape(contract.output, answer, "output");
-    }
     case "grasp.model": {
       requireModelRequest(call);
       return requireShape(JSON.stringify(call.outputSchema), answer, "output");
@@ -1020,8 +920,8 @@ const requireCallAllowed = async (
     throw workflowResourceErrors.create("workflow.action_restricted");
   }
   await requireCallAuthority(env, run, binding);
-  // What the run recalled leaves with a connector call, a store operation
-  // or a model call, and with a file it writes: a file's name and its
+  // What the run recalled leaves with a connector call or a model call,
+  // and with a file it writes: a file's name and its
   // bytes are shown outside the run once it's finished (run-files.ts), so
   // opening, appending to and finishing one are gated too. Not once the
   // run may no longer read it (resource-reads.ts), refused with its
@@ -1061,9 +961,9 @@ export const makeCall = async (
     return await candidateAnswer(env, run.candidate, call);
   }
   // A run an App's test started never comes here: its host answers its
-  // model and store calls from its test (fixture-calls.ts) and refuses
-  // the rest. Refused again, before anything is looked at, so none of
-  // its calls can reach connect, a model, an App, a store or Knowledge.
+  // model calls from its test (fixture-calls.ts) and refuses the rest.
+  // Refused again, before anything is looked at, so none of its calls
+  // can reach connect, a model, an App, a store or Knowledge.
   if (run.fixture === true) {
     throw operationErrors.create("resource.unavailable");
   }
@@ -1114,9 +1014,8 @@ export const makeCall = async (
     // Kept before the call goes out, or it doesn't go: a call that took
     // effect always has its receipt, whatever happens after.
     await audited(env, receipt("started"));
-    // A model call goes out as its request is sent (`callModel`), and a
-    // store operation once its own checks passed (`callStoreOperation`).
-    if (call.name !== "grasp.model" && call.name !== "grasp.operation") {
+    // A model call goes out as its request is sent (`callModel`).
+    if (call.name !== "grasp.model") {
       effect.sending?.();
     }
     switch (call.name) {
@@ -1135,10 +1034,6 @@ export const makeCall = async (
         );
         fileDetail = { ...fileDetail, ...answer.detail };
         ({ output } = answer);
-        break;
-      }
-      case "grasp.operation": {
-        output = await callOperation(env, run, binding, call, effect);
         break;
       }
       case "grasp.model": {

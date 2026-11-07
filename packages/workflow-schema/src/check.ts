@@ -1004,7 +1004,7 @@ const checkDo = (
   const binding = bindingFor(
     walk,
     step.binding,
-    ["connector", "operation", "compute", "action"],
+    ["connector", "compute", "action"],
     join(pointer, "binding")
   );
   if (binding?.kind === "connector" && step.operation === undefined) {

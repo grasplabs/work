@@ -28,10 +28,7 @@ const objectIdOf = (object: Permission["object"]): string | undefined => {
   if (object.type === "workflow") {
     return object.workflowId;
   }
-  if (object.type === "app") {
-    return object.appId;
-  }
-  return object.type === "store" ? object.storeId : undefined;
+  return object.type === "app" ? object.appId : undefined;
 };
 
 /** The capabilities `permissions` give, by core's names for them. */

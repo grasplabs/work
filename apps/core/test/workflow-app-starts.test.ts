@@ -44,7 +44,7 @@ import {
 } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
 import { personOf } from "../src/connections.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { appHost, workspace } from "../src/durable-objects.ts";
 import { createCollection } from "../src/knowledge/collection-rules.ts";
@@ -77,6 +77,7 @@ import {
   resourceRunFor,
   stopRetryMs,
 } from "../src/workflows/resource-runs.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
@@ -457,7 +458,7 @@ const fixture = async (waits = false): Promise<Fixture> => {
     ).bind(app, bob.userId, ada.userId, Date.now()),
   ]);
   const sealed = await sealedManifest(app);
-  const storeId = await createStore(env, ada);
+  const storeId = await storeOfNewApp(env, ada);
   const store = await openStore(env, storeId);
   await store.defineTables(manifestText(manifest.schema));
   const workflow = await workflowOf(ada, waits);

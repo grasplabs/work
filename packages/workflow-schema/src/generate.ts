@@ -261,23 +261,18 @@ const callOf = (
       operation,
     };
   }
-  if (binding.kind === "compute" || binding.kind === "action") {
-    const parts = localPattern.exec(binding.contract);
-    const name = binding.kind === "compute" ? "grasp.compute" : "grasp.action";
-    return {
-      call: {
-        name,
-        binding: step.binding,
-        module: parts?.[1] ?? "",
-        export: parts?.[2] ?? "",
-        arguments: args,
-      },
-      operation: name,
-    };
-  }
+  // A checked `do` step binds a connector, a compute or an action alone.
+  const parts = localPattern.exec(binding.contract);
+  const name = binding.kind === "compute" ? "grasp.compute" : "grasp.action";
   return {
-    call: { name: "grasp.operation", binding: step.binding, arguments: args },
-    operation: "grasp.operation",
+    call: {
+      name,
+      binding: step.binding,
+      module: parts?.[1] ?? "",
+      export: parts?.[2] ?? "",
+      arguments: args,
+    },
+    operation: name,
   };
 };
 

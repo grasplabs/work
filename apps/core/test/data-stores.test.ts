@@ -32,8 +32,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { allEvents } from "./audit-events.ts";
 import { failure } from "./sealed-apps.ts";
 import {
@@ -107,7 +108,7 @@ const commitIn = async (
 
 /** A new store with a `notes` table. */
 const newStore = async (): Promise<OpenStore> => {
-  const store = await openStore(env, await createStore(env, builder));
+  const store = await openStore(env, await storeOfNewApp(env, builder));
   await store.defineTables(storeManifest);
   await store.defineTables(laterManifest);
   return store;
@@ -201,8 +202,8 @@ describe("stores", () => {
   });
 
   it("mints table IDs, so two stores' tables of one name differ", async () => {
-    const first = await openStore(env, await createStore(env, builder));
-    const second = await openStore(env, await createStore(env, builder));
+    const first = await openStore(env, await storeOfNewApp(env, builder));
+    const second = await openStore(env, await storeOfNewApp(env, builder));
     const firstTables = await first.defineTables(
       tablesManifest("notes", "people")
     );
@@ -236,7 +237,7 @@ describe("stores", () => {
   });
 
   it(`holds at most ${storeMaxTables} tables`, async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     const names = Array.from({ length: storeMaxTables }, (_, n) => `t${n}`);
     await expect(
       store.defineTables(tablesManifest(...names))
@@ -267,7 +268,7 @@ describe("stores", () => {
   it("serves one store per object, never another addressed at it", async () => {
     const store = await newStore();
     const id = await insertNote(store);
-    const other = await createStore(env, builder);
+    const other = await storeOfNewApp(env, builder);
     const misaddressed = async () =>
       await objectOf(store.id).get(other, "notes", id);
     await expect(misaddressed()).rejects.toThrow(
@@ -367,7 +368,7 @@ const fieldsOf = (json: Record<string, unknown>): Record<string, unknown> =>
 
 describe("schemas", () => {
   it("defines a schema's tables from its manifest and answers its hash, as the SDK computes it", async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     const manifest = notesSchema("declared");
     const defined = await store.defineTables(manifestText(manifest));
 
@@ -408,7 +409,7 @@ describe("schemas", () => {
   });
 
   it("a changed access mode waits for its version to be made current", async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     const first = await store.defineTables(manifestText(notesManifest()));
     const looser = await store.defineTables(
       manifestText(notesManifest({ read: "appMembers" }))
@@ -418,7 +419,7 @@ describe("schemas", () => {
   });
 
   it("indexes declared in another order alone are the same schema", async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     const declared = await store.defineTables(manifestText(notesManifest()));
     const reversed = await store.defineTables(
       manifestText(notesManifest({ indexes: "reversed" }))
@@ -505,7 +506,7 @@ describe("schemas", () => {
   ])(
     "refuses a schema with %s, and defines nothing of it",
     async (_, text, code) => {
-      const store = await openStore(env, await createStore(env, builder));
+      const store = await openStore(env, await storeOfNewApp(env, builder));
       await expect(store.defineTables(text)).rejects.toMatchObject({
         code: "data.invalid_schema",
         details: { code },
@@ -517,7 +518,7 @@ describe("schemas", () => {
   );
 
   it("refuses anything but a manifest's text", async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     await expect(
       store.defineTables(asText(notesSchema("declared")))
     ).rejects.toMatchObject({
@@ -1164,7 +1165,7 @@ const insertInto = (table: string) => ({
 describe("writes under the pinned schema's access", () => {
   /** A store whose tables are written by each mode, read by their owner. */
   const accessStore = async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     const tables = ["owned", "members", "builders", "locked"] as const;
     const modes: Record<(typeof tables)[number], AccessMode> = {
       owned: "owner",
@@ -1452,7 +1453,7 @@ const linksHash = await manifestHash(linksManifest);
 
 /** A new store with the `notes` and `links` tables. */
 const newLinkedStore = async (): Promise<OpenStore> => {
-  const store = await openStore(env, await createStore(env, builder));
+  const store = await openStore(env, await storeOfNewApp(env, builder));
   await store.defineTables(linksManifest);
   return store;
 };
@@ -1852,7 +1853,7 @@ describe("a store's references", () => {
   });
 
   it("keeps a reference a newer version wrote through an older version's writes", async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     // The older version knows no reference; the newer adds one.
     const older = notesAndLinks({ label: v.string().optional() });
     const newer = notesAndLinks({
@@ -1969,7 +1970,7 @@ const cascadeHash = await manifestHash(cascadeManifest);
 
 /** A new store with the `notes`, `links` and `subs` tables. */
 const newCascadeStore = async (): Promise<OpenStore> => {
-  const store = await openStore(env, await createStore(env, builder));
+  const store = await openStore(env, await storeOfNewApp(env, builder));
   await store.defineTables(cascadeManifest);
   return store;
 };
@@ -2009,7 +2010,7 @@ const linksTo = (note: string, count: number): StoreFields[] =>
 
 describe("a store's cascades", () => {
   it("cascades through a field a newer version declared, after an older version's write", async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     const older = notesAndLinks({ label: v.string().optional() });
     const newer = notesAndLinks({
       label: v.string().optional(),
@@ -3094,7 +3095,7 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
   });
 
   it("deletes the records of everyone a cascade reaches, each batch's audited per owner", async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     await store.defineTables(ownedManifest);
     const [note = ""] = await insertOwned(store, ada, "notes", [
       { title: "Root" },

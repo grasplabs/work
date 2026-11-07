@@ -5,10 +5,6 @@ import { connectorContractIdSchema } from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { chatIdSchema, identifierSchema, workspaceIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
-import {
-  storeOperationPathMaxLength,
-  storeOperationPathPattern,
-} from "./operation-limits.ts";
 import type { RunFileListing } from "./run-files.ts";
 import { isEventType, sealedBuildLimits } from "./sealed-builds.ts";
 import type {
@@ -173,6 +169,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "This version was published by an earlier release of the platform that this one doesn't read. Publish it again as a new version.",
   "workflow.start_unconfirmed":
     "The run never started: the workflow engine didn't confirm its start in time, so nothing of it ran. Start the workflow again.",
+  "workflow.binding_kind_removed":
+    "This version binds an App's store operation (an `operation` binding), which workflows can no longer use. Remove that binding and publish the workflow again as a new version.",
   "workflow.start_invalid":
     "That isn't a valid start: name an exact published version, and input the workflow accepts.",
   "workflow.start_held_gone":
@@ -255,7 +253,7 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.candidate_unfixtured":
     "This test run made a call its start gave no answer for. A test run never calls anything: give each binding it calls an answer, then start it again.",
   "workflow.test_unfixtured":
-    "This test's run made a model or store call its fixture gives nothing for. A test's run never calls a real model or store: in the fixture's workflows, give each model binding it calls an answer, and each operation binding an operation of the App.",
+    "This test's run made a model call its fixture gives nothing for. A test's run never calls a real model: in the fixture's workflows, give each model binding it calls an answer.",
   "workflow.candidate_unavailable":
     "This test run doesn't exist, or isn't one you can see.",
   "workflow.candidate_limit":
@@ -284,7 +282,6 @@ export const workflowResourceErrors = defineErrorFamily({
  * workflow's own actions (GRA-700, GRA-724): no JSON task calls one.
  */
 export const catalogBindingKinds = [
-  "operation",
   "connector",
   "model",
   "decision",
@@ -461,12 +458,6 @@ const deciderSchema = z.string().regex(/^(?:person|team|role):[\w.-]{1,128}$/u);
  * - `connector`: one of the workflow's own connection permissions, and the
  *   contract connect generates for that connection (`<connector>.<family>@1`
  *   or `composio.<toolkit>@1`) whose actions serve the catalog contract;
- * - `storeOperation`: a business store's public operation, by its path,
- *   through one of the workflow's own store permissions, run by the App
- *   that owns the store as its current version serves it (core's
- *   store-operations.ts). It is the only target an `operation` binding
- *   has: no workflow reaches another App's actions, which would run with
- *   that App's own resource bindings;
  * - `decision`: who answers it;
  * - `event`: that the workflow may listen for and emit the contract's
  *   types. Who may send each is the contract's (`browser`, `ingress`)
@@ -485,19 +476,6 @@ export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
     kind: z.literal("connector"),
     permissionId: identifierSchema,
     contract: connectorContractIdSchema,
-  }),
-  z.strictObject({
-    kind: z.literal("storeOperation"),
-    permissionId: identifierSchema,
-    operation: z
-      .string()
-      .max(storeOperationPathMaxLength)
-      .regex(storeOperationPathPattern),
-    /**
-     * The operation's kind, as the admin approves it: a query only reads,
-     * a mutation writes. One that becomes the other serves nothing.
-     */
-    operationKind: z.enum(["query", "mutation"]),
   }),
   z.strictObject({
     kind: z.literal("decision"),
@@ -527,12 +505,6 @@ export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("files") }),
 ]);
 export type WorkflowBindingTarget = z.infer<typeof workflowBindingTargetSchema>;
-
-/** The catalog binding kind a target serves: a store operation an `operation`. */
-export const servedKindOf = (
-  target: WorkflowBindingTarget
-): CatalogBindingKind =>
-  target.kind === "storeOperation" ? "operation" : target.kind;
 
 /**
  * An admin's approval of a workflow's binding: the alias, its target, and
@@ -564,7 +536,7 @@ export interface WorkflowBindingApproval {
 /**
  * An active approval as a workflow's listing names it: with what its
  * target names, as an offer of the same target is named
- * (`PendingWorkflowBindings`): a connector's or store operation's grant
+ * (`PendingWorkflowBindings`): a connector's grant
  * by its binding name, a Brain collection by its name, a model by its ID;
  * empty where the target names nothing, or its grant is gone.
  */
@@ -578,8 +550,8 @@ export interface ListedWorkflowBindingApproval extends WorkflowBindingApproval {
  * with the targets core can offer now that would serve it, each checked as
  * an approval is. A decision is offered none: the admin names its
  * deciders. Across workflows (`pendingBindings`) only what is quick to
- * read is offered (models, events, files, Knowledge); a connector, store
- * operation or template is offered on the workflow's own read
+ * read is offered (models, events, files, Knowledge); a connector or
+ * template is offered on the workflow's own read
  * (`pendingBindingsOf`).
  */
 export interface PendingWorkflowBindings {
@@ -847,7 +819,7 @@ export interface WorkflowResource {
  * binding workflow's builders, whose definition text names it: anyone else
  * gets null there, and only the alias and the contract's fingerprint. A
  * catalog binding
- * (an operation, connector, model or decision contract) names its
+ * (a connector, model or decision contract) names its
  * contract key and fingerprint; what serves it is an approval's.
  */
 export interface WorkflowVersionBinding {
@@ -875,13 +847,12 @@ export interface WorkflowVersionAction {
 
 /**
  * A use whose writes a model's answers may steer, by its binding's alias:
- * a connector's, with each of its operations that may write; or an
- * operation binding's (an App's export), which may always write, as its
- * contract states nothing about reading only.
+ * a connector's, with each of its operations that may write; or an action
+ * the version doesn't seal, any of which may write.
  */
 export type SteeredWrite =
   | { alias: string; kind: "connector"; operations: string[] }
-  | { alias: string; kind: "operation" };
+  | { alias: string; kind: "action" };
 
 /**
  * One of a version's own actions as its review shows it (GRA-718): as
@@ -944,7 +915,15 @@ export interface WorkflowResourceVersion {
    * model task is taken to reach every call, whatever their order.
    */
   modelSteeredWrites: SteeredWrite[];
-  build: WorkflowVersionBuild;
+  /** Its build; null for a version that is refused (`refused`). */
+  build: WorkflowVersionBuild | null;
+  /**
+   * Why the version is refused, when it is: it binds a kind the platform
+   * no longer serves (`workflow.binding_kind_removed`), and is to be
+   * published again. It never runs, starts, is reviewed or exported, so
+   * nothing of its actions or build is shown.
+   */
+  refused?: { code: "workflow.binding_kind_removed"; message: string };
   author: string;
   createdAt: string;
 }

@@ -21,17 +21,14 @@ import {
 import { appDefinition } from "./app-definitions.ts";
 import { fakeProvider } from "./model-provider.ts";
 import { resumed, sleeping, stopped } from "./runs.ts";
-import { appWith, calledAs, person, seal } from "./sealed-apps.ts";
+import { appWith, person, seal } from "./sealed-apps.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
 
-// The model and store calls of a run an App's test started (`workflowTest`,
+// The model calls of a run an App's test started (`workflowTest`,
 // workflows/fixture-calls.ts), from its threat model first: a test's run
-// asks a real model, spends budget or leaves a trace of a model call; its
-// store call reaches the App's own store, another App's or another test's;
-// it runs an operation the release doesn't serve, or one of a shape the
-// contract doesn't take; a call the fixture gives nothing falls through to
-// a real one; a replay repeats a store write. Then what a test sees: the
-// fixture's answer, and its own store holding what the run wrote.
+// asks a real model, spends budget or leaves a trace of a model call; a
+// call the fixture gives nothing falls through to a real one; a replay
+// answers again. Then what a test sees: the fixture's answer.
 
 /** A JSON object schema of `properties`, each required, and nothing else. */
 const objectSchema = (properties: Record<string, unknown>) => ({
@@ -76,14 +73,6 @@ const summarize = {
 /** The line `summarize` answered. */
 const line = { $expr: "steps.summarize.output.line" };
 
-/** Saves the input's `who` through the `save` operation binding. */
-const save = {
-  id: "save",
-  type: "do",
-  binding: "save",
-  arguments: { who: { $expr: "input.who" } },
-};
-
 /** A wait of `duration` (`"1 second"`) in step `hold`. */
 const hold = (duration: string) => ({
   id: "hold",
@@ -94,7 +83,6 @@ const hold = (duration: string) => ({
 /** What a test's fixture gives the workflow the App binds as `followUp`. */
 interface WorkflowFixture {
   models?: Record<string, unknown>;
-  operations?: Record<string, string>;
 }
 
 /** The App's files: it binds `followUp` and keeps requests; `tests`. */
@@ -143,24 +131,17 @@ export const list = query({
   ...tests,
 });
 
-/** The catalog contracts `admin` publishes: a model's, and `requests.add`'s. */
-const contracts = async (admin: Identity) => {
+/** The model catalog contract `admin` publishes. */
+const modelContract = async (admin: Identity): Promise<string> => {
   const model = `summary-${unique()}`;
   await publishCatalogContract(env, admin, { key: model, kind: "model" });
-  const operation = `save-${unique()}`;
-  await publishCatalogContract(env, admin, {
-    key: operation,
-    kind: "operation",
-    input: JSON.stringify(v.object({ who: v.string() }).descriptor),
-    output: JSON.stringify(v.null().descriptor),
-  });
-  return { model, operation };
+  return model;
 };
 
 /**
  * The Requests App binding a workflow of `flow` as `followUp`, its model
- * binding `summary` and its operation binding `save`, with `workflow` as
- * its fixture and `tests` as its tests.
+ * binding `summary`, with `workflow` as its fixture and `tests` as its
+ * tests.
  */
 const requestsApp = async (
   flow: Flow,
@@ -168,7 +149,7 @@ const requestsApp = async (
   tests: Record<string, string> = {}
 ) => {
   const admin = await person("admin");
-  const keys = await contracts(admin);
+  const model = await modelContract(admin);
   const builder = await person("builder");
   const files = filesWith(workflow, tests);
   const fixture = await appWith(files, "Requests", builder);
@@ -179,8 +160,7 @@ const requestsApp = async (
   );
   await publishWorkflowVersion(env, builder, resource.id, {
     definition: definitionOf(flow, {
-      summary: { kind: "model", contract: keys.model },
-      save: { kind: "operation", contract: keys.operation },
+      summary: { kind: "model", contract: model },
     }),
     basedOn: null,
   });
@@ -191,7 +171,7 @@ const requestsApp = async (
   });
   await seal(fixture);
   const release = await loadRelease(env, fixture.app, 1);
-  return { builder, app: fixture.app, store: fixture.store, release, files };
+  return { builder, app: fixture.app, release, files };
 };
 
 type RequestsApp = Awaited<ReturnType<typeof requestsApp>>;
@@ -278,13 +258,17 @@ const activated = async (
   }
 };
 
-/** What the App's own store holds, as its builder reads it once current. */
-const ownStoreOf = async (app: RequestsApp): Promise<unknown> => {
-  const result = await calledAs(app.builder, app.app, {
-    name: "requests.list",
-    kind: "query",
-  });
-  return result.ok ? result.value : result.error.code;
+/** What `work` comes to: "ok", or its error's code. */
+const outcomeOf = async (work: () => Promise<void>): Promise<string> => {
+  try {
+    await work();
+    return "ok";
+  } catch (error) {
+    if (!isExpectedError(error)) {
+      throw error;
+    }
+    return error.code;
+  }
 };
 
 /** The test stores and runs core still records for `app`. */
@@ -319,214 +303,128 @@ ${body.includes("owner") ? '      const owner = await t.as("desk-user");' : ""}
 });
 `;
 
-describe(
-  "a workflow test's model and store calls",
-  { timeout: 180_000 },
-  () => {
-    it("answer a model call with the fixture's answer, and never ask a model or leave a trace of one", async () => {
-      const provider = await watchedProvider();
-      const app = await requestsApp(
-        { steps: [summarize], status: line },
-        { models: { summary: { line: "Hello from the fixture" } } },
-        {
-          "tests/greet.test.ts": suiteOf(`
+describe("a workflow test's model calls", { timeout: 180_000 }, () => {
+  it("answer a model call with the fixture's answer, and never ask a model or leave a trace of one", async () => {
+    const provider = await watchedProvider();
+    const app = await requestsApp(
+      { steps: [summarize], status: line },
+      { models: { summary: { line: "Hello from the fixture" } } },
+      {
+        "tests/greet.test.ts": suiteOf(`
       const run = await owner.start(workflows.followUp, { who: "Ada" });
       t.equal(await t.runs.untilTerminal(run), {
         status: "completed",
         output: { status: "Hello from the fixture" },
       });
       t.equal(await t.effects.completedCount(run, "summarize"), 1);`),
-        }
-      );
-      let outcome: unknown;
-      const events = await auditedDuring(async () => {
-        outcome = await activated(app.builder, app.app);
-      });
-      expect({
-        outcome,
-        asked: provider.requests.length,
-        traces: events
-          .map(({ action }) => action)
-          .filter(
-            (action) =>
-              action.startsWith("model.") || action.startsWith("workflow.")
+      }
+    );
+    let outcome: unknown;
+    const events = await auditedDuring(async () => {
+      outcome = await activated(app.builder, app.app);
+    });
+    expect({
+      outcome,
+      asked: provider.requests.length,
+      traces: events
+        .map(({ action }) => action)
+        .filter(
+          (action) =>
+            action.startsWith("model.") || action.startsWith("workflow.")
+        ),
+      left: await leftOf(app.app),
+    }).toStrictEqual({
+      outcome: "current",
+      asked: 0,
+      traces: [],
+      left: { stores: 0, runs: 0 },
+    });
+  });
+
+  it("fail a model call the fixture gives nothing, or an answer the task's schema doesn't take, without asking a model", async () => {
+    const provider = await watchedProvider();
+    const tasks = { steps: [summarize], status: line };
+    expect({
+      unfixtured: await endedIn(await requestsApp(tasks, {})),
+      otherBinding: await endedIn(
+        await requestsApp(tasks, { models: { elsewhere: { line: "Hi" } } })
+      ),
+      wrongShape: await endedIn(
+        await requestsApp(tasks, { models: { summary: { words: 3 } } })
+      ),
+      asked: provider.requests.length,
+    }).toMatchObject({
+      unfixtured: { status: "failed", code: "workflow.test_unfixtured" },
+      otherBinding: { status: "failed", code: "workflow.test_unfixtured" },
+      wrongShape: { status: "failed", code: "workflow.call_invalid" },
+      asked: 0,
+    });
+  });
+
+  // A workflow reaches no App's store: there is no binding that would.
+  it("can't be bound to an App's store operation, nor its contract published", async () => {
+    const admin = await person("admin");
+    const builder = await person("builder");
+    const resource = await createWorkflowResource(
+      env,
+      builder,
+      `greet-${unique()}`
+    );
+    expect({
+      contract: await outcomeOf(async () => {
+        await publishCatalogContract(env, admin, {
+          key: `save-${unique()}`,
+          kind: "operation",
+          input: JSON.stringify(v.object({ who: v.string() }).descriptor),
+          output: JSON.stringify(v.null().descriptor),
+        });
+      }),
+      binding: await outcomeOf(async () => {
+        await publishWorkflowVersion(env, builder, resource.id, {
+          definition: definitionOf(
+            {
+              steps: [
+                {
+                  id: "save",
+                  type: "do",
+                  binding: "save",
+                  arguments: { who: { $expr: "input.who" } },
+                },
+              ],
+              status: "saved",
+            },
+            { save: { kind: "operation", contract: "requests.add@1" } }
           ),
-        left: await leftOf(app.app),
-      }).toStrictEqual({
-        outcome: "current",
-        asked: 0,
-        traces: [],
-        left: { stores: 0, runs: 0 },
-      });
+          basedOn: null,
+        });
+      }),
+    }).toStrictEqual({
+      contract: "workflow.contract_invalid",
+      binding: "workflow.definition_invalid",
     });
+  });
 
-    it("fail a model call the fixture gives nothing, or an answer the task's schema doesn't take, without asking a model", async () => {
-      const provider = await watchedProvider();
-      const tasks = { steps: [summarize], status: line };
-      expect({
-        unfixtured: await endedIn(await requestsApp(tasks, {})),
-        otherBinding: await endedIn(
-          await requestsApp(tasks, { models: { elsewhere: { line: "Hi" } } })
-        ),
-        wrongShape: await endedIn(
-          await requestsApp(tasks, { models: { summary: { words: 3 } } })
-        ),
-        asked: provider.requests.length,
-      }).toMatchObject({
-        unfixtured: { status: "failed", code: "workflow.test_unfixtured" },
-        otherBinding: { status: "failed", code: "workflow.test_unfixtured" },
-        wrongShape: { status: "failed", code: "workflow.call_invalid" },
-        asked: 0,
-      });
-    });
-
-    it("run a store call on the test's own store, which the test reads back, and never on the App's own store", async () => {
-      const app = await requestsApp(
-        { steps: [save], status: "saved" },
-        { operations: { save: "requests.add" } },
-        {
-          "tests/save.test.ts": suiteOf(`
-      t.equal(await owner.query(api.requests.list, {}), []);
-      const run = await owner.start(workflows.followUp, { who: "Ada" });
-      t.equal(await t.runs.untilTerminal(run), {
-        status: "completed",
-        output: { status: "saved" },
-      });
-      t.equal(await owner.query(api.requests.list, {}), ["Ada"]);`),
-        }
-      );
-      expect({
-        outcome: await activated(app.builder, app.app),
-        ownStore: await ownStoreOf(app),
-        left: await leftOf(app.app),
-      }).toStrictEqual({
-        outcome: "current",
-        ownStore: [],
-        left: { stores: 0, runs: 0 },
-      });
-    });
-
-    it("refuse a store call whose run names the App's own store or another App's test store, and change neither", async () => {
-      const tasks = { steps: [hold("1 second"), save], status: "saved" };
-      const app = await requestsApp(tasks, {
-        operations: { save: "requests.add" },
-      });
-      const other = await requestsApp(tasks, {
-        operations: { save: "requests.add" },
-      });
-      // Another App's test store, recorded as its tests record one.
-      const otherStore = crypto.randomUUID();
-      await env.DB.prepare(
-        "INSERT INTO app_test_fixtures (store_id, app_id, version, created_at) VALUES (?, ?, 1, ?)"
-      )
-        .bind(otherStore, other.app, Date.now())
-        .run();
-      const endedOn = async (store: string | null): Promise<unknown> => {
-        const { session, run, runId } = await runningIn(app);
-        // While it holds, its record is changed to name another store.
-        await env.DB.prepare(
-          "UPDATE app_test_runs SET store_id = ? WHERE run_id = ?"
-        )
-          .bind(store, runId)
-          .run();
-        const ended: unknown = JSON.parse(await session.runOutcome(run));
-        await session.close();
-        return ended;
-      };
-      const endedOnRecorded = async (store: string): Promise<unknown> => {
-        await env.DB.prepare(
-          "INSERT INTO app_test_fixtures (store_id, app_id, version, created_at) VALUES (?, ?, 1, ?)"
-        )
-          .bind(store, app.app, Date.now())
-          .run();
-        try {
-          return await endedOn(store);
-        } finally {
-          // Never left for the sweep, which would discard what it names.
-          await env.DB.prepare(
-            "DELETE FROM app_test_fixtures WHERE store_id = ?"
-          )
-            .bind(store)
-            .run();
-        }
-      };
-      const refused = {
-        ownStore: await endedOn(app.store),
-        otherAppsStore: await endedOn(otherStore),
-        noStore: await endedOn(null),
-        // Its own store recorded as a test store too: listed, so never one.
-        ownStoreRecorded: await endedOnRecorded(app.store),
-      };
-      await activated(app.builder, app.app);
-      expect({ refused, ownStore: await ownStoreOf(app) }).toMatchObject({
-        refused: {
-          ownStore: { status: "failed", code: "resource.unavailable" },
-          otherAppsStore: { status: "failed", code: "resource.unavailable" },
-          noStore: { status: "failed", code: "resource.unavailable" },
-          ownStoreRecorded: { status: "failed", code: "resource.unavailable" },
-        },
-        ownStore: [],
-      });
-    });
-
-    it("refuse an operation the release doesn't serve as the binding's contract, and fail a binding the fixture gives none", async () => {
-      const tasks = { steps: [save], status: "saved" };
-      expect({
-        otherShape: await endedIn(
-          await requestsApp(tasks, { operations: { save: "requests.list" } })
-        ),
-        missing: await endedIn(
-          await requestsApp(tasks, { operations: { save: "requests.remove" } })
-        ),
-        unfixtured: await endedIn(await requestsApp(tasks, {})),
-      }).toMatchObject({
-        otherShape: { status: "failed", code: "workflow.call_denied" },
-        missing: { status: "failed", code: "workflow.call_denied" },
-        unfixtured: { status: "failed", code: "workflow.test_unfixtured" },
-      });
-    });
-
-    it("write once and answer once, though the run stops after its calls and starts again", async () => {
-      const provider = await watchedProvider();
-      const app = await requestsApp(
-        { steps: [save, summarize, hold("2 seconds")], status: line },
-        {
-          models: { summary: { line: "Hello" } },
-          operations: { save: "requests.add" },
-        }
-      );
-      const { session, run, runId } = await runningIn(app);
-      await sleeping(runId, "hold:task");
-      // Down while it waits, then back: the workflow runs again from its
-      // start, its finished steps replayed.
-      await stopped(runId);
-      await resumed(runId);
-      const ended: unknown = JSON.parse(await session.runOutcome(run));
-      const saved: unknown = JSON.parse(
-        await session.call(
-          "desk-user",
-          JSON.stringify({
-            reference: { name: "requests.list", kind: "query" },
-            input: {},
-          })
-        )
-      );
-      const completed = {
-        save: await session.completedCount(run, "save"),
-        summarize: await session.completedCount(run, "summarize"),
-      };
-      await session.close();
-      expect({
-        ended,
-        saved,
-        completed,
-        asked: provider.requests.length,
-      }).toStrictEqual({
+  it("answer once, though the run stops after its calls and starts again", async () => {
+    const provider = await watchedProvider();
+    const app = await requestsApp(
+      { steps: [summarize, hold("2 seconds")], status: line },
+      { models: { summary: { line: "Hello" } } }
+    );
+    const { session, run, runId } = await runningIn(app);
+    await sleeping(runId, "hold:task");
+    // Down while it waits, then back: the workflow runs again from its
+    // start, its finished steps replayed.
+    await stopped(runId);
+    await resumed(runId);
+    const ended: unknown = JSON.parse(await session.runOutcome(run));
+    const completed = await session.completedCount(run, "summarize");
+    await session.close();
+    expect({ ended, completed, asked: provider.requests.length }).toStrictEqual(
+      {
         ended: { status: "completed", output: { status: "Hello" } },
-        saved: { ok: true, value: ["Ada"] },
-        completed: { save: 1, summarize: 1 },
+        completed: 1,
         asked: 0,
-      });
-    });
-  }
-);
+      }
+    );
+  });
+});

@@ -457,10 +457,12 @@ describe("abandoning a failed backfill", () => {
   it("waits while the store's App is archived, and is its admins' once the App is removed", async () => {
     const { app, store, target } = await failedStore();
     await registerApp(app, null, null);
+    // The store is this App's own: keyed by it, as its seal keys an App's
+    // one store (`newStore` keyed it by an App of its own).
     await env.DB.prepare(
-      "INSERT INTO app_default_stores (app_id, store_id, created_at) VALUES (?, ?, ?)"
+      "UPDATE app_default_stores SET app_id = ? WHERE store_id = ?"
     )
-      .bind(app, store.id, Date.now())
+      .bind(app, store.id)
       .run();
     const input = { store: store.id, target, attempt: 1 };
     await env.DB.prepare(

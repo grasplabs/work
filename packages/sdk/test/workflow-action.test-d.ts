@@ -1,7 +1,6 @@
 // Compile-time guarantees of a workflow's own actions (GRA-704, GRA-700):
 // a connector use declares the exact operations it calls, and
-// `ctx.resources.<alias>.call` takes only those; an operation use takes
-// its arguments alone; a model use's `generate` answers the shape it
+// `ctx.resources.<alias>.call` takes only those; a model use's `generate` answers the shape it
 // declared, and takes instructions and an input alone. This file is type-checked by `vp check` and never
 // run: every `@ts-expect-error` below must stay an error.
 import { expectTypeOf } from "vite-plus/test";
@@ -15,12 +14,10 @@ import type {
   RunFile,
   TemplateContent,
 } from "../src/action.ts";
-import type { JsonValue } from "../src/value-descriptor.ts";
 
 const mail = resource.connector("mail", {
   operations: ["mail.send", "mail.list"],
 });
-const lookup = resource.operation("lookup");
 const writer = resource.model("writer", {
   output: v.object({ line: v.string(), score: v.number() }),
 });
@@ -29,13 +26,7 @@ const docs = resource.knowledge("docs", { operations: ["search"] });
 const letter = resource.template("letter");
 
 declare const ctx: ActionCtx<
-  readonly [
-    typeof mail,
-    typeof lookup,
-    typeof writer,
-    typeof docs,
-    typeof letter,
-  ]
+  readonly [typeof mail, typeof writer, typeof docs, typeof letter]
 >;
 
 expectTypeOf(ctx.resources.docs.search).returns.resolves.toEqualTypeOf<
@@ -84,7 +75,6 @@ expectTypeOf(
 expectTypeOf(ctx.resources.mail.call)
   .parameter(0)
   .toEqualTypeOf<"mail.list" | "mail.send">();
-expectTypeOf(ctx.resources.lookup.call).parameters.toEqualTypeOf<[JsonValue]>();
 
 expectTypeOf(ctx.resources.writer.generate).parameters.toEqualTypeOf<
   [ModelRequest]
@@ -117,10 +107,6 @@ void ctx.resources.archive;
 // A connector use without its operations.
 // @ts-expect-error -- operations are required
 resource.connector("mail");
-
-// An operation use names nothing more.
-// @ts-expect-error -- an App export is one operation
-resource.operation("lookup", { operations: ["x"] });
 
 export const notify = action({
   args: { to: v.string() },

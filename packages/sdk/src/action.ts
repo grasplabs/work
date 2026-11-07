@@ -57,7 +57,6 @@ export type { Infer, InferInput } from "./values.ts";
 /** The kinds of binding an action may use in this release. */
 export type UseKind =
   | "connector"
-  | "operation"
   | "model"
   | "knowledge"
   | "template"
@@ -126,12 +125,6 @@ export interface ConnectorResource<Operation extends string = string> {
     args: JsonValue,
     options?: ConnectorCallOptions
   ) => Promise<JsonValue>;
-}
-
-/** An operation binding (an approved App export), as an action calls it. */
-export interface OperationResource {
-  /** Calls the operation the binding serves, with `args`. */
-  readonly call: (args: JsonValue) => Promise<JsonValue>;
 }
 
 /** What one call of a model binding sends. */
@@ -306,11 +299,9 @@ type ResourceOf<U extends AnyUse> = U["~use"]["kind"] extends "connector"
         >
       : U["~use"]["kind"] extends "template"
         ? TemplateResource
-        : U["~use"]["kind"] extends "files"
-          ? FilesResource<
-              Extract<Exclude<U["~operation"], undefined>, FilesOperation>
-            >
-          : OperationResource;
+        : FilesResource<
+            Extract<Exclude<U["~operation"], undefined>, FilesOperation>
+          >;
 
 /** What an action's handler gets besides its arguments. */
 export interface ActionCtx<Uses extends readonly AnyUse[]> {
@@ -435,7 +426,6 @@ const isDeclaredUse = (value: unknown): value is DeclaredUse =>
   typeof value.alias === "string" &&
   "kind" in value &&
   (value.kind === "connector" ||
-    value.kind === "operation" ||
     value.kind === "model" ||
     value.kind === "knowledge" ||
     value.kind === "template" ||
@@ -519,9 +509,6 @@ export const resource = freeze({
       operationsOf(property.value, "connector")
     );
   },
-  // An App export is one operation: nothing more to declare.
-  operation: <const Alias extends string>(alias: Alias) =>
-    declareUse("operation", alias, []),
   model: <const Alias extends string, const Output extends AnySchema>(
     alias: Alias,
     options: ModelUseOptions<Output>
@@ -627,7 +614,6 @@ export type ContractUse =
       readonly kind: "connector";
       readonly operations: readonly string[];
     }
-  | { readonly alias: string; readonly kind: "operation" }
   | {
       readonly alias: string;
       readonly kind: "model";

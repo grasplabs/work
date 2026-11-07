@@ -32,7 +32,7 @@ import { requireShape } from "./resource-calls.ts";
 import { filesCallOperations } from "./run-files.ts";
 
 // A run's call of one of its workflow's own actions (platform
-// specification 13.6; GRA-666 has the threat model): a `grasp.operation`
+// specification 13.6; GRA-666 has the threat model): a `grasp.action`
 // task whose binding names `local:code/<file>.ts#<export>`. The action
 // runs in an isolate of its own, as a calculation does (workflow-modules.ts:
 // no env, no network, no clock, no randomness, no code generation), with
@@ -107,9 +107,6 @@ const connectorRequestSchema = z.strictObject({
   into: z.string().min(1).max(128).optional(),
   from: z.string().min(1).max(128).optional(),
 });
-
-/** What an action asks of an operation binding: its args. */
-const operationRequestSchema = z.strictObject({ arguments: jsonSchema });
 
 /**
  * What an action asks of a model binding: instructions as text and an
@@ -510,21 +507,10 @@ class ActionHost extends RpcTarget {
         ordinal
       );
     }
-    const parsed = operationRequestSchema.safeParse(request);
-    if (kind !== "operation" || !parsed.success) {
-      return this.#refuse(
-        "request_invalid",
-        alias,
-        workflowResourceErrors.create("workflow.call_invalid")
-      );
-    }
-    return await this.#make(
-      {
-        name: "grasp.operation",
-        binding: alias,
-        arguments: parsed.data.arguments,
-      },
-      ordinal
+    return this.#refuse(
+      "request_invalid",
+      alias,
+      workflowResourceErrors.create("workflow.call_invalid")
     );
   }
 }

@@ -68,7 +68,7 @@ import {
 // - The agent granting itself, or anything, authority. No call here
 //   grants, approves or starts: a published version runs nothing until
 //   something with a grant starts it; each catalog binding it declares
-//   (a connector, store operation, model or decision) waits for an
+//   (a connector, model or decision) waits for an
 //   admin's approval of that exact version (workflow-bindings.ts); an App
 //   starts it only through its own `start` permission, which an admin
 //   grants; and a request asks for a permission for the workflow it
@@ -413,9 +413,9 @@ export class WorkflowBuildApi extends WorkerEntrypoint<Env, AgentScope> {
   }
 
   /**
-   * Asks for a permission for the workflow itself (a connection or a
-   * store its bindings are served by), as its builders do: it allows
-   * nothing until an admin grants it.
+   * Asks for a permission for the workflow itself (a connection its
+   * bindings are served by, or a collection), as its builders do: it
+   * allows nothing until an admin grants it.
    */
   async requestPermission(
     workflow: unknown,
@@ -499,7 +499,7 @@ const workflowBuildDeclaration = `/**
  * | "schedule" | "template", label, sensitive?: false, default?, currency? } }\`, sensitive
  * (never shown or read by code, no default) unless \`sensitive: false\`. \`bindings\` declare
  * what the workflow calls outside itself: \`{ [alias]: { kind, contract, title? } }\`, kind one
- * of ${bindingKinds.map((kind) => `\`${kind}\``).join(", ")}; a model, connector, operation,
+ * of ${bindingKinds.map((kind) => `\`${kind}\``).join(", ")}; a model, connector,
  * decision or event binding names a contract of its kind from \`catalog()\` (an event contract's
  * \`events\` are the types a wait for it takes), a files binding a \`files\` one and a brain
  * binding a \`knowledge\` one; a compute or action binding one of the workflow's own modules
@@ -515,7 +515,7 @@ const workflowBuildDeclaration = `/**
  * Each step is \`{ id, type, title?, if?, ... }\`: \`id\` is a stable key (lower-case words
  * and dashes, never changed once made; rename by \`title\`), \`if\` an expression that skips it.
  * - \`do\`: \`{ binding, operation?, arguments?, timeout? }\` calls a binding (a connector's
- *   operation, a catalog operation, the workflow's own compute or action);
+ *   operation, the workflow's own compute or action);
  * - \`agent\`: \`{ binding, instructions, input, output, timeout? }\` asks a model binding for an
  *   answer matching the JSON Schema \`output\`;
  * - a \`do\` or \`agent\` step may also take \`state: { [key]: value }\`: declared keys it writes once it
@@ -602,11 +602,10 @@ workflowBuild: {
   }>;
   /** Binds an exact published version to an App the person builds, replacing that alias's binding. */
   bind(workflow: string, binding: { app: string; alias: string; version: number }): Promise<{ id: string; app: string; alias: string; version: number }>;
-  /** Asks for a permission for the workflow itself (a connection or store for its bindings, or a collection); nothing holds until an admin grants it. */
+  /** Asks for a permission for the workflow itself (a connection for its bindings, or a collection); nothing holds until an admin grants it. */
   requestPermission(workflow: string, request: {
     object:
       | { type: "connection"; connectionId: string; resource?: string }
-      | { type: "store"; storeId: string }
       | { type: "collection"; collectionId: string };
     actions: string[];
     binding: string;

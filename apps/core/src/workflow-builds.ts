@@ -447,14 +447,37 @@ export const buildSummary = (build: SealedBuild): WorkflowVersionBuild => ({
 /** Where a version's manifest holds its build. */
 const manifestBuildSchema = z.object({ build: sealedBuildSchema });
 
+/** What a manifest says of the kinds of its bindings, before anything else. */
+const manifestBindingKindsSchema = z.object({
+  bindings: z.array(z.object({ kind: z.unknown() })),
+});
+
 /**
- * The build a version's manifest text seals. One of a shape this host
- * doesn't read is `workflow.format_unsupported`: its manifest is what an
+ * Refuses (`workflow.binding_kind_removed`) a version whose manifest
+ * binds a kind the platform no longer serves: an `operation` binding, an
+ * App's public store operation, which no workflow reaches now that each
+ * App's store is its own. Read before the rest of the manifest, so such a
+ * version is told to be published again, never taken for one that was
+ * changed (`workflow.version_corrupt`).
+ */
+export const requireServedBindingKinds = (manifest: unknown): void => {
+  const { data } = manifestBindingKindsSchema.safeParse(manifest);
+  if (data?.bindings.some(({ kind }) => kind === "operation") === true) {
+    throw workflowResourceErrors.create("workflow.binding_kind_removed");
+  }
+};
+
+/**
+ * The build a version's manifest text seals. One binding a kind no longer
+ * served is `workflow.binding_kind_removed`, and one of a shape this host
+ * doesn't read `workflow.format_unsupported`: its manifest is what an
  * earlier platform release published, to be published again, never taken
  * for one that was changed.
  */
 export const buildOf = (manifest: string): SealedBuild => {
-  const parsed = manifestBuildSchema.safeParse(JSON.parse(manifest));
+  const read: unknown = JSON.parse(manifest);
+  requireServedBindingKinds(read);
+  const parsed = manifestBuildSchema.safeParse(read);
   if (!parsed.success) {
     throw workflowResourceErrors.create("workflow.format_unsupported");
   }

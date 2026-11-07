@@ -17,10 +17,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { StoreHost } from "../src/store-host.ts";
 import type { AnchorValue } from "../src/store-queries.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { accessedManifest } from "./store-schemas.ts";
 
 // Pages of a business store's records and their cursors (store-cursors.ts,
@@ -69,7 +70,7 @@ interface Fixture {
 }
 
 const storeWith = async (read: AccessMode): Promise<Fixture> => {
-  const store = await openStore(env, await createStore(env, builder));
+  const store = await openStore(env, await storeOfNewApp(env, builder));
   const defined = await store.defineTables(
     manifestText(
       accessedManifest(schema, {

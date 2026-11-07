@@ -10,7 +10,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { defaultMaxAttempts } from "../src/outbox-delivery.ts";
 import type {
@@ -19,6 +19,7 @@ import type {
   OutboxEntry,
 } from "../src/outbox-delivery.ts";
 import { StoreHost } from "../src/store-host.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { gatedConsumer } from "./gated-consumer.ts";
 import {
   manifestHash,
@@ -54,7 +55,7 @@ const scope = {
 
 /** A new store with a `notes` table. */
 const newStore = async (): Promise<OpenStore> => {
-  const store = await openStore(env, await createStore(env, builder));
+  const store = await openStore(env, await storeOfNewApp(env, builder));
   await store.defineTables(tablesManifest("notes"));
   return store;
 };
