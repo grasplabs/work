@@ -218,6 +218,18 @@ const typeRules: readonly {
   { action: "dependency.advisory_found", type: "action" },
   // An approved graph built for what uses it: its install.
   { action: "dependency.built", type: "action" },
+  // What follows from a decision or a deletion, not one itself: an
+  // approval replaced by a later one, and one withdrawn once its App or
+  // workflow is gone or no kept release runs on it.
+  { action: "dependency.retired", type: "action" },
+  { action: "dependency.withdrawn", type: "action" },
+  // What releases before GRA-1636 wrote, read as they were filed: a build
+  // refused packages nobody approved, a build's pin of an approved
+  // graph's artifact dropping, and a resolve changing what a lock's
+  // target is built for.
+  { action: "dependency.admission_refused", type: "action" },
+  { action: "dependency.pin_dropped", type: "action" },
+  { action: "dependency.lock_targets_changed", type: "action" },
   // A builder approving or denying a request, and core revoking one.
   { action: "dependency", type: "decision" },
   // A run reading an attachment of a message its email trigger kept.
