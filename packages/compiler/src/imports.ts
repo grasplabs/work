@@ -65,7 +65,8 @@ interface Edit {
  * elsewhere, as es-module-lexer finds them: each import's specifier
  * replaced by what `moduleFor` answers for it, which throws for one that
  * isn't allowed, or the whole statement by what `statement` answers, when
- * it answers one.
+ * it answers one. Every specifier goes in quoted (`JSON.stringify`),
+ * quotes and all, so nothing a name holds reads as code.
  */
 const pointImports = (
   code: string,
@@ -82,16 +83,11 @@ const pointImports = (
       return [{ start: site.importStart, end: site.importEnd, text: replaced }];
     }
     // An `import()`'s span is its argument, quotes and all; a static
-    // import's, the specifier's text alone.
-    if (site.type === "dynamic") {
-      const module = moduleFor(site.specifier);
-      return [
-        { start: site.start, end: site.end, text: JSON.stringify(module) },
-      ];
-    }
-    return [
-      { start: site.start, end: site.end, text: moduleFor(site.specifier) },
-    ];
+    // import's, the specifier's text alone, between its quotes.
+    const quoted = JSON.stringify(moduleFor(site.specifier));
+    return site.type === "dynamic"
+      ? [{ start: site.start, end: site.end, text: quoted }]
+      : [{ start: site.start - 1, end: site.end + 1, text: quoted }];
   });
   let text = "";
   let at = 0;
@@ -102,15 +98,25 @@ const pointImports = (
   return text + code.slice(at);
 };
 
-/** A name a statement takes or gives: an identifier's, or a string's. */
-const nameOf = (node: Node | undefined): string => {
-  const name = node?.type === "Identifier" ? node.name : node?.value;
-  return typeof name === "string" ? name : "";
-};
-
 /** Why an import of icons can't be read: it names none of them. */
 const iconsByName =
   "import or export icons from lucide-react by name, e.g. { InboxIcon }.";
+
+/**
+ * A name a statement takes or gives, which the icons' statements are
+ * written with: only ever an identifier, whose name holds nothing but an
+ * identifier's characters. A string name (`export { A as "b" }`) is
+ * refused: written back, its text could read as code.
+ */
+const identifierOf = (node: Node | undefined): string => {
+  const name = node?.type === "Identifier" ? node.name : undefined;
+  if (typeof name !== "string") {
+    throw new TypeError(
+      "Icons from lucide-react are imported and exported under plain names, never strings: { InboxIcon }, or { InboxIcon as Inbox }."
+    );
+  }
+  return name;
+};
 
 /**
  * An import or re-export of lucide-react icons by name (`statement`, as
@@ -129,14 +135,20 @@ const iconStatements = (
   return children(read, "specifiers")
     .map((each) => {
       if (each.type === "ExportSpecifier") {
-        const module = JSON.stringify(moduleOf(nameOf(child(each, "local"))));
-        return `export{default as ${nameOf(child(each, "exported"))}}from${module}`;
+        const exported = identifierOf(child(each, "exported"));
+        const module = JSON.stringify(
+          moduleOf(identifierOf(child(each, "local")))
+        );
+        return `export{default as ${exported}}from${module}`;
       }
       if (each.type !== "ImportSpecifier") {
         throw new TypeError(iconsByName);
       }
-      const module = JSON.stringify(moduleOf(nameOf(child(each, "imported"))));
-      return `import ${nameOf(child(each, "local"))} from${module}`;
+      const local = identifierOf(child(each, "local"));
+      const module = JSON.stringify(
+        moduleOf(identifierOf(child(each, "imported")))
+      );
+      return `import ${local} from${module}`;
     })
     .join(";");
 };
