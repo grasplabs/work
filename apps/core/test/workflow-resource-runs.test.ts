@@ -150,7 +150,6 @@ const forgedModule = async (id: string, code: string): Promise<void> => {
     .looseObject({
       build: z.looseObject({
         generator: z.string(),
-        protocol: z.number(),
         compilerVersion: z.string(),
         hash: z.string(),
         artifacts: z.array(
@@ -175,7 +174,6 @@ const forgedModule = async (id: string, code: string): Promise<void> => {
   build.hash = await sha256Hex(
     canonicalJson({
       generator: build.generator,
-      protocol: build.protocol,
       compilerVersion: build.compilerVersion,
       artifacts: build.artifacts
         // As workflow-builds.ts names it: not the definition or source map.

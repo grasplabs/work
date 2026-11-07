@@ -1,7 +1,6 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { valueDepth } from "@grasp-os/shared/value-depth";
-import { generatedWorkflowProtocol } from "@grasp-os/shared/workflow-resources";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowDuration } from "@grasp-os/workerflow/contracts";
 import { runInDurableObject } from "cloudflare:test";
@@ -557,18 +556,18 @@ return { before, after: await late };
     });
   });
 
-  it("refuses a version built for another protocol as one to publish again, not as one changed", async () => {
+  it("refuses a version an earlier platform release built as one to publish again, not as one changed", async () => {
     const old = await sealedWorkflow();
     const row = await env.DB.prepare(
       "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
     )
       .bind(old.workflow.id)
       .first<{ manifest: string }>();
-    // As a version published before this protocol: its manifest, and the
-    // hash every pin reads it by, of the protocol before.
+    // As a version published while builds named a protocol: its manifest,
+    // and the hash every pin reads it by, with one.
     const manifest = (row?.manifest ?? "").replace(
-      `"protocol":${generatedWorkflowProtocol}`,
-      `"protocol":${generatedWorkflowProtocol - 1}`
+      '"build":{',
+      '"build":{"protocol":9,'
     );
     await env.DB.batch([
       env.DB.prepare(
@@ -588,7 +587,7 @@ return { before, after: await late };
         old.workflow.id,
         { version: 1, input: { who: "Ada" }, key: unique() }
       )
-    ).rejects.toMatchObject({ code: "workflow.protocol_unsupported" });
+    ).rejects.toMatchObject({ code: "workflow.format_unsupported" });
   });
 });
 

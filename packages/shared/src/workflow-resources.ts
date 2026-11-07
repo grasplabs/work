@@ -169,10 +169,10 @@ export const workflowResourceErrors = defineErrorFamily({
     "A listen task's events didn't all arrive before its timeout.",
   "workflow.run_paused":
     "This run is paused. Resume it, then confirm what it holds.",
+  "workflow.format_unsupported":
+    "This version was published by an earlier release of the platform that this one doesn't read. Publish it again as a new version.",
   "workflow.start_unconfirmed":
     "The run never started: the workflow engine didn't confirm its start in time, so nothing of it ran. Start the workflow again.",
-  "workflow.protocol_unsupported":
-    "This version was built for a protocol between the platform and workflow code that this platform doesn't run. Publish it again as a new version.",
   "workflow.start_invalid":
     "That isn't a valid start: name an exact published version, and input the workflow accepts.",
   "workflow.start_held_gone":
@@ -915,15 +915,6 @@ export interface WorkflowBinders {
    */
   liveRuns: number;
 }
-
-/**
- * The version of the protocol between the host and the code generated
- * from a JSON workflow: what core's run module calls of the sealed SDK
- * (`@grasp-os/sdk/workflow`).
- * A version built for another one doesn't run
- * (`workflow.protocol_unsupported`): its sealed SDK speaks something else.
- */
-export const generatedWorkflowProtocol = 9;
 
 /**
  * What a version runs: code generated from its definition, compiled and
