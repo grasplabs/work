@@ -814,6 +814,125 @@ export const insertWhere = (
     .select(sql`SELECT ${sql.join(values, sql`, `)} WHERE ${condition}`);
 };
 
+/** A stored JSON list of strings, joined by spaces, as SQL. */
+const joined = (list: typeof permissions.actions): SQL =>
+  sql`(SELECT group_concat(value, ' ') FROM json_each(${list}))`;
+
+/**
+ * The ID of the audit event one statement stores for the permission row,
+ * as SQL: a random UUID (`fresh`, one per statement) whose last part is
+ * the permission's own ID's, so each row's event has its own ID, and every
+ * statement's are new. A UUID still: the version and variant are `fresh`'s,
+ * and a permission's ID is a UUID too.
+ */
+const eventIdSql = (fresh: string): SQL =>
+  sql`${fresh.slice(0, 24)} || lower(substr(${permissions.id}, 25, 12))`;
+
+/**
+ * What `auditDetail` records of a permission row, as SQL: its IDs by name
+ * (connectionId and resource; collectionId; workflowId; appId), its
+ * actions and its binding.
+ */
+const auditDetailSql = sql`json_patch(
+  json_object('subjectType', ${permissions.subjectType}, 'subjectId', ${permissions.subjectId}, 'objectType', ${permissions.objectType}),
+  CASE ${permissions.objectType}
+    WHEN 'connection' THEN json_patch(
+      json_object('connectionId', ${permissions.objectId}),
+      CASE WHEN ${permissions.resource} IS NULL THEN '{}' ELSE json_object('resource', ${permissions.resource}) END
+    )
+    WHEN 'collection' THEN json_object('collectionId', ${permissions.objectId})
+    WHEN 'app' THEN json_object('appId', ${permissions.objectId})
+    WHEN 'workflow' THEN json_object('workflowId', ${permissions.objectId})
+    ELSE '{}'
+  END
+)`;
+
+/**
+ * The statements revoking, for `by`, every permission row `held` finds,
+ * each audited as `permission.revoked` (with `reason` in its detail, when
+ * given), from the rows the batch itself finds, so none is revoked
+ * unaudited, whenever it landed.
+ */
+const revokedWhere = (
+  db: DrizzleD1Database,
+  by: Acting,
+  held: SQL | undefined,
+  reason?: string
+): [BatchItem<"sqlite">, BatchItem<"sqlite">] => {
+  const now = new Date();
+  const eventId = eventIdSql(crypto.randomUUID());
+  const event = sql`json_object(
+    'id', ${eventId},
+    'at', ${now.toISOString()},
+    'source', 'core',
+    'actor', json(${JSON.stringify(by.actor ?? actorOf(by))}),
+    'action', 'permission.revoked',
+    'target', json_object('type', 'permission', 'id', ${permissions.id}),
+    'provenance', json('[]'),
+    'detail', json_set(
+      ${auditDetailSql},
+      '$.actions', ${joined(permissions.actions)},
+      '$.binding', ${permissions.binding}${
+        reason === undefined ? sql`` : sql`, '$.reason', ${reason}`
+      }
+    )
+  )`;
+  return [
+    db
+      .insert(auditOutbox)
+      .select(
+        sql`SELECT ${eventId}, ${event}, ${now.getTime()} FROM ${permissions} WHERE ${held}`
+      ),
+    db
+      .update(permissions)
+      .set({ status: "revoked", revokedBy: by.userId, revokedAt: now })
+      .where(held),
+  ];
+};
+
+/**
+ * The statements revoking, for `by`, every permission of `subject` that
+ * isn't revoked yet, for the batch that removes `subject` (a trigger
+ * deleted), each audited (`revokedWhere`).
+ */
+export const revokedWith = (
+  db: DrizzleD1Database,
+  by: Acting,
+  subject: PermissionSubject
+): [BatchItem<"sqlite">, BatchItem<"sqlite">] =>
+  revokedWhere(
+    db,
+    by,
+    and(ofSubject(subject), ne(permissions.status, "revoked"))
+  );
+
+/**
+ * The statements revoking, for `by`, `subject`'s grants on a store that
+ * still hold binding name `binding`, each audited with the reason: left
+ * from before each App's store was its own, they serve nothing and every
+ * read takes them as not there (`servedSql`), yet the name stays taken
+ * among the subject's live permissions. So a request under that name
+ * frees it in its own batch. A later release removes the rest.
+ */
+const leftoverStoreGrantsRevoked = (
+  db: DrizzleD1Database,
+  by: Acting,
+  subject: PermissionSubject,
+  binding: string
+): [BatchItem<"sqlite">, BatchItem<"sqlite">] =>
+  revokedWhere(
+    db,
+    by,
+    and(
+      ofSubject(subject),
+      eq(permissions.binding, binding),
+      sql`${permissions.objectType} = 'store'`,
+      ne(permissions.status, "revoked"),
+      isNull(permissions.chatId)
+    ),
+    "binding kind removed"
+  );
+
 /**
  * Asks for a permission for an App, an agent, or an independent workflow
  * or trigger. It allows nothing until an admin grants it. Only the
@@ -888,6 +1007,7 @@ export const requestPermission = async (
     // Admitted last, with nothing slow left before the write.
     await admit?.();
     await auditedBatch(env, db, [
+      ...leftoverStoreGrantsRevoked(db, by, subject, binding),
       insertWhere(
         db,
         row,
@@ -1262,80 +1382,6 @@ export const grantPermission = async (
   await tellPolicyChanged(env, permission.subject);
   await tellChat(env, permission, "granted");
   return permission;
-};
-
-/** A stored JSON list of strings, joined by spaces, as SQL. */
-const joined = (list: typeof permissions.actions): SQL =>
-  sql`(SELECT group_concat(value, ' ') FROM json_each(${list}))`;
-
-/**
- * The ID of the audit event one statement stores for the permission row,
- * as SQL: a random UUID (`fresh`, one per statement) whose last part is
- * the permission's own ID's, so each row's event has its own ID, and every
- * statement's are new. A UUID still: the version and variant are `fresh`'s,
- * and a permission's ID is a UUID too.
- */
-const eventIdSql = (fresh: string): SQL =>
-  sql`${fresh.slice(0, 24)} || lower(substr(${permissions.id}, 25, 12))`;
-
-/**
- * What `auditDetail` records of a permission row, as SQL: its IDs by name
- * (connectionId and resource; collectionId; workflowId; appId), its
- * actions and its binding.
- */
-const auditDetailSql = sql`json_patch(
-  json_object('subjectType', ${permissions.subjectType}, 'subjectId', ${permissions.subjectId}, 'objectType', ${permissions.objectType}),
-  CASE ${permissions.objectType}
-    WHEN 'connection' THEN json_patch(
-      json_object('connectionId', ${permissions.objectId}),
-      CASE WHEN ${permissions.resource} IS NULL THEN '{}' ELSE json_object('resource', ${permissions.resource}) END
-    )
-    WHEN 'collection' THEN json_object('collectionId', ${permissions.objectId})
-    WHEN 'app' THEN json_object('appId', ${permissions.objectId})
-    WHEN 'workflow' THEN json_object('workflowId', ${permissions.objectId})
-    ELSE '{}'
-  END
-)`;
-
-/**
- * The statements revoking, for `by`, every permission of `subject` that
- * isn't revoked yet, for the batch that removes `subject` (a trigger
- * deleted): each audited as `permission.revoked`, from the rows the
- * batch itself finds, so none is revoked unaudited, whenever it landed.
- */
-export const revokedWith = (
-  db: DrizzleD1Database,
-  by: Acting,
-  subject: PermissionSubject
-): BatchItem<"sqlite">[] => {
-  const held = and(ofSubject(subject), ne(permissions.status, "revoked"));
-  const now = new Date();
-  const eventId = eventIdSql(crypto.randomUUID());
-  const event = sql`json_object(
-    'id', ${eventId},
-    'at', ${now.toISOString()},
-    'source', 'core',
-    'actor', json(${JSON.stringify(by.actor ?? actorOf(by))}),
-    'action', 'permission.revoked',
-    'target', json_object('type', 'permission', 'id', ${permissions.id}),
-    'provenance', json('[]'),
-    'detail', json_set(
-      ${auditDetailSql},
-      '$.actions', ${joined(permissions.actions)},
-      '$.binding', ${permissions.binding}
-    )
-  )`;
-  return [
-    db
-      .insert(auditOutbox)
-      .select(
-        sql`SELECT ${eventId}, ${event}, ${now.getTime()} FROM ${permissions} WHERE ${held}`
-      ),
-    db
-      .update(permissions)
-      .set({ status: "revoked", revokedBy: by.userId, revokedAt: now })
-      .where(held),
-  ];
 };
 
 /**

@@ -651,6 +651,58 @@ describe("permissions", () => {
     }).toStrictEqual({ listed: false, granted: "permission.not_found" });
   });
 
+  // Hidden, a leftover store grant would still hold its binding name, and
+  // nobody could revoke it to free the name: a request under that name
+  // revokes it in its own batch, audited with why.
+  it("free a binding name a leftover grant on a store holds, revoking it audited", async () => {
+    const admin = await permissionApi("admin");
+    const app = await newApp(admin.api);
+    const store = await storeOfNewApp(env, await admin.api.whoami());
+    const left = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+        actions, binding, status, requested_by, requested_at, granted_by, granted_at)
+       VALUES (?, 'app', ?, 'store', ?, '["notes.list"]', 'OUTLOOK', 'active', 'test', 0, 'test', 0)`
+    )
+      .bind(left, app.appId, store)
+      .run();
+
+    const requested = await outcome(
+      admin.api.permissions.request(outlook(app.appId))
+    );
+    const row = await env.DB.prepare(
+      "SELECT status, revoked_by AS revokedBy FROM permissions WHERE id = ?"
+    )
+      .bind(left)
+      .first<{ status: string; revokedBy: string | null }>();
+    const events = await allEvents();
+    const revoked = events.filter(
+      ({ action, target }) =>
+        action === "permission.revoked" && target?.id === left
+    );
+    const { userId } = await admin.api.whoami();
+
+    expect({
+      requested,
+      row,
+      revoked: revoked.map(({ actor, detail }) => ({
+        actor,
+        reason: detail?.reason,
+        binding: detail?.binding,
+      })),
+    }).toStrictEqual({
+      requested: "ok",
+      row: { status: "revoked", revokedBy: userId },
+      revoked: [
+        {
+          actor: { type: "person", userId },
+          reason: "binding kind removed",
+          binding: "OUTLOOK",
+        },
+      ],
+    });
+  });
+
   it("are refused for an App that isn't in the registry", async () => {
     const admin = await permissionApi("admin");
     const missing = { type: "app" as const, appId: `app-${unique()}` };
