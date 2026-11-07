@@ -15,7 +15,10 @@ import {
 import { rescanPackages } from "../src/packages/rescan.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
-import { createWorkflowResource } from "../src/workflow-resources.ts";
+import {
+  createWorkflowResource,
+  deleteWorkflowResource,
+} from "../src/workflow-resources.ts";
 import {
   advise,
   daysAgo,
@@ -64,6 +67,31 @@ const asked = async (
     })),
     ...(entries === undefined ? {} : { entries }),
   });
+
+/** `by`'s request taking `names` out of workflow `workflow`'s packages. */
+const removing = async (
+  by: Acting,
+  workflow: string,
+  names: string[]
+): Promise<DependencyRequest> =>
+  await resolveDependencies(env, by, {
+    workflow,
+    purpose: "No longer needed.",
+    dependencies: [],
+    remove: names,
+  });
+
+/** What building workflow `workflow`'s graph `graphHash` comes to. */
+const builds = async (by: Acting, workflow: string, graphHash: string) =>
+  await outcome(
+    buildPackages(
+      env,
+      actorOf(by),
+      { type: "workflow", id: workflow },
+      graphHash,
+      "worker"
+    )
+  );
 
 /** `by`'s decision on `request`, on the graph it shows. */
 const decided = async (
@@ -337,6 +365,86 @@ describe("deciding packages", () => {
   });
 });
 
+describe("one current approval", () => {
+  it("lets a removal hold: a graph approved before is no longer built once another replaces it", async () => {
+    const [a, b] = [await published("left"), await published("right")];
+    const { builder, workflow } = await workflowOfBuilder();
+    const first = await asked(builder, workflow, { [a]: "^1.0.0" });
+    await decided(builder, first);
+    const both = await asked(builder, workflow, { [b]: "^1.0.0" });
+    await decided(builder, both);
+
+    const removal = await removing(builder, workflow, [b]);
+    const waiting = removal.status;
+    await decided(builder, removal);
+
+    expect({
+      // The same graph as the first approval, asked for again: a new
+      // request, never the replaced approval standing in for it.
+      sameGraph: removal.graphHash === first.graphHash,
+      waiting,
+      current: await approvedOf(builder, workflow),
+      onlyA: await builds(builder, workflow, removal.graphHash),
+      both: await builds(builder, workflow, both.graphHash),
+    }).toStrictEqual({
+      sameGraph: true,
+      waiting: "pending",
+      current: removal.id,
+      onlyA: "ok",
+      both: "dependency.approval_required",
+    });
+  });
+
+  it("asks again for a package removed before, never stuck on the approval that had it", async () => {
+    const [a, b] = [await published("left"), await published("right")];
+    const { builder, workflow } = await workflowOfBuilder();
+    const both = await asked(builder, workflow, {
+      [a]: "^1.0.0",
+      [b]: "^1.0.0",
+    });
+    await decided(builder, both);
+    await decided(builder, await removing(builder, workflow, [b]));
+
+    const again = await asked(builder, workflow, { [b]: "^1.0.0" });
+    const waiting = again.status;
+    await decided(builder, again);
+
+    expect({
+      sameGraph: again.graphHash === both.graphHash,
+      waiting,
+      current: await approvedOf(builder, workflow),
+      built: await builds(builder, workflow, again.graphHash),
+    }).toStrictEqual({
+      sameGraph: true,
+      waiting: "pending",
+      current: again.id,
+      built: "ok",
+    });
+  });
+
+  it("falls back on nothing once the current approval is revoked", async () => {
+    const [a, b] = [await published("left"), await published("right")];
+    const { builder, workflow } = await workflowOfBuilder();
+    const first = await asked(builder, workflow, { [a]: "^1.0.0" });
+    await decided(builder, first);
+    const both = await asked(builder, workflow, { [b]: "^1.0.0" });
+    await decided(builder, both);
+    await reportToOsv(b, "1.0.0", "MAL-2026-40005");
+
+    await rescannedUntil(both.id, new Date());
+
+    expect({
+      current: await approvedOf(builder, workflow),
+      before: await builds(builder, workflow, first.graphHash),
+      revoked: await builds(builder, workflow, both.graphHash),
+    }).toStrictEqual({
+      current: null,
+      before: "dependency.approval_required",
+      revoked: "dependency.revoked",
+    });
+  });
+});
+
 describe("building approved packages", () => {
   it("builds nothing nobody approved", async () => {
     const name = await published();
@@ -469,6 +577,48 @@ describe("building approved packages", () => {
     });
   });
 
+  it("reaches no package of the graph that isn't one of the importing package's own dependencies", async () => {
+    const sibling = await published("sibling");
+    const name = named("reaches");
+    await publish({
+      name,
+      version: "1.0.0",
+      entries: [
+        manifestEntry(name, { type: "module", main: "index.js" }),
+        {
+          path: "package/index.js",
+          content: `export * from ${JSON.stringify(sibling)};`,
+        },
+      ],
+    });
+    // Both in the graph, as the App's own: neither depends on the other.
+    const { builder, workflow } = await workflowOfBuilder();
+    const request = await asked(
+      builder,
+      workflow,
+      { [name]: "^1.0.0", [sibling]: "^1.0.0" },
+      [name]
+    );
+    await decided(builder, request);
+
+    const { modules, refused } = await buildPackages(
+      env,
+      actorOf(builder),
+      { type: "workflow", id: workflow },
+      request.graphHash,
+      "worker"
+    );
+
+    expect({ built: Object.keys(modules), refused }).toStrictEqual({
+      built: [],
+      refused: {
+        [name]: [
+          expect.stringContaining(`${sibling}, which it doesn't depend on`),
+        ],
+      },
+    });
+  });
+
   it("refuses packages that stopped the builder themselves, and says the sandbox was unavailable when a crash cut it off", async () => {
     const name = await published();
     const { builder, workflow, request } = await approvedPackage(name);
@@ -555,6 +705,53 @@ describe("rescanning approved packages", () => {
       told: [{ name, advisory: "GHSA-dddd-eeee-ffff" }],
       approved: request.id,
     });
+  });
+
+  it("revokes a graph reported as malware for every workflow approved with it, at once", async () => {
+    const name = await published();
+    const one = await approvedPackage(name);
+    const other = await approvedPackage(name);
+    const at = new Date();
+    // The other's approval just scanned: only one is due on this run.
+    await env.DB.prepare(
+      "UPDATE dependency_requests SET malware_checked_at = ? WHERE id = ?"
+    )
+      .bind(at.getTime(), other.request.id)
+      .run();
+    await reportToOsv(name, "1.0.0", "MAL-2026-40006");
+
+    await rescannedUntil(one.request.id, at);
+
+    expect({
+      sameGraph: one.request.graphHash === other.request.graphHash,
+      one: await approvedOf(one.builder, one.workflow),
+      other: await approvedOf(other.builder, other.workflow),
+      told: await noticesOf(other.builder.userId, "package_revoked"),
+    }).toStrictEqual({
+      sameGraph: true,
+      one: null,
+      other: null,
+      told: [{ name, advisory: "MAL-2026-40006" }],
+    });
+  });
+
+  it("stops on a deleted workflow's packages: its approval is withdrawn, audited", async () => {
+    const name = await published();
+    const { builder, workflow, request } = await approvedPackage(name);
+
+    const events = await auditedDuring(async () => {
+      await deleteWorkflowResource(env, builder, workflow);
+    });
+    const row = await env.DB.prepare(
+      "SELECT status FROM dependency_requests WHERE id = ?"
+    )
+      .bind(request.id)
+      .first<{ status: string }>();
+
+    expect({
+      status: row?.status,
+      audited: events.some(({ action }) => action === "dependency.withdrawn"),
+    }).toStrictEqual({ status: "revoked", audited: true });
   });
 
   it("changes nothing when the sources can't be read", async () => {

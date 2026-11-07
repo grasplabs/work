@@ -9,6 +9,7 @@ import {
 } from "@grasp-os/shared/packages";
 import type { GraspLock, PackageTarball } from "@grasp-os/shared/packages";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
 import type { OutboxEnv } from "../audit-outbox.ts";
@@ -51,9 +52,14 @@ export type PackageBuildEnv = PlatformEnv &
 // - What the builder answers: its code is Grasp's, but it handled hostile
 //   bytes, so its answer is checked like any input.
 //
-// Nothing is kept here: the modules go into the build of what uses them
-// (a workflow version's, workflows/sealed-packages.ts), whose artifacts
-// are content-addressed and collected as releases' are.
+// - A cached build standing in for governance: an App's bundle bytes may
+//   come from the build cache (`appPackageModules`), keyed by the graph's
+//   hash, which covers every tarball's integrity; the approval, the
+//   malware check and the audit run on every build all the same.
+//
+// A workflow's modules go into the version that seals them
+// (workflows/sealed-packages.ts), whose artifacts are content-addressed
+// and collected as releases' are.
 
 /**
  * Most bytes of modules core takes from the sandbox host: what a workflow
@@ -128,31 +134,24 @@ export const runBuilder = async (
   };
 };
 
-/**
- * Each entry of `subject`'s approved graph `graphHash`, built into one ES
- * module for `target`, by entry, audited as an install by `actor`
- * (`dependency.built`); and the approval it stands on.
- */
-export const buildPackages = async (
-  env: PackageBuildEnv,
-  actor: AuditActor,
-  subject: DependencySubject,
-  graphHash: string,
-  target: PackageTarget
-): Promise<{
-  approval: string;
+/** What one build of a graph makes: each entry's module, or why not. */
+interface Bundled {
   modules: Record<string, string>;
   refused: Record<string, string[]>;
-}> => {
-  // Refused at once where nothing bounds the builder, before any tarball
-  // is fetched.
-  sessionHost(env);
-  const { approval, lock } = await approvedLock(env, subject, graphHash);
+}
+
+/**
+ * Each entry of `lock` built into one ES module for `target`, from
+ * tarballs checked against the lock's integrity, in the package builder's
+ * isolate for `subject`.
+ */
+const bundle = async (
+  env: PackageBuildEnv,
+  subject: DependencySubject,
+  lock: GraspLock,
+  target: PackageTarget
+): Promise<Bundled> => {
   const locked = Object.values(lock.packages);
-  const [first, ...rest] = await knownMalwareIn(env, locked);
-  if (first !== undefined) {
-    await refuseMalware(env, actor, subject, [first, ...rest], "build");
-  }
   const tarballs: PackageTarball[] = [];
   let archived = 0;
   for (const { name, version, integrity } of locked) {
@@ -216,6 +215,68 @@ export const buildPackages = async (
   ) {
     throw new Error("The package builder left out an entry.");
   }
+  return { modules, refused };
+};
+
+/** A cached build's text, read back as it was written. */
+const bundledSchema = z.object({
+  modules: z.record(z.string(), z.string()),
+  refused: z.record(z.string(), z.array(z.string())),
+});
+
+/**
+ * `bundle`, its bytes kept in the build cache under graph `graphHash`'s
+ * hash, which covers every tarball's integrity, and `target`: the same
+ * graph makes the same modules, whichever App asked first.
+ */
+const bundleCached = async (
+  env: PackageBuildEnv,
+  subject: DependencySubject,
+  lock: GraspLock,
+  graphHash: string,
+  target: PackageTarget
+): Promise<Bundled> => {
+  const { text } = await throughCache(
+    env,
+    await cacheKeyOf("package-modules", [graphHash, target]),
+    async () => ({
+      text: JSON.stringify(await bundle(env, subject, lock, target)),
+      cache: true,
+    })
+  );
+  return bundledSchema.parse(JSON.parse(text));
+};
+
+/**
+ * Each entry of `subject`'s current approved graph `graphHash`, built into
+ * one ES module for `target`, by entry, audited as an install by `actor`
+ * (`dependency.built`); and the approval it stands on. With `cached`, the
+ * bytes may come from, and go to, the build cache under the graph's hash
+ * and `target`: the approval and the malware check (failing closed) are
+ * made, and the build audited, all the same.
+ */
+export const buildPackages = async (
+  env: PackageBuildEnv,
+  actor: AuditActor,
+  subject: DependencySubject,
+  graphHash: string,
+  target: PackageTarget,
+  cached = false
+): Promise<Bundled & { approval: string }> => {
+  // Refused at once where nothing bounds the builder, before any tarball
+  // is fetched.
+  sessionHost(env);
+  const { approval, lock } = await approvedLock(env, subject, graphHash);
+  const [first, ...rest] = await knownMalwareIn(
+    env,
+    Object.values(lock.packages)
+  );
+  if (first !== undefined) {
+    await refuseMalware(env, actor, subject, [first, ...rest], "build");
+  }
+  const { modules, refused } = cached
+    ? await bundleCached(env, subject, lock, graphHash, target)
+    : await bundle(env, subject, lock, target);
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     outboxed(db, {
@@ -237,10 +298,11 @@ export const buildPackages = async (
 /**
  * What an App's page (`browser`) or server (`worker`) build is handed of
  * its approved packages (the compiler's `packageModulesFile`): its
- * latest approval's graph, each entry bundled for `target`, cached by
- * graph and target as every build is; none while it has no approval. A
- * graph revoked since is no approval: the next build refuses what imports
- * it, as not approved.
+ * current approval's graph, each entry bundled for `target`, the bytes
+ * cached by graph and target; none while it has no approval. Each build
+ * checks the approval and the malware sources again, and is audited for
+ * the App. A graph revoked since is no approval: the next build refuses
+ * what imports it, as not approved.
  */
 export const appPackageModules = async (
   env: PackageBuildEnv,
@@ -252,19 +314,13 @@ export const appPackageModules = async (
   if (graphHash === undefined) {
     return undefined;
   }
-  const { text } = await throughCache(
+  const { modules } = await buildPackages(
     env,
-    await cacheKeyOf("app-packages", [graphHash, target]),
-    async () => {
-      const { modules } = await buildPackages(
-        env,
-        { type: "system" },
-        subject,
-        graphHash,
-        target
-      );
-      return { text: JSON.stringify({ graphHash, modules }), cache: true };
-    }
+    { type: "system" },
+    subject,
+    graphHash,
+    target,
+    true
   );
-  return text;
+  return JSON.stringify({ graphHash, modules });
 };

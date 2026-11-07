@@ -2548,8 +2548,11 @@ export const workflowDecisionConfirmations = sqliteTable(
  * graph's hash, and the review (`snapshot`: the lock and its findings, as
  * JSON). `status` moves from `pending` once, in one conditional update,
  * to a builder's decision (`approved`, `denied`), which keeps who made it,
- * when and why; the clock's rescan may later revoke an approval as
- * malware (`revoked`, `ended_at`, `ended_reason`). A decided row is never
+ * when and why. A subject has one current approval: approving another
+ * retires it (`retired`), still in force for what was built on it; the
+ * clock's rescan revokes every row of a graph reported as malware, and an
+ * App's removal or a workflow's deletion withdraws its own (`revoked`,
+ * `ended_at`, `ended_reason`). A decided row is never
  * deleted; a pending one is deleted when another request for the subject
  * takes its place, and its audit event keeps its ID and hash.
  *
@@ -2557,7 +2560,7 @@ export const workflowDecisionConfirmations = sqliteTable(
  * dropped by GRA-1547 (expand, then contract): `source_revision`,
  * `targets`, `summary`, `refused`, `previous`, `policy_generation`,
  * `decided_generation`, `ended_by`, `ended_generation`, written only as
- * the NOT NULL ones must be; the `retired` status.
+ * the NOT NULL ones must be.
  */
 export const dependencyRequests = sqliteTable(
   "dependency_requests",

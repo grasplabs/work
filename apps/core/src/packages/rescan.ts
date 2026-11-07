@@ -4,7 +4,7 @@ import type { DependencySubject } from "@grasp-os/shared/dependencies";
 import { packageKey } from "@grasp-os/shared/dependencies";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { packageErrors } from "@grasp-os/shared/packages";
-import { and, asc, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -14,24 +14,30 @@ import {
 } from "../audit-outbox.ts";
 import { dependencyRequests } from "../db/core/schema.ts";
 import { packageNoticed } from "../notifications.ts";
-import { malwareEntries, requestEntry, snapshotOf } from "./approvals.ts";
+import {
+  inForce,
+  malwareEntries,
+  requestEntry,
+  snapshotOf,
+} from "./approvals.ts";
 import { scanPackages } from "./malware.ts";
 import { buildersOf } from "./subjects.ts";
 
-// Approved packages scanned again on core's clock (clock.ts): each
-// approval at most every `rescanMs`, the longest unscanned first, a few a
-// run. What could go wrong, and what stops it:
+// Approvals in force (`inForce`: current, or replaced but still what an
+// older release or version runs on) scanned again on core's clock
+// (clock.ts): each at most every `rescanMs`, the longest unscanned first,
+// a few a run. What could go wrong, and what stops it:
 //
-// - Malware reported after approval running on: an approval a report
-//   covers is revoked, by core, in one batch that lands only while it is
-//   still approved, with its audit event and a notice to the App's or
-//   workflow's builders. Nothing of a revoked graph is built any more, no
+// - Malware reported after approval running on: every row in force of a
+//   graph a report covers is revoked, by core, whichever App or workflow
+//   it is of, in one batch, each with its audit event and a notice to its
+//   builders. Nothing of a revoked graph is built or served any more, no
 //   start or call of a workflow sealing it is admitted
 //   (workflows/package-seal.ts), and a run in flight fails at its next
 //   call.
-// - A new advisory going unnoticed: one not known as the graph was
-//   approved, or at its last scan, is audited and told to its builders
-//   once; the approval stands, as every other finding only warns.
+// - A new advisory going unnoticed: one not known of a current approval
+//   as it was approved, or at its last scan, is audited and told to its
+//   builders once; the approval stands, as every other finding only warns.
 // - Sources out of reach taken as clean: a scan that can't read either
 //   source changes nothing, is logged, and ends the run; the next asks
 //   again.
@@ -47,9 +53,88 @@ const coreActor: AuditActor = { type: "system" };
 
 type Row = typeof dependencyRequests.$inferSelect;
 
-/** That `row` is still the approval it was as it was read, as SQL. */
-const stillApproved = (row: Row) =>
-  sql`EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.id} = ${row.id} AND ${dependencyRequests.status} = 'approved')`;
+/** That `row` is still in force as the statement runs, as SQL. */
+const stillInForce = (row: Pick<Row, "id">) =>
+  sql`EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.id} = ${row.id} AND ${dependencyRequests.status} IN ('approved', 'retired'))`;
+
+/**
+ * Revokes every row in force of `row`'s graph for `malware`, by core: one
+ * audit event and builders' notice each, every App and workflow sharing
+ * the graph at once, in one batch.
+ */
+const revokeGraph = async (
+  env: Env,
+  row: Row,
+  scanned: Awaited<ReturnType<typeof scanPackages>>,
+  at: Date
+): Promise<void> => {
+  const [malware] = scanned.malware;
+  if (malware === undefined) {
+    return;
+  }
+  const db = drizzle(env.DB);
+  const sharing = await db
+    .select()
+    .from(dependencyRequests)
+    .where(
+      and(
+        eq(dependencyRequests.graphHash, row.graphHash),
+        inArray(dependencyRequests.status, [...inForce])
+      )
+    );
+  const statements = await Promise.all(
+    sharing.map(async (each) => {
+      const subject: DependencySubject = {
+        type: each.subjectType,
+        id: each.subjectId,
+      };
+      const revoked = createAuditEvent(
+        requestEntry(coreActor, "revoked", each, {
+          reason: "malware",
+          package: malware.package.name,
+          version: malware.package.version,
+          advisory: malware.advisory,
+          found: scanned.malware.length,
+        }),
+        "core"
+      );
+      return [
+        outboxedEventWhere(db, revoked, stillInForce(each)),
+        db
+          .update(dependencyRequests)
+          .set({
+            status: "revoked",
+            endedAt: at,
+            endedReason: `Reported as malware: ${packageKey(malware.package)} (${malware.advisory})`,
+            malwareCheckedAt: at,
+          })
+          .where(
+            and(eq(dependencyRequests.id, each.id), storedEvent(revoked.id))
+          ),
+        ...malwareEntries(coreActor, subject, scanned.malware, "rescan").map(
+          (entry) =>
+            outboxedEventWhere(
+              db,
+              createAuditEvent(entry, "core"),
+              storedEvent(revoked.id)
+            )
+        ),
+        ...packageNoticed(db, {
+          type: "package_revoked",
+          subject,
+          package: malware.package,
+          advisory: malware.advisory,
+          personIds: await buildersOf(env, subject),
+          recorded: storedEvent(revoked.id),
+        }),
+      ];
+    })
+  );
+  const [first, ...rest] = statements.flat();
+  if (first !== undefined) {
+    await auditedBatch(env, db, [first, ...rest]);
+  }
+};
 
 /**
  * Scans approval `row` again: revoked for malware, its builders told of
@@ -77,54 +162,19 @@ const rescanApproval = async (
     });
     return false;
   }
-  const db = drizzle(env.DB);
-  const builders = await buildersOf(env, subject);
-  const [malware] = scanned.malware;
-  if (malware !== undefined) {
-    const revoked = createAuditEvent(
-      requestEntry(coreActor, "revoked", row, {
-        reason: "malware",
-        package: malware.package.name,
-        version: malware.package.version,
-        advisory: malware.advisory,
-        found: scanned.malware.length,
-      }),
-      "core"
-    );
-    await auditedBatch(env, db, [
-      outboxedEventWhere(db, revoked, stillApproved(row)),
-      db
-        .update(dependencyRequests)
-        .set({
-          status: "revoked",
-          endedAt: at,
-          endedReason: `Reported as malware: ${packageKey(malware.package)} (${malware.advisory})`,
-          malwareCheckedAt: at,
-        })
-        .where(and(eq(dependencyRequests.id, row.id), storedEvent(revoked.id))),
-      ...malwareEntries(coreActor, subject, scanned.malware, "rescan").map(
-        (entry) =>
-          outboxedEventWhere(
-            db,
-            createAuditEvent(entry, "core"),
-            storedEvent(revoked.id)
-          )
-      ),
-      ...packageNoticed(db, {
-        type: "package_revoked",
-        subject,
-        package: malware.package,
-        advisory: malware.advisory,
-        personIds: builders,
-        recorded: storedEvent(revoked.id),
-      }),
-    ]);
+  if (scanned.malware.length > 0) {
+    await revokeGraph(env, row, scanned, at);
     return true;
   }
+  const db = drizzle(env.DB);
+  const builders = await buildersOf(env, subject);
   const known = new Set(row.advisories);
-  const found = scanned.advisories.filter(
-    ({ advisory }) => !known.has(advisory.id)
-  );
+  // Advisories are told of the current approval only: a replaced one runs
+  // only what was built before, until it is built again.
+  const found =
+    row.status === "approved"
+      ? scanned.advisories.filter(({ advisory }) => !known.has(advisory.id))
+      : [];
   const events = found.map(({ advisory, package: ref }) =>
     createAuditEvent(
       requestEntry(coreActor, "advisory_found", row, {
@@ -149,7 +199,7 @@ const rescanApproval = async (
       .where(
         and(
           eq(dependencyRequests.id, row.id),
-          eq(dependencyRequests.status, "approved"),
+          eq(dependencyRequests.status, row.status),
           row.malwareCheckedAt === null
             ? isNull(dependencyRequests.malwareCheckedAt)
             : eq(dependencyRequests.malwareCheckedAt, row.malwareCheckedAt)
@@ -184,7 +234,7 @@ export const rescanPackages = async (
     .from(dependencyRequests)
     .where(
       and(
-        eq(dependencyRequests.status, "approved"),
+        inArray(dependencyRequests.status, [...inForce]),
         or(
           isNull(dependencyRequests.malwareCheckedAt),
           lt(

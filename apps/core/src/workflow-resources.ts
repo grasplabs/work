@@ -96,6 +96,7 @@ import {
   workflowStateWrites,
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
+import { withdrawnWith } from "./packages/approvals.ts";
 import { checkWorkflowExpressions, withinBuildWait } from "./pages.ts";
 import { namedProjectsFor, requireStillBuilt } from "./project-access.ts";
 import { projectStillBuiltSql } from "./project-sql.ts";
@@ -1862,7 +1863,7 @@ const writeVersion = async (
         workflowResourceId: sql`(SELECT id FROM workflow_resources
         WHERE id = ${workflow.id} AND deleted_at IS NULL
           AND current_version IS ${workflow.currentVersion}
-          AND ${packages === undefined ? sql`1` : packagesHoldSql(workflow.id, packages.graphHash)})`,
+          AND ${packages === undefined ? sql`1` : packagesHoldSql(workflow.id, packages.graphHash, true)})`,
         version,
         definitionVersion,
         definition,
@@ -1925,7 +1926,7 @@ const writeVersion = async (
     if (
       packages !== undefined &&
       notNullFailed(error, "workflow_resource_versions.workflow_resource_id") &&
-      !(await packagesHold(db, workflow.id, packages.graphHash))
+      !(await packagesHold(db, workflow.id, packages.graphHash, true))
     ) {
       throw dependencyErrors.create("dependency.revoked");
     }
@@ -2874,11 +2875,12 @@ const deletedOnce = async (
   id: string
 ): Promise<boolean> => {
   const db = drizzle(env.DB);
+  const now = new Date();
   const [deleted] = await auditedBatch(env, db, [
     db
       .update(workflowResources)
       .set({
-        deletedAt: new Date(),
+        deletedAt: now,
         policyGeneration: sql`${workflowResources.policyGeneration} + 1`,
       })
       .where(
@@ -2890,6 +2892,13 @@ const deletedOnce = async (
       )
       .returning({ id: workflowResources.id }),
     outboxedIfChanged(db, entry(by, "workflow.deleted", id)),
+    ...withdrawnWith(
+      db,
+      by.actor ?? actorOf(by),
+      { type: "workflow", id },
+      sql`EXISTS (SELECT 1 FROM workflow_resources WHERE id = ${id} AND deleted_at IS NOT NULL)`,
+      now
+    ),
     // Its draft (workflow-drafts.ts) is never read again, and may hold a
     // sensitive parameter's default: it goes once it is deleted.
     db.delete(workflowResourceDrafts).where(

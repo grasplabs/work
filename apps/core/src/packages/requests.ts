@@ -23,7 +23,7 @@ import { graspLockHash, packageErrors } from "@grasp-os/shared/packages";
 import type { GraspLock } from "@grasp-os/shared/packages";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
@@ -33,6 +33,7 @@ import { isUniqueViolation } from "../db/d1.ts";
 import { workspace } from "../durable-objects.ts";
 import {
   latest,
+  ofSubject,
   refuseMalware,
   requestEntry,
   snapshotOf,
@@ -65,6 +66,10 @@ import { builtSubject, subjectName, subjectOfInput } from "./subjects.ts";
 //   the clock revokes an approval a later report covers (rescan.ts).
 // - Packages used without an approval: `approvedLock` is the only way to
 //   a graph's lock for a build, and only an approved row holds one.
+// - An older approval coming back: a subject has one current approval.
+//   Approving another retires it in the decision's batch, so a removal
+//   holds, a package removed can be asked for again, and revoking the
+//   current one leaves no approval to fall back on.
 //
 // Every request, decision, refusal of malware and revocation is audited.
 
@@ -90,8 +95,7 @@ const toRequest = async (env: Env, row: Row): Promise<DependencyRequest> => {
   return {
     id: row.id,
     subject: { type: row.subjectType, id: row.subjectId, name },
-    // `retired` is a status only an older release wrote: in force for
-    // nothing, as revoked.
+    // Replaced by a later approval: no longer the subject's packages.
     status: row.status === "retired" ? "revoked" : row.status,
     purpose: row.purpose,
     graphHash: row.graphHash,
@@ -410,6 +414,14 @@ export const decideDependency = async (
     await refuseKnownMalware(env, actor, row);
   }
   const status = approved ? "approved" : "denied";
+  const subject: DependencySubject = {
+    type: row.subjectType,
+    id: row.subjectId,
+  };
+  const replaced = approved
+    ? await latest(env, subject, "approved")
+    : undefined;
+  const decidedAt = new Date();
   // What was known of it as it was approved: the clock tells its builders
   // of any advisory past these (rescan.ts).
   const known = snapshotOf(row).findings.flatMap(({ id: advisory }) =>
@@ -421,7 +433,7 @@ export const decideDependency = async (
       .set({
         status,
         decidedBy: by.userId,
-        decidedAt: new Date(),
+        decidedAt,
         decidedGeneration: 0,
         reason: reason ?? null,
         advisories: approved ? [...new Set(known)] : null,
@@ -442,6 +454,31 @@ export const decideDependency = async (
         ...(reason === undefined ? {} : { reason }),
       })
     ),
+    // The approval it replaces retires, and only once this one landed:
+    // one current approval per subject.
+    ...(replaced === undefined
+      ? []
+      : [
+          db
+            .update(dependencyRequests)
+            .set({
+              status: "retired",
+              endedAt: decidedAt,
+              endedReason: `Replaced by request ${row.id}`,
+            })
+            .where(
+              and(
+                ofSubject(subject),
+                eq(dependencyRequests.status, "approved"),
+                ne(dependencyRequests.id, row.id),
+                sql`EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.id} = ${row.id} AND ${dependencyRequests.status} = 'approved')`
+              )
+            ),
+          outboxedIfChanged(
+            db,
+            requestEntry(actor, "retired", replaced, { by: row.id })
+          ),
+        ]),
   ]);
   if (!decided) {
     throw dependencyErrors.create("dependency.stale");

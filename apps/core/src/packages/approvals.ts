@@ -6,12 +6,13 @@ import type {
 } from "@grasp-os/shared/dependencies";
 import { graspLockSchema } from "@grasp-os/shared/packages";
 import type { GraspLock } from "@grasp-os/shared/packages";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxed } from "../audit-outbox.ts";
+import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import type { OutboxEnv } from "../audit-outbox.ts";
 import { dependencyRequests } from "../db/core/schema.ts";
 import type { MalwareFound } from "./malware.ts";
@@ -66,6 +67,60 @@ export const requestEntry = (
     ...detail,
   },
 });
+
+/**
+ * The statuses of an approval still in force for what was built on it: the
+ * subject's one current approval (`approved`), and one a later approval
+ * of the subject replaced (`retired`), which a release or a workflow
+ * version built before keeps running on. Only the current approval is
+ * proposed against, built or sealed; malware revokes both.
+ */
+export const inForce = ["approved", "retired"] as const;
+
+/**
+ * The statements that withdraw `subject`'s approvals once it is gone (an
+ * App removed, a workflow deleted, as `gone` says when they run), for a
+ * batch that does that: what is in force is revoked, so the clock stops
+ * scanning it and nothing of it is served, audited by `actor`; a request
+ * still waiting goes, as nobody can decide it now.
+ */
+export const withdrawnWith = (
+  db: DrizzleD1Database,
+  actor: AuditActor,
+  subject: DependencySubject,
+  gone: SQL,
+  at: Date
+) =>
+  [
+    db
+      .update(dependencyRequests)
+      .set({
+        status: "revoked",
+        endedAt: at,
+        endedReason:
+          subject.type === "app"
+            ? "Withdrawn: the App was removed."
+            : "Withdrawn: the workflow was deleted.",
+      })
+      .where(
+        and(
+          ofSubject(subject),
+          inArray(dependencyRequests.status, [...inForce]),
+          gone
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor,
+      action: "dependency.withdrawn",
+      target: auditTargetOf(subject),
+      detail: { [subject.type]: subject.id },
+    }),
+    db
+      .delete(dependencyRequests)
+      .where(
+        and(ofSubject(subject), eq(dependencyRequests.status, "pending"), gone)
+      ),
+  ] as const;
 
 /** The request of `subject` in `status`, newest decision first, if any. */
 export const latest = async (
@@ -145,10 +200,11 @@ export const refuseMalware = async (
 };
 
 /**
- * The approved lock of `subject`'s graph `graphHash`, and the approval it
- * stands on: the one way to a graph's packages for a build or an export.
- * `dependency.revoked` for a graph core revoked; `dependency.approval_required`
- * for anything else not approved.
+ * The lock of `subject`'s graph `graphHash` while it is the subject's
+ * current approval, and that approval: the one way to a graph's packages
+ * for a build, a seal or an export. `dependency.revoked` for a graph core
+ * revoked; `dependency.approval_required` for anything else, one a later
+ * approval replaced too.
  */
 export const approvedLock = async (
   env: Pick<Env, "DB">,
@@ -166,8 +222,8 @@ export const approvedLock = async (
 };
 
 /**
- * The lock of `subject`'s latest approval in force, if any: what a new
- * request adds to, or takes packages out of.
+ * The lock of `subject`'s current approval, if any: what a new request
+ * adds to, or takes packages out of.
  */
 export const latestApprovedLock = async (
   env: Pick<Env, "DB">,
@@ -177,7 +233,7 @@ export const latestApprovedLock = async (
   return approved === undefined ? undefined : snapshotOf(approved).lock;
 };
 
-/** The graph of `subject`'s latest approval in force, if any. */
+/** The graph of `subject`'s current approval, if any. */
 export const latestApproval = async (
   env: Pick<Env, "DB">,
   subject: DependencySubject
@@ -187,9 +243,10 @@ export const latestApproval = async (
 };
 
 /**
- * Whether graph `graphHash` is approved for anyone now: what serving or
- * loading a build that bundles it requires. A graph is its packages'
- * exact bytes, so one revoked as malware is revoked for every App.
+ * Whether graph `graphHash` is in force for anyone now (`inForce`): what
+ * serving or loading a build that bundles it requires. A graph is its
+ * packages' exact bytes, so malware revokes every row of it at once
+ * (rescan.ts), for every App.
  */
 export const graphApproved = async (
   env: Env,
@@ -201,7 +258,7 @@ export const graphApproved = async (
     .where(
       and(
         eq(dependencyRequests.graphHash, graphHash),
-        eq(dependencyRequests.status, "approved")
+        inArray(dependencyRequests.status, [...inForce])
       )
     )
     .limit(1)

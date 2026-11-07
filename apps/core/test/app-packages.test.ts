@@ -10,6 +10,7 @@ import { appDefinition } from "./app-definitions.ts";
 import { named, publish, reportToOsv, rescannedUntil } from "./npm.ts";
 import { appWith, calledAs, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
+import { outcome } from "./sign-in.ts";
 
 // An App's approved npm packages, from GRA-1636's threat model: imported
 // in its pages and its server code as any package is, each bundled into
@@ -278,6 +279,22 @@ export const Route = createFileRoute("/")({ component: () => <p>{String(renderTo
     });
 
     expect(reached.ok).toBeFalsy();
+  });
+
+  it("are checked for malware on every build, a graph built and cached before refused at once once reported", async () => {
+    const [page, server] = [await chart(), await maths()];
+    const files = appFiles(page, server);
+    const fixture = await appWith(files, "Charts");
+    await approved(fixture, [page, server]);
+    const first = await buildPages(env, files, fixture.app);
+    await reportToOsv(page, "1.0.0", "MAL-2026-50002");
+
+    const again = await outcome(buildPages(env, files, fixture.app));
+
+    expect({ first: first.ok, again }).toStrictEqual({
+      first: true,
+      again: "dependency.malware",
+    });
   });
 
   it("are no longer loaded, built or served once revoked as malware", async () => {

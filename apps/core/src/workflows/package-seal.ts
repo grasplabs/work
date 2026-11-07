@@ -45,23 +45,31 @@ export type PackageSealer = (
 ) => Promise<SealedPackages>;
 
 /**
- * That workflow `workflow`'s graph `graphHash` is approved as the
- * statement runs, as SQL: what a publication, a start and every call of a
- * version that seals it require. A graph revoked as malware holds nothing.
+ * That workflow `workflow`'s graph `graphHash` holds as the statement
+ * runs, as SQL: for a publication (`current`) it must be the workflow's
+ * current approval; for a start and every call of a version sealed
+ * before, in force still (`inForce`: current, or replaced by a later
+ * approval since). A graph revoked as malware holds nothing.
  */
-export const packagesHoldSql = (workflow: string, graphHash: string): SQL =>
+export const packagesHoldSql = (
+  workflow: string,
+  graphHash: string,
+  current = false
+): SQL =>
   sql`EXISTS (SELECT 1 FROM dependency_requests
     WHERE subject_type = 'workflow' AND subject_id = ${workflow}
-      AND graph_hash = ${graphHash} AND status = 'approved')`;
+      AND graph_hash = ${graphHash}
+      AND (status = 'approved' OR (${current ? 0 : 1} AND status = 'retired')))`;
 
-/** Whether workflow `workflow`'s graph `graphHash` is approved now. */
+/** Whether workflow `workflow`'s graph `graphHash` holds now (`packagesHoldSql`). */
 export const packagesHold = async (
   db: DrizzleD1Database,
   workflow: string,
-  graphHash: string
+  graphHash: string,
+  current = false
 ): Promise<boolean> => {
   const read = await db.get<{ holds: number }>(
-    sql`SELECT ${packagesHoldSql(workflow, graphHash)} AS holds`
+    sql`SELECT ${packagesHoldSql(workflow, graphHash, current)} AS holds`
   );
   return read.holds !== 0;
 };
