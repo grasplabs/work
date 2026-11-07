@@ -35,7 +35,7 @@ import {
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { EllipsisIcon, WorkflowIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
@@ -244,7 +244,7 @@ const OwnedBy = ({ owner, names }: { owner: string; names: Names }) => {
 
 /**
  * What its builders and owner set about it, behind "…" at the end of the
- * title's line: the process it serves, its packages, whom it is shared
+ * title's line: the process it serves, whom it is shared
  * with, and whether people may ask Stephen to start it.
  */
 const WorkflowSettings = ({
@@ -289,21 +289,6 @@ const WorkflowSettings = ({
               workflow={resource.id}
             />
             <ShareWorkflow resource={resource} />
-            {/* Its approved packages: read there, and retired or revoked
-                by whoever may approve packages. */}
-            <Button
-              nativeButton={false}
-              render={
-                <Link
-                  params={{ workflow: resource.id }}
-                  to="/settings/packages/workflows/$workflow"
-                />
-              }
-              size="sm"
-              variant="ghost"
-            >
-              <Trans>Packages</Trans>
-            </Button>
           </div>
         ) : null}
         {builder && owner ? <Separator /> : null}

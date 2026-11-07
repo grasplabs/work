@@ -27,7 +27,7 @@ const settledInInbox = new Set<InboxSource["type"]>([
   "stoppedEvents",
   "appMessage",
   "bindings",
-  "revoked",
+  "packageNotice",
 ]);
 
 /** The items of what was read that wait in the inbox, in its order. */

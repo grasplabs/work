@@ -1,6 +1,5 @@
 import type { Acting } from "../../src/auth/identity.ts";
-import { buildDependencies } from "../../src/packages/build.ts";
-import { resolveDependencies } from "../../src/packages/resolve.ts";
+import { buildPackages } from "../../src/packages/build.ts";
 import { buildPages } from "../../src/pages.ts";
 import { runCompute } from "../../src/workflow-modules.ts";
 import { loadSealedIsolate } from "../../src/workflows/sealed-isolate.ts";
@@ -11,7 +10,7 @@ import { loadSealedIsolate } from "../../src/workflows/sealed-isolate.ts";
 // core loads none of them, as no sandbox bounds them here. Each is asked
 // for with `SANDBOX_HOST` unbound, as by a deployment that forgot it.
 
-/** An App's builder, as far as a package resolve or build reads one first. */
+/** A workflow's builder, as far as a package build reads one first. */
 const builder: Acting = {
   userId: "builder",
   role: "builder",
@@ -85,26 +84,15 @@ export default {
         )
       );
     }
-    if (pathname === "/resolve") {
-      return new Response(
-        await refusal(
-          async () =>
-            await resolveDependencies(
-              { ...env, SANDBOX_HOST: undefined },
-              builder,
-              {}
-            )
-        )
-      );
-    }
     if (pathname === "/build") {
       return new Response(
         await refusal(
           async () =>
-            await buildDependencies(
+            await buildPackages(
               { ...env, SANDBOX_HOST: undefined },
               builder,
-              {}
+              { type: "workflow", id: "workflow-test" },
+              "0".repeat(64)
             )
         )
       );

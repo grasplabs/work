@@ -29,7 +29,6 @@ export { withTypeCheck } from "./checked-build.ts";
 export type { TypeCheckPlan, Unchecked } from "./checked-build.ts";
 export type { TypeCheckRequest } from "./type-check.ts";
 export type { KitModules } from "./kit.ts";
-export type { BuildRequest, InspectRequest } from "./packages/worker.ts";
 export { expressionTypeCheck } from "./expression-types.ts";
 export type {
   ExpressionScopeTypes,
@@ -99,7 +98,6 @@ export type {
 } from "./increments.ts";
 export { pageRefusals } from "./refusals.ts";
 export type { SurfaceManifest } from "./route-tree.ts";
-export { platformPeers, platformScope } from "./packages/platform.ts";
 /** Part of every build's cache key: a new compiler or kit builds again. */
 export { version as compilerVersion } from "#version";
 

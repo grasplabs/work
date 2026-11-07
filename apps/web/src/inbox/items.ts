@@ -1,6 +1,5 @@
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
 import type { DecisionView } from "@grasp-os/shared/decisions";
-import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import type { HeldStart } from "@grasp-os/shared/held-starts";
 import type {
   AppMessageNotification,
@@ -13,13 +12,11 @@ import type {
   GoLiveItem,
   WorkflowGoLiveItem,
 } from "@grasp-os/shared/waiting";
-import { i18n } from "@lingui/core";
-import { ph, plural, t } from "@lingui/core/macro";
+import { plural, t } from "@lingui/core/macro";
 
 import { objectOf, subjectOf } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
-import { targetNames } from "../dashboard/dependency-requests.tsx";
 import type { NotificationsPage } from "../dashboard/notifications-page.ts";
 import { decidesRequests } from "../dashboard/waiting.ts";
 import type { Viewer, Waiting } from "../dashboard/waiting.ts";
@@ -33,7 +30,7 @@ import type { Loaded } from "../load-from-core.tsx";
 // lists today fills those it has (a connection to sign in to again) and
 // kinds of its own: a change an agent wants to make, a change sent for
 // the person whose answer was lost, a permission an App
-// or agent asked for, packages proposed for an App, a version of an
+// or agent asked for, a version of an
 // App the person answers for
 // up for review. Core keeps nothing the inbox adds (put away until a date, given
 // to someone, dismissed with why), so none of that is here. Pure.
@@ -53,9 +50,8 @@ export type InboxKind =
   | "heldStart"
   | "unknownOutcome"
   | "permissionRequest"
-  | "packages"
   | "stoppedSchedule"
-  | "revokedPackage"
+  | "packageNotice"
   | "stoppedEvents"
   | "appMessage"
   | "bindingApproval"
@@ -66,13 +62,12 @@ export type Target =
   | { kind: "independentWorkflow"; workflow: string; tab?: "triggers" }
   /**
    * An App: its own page, or the section of its settings where what the
-   * item is about is decided. Its settings also show the packages alone to
-   * an approver with no role in the App.
+   * item is about is decided.
    */
   | {
       kind: "app";
       app: string;
-      place?: "connections" | "packages" | "versions";
+      place?: "connections" | "versions";
     }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
@@ -85,14 +80,13 @@ export type InboxSource =
   | { type: "heldStart"; start: HeldStart }
   | { type: "outcome"; outcome: UnknownOutcome }
   | { type: "request"; request: Permission; pending: PendingRequests }
-  | { type: "packages"; request: DependencyRequest; policyGeneration: number }
   | { type: "version"; item: GoLiveItem }
   | { type: "workflowGoLive"; item: WorkflowGoLiveItem }
   | { type: "bindings"; item: BindingApprovalItem }
   | { type: "reconnect"; integration: string }
   | { type: "asked"; notification: GapAskedNotification }
   | { type: "stopped"; notification: TriggerStoppedNotification }
-  | { type: "revoked"; notification: PackageRevokedNotification }
+  | { type: "packageNotice"; notification: PackageNotification }
   | { type: "stoppedEvents"; notification: EventsStoppedNotification }
   | { type: "appMessage"; notification: AppMessageNotification }
   | { type: "decision"; decision: DecisionView };
@@ -139,9 +133,8 @@ export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
   heldStart: "workflows",
   unknownOutcome: "apps",
   permissionRequest: "apps",
-  packages: "apps",
   stoppedSchedule: "workflows",
-  revokedPackage: "apps",
+  packageNotice: "apps",
   stoppedEvents: "workflows",
   appMessage: "apps",
   bindingApproval: "workflows",
@@ -322,48 +315,6 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
     };
   });
 
-/** Packages proposed for an App, which someone given the permission approves. */
-const packageItems = (
-  requests: readonly DependencyRequest[],
-  policyGeneration: number
-): InboxItem[] =>
-  requests.map((request) => {
-    // An App or a workflow, in one queue: only an App has a page to go to.
-    const subjectName = request.subject.name;
-    const kind = request.subject.type === "workflow" ? t`Workflow` : t`App`;
-    const targets = formatList(
-      request.targets.map((target) => i18n._(targetNames[target]))
-    );
-    const count = request.counts.packages;
-    return {
-      id: `packages:${request.id}`,
-      kind: "packages",
-      title: t`Approve the packages for ${ph({ app: subjectName })}?`,
-      context: t`Packages for ${ph({ app: subjectName })}`,
-      body: [request.purpose],
-      facts: [
-        { label: kind, value: subjectName },
-        { label: t`Asked by`, value: request.requestedBy.name },
-        {
-          label: t`Packages`,
-          value: plural(count, {
-            one: "# package",
-            other: "# packages",
-          }),
-        },
-        { label: t`Runs in`, value: targets },
-      ],
-      about:
-        request.subject.type === "app"
-          ? { kind: "app", app: request.subject.id, place: "packages" }
-          : undefined,
-      forWhom: { role: t`package approvers` },
-      date: request.requestedAt,
-      urgent: false,
-      source: { type: "packages", request, policyGeneration },
-    };
-  });
-
 /** A version of an App the person answers for, up for review: made current under Versions in its settings. */
 const versionItems = (
   versions: readonly GoLiveItem[],
@@ -499,57 +450,65 @@ const askedItems = (
     ];
   });
 
-/** Packages of an App or workflow revoked as malware: what the notification says of it. */
-type PackageRevokedNotification = Extract<
+/** What core's rescan found of an App's or workflow's approved packages. */
+type PackageNotification = Extract<
   NotificationsPage["page"]["notifications"][number],
-  { type: "package_revoked" }
+  { type: "package_revoked" | "package_advisory" }
 >;
 
-/** What a revocation is about: its name and the page it is replaced on. */
-const revokedSubject = (
-  subject: PackageRevokedNotification["subject"]
+/** What a package notice is about: its name and its page. */
+const noticeSubject = (
+  subject: PackageNotification["subject"]
 ): { name: string; about: Target } =>
   subject.type === "app"
-    ? {
-        name: subject.appName,
-        about: { kind: "app", app: subject.app, place: "packages" },
-      }
+    ? { name: subject.appName, about: { kind: "app", app: subject.app } }
     : {
         name: subject.workflowName,
         about: { kind: "independentWorkflow", workflow: subject.workflow },
       };
 
-/** Packages of an App or workflow the person builds or approved, revoked because one was reported as malware. */
-const revokedItems = (
+/**
+ * What core's rescan found of the approved packages of an App or workflow
+ * the person builds: revoked as malware, or a new advisory.
+ */
+const packageNoticeItems = (
   notifications: NotificationsPage,
   me: string
 ): InboxItem[] =>
   notifications.page.notifications.flatMap((notification): InboxItem[] => {
-    if (notification.type !== "package_revoked") {
+    if (
+      notification.type !== "package_revoked" &&
+      notification.type !== "package_advisory"
+    ) {
       return [];
     }
     const { at, advisory } = notification;
-    const { name, about } = revokedSubject(notification.subject);
-    const revoked = `${notification.package.name}@${notification.package.version}`;
+    const { name, about } = noticeSubject(notification.subject);
+    const found = `${notification.package.name}@${notification.package.version}`;
+    const revoked = notification.type === "package_revoked";
     return [
       {
-        id: `revoked:${notification.id}`,
-        kind: "revokedPackage",
-        title: t`Packages of ${name} were revoked as malware`,
+        id: `packageNotice:${notification.id}`,
+        kind: "packageNotice",
+        title: revoked
+          ? t`Packages of ${name} were revoked as malware`
+          : t`A new advisory affects the packages of ${name}`,
         context: name,
         body: [
-          t`${revoked} was reported as malware, so Grasp revoked the packages approved with it: nothing of ${name} that uses them is built, served or started. Remove the package, then ask for a new set to be approved.`,
+          revoked
+            ? t`${found} was reported as malware, so Grasp revoked the packages approved with it: nothing of ${name} that uses them is built or started. Remove the package, then ask for a new set to be approved.`
+            : t`${found}, approved for ${name}, has an advisory it didn't have when it was approved. The approval stands: decide whether to update or remove the package.`,
         ],
         facts: [
-          { label: t`Package`, value: revoked },
+          { label: t`Package`, value: found },
           { label: t`Advisory`, value: advisory },
-          { label: t`Revoked`, value: formatDateTime(at) },
+          { label: t`Found`, value: formatDateTime(at) },
         ],
         about,
         forWhom: { person: me },
         date: at,
-        urgent: true,
-        source: { type: "revoked", notification },
+        urgent: revoked,
+        source: { type: "packageNotice", notification },
       },
     ];
   });
@@ -738,7 +697,6 @@ export const inboxItems = (
   const requests = decidesRequests(viewer)
     ? readyOf(waiting.requests)
     : undefined;
-  const dependencies = readyOf(waiting.dependencies);
   const notifications = readyOf(waiting.notifications);
   const decisions = readyOf(waiting.decisions) ?? [];
   const heldStarts = readyOf(waiting.heldStarts) ?? [];
@@ -783,15 +741,14 @@ export const inboxItems = (
     ...heldStartItems(heldStarts, me),
     ...outcomeItems(outcomes, me),
     ...(requests === undefined ? [] : requestItems(requests)),
-    ...(dependencies === undefined
-      ? []
-      : packageItems(dependencies.requests, dependencies.policyGeneration)),
     ...versionItems(versions, me, readAt),
     ...workflowGoLiveItems(workflowGoLives, me),
     ...bindingItems(bindings, readAt),
     ...(notifications === undefined ? [] : askedItems(notifications, me)),
     ...(notifications === undefined ? [] : stoppedItems(notifications, me)),
-    ...(notifications === undefined ? [] : revokedItems(notifications, me)),
+    ...(notifications === undefined
+      ? []
+      : packageNoticeItems(notifications, me)),
     ...(notifications === undefined
       ? []
       : stoppedEventsItems(notifications, me)),
@@ -806,7 +763,6 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.held,
     waiting.outcomes,
     waiting.requests,
-    waiting.dependencies,
     waiting.notifications,
     waiting.reconnect,
     waiting.versions,

@@ -184,7 +184,7 @@ const frameAccessMs = 10 * minute;
  * late: between one window and two. A chat's preview's module tokens hold
  * at most an hour, whose frame the page opens again with a fresh token
  * when one expires (@grasp-os/sdk's preview-runtime.ts); a published
- * build's, and a package artifact's, at most six, which a person keeps
+ * build's at most six, which a person keeps
  * open through a stretch of a working day.
  */
 const accessWindowsMs = { preview: 30 * minute, published: 3 * hour };
@@ -248,8 +248,8 @@ export const windowedAccessEnd = (
 /**
  * A token for `subject` that holds until the end of the next window of
  * `windowMs` (`windowedAccessEnd`): the same for everything asked in one
- * window. The subject says what it is for (`modules:…`,
- * `package-artifact:…`), so one never passes for another.
+ * window. The subject says what it is for (`modules:…`),
+ * so one never passes for another.
  */
 export const windowedAccess = async (
   env: Env,
@@ -318,8 +318,8 @@ const moduleAccess = async (
   );
 
 /**
- * The query parameter an address carries its token in, a page module's
- * or a package artifact's file's: never its path (see above).
+ * The query parameter a page module's address carries its token in:
+ * never its path (see above).
  */
 export const accessTokenParameter = "token";
 

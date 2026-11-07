@@ -20,7 +20,7 @@ import {
 /**
  * What the browser's own sandbox and policy hold, run in every browser
  * engine: a page's attacks on its frame, and the product page's refusal
- * of page modules and package files.
+ * of page modules.
  */
 const browserPolicyTests = /(?:page-attacks|product-page-scripts)\.e2e\.ts$/u;
 /**
@@ -43,13 +43,6 @@ export const interviewTests = /interview\.e2e\.ts$/u;
  */
 export const journeyTests = /journey\.e2e\.ts$/u;
 /**
- * What grants, retires or revokes package approvals: each bumps the
- * deployment's shared policy generation in the one database every worker
- * uses, so a decision another worker's browser already shows is refused as
- * stale. They run in a project of their own, one test at a time.
- */
-const packageApprovalTests = /(?:dashboard|engine-packages|inbox)\.e2e\.ts$/u;
-/**
  * The admin's journeys (e2e/admin): they run on a stack of their
  * own (playwright.admin.config.ts).
  */
@@ -62,26 +55,13 @@ const devVar = (name: string, value: string): string =>
 
 /**
  * The projects that run side by side, from the start: the product's tests
- * in Chromium, the package approvals one at a time, and the browser policy
- * tests in each engine.
+ * in Chromium, and the browser policy tests in each engine.
  */
 const parallelProjects: Project[] = [
   {
     name: "chromium",
     use: { ...devices["Desktop Chrome"] },
-    testIgnore: [
-      onboardingTests,
-      packageApprovalTests,
-      interviewTests,
-      journeyTests,
-      adminTests,
-    ],
-  },
-  {
-    name: "package-approvals",
-    use: { ...devices["Desktop Chrome"] },
-    testMatch: packageApprovalTests,
-    workers: 1,
+    testIgnore: [onboardingTests, interviewTests, journeyTests, adminTests],
   },
   // A page's frame and the product page are held by the browser's own
   // sandbox and policy, so what they can't do is shown in each engine:

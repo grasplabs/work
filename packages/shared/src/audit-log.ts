@@ -205,23 +205,20 @@ const typeRules: readonly {
   { action: "team", type: "config" },
   // A decision a run put to people: opened, asked, answered, timed out.
   { action: "workflow.decision", type: "decision" },
-  // npm packages proposed for an App: the request, another proposal
-  // taking its place, a build refused packages nobody approved, and a
-  // person approving or denying a request.
+  // npm packages asked for an App or a workflow: the request, and another
+  // taking its place.
   { action: "dependency.requested", type: "action" },
-  { action: "dependency.admission_refused", type: "action" },
   { action: "dependency.superseded", type: "action" },
-  // A resolve or an approval refused because a package in the graph is
-  // known malware; and an approval refused because whether it is couldn't
-  // be checked.
+  // A resolve, an approval, a build or a rescan refused because a package
+  // in the graph is known malware; an approval refused because whether it
+  // is couldn't be checked; and a rescan finding an advisory the approval
+  // didn't know.
   { action: "dependency.malware_refused", type: "action" },
   { action: "dependency.approval_refused", type: "action" },
-  // A build pinning an artifact of an approved graph, and the approval it
-  // relied on, and each pin that dropped; and a resolve changing what a
-  // target of a graph's lock is built for (its conditions or entries).
+  { action: "dependency.advisory_found", type: "action" },
+  // An approved graph built for what uses it: its install.
   { action: "dependency.built", type: "action" },
-  { action: "dependency.pin_dropped", type: "action" },
-  { action: "dependency.lock_targets_changed", type: "action" },
+  // A builder approving or denying a request, and core revoking one.
   { action: "dependency", type: "decision" },
   // A run reading an attachment of a message its email trigger kept.
   { action: "workflow.email.read", type: "read" },

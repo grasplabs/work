@@ -22,7 +22,7 @@ import { catalogBindingKinds } from "./workflow-resources.ts";
  * refused, to be exported again, rather than read as this one: the
  * schema is strict, so another format's shape would read as no package.
  */
-export const definitionPackageFormatVersion = 3;
+export const definitionPackageFormatVersion = 4;
 
 /** The most workflow versions one package holds. */
 export const definitionPackageMaxWorkflows = 64;
@@ -159,10 +159,9 @@ export const definitionPackageSchema = z.strictObject({
       /**
        * The approved npm packages its modules import (GRA-665), null when
        * it seals none: the graph's hash, the entries the modules import,
-       * and the graph's lock (`grasp.lock.json`) without this
-       * deployment's build pins, from which the destination asks for the
-       * same exact versions and a standalone project pins them. Null lock
-       * when this deployment no longer keeps it. Never an approval: the
+       * and the graph's lock (`grasp.lock.json`), from which the
+       * destination asks for the same exact versions and a standalone
+       * project pins them. Never an approval: the
        * destination approves the graph for its own workflow before
        * anything it publishes seals it.
        */
@@ -170,7 +169,7 @@ export const definitionPackageSchema = z.strictObject({
         .strictObject({
           graphHash: sha256Schema,
           entries: z.array(packageEntrySchema).min(1).max(256),
-          lock: graspLockSchema.omit({ artifacts: true }).nullable(),
+          lock: graspLockSchema,
         })
         .nullable(),
     })

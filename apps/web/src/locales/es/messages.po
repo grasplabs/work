@@ -29,35 +29,15 @@ msgstr "(antes: {before})"
 msgid "(yours)"
 msgstr "(tuya)"
 
-#. placeholder {0}: request.counts.direct
-#: src/dashboard/dependency-requests.tsx
-msgid "{0, plural, one {{requester} asks for # package} other {{requester} asks for # packages}}"
-msgstr "{0, plural, one {{requester} pide # paquete} other {{requester} pide # paquetes}}"
-
 #. placeholder {0}: webhook.dropped
 #: src/apps/app-webhooks.tsx
 msgid "{0, plural, one {# event wasn't sent: too many were waiting for this address.} other {# events weren't sent: too many were waiting for this address.}}"
 msgstr "{0, plural, one {# evento no se envió: había demasiados esperando para esta dirección.} other {# eventos no se enviaron: había demasiados esperando para esta dirección.}}"
 
-#. placeholder {0}: request.counts.findings
-#: src/dashboard/dependency-requests.tsx
-msgid "{0, plural, one {# finding reported} other {# findings reported}}"
-msgstr "{0, plural, one {# hallazgo notificado} other {# hallazgos notificados}}"
-
 #. placeholder {0}: out.length
 #: src/interview/read-back.tsx
 msgid "{0, plural, one {# line taken out.} other {# lines taken out.}}"
 msgstr "{0, plural, one {# línea quitada.} other {# líneas quitadas.}}"
-
-#. placeholder {0}: review.counts.findings - review.findings.length
-#: src/dashboard/dependency-requests.tsx
-msgid "{0, plural, one {# more finding not shown: only the gravest are kept.} other {# more findings not shown: only the gravest are kept.}}"
-msgstr "{0, plural, one {# hallazgo más no se muestra: solo se conservan los más graves.} other {# hallazgos más no se muestran: solo se conservan los más graves.}}"
-
-#. placeholder {0}: request.counts.packages
-#: src/dashboard/dependency-requests.tsx
-msgid "{0, plural, one {# package in all, to run in: {targets}} other {# packages in all, to run in: {targets}}}"
-msgstr "{0, plural, one {# paquete en total, para ejecutarse en: {targets}} other {# paquetes en total, para ejecutarse en: {targets}}}"
 
 #. placeholder {0}: team.people
 #: src/onboarding/send-plan-form.tsx
@@ -88,11 +68,6 @@ msgstr "{0, plural, one {# flujo de trabajo conserva sus cifras, que indicarán 
 #: src/chat/sources.tsx
 msgid "{0, plural, one {Based on # source} other {Based on # sources}}"
 msgstr "{0, plural, one {Basado en # fuente} other {Basado en # fuentes}}"
-
-#. placeholder {0}: request.counts.refused
-#: src/dashboard/dependency-requests.tsx
-msgid "{0, plural, one {Needs # thing Grasp refuses to run} other {Needs # things Grasp refuses to run}}"
-msgstr "{0, plural, one {Necesita # cosa que Grasp se niega a ejecutar} other {Necesita # cosas que Grasp se niega a ejecutar}}"
 
 #. placeholder {0}: held.length
 #: src/onboarding/send-plan-form.tsx
@@ -133,10 +108,6 @@ msgstr "{amount} en total"
 msgid "{answered} of {questions} questions"
 msgstr "{answered} de {questions} preguntas"
 
-#: src/dashboard/dependency-requests.tsx
-msgid "{app} doesn't get these packages."
-msgstr "{app} no recibe estos paquetes."
-
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
 msgstr "{app} no tiene herramientas."
@@ -156,10 +127,6 @@ msgstr "{app} está desactivado"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} isn't connected yet."
 msgstr "{app} aún no está conectado."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "{app} may use exactly these packages from now on."
-msgstr "{app} podrá usar exactamente estos paquetes a partir de ahora."
 
 #: src/dashboard/to-do.tsx
 msgid "{app} needs someone to sign in again"
@@ -181,25 +148,9 @@ msgstr "{app}: ejecución de {workflowId}"
 msgid "{appName}, version {version}"
 msgstr "{appName}, versión {version}"
 
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "{approvals, plural, one {# approval} other {# approvals}}"
-msgstr "{approvals, plural, one {# aprobación} other {# aprobaciones}}"
-
-#: src/apps/package-approvals.tsx
-msgid "{approvals, plural, one {This ends # approval of these packages.} other {This ends # approvals of these packages.}}"
-msgstr "{approvals, plural, one {Esto termina # aprobación de estos paquetes.} other {Esto termina # aprobaciones de estos paquetes.}}"
-
 #: src/projects/project-counts.tsx
 msgid "{apps, plural, one {# App} other {# Apps}}"
 msgstr "{apps, plural, one {# app} other {# apps}}"
-
-#: src/apps/package-approvals.tsx
-msgid "{artifacts, plural, one {# build already made ({targets}) keeps working. Nothing new is built with these packages.} other {# builds already made ({targets}) keep working. Nothing new is built with these packages.} =0 {Nothing was built with these packages yet, and nothing new will be.}}"
-msgstr "{artifacts, plural, one {# compilación ya hecha ({targets}) sigue funcionando. No se compila nada nuevo con estos paquetes.} other {# compilaciones ya hechas ({targets}) siguen funcionando. No se compila nada nuevo con estos paquetes.} =0 {Aún no se compiló nada con estos paquetes, y no se compilará nada nuevo.}}"
-
-#: src/apps/package-approvals.tsx
-msgid "{artifacts, plural, one {# build made with them ({targets}) stops at once, and nothing of these packages runs any more.} other {# builds made with them ({targets}) stop at once, and nothing of these packages runs any more.} =0 {Nothing of these packages runs any more.}}"
-msgstr "{artifacts, plural, one {# compilación hecha con ellos ({targets}) se detiene de inmediato, y nada de estos paquetes vuelve a ejecutarse.} other {# compilaciones hechas con ellos ({targets}) se detienen de inmediato, y nada de estos paquetes vuelve a ejecutarse.} =0 {Nada de estos paquetes vuelve a ejecutarse.}}"
 
 #: src/settings/stephen-card.tsx
 msgid "{asked} asked"
@@ -361,7 +312,7 @@ msgstr "{count, plural, one {# equipo invitado aún sin entrevistar: {teams}.} o
 msgid "{count, plural, one {# member} other {# members}}"
 msgstr "{count, plural, one {# miembro} other {# miembros}}"
 
-#: src/inbox/items.ts
+#: src/chat/package-requests.tsx
 msgid "{count, plural, one {# package} other {# packages}}"
 msgstr "{count, plural, one {# paquete} other {# paquetes}}"
 
@@ -581,6 +532,14 @@ msgstr "{fixtures, plural, one {Se ejecuta sobre su # registro de prueba cuando 
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
 msgstr "{folded, plural, one {# anterior} other {# anteriores}}"
 
+#: src/inbox/items.ts
+msgid "{found} was reported as malware, so Grasp revoked the packages approved with it: nothing of {name} that uses them is built or started. Remove the package, then ask for a new set to be approved."
+msgstr "{found} se ha notificado como malware, así que Grasp revocó los paquetes aprobados con él: nada de {name} que los use se compila ni se inicia. Quita el paquete y pide que se aprueben unos nuevos."
+
+#: src/inbox/items.ts
+msgid "{found}, approved for {name}, has an advisory it didn't have when it was approved. The approval stands: decide whether to update or remove the package."
+msgstr "{found}, aprobado para {name}, tiene un aviso de seguridad que no tenía cuando se aprobó. La aprobación sigue en pie: decide si actualizas o quitas el paquete."
+
 #: src/onboarding/interviews-progress.tsx
 msgid "{fresh, plural, one {One new link is ready to send, under “Links to send”.} other {# new links are ready to send, under “Links to send”.}}"
 msgstr "{fresh, plural, one {Hay un enlace nuevo listo para enviar, en «Enlaces para enviar».} other {Hay # enlaces nuevos listos para enviar, en «Enlaces para enviar».}}"
@@ -654,10 +613,6 @@ msgstr "{invited, plural, one {Responsables de {interviewed} de # equipo invitad
 #: src/activity/pending.tsx
 msgid "{kind} ({what})"
 msgstr "{kind} ({what})"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "{kind}, {severity}, {about}: {summary}"
-msgstr "{kind}, {severity}, {about}: {summary}"
 
 #: src/workflows/binding-approvals.tsx
 msgid "{kind}: {contractId}"
@@ -739,15 +694,6 @@ msgstr "{minutes, plural, one {Guardado hace # min} other {Guardado hace # min}}
 msgid "{minutes}m {rest}s"
 msgstr "{minutes} min {rest} s"
 
-#: src/apps/package-approvals.tsx
-#: src/dashboard/dependency-requests.tsx
-msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
-msgstr "{more, plural, one {{shown} y # más} other {{shown} y # más}}"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "{moreFindings, plural, one {And # more finding: show every package to read it.} other {And # more findings: show every package to read them.}}"
-msgstr "{moreFindings, plural, one {Y # hallazgo más: muestra todos los paquetes para leerlo.} other {Y # hallazgos más: muestra todos los paquetes para leerlos.}}"
-
 #: src/brain/brain-atlas.ts
 msgid "{moved, plural, one {# of them changed after it was set, at a later talk with the board.} other {# of them changed after they were set, at later talks with the board.}}"
 msgstr "{moved, plural, one {# de ellos cambió después, en otra conversación con la dirección.} other {# de ellos cambiaron después, en otras conversaciones con la dirección.}}"
@@ -777,14 +723,6 @@ msgstr "{name} (opcional)"
 #: src/projects/project-people.tsx
 msgid "{name} (team)"
 msgstr "{name} (equipo)"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "{name} {range}, met by {resolved}"
-msgstr "{name} {range}, cubierto por {resolved}"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "{name} {range}, not met"
-msgstr "{name} {range}, sin cubrir"
 
 #: src/settings/teams.tsx
 msgid "{name} couldn't be deleted. Try again."
@@ -1008,10 +946,6 @@ msgstr "{rests} · {team} · semana {week}"
 #: src/brain/work-knowledge.tsx
 msgid "{rests} · week {week}"
 msgstr "{rests} · semana {week}"
-
-#: src/inbox/items.ts
-msgid "{revoked} was reported as malware, so Grasp revoked the packages approved with it: nothing of {name} that uses them is built, served or started. Remove the package, then ask for a new set to be approved."
-msgstr "{revoked} se ha notificado como malware, así que Grasp ha revocado los paquetes aprobados con él: nada de {name} que los use se compila, se sirve ni se inicia. Elimina el paquete y después pide que se aprueben paquetes nuevos."
 
 #: src/brain/brain.ts
 msgid "{role} (unknown)"
@@ -1547,6 +1481,10 @@ msgstr "al mes"
 msgid "A name has no [, ], # or |, and no empty folders."
 msgstr "Un nombre no lleva [, ], # ni |, ni carpetas vacías."
 
+#: src/inbox/items.ts
+msgid "A new advisory affects the packages of {name}"
+msgstr "Un nuevo aviso de seguridad afecta a los paquetes de {name}"
+
 #: src/workflows/trigger-description.ts
 msgid "A new file in Google Drive"
 msgstr "Un archivo nuevo en Google Drive"
@@ -1831,10 +1769,8 @@ msgstr "Acción"
 #: src/apps/app-sharing.tsx
 #: src/apps/app-versions.tsx
 #: src/apps/app-workflows.tsx
-#: src/apps/package-approvals.tsx
 #: src/apps/resource-bindings.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
-#: src/settings/package-approvers.tsx
 msgid "Actions"
 msgstr "Acciones"
 
@@ -1951,10 +1887,6 @@ msgstr "Añadir un índice"
 msgid "Add an integration"
 msgstr "Añadir una integración"
 
-#: src/settings/package-approvers.tsx
-msgid "Add approver"
-msgstr "Añadir aprobador"
-
 #: src/projects/project-people.tsx
 msgid "Add as"
 msgstr "Añadir como"
@@ -2016,7 +1948,6 @@ msgid "Add who answers"
 msgstr "Añadir quién responde"
 
 #: src/chat/builds.tsx
-#: src/settings/package-approvers.tsx
 msgid "Added"
 msgstr "Añadido"
 
@@ -2479,7 +2410,6 @@ msgid "Anything else?"
 msgstr "¿Algo más?"
 
 #: src/connections/request-app-dialog.tsx
-#: src/dashboard/dependency-requests.tsx
 #: src/inbox/items.ts
 #: src/pages/page-frame.tsx
 #: src/projects/new-item-dialog.tsx
@@ -2487,7 +2417,6 @@ msgstr "¿Algo más?"
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.apps.$app.tsx
 #: src/routes/_shell.settings.models.tsx
-#: src/routes/_shell.settings.packages.index.tsx
 msgid "App"
 msgstr "Aplicación"
 
@@ -2548,12 +2477,8 @@ msgstr "Aplícala si el dominio del remitente es {domain}."
 msgid "Approval"
 msgstr "Aprobación"
 
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "Approvals"
-msgstr "Aprobaciones"
-
 #: src/apps/app-webhooks.tsx
-#: src/dashboard/dependency-requests.tsx
+#: src/chat/package-requests.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
 #: src/inbox/item-detail.tsx
@@ -2592,21 +2517,15 @@ msgstr "Apruébalo en la página del flujo"
 msgid "Approve the change"
 msgstr "Aprobar el cambio"
 
-#: src/dashboard/dependency-requests.tsx
-#: src/inbox/item-detail.tsx
-msgid "Approve the packages for {app}"
-msgstr "Aprobar los paquetes para {app}"
-
-#: src/inbox/items.ts
-msgid "Approve the packages for {app}?"
-msgstr "¿Aprobar los paquetes para {app}?"
+#: src/chat/package-requests.tsx
+msgid "Approve the packages for {subject}"
+msgstr "Aprobar los paquetes para {subject}"
 
 #: src/inbox/items.ts
 msgid "Approve what {name} reaches"
 msgstr "Aprobar a qué accede {name}"
 
 #: src/apps/app-webhooks.tsx
-#: src/apps/package-approvals.tsx
 #: src/dashboard/runs-widget.tsx
 msgid "Approved"
 msgstr "Aprobado"
@@ -2619,10 +2538,6 @@ msgstr "Aprobó el código de una página"
 msgid "Approved by {approver} on {at}"
 msgstr "Aprobado por {approver} el {at}"
 
-#: src/apps/package-approvals.tsx
-msgid "Approved by {decidedBy}, {decidedAt}"
-msgstr "Aprobado por {decidedBy}, {decidedAt}"
-
 #: src/routes/decisions.$decision.tsx
 msgid "Approved by {name} on {date}."
 msgstr "Aprobado por {name} el {date}."
@@ -2632,7 +2547,6 @@ msgid "Approved in {left} s"
 msgstr "Aprobado en {left} s"
 
 #: src/activity/audit-words.ts
-#: src/apps/package-approvals.tsx
 msgid "Approved packages"
 msgstr "Aprobó paquetes"
 
@@ -2648,7 +2562,6 @@ msgstr "Aprobado: {alias}."
 msgid "Approved: {approved}"
 msgstr "Aprobadas: {approved}"
 
-#: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/inbox/item-detail.tsx
 msgid "Approved: {who}."
@@ -2871,7 +2784,6 @@ msgstr "Pedido de nuevo (concedido antes por {person} el {date})"
 msgid "Asked again after version {version} was made current (previously granted by {person} on {date})"
 msgstr "Pedido de nuevo después de que la versión {version} pasara a ser la actual (concedido antes por {person} el {date})"
 
-#: src/inbox/items.ts
 #: src/workflows/go-lives-waiting.tsx
 msgid "Asked by"
 msgstr "Solicitado por"
@@ -2894,7 +2806,6 @@ msgid "Asked for"
 msgstr "Solicitado"
 
 #: src/chat/held-writes.tsx
-#: src/dashboard/dependency-requests.tsx
 msgid "Asked for <0>{asked}</0>"
 msgstr "Pedido el <0>{asked}</0>"
 
@@ -3192,11 +3103,6 @@ msgstr "Maletín"
 msgid "Browse"
 msgstr "Explorar"
 
-#: src/dashboard/dependency-requests.tsx
-msgctxt "where a package runs"
-msgid "Browser"
-msgstr "Navegador"
-
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Brussels"
@@ -3315,7 +3221,6 @@ msgstr "No se puede ofrecer Iniciar: {unread}"
 #: src/apps/blueprints.tsx
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
-#: src/apps/package-approvals.tsx
 #: src/apps/release-controls.tsx
 #: src/brain/gap-actions.tsx
 #: src/brain/goals-editor.tsx
@@ -3552,10 +3457,6 @@ msgstr "Cambió la definición de la App"
 #: src/activity/audit-words.ts
 msgid "Changed what a connection listens for"
 msgstr "Cambió lo que escucha una conexión"
-
-#: src/activity/audit-words.ts
-msgid "Changed what is built of approved packages"
-msgstr "Cambió lo que se compila de paquetes aprobados"
 
 #: src/activity/audit-words.ts
 msgid "Changed whether an App's data goes to code outside Grasp"
@@ -3827,7 +3728,6 @@ msgstr "Borrar filtros"
 #: src/apps/app-workspace.tsx
 #: src/apps/blueprints.tsx
 #: src/apps/data-model-changes.tsx
-#: src/apps/package-approvals.tsx
 #: src/apps/release-controls.tsx
 #: src/apps/resource-bindings.tsx
 #: src/apps/store-changes.tsx
@@ -4031,11 +3931,6 @@ msgstr "Completadas: {completed}"
 #: src/routes/_shell.integrations.index.tsx
 msgid "Composio's toolkits can't be listed right now. Try again shortly."
 msgstr "No se pueden mostrar los toolkits de Composio ahora mismo. Vuelve a intentarlo en un momento."
-
-#: src/dashboard/dependency-requests.tsx
-msgctxt "where a package runs"
-msgid "Computations"
-msgstr "Cálculos"
 
 #: src/activity/type-labels.ts
 msgid "Configuration"
@@ -4434,10 +4329,10 @@ msgstr "Creando la App {name}"
 msgid "Credential"
 msgstr "Credencial"
 
-#: src/dashboard/dependency-requests.tsx
-msgctxt "severity of a finding"
+#: src/chat/package-requests.tsx
+msgctxt "an advisory's severity"
 msgid "Critical"
-msgstr "Crítica"
+msgstr "Crítico"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -4650,9 +4545,13 @@ msgstr "Eliminada. No se guarda nada de lo que has dicho."
 msgid "Denied packages"
 msgstr "Denegó paquetes"
 
-#: src/dashboard/dependency-requests.tsx
-msgid "Depends on"
-msgstr "Depende de"
+#: src/chat/package-requests.tsx
+msgid "Deny"
+msgstr "Denegar"
+
+#: src/chat/package-requests.tsx
+msgid "Deny the packages for {subject}"
+msgstr "Denegar los paquetes para {subject}"
 
 #: src/apps/new-app.tsx
 msgid "Describe the App"
@@ -4959,10 +4858,6 @@ msgstr "Suelta los archivos aquí"
 #: src/activity/audit-words.ts
 msgid "Dropped a held action nobody can confirm"
 msgstr "Descartó una acción retenida que nadie puede confirmar"
-
-#: src/activity/audit-words.ts
-msgid "Dropped a kept build of approved packages"
-msgstr "Descartó una compilación guardada de paquetes aprobados"
 
 #: src/activity/audit-words.ts
 msgid "Dropped a reply to a run's email"
@@ -5551,10 +5446,6 @@ msgstr "Buscar un registro por su ID"
 msgid "Find Stephen under Apps in your Slack workspace."
 msgstr "Encontrarás a Stephen en Aplicaciones, en tu espacio de trabajo de Slack."
 
-#: src/dashboard/dependency-requests.tsx
-msgid "Findings"
-msgstr "Hallazgos"
-
 #: src/routes/guest.tsx
 msgid "Finish"
 msgstr "Terminar"
@@ -5712,6 +5603,14 @@ msgstr "Adelante"
 #: src/connections/request-app-dialog.tsx
 msgid "Forwarded to our team"
 msgstr "Enviada a nuestro equipo"
+
+#: src/inbox/items.ts
+msgid "Found"
+msgstr "Encontrado"
+
+#: src/activity/audit-words.ts
+msgid "Found a new advisory against approved packages"
+msgstr "Encontró un nuevo aviso de seguridad sobre paquetes aprobados"
 
 #: src/brain/brain.ts
 msgid "Found in {source}"
@@ -6021,10 +5920,6 @@ msgstr "Grasp solo registra esta respuesta cuando la confirmas aquí. Comprueba 
 msgid "Grasp records your word that it took effect and never sends it again; a run waiting on it goes on without the answer that was lost. Nothing is changed or undone on {connection}."
 msgstr "Grasp registra tu palabra de que surtió efecto y no lo vuelve a enviar nunca; una ejecución que lo espera continúa sin la respuesta que se perdió. No se cambia ni se deshace nada en {connection}."
 
-#: src/dashboard/dependency-requests.tsx
-msgid "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
-msgstr "Grasp resolvió estos paquetes desde el registro de npm y comprobó los archivos de cada uno con el hash del registro. Una licencia es la que indica el propio paquete."
-
 #: src/apps/app-webhooks.tsx
 msgid "Grasp sends this App's events to each address, signed with its secret. Until an admin approves an address, it gets IDs and the event only, never what someone sent in a form."
 msgstr "Grasp envía los eventos de esta aplicación a cada dirección, firmados con su secreto. Hasta que un administrador apruebe una dirección, solo recibe los ID y el evento, nunca lo que alguien envió en un formulario."
@@ -6066,10 +5961,6 @@ msgstr "Grasp transcribe las entrevistas con {whereItRuns}, usando la clave prop
 #: src/route-error.tsx
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp se actualizó mientras esta página estaba abierta. Vuelve a intentarlo para cargar la nueva versión."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Grasp won't run what {about} needs: {requirement}"
-msgstr "Grasp no ejecutará lo que {about} necesita: {requirement}"
 
 #: src/settings/ai-providers.tsx
 msgid "Grasp's AI calls models with your organization's own provider keys. Keys are stored sealed: nobody can read one back, only its last four characters."
@@ -6240,10 +6131,10 @@ msgstr "Ocultar exactamente lo que se enviará"
 msgid "Hide people one by one"
 msgstr "Ocultar personas una a una"
 
-#: src/dashboard/dependency-requests.tsx
-msgctxt "severity of a finding"
+#: src/chat/package-requests.tsx
+msgctxt "an advisory's severity"
 msgid "High"
-msgstr "Alta"
+msgstr "Alto"
 
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
@@ -6570,6 +6461,11 @@ msgstr "Índices"
 msgctxt "a table's indexes"
 msgid "Indexes"
 msgstr "Índices"
+
+#: src/chat/package-requests.tsx
+msgctxt "an advisory's severity"
+msgid "Info"
+msgstr "Info"
 
 #: src/chat/thread.tsx
 #: src/workflows/traced-run.tsx
@@ -7144,8 +7040,6 @@ msgid "Key: <0>{mask}</0>"
 msgstr "Clave: <0>{mask}</0>"
 
 #: src/apps/resource-bindings.tsx
-#: src/routes/_shell.settings.packages.index.tsx
-#: src/settings/package-approvers.tsx
 msgid "Kind"
 msgstr "Tipo"
 
@@ -7194,10 +7088,6 @@ msgstr "Idioma: {name}"
 msgctxt "chats from the past week"
 msgid "Last 7 days"
 msgstr "Últimos 7 días"
-
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "Last decided"
-msgstr "Última decisión"
 
 #: src/brain/brain-article/kern.tsx
 msgid "Last heard {day}"
@@ -7351,15 +7241,6 @@ msgstr "Empecemos"
 msgid "Lets {field} in {table} hold more. Every record already fits."
 msgstr "Permite que {field} en {table} admita más. Todos los registros ya encajan."
 
-#: src/dashboard/dependency-requests.tsx
-msgid "Licence"
-msgstr "Licencia"
-
-#: src/dashboard/dependency-requests.tsx
-msgctxt "kind of finding"
-msgid "Licence"
-msgstr "Licencia"
-
 #: src/apps/release-controls.tsx
 msgid "Lift hold"
 msgstr "Levantar retención"
@@ -7499,19 +7380,14 @@ msgstr "Cargando…"
 msgid "London"
 msgstr "Londres"
 
-#: src/dashboard/dependency-requests.tsx
-msgctxt "kind of finding"
-msgid "Lookalike name"
-msgstr "Nombre parecido"
-
 #: src/activity/audit-words.ts
 msgid "Looked at the access to remove by hand"
 msgstr "Consultó el acceso que quitar a mano"
 
-#: src/dashboard/dependency-requests.tsx
-msgctxt "severity of a finding"
+#: src/chat/package-requests.tsx
+msgctxt "an advisory's severity"
 msgid "Low"
-msgstr "Baja"
+msgstr "Bajo"
 
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
@@ -7642,11 +7518,6 @@ msgstr "¿Poner en marcha la versión {version} de {name}?"
 #: src/apps/data-model-changes.tsx
 msgid "Makes {table} sensitive: its history keeps no values, and every read is recorded."
 msgstr "Hace sensible {table}: su historial no guarda valores y cada lectura queda registrada."
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind: packages revoked as malware"
-msgid "Malware"
-msgstr "Malware"
 
 #: src/connections/integration-row.tsx
 msgid "Manage"
@@ -7794,10 +7665,10 @@ msgstr "Aún no hay modelos configurados. Pide a tu administrador que conecte un
 msgid "Models for your organization"
 msgstr "Modelos de tu organización"
 
-#: src/dashboard/dependency-requests.tsx
-msgctxt "severity of a finding"
+#: src/chat/package-requests.tsx
+msgctxt "an advisory's severity"
 msgid "Moderate"
-msgstr "Moderada"
+msgstr "Moderado"
 
 #: src/workflows/module-files.tsx
 msgid "Modules"
@@ -7942,10 +7813,8 @@ msgstr "En silencio"
 #: src/onboarding/interviews-progress.tsx
 #: src/projects/new-item-dialog.tsx
 #: src/projects/project-dialog.tsx
-#: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.workspace.tsx
-#: src/settings/package-approvers.tsx
 #: src/settings/teams.tsx
 #: src/workflows/files-and-apps.tsx
 msgid "Name"
@@ -7993,10 +7862,6 @@ msgstr "Nativa"
 msgctxt "workflow stage"
 msgid "Needs a check"
 msgstr "Por revisar"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Needs alongside it"
-msgstr "Necesita además"
 
 #: src/dashboard/widget-board.tsx
 msgid "Needs attention"
@@ -8111,10 +7976,6 @@ msgstr "Opción nueva"
 msgid "New project"
 msgstr "Nuevo proyecto"
 
-#: src/dashboard/dependency-requests.tsx
-msgid "New since the last approval: {added}"
-msgstr "Nuevo desde la última aprobación: {added}"
-
 #: src/apps/app-data-model.tsx
 msgid "New table"
 msgstr "Nueva tabla"
@@ -8210,10 +8071,6 @@ msgstr "Ninguna aplicación tiene un modelo vinculado."
 #: src/apps/apps-overview.tsx
 msgid "No App is called “{asked}”"
 msgstr "Ninguna aplicación se llama «{asked}»"
-
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "No App or workflow has approved packages."
-msgstr "Ninguna aplicación ni flujo de trabajo tiene paquetes aprobados."
 
 #: src/apps/apps-overview.tsx
 #: src/chat/side-panel.tsx
@@ -8320,10 +8177,6 @@ msgstr "Ya no declarados"
 msgid "No longer offered"
 msgstr "Ya no se ofrece"
 
-#: src/dashboard/dependency-requests.tsx
-msgid "No longer used: {removed}"
-msgstr "Ya no se usa: {removed}"
-
 #: src/onboarding/setup-steps.tsx
 msgid "No longer where it was"
 msgstr "Ya no está donde estaba"
@@ -8359,18 +8212,6 @@ msgstr "Aún no hay módulos. Un módulo contiene cálculos que una tarea llama 
 #: src/people/person-picker.tsx
 msgid "No owner yet"
 msgstr "Aún sin responsable"
-
-#: src/apps/package-approvals.tsx
-msgid "No packages are approved for this App."
-msgstr "No hay paquetes aprobados para esta aplicación."
-
-#: src/apps/package-approvals.tsx
-msgid "No packages are approved for this workflow."
-msgstr "No hay paquetes aprobados para este flujo de trabajo."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "No packages were approved for this App before."
-msgstr "Antes no se había aprobado ningún paquete para esta aplicación."
 
 #: src/apps/app-page.tsx
 msgid "No page yet"
@@ -8512,10 +8353,6 @@ msgstr "Nadie"
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Nadie respondió a tiempo, así que esta decisión se ha cerrado."
 
-#: src/settings/package-approvers.tsx
-msgid "Nobody approves packages yet, so every package request waits."
-msgstr "Nadie aprueba paquetes todavía, así que cada solicitud de paquetes espera."
-
 #: src/settings/stephen-card.tsx
 msgid "Nobody asked him anything yet."
 msgstr "Nadie le ha preguntado nada todavía."
@@ -8614,10 +8451,6 @@ msgstr "Ninguno de los permisos de integración de la aplicación sirve {contrac
 #: src/interview/read-back.tsx
 msgid "None of this is right"
 msgstr "Nada de esto es correcto"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "None stated"
-msgstr "No indicada"
 
 #: src/chat/builds.tsx
 msgid "None waiting for an admin."
@@ -8805,11 +8638,6 @@ msgctxt "a run that hasn't ended"
 msgid "Not yet"
 msgstr "Todavía no"
 
-#: src/dashboard/dependency-requests.tsx
-msgctxt "severity of a finding"
-msgid "Note"
-msgstr "Nota"
-
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "tab: a piece of work's note in the brain"
 msgid "Note"
@@ -8957,6 +8785,10 @@ msgstr "Ahora mismo no hay nada que mejorar."
 #: src/dashboard/custom-widget.tsx
 msgid "Nothing to show yet."
 msgstr "Aún no hay nada que mostrar."
+
+#: src/chat/package-requests.tsx
+msgid "Nothing uses them until you approve. Known malware is always refused."
+msgstr "Nada los usa hasta que los apruebes. El malware conocido siempre se rechaza."
 
 #: src/inbox/inbox-page.tsx
 msgid "Nothing waits on you"
@@ -9197,10 +9029,6 @@ msgstr "Solo mapeado"
 #: src/knowledge/new-collection.tsx
 msgid "Only me"
 msgstr "Solo yo"
-
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "Only people who may approve packages see what is approved across the workspace."
-msgstr "Solo quienes pueden aprobar paquetes ven lo aprobado en todo el espacio de trabajo."
 
 #: src/apps/app-own-link.tsx
 msgid "Only someone signed in to the workspace opens it."
@@ -9614,42 +9442,22 @@ msgstr "Responsable: nadie todavía. Cambiar responsable"
 msgid "Owners see people one by one."
 msgstr "Los propietarios ven a las personas una a una."
 
-#: src/dashboard/dependency-requests.tsx
 #: src/inbox/items.ts
 msgid "Package"
 msgstr "Paquete"
 
-#: src/inbox/items.ts
-msgid "package approvers"
-msgstr "aprobadores de paquetes"
+#: src/chat/package-requests.tsx
+msgid "Package requests"
+msgstr "Solicitudes de paquetes"
 
-#: src/apps/package-approvals.tsx
-#: src/inbox/items.ts
-#: src/routes/_shell.apps.$app_.settings.tsx
-#: src/routes/_shell.settings.packages.index.tsx
-#: src/routes/_shell.settings.tsx
-#: src/routes/_shell.workflows.$workflow.tsx
-msgid "Packages"
-msgstr "Paquetes"
-
-#: src/apps/app-settings.tsx
-msgctxt "an app's settings section"
+#: src/chat/package-requests.tsx
 msgid "Packages"
 msgstr "Paquetes"
 
 #: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
+msgctxt "inbox item kind: what a scan found of approved packages"
 msgid "Packages"
 msgstr "Paquetes"
-
-#: src/dashboard/dependency-requests.tsx
-#: src/inbox/items.ts
-msgid "Packages for {app}"
-msgstr "Paquetes para {app}"
-
-#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
-msgid "Packages for {workflow}"
-msgstr "Paquetes para {workflow}"
 
 #: src/inbox/items.ts
 msgid "Packages of {name} were revoked as malware"
@@ -9870,7 +9678,6 @@ msgid "Permissions asked for"
 msgstr "Permisos pedidos"
 
 #: src/routes/_shell.settings.outcomes.tsx
-#: src/settings/package-approvers.tsx
 msgid "Person"
 msgstr "Persona"
 
@@ -10052,17 +9859,9 @@ msgstr "Propuesta por el agente, en un chat tuyo que se eliminó."
 msgid "Proposed by the agent, in another person's chat."
 msgstr "Propuesta por el agente, en el chat de otra persona."
 
-#: src/dashboard/dependency-requests.tsx
-msgid "Proposed by the agent, in their chat, <0>{asked}</0>"
-msgstr "Propuesto por el agente, en su chat, el <0>{asked}</0>"
-
 #: src/activity/audit-words.ts
 msgid "Proposed packages"
 msgstr "Propuso paquetes"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Provided by Grasp, not installed again: {provided}"
-msgstr "Lo proporciona Grasp, no se instala de nuevo: {provided}"
 
 #: src/settings/ai-providers.tsx
 msgid "Provider"
@@ -10269,10 +10068,6 @@ msgstr "Se leyó {path} en la documentación"
 msgid "Read a knowledge document"
 msgstr "Leyó un documento de conocimiento"
 
-#: src/apps/package-approvals.tsx
-msgid "Read again"
-msgstr "Leer de nuevo"
-
 #: src/activity/audit-words.ts
 msgid "Read an App's statistics"
 msgstr "Leyó las estadísticas de una aplicación"
@@ -10476,12 +10271,7 @@ msgstr "Rediseñado o en prueba"
 msgid "Region"
 msgstr "Región"
 
-#: src/dashboard/dependency-requests.tsx
-msgid "Registry and hash"
-msgstr "Registro y hash"
-
 #: src/chat/held-writes.tsx
-#: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/decision-confirmation.tsx
 #: src/inbox/item-detail.tsx
@@ -10507,11 +10297,6 @@ msgstr "Rechazar {who}"
 msgid "Reject all"
 msgstr "Rechazar todo"
 
-#: src/dashboard/dependency-requests.tsx
-#: src/inbox/item-detail.tsx
-msgid "Reject the packages for {app}"
-msgstr "Rechazar los paquetes para {app}"
-
 #: src/dashboard/pile-cards.tsx
 #: src/inbox/item-detail.tsx
 msgid "Reject this request?"
@@ -10533,7 +10318,6 @@ msgstr "Rechazado en {left} s"
 msgid "Rejected: {rejected}"
 msgstr "Rechazadas: {rejected}"
 
-#: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
 #: src/inbox/item-detail.tsx
 msgid "Rejected: {who}."
@@ -10561,7 +10345,6 @@ msgstr "Recordar algo"
 #: src/connections/tool-permissions.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/ai-providers.tsx
-#: src/settings/package-approvers.tsx
 msgid "Remove"
 msgstr "Quitar"
 
@@ -10597,10 +10380,6 @@ msgstr "Quitar {name} de los modelos de reserva"
 #: src/routes/_shell.settings.members.tsx
 msgid "Remove {name}?"
 msgstr "¿Quitar a {name}?"
-
-#: src/settings/package-approvers.tsx
-msgid "Remove {named} as an approver"
-msgstr "Quitar a {named} como aprobador"
 
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Remove {title} from the brain"
@@ -10667,7 +10446,6 @@ msgstr "Eliminar esto del cerebro"
 
 #: src/chat/builds.tsx
 #: src/settings/erasures.tsx
-#: src/settings/package-approvers.tsx
 msgid "Removed"
 msgstr "Eliminado"
 
@@ -10875,29 +10653,13 @@ msgstr "Reanudar"
 msgid "Retention"
 msgstr "Conservación"
 
-#: src/apps/package-approvals.tsx
-msgid "Retire"
-msgstr "Dar de baja"
-
 #: src/brain/memory-page.tsx
 msgid "Retire it"
 msgstr "Retirar"
 
-#: src/apps/package-approvals.tsx
-msgid "Retire the packages for {app}"
-msgstr "Dar de baja los paquetes de {app}"
-
-#: src/apps/package-approvals.tsx
-msgid "Retire the packages for {app}?"
-msgstr "¿Dar de baja los paquetes de {app}?"
-
 #: src/brain/lessons-view.tsx
 msgid "Retire this lesson"
 msgstr "Retirar esta lección"
-
-#: src/apps/package-approvals.tsx
-msgid "Retired"
-msgstr "Dado de baja"
 
 #: src/brain/lessons-view.tsx
 msgctxt "lesson state"
@@ -10908,10 +10670,6 @@ msgstr "Retirada"
 msgctxt "memory record state"
 msgid "Retired"
 msgstr "Retirado"
-
-#: src/apps/package-approvals.tsx
-msgid "Retired by {endedBy}, {endedAt}: {endedReason}"
-msgstr "Dado de baja por {endedBy}, {endedAt}: {endedReason}"
 
 #: src/dashboard/standard-widgets.tsx
 msgctxt "column: the value of the hours that come free a month"
@@ -10981,7 +10739,6 @@ msgstr "La revisión {revision} todavía no pasa la comprobación. La última qu
 msgid "Revision {revision} passes the profile and can be published."
 msgstr "La revisión {revision} pasa la comprobación del perfil y se puede publicar."
 
-#: src/apps/package-approvals.tsx
 #: src/apps/release-controls.tsx
 #: src/apps/resource-bindings.tsx
 #: src/connections/connection-list.tsx
@@ -11026,14 +10783,6 @@ msgstr "¿Revocar la vinculación de {alias}?"
 msgid "Revoke the connection"
 msgstr "Revocar la conexión"
 
-#: src/apps/package-approvals.tsx
-msgid "Revoke the packages for {app}"
-msgstr "Revocar los paquetes de {app}"
-
-#: src/apps/package-approvals.tsx
-msgid "Revoke the packages for {app}?"
-msgstr "¿Revocar los paquetes de {app}?"
-
 #: src/workflows/workflow-triggers-tab.tsx
 msgid "Revoke the secret"
 msgstr "Revocar el secreto"
@@ -11055,7 +10804,6 @@ msgid "Revoke version {version}?"
 msgstr "¿Revocar la versión {version}?"
 
 #: src/apps/release-controls.tsx
-#: src/inbox/items.ts
 msgid "Revoked"
 msgstr "Revocada"
 
@@ -11066,6 +10814,10 @@ msgstr "Revocó el acceso de una cuenta desconectada en su proveedor"
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
 msgstr "Revocó un permiso"
+
+#: src/activity/audit-words.ts
+msgid "Revoked packages as malware"
+msgstr "Revocó paquetes por malware"
 
 #: src/workflows/files-and-apps.tsx
 msgid "Revoked: {alias}."
@@ -11253,11 +11005,6 @@ msgstr "Funciona en: {whereItRuns}"
 msgid "Runs by the day they started"
 msgstr "Ejecuciones por el día en que empezaron"
 
-#: src/apps/package-approvals.tsx
-#: src/inbox/items.ts
-msgid "Runs in"
-msgstr "Se ejecuta en"
-
 #: src/chat/builds-state.ts
 msgid "Runs now"
 msgstr "Se ejecuta ahora"
@@ -11377,10 +11124,6 @@ msgstr "Sam, como todos los que usan la App, puede cambiar cualquier registro de
 #: src/apps/access-view.tsx
 msgid "Sam, like everyone who uses the App, sees every record in {table}."
 msgstr "Sam, como todos los que usan la App, ve todos los registros de {table}."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Same version, different contents: {changed}"
-msgstr "Misma versión, contenido distinto: {changed}"
 
 #: src/apps/field-editor.tsx
 #: src/brain/goals-editor.tsx
@@ -11629,11 +11372,6 @@ msgstr "Secreto revocado"
 msgid "Security"
 msgstr "Seguridad"
 
-#: src/dashboard/dependency-requests.tsx
-msgctxt "kind of finding"
-msgid "Security"
-msgstr "Seguridad"
-
 #: src/workflows/activity-bar.tsx
 msgctxt "open the whole list"
 msgid "See all"
@@ -11768,11 +11506,6 @@ msgstr "Enviada a: {who}"
 #: src/brain/brain.ts
 msgid "Served by"
 msgstr "Flujos que contribuyen"
-
-#: src/dashboard/dependency-requests.tsx
-msgctxt "where a package runs"
-msgid "Server"
-msgstr "Servidor"
 
 #: src/chat/builds.tsx
 msgid "Server code"
@@ -11927,14 +11660,6 @@ msgstr "Mostrar actividad de"
 msgid "Show all {count} lines ({characters} characters)"
 msgstr "Mostrar las {count} líneas ({characters} caracteres)"
 
-#: src/dashboard/dependency-requests.tsx
-msgid "Show every package"
-msgstr "Mostrar todos los paquetes"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Show every package before you approve them."
-msgstr "Muestra todos los paquetes antes de aprobarlos."
-
 #: src/chat/held-writes.tsx
 msgid "Show exactly what was sent"
 msgstr "Mostrar exactamente lo que se envió"
@@ -11969,7 +11694,6 @@ msgstr "Mostrar menos"
 #: src/onboarding/place-picker.tsx
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
-#: src/routes/_shell.settings.packages.index.tsx
 msgid "Show more"
 msgstr "Mostrar más"
 
@@ -11996,10 +11720,6 @@ msgstr "Mostrar u ocultar la barra lateral"
 #: src/workflows/requests/request-who.tsx
 msgid "Show people one by one"
 msgstr "Mostrar personas una a una"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Show the packages for {app}"
-msgstr "Mostrar los paquetes para {app}"
 
 #: src/workflows/requests/request-detail.tsx
 msgid "Show the page for {title}"
@@ -12449,7 +12169,6 @@ msgid "Statements"
 msgstr "Afirmaciones"
 
 #: src/apps/app-settings.tsx
-#: src/apps/package-approvals.tsx
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -12765,7 +12484,6 @@ msgstr "tareas"
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 #: src/onboarding/interviews-progress.tsx
-#: src/settings/package-approvers.tsx
 msgid "Team"
 msgstr "Equipo"
 
@@ -13005,6 +12723,10 @@ msgstr "La dirección puede volver a iniciar sesión."
 msgid "The address may be wrong, or the page was moved or removed."
 msgstr "Puede que la dirección sea incorrecta, o que la página se haya movido o eliminado."
 
+#: src/chat/package-requests.tsx
+msgid "The agent asks for npm packages for {subject}"
+msgstr "El agente pide paquetes de npm para {subject}"
+
 #: src/activity/audit-words.ts
 msgid "The agent looked something up"
 msgstr "El agente consultó algo"
@@ -13074,10 +12796,6 @@ msgstr "La versión activa de la aplicación no guarda datos."
 #: src/apps/resource-bindings.tsx
 msgid "The App's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
 msgstr "La siguiente solicitud de la aplicación a través de ella se rechaza, y las acciones que esperan en ella se descartan. Vincúlalo de nuevo para volver a usarlo."
-
-#: src/routes/_shell.settings.packages.index.tsx
-msgid "The Apps and workflows that may use approved npm packages. Open one to retire or revoke what was approved for it."
-msgstr "Las aplicaciones y flujos de trabajo que pueden usar paquetes npm aprobados. Abre uno para dar de baja o revocar lo que se le aprobó."
 
 #: src/brain/brain-sections.ts
 msgid "The apps teams named, and the ones seen in use that nobody mentioned."
@@ -13367,10 +13085,6 @@ msgstr "No se puede rellenar el nuevo campo {field} de la tabla {table}: el regi
 msgid "The next one"
 msgstr "La siguiente"
 
-#: src/apps/app-settings.tsx
-msgid "The npm packages approved for the App, and taking an approval back."
-msgstr "Los paquetes npm aprobados para la App, y retirar una aprobación."
-
 #: src/interview/words.ts
 msgid "The numbers"
 msgstr "Las cifras"
@@ -13387,25 +13101,9 @@ msgstr "La organización aún no tiene equipos."
 msgid "The origin is https:// and a public host name, with nothing after it: https://api.example.com."
 msgstr "El origen es https:// y un nombre de host público, sin nada detrás: https://api.example.com."
 
-#: src/routes/_shell.apps.$app_.settings.tsx
-msgid "The packages approved for this App. You see them because you may approve packages; the rest of the App is for its members."
-msgstr "Los paquetes aprobados para esta aplicación. Los ves porque puedes aprobar paquetes; el resto de la aplicación es para sus miembros."
-
-#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
-msgid "The packages approved for this workflow's calculations. Retire or revoke them here."
-msgstr "Los paquetes aprobados para los cálculos de este flujo de trabajo. Dalos de baja o revócalos aquí."
-
-#: src/apps/package-approvals.tsx
-msgid "The packages couldn't be read again, so this list may be out of date: {unread}"
-msgstr "No se pudieron leer de nuevo los paquetes, así que esta lista puede estar desactualizada: {unread}"
-
 #: src/pages/page-frame.tsx
 msgid "The page couldn't be loaded."
 msgstr "No se pudo cargar la página."
-
-#: src/settings/package-approvers.tsx
-msgid "The people and teams who approve or deny the npm packages Apps and workflows ask for. No role includes this, not even admin: add yourself to approve packages."
-msgstr "Las personas y los equipos que aprueban o rechazan los paquetes npm que piden las aplicaciones y los flujos de trabajo. Ningún rol lo incluye, ni siquiera el de administrador: añádete para aprobar paquetes."
 
 #: src/apps/access-view.tsx
 #: src/chat/builds.tsx
@@ -14151,10 +13849,6 @@ msgstr "A los responsables de equipo. Los demás siguen en cuanto su responsable
 #: src/onboarding/send-plan-form.tsx
 msgid "To these teams"
 msgstr "A estos equipos"
-
-#: src/apps/package-approvals.tsx
-msgid "To use them again, someone who approves packages reviews them again."
-msgstr "Para volver a usarlos, alguien que aprueba paquetes los revisa de nuevo."
 
 #: src/brain/brain-log.tsx
 msgid "Today"
@@ -14911,16 +14605,16 @@ msgid "Was refused adding a member to an App"
 msgstr "No se le permitió añadir un miembro a una aplicación"
 
 #: src/activity/audit-words.ts
+msgid "Was refused approving packages that couldn't be checked"
+msgstr "No pudo aprobar paquetes que no se pudieron comprobar"
+
+#: src/activity/audit-words.ts
 msgid "Was refused as an App's visitor"
 msgstr "Fue rechazado como visitante de una aplicación"
 
 #: src/activity/audit-words.ts
 msgid "Was refused packages known as malware"
 msgstr "Se rechazaron paquetes conocidos como malware"
-
-#: src/activity/audit-words.ts
-msgid "Was refused packages nobody approved"
-msgstr "Se le denegaron paquetes que nadie aprobó"
 
 #: src/activity/audit-words.ts
 msgid "Was sent a code to visit an App"
@@ -15075,10 +14769,6 @@ msgstr "Lo que Grasp aún no sabe, y quién puede responderlo."
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What Grasp may do"
 msgstr "Qué puede hacer Grasp"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "What Grasp refuses to run"
-msgstr "Lo que Grasp se niega a ejecutar"
 
 #: src/inbox/item-detail.tsx
 msgctxt "inbox item section"
@@ -15555,11 +15245,6 @@ msgstr "Quién responde por la aplicación: a quién se le pregunta por ella y q
 msgid "Who approves a new tool"
 msgstr "Quién aprueba una herramienta nueva"
 
-#: src/routes/_shell.settings.packages.index.tsx
-#: src/settings/package-approvers.tsx
-msgid "Who approves packages"
-msgstr "Quién aprueba paquetes"
-
 #: src/brain/brain.ts
 msgid "Who can answer"
 msgstr "Quién puede responder"
@@ -15624,7 +15309,6 @@ msgstr "¿Quién es quién en tu empresa?"
 msgid "whoever added the row"
 msgstr "quien añadió la fila"
 
-#: src/apps/package-approvals.tsx
 #: src/apps/release-controls.tsx
 #: src/knowledge/purge.tsx
 #: src/workflows/requests/request-table.tsx
@@ -15666,6 +15350,10 @@ msgstr "Con IA"
 msgid "With the board"
 msgstr "Con la dirección"
 
+#: src/chat/package-requests.tsx
+msgid "With what they bring"
+msgstr "Con todo lo que traen"
+
 #: src/settings/invitations.tsx
 msgid "Withdraw"
 msgstr "Retirar"
@@ -15677,10 +15365,6 @@ msgstr "Mejor retirarme"
 #: src/settings/invitations.tsx
 msgid "Withdraw the invitation of {email}"
 msgstr "Retirar la invitación de {email}"
-
-#: src/activity/audit-words.ts
-msgid "Withdrew a request for packages"
-msgstr "Retiró una solicitud de paquetes"
 
 #: src/activity/audit-words.ts
 msgid "Withdrew an invitation"
@@ -15723,12 +15407,10 @@ msgid "Worked out what could be improved"
 msgstr "Calculó lo que podría mejorarse"
 
 #: src/apps/app-workflows.tsx
-#: src/dashboard/dependency-requests.tsx
 #: src/dashboard/runs-widget.tsx
 #: src/dashboard/standard-widgets.tsx
 #: src/inbox/items.ts
 #: src/projects/new-item-dialog.tsx
-#: src/routes/_shell.settings.packages.index.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/go-lives-waiting.tsx
 #: src/workflows/runs.tsx
@@ -15758,10 +15440,6 @@ msgstr "Flujo de trabajo {workflow}"
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Workflow not found"
 msgstr "Flujo de trabajo no encontrado"
-
-#: src/routes/_shell.settings.packages.workflows.$workflow.tsx
-msgid "Workflow packages"
-msgstr "Paquetes del flujo de trabajo"
 
 #: src/settings/audit-archive.tsx
 msgid "Workflow run details"
@@ -15809,11 +15487,6 @@ msgstr "Flujos de trabajo"
 
 #: src/brain/brain.ts
 msgctxt "note property: the workflows a tool or team is part of"
-msgid "Workflows"
-msgstr "Flujos de trabajo"
-
-#: src/dashboard/dependency-requests.tsx
-msgctxt "where a package runs"
 msgid "Workflows"
 msgstr "Flujos de trabajo"
 

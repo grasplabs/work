@@ -76,25 +76,26 @@ export interface EventsStoppedNotification {
 }
 
 /**
- * Packages of an App or workflow the person builds, or whose packages
- * they approved, were revoked because one was reported as malware
- * (core's dependencies/requests.ts): nothing of them is built, served or
- * started until a builder removes it and an approver approves a new set.
- * Listed while the person can still open the App or workflow, or approve
- * packages.
+ * What core's rescan found of the approved packages of an App or workflow
+ * the person builds (core's packages/rescan.ts): `package_revoked`, one
+ * was reported as malware, so they were revoked and nothing of them is
+ * built or started until a builder removes it and approves a new set;
+ * `package_advisory`, an advisory not known as they were approved, which
+ * a builder decides about (the approval stands). Listed while the person
+ * can still open the App or workflow.
  */
-export interface PackageRevokedNotification {
+export interface PackageNotification {
   id: string;
-  type: "package_revoked";
-  /** The App or workflow whose packages were revoked, by its name now. */
+  type: "package_revoked" | "package_advisory";
+  /** The App or workflow, by its name now. */
   subject:
     | { type: "app"; app: string; appName: string }
     | { type: "workflow"; workflow: string; workflowName: string };
-  /** The package version reported as malware: the first, if several were. */
+  /** The package version it is about. */
   package: { name: string; version: string };
-  /** The advisory that reported it, such as an OSV or GHSA ID. */
+  /** The advisory or report, such as an OSV or GHSA ID. */
   advisory: string;
-  /** When they were revoked (ISO 8601). */
+  /** When it was found (ISO 8601). */
   at: string;
   read: boolean;
 }
@@ -120,7 +121,7 @@ export type Notification =
   | AppMessageNotification
   | GapAskedNotification
   | TriggerStoppedNotification
-  | PackageRevokedNotification
+  | PackageNotification
   | EventsStoppedNotification;
 
 /** Most notifications `list` returns: the latest. */

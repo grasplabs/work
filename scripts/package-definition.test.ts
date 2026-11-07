@@ -202,22 +202,19 @@ const locked = (
   license,
   publishedAt: "2026-01-01T00:00:00.000Z",
   dependencies,
-  peers: {},
 });
 const lockOf = (
   direct: Record<string, string>,
-  packages: ReturnType<typeof locked>[],
-  platformPeers: Record<string, string> = {}
+  packages: ReturnType<typeof locked>[]
 ) =>
   JSON.stringify({
-    lockfileVersion: 1,
+    lockfileVersion: 2,
     registry: "https://registry.npmjs.org",
     requested: Object.fromEntries(
       Object.entries(direct).map(([name, version]) => [name, `^${version}`])
     ),
     direct,
-    platformPeers,
-    targets: {},
+    entries: Object.keys(direct),
     packages: Object.fromEntries(
       packages.map((entry) => [`${entry.name}@${entry.version}`, entry])
     ),
@@ -1011,17 +1008,12 @@ describe(
       await packaged(
         withLock(
           lockOf({ "date-kit": "1.2.0" }, [
-            {
-              ...locked("date-kit", "1.2.0", "MIT | injected\n| row |", {
-                "tz-data": "2.0.1",
-              }),
-              // A peer the graph meets is pinned like a dependency; one the
-              // platform meets is the project's own.
-              peers: {
-                "tz-rules": { range: "^3.0.0", resolved: "3.1.0", by: "graph" },
-                react: { range: "^19.0.0", resolved: "19.3.0", by: "platform" },
-              },
-            },
+            // A required peer is pinned among its dependencies, as its
+            // lock resolved it.
+            locked("date-kit", "1.2.0", "MIT | injected\n| row |", {
+              "tz-data": "2.0.1",
+              "tz-rules": "3.1.0",
+            }),
             locked("tz-rules", "3.1.0", "MIT"),
             locked("tz-data", "2.0.1", "Apache-2.0"),
           ])
@@ -1055,17 +1047,6 @@ describe(
           lockOf({ "date-kit": "1.2.0" }, [
             locked("date-kit", "1.2.0", "MIT", { "@grasp-os/shared": "1.0.0" }),
             locked("@grasp-os/shared", "1.0.0", "MIT"),
-          ]),
-          // A peer its graph met at one version, the project at another.
-          lockOf({ "date-kit": "1.2.0", "tz-rules": "3.2.0" }, [
-            {
-              ...locked("date-kit", "1.2.0", "MIT"),
-              peers: {
-                "tz-rules": { range: "^3.0.0", resolved: "3.1.0", by: "graph" },
-              },
-            },
-            locked("tz-rules", "3.1.0", "MIT"),
-            locked("tz-rules", "3.2.0", "MIT"),
           ]),
           // The tarball the kit installs, with other dependencies.
           lockOf({ "date-kit": "1.2.0" }, [
@@ -1106,12 +1087,11 @@ describe(
       }).toStrictEqual({
         dateKit: "1.2.0",
         locked: {
-          // Its peers met as the lock met them: one by the graph, React by
-          // the project's own.
+          // Its dependencies, its required peer among them, as its lock
+          // resolved them.
           "date-kit@1.2.0": {
             integrity: lockedIntegrity,
             dependencies: {
-              react: lockfile.importers["."]?.dependencies?.react?.version,
               "tz-data": "2.0.1",
               "tz-rules": "3.1.0",
             },
@@ -1121,7 +1101,6 @@ describe(
         },
         notices: ["| date-kit | 1.2.0 | unknown | the App's lock |"],
         refused: [
-          "refused",
           "refused",
           "refused",
           "refused",
@@ -1149,10 +1128,10 @@ describe(
           workflows: { "workspace/greet/1.0.0": { ...greet, packages } },
         };
       };
-      const sealed = (lock: string | null) => ({
+      const sealed = (lock: string) => ({
         graphHash: hash("9"),
         entries: ["date-kit"],
-        lock: lock === null ? null : graspLockSchema.parse(JSON.parse(lock)),
+        lock: graspLockSchema.parse(JSON.parse(lock)),
       });
       const dateKit = (version: string) =>
         lockOf({ "date-kit": version }, [
@@ -1202,9 +1181,6 @@ describe(
             scratch().out
           )
         ),
-        unlocked: await refusalOf(
-          packaged(withPackages(sealed(null)), scratch().out)
-        ),
         ownedByProject: await refusalOf(
           packaged(
             withPackages(
@@ -1232,7 +1208,6 @@ describe(
         refusals: {
           conflicting: "refused",
           agreeing: "ok",
-          unlocked: "refused",
           ownedByProject: "refused",
         },
       });
@@ -1276,7 +1251,7 @@ describe(
       });
     });
 
-    it("meets the kit's peers only from the kit, a lock's as its lock met them, and refuses a peer outside its range or a platform it wasn't resolved against", async () => {
+    it("meets the kit's peers only from the kit, never from an App's own versions", async () => {
       const withLock = (lock: string) =>
         definitionOf({
           ...notesFiles(),
@@ -1315,135 +1290,16 @@ describe(
           },
         ])
       );
-      const peered = (peers: Record<string, unknown>, platformPeers = {}) =>
-        lockOf(
-          { "date-kit": "1.2.0" },
-          [
-            { ...locked("date-kit", "1.2.0", "MIT"), peers },
-            locked("tz-rules", "3.1.0", "MIT"),
-          ],
-          platformPeers
-        );
-      const refusals = {
-        platformElsewhere: await refusalOf(
-          packaged(
-            withLock(
-              peered({
-                react: { range: "^17.0.0", resolved: "17.0.2", by: "platform" },
-              })
-            ),
-            scratch().out
-          )
-        ),
-        outsideRange: await refusalOf(
-          packaged(
-            withLock(
-              peered({
-                "tz-rules": { range: "^4.0.0", resolved: "3.1.0", by: "graph" },
-              })
-            ),
-            scratch().out
-          )
-        ),
-        dependencyAndPeerDiffer: await refusalOf(
-          packaged(
-            withLock(
-              lockOf({ "date-kit": "1.2.0" }, [
-                {
-                  ...locked("date-kit", "1.2.0", "MIT", {
-                    "tz-rules": "3.0.0",
-                  }),
-                  peers: {
-                    "tz-rules": {
-                      range: "^3.0.0",
-                      resolved: "3.1.0",
-                      by: "graph",
-                    },
-                  },
-                },
-                locked("tz-rules", "3.0.0", "MIT"),
-                locked("tz-rules", "3.1.0", "MIT"),
-              ])
-            ),
-            scratch().out
-          )
-        ),
-        resolvedAgainstAnotherPlatform: await refusalOf(
-          packaged(withLock(peered({}, { react: "17.0.2" })), scratch().out)
-        ),
-        // A kit package a lock names too, its peer met in the lock's graph
-        // with a version the kit doesn't install: the project would leave
-        // it unmet.
-        kitPeerTheLockMet: await refusalOf(
-          packaged(
-            withLock(
-              lockOf({ debug: "4.4.3" }, [
-                {
-                  ...locked("debug", "4.4.3", "MIT", { ms: "2.1.3" }),
-                  integrity: kitIntegrity("debug@4.4.3"),
-                  peers: {
-                    "supports-color": {
-                      range: "*",
-                      resolved: "10.2.2",
-                      by: "graph",
-                    },
-                  },
-                },
-                {
-                  ...locked("supports-color", "10.2.2", "MIT"),
-                  integrity: kitIntegrity("supports-color@10.2.2"),
-                },
-                {
-                  ...locked("ms", "2.1.3", "MIT"),
-                  integrity: kitIntegrity("ms@2.1.3"),
-                },
-              ])
-            ),
-            scratch().out
-          )
-        ),
-        // A kit package a lock names too, its peer met by the platform at
-        // a version the project doesn't install: refused as for any other.
-        kitPackagePlatformElsewhere: await refusalOf(
-          packaged(
-            withLock(
-              lockOf({ "lucide-react": "1.47.0" }, [
-                {
-                  ...locked("lucide-react", "1.47.0", "ISC"),
-                  integrity: kitIntegrity("lucide-react@1.47.0"),
-                  peers: {
-                    react: {
-                      range: "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0",
-                      resolved: "17.0.2",
-                      by: "platform",
-                    },
-                  },
-                },
-              ])
-            ),
-            scratch().out
-          )
-        ),
-      };
       expect({
         dateFns: metFor(withOwn, "@base-ui/react", "date-fns"),
         supportsColor: metFor(withOwn, "debug", "supports-color"),
-        refusals,
       }).toStrictEqual({
         dateFns: metFor(kit, "@base-ui/react", "date-fns"),
         supportsColor: metFor(kit, "debug", "supports-color"),
-        refusals: {
-          platformElsewhere: "refused",
-          outsideRange: "refused",
-          dependencyAndPeerDiffer: "refused",
-          resolvedAgainstAnotherPlatform: "refused",
-          kitPeerTheLockMet: "refused",
-          kitPackagePlatformElsewhere: "refused",
-        },
       });
     });
 
-    it("installs an App's locked packages with their peers as the lockfile meets them, and refuses one whose tarball isn't the one pinned", async () => {
+    it("installs an App's locked packages as its lock resolved them, and refuses one whose tarball isn't the one pinned", async () => {
       // The App's packages, as a registry of the test's own serves them.
       const tarballs = new Map<string, Buffer>();
       const tarball = (name: string, version: string, index: string) => {
@@ -1465,18 +1321,17 @@ describe(
       const lock = (dateKitIntegrity?: string) =>
         lockOf({ "date-kit": "1.2.0" }, [
           {
-            ...locked("date-kit", "1.2.0", "MIT", { "tz-data": "2.0.1" }),
+            ...locked("date-kit", "1.2.0", "MIT", {
+              "tz-data": "2.0.1",
+              "tz-rules": "3.1.0",
+            }),
             integrity:
               dateKitIntegrity ??
               tarball(
                 "date-kit",
                 "1.2.0",
-                'module.exports = [require("tz-data"), require("tz-rules"), require("react").version];\n'
+                'module.exports = [require("tz-data"), require("tz-rules")];\n'
               ),
-            peers: {
-              "tz-rules": { range: "^3.0.0", resolved: "3.1.0", by: "graph" },
-              react: { range: "^19.0.0", resolved: "19.3.0", by: "platform" },
-            },
           },
           {
             ...locked("tz-data", "2.0.1", "MIT"),
@@ -1547,7 +1402,7 @@ describe(
       }).toStrictEqual({
         accepted: {
           status: 0,
-          loaded: JSON.stringify(["tz-data", "tz-rules", "19.3.0"]),
+          loaded: JSON.stringify(["tz-data", "tz-rules"]),
         },
         tampered: { status: "refused", why: true },
       });

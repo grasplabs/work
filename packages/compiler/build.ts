@@ -70,7 +70,6 @@ import {
 } from "./src/kit.ts";
 import type { Kit, KitModules } from "./src/kit.ts";
 import { startOxc } from "./src/oxc.ts";
-import { platformModules } from "./src/packages/platform.ts";
 import { compilerOptions, serverLibs } from "./src/type-check.ts";
 import type { KitTypes } from "./src/type-check.ts";
 import { ultraciteConfig } from "./ultracite-config.ts";
@@ -100,8 +99,14 @@ const ownPackages: Readonly<Record<string, string>> = {
 };
 const require = createRequire(path.join(root, "package.json"));
 
-/** React as the kit's modules, App modules and packages import it. */
-const reactSpecifiers = platformModules;
+/** The modules of React and React DOM the kit provides, by specifier. */
+const reactSpecifiers = [
+  "react",
+  "react/jsx-runtime",
+  "react/compiler-runtime",
+  "react-dom",
+  "react-dom/client",
+];
 /** What App code may import besides `@grasp-os/ui` and lucide-react icons. */
 const reactImports = ["react", "react/jsx-runtime"];
 

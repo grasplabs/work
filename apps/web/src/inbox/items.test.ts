@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
-import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import {
   appIdSchema,
   collectionIdSchema,
@@ -82,22 +81,6 @@ const outcome = (idempotencyKey: string, sentAt: string): UnknownOutcome => ({
     context: { type: "app", appId: app },
   },
   cursor: "1.abc",
-});
-
-const packages = (id: string, requestedAt: string): DependencyRequest => ({
-  id,
-  subject: { type: "app", id: app, name: "Invoices" },
-  status: "pending",
-  sourceRevision: "rev-1",
-  purpose: "Draw the monthly totals as a chart.",
-  targets: ["browser"],
-  graphHash: "hash",
-  counts: { direct: 1, packages: 2, findings: 0, refused: 0 },
-  summary: { direct: ["charts@3.1.0"], findings: [] },
-  requestedBy: { userId: "builder", name: "Bea Builder" },
-  requestedAt,
-  requestedVia: null,
-  policyGeneration: 1,
 });
 
 const request: Permission = {
@@ -278,13 +261,6 @@ const waiting = (ranOut = true) =>
         directory: { people: new Map(), apps: new Map() },
       },
     },
-    dependencies: {
-      state: "ready",
-      data: {
-        policyGeneration: 1,
-        requests: [packages("packages-1", "2026-10-11T08:00:00.000Z")],
-      },
-    },
     heldStarts: {
       state: "ready",
       data: [
@@ -340,9 +316,8 @@ describe(inboxItems, () => {
         "held:held-new",
         "held:held-old",
         `outcome:${JSON.stringify([outcome("mail-1", readAt).key, 1])}`,
-        "packages:packages-1",
         "request:request-1",
-        "revoked:revoked-1",
+        "packageNotice:revoked-1",
         "signIn:connection-1",
         "stopped:stopped-1",
         "stoppedEvents:deaf-1",
@@ -351,9 +326,9 @@ describe(inboxItems, () => {
     );
   });
 
-  it("tells of packages revoked as malware as urgent, with the package, its advisory and where to replace it", () => {
+  it("tells of packages revoked as malware as urgent, with the package, its advisory and where it is fixed", () => {
     const revoked = inboxItems(waiting(), member, readAt).find(
-      ({ id }) => id === "revoked:revoked-1"
+      ({ id }) => id === "packageNotice:revoked-1"
     );
     expect({
       kind: revoked?.kind,
@@ -362,13 +337,13 @@ describe(inboxItems, () => {
       about: revoked?.about,
       urgent: revoked?.urgent,
     }).toStrictEqual({
-      kind: "revokedPackage",
+      kind: "packageNotice",
       title: "Packages of Invoices were revoked as malware",
       facts: [
         { label: "Package", value: "left-pad@1.3.0" },
         { label: "Advisory", value: "MAL-2026-1" },
       ],
-      about: { kind: "app", app: "app-invoices", place: "packages" },
+      about: { kind: "app", app: "app-invoices" },
       urgent: true,
     });
   });
@@ -482,7 +457,6 @@ describe(inboxItems, () => {
     const kinds = inboxItems(waiting(), member, readAt).map(({ kind }) => kind);
     expect(kinds).not.toContain("permissionRequest");
     expect(kinds).not.toContain("bindingApproval");
-    expect(kinds).toContain("packages");
   });
 
   it("lets go of an item once what it is about is settled", () => {
@@ -533,15 +507,9 @@ describe(inboxItems, () => {
 
 describe(inInbox, () => {
   it("leads the dashboard to every item it has no card or row of its own for", () => {
-    // The pile settles changes, lost answers, requests and packages; rows
+    // The pile settles changes, lost answers and requests; rows
     // under it lead to connections.
-    const onDashboard = new Set([
-      "held",
-      "outcome",
-      "request",
-      "packages",
-      "reconnect",
-    ]);
+    const onDashboard = new Set(["held", "outcome", "request", "reconnect"]);
     const all = inboxItems(waiting(), admin, readAt);
     const elsewhere = all.filter(({ source }) => !onDashboard.has(source.type));
     expect(
@@ -555,7 +523,7 @@ describe(inInbox, () => {
       "decision:decision-1",
       "goLive:app-invoices:4",
       "heldStart:held-start-1",
-      "revoked:revoked-1",
+      "packageNotice:revoked-1",
       "stopped:stopped-1",
       "stoppedEvents:deaf-1",
       "workflowGoLive:workflow-quotes:2",
@@ -658,14 +626,11 @@ describe(TargetLink, () => {
     const about = (id: string) => items.find((item) => item.id === id)?.about;
 
     expect({
-      // An approver with no role in the App still reads its packages there.
-      packages: await hrefOf(about("packages:packages-1")),
-      revoked: await hrefOf(about("revoked:revoked-1")),
+      revoked: await hrefOf(about("packageNotice:revoked-1")),
       goLive: await hrefOf(about("goLive:app-invoices:4")),
       app: await hrefOf({ kind: "app", app }),
     }).toStrictEqual({
-      packages: `/apps/${app}/settings?section=packages`,
-      revoked: `/apps/${app}/settings?section=packages`,
+      revoked: `/apps/${app}`,
       goLive: `/apps/${app}/settings?section=versions`,
       app: `/apps/${app}`,
     });

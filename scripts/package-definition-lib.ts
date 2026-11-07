@@ -82,7 +82,7 @@ import {
 } from "@grasp-os/shared/definition-packages";
 import type { DefinitionPackage } from "@grasp-os/shared/definition-packages";
 import { graspLockSchema } from "@grasp-os/shared/packages";
-import type { GraspLock, LockedPackage } from "@grasp-os/shared/packages";
+import type { GraspLock } from "@grasp-os/shared/packages";
 import { parse } from "yaml";
 import { z } from "zod";
 
@@ -506,25 +506,11 @@ interface LockPins {
   readonly direct: Record<string, string>;
   /**
    * For each locked package, by `<name>@<version>`, the exact version of
-   * each of its dependencies and of each peer met within its graph, as
-   * the lock resolved them: two locks must agree on them.
+   * each of its dependencies and required peers, as the lock resolved
+   * them: two locks must agree on them.
    */
   readonly overrides: Record<string, Record<string, string>>;
 }
-
-/**
- * The peers of `entry` the lock resolved within its own graph, by exact
- * version: pinned like its dependencies. Peers the platform meets are the
- * project's own (React), which it pins itself.
- */
-const graphPeersOf = (entry: LockedPackage): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(entry.peers).flatMap(([name, peer]) =>
-      peer.by === "graph" && peer.resolved !== null
-        ? [[name, peer.resolved]]
-        : []
-    )
-  );
 
 /** Whether the project pins `name` itself, so no App lock may name it. */
 const ownedByProject = (name: string): boolean =>
@@ -541,17 +527,16 @@ const ownedByProject = (name: string): boolean =>
  * swap it for whatever the registry serves.
  */
 const lockPins = (
-  lock: Omit<GraspLock, "artifacts">,
+  lock: GraspLock,
   owner: string,
   notices: Notice[]
 ): LockPins => {
   const locked = Object.values(lock.packages);
   // Nothing the project pins itself is the lock's to replace, anywhere in
-  // the graph but its peers, which the project's own versions meet.
+  // the graph.
   const named = locked.flatMap((entry) => [
     entry.name,
     ...Object.keys(entry.dependencies),
-    ...Object.keys(graphPeersOf(entry)),
   ]);
   if (
     Object.keys(lock.direct).some(ownedByProject) ||
@@ -571,9 +556,8 @@ const lockPins = (
   }
   const overrides: Record<string, Record<string, string>> = {};
   for (const entry of locked) {
-    const pinnedEdges = { ...graphPeersOf(entry), ...entry.dependencies };
-    if (Object.keys(pinnedEdges).length > 0) {
-      overrides[`${entry.name}@${entry.version}`] = pinnedEdges;
+    if (Object.keys(entry.dependencies).length > 0) {
+      overrides[`${entry.name}@${entry.version}`] = { ...entry.dependencies };
     }
   }
   return { direct: { ...lock.direct }, overrides };
@@ -619,11 +603,6 @@ const workflowDependencies = (
     .flatMap(([key, { packages }]) => {
       if (packages === null) {
         return [];
-      }
-      if (packages.lock === null) {
-        return refuse(
-          `${key} imports packages, but the package carries no lock for them.`
-        );
       }
       return [{ owner: key, pins: lockPins(packages.lock, key, notices) }];
     });
@@ -1138,13 +1117,11 @@ export const planProject = async (
       importers,
       locks: [
         ...appLock(definition.app.files),
-        ...Object.entries(definition.workflows).flatMap(([key, workflow]) => {
-          // `workflowDependencies` refused one with packages but no lock.
-          const lock = workflow.packages?.lock;
-          return lock === undefined || lock === null
+        ...Object.entries(definition.workflows).flatMap(([key, workflow]) =>
+          workflow.packages === null
             ? []
-            : [{ owner: key, lock }];
-        }),
+            : [{ owner: key, lock: workflow.packages.lock }]
+        ),
       ],
     })
   );

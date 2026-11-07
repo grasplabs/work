@@ -8,7 +8,6 @@ import type {
 } from "./decisions.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { AppId } from "./ids.ts";
-import { packageArtifactPath } from "./packages.ts";
 import {
   pageFrameMounted,
   pageFrameReady,
@@ -198,12 +197,12 @@ export interface PageBundle {
 const reportLimits = pageLimits.report;
 
 /**
- * The query of every address on a path whose files are asked for with a
- * token in it (a page module's, a package artifact's file's), up to
- * where a stack frame's line and column, a space or a bracket begins.
+ * The query of every address on the path whose files are asked for with a
+ * token in it (a page module's), up to where a stack frame's line and
+ * column, a space or a bracket begins.
  */
 const tokenedQuery = new RegExp(
-  `((?:${pageModulePath}|${packageArtifactPath})/[^\\s?#()"'\`]*)\\?[^\\s#:()"'\`]*`,
+  `(${pageModulePath}/[^\\s?#()"'\`]*)\\?[^\\s#:()"'\`]*`,
   "gu"
 );
 

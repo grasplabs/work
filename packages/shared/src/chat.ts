@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { AppFiles } from "./apps.ts";
 import type { DataModelChange, DraftDataModel } from "./data-model.ts";
+import type { DependencyRequest } from "./dependencies.ts";
 import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
 import type { PageBundle, PageProblem } from "./pages.ts";
@@ -842,7 +843,8 @@ export interface ChatUpdate {
   /**
    * Changes whenever something of the chat waits for the person, or no
    * longer does: a write its agent had held for them to confirm, or a
-   * connection it asked for (`connectionRequests`). Read both again then.
+   * connection or packages it asked for (`connectionRequests`,
+   * `packageRequests`). Read them again then.
    * Only a count, from when the object last started; never what waits.
    */
   held: number;
@@ -1106,6 +1108,8 @@ export interface ChatsApi {
   ) => Promise<void>;
   /** Stops the agent's work on the chat; `false` when there was none. */
   cancel: (chatId: string) => Promise<boolean>;
+  /** The npm packages the chat's agent asked for that wait, oldest first. */
+  packageRequests: (chatId: string) => Promise<DependencyRequest[]>;
   /** The connections the chat's agent asked for that wait, oldest first. */
   connectionRequests: (chatId: string) => Promise<ChatConnectionRequest[]>;
   /**

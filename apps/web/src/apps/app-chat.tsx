@@ -13,6 +13,7 @@ import type { ChatBuildsRead } from "../chat/builds.tsx";
 import type { useFollowedChat } from "../chat/chat-watch.ts";
 import { ConnectionRequests } from "../chat/connection-requests.tsx";
 import { HeldWrites } from "../chat/held-writes.tsx";
+import { PackageRequests } from "../chat/package-requests.tsx";
 import { useAsk } from "../chat/use-ask.ts";
 import { ErrorText } from "../error-text.tsx";
 import { ConnectAiProvider } from "../frame/connect-ai-provider.tsx";
@@ -255,6 +256,7 @@ export const AppChat = ({
             )}
             <HeldWrites chatId={chatId} version={view.held} />
             <ConnectionRequests chatId={chatId} version={view.held} />
+            <PackageRequests chatId={chatId} version={view.held} />
           </ChatThread>
         </Suspense>
       )}

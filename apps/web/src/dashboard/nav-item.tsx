@@ -14,7 +14,7 @@ import { useFrameRead } from "../frame/frame-read.ts";
 // The nav's way to the dashboard, with how many things wait on the person
 // (as the prototype's badge, `app-sidebar.tsx`): everything core's feed of
 // what waits lists (`session.waiting`), the failed workflows, questions,
-// stopped schedules, sources and revoked packages among it only while
+// stopped schedules, sources and package notices among it only while
 // unread. Read again after every change on a page, and on the way to
 // another once the count is older than half a minute (frame/frame-read.ts);
 // nothing is marked read by counting.
@@ -28,7 +28,7 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
         "failedRun",
         "openQuestion",
         "stoppedSchedule",
-        "revokedPackage",
+        "packageNotice",
         "stoppedEvents",
         "appMessage",
       ]);

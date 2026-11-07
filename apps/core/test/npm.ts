@@ -7,10 +7,12 @@
  */
 import { toBase64 } from "@grasp-os/shared/encoding";
 import type { DependencyIntent } from "@grasp-os/shared/packages";
+import { env } from "cloudflare:workers";
 import { expect } from "vite-plus/test";
 import { z } from "zod";
 
 import type { NpmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
+import { rescanPackages } from "../src/packages/rescan.ts";
 import {
   npmAdviseUrl,
   osvAnswerUrl,
@@ -150,16 +152,14 @@ export const noise = (length: number): string => {
   return text.slice(0, length);
 };
 
-/** What an App's package.json asks for, for `app`. */
+/** What an App asks for, for `app`. */
 export const intentFor = (
   app: string,
   dependencies: Record<string, string>,
   more: Partial<DependencyIntent> = {}
 ): DependencyIntent => ({
   app,
-  sourceRevision: "rev-1",
   purpose: "Format dates in the report.",
-  targets: ["browser"],
   dependencies: Object.entries(dependencies).map(([name, range]) => ({
     name,
     range,
@@ -214,3 +214,24 @@ export const manifestEntry = (
   path: "package/package.json",
   content: JSON.stringify({ name, version: "1.0.0", ...more }),
 });
+
+/** Scans again until `request` was scanned at `at` or later, or was revoked. */
+export const rescannedUntil = async (
+  request: string,
+  at: Date
+): Promise<void> => {
+  for (let run = 0; run < 20; run += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one run after another
+    await rescanPackages(env, at);
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    const row = await env.DB.prepare(
+      "SELECT status, malware_checked_at AS scanned FROM dependency_requests WHERE id = ?"
+    )
+      .bind(request)
+      .first<{ status: string; scanned: number | null }>();
+    if (row?.status !== "approved" || (row.scanned ?? 0) >= at.getTime()) {
+      return;
+    }
+  }
+  throw new Error(`${request} was never scanned`);
+};

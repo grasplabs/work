@@ -82,7 +82,7 @@ import { z } from "zod";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
-  dependencyLocks,
+  dependencyRequests,
   sdkResourceBindings,
   workflowResourceDraftInspections,
   workflowResourceDraftModules,
@@ -96,8 +96,6 @@ import {
   workflowStateWrites,
 } from "./db/core/schema.ts";
 import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
-import { withdrawnWithWorkflow } from "./dependencies/pending.ts";
-import { failUnless, lockGuardFailed } from "./packages/locks.ts";
 import { checkWorkflowExpressions, withinBuildWait } from "./pages.ts";
 import { namedProjectsFor, requireStillBuilt } from "./project-access.ts";
 import { projectStillBuiltSql } from "./project-sql.ts";
@@ -139,8 +137,8 @@ import type {
   ModulePackages,
 } from "./workflow-modules.ts";
 import {
+  packagesHold,
   packagesHoldSql,
-  packagesRefusal,
   sealedPackagesSchema,
 } from "./workflows/package-seal.ts";
 import type {
@@ -1858,10 +1856,13 @@ const writeVersion = async (
     await auditedBatch(env, db, [
       db.insert(workflowResourceVersions).values({
         // Only while the workflow is live and still at the version this
-        // publication built on: otherwise NULL, which fails the batch.
+        // publication built on, and the graph it seals still approved (a
+        // revocation may have come since it was sealed): otherwise NULL,
+        // which fails the batch.
         workflowResourceId: sql`(SELECT id FROM workflow_resources
         WHERE id = ${workflow.id} AND deleted_at IS NULL
-          AND current_version IS ${workflow.currentVersion})`,
+          AND current_version IS ${workflow.currentVersion}
+          AND ${packages === undefined ? sql`1` : packagesHoldSql(workflow.id, packages.graphHash)})`,
         version,
         definitionVersion,
         definition,
@@ -1882,19 +1883,6 @@ const writeVersion = async (
         createdAt,
         sealId: seal,
       }),
-      // Only while the graph it seals is still approved (not retired, not
-      // revoked) as it lands: what was admitted when it was sealed may have
-      // ended since (`packagesRefusal` says how).
-      ...(packages === undefined
-        ? []
-        : [
-            failUnless(
-              db,
-              { type: "workflow", id: workflow.id },
-              packages.graphHash,
-              packagesHoldSql(workflow.id, packages.graphHash, ["approved"])
-            ),
-          ]),
       db
         .update(workflowResources)
         .set({ currentVersion: version })
@@ -1933,14 +1921,13 @@ const writeVersion = async (
     } catch (releaseError) {
       log.warn("workflow.build_release_failed", errorFields(releaseError));
     }
-    // Its graph's approval ended as it was written: said as how.
-    if (packages !== undefined && lockGuardFailed(error)) {
-      const refused = await packagesRefusal(
-        db,
-        workflow.id,
-        packages.graphHash
-      );
-      throw dependencyErrors.create(refused ?? "dependency.stale");
+    // Its graph was revoked as it was written.
+    if (
+      packages !== undefined &&
+      notNullFailed(error, "workflow_resource_versions.workflow_resource_id") &&
+      !(await packagesHold(db, workflow.id, packages.graphHash))
+    ) {
+      throw dependencyErrors.create("dependency.revoked");
     }
     throw error;
   }
@@ -2375,11 +2362,8 @@ export interface ExportedPackages {
   readonly graphHash: string;
   /** The entries its modules import, sorted. */
   readonly entries: readonly string[];
-  /**
-   * The graph's lock without this deployment's build pins; null once this
-   * deployment no longer keeps it.
-   */
-  readonly lock: Omit<GraspLock, "artifacts"> | null;
+  /** The graph's lock, from which another deployment asks for the same exact versions. */
+  readonly lock: GraspLock;
 }
 
 /** Where a version's manifest seals its packages, as an export reads it. */
@@ -2390,11 +2374,9 @@ const exportedPackagesSchema = z.object({
 /**
  * What version manifest `manifest` of workflow `workflowId` seals of its
  * approved packages, for its export: the graph, the entries its modules
- * import, and the graph's lock without its build pins, which name this
- * deployment's builds. Never the approval or the artifact the entries
- * were copied from, which are this deployment's: the destination approves
- * the graph again. Undefined for a manifest, or a stored lock, that
- * doesn't read as one, JSON or not.
+ * import, and the graph's lock. Never the approval, which is this
+ * deployment's: the destination approves the graph again. Undefined for a
+ * manifest, or a stored lock, that doesn't read as one, JSON or not.
  */
 const exportedPackages = async (
   env: Env,
@@ -2409,30 +2391,29 @@ const exportedPackages = async (
   if (sealed === undefined) {
     return null;
   }
+  // The lock of the request that approved it, whatever became of it since.
   const row = await drizzle(env.DB)
-    .select({ lock: dependencyLocks.lock })
-    .from(dependencyLocks)
+    .select({ snapshot: dependencyRequests.snapshot })
+    .from(dependencyRequests)
     .where(
       and(
-        eq(dependencyLocks.subjectType, "workflow"),
-        eq(dependencyLocks.subjectId, workflowId),
-        eq(dependencyLocks.graphHash, sealed.graphHash)
+        eq(dependencyRequests.subjectType, "workflow"),
+        eq(dependencyRequests.subjectId, workflowId),
+        eq(dependencyRequests.graphHash, sealed.graphHash)
       )
     )
+    .limit(1)
     .get();
-  let lock: ExportedPackages["lock"] = null;
-  if (row !== undefined) {
-    const read = graspLockSchema.safeParse(parsedJson(row.lock));
-    if (!read.success) {
-      return undefined;
-    }
-    const { artifacts: _pins, ...kept } = read.data;
-    lock = kept;
+  const read = z
+    .object({ lock: graspLockSchema })
+    .safeParse(row === undefined ? undefined : parsedJson(row.snapshot));
+  if (!read.success) {
+    return undefined;
   }
   return {
     graphHash: sealed.graphHash,
     entries: Object.keys(sealed.entries).toSorted(),
-    lock,
+    lock: read.data.lock,
   };
 };
 
@@ -2909,10 +2890,6 @@ const deletedOnce = async (
       )
       .returning({ id: workflowResources.id }),
     outboxedIfChanged(db, entry(by, "workflow.deleted", id)),
-    // Its packages end with it: approvals revoked, the request waiting
-    // withdrawn, and the locks only they named gone, their files to
-    // cleanup (dependencies/pending.ts).
-    ...withdrawnWithWorkflow(db, by, id),
     // Its draft (workflow-drafts.ts) is never read again, and may hold a
     // sensitive parameter's default: it goes once it is deleted.
     db.delete(workflowResourceDrafts).where(

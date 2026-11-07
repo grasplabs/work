@@ -35,8 +35,9 @@ import { derivedHmacKey } from "./derived-keys.ts";
 // secret can't have core take text of theirs as its own work, nor move
 // an entry to another key. One that fails its check is logged and taken
 // for a miss: it is made again, and the new entry replaces it. Cached
-// bytes grant nothing: package bytes reach an App through admission where
-// they are served or sealed (packages/serve.ts), never through this cache.
+// bytes grant nothing: approved packages reach a workflow only as its
+// version seals them (workflows/sealed-packages.ts), never through this
+// cache.
 
 /** Where every entry is kept: swept by age (pages.ts `sweepBuilds`). */
 export const buildCachePrefix = "build-cache/";

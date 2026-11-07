@@ -1,7 +1,6 @@
 import { appFilesPath } from "@grasp-os/shared/app-file-limits";
 import { catalogLogoPath } from "@grasp-os/shared/connect";
 import { strictTransportSecurity } from "@grasp-os/shared/http";
-import { isPackageArtifactPath } from "@grasp-os/shared/packages";
 import { pageFramePath, pageModulePath } from "@grasp-os/shared/pages";
 import { runFilesPath } from "@grasp-os/shared/run-files";
 
@@ -129,14 +128,9 @@ export const docsPolicy = (origin: string, inline: InlineHashes): string =>
 export const isDocsPath = (pathname: string): boolean =>
   pathname === docsPath || pathname.startsWith(`${docsPath}/`);
 
-/**
- * Whether `pathname` is where core serves code we didn't write: a
- * page's modules or the files of an App's npm packages.
- */
+/** Whether `pathname` is where core serves code we didn't write: a page's modules. */
 const isThirdPartyCodePath = (pathname: string): boolean =>
-  pathname === pageModulePath ||
-  pathname.startsWith(`${pageModulePath}/`) ||
-  isPackageArtifactPath(pathname);
+  pathname === pageModulePath || pathname.startsWith(`${pageModulePath}/`);
 
 /**
  * Whether core refuses `request`: one the product page itself makes for
@@ -231,44 +225,6 @@ export const pageFramePolicy = (scripts: readonly string[]): string =>
   });
 
 /**
- * The policy of every response on the path of an App's built packages
- * (packages/serve.ts), a file or an error: the one the package build
- * relies on for what it can't check (packages/build.ts). Code nobody
- * reviewed line by line, from npm, so wherever a browser opens a file of
- * it on its own, as a document or a worker:
- *
- * - Script only from `origin`, the deployment's own, as people reach it
- *   (the artifact's origin, where pages' modules are served too); no
- *   inline script, eval, `data:` or `blob:`. No workers at all.
- * - No connections at all. Nothing that legitimately runs under this
- *   policy needs one: documents are sandboxed and run no script, and
- *   browser code never runs as a worker; allowing `origin` would only let
- *   a worker started on this origin call its APIs with the person's
- *   cookies.
- * - Images and fonts only from this origin and `data:`; styles only from
- *   this origin, none inline.
- * - `sandbox` on every file, not only SVGs: whatever a browser opens as a
- *   document runs nothing and has an opaque origin, whichever type it was
- *   sent with.
- * - No Referer, as each address carries a token (packages/serve.ts).
- *
- * A policy sent with a script or a stylesheet says nothing about the page
- * that loads it: inside a page's frame, the frame's policy (above)
- * governs what the code does, and it too allows no worker, no connection
- * and no image, font or stylesheet from anywhere.
- */
-export const packageArtifactPolicy = (origin: string): string =>
-  `${policy({
-    "default-src": "'none'",
-    "script-src": origin,
-    "worker-src": "'none'",
-    "connect-src": "'none'",
-    "img-src": "'self' data:",
-    "font-src": "'self' data:",
-    "style-src": "'self'",
-  })}; sandbox`;
-
-/**
  * The policy of every answer on the path of catalog logos (connections.ts):
  * images from Composio, an SVG among them, which can carry script. Shown
  * in an `<img>`, an SVG runs none; opened on its own, as a document, this
@@ -290,11 +246,10 @@ export const catalogLogoPolicy = `${policy({
  * stricter referrer policy of its own, such as `no-referrer` where its
  * URL carries a secret; it is kept. So is the page frame's policy,
  * which names its build's scripts; a frame response without one runs no
- * script at all. Everything on the path of packages' artifacts gets their
- * policy and `no-referrer`, whatever the route sent; everything on the
- * path of catalog logos gets theirs (`catalogLogoPolicy`). Answers on the
- * paths of code we didn't write vary on `Sec-Fetch-Site`, as core refuses
- * them to the product page (`isRefusedToProductPage`).
+ * script at all. Everything on the path of catalog logos gets its policy
+ * (`catalogLogoPolicy`). Answers on the paths of code we didn't write
+ * vary on `Sec-Fetch-Site`, as core refuses them to the product page
+ * (`isRefusedToProductPage`).
  */
 /** Whether `pathname` is where an App file's or a run file's bytes are sent. */
 const isFileContentPath = (pathname: string): boolean =>
@@ -307,11 +262,7 @@ export const setSecurityHeaders = (
   url: URL,
   origin: string
 ): void => {
-  const artifact = isPackageArtifactPath(url.pathname);
-  if (artifact) {
-    headers.set("content-security-policy", packageArtifactPolicy(origin));
-    headers.set("referrer-policy", "no-referrer");
-  } else if (url.pathname.startsWith(`${catalogLogoPath}/`)) {
+  if (url.pathname.startsWith(`${catalogLogoPath}/`)) {
     headers.set("content-security-policy", catalogLogoPolicy);
   } else if (isFileContentPath(url.pathname)) {
     // An App file's or a run file's bytes (app-file-route.ts,
@@ -334,7 +285,7 @@ export const setSecurityHeaders = (
     headers.set("content-security-policy", pageFramePolicy([]));
   }
   headers.set("x-content-type-options", "nosniff");
-  if (!artifact && headers.get("referrer-policy") !== "no-referrer") {
+  if (headers.get("referrer-policy") !== "no-referrer") {
     headers.set("referrer-policy", "strict-origin-when-cross-origin");
   }
   if (isThirdPartyCodePath(url.pathname)) {

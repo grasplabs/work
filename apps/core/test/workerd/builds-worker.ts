@@ -1,22 +1,21 @@
 import { packageBuilderCode } from "@grasp-os/compiler";
 import { npmRegistryOrigin } from "@grasp-os/shared/dependencies";
-import { sha256HexOfBytes, sha512Integrity } from "@grasp-os/shared/encoding";
+import { sha512Integrity } from "@grasp-os/shared/encoding";
 import {
   packageBuildAnswerSchema,
   packageLimits,
-  targetConditions,
 } from "@grasp-os/shared/packages";
 import type { GraspLock, PackageTarball } from "@grasp-os/shared/packages";
 
-import { packageBuilder } from "../../src/packages/builder.ts";
-import type { PackageBuilderEnv } from "../../src/packages/builder.ts";
+import { runBuilder } from "../../src/packages/build.ts";
 import { PlatformBoundError } from "../../src/platform-sandbox.ts";
+import type { PlatformEnv } from "../../src/platform-sandbox.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 
 // The package builder on plain workerd
-// (scripts/workerd-sandbox-builds.test.ts): the same `packageBuilder` a
-// resolve and a build run, with `SANDBOX_HOST` bound to the sandbox
+// (scripts/workerd-sandbox-builds.test.ts): the same `runBuilder` a
+// build runs, with `SANDBOX_HOST` bound to the sandbox
 // supervisor as on-prem binds it. The builder's code is the one core's
 // build makes, given as the static assets give it, or one a package that
 // took it over would run instead.
@@ -41,10 +40,10 @@ export default class extends WorkerEntrypoint { ${methods} }`;
 const hostile: Readonly<Record<string, string>> = {
   // Never returns, once it has its first chunk.
   busy: takenOver(
-    "async inspectRead(limits, headers, read) { await read(headers[0].key, 0); for (;;) {} }"
+    "async buildRead(lock, headers, read) { await read(headers[0].key, 0); for (;;) {} }"
   ),
   // Allocates without end.
-  memory: takenOver(`async inspectRead(limits, headers, read) {
+  memory: takenOver(`async buildRead(lock, headers, read) {
     await read(headers[0].key, 0);
     const held = [];
     for (;;) {
@@ -54,18 +53,18 @@ const hostile: Readonly<Record<string, string>> = {
     }
   }`),
   // Reads a tarball's start again.
-  reread: takenOver(`async inspectRead(limits, headers, read) {
+  reread: takenOver(`async buildRead(lock, headers, read) {
     await read(headers[0].key, 0);
     try {
       await read(headers[0].key, 0);
-      return [{ key: "read twice" }];
+      return { ok: false, refusals: ["read twice"] };
     } catch {
-      return [{ key: "refused" }];
+      return { ok: false, refusals: ["refused"] };
     }
   }`),
   // Reads a tarball of several chunks: its second chunk, then its first
   // again, then past its third, each refused or not.
-  rereadLater: takenOver(`async inspectRead(limits, headers, read) {
+  rereadLater: takenOver(`async buildRead(lock, headers, read) {
     const { key } = headers[0];
     const tried = async (offset) => {
       try {
@@ -79,15 +78,15 @@ const hostile: Readonly<Record<string, string>> = {
     const second = await tried(first.byteLength);
     const again = await tried(0);
     const skipped = await tried(3 * first.byteLength);
-    return [{ key: [second, again, skipped].join(" ") }];
+    return { ok: false, refusals: [[second, again, skipped].join(" ")] };
   }`),
-  // Writes back more of an artifact than it may be.
-  overwrite: takenOver(`async buildRead(request, read, write) {
+  // Writes back more of a module than core takes.
+  overwrite: takenOver(`async buildRead(lock, headers, read, write) {
     const chunk = new Uint8Array(1024 * 1024).fill(7);
     let written = 0;
     try {
       for (;;) {
-        await write("index.js", chunk);
+        await write(lock.entries[0], chunk);
         written += chunk.byteLength;
       }
     } catch {
@@ -97,7 +96,6 @@ const hostile: Readonly<Record<string, string>> = {
 };
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
 
 /**
  * What the built package exports: the numbers to 200,000, in order, some
@@ -149,8 +147,10 @@ const tarballOf = async (
   return new Uint8Array(await new Response(zipped).arrayBuffer());
 };
 
-/** The package `kind` names, as the registry would serve it. */
-const packageOf = async (kind: string): Promise<PackageTarball> => {
+/** The package `kind` names, as the registry would serve it, and a lock approving it. */
+const packageOf = async (
+  kind: string
+): Promise<{ tarball: PackageTarball; lock: GraspLock }> => {
   const name = `${kind}-package`;
   const manifest = encoder.encode(
     JSON.stringify({
@@ -166,7 +166,7 @@ const packageOf = async (kind: string): Promise<PackageTarball> => {
     "package/index.js": encoder.encode("export const answer = 42;\n"),
   };
   if (kind === "bomb") {
-    // Zeros gzip shrinks a thousandfold: past what a package may unpack to.
+    // Zeros gzip shrinks a thousandfold: past what a graph may unpack to.
     files["package/zeros.bin"] = new Uint8Array(
       packageLimits.extractedBytes + 1024 * 1024
     );
@@ -185,64 +185,44 @@ const packageOf = async (kind: string): Promise<PackageTarball> => {
     files["package/noise.bin"] = noise;
   }
   const tarball = await tarballOf(files);
+  const key = `${name}@1.0.0`;
   return {
-    key: `${name}@1.0.0`,
-    name,
-    version: "1.0.0",
-    integrity: await sha512Integrity(tarball),
-    tarball,
+    tarball: { key, tarball },
+    lock: {
+      lockfileVersion: 2,
+      registry: npmRegistryOrigin,
+      requested: { [name]: "1.0.0" },
+      direct: { [name]: "1.0.0" },
+      entries: [name],
+      packages: {
+        [key]: {
+          name,
+          version: "1.0.0",
+          integrity: await sha512Integrity(tarball),
+          license: "MIT",
+          publishedAt: "2026-01-01T00:00:00.000Z",
+          dependencies: {},
+        },
+      },
+    },
   };
 };
 
-/** An approved lock of `pkg` alone, its browser target importing it. */
-const lockOf = (pkg: PackageTarball): GraspLock => ({
-  lockfileVersion: 1,
-  registry: npmRegistryOrigin,
-  requested: { [pkg.name]: pkg.version },
-  direct: { [pkg.name]: pkg.version },
-  platformPeers: {},
-  targets: {
-    browser: { conditions: [...targetConditions.browser], entries: [pkg.name] },
-  },
-  packages: {
-    [pkg.key]: {
-      name: pkg.name,
-      version: pkg.version,
-      integrity: pkg.integrity,
-      license: "MIT",
-      publishedAt: "2026-01-01T00:00:00.000Z",
-      dependencies: {},
-      peers: {},
-    },
-  },
-});
-
 /**
- * A build's answer as the test reads it: for each file the artifact
- * describes, what it says of it and what came back, the bytes' length and
- * SHA-256, and whether they hold what the package exports, whole and in
- * order. Anything else as it came.
+ * A build's answer as the test reads it: each module's length, and
+ * whether it holds what the package exports, whole and in order. Anything
+ * else as it came.
  */
-const builtFiles = async (answer: unknown): Promise<unknown> => {
+const builtModules = (answer: unknown): unknown => {
   const built = packageBuildAnswerSchema.safeParse(answer).data;
   if (built === undefined || !built.ok) {
     return answer;
   }
-  const { artifact, files } = built;
-  return await Promise.all(
-    Object.entries(artifact.files).map(async ([path, described]) => {
-      const bytes = files[path] ?? new Uint8Array();
-      return {
-        path,
-        described: { bytes: described.bytes, sha256: described.sha256 },
-        returned: {
-          bytes: bytes.byteLength,
-          sha256: await sha256HexOfBytes(bytes),
-        },
-        holdsExport: decoder.decode(bytes).includes(counted),
-      };
-    })
-  );
+  return Object.entries(built.modules).map(([entry, text]) => ({
+    entry,
+    bytes: encoder.encode(text).byteLength,
+    holdsExport: text.includes(counted),
+  }));
 };
 
 /** Core's static assets as far as the builder reads them. */
@@ -376,7 +356,7 @@ export default {
       // gives up on it: then the same App's next build is asked for.
       const caller = new AbortController();
       const first = env.SELF.fetch(
-        `http://core/inspect?builder=busy&app=${searchParams.get("app") ?? ""}`,
+        `http://core/build?builder=busy&app=${searchParams.get("app") ?? ""}`,
         { method: "POST", signal: caller.signal }
       );
       await scheduler.wait(500);
@@ -387,7 +367,7 @@ export default {
         // Given up on, as meant.
       }
       const next = await env.SELF.fetch(
-        `http://core/inspect?app=${searchParams.get("app") ?? ""}`,
+        `http://core/build?app=${searchParams.get("app") ?? ""}`,
         { method: "POST" }
       );
       return new Response(next.body, next);
@@ -427,43 +407,28 @@ export default {
       SANDBOX_DEADLINE_MS: env.SANDBOX_DEADLINE_MS,
       SANDBOX_HOST: env.SANDBOX_HOST,
       SANDBOX_IN_PROCESS: undefined,
-    } satisfies PackageBuilderEnv;
-    const pkg = await packageOf(searchParams.get("package") ?? "plain");
+    } satisfies PlatformEnv;
+    const { tarball, lock } = await packageOf(
+      searchParams.get("package") ?? "plain"
+    );
     // Whose build it is: the builder's sub-owner on the sandbox host.
     const whose = searchParams.get("app") ?? "app-stand-in";
-    if (pathname === "/build") {
-      return Response.json(
-        await outcomeOf(async () => {
-          const builder = packageBuilder(builderEnv)(whose);
-          return await builtFiles(
-            await builder.build({
-              limits: { ...packageLimits, artifactBytes: 2 * 1024 * 1024 },
-              lock: lockOf(pkg),
-              target: "browser",
-              packages: [pkg],
-            })
-          );
-        })
-      );
-    }
-    if (pathname === "/inspect-twice") {
-      // Two resolves' inspections, each starting the builder afresh.
+    if (pathname === "/build-twice") {
+      // Two builds, each starting the builder afresh.
       return Response.json(
         await outcomeOf(async () => {
           for (const _ of [1, 2]) {
-            const builder = packageBuilder(builderEnv)(whose);
             // oxlint-disable-next-line no-await-in-loop -- one after the other
-            await builder.inspect(packageLimits, [pkg]);
+            await runBuilder(builderEnv, whose, lock, [tarball]);
           }
           return reads.builder;
         })
       );
     }
     return Response.json(
-      await outcomeOf(async () => {
-        const builder = packageBuilder(builderEnv)(whose);
-        return await builder.inspect(packageLimits, [pkg]);
-      })
+      await outcomeOf(async () =>
+        builtModules(await runBuilder(builderEnv, whose, lock, [tarball]))
+      )
     );
   },
 } satisfies ExportedHandler<StandInEnv>;
