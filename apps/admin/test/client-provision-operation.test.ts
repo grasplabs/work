@@ -2130,32 +2130,66 @@ describe("provisioning a placed client", () => {
       }
       const uploads = () => cloudflare.calls.filter(isCoreUpload).length;
       const sentBefore = uploads();
+      // Time under the test's control: the retry waits this long between
+      // reads of a mark it holds on to (`othersSettled`), and between
+      // reads back of what it wrote (`observed`). Before core's upload went
+      // out, such a wait is the retry holding on to the mark: held until
+      // the test lets it go. After, it passes at once.
+      const markWaitMs = 60_000;
+      const waiting = Promise.withResolvers<"waiting">();
+      const letGo = Promise.withResolvers<null>();
+      const wait = scheduler.wait.bind(scheduler);
+      const waitSpy = vi
+        .spyOn(scheduler, "wait")
+        .mockImplementation(async (ms, options) => {
+          if (ms % markWaitMs !== 0) {
+            await wait(ms, options);
+          } else if (uploads() > sentBefore) {
+            await wait(0, options);
+          } else {
+            waiting.resolve("waiting");
+            await letGo.promise;
+          }
+        });
 
-      const run = runClientProvision(context, await attempt(clientId));
-      await scheduler.wait(500);
-      const meanwhile = await operationOf(clientId);
-      const whileMarked = {
-        uploads: uploads() - sentBefore,
-        status: meanwhile?.status,
-      };
-      // Aged out: no call of it can land any more.
-      await db
-        .update(clientProvisions)
-        .set({
-          sending: sql`(SELECT json_group_object(key, json_set(value, '$.at', 0)) FROM json_each(${clientProvisions.sending}))`,
-        })
-        .where(eq(clientProvisions.clientId, clientId));
-      await run;
-      const after = await operationOf(clientId);
+      try {
+        const run = runClientProvision(
+          { ...context, observe: { retryDelayMs: markWaitMs } },
+          await attempt(clientId)
+        );
+        // Whichever comes first: the retry finishing, or waiting for the mark.
+        const first = await Promise.race([
+          run.then(() => "finished" as const),
+          waiting.promise,
+        ]);
+        const meanwhile = await operationOf(clientId);
+        const whileMarked = {
+          first,
+          uploads: uploads() - sentBefore,
+          status: meanwhile?.status,
+        };
+        // Aged out: no call of it can land any more.
+        await db
+          .update(clientProvisions)
+          .set({
+            sending: sql`(SELECT json_group_object(key, json_set(value, '$.at', 0)) FROM json_each(${clientProvisions.sending}))`,
+          })
+          .where(eq(clientProvisions.clientId, clientId));
+        letGo.resolve(null);
+        await run;
+        const after = await operationOf(clientId);
 
-      expect({ whileMarked, status: after?.status }).toStrictEqual({
-        // The same upload: it goes on at once. Another: nothing goes out
-        // until the mark ages.
-        whileMarked: waits
-          ? { uploads: 0, status: "running" }
-          : { uploads: 1, status: "done" },
-        status: "done",
-      });
+        expect({ whileMarked, status: after?.status }).toStrictEqual({
+          // The same upload: it goes on without waiting. Another: nothing
+          // goes out while the mark is fresh.
+          whileMarked: waits
+            ? { first: "waiting", uploads: 0, status: "running" }
+            : { first: "finished", uploads: 1, status: "done" },
+          status: "done",
+        });
+      } finally {
+        waitSpy.mockRestore();
+      }
     }
   );
 
