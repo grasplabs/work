@@ -423,14 +423,20 @@ struct ParseError {
 /// large enough to pass the 64 MiB ceiling traps, and src/oxc.ts starts a
 /// fresh instance.
 #[unsafe(no_mangle)]
-pub extern "C" fn parse(path_ptr: *mut u8, path_len: usize, src_ptr: *mut u8, src_len: usize) -> usize {
+pub extern "C" fn parse(
+    path_ptr: *mut u8,
+    path_len: usize,
+    src_ptr: *mut u8,
+    src_len: usize,
+) -> usize {
     let path = input(path_ptr, path_len);
     let source = input(src_ptr, src_len);
     let source_type = SourceType::from_path(&path).unwrap_or_default();
     let allocator = Allocator::default();
-    let ParserReturn { mut program, diagnostics, .. } = Parser::new(&allocator, &source, source_type)
-        .with_options(ParseOptions { preserve_parens: false, ..ParseOptions::default() })
-        .parse();
+    let ParserReturn { mut program, diagnostics, .. } =
+        Parser::new(&allocator, &source, source_type)
+            .with_options(ParseOptions { preserve_parens: false, ..ParseOptions::default() })
+            .parse();
     let converter = Utf8ToUtf16::new(&source);
     if let Some(error) = diagnostics.iter().find(|error| error.severity == Severity::Error) {
         let mut start = error.labels.first().map_or(0, |label| label.offset());
