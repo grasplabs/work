@@ -694,7 +694,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     ]);
   });
 
-  it("changes a definition whose table holds records only as the records can follow, says what each change does to them, and records each change", async () => {
+  it("changes a definition whose table holds records, says what each change does to them, and records each change", async () => {
     // Version 1: the Notes App, current, with a note in its store, and an
     // answer its definition kept for a category it no longer has.
     const { builder, chat, grant } = await setUp([
@@ -702,9 +702,11 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
         const definition = async () => JSON.parse((await env.build.files(app.id)).files["definition.json"]);
         const steps = {};
-        // A field the released version has holds the note's value under
-        // its name: refused, saying what to do instead.
-        steps.released = await env.build.define(app.id, { op: "renameField", table: "notes", field: "title", name: "heading" });
+        // A field the released version has: renamed by its ID, its values
+        // following it as the version is published, and back.
+        const away = await env.build.define(app.id, { op: "renameField", table: "notes", field: "title", name: "heading" });
+        const back = await env.build.define(app.id, { op: "renameField", table: "notes", field: "heading", name: "title" });
+        steps.released = away.ok && back.ok && away.plan.refused.length === 0;
         // A field the note lacks: checked against it, answered or not.
         const unanswered = await env.build.define(app.id, { op: "addField", table: "notes", name: "category", type: "v.string()" });
         steps.unanswered = unanswered.ok && unanswered.plan.checks;
@@ -751,9 +753,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     const steps = z
-      .object({
-        released: z.object({ ok: z.literal(false), problem: z.string() }),
-      })
+      .object({ released: z.boolean() })
       .loose()
       .parse(returned(result?.text));
     const events = await allEvents();
@@ -765,9 +765,6 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     );
     expect({
       ...steps,
-      released: steps.released.problem.includes(
-        "Only a field this draft added renames"
-      ),
       audited: defined.map(({ detail }) => [detail.op, detail.table]),
     }).toStrictEqual({
       released: true,
@@ -778,6 +775,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       afterRename: 1,
       sensitive: ["notes"],
       audited: [
+        ["renameField", "notes"],
         ["renameField", "notes"],
         ["addField", "notes"],
         ["changeField", "notes"],
@@ -915,7 +913,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
-  it("renames no field a version that ran had, after a rollback to one without it too", async () => {
+  it("renames a field a version that ran had, after a rollback to one without it too, by its stable ID", async () => {
     const { builder, chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Notes");
@@ -944,10 +942,11 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     await chat.ask("Call the nickname a display name");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    const refused = z
-      .object({ ok: z.literal(false), problem: z.string() })
-      .parse(returned(result?.text));
-    expect(refused.problem).toContain("`notes.nickname` is in a version");
+    // Its values, kept by the store since the rollback, follow its ID.
+    expect(returned(result?.text)).toMatchObject({
+      ok: true,
+      plan: { refused: [] },
+    });
   });
 
   it("keeps a draft's answer for a field whose type the version people use doesn't have yet, whatever that version answered", async () => {
@@ -989,7 +988,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     });
   });
 
-  it("refuses a commit that renames a field a version has, as the definition tools do", async () => {
+  it("commits a definition that renames a field a version has, its ID kept", async () => {
     const builder = await signedInApi(idp, "builder");
     const { id: app } = await builder.api.apps.create({ name: "Notes" });
     await published(app);
@@ -1012,23 +1011,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       })),
     }));
 
-    const refused: unknown = await builder.api.apps.files
-      .commit(app, renamed, "Rename")
-      .then(
-        () => null,
-        (error: unknown) => error
-      );
-
-    const { code, details } = z
-      .object({
-        code: z.string(),
-        details: z.object({ issues: z.array(z.string()) }),
-      })
-      .parse(refused);
-    expect(code).toBe("app.definition_invalid");
-    expect(details.issues.join(" ")).toContain(
-      "`notes.nickname` is in a version of the App"
-    );
+    await expect(
+      builder.api.apps.files.commit(app, renamed, "Rename")
+    ).resolves.toMatchObject({ version: 2 });
   });
 
   it("keeps no change that leaves a file as the base has it", async () => {

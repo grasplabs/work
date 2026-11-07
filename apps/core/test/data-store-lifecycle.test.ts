@@ -14,6 +14,7 @@ import { StoreHost } from "../src/store-host.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { allEvents } from "./audit-events.ts";
 import {
+  applied,
   manifestHash,
   memberRoles,
   newRecordId,
@@ -109,7 +110,7 @@ const commitNote = async (
 /** The store of a new App `by` builds, with a `notes` table. */
 const storeOf = async (by: Acting): Promise<OpenStore> => {
   const store = await openStore(env, await storeOfNewApp(env, by));
-  await store.defineTables(tablesManifest("notes"));
+  await store.applySchema(applied(tablesManifest("notes")));
   return store;
 };
 

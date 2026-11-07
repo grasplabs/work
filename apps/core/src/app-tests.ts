@@ -38,6 +38,7 @@ import { eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { schemaIdsOf } from "./app-definition.ts";
 import {
   publicOperationOf,
   readFunctionRequest,
@@ -77,6 +78,7 @@ import {
   sandboxWaitMs,
   sessionHost,
 } from "./sandboxed.ts";
+import type { SchemaIds } from "./schema-changes.ts";
 import { Subscription } from "./subscription.ts";
 import { answerFixtureDecision } from "./workflows/fixture-decisions.ts";
 import {
@@ -483,7 +485,8 @@ const fixtureOf = (
  */
 const createFixtureStore = async (
   env: Env,
-  release: Release
+  release: Release,
+  ids: SchemaIds
 ): Promise<OpenStore> => {
   // A release's resource ID is the App it was sealed for.
   const app = appIdSchema.parse(release.manifest.resourceId);
@@ -495,9 +498,10 @@ const createFixtureStore = async (
     createdAt: new Date(),
   });
   const store = openFixtureStore(env, id);
-  await store.defineTables(manifestText(release.app.schema), {
-    resourceId: app,
-    resourceVersion: release.manifest.resourceVersion,
+  await store.applySchema({
+    manifest: manifestText(release.app.schema),
+    ids,
+    actor: { type: "app", appId: app, part: "server" },
   });
   return store;
 };
@@ -707,6 +711,8 @@ const suiteDeadline = ({
 interface SessionContext {
   readonly env: Env;
   readonly release: Release;
+  /** The stable IDs its version's definition gives its schema. */
+  readonly ids: SchemaIds;
   /** How long discarding a session's store may take (`TestLimits`). */
   readonly cleanupMs: number;
   /**
@@ -805,6 +811,7 @@ const answerOf = (request: unknown): unknown => {
 class FixtureSession extends TestTarget {
   readonly #env: Env;
   readonly #release: Release;
+  readonly #ids: SchemaIds;
   readonly #cleanupMs: number;
   readonly #parent: () => string | undefined;
   readonly #sandbox: { refused: boolean };
@@ -836,6 +843,7 @@ class FixtureSession extends TestTarget {
     super();
     this.#env = context.env;
     this.#release = context.release;
+    this.#ids = context.ids;
     this.#cleanupMs = context.cleanupMs;
     this.#parent = context.parent;
     this.#sandbox = context.sandbox;
@@ -883,7 +891,7 @@ class FixtureSession extends TestTarget {
     if (this.#closed) {
       throw sessionEnded();
     }
-    this.#store ??= createFixtureStore(this.#env, this.#release);
+    this.#store ??= createFixtureStore(this.#env, this.#release, this.#ids);
     return await this.#store;
   }
 
@@ -1406,6 +1414,7 @@ export const fixtureHostFor = (
     {
       env,
       release,
+      ids: release.store === null ? {} : schemaIdsOf(files, release.app.schema),
       cleanupMs,
       testMs,
       parent: parent ?? noParent,

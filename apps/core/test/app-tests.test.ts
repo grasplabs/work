@@ -22,6 +22,7 @@ import {
 import { appDefinition } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { person } from "./sealed-apps.ts";
+import { applied } from "./store-schemas.ts";
 
 // An App's tests (`appTest`, spec 28.2), as core runs them whenever a
 // version is made current: each suite in its own isolate, every call
@@ -661,9 +662,8 @@ const fixtureStore = async (
   )
     .bind(id, built.app, Date.now() - ago)
     .run();
-  await openFixtureStore(env, id).defineTables(
-    manifestText(release.app.schema),
-    { resourceId: built.app, resourceVersion: 1 }
+  await openFixtureStore(env, id).applySchema(
+    applied(manifestText(release.app.schema))
   );
   return id;
 };
@@ -695,10 +695,7 @@ describe("fixture stores", () => {
       "This fixture store was discarded."
     );
     await expect(
-      store.defineTables(manifestText(app.release.app.schema), {
-        resourceId: app.built.app,
-        resourceVersion: 1,
-      })
+      store.applySchema(applied(manifestText(app.release.app.schema)))
     ).rejects.toThrow("This fixture store was discarded.");
     await expect(tablesIn(id)).resolves.toBe(0);
     await expect(alarmOf(id)).resolves.toBeNull();
@@ -715,10 +712,7 @@ describe("fixture stores", () => {
     const app = await sealed();
     const store = await storeOfNewApp(env, app.built.owner);
     const opened = await openStore(env, store);
-    await opened.defineTables(manifestText(app.release.app.schema), {
-      resourceId: app.built.app,
-      resourceVersion: 1,
-    });
+    await opened.applySchema(applied(manifestText(app.release.app.schema)));
     await runInDurableObject(env.DATA_STORES.getByName(store), (_i, state) => {
       state.storage.kv.put("probe", "kept");
     });

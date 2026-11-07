@@ -55,15 +55,27 @@ export const store = sqliteTable(
      */
     cursorKey: text("cursor_key"),
     /**
-     * The store's data contract (store-host.ts, `defineTables`): every
-     * table and field of every schema the store accepted, as a canonical
-     * schema manifest, and its hash. Every record the store holds, and
-     * every record a version sealed on it may write, fits it. Both null
-     * until the store's first schema, and written together; host-only,
-     * never a caller's.
+     * The schema in force (store-host.ts, `applySchema`), as a canonical
+     * schema manifest, and its hash: the one schema the store reads and
+     * writes under. Both null until the store's first schema, and written
+     * together with the catalog; host-only, never a caller's.
      */
     contractHash: text("contract_hash"),
     contractManifest: text("contract_manifest"),
+    /**
+     * Every table and field the store holds values of, by stable ID, with
+     * its name and type, those the schema in force left out included
+     * (schema-changes.ts, `Catalog`), as canonical JSON: what the next
+     * schema is diffed against.
+     */
+    schemaCatalog: text("schema_catalog"),
+    /**
+     * The version of the App whose schema is in force, and when it was
+     * applied: a publish applies its schema only over the version it was
+     * based on (store-host.ts, `applySchema`).
+     */
+    schemaVersion: integer("schema_version"),
+    schemaAppliedAt: integer("schema_applied_at"),
     /**
      * The store's preferences contract (store-host.ts, `definePreferences`):
      * every preference any version sealed on it declared, by name, with
@@ -83,7 +95,7 @@ export const store = sqliteTable(
 
 /**
  * The store's logical tables, by the name the schema gives them, each
- * with an ID the host mints. Records name their table by that ID, so a
+ * with its stable ID from the App's definition. Records name their table by that ID, so a
  * name never reaches SQL. Names are unique without regard to case
  * (`name_key`).
  */
@@ -224,317 +236,6 @@ export const recordRefs = sqliteTable(
       table.toRecordId,
       table.cascade,
       table.tableId,
-      table.recordId
-    ),
-  ]
-);
-
-/**
- * Every schema the store was handed, by its hash, with its canonical
- * manifest: what a read pinned to that schema is checked against, and
- * whose indexes it reads through. Kept as long as the store, so a
- * consumer pinned to an older schema keeps its indexes (store-indexes.ts);
- * nothing here is activated, and nothing removes a row.
- */
-export const schemas = sqliteTable("sdk_schemas", {
-  schemaHash: text("schema_hash").primaryKey(),
-  manifest: text().notNull(),
-  createdAt: integer("created_at").notNull(),
-  /**
-   * When an admin abandoned the pending target that alone held this
-   * schema (store-host.ts, `abandonBackfill`): the contract never took
-   * it, so it is left out of the check of the contract against the
-   * store's schemas, and of a contract rebuilt from them, until a later
-   * consumer applies it again.
-   */
-  abandonedAt: integer("abandoned_at"),
-  /**
-   * When an explicit migration's target became the contract and this
-   * schema no longer fit it (store-host.ts, `#activate`): its records
-   * moved on, so a write under it is refused
-   * (`migration.incompatible_write`), and the check of the contract
-   * against the store's schemas leaves it out. Reads under it go on: a
-   * migration's output fits the contract it ran under.
-   */
-  supersededAt: integer("superseded_at"),
-});
-
-/**
- * What applying a schema to the store's contract did, for the consumer
- * it was applied for (a resource's version, e.g. an App's sealed
- * release): the contract before and after, the plan's hash and the plan.
- * One per consumer and schema, written in the transaction that moved the
- * contract, so it exists exactly when the store committed that consumer's
- * schema; applying it again answers this receipt and changes nothing.
- */
-export const schemaActivations = sqliteTable("sdk_schema_activations", {
-  /** The SHA-256 of the consumer and the schema's hash. */
-  receiptId: text("receipt_id").primaryKey(),
-  resourceId: text("resource_id").notNull(),
-  resourceVersion: integer("resource_version").notNull(),
-  schemaHash: text("schema_hash").notNull(),
-  /** The contract's hash before; null for the store's first schema. */
-  baseHash: text("base_hash"),
-  contractHash: text("contract_hash").notNull(),
-  planHash: text("plan_hash").notNull(),
-  /** The plan, as canonical JSON: what it added and retained. */
-  plan: text().notNull(),
-  /**
-   * The consumer's answers for fields records may lack
-   * (store-schema-changes.ts), as canonical JSON `[answer, ...]`: the
-   * value its activation gives the records that lack one, never over a
-   * value a record holds.
-   */
-  answers: text().notNull().default("[]"),
-  createdAt: integer("created_at").notNull(),
-  /**
-   * When the pending target this receipt waited on was abandoned
-   * (store-host.ts, `abandonBackfill`): its consumer's release never runs
-   * on the store, and applying its schema for it again is refused
-   * (`migration.abandoned`) rather than making it pending once more.
-   */
-  abandonedAt: integer("abandoned_at"),
-});
-
-/** What a version whose rules the store owes is a version of. */
-export const owedResourceKinds = ["app", "workflow"] as const;
-
-/**
- * Access and row rules the store owes a resource (store-host.ts,
- * `activateReady` with `owed`): its version's change was applied, rules
- * kept, before core's database made the version current or published it,
- * and the rules of whichever version core's database then has current
- * follow once it committed (`applyRules`). Core settles it once they did;
- * one core never settled (a crash after the commit) is the alarm's from
- * `due_at` on, which applies them itself (store-backfill.ts,
- * `applyCurrentRules`), or drops them when core's database has another
- * version current. While it is held, it is also the activation in flight:
- * another version's activation is refused (`migration.busy`).
- */
-export const rulesOwed = sqliteTable(
-  "sdk_rules_owed",
-  {
-    /** The make-current or publication's own ID. */
-    owedId: text("owed_id").primaryKey(),
-    resourceKind: text("resource_kind", { enum: owedResourceKinds }).notNull(),
-    resourceId: text("resource_id").notNull(),
-    resourceVersion: integer("resource_version").notNull(),
-    /** The schema the version was activated on. */
-    schemaHash: text("schema_hash").notNull(),
-    owedAt: integer("owed_at").notNull(),
-    /** When the alarm takes it up, or tries it again. */
-    dueAt: integer("due_at").notNull(),
-  },
-  (table) => [index("sdk_rules_owed_due").on(table.dueAt)]
-);
-
-/**
- * The fields an abandoned pending target added (store-host.ts,
- * `abandonBackfill`), each with its descriptor: records its backfill
- * filled in keep the value, so a later schema may add the field again
- * only as it was (`planSchemaChange`'s `reserved`), never with another
- * meaning those values wouldn't fit.
- */
-export const reservedFields = sqliteTable(
-  "sdk_reserved_fields",
-  {
-    tableName: text("table_name").notNull(),
-    fieldName: text("field_name").notNull(),
-    /** The field's value descriptor, as canonical JSON. */
-    descriptor: text().notNull(),
-    /** The abandoned target that reserved it first. */
-    targetHash: text("target_hash").notNull(),
-    reservedAt: integer("reserved_at").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.tableName, table.fieldName] })]
-);
-
-/**
- * Pending targets an admin abandoned (store-host.ts, `abandonBackfill`),
- * by target: what the backfill had done and why it failed, the schemas
- * and receipts it took out of force and the fields it reserved, and who
- * abandoned it when. The abandonment's record, which its audit event is
- * made from alone, so core and the store's alarm make the same event;
- * `audited_at` is set once core holds it.
- */
-export const abandonedTargets = sqliteTable(
-  "sdk_abandoned_targets",
-  {
-    targetHash: text("target_hash").notNull(),
-    baseHash: text("base_hash"),
-    /** The run abandoned: a new pending target of this hash goes on past it. */
-    attempt: integer().notNull(),
-    scanned: integer().notNull(),
-    filled: integer().notNull(),
-    /** Why its backfill failed (JSON). */
-    failure: text().notNull(),
-    /** The schemas taken out of force, as canonical JSON: `[hash, ...]`. */
-    schemas: text().notNull(),
-    /** The receipts abandoned, as canonical JSON: `[[resource, version], ...]`. */
-    consumers: text().notNull(),
-    /** The fields reserved, as canonical JSON: `[[table, field], ...]`. */
-    reserved: text().notNull(),
-    /** Who abandoned it, as the audit log names them (JSON). */
-    abandonedBy: text("abandoned_by").notNull(),
-    abandonedAt: integer("abandoned_at").notNull(),
-    /** When core's audit outbox was found to hold its event. */
-    auditedAt: integer("audited_at"),
-  },
-  // One per run abandoned: a target added back as it was goes on from a
-  // later run, and its abandonment is a record of its own.
-  (table) => [primaryKey({ columns: [table.targetHash, table.attempt] })]
-);
-
-/**
- * A schema change the store took but whose contract isn't in force yet:
- * the pending target (spec 17.4 step 4), kept apart from the contract in
- * `sdk_store`, with the bounded fill-missing backfill that has to finish
- * before the contract moves to it (store-host.ts, `fillMissing`). At most
- * one is pending (running or failed) at a time; a completed one stays as
- * the receipt of its activation.
- */
-export const backfills = sqliteTable(
-  "sdk_schema_backfills",
-  {
-    /** The hash of the pending contract: the target's identity. */
-    targetHash: text("target_hash").primaryKey(),
-    /** The pending contract, as canonical manifest text. */
-    targetManifest: text("target_manifest").notNull(),
-    /**
-     * The contract hash `sdk_store` held when the change was planned:
-     * activation compares and sets against it. Null for a contract the
-     * store's row didn't hold (rebuilt from its schemas).
-     */
-    baseHash: text("base_hash"),
-    /** The fields to fill, as canonical JSON: `[[table, field], ...]`. */
-    fills: text().notNull(),
-    /**
-     * Where the scan ends in each table it fills, as canonical JSON
-     * `{tableId: recordId}`: the highest record ID the table held when the
-     * target became pending. Every commit since filled in what it wrote,
-     * so nothing past it needs a look; a table that held no record then
-     * isn't scanned.
-     */
-    scanBounds: text("scan_bounds").notNull(),
-    state: text({ enum: ["running", "complete", "failed"] }).notNull(),
-    /**
-     * The fence: the run of the backfill the store answers, moved on when
-     * a new run takes over from one that ended (`restartBackfill`).
-     */
-    attempt: integer().notNull().default(1),
-    /** Until when the current run's lease holds, by the store's clock. */
-    leaseUntil: integer("lease_until"),
-    /**
-     * When the backfill's run was last looked after: handed over
-     * (`restartBackfill`), or found going by the store's alarm. The next
-     * look is due at the end of the run's lease, or a lease's time after
-     * this once that ended (store-host.ts, `#backfillDueAt`).
-     */
-    lookedAt: integer("looked_at"),
-    /**
-     * Hand-overs in a row that found no progress since the last
-     * (`scanned` still `stall_scanned`): the third fails the backfill as
-     * stalled, rather than starting runs that can't move on, forever.
-     */
-    stalls: integer().notNull().default(0),
-    stallScanned: integer("stall_scanned"),
-    /** The last batch the current run committed, and what it answered. */
-    lastBatch: integer("last_batch").notNull().default(0),
-    lastOutcome: text("last_outcome"),
-    /** Where the scan is: the table and record it reached last. */
-    cursorTable: text("cursor_table"),
-    cursorRecord: text("cursor_record"),
-    /**
-     * For an explicit migration (`migrations`), the rest of where its scan
-     * is: it goes through a table's records by owner, then creation time,
-     * then ID, so a batch holds one owner's records where the table's
-     * access is `owner` (store-migrations.ts).
-     */
-    cursorOwner: text("cursor_owner"),
-    cursorCreatedAt: integer("cursor_created_at"),
-    /**
-     * The explicit migrations the target runs instead of filling, as
-     * canonical JSON `{ consumer: [resource, version], migrations:
-     * [[table, name], ...] }`: the release whose transforms run, one per
-     * table. Null for a fill-missing target.
-     */
-    migrations: text(),
-    /**
-     * An explicit migration's phase: `scan` through the records the
-     * tables held when it became pending, then `work` through the records
-     * concurrent writes left not fitting the target
-     * (`sdk_migration_work`).
-     */
-    phase: text({ enum: ["scan", "work"] })
-      .notNull()
-      .default("scan"),
-    /**
-     * When an explicit migration found its scan through and no work left:
-     * ready, its contract taking over only as a release sealed on it is
-     * made current (store-host.ts, `activateReady`), so the version
-     * still current goes on writing until then. Cleared when a write
-     * queues work again.
-     */
-    readyAt: integer("ready_at"),
-    /** Records looked at, and records filled in, so far. */
-    scanned: integer().notNull().default(0),
-    filled: integer().notNull().default(0),
-    /** For a failed backfill: the record whose value doesn't fit (JSON). */
-    failure: text(),
-    /**
-     * The revision that record was at when it failed the backfill: a
-     * retry runs only once it moved on (`retryBackfill`), so a failure
-     * nobody changed anything for isn't retried in a loop.
-     */
-    failureRevision: integer("failure_revision"),
-    createdAt: integer("created_at").notNull(),
-    completedAt: integer("completed_at"),
-  },
-  (table) => [
-    check("sdk_schema_backfills_attempt", sql`${table.attempt} >= 1`),
-    check(
-      "sdk_schema_backfills_failure",
-      sql`(${table.state} = 'failed') = (${table.failure} IS NOT NULL)`
-    ),
-    // One pending target at a time, running or failed: unique on whether
-    // it is pending, so a running and a failed one can't both be there.
-    uniqueIndex("sdk_schema_backfills_one_pending")
-      .on(sql`(${table.state} <> 'complete')`)
-      .where(sql`state <> 'complete'`),
-  ]
-);
-
-/**
- * Records an explicit migration still has to transform once its scan is
- * through (store-migrations.ts): written in the transaction of a commit
- * that left a record of a migrated table not fitting the pending target,
- * of a batch whose record changed since it was read, or of a scan batch
- * that passed over a record of another audience. Its activation
- * waits until none is left; a record that fits by then is dropped.
- */
-export const migrationWork = sqliteTable(
-  "sdk_migration_work",
-  {
-    targetHash: text("target_hash").notNull(),
-    tableId: text("table_id").notNull(),
-    recordId: text("record_id").notNull(),
-    /**
-     * Who the record reached as it was queued (store-rules.ts,
-     * `audienceKey`): work is taken in its order, so a batch, which holds
-     * one audience's records only, stays full.
-     */
-    audience: text().notNull(),
-    queuedAt: integer("queued_at").notNull(),
-  },
-  (table) => [
-    primaryKey({
-      columns: [table.targetHash, table.tableId, table.recordId],
-    }),
-    // A batch's records: one table's, by audience then ID.
-    index("sdk_migration_work_batches").on(
-      table.targetHash,
-      table.tableId,
-      table.audience,
       table.recordId
     ),
   ]
@@ -898,9 +599,9 @@ export const cascadeJobs = sqliteTable(
  * record belongs to one job at most. While it has a row it stays readable,
  * and a write to it or a new reference to it is refused (`data.deleting`);
  * the batch that deletes it removes the row in the same transaction.
- * Only a commit is refused: the store's own migrations and backfills
- * (store-migrations.ts, store-backfill.ts) may still rewrite a deleting
- * record, which the job then deletes as it is.
+ * Only a commit is refused: a schema change applied at publish
+ * (store-host.ts, `applySchema`) may still rewrite a deleting record,
+ * which the job then deletes as it is.
  */
 export const cascadeMembers = sqliteTable(
   "sdk_cascade_members",
@@ -994,5 +695,171 @@ export const importRows = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.importId, table.position] }),
     index("sdk_import_rows_staged_at").on(table.stagedAt),
+  ]
+);
+
+/**
+ * A migration's output, as core stages it batch by batch
+ * (`StoreHost.stageMigration`) before the publish applies it with the
+ * schema in one transaction (`StoreHost.applySchema`), which removes it:
+ * each record's fields after its transform, with the revision it was read
+ * at. Rows a publish left staged are removed as the next migration begins.
+ */
+export const migrationRows = sqliteTable(
+  "sdk_migration_rows",
+  {
+    migrationId: text("migration_id").notNull(),
+    tableId: text("table_id").notNull(),
+    recordId: text("record_id").notNull(),
+    revision: integer().notNull(),
+    valueJson: text("value_json").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.migrationId, table.tableId, table.recordId],
+    }),
+  ]
+);
+
+/*
+ * Unused since an App's schema changes apply at publish in one
+ * transaction (store-host.ts, `applySchema`): the per-schema records,
+ * pending targets, backfills, migration work queues, receipts and rules
+ * owed of the contract model before it. Kept so a rolled-back core still
+ * opens the store (expand only, one release at a time); dropped in
+ * GRA-1550.
+ */
+export const schemas = sqliteTable("sdk_schemas", {
+  schemaHash: text("schema_hash").primaryKey(),
+  manifest: text().notNull(),
+  createdAt: integer("created_at").notNull(),
+  abandonedAt: integer("abandoned_at"),
+  supersededAt: integer("superseded_at"),
+});
+
+export const schemaActivations = sqliteTable("sdk_schema_activations", {
+  receiptId: text("receipt_id").primaryKey(),
+  resourceId: text("resource_id").notNull(),
+  resourceVersion: integer("resource_version").notNull(),
+  schemaHash: text("schema_hash").notNull(),
+  baseHash: text("base_hash"),
+  contractHash: text("contract_hash").notNull(),
+  planHash: text("plan_hash").notNull(),
+  plan: text().notNull(),
+  answers: text().notNull().default("[]"),
+  createdAt: integer("created_at").notNull(),
+  abandonedAt: integer("abandoned_at"),
+});
+
+export const owedResourceKinds = ["app", "workflow"] as const;
+
+export const rulesOwed = sqliteTable(
+  "sdk_rules_owed",
+  {
+    owedId: text("owed_id").primaryKey(),
+    resourceKind: text("resource_kind", { enum: owedResourceKinds }).notNull(),
+    resourceId: text("resource_id").notNull(),
+    resourceVersion: integer("resource_version").notNull(),
+    schemaHash: text("schema_hash").notNull(),
+    owedAt: integer("owed_at").notNull(),
+    dueAt: integer("due_at").notNull(),
+  },
+  (table) => [index("sdk_rules_owed_due").on(table.dueAt)]
+);
+
+export const reservedFields = sqliteTable(
+  "sdk_reserved_fields",
+  {
+    tableName: text("table_name").notNull(),
+    fieldName: text("field_name").notNull(),
+    descriptor: text().notNull(),
+    targetHash: text("target_hash").notNull(),
+    reservedAt: integer("reserved_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.tableName, table.fieldName] })]
+);
+
+export const abandonedTargets = sqliteTable(
+  "sdk_abandoned_targets",
+  {
+    targetHash: text("target_hash").notNull(),
+    baseHash: text("base_hash"),
+    attempt: integer().notNull(),
+    scanned: integer().notNull(),
+    filled: integer().notNull(),
+    failure: text().notNull(),
+    schemas: text().notNull(),
+    consumers: text().notNull(),
+    reserved: text().notNull(),
+    abandonedBy: text("abandoned_by").notNull(),
+    abandonedAt: integer("abandoned_at").notNull(),
+    auditedAt: integer("audited_at"),
+  },
+  (table) => [primaryKey({ columns: [table.targetHash, table.attempt] })]
+);
+
+export const backfills = sqliteTable(
+  "sdk_schema_backfills",
+  {
+    targetHash: text("target_hash").primaryKey(),
+    targetManifest: text("target_manifest").notNull(),
+    baseHash: text("base_hash"),
+    fills: text().notNull(),
+    scanBounds: text("scan_bounds").notNull(),
+    state: text({ enum: ["running", "complete", "failed"] }).notNull(),
+    attempt: integer().notNull().default(1),
+    leaseUntil: integer("lease_until"),
+    lookedAt: integer("looked_at"),
+    stalls: integer().notNull().default(0),
+    stallScanned: integer("stall_scanned"),
+    lastBatch: integer("last_batch").notNull().default(0),
+    lastOutcome: text("last_outcome"),
+    cursorTable: text("cursor_table"),
+    cursorRecord: text("cursor_record"),
+    cursorOwner: text("cursor_owner"),
+    cursorCreatedAt: integer("cursor_created_at"),
+    migrations: text(),
+    phase: text({ enum: ["scan", "work"] })
+      .notNull()
+      .default("scan"),
+    readyAt: integer("ready_at"),
+    scanned: integer().notNull().default(0),
+    filled: integer().notNull().default(0),
+    failure: text(),
+    failureRevision: integer("failure_revision"),
+    createdAt: integer("created_at").notNull(),
+    completedAt: integer("completed_at"),
+  },
+  (table) => [
+    check("sdk_schema_backfills_attempt", sql`${table.attempt} >= 1`),
+    check(
+      "sdk_schema_backfills_failure",
+      sql`(${table.state} = 'failed') = (${table.failure} IS NOT NULL)`
+    ),
+    uniqueIndex("sdk_schema_backfills_one_pending")
+      .on(sql`(${table.state} <> 'complete')`)
+      .where(sql`state <> 'complete'`),
+  ]
+);
+
+export const migrationWork = sqliteTable(
+  "sdk_migration_work",
+  {
+    targetHash: text("target_hash").notNull(),
+    tableId: text("table_id").notNull(),
+    recordId: text("record_id").notNull(),
+    audience: text().notNull(),
+    queuedAt: integer("queued_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.targetHash, table.tableId, table.recordId],
+    }),
+    index("sdk_migration_work_batches").on(
+      table.targetHash,
+      table.tableId,
+      table.audience,
+      table.recordId
+    ),
   ]
 );

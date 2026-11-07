@@ -77,6 +77,8 @@ export const rpcParamNames: ParamNames = {
     "overview": [],
     "publish": ["app"],
     "remove": ["app"],
+    "resetData": ["app","name"],
+    "resetLegacyData": ["app"],
     "restore": ["app"],
     "setLink": ["app","link"],
     "setVisitorGrants": ["app","functions"],
@@ -391,11 +393,6 @@ export const rpcParamNames: ParamNames = {
     "summary": [],
     "updateSettings": ["change"],
     "week": [],
-  },
-  "StoresRpc": {
-    "abandonBackfill": ["input"],
-    "appBackfills": ["app"],
-    "backfill": ["store"],
   },
   "Subscription": {
     "release": [],

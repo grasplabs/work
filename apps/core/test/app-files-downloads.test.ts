@@ -43,6 +43,7 @@ import {
   upload,
   utf8,
 } from "./app-files.ts";
+import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { person as actingPerson } from "./sealed-apps.ts";
 import { callAuth } from "./sign-in.ts";
@@ -1247,6 +1248,59 @@ describe("an App's files", { timeout: 120_000 }, () => {
       before: 2,
       after: 1,
     });
+  });
+
+  it("removes every byte of an upload under way when its App's data is reset, a chunk landing after included", async () => {
+    const { app, release, page, builder, admin } = await openedApp();
+    const raw = rawChannel(page, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    const storeId = storeIdSchema.parse(release.store?.storeId);
+    const admitted: { key: string | null } = { key: null };
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      async (instance: DataStore) => {
+        admitted.key = await instance.admitChunk(
+          storeId,
+          builder.userId,
+          "files",
+          file,
+          0,
+          bytes.length
+        );
+      }
+    );
+
+    await admin.api.apps.resetData(app, "Notes");
+    // The chunk's bytes land only now, and its writer never removes them.
+    await env.FILES.put(admitted.key ?? "", bytes);
+    const recorded = await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      (instance: DataStore) =>
+        instance.chunkStored(
+          storeId,
+          builder.userId,
+          file,
+          0,
+          bytes.length,
+          sha,
+          admitted.key ?? ""
+        )
+    );
+    await sweepIn(release, purgeGraceMs + 1);
+    const events = await allEvents();
+
+    expect({
+      recorded,
+      left: await storedObjects(release),
+      deleted: events.find(
+        ({ action, target }) =>
+          action === "store.reset" && target?.id === storeId
+      )?.detail.files,
+    }).toStrictEqual({ recorded: "ended", left: [], deleted: 1 });
   });
 
   it("removes again a write's object that lands after the alarm removed it", async () => {

@@ -144,10 +144,6 @@ msgstr "{app}, compartida: {whose}"
 msgid "{app}: run of {workflowId}"
 msgstr "{app}: ejecución de {workflowId}"
 
-#: src/apps/store-changes.tsx
-msgid "{appName}, version {version}"
-msgstr "{appName}, versión {version}"
-
 #: src/projects/project-counts.tsx
 msgid "{apps, plural, one {# App} other {# Apps}}"
 msgstr "{apps, plural, one {# app} other {# apps}}"
@@ -1341,18 +1337,6 @@ msgstr "Un cambio"
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Un cambio se aplica a las ejecuciones que empiezan después: las que ya están en marcha conservan los valores con los que empezaron. Cada cambio queda registrado, sin su valor."
 
-#: src/apps/store-changes.tsx
-msgid "A change to the store {name} can't be applied"
-msgstr "No se puede aplicar un cambio en el almacén {name}"
-
-#: src/apps/store-changes.tsx
-msgid "A change to the store {name} is being applied"
-msgstr "Se está aplicando un cambio en el almacén {name}"
-
-#: src/apps/store-changes.tsx
-msgid "A change to the store {name} is ready"
-msgstr "Un cambio en el almacén {name} está listo"
-
 #: src/apps/app-access-requests.tsx
 msgid "A collection"
 msgstr "Una colección"
@@ -1376,14 +1360,6 @@ msgstr "Una conexión necesita volver a iniciar sesión"
 #: src/activity/audit-words.ts
 msgid "A connection refused to say what changed"
 msgstr "Una conexión se negó a decir qué cambió"
-
-#: src/apps/store-change-errors.ts
-msgid "A data migration moved this App's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
-msgstr "Una migración de datos transformó los registros de esta aplicación después de esta versión, así que no puede volver a hacerse actual, y ninguna versión conservada encaja ya con ellos. Crea una versión nueva en su lugar."
-
-#: src/apps/store-change-errors.ts
-msgid "A data migration moved this App's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
-msgstr "Una migración de datos transformó los registros de esta aplicación después de esta versión, así que no puede volver a hacerse actual. Versiones conservadas que aún encajan con ellos: {versions}."
 
 #: src/apps/field-kinds.tsx
 msgid "A day and time"
@@ -1555,10 +1531,6 @@ msgstr "Un recibo cada vez que se realiza un pago."
 msgid "A record of another table"
 msgstr "Un registro de otra tabla"
 
-#: src/apps/store-change-errors.ts
-msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
-msgstr "Ya empezó un nuevo intento de este cambio, así que no se abandonó. La página muestra ahora en qué punto está."
-
 #: src/inbox/items.ts
 msgid "A run of {name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting."
 msgstr "Una ejecución de {name} espera tu respuesta. No ocurre nada más en ella hasta que alguien responda o hasta que la ejecución deje de estar en espera."
@@ -1685,18 +1657,6 @@ msgstr "¿Un workflow necesita una app que aún no está aquí? Dile a Grasp cu�
 #: src/workflows/requests/request-plan.tsx
 msgid "A workflow started"
 msgstr "Un flujo de trabajo iniciado"
-
-#: src/apps/store-changes.tsx
-msgid "Abandon the change"
-msgstr "Abandonar el cambio"
-
-#: src/apps/store-changes.tsx
-msgid "Abandon this change"
-msgstr "Abandonar este cambio"
-
-#: src/apps/store-changes.tsx
-msgid "Abandon this change?"
-msgstr "¿Abandonar este cambio?"
 
 #: src/apps/app-settings.tsx
 msgid "About"
@@ -2198,18 +2158,6 @@ msgstr "Ámsterdam"
 msgid "An admin"
 msgstr "Un administrador"
 
-#: src/apps/store-change-errors.ts
-msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the App to be built again."
-msgstr "Un administrador abandonó el cambio de datos que necesita esta versión, así que nunca podrá hacerse actual. Pide que se vuelva a crear la aplicación."
-
-#: src/apps/store-change-errors.ts
-msgid "An admin can see the record that holds it back, and abandon the change, in the App's settings."
-msgstr "Un admin puede ver el registro que la frena y abandonar el cambio en los ajustes de la App."
-
-#: src/apps/store-change-errors.ts
-msgid "An admin can see what went wrong, and abandon the change, in the App's settings."
-msgstr "Un admin puede ver qué salió mal y abandonar el cambio en los ajustes de la App."
-
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
 msgstr "Lo cambia un administrador, en Miembros y roles."
@@ -2245,6 +2193,10 @@ msgstr "Una App"
 #: src/apps/new-app.tsx
 msgid "An App that… (what it shows, and for whom)"
 msgstr "Una App que… (qué muestra y para quién)"
+
+#: src/apps/app-settings.tsx
+msgid "An App whose data was stored before this version of Grasp can’t read it any more: reset it, then publish again. Any other App’s data only an admin resets."
+msgstr "Una App cuyos datos se guardaron antes de esta versión de Grasp ya no puede leerlos: restablécelos y vuelve a publicar. Los datos de cualquier otra App solo los restablece un administrador."
 
 #: src/apps/app-status.tsx
 msgid "An archived App is kept as it is and goes offline: nobody opens its pages, its triggers stop and its unfinished runs are cancelled. A builder can restore it later, as a draft."
@@ -2429,10 +2381,6 @@ msgstr "Aplicación"
 #: src/connections/connection-list.tsx
 msgid "App {app}"
 msgstr "Aplicación {app}"
-
-#: src/apps/store-changes.tsx
-msgid "App {app}, version {version}"
-msgstr "Aplicación {app}, versión {version}"
 
 #: src/routes/_shell.apps.$app_.edit.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
@@ -3141,11 +3089,6 @@ msgid "By {by}"
 msgstr "Por {by}"
 
 #: src/apps/app-data.tsx
-msgctxt "a change's source: the platform filled in a value the record lacked as a new version of the App's data model took effect"
-msgid "by a change of the App's data model"
-msgstr "por un cambio en el modelo de datos de la App"
-
-#: src/apps/app-data.tsx
 msgctxt "a change's source"
 msgid "by an import"
 msgstr "por una importación"
@@ -3214,6 +3157,7 @@ msgstr "No se puede ofrecer Iniciar: {unread}"
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
 #: src/apps/app-remove.tsx
+#: src/apps/app-reset.tsx
 #: src/apps/app-sharing.tsx
 #: src/apps/app-status.tsx
 #: src/apps/app-versions.tsx
@@ -3496,10 +3440,6 @@ msgstr "Cambios publicados desde el espacio de trabajo de la App"
 msgid "Changes since {when}"
 msgstr "Cambios desde {when}"
 
-#: src/apps/store-changes.tsx
-msgid "Changes to the App's stores"
-msgstr "Cambios en los almacenes de la aplicación"
-
 #: src/apps/data-model-changes.tsx
 msgid "Changes who can see and change the records of {table}."
 msgstr "Cambia quién puede ver y cambiar los registros de {table}."
@@ -3730,7 +3670,6 @@ msgstr "Borrar filtros"
 #: src/apps/data-model-changes.tsx
 #: src/apps/release-controls.tsx
 #: src/apps/resource-bindings.tsx
-#: src/apps/store-changes.tsx
 #: src/brain/forget.tsx
 #: src/brain/remember-dialog.tsx
 #: src/brain/share-record.tsx
@@ -5070,6 +5009,10 @@ msgstr "Cada lunes por la mañana, para ti"
 msgid "Every other app Grasp can connect to."
 msgstr "Todas las demás apps que Grasp puede conectar."
 
+#: src/apps/app-reset.tsx
+msgid "Every record it holds and every file in them is gone for good, and its current version runs again with no records. Its pages, versions, members and history stay."
+msgstr "Todos sus registros y todos los archivos que contienen desaparecen para siempre, y su versión actual vuelve a ejecutarse sin registros. Sus páginas, versiones, miembros e historial se mantienen."
+
 #: src/apps/app-data.tsx
 msgid "Every row is checked first. If one is wrong, nothing is added."
 msgstr "Primero se comprueba cada fila. Si una es incorrecta, no se añade nada."
@@ -5186,6 +5129,7 @@ msgstr "Todo lo que Grasp guarda para tu organización se queda aquí."
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 msgstr "Todo lo que me has contado se elimina para siempre y no se puede recuperar. ¿Solo hay algo mal? Corrígelo mejor con «Añadir algo»."
 
+#: src/apps/app-reset.tsx
 #: src/settings/erasures.tsx
 msgid "Exactly as it’s written here."
 msgstr "Exactamente como está escrito aquí."
@@ -5397,14 +5341,6 @@ msgstr "Archivos a flujos de trabajo"
 #: src/workflows/start-run.tsx
 msgid "Fill this in."
 msgstr "Rellena este campo."
-
-#: src/apps/store-changes.tsx
-msgid "Filling in the new field {field} of the table {table} would make the record {record} larger than a record may be."
-msgstr "Rellenar el nuevo campo {field} de la tabla {table} haría el registro {record} más grande de lo que puede ser un registro."
-
-#: src/apps/store-changes.tsx
-msgid "Filling in the new fields stopped making progress, and trying again didn't help."
-msgstr "El relleno de los nuevos campos dejó de avanzar, y volver a intentarlo no sirvió."
 
 #: src/activity/audit-log.tsx
 #: src/settings/filter-menu.tsx
@@ -6853,6 +6789,10 @@ msgid "Its current version has no parameters."
 msgstr "Su versión actual no tiene parámetros."
 
 #: src/apps/app-settings.tsx
+msgid "Its data"
+msgstr "Sus datos"
+
+#: src/apps/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "Su definición para guardarla o moverla, y una plantilla desde la que otros pueden empezar."
 
@@ -6868,10 +6808,6 @@ msgstr "Su enlace"
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Sus mensajes se eliminan para siempre y se rechaza cada cambio que su agente retiene para ti. Lo que hizo el agente queda en el registro de auditoría."
 
-#: src/apps/store-changes.tsx
-msgid "Its migration has transformed every record. It takes over when a release that needs it is made current; until then the current release goes on using the store as before."
-msgstr "Su migración ha transformado todos los registros. Entra en vigor cuando una versión que la necesita se hace actual; hasta entonces, la versión actual sigue usando el almacén como antes."
-
 #: src/chat/builds.tsx
 msgid "Its migrations can't be read: it may rewrite the records of any table"
 msgstr "Sus migraciones no se pueden leer: puede reescribir los registros de cualquier tabla"
@@ -6879,10 +6815,6 @@ msgstr "Sus migraciones no se pueden leer: puede reescribir los registros de cua
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Its model tasks"
 msgstr "Sus tareas de modelo"
-
-#: src/apps/store-changes.tsx
-msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
-msgstr "Se están rellenando los valores predeterminados de sus nuevos campos. Las versiones que lo necesitan podrán hacerse actuales cuando termine."
 
 #: src/workflows/files-and-apps.tsx
 msgid "Its next start is refused until an admin approves {alias} again, and runs already started fail at their next call through it."
@@ -8229,10 +8161,6 @@ msgstr "Aún no hay proyectos"
 msgid "No query uses it yet"
 msgstr "Ninguna consulta lo usa aún"
 
-#: src/apps/store-change-errors.ts
-msgid "No record is to blame, so an admin can only abandon the change, in the App's settings."
-msgstr "Ningún registro tiene la culpa, así que un admin solo puede abandonar el cambio en los ajustes de la App."
-
 #: src/apps/app-data.tsx
 msgid "No record of this table has that ID."
 msgstr "Ningún registro de esta tabla tiene ese ID."
@@ -9006,6 +8934,14 @@ msgstr "Solo los administradores pueden cambiar los equipos."
 msgid "Only an admin makes a collection for everyone or for teams."
 msgstr "Solo un administrador crea una colección para todos o para equipos."
 
+#: src/apps/app-settings.tsx
+msgid "Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records."
+msgstr "Solo un administrador restablece los datos de una App: todos los registros desaparecen para siempre y su versión actual vuelve a ejecutarse sin registros."
+
+#: src/apps/app-reset.tsx
+msgid "Only for data stored before this version of Grasp, which can’t be read any more. Every record it holds and every file in them is gone for good, and its current version runs again with no records."
+msgstr "Solo para datos guardados antes de esta versión de Grasp, que ya no se pueden leer. Todos sus registros y todos los archivos que contienen desaparecen para siempre, y su versión actual vuelve a ejecutarse sin registros."
+
 #: src/brain/brain-transcript.tsx
 msgid "Only highlighted turns"
 msgstr "Solo intervenciones destacadas"
@@ -9083,10 +9019,6 @@ msgstr "Solo tú y tus agentes lo leen, hasta que lo compartas."
 #: src/connections/connected-dialog.tsx
 msgid "Only you can use it."
 msgstr "Solo tú puedes usarlo."
-
-#: src/apps/store-change-errors.ts
-msgid "Only your organization's admins can abandon a change to a store."
-msgstr "Solo los administradores de tu organización pueden abandonar un cambio en un almacén."
 
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/in-inbox.tsx
@@ -10234,10 +10166,6 @@ msgctxt "a table's records"
 msgid "Records"
 msgstr "Registros"
 
-#: src/apps/store-changes.tsx
-msgid "Records checked: {scanned}. Filled in: {filled}."
-msgstr "Registros revisados: {scanned}. Rellenados: {filled}."
-
 #: src/apps/data-model-changes.tsx
 msgid "Records in {table} that lack {field} get “{value}”."
 msgstr "Los registros de {table} sin {field} reciben «{value}»."
@@ -10566,6 +10494,26 @@ msgstr "Obligatorio"
 #: src/workflows/kept-state.tsx
 msgid "Reset"
 msgstr "Restablecer"
+
+#: src/apps/app-reset.tsx
+msgid "Reset {name}’s data?"
+msgstr "¿Restablecer los datos de {name}?"
+
+#: src/apps/app-reset.tsx
+msgid "Reset {name}’s old data?"
+msgstr "¿Restablecer los datos antiguos de {name}?"
+
+#: src/apps/app-reset.tsx
+msgid "Reset data"
+msgstr "Restablecer datos"
+
+#: src/apps/app-reset.tsx
+msgid "Reset for good"
+msgstr "Restablecer definitivamente"
+
+#: src/apps/app-reset.tsx
+msgid "Reset old data"
+msgstr "Restablecer datos antiguos"
 
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps"
@@ -12341,10 +12289,6 @@ msgstr "Dejó de permitir que alguien visite una aplicación"
 msgid "Stopped."
 msgstr "Detenido."
 
-#: src/apps/store-changes.tsx
-msgid "Store ID: {store}"
-msgstr "ID del almacén: {store}"
-
 #: src/routes/_shell.settings.billing.tsx
 msgid "Stripe is not linked yet"
 msgstr "Stripe aún no está vinculado"
@@ -12866,10 +12810,6 @@ msgstr "El catálogo no incluye {app}, así que no se pueden mostrar sus herrami
 msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 msgstr "No se pudo leer el catálogo de integraciones, así que esta página muestra solo lo que tus cuentas dicen de ella."
 
-#: src/apps/store-changes.tsx
-msgid "The change to the store {name} was abandoned"
-msgstr "Se abandonó el cambio en el almacén {name}"
-
 #: src/apps/indexes-view.tsx
 msgid "The chat adds indexes as it writes the App’s queries."
 msgstr "El chat añade índices mientras escribe las consultas de la App."
@@ -13045,14 +12985,6 @@ msgstr "La migración {migration} falló en su registro de prueba {fixture} cuan
 msgid "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the App again."
 msgstr "La migración {migration} falló en sus registros de prueba cuando se selló esta versión: {reason}. No se ejecuta sobre ningún registro, así que la versión no puede hacerse actual: corrige la migración o sus registros de prueba y vuelve a crear la aplicación."
 
-#: src/apps/store-changes.tsx
-msgid "The migration {migration} of the table {table} failed as a whole: its code failed, not a record."
-msgstr "La migración {migration} de la tabla {table} falló por completo: falló su código, no un registro."
-
-#: src/apps/store-changes.tsx
-msgid "The migration {migration} of the table {table} failed on the record {record}."
-msgstr "La migración {migration} de la tabla {table} falló en el registro {record}."
-
 #: src/apps/store-change-errors.ts
 msgid "the migration threw an error"
 msgstr "la migración lanzó un error"
@@ -13076,10 +13008,6 @@ msgstr "El presupuesto mensual para IA aún no está fijado."
 #: src/apps/blueprints.tsx
 msgid "The new App starts as a copy of it, with none of its data. Its access waits for an admin."
 msgstr "La nueva aplicación empieza como una copia, sin sus datos. Sus accesos esperan a un administrador."
-
-#: src/apps/store-changes.tsx
-msgid "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
-msgstr "No se puede rellenar el nuevo campo {field} de la tabla {table}: el registro {record} ya tiene con ese nombre un valor que el campo no acepta."
 
 #: src/dashboard/todo-pile.tsx
 msgid "The next one"
@@ -13243,10 +13171,6 @@ msgstr "Los archivos fuente de la versión {sourceVersion}"
 msgid "The step, as JSON"
 msgstr "El paso, en JSON"
 
-#: src/apps/store-changes.tsx
-msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this App or any other App using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
-msgstr "El almacén mantiene sus tablas como están y vuelve a aceptar cambios. La versión que necesitaba este cambio nunca podrá hacerse actual, ni en esta aplicación ni en ninguna otra que use el almacén: hay que volver a crearla. Los nuevos campos quedan reservados con el significado que les dio este cambio: una versión posterior solo puede volver a añadirlos exactamente como eran. Los valores ya rellenados se quedan en los registros, sin mostrarse. Esto no se puede deshacer."
-
 #: src/settings/teams.tsx
 msgid "The team couldn't be created. Try again."
 msgstr "No se ha podido crear el equipo. Inténtalo de nuevo."
@@ -13400,10 +13324,6 @@ msgstr "Estas son tus aplicaciones. Cada una está hecha para un equipo o una pe
 msgid "These features always use Grasp's own provider keys, whichever providers you connect above."
 msgstr "Estas funciones siempre usan las claves de proveedor propias de Grasp, sean cuales sean los proveedores que conectes arriba."
 
-#: src/apps/store-changes.tsx
-msgid "These fields stay reserved with their current meaning: {reserved}."
-msgstr "Estos campos quedan reservados con su significado actual: {reserved}."
-
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named} and {more} more."
 msgstr "Estas notas no se apoyan en nada más y también se van: {named} y {more} más."
@@ -13411,10 +13331,6 @@ msgstr "Estas notas no se apoyan en nada más y también se van: {named} y {more
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named}."
 msgstr "Estas notas no se apoyan en nada más y también se van: {named}."
-
-#: src/apps/store-changes.tsx
-msgid "These releases can never be made current: {releases}."
-msgstr "Estas versiones nunca podrán hacerse actuales: {releases}."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
@@ -13494,17 +13410,9 @@ msgstr "Este navegador es demasiado antiguo para las páginas de aplicaciones. A
 msgid "This can't be undone. Confirm by {until}, or prepare it again."
 msgstr "No se puede deshacer. Confirma antes de {until}, o prepáralo de nuevo."
 
-#: src/apps/store-change-errors.ts
-msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
-msgstr "Este cambio se está aplicando de nuevo, así que ahora no se puede abandonar. La página muestra ahora en qué punto está."
-
 #: src/apps/app-code.tsx
 msgid "This change is too large to show line by line."
 msgstr "Este cambio es demasiado grande para mostrarlo línea por línea."
-
-#: src/apps/store-change-errors.ts
-msgid "This change was already abandoned."
-msgstr "Este cambio ya se abandonó."
 
 #: src/brain/memory-page.tsx
 msgctxt "memory record scope"
@@ -13701,26 +13609,6 @@ msgstr "Esta página quiere abrir otro sitio en una pestaña nueva. Ábrelo solo
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "El código guardado de esta página ya no coincide con el código publicado, así que no se abrió. Avisa a un administrador."
 
-#: src/apps/store-change-errors.ts
-msgid "This store no longer exists, so there is nothing to abandon."
-msgstr "Este almacén ya no existe, así que no hay nada que abandonar."
-
-#: src/apps/store-change-errors.ts
-msgid "This version changes the App's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
-msgstr "Esta versión cambia los datos de la aplicación con una migración, y no puede terminar: su transformación falló o devolvió algo que la tabla no acepta."
-
-#: src/apps/store-change-errors.ts
-msgid "This version changes the App's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
-msgstr "Esta versión cambia los datos de la aplicación y el cambio no se puede aplicar: un registro ya tiene un valor que uno de sus nuevos campos no acepta."
-
-#: src/apps/store-change-errors.ts
-msgid "This version changes the App's data, and the change can't be applied: filling in its new fields stopped making progress."
-msgstr "Esta versión cambia los datos de la aplicación y el cambio no se puede aplicar: el relleno de sus nuevos campos dejó de avanzar."
-
-#: src/apps/store-change-errors.ts
-msgid "This version changes the App's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
-msgstr "Esta versión cambia los datos de la aplicación y el cambio no se puede aplicar: rellenar uno de sus nuevos campos haría un registro más grande de lo que puede ser un registro."
-
 #: src/apps/app-code.tsx
 msgid "This version has no files."
 msgstr "Esta versión no tiene archivos."
@@ -13736,10 +13624,6 @@ msgstr "Esta versión de la aplicación se revocó y ya no se ejecuta. Un admini
 #: src/pages/page-frame.tsx
 msgid "This version of the App was revoked, and the page was stopped. An admin can make another version current."
 msgstr "Esta versión de la aplicación se revocó y la página se detuvo. Un administrador puede hacer actual otra versión."
-
-#: src/apps/store-change-errors.ts
-msgid "This version's data change is still being applied. Try again in a moment."
-msgstr "El cambio de datos de esta versión todavía se está aplicando. Vuelve a intentarlo en un momento."
 
 #: src/chat/thread.tsx
 msgid "Thought for {time}"
@@ -14013,6 +13897,7 @@ msgstr "Dos respuestas"
 msgid "Type"
 msgstr "Tipo"
 
+#: src/apps/app-reset.tsx
 #: src/settings/erasures.tsx
 msgid "Type {name} to confirm"
 msgstr "Escribe {name} para confirmar"
@@ -14166,14 +14051,6 @@ msgstr "Hasta que el soporte de Grasp configure uno, los enlaces de entrevista n
 #: src/routes/_shell.settings.billing.tsx
 msgid "Until it is, there is no plan, card or invoice. The billing details and emails below are kept for when it is."
 msgstr "Hasta entonces no hay plan, tarjeta ni factura. Los datos de facturación y los correos de abajo se guardan para entonces."
-
-#: src/apps/store-changes.tsx
-msgid "Until this is resolved, no release that changes this store's tables can be made current, in this App or any other App using the store. Mend the record through the App and the change is tried again, or abandon it."
-msgstr "Hasta que se resuelva, ninguna versión que cambie las tablas de este almacén podrá hacerse actual, ni en esta aplicación ni en ninguna otra que use el almacén. Corrige el registro desde la aplicación y el cambio se volverá a intentar, o abandónalo."
-
-#: src/apps/store-changes.tsx
-msgid "Until this is resolved, no release that changes this store's tables can be made current, in this App or any other App using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
-msgstr "Hasta que se resuelva, ninguna versión que cambie las tablas de este almacén podrá hacerse actual, ni en esta aplicación ni en ninguna otra que use el almacén. Ningún registro tiene la culpa, así que no hay nada que corregir: abandona el cambio para que el almacén vuelva a aceptar cambios."
 
 #: src/apps/app-versions.tsx
 msgid "Up for review"

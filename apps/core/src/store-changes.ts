@@ -9,7 +9,7 @@ import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { StoreFields } from "@grasp-os/shared/stores";
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
@@ -48,8 +48,11 @@ import { recordChanges, store } from "./db/data-store/schema.ts";
 //   before and after states the rules admit them to, nothing past a change
 //   that kept no values (`admittedHistoryOf`; app-data.ts, store-host.ts).
 //   A migration's rewrite keeps no change, and never moves a field a row
-//   rule reads (store-migrations.ts, `rule_changed`), so the states a
-//   history is rebuilt through admit the same people across it.
+//   rule reads (store-host.ts, `rule_changed`), so the states a
+//   history is rebuilt through admit the same people across it; a field
+//   renamed is renamed in its history too, in the same transaction
+//   (`renameHistoryFields`), so a state is never rebuilt from a field's
+//   value now and its old name's then.
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -245,6 +248,106 @@ const overBound = (db: DrizzleSqliteDODatabase): boolean => {
   );
 };
 
+/** A change's field names, and its values, as their columns hold them. */
+const namesSchema = z.array(z.string());
+const valuesSchema = z.record(z.string(), z.unknown());
+
+/** History rows a field rename rewrites at once. */
+const renamePage = 500;
+
+/** `fields` with each key `names` maps renamed, others as they are. */
+const renamedKeys = (
+  fields: Readonly<Record<string, unknown>>,
+  names: ReadonlyMap<string, string>
+): Record<string, unknown> => {
+  const renamed: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(fields)) {
+    // Defined, not assigned: no field name reaches the prototype.
+    Object.defineProperty(renamed, names.get(name) ?? name, {
+      enumerable: true,
+      value,
+    });
+  }
+  return renamed;
+};
+
+/**
+ * Renames fields of table `tableId` in its history, old name to new
+ * (`names`, all at once, so two fields that swap names swap here too):
+ * call it inside the transaction of the schema change that renames them.
+ * A history is rebuilt from the record as it is now through its changes
+ * (`admittedHistoryOf`), so its changes must name each field as the
+ * record does: a row rule reading a renamed field would otherwise read
+ * the record's value now in states its history says it didn't hold.
+ */
+export const renameHistoryFields = (
+  db: DrizzleSqliteDODatabase,
+  tableId: string,
+  names: ReadonlyMap<string, string>
+): void => {
+  if (names.size === 0) {
+    return;
+  }
+  const rename = (text: string | null): string | null =>
+    text === null
+      ? null
+      : JSON.stringify(
+          renamedKeys(valuesSchema.parse(JSON.parse(text)), names)
+        );
+  let after = 0;
+  let grown = 0;
+  for (;;) {
+    const rows = db
+      .select({
+        id: recordChanges.id,
+        fields: recordChanges.fields,
+        beforeJson: recordChanges.beforeJson,
+        afterJson: recordChanges.afterJson,
+        bytes: recordChanges.bytes,
+      })
+      .from(recordChanges)
+      .where(
+        and(eq(recordChanges.tableId, tableId), gt(recordChanges.id, after))
+      )
+      .orderBy(asc(recordChanges.id))
+      .limit(renamePage)
+      .all();
+    if (rows.length === 0) {
+      break;
+    }
+    for (const row of rows) {
+      after = row.id;
+      const listed = namesSchema.parse(JSON.parse(row.fields));
+      if (!listed.some((name) => names.has(name))) {
+        continue;
+      }
+      const fields = JSON.stringify(
+        listed.map((name) => names.get(name) ?? name)
+      );
+      const beforeJson = rename(row.beforeJson);
+      const afterJson = rename(row.afterJson);
+      const bytes =
+        row.bytes +
+        bytesOf(fields) -
+        bytesOf(row.fields) +
+        bytesOf(beforeJson) -
+        bytesOf(row.beforeJson) +
+        bytesOf(afterJson) -
+        bytesOf(row.afterJson);
+      grown += bytes - row.bytes;
+      db.update(recordChanges)
+        .set({ fields, beforeJson, afterJson, bytes })
+        .where(eq(recordChanges.id, row.id))
+        .run();
+    }
+  }
+  if (grown !== 0) {
+    db.update(store)
+      .set({ historyBytes: sql`${store.historyBytes} + ${grown}` })
+      .run();
+  }
+};
+
 /**
  * When retention next has something to remove from the history: `now`
  * while it is past a bound (`overBound`), otherwise when its
@@ -310,9 +413,6 @@ export const pruneHistory = (
     }
   }
 };
-
-const namesSchema = z.array(z.string());
-const valuesSchema = z.record(z.string(), z.unknown());
 
 /** A row as the history answers it. */
 const changeOf = (row: typeof recordChanges.$inferSelect): RecordChange => ({

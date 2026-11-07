@@ -270,7 +270,6 @@ const opened = async (
         identity={identity}
         models={[]}
         section={undefined}
-        storeChanges={undefined}
         view="preview"
       />
     );

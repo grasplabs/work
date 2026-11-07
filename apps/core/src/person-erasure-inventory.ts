@@ -381,6 +381,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // An import's rows waiting to land (store-host.ts, `stageImport`): theirs
   // go with their erasure, and every one an hour after it was staged.
   "dataStore.sdk_import_rows": { erased: "apps" },
+  // A migration's output, staged while its publish runs (store-host.ts,
+  // `stageMigration`): the App's records as they will be, gone as the
+  // schema applies or the next migration begins.
+  "dataStore.sdk_migration_rows": {
+    company: "the App's records, as a migration rewrites them",
+  },
   "dataStore.sdk_cascade_jobs": { company: "writes of the App's records" },
   "dataStore.sdk_cascade_members": noPerson,
   "dataStore.sdk_file_chunks": noPerson,

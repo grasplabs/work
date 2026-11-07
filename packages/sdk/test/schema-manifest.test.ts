@@ -10,7 +10,6 @@ import {
   schemaManifest,
 } from "../src/host.ts";
 import type { AccessMode, SchemaManifest, TableAccess } from "../src/host.ts";
-import { diffSchemaManifests } from "../src/schema-diff.ts";
 import type { AnySchema } from "../src/value-schema.ts";
 import { defineSchema, defineTable, rows, v } from "../src/values.ts";
 import type {
@@ -168,7 +167,6 @@ describe("canonical manifests", () => {
     );
     expect(manifestText(second)).toBe(manifestText(first));
     await expect(schemaHash(second)).resolves.toBe(await schemaHash(first));
-    expect(diffSchemaManifests(first, second).hasChanges).toBeFalsy();
   });
 
   test.each([
@@ -344,139 +342,6 @@ describe("canonical manifests", () => {
     expect(codeOf(() => schemaManifest({ tables: { ...real.tables } }))).toBe(
       "schema.invalid_table"
     );
-  });
-});
-
-describe("diffs", () => {
-  const before = manifestOf(notes(noteFields));
-
-  test("a changed default is a changed field, with both descriptors", () => {
-    const after = manifestOf(
-      notes({ ...noteFields, body: v.string().max(100_000).default("-") })
-    );
-    const diff = diffSchemaManifests(before, after);
-    expect(diff.fields).toStrictEqual([
-      {
-        table: "notes",
-        field: "body",
-        change: "changed",
-        before: before.tables.notes?.fields.body,
-        after: after.tables.notes?.fields.body,
-      },
-    ]);
-    expect(diff.fields[0]?.after?.defaultValue).toBe("-");
-    expect([diff.tables, diff.indexes, diff.access]).toStrictEqual([
-      [],
-      [],
-      [],
-    ]);
-  });
-
-  test("a changed constraint or presence is a changed field", () => {
-    const narrower = manifestOf(
-      notes({ ...noteFields, title: v.string().trim().min(1).max(100) })
-    );
-    const optional = manifestOf(
-      notes({ ...noteFields, summary: v.string().max(10_000).optional() })
-    );
-    expect(
-      diffSchemaManifests(before, narrower).fields.map(
-        ({ field, change, after }) => [
-          field,
-          change,
-          after?.kind === "string" ? after.max : undefined,
-        ]
-      )
-    ).toStrictEqual([["title", "changed", 100]]);
-    expect(
-      diffSchemaManifests(before, optional).fields.map(({ field, after }) => [
-        field,
-        after?.presence,
-        after?.nullable,
-      ])
-    ).toStrictEqual([["summary", "optional", false]]);
-  });
-
-  test("an index's field order is part of it", () => {
-    const fields = { title: v.string(), rank: v.number() };
-    const ordered = (
-      keys: readonly ["title", "rank"] | readonly ["rank", "title"]
-    ) =>
-      manifestOf(
-        defineSchema({ notes: defineTable(fields).index("by_both", keys) })
-      );
-    expect(
-      diffSchemaManifests(
-        ordered(["title", "rank"]),
-        ordered(["rank", "title"])
-      ).indexes
-    ).toStrictEqual([
-      {
-        table: "notes",
-        index: "by_both",
-        change: "changed",
-        before: ["title", "rank"],
-        after: ["rank", "title"],
-      },
-    ]);
-  });
-
-  test("a changed access mode is an access change", () => {
-    const after = manifestOf(notes(noteFields), {
-      tables: { notes: { read: "appMembers", write: "owner" } },
-    });
-    expect(diffSchemaManifests(before, after)).toStrictEqual({
-      hasChanges: true,
-      tables: [],
-      fields: [],
-      indexes: [],
-      access: [
-        {
-          table: "notes",
-          before: { read: "owner", write: "owner" },
-          after: { read: "appMembers", write: "owner" },
-        },
-      ],
-    });
-  });
-
-  test("tables, fields and indexes added, removed and renamed each show", () => {
-    const after = manifestOf(
-      defineSchema({
-        notes: defineTable({
-          title: noteFields.title,
-          body: noteFields.body,
-          archivedAt: v.timestamp().optional(),
-        })
-          .index("by_updated", ["_updatedAt"])
-          .index("by_heading", ["title"]),
-        people: defineTable({ name: v.string() }),
-      }),
-      { tables: { notes: { read: "owner", write: "owner" } } }
-    );
-    const diff = diffSchemaManifests(before, after);
-    expect(diff.tables).toStrictEqual([{ table: "people", change: "added" }]);
-    expect(
-      diff.fields.map(({ table, field, change }) => [table, field, change])
-    ).toStrictEqual([
-      ["notes", "archivedAt", "added"],
-      ["notes", "summary", "removed"],
-      ["people", "name", "added"],
-    ]);
-    // A renamed index is a new one beside the old, which stays while
-    // anything pinned uses it.
-    expect(
-      diff.indexes.map(({ index, change }) => [index, change])
-    ).toStrictEqual([
-      ["by_heading", "added"],
-      ["by_title", "removed"],
-    ]);
-    expect(diff.access).toStrictEqual([
-      { table: "people", after: { read: "none", write: "none" } },
-    ]);
-    expect(diffSchemaManifests(after, before).tables).toStrictEqual([
-      { table: "people", change: "removed" },
-    ]);
   });
 });
 
@@ -772,14 +637,9 @@ describe("row rules", () => {
     expect(readSchemaManifest(manifestText(manifest)).manifest).toStrictEqual(
       manifest
     );
-    expect(diffSchemaManifests(plain, manifest).access).toStrictEqual([
-      {
-        table: "requests",
-        before: { read: "appMembers", write: "appMembers" },
-        after: { read: "appMembers", write: "appMembers" },
-        rulesAfter: manifest.tables.requests?.rules,
-      },
-    ]);
+    expect(manifest.tables.requests?.access).toStrictEqual(
+      plain.tables.requests?.access
+    );
   });
 
   test("refuse rules that name no field of their kind, or that are malformed", () => {

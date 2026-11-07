@@ -258,10 +258,15 @@ export const hello = query({
       )
     );
     const current = await currentOf(app);
+    // The other is refused by the App's store, whose schema the first
+    // took (`migration.busy`), or by core, whose current version it took
+    // (`app.conflict`), whichever it reaches first.
+    const refused = outcomes.find((outcome) => outcome !== "ok") ?? "";
     expect({
-      outcomes: outcomes.toSorted(),
+      made: outcomes.filter((outcome) => outcome === "ok").length,
+      refused: ["app.conflict", "migration.busy"].includes(refused),
       current: current === 2 || current === 3,
-    }).toStrictEqual({ outcomes: ["app.conflict", "ok"], current: true });
+    }).toStrictEqual({ made: 1, refused: true, current: true });
   });
 
   it("goes on after a crash between sealing and marking, sealing nothing new", async () => {

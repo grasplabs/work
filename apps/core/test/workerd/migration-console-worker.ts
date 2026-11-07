@@ -4,13 +4,13 @@ import {
   serverEntryPath,
 } from "@grasp-os/compiler";
 
-import { transformIsolate } from "../../src/migration-transform.ts";
+import { transformIsolate } from "../../src/migration-run.ts";
 import { callSandboxed } from "../../src/sandboxed.ts";
 import type { SandboxedEnv } from "../../src/sandboxed.ts";
 
 // A migration's transform logging a record's values on the on-prem sandbox
 // (scripts/workerd-sandbox-migration-console.test.ts): the isolate core
-// runs a batch in (migration-transform.ts, `transformIsolate`), with
+// runs a batch in (migration-run.ts, `transformIsolate`), with
 // `SANDBOX_HOST` bound to the sandbox supervisor as on-prem binds it, and
 // an isolate of its own that logs, which the sandbox host silences too
 // (GRA-776, @grasp-os/shared/quiet-isolate).

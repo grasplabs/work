@@ -70,7 +70,7 @@ await Promise.all([
   // builtins.ts
   import("#blueprints"),
   // apps.ts, lazy because these modules import it back
-  import("../src/migration-evidence.ts"),
+  import("../src/app-schema.ts"),
   import("../src/app-tests.ts"),
   import("../src/app-publish.ts"),
   import("../src/app-releases.ts"),

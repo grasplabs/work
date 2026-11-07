@@ -4,17 +4,17 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { storeMaxWatches } from "../src/store-watches.ts";
 import {
-  fill,
   newStore,
   objectOf,
-  pendingStore,
+  storeOfNotes,
   v1,
-  consumer,
-} from "./pending-stores.ts";
+  withCategory,
+} from "./notes-stores.ts";
+import { applied } from "./store-schemas.ts";
 
 // The live queries a business store's object keeps (store-watches.ts),
 // through its RPC surface as core calls it: told of every write that
-// moves a table's generation, a backfill's batch as much as a commit;
+// moves a table's generation, a schema change's as much as a commit;
 // and its bounds, which watches whose pages are gone must not fill for
 // everyone.
 
@@ -46,8 +46,8 @@ const notesGeneration = async (
 };
 
 describe("a store's live queries", { timeout: 120_000 }, () => {
-  it("tells a watch of a backfill's batch, not only of commits", async () => {
-    const { store, second } = await pendingStore(3);
+  it("tells a watch of a schema change that rewrote records, not only of commits", async () => {
+    const { store } = await storeOfNotes(3);
     const { told, watcher } = watcherOf();
     await objectOf(store).watch(
       store.id,
@@ -56,15 +56,34 @@ describe("a store's live queries", { timeout: 120_000 }, () => {
       watcher
     );
 
-    await fill(store, second.contract.hash, 1);
+    await store.applySchema(applied(withCategory));
 
     await vi.waitFor(() => {
       expect(told).toContainEqual(["notes"]);
     });
   });
 
+  it("tells a watch of a reset of the store's data, its table past every generation it read", async () => {
+    const { store } = await storeOfNotes(5);
+    const read = await notesGeneration(store);
+    const { told, watcher } = watcherOf();
+    await objectOf(store).watch(store.id, "ada", { notes: read }, watcher);
+
+    await objectOf(store).resetData(store.id, {
+      actor: { type: "person", userId: "ada" },
+      app: "notes",
+      everything: true,
+      apply: applied(v1),
+    });
+
+    await vi.waitFor(() => {
+      expect(told).toContainEqual(["notes"]);
+    });
+    await expect(notesGeneration(store)).resolves.toBeGreaterThan(read);
+  });
+
   it("answers that a write moved past a new watch's read with its ID, not through a watcher core can't match yet", async () => {
-    const { store } = await pendingStore(1);
+    const { store } = await storeOfNotes(1);
     const { told, watcher } = watcherOf();
     const generation = await notesGeneration(store);
 
@@ -84,7 +103,7 @@ describe("a store's live queries", { timeout: 120_000 }, () => {
 
   it("lets go of everyone's dead watches when the store is full, so a newcomer still gets one", async () => {
     const store = await newStore();
-    await store.defineTables(v1, consumer(1));
+    await store.applySchema(applied(v1));
     const people = Math.ceil(
       storeMaxWatches / querySubscriptionLimits.perPerson
     );
@@ -107,7 +126,7 @@ describe("a store's live queries", { timeout: 120_000 }, () => {
 
   it("brings a later alarm forward so it sweeps soon after a watch", async () => {
     const store = await newStore();
-    await store.defineTables(v1, consumer(1));
+    await store.applySchema(applied(v1));
     const hour = 60 * 60 * 1000;
     await runInDurableObject(objectOf(store), async (_instance, state) => {
       await state.storage.setAlarm(Date.now() + hour);
@@ -126,7 +145,7 @@ describe("a store's live queries", { timeout: 120_000 }, () => {
 
   it("sweeps the watches whose pages are gone from its alarm", async () => {
     const store = await newStore();
-    await store.defineTables(v1, consumer(1));
+    await store.applySchema(applied(v1));
     const gone = watcherOf(false);
     await objectOf(store).watch(store.id, "ada", {}, gone.watcher);
 

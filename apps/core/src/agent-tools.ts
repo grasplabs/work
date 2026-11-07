@@ -205,11 +205,11 @@ const answersWithDiagnostics =
 
 /** What the file tools say of the files the definition tools write. */
 const generatedNote =
-  "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code generated from it: change them with the definition tools (addTable, addField, changeField, renameField, setAccess, addIndex, addPermission, their remove counterparts, and the preference tools), never by writing them.";
+  "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code generated from it: change them with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission, their remove counterparts, and the preference tools), never by writing them.";
 
 /** What the definition tools say of what they answer with (`env.build.define`). */
 const definitionAnswer =
-  "Changes the App's definition in this chat's draft, checked as it is made, and writes grasp.config.ts and server/schema.ts from it. A change the definition can't take answers `ok: false` and the `problem`, saving nothing. Otherwise it answers the `plan`, what the change does to the records the App holds (added, widened, kept, `checks`: fields every record must fit as the version is made current, where an `answer` (null until given) fills a record that lacks the field; `refused`: what only a migration in server/migrations/ can do), and what fails in the whole App now, as writeFile does.";
+  "Changes the App's definition in this chat's draft, checked as it is made, and writes grasp.config.ts and server/schema.ts from it. A change the definition can't take answers `ok: false` and the `problem`, saving nothing. Otherwise it answers the `plan`, what the change does to the records the App holds (added, widened, kept, `checks`: fields the App's records may lack, which the version requires, where an `answer` (null until given) fills a record that lacks the field as the version is published; `refused`: what only a migration in server/migrations/ can do), and what fails in the whole App now, as writeFile does.";
 
 /** A type, as the definition tools take it. */
 const typeParameter = Type.String({
@@ -670,7 +670,7 @@ const definitions = (known: Set<string>) => [
     name: "renameField",
     label: "Rename a field",
     api: "build",
-    description: `Renames a field this draft added: it keeps its ID, so its indexes and row rules follow it. A field any version of the App has can't be renamed yet, as its records may hold values under that name: the answer says what to do instead. ${definitionAnswer}`,
+    description: `Renames a field: it keeps its ID, so its indexes, row rules and the values the App's records hold follow it, those moving to the new name as the version is published. ${definitionAnswer}`,
     parameters: Type.Object(
       {
         app: appParameter,
@@ -690,6 +690,26 @@ const definitions = (known: Set<string>) => [
     ),
     run: async (scope, { app, ...input }) =>
       await define(scope, app, { op: "renameField", ...input }),
+  }),
+  tool({
+    name: "renameTable",
+    label: "Rename a table",
+    api: "build",
+    description: `Renames a table: it keeps its ID, so its records, indexes, row rules and every field that refers to it (\`v.id\`) follow it, the table taking the new name as the version is published. Change the code that names it (\`ctx.db.query("…")\`) to the new name. ${definitionAnswer}`,
+    parameters: Type.Object(
+      {
+        app: appParameter,
+        table: tableParameter,
+        name: Type.String({
+          minLength: 1,
+          maxLength: 64,
+          description: "Its new name.",
+        }),
+      },
+      { additionalProperties: false }
+    ),
+    run: async (scope, { app, ...input }) =>
+      await define(scope, app, { op: "renameTable", ...input }),
   }),
   tool({
     name: "setAccess",

@@ -80,13 +80,6 @@ const declared = `v.object({
     theme: v.enum(["light", "dark"]).default("light"),
   })`;
 
-/** The preferences declared, with a page size of at most `max`. */
-const withPageSize = (max: number): string => `v.object({
-    compact: v.boolean().default(false),
-    theme: v.enum(["light", "dark"]).default("light"),
-    pageSize: v.number().integer().min(10).max(${max}).default(25),
-  })`;
-
 type Sealed = Fixture & { release: Release };
 
 /** The App sealed and current, with `files`. */
@@ -603,41 +596,6 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
       pageSize: 25,
       _rev: 3,
     });
-  });
-
-  it("leave nothing in the store's preferences contract from a seal that failed", async () => {
-    const desk = await sealedDesk(filesWith(declared, { withNotes: true }));
-    /** Seals the App's next `version` with `preferences` and `title`. */
-    const sealing = async (
-      version: number,
-      preferences: string,
-      title?: string
-    ): Promise<string> => {
-      await commitFiles(
-        env,
-        desk.owner,
-        desk.app,
-        filesWith(preferences, {
-          withNotes: true,
-          ...(title === undefined ? {} : { title }),
-        }),
-        `v${version}`
-      );
-      return await failure(async () => await seal(desk, version));
-    };
-    expect([
-      // A new preference, in a version whose table change the store
-      // refuses whatever its records hold (a field made to hold a record
-      // ID): the seal fails after its preferences were checked.
-      await sealing(2, withPageSize(100), 'v.id("notes")'),
-      // So the builder can still give it another shape.
-      await sealing(3, withPageSize(50)),
-      await sealing(4, withPageSize(100)),
-    ]).toStrictEqual([
-      "migration.required",
-      "ok",
-      "migration.preference_changed",
-    ]);
   });
 
   it("apply a sealed version's preferences again when it is sealed again, so a lost apply heals", async () => {

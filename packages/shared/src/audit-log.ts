@@ -179,6 +179,28 @@ const typeRules: readonly {
   // which table and how many of its records, never what they hold.
   { action: "app.data.read", type: "read" },
   { action: "app.data.imported", type: "action" },
+  // A defaulted field, or one the App answered for, filled in on the records
+  // that lacked it as a version was published (core's store-host.ts): one
+  // entry a field, saying how many records took its value.
+  { action: "app.data.filled", type: "action" },
+  // What else a version's schema did to an App's records as it was
+  // published (core's store-host.ts): a table or field renamed, left out
+  // and kept with its values, or rewritten by the version's migration
+  // (with how many records). Names and counts only.
+  { action: "app.data.renamed", type: "action" },
+  { action: "app.data.kept", type: "action" },
+  { action: "app.data.migrated", type: "action" },
+  // An App's data reset (core's store-host.ts): by an admin of the
+  // organization, or by a builder for data stored before stable IDs. Every
+  // record gone, its current version applied to the empty store; one entry
+  // more a table, with how many records it held.
+  { action: "store.reset", type: "action" },
+  { action: "app.data.erased", type: "action" },
+  // A publish whose version's schema reached the App's store but that
+  // core couldn't make current, the current version's schema not taken
+  // back (core's app-schema.ts): only that version runs until it is
+  // published again.
+  { action: "app.version.unfinished", type: "action" },
   { action: "app.webhook.approved", type: "decision" },
   { action: "app.webhook.undeliverable", type: "action" },
   { action: "webhook.call", type: "action" },

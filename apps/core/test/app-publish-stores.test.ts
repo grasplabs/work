@@ -1,34 +1,43 @@
-import { defineSchema, defineTable, v } from "@grasp-os/sdk";
-import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
-import { storeIdSchema } from "@grasp-os/shared/ids";
+import {
+  definitionManifest,
+  definitionPath,
+  readDefinition,
+} from "@grasp-os/sdk/definition";
+import { schemaHash } from "@grasp-os/sdk/host";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { addMember, removeMember } from "../src/app-members.ts";
 import { publishVersion } from "../src/app-publish.ts";
-import { loadRelease, sealRelease } from "../src/app-releases.ts";
+import {
+  loadRelease,
+  readBackRelease,
+  sealRelease,
+} from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
+import {
+  applyVersionSchema,
+  resetAppData,
+  resetLegacyAppData,
+} from "../src/app-schema.ts";
 import { commitFiles, createApp, findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { deleteStore, openStore } from "../src/data-stores.ts";
+import { deleteStore } from "../src/data-stores.ts";
 import { appDefaultStores } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
-import { abandonStoreBackfill, storeBackfill } from "../src/store-abandon.ts";
-import { appDefinition } from "./app-definitions.ts";
+import { appDefinition, definedWith, redefined } from "./app-definitions.ts";
 import type { AppSpec } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { racingDb } from "./apps.ts";
+import { failingDb, racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
-import { commit as commitTo } from "./pending-stores.ts";
-import { aroundEngine } from "./runs.ts";
 import { failure, person, sweptAway } from "./sealed-apps.ts";
-import { newRecordId } from "./store-schemas.ts";
 
 // Publishing a version of spec 8's layout seals it on the App's one
 // default store, which the host creates the first time a version needs
@@ -221,6 +230,32 @@ export const rows = query({
 };
 
 /** The value `path` of the current release of `app` answers `by` for `input`. */
+/**
+ * What the audit log holds of version `version` of `app` made current:
+ * its `app.version.current` event's detail, and the store's entries of
+ * what its schema did to the records (`app.data.*`, the version's).
+ */
+const schemaAudit = async (app: AppId, version: number) => {
+  const events = await allEvents();
+  return {
+    current: events.find(
+      ({ action, target, detail }) =>
+        action === "app.version.current" &&
+        target?.id === app &&
+        detail.version === version
+    )?.detail,
+    changes: events
+      .filter(
+        ({ action, target, detail }) =>
+          action.startsWith("app.data.") &&
+          action !== "app.data.erased" &&
+          target?.id === app &&
+          detail.version === version
+      )
+      .map(({ action, detail }) => ({ action, detail })),
+  };
+};
+
 const valueOf = async (
   by: Caller,
   app: AppId,
@@ -241,6 +276,36 @@ const valueOf = async (
     throw new Error(`${path} failed: ${JSON.stringify(result)}`);
   }
   return result.value;
+};
+
+/** The error code of `path` of `app`'s current release for `by`, or "ok". */
+const codeOfCall = async (
+  by: Caller,
+  app: AppId,
+  path: string,
+  input: Json = {}
+): Promise<string> => {
+  const current = await currentOf(app);
+  const result = await call(
+    by,
+    await loadRelease(env, app, current ?? 0),
+    path,
+    input
+  );
+  return result.ok ? "ok" : result.error.code;
+};
+
+/**
+ * App `app`'s store as a minute after the schema it holds was applied:
+ * a publish that stopped meanwhile has settled (store-host.ts,
+ * `publishSettleMs`), and another may go over it.
+ */
+const settled = async (app: AppId): Promise<void> => {
+  const [own] = await defaultStores(app);
+  const store = own?.storeId ?? "";
+  await runInDurableObject(env.DATA_STORES.getByName(store), (_, state) => {
+    state.storage.sql.exec("UPDATE sdk_store SET schema_applied_at = 0");
+  });
 };
 
 /** Commits `files` as the App's next version, and answers its number. */
@@ -657,11 +722,50 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
   });
 });
 
+/** The hash of the schema the definition `files` hold declares. */
+const schemaOf = async (files: Record<string, string>): Promise<string> =>
+  await schemaHash(
+    definitionManifest(readDefinition(files[definitionPath] ?? "")).schema
+  );
+
+/**
+ * `evolvingFiles` with an optional `category` that is a number, and a
+ * migration from the schema of `from`, where it is text, that answers
+ * each record's `category` as `category` (TypeScript over `row`) derives it.
+ */
+const migratedFiles = async (
+  from: Record<string, string>,
+  category: string
+): Promise<Record<string, string>> => {
+  const files = evolvingFiles({ category: "v.number()" });
+  return {
+    ...files,
+    "server/migrations/category.ts": `import { migration, v } from "@grasp-os/sdk";
+
+export default migration({
+  name: "category",
+  table: "notes",
+  fromSchema: ${JSON.stringify(await schemaOf(from))},
+  toSchema: ${JSON.stringify(await schemaOf(files))},
+  input: v.object({ title: v.string(), category: v.string() }),
+  output: v.object({
+    title: v.string().min(1).max(200),
+    category: v.number().optional(),
+  }),
+  fixtures: [
+    { row: { title: "Fixture", category: "abc" }, expect: { title: "Fixture", category: 3 } },
+  ],
+  handler: (ctx, row) => ({ title: row.title, category: ${category} }),
+});
+`,
+  };
+};
+
 describe(
-  "a version's schema changing on activation",
+  "a version's schema applied as it is published",
   { timeout: 180_000 },
   () => {
-    it("applies an optional field, and an older version made current again keeps it", async () => {
+    it("applies an optional field, and an older version made current again keeps its values", async () => {
       const { owner, app } = await appWith(evolvingFiles());
       await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
@@ -682,7 +786,7 @@ describe(
       });
 
       // Back to the first version: it reads and writes its own fields,
-      // and keeps what the second stored.
+      // and the store keeps what the second stored.
       await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.rename", {
         id: renamed,
@@ -727,7 +831,7 @@ describe(
       }).toStrictEqual({ current: 1, rows: [{ title: "Launch" }] });
     });
 
-    it("refuses a change that needs a migration, and the current version keeps running", async () => {
+    it("refuses a type change without a migration, losing nothing, and the current version keeps running", async () => {
       const { owner, app } = await appWith(
         evolvingFiles({ category: "v.string()" })
       );
@@ -755,7 +859,7 @@ describe(
       });
     });
 
-    it("fills in a defaulted field in the background, then makes the version current", async () => {
+    it("fills in a defaulted field as it publishes, and the records an older version wrote meanwhile", async () => {
       const { owner, app } = await appWith(evolvingFiles());
       await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
@@ -765,149 +869,371 @@ describe(
         evolvingFiles({}, { category: 'v.string().default("general")' })
       );
 
-      // Sealed, and its store's backfill started: current once it ended
-      // (`migration.pending` until then, which store-backfill.test.ts
-      // holds on to; one note's backfill may be done before the answer).
-      await vi.waitFor(
-        async () => {
-          await publishVersion(env, owner, app, defaulted);
-        },
-        { timeout: 20_000, interval: 200 }
-      );
+      await publishVersion(env, owner, app, defaulted);
       const filled = await valueOf(owner, app, "notes.rows");
       // The first version, made current again, writes without the field;
-      // the store fills it in.
+      // made current again, the defaulted one fills it in.
       await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Hiring" });
       await publishVersion(env, owner, app, defaulted);
+      const events = await allEvents();
 
+      // One event per fill, counting its records: none per record.
       expect({
         filled,
         after: await valueOf(owner, app, "notes.rows"),
+        audited: events
+          .filter(
+            ({ action, target }) =>
+              action === "app.data.filled" && target?.id === app
+          )
+          .map(({ actor, detail }) => ({ actor, detail })),
       }).toStrictEqual({
         filled: [{ title: "Launch", category: "general" }],
         after: [
           { title: "Hiring", category: "general" },
           { title: "Launch", category: "general" },
         ],
+        audited: [1, 1].map((records) => ({
+          actor: { type: "person", userId: owner.userId },
+          detail: {
+            table: "notes",
+            field: "category",
+            version: defaulted,
+            records,
+          },
+        })),
       });
     });
 
-    it("answers migration.pending, not an error, while the engine that runs its backfill is unavailable", async () => {
+    it("asks a value for the records that lack a new required field, and fills in the answer", async () => {
       const { owner, app } = await appWith(evolvingFiles());
       await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
-
-      // The engine can't be reached, from the seal on: the backfill the
-      // seal made pending can't be started, by the seal or the activation.
-      const activated = await aroundEngine(
-        async () => {
-          await Promise.resolve();
-          throw new Error("The engine is unavailable");
-        },
-        async () => {
-          const defaulted = await nextVersion(
-            owner,
-            app,
-            evolvingFiles({}, { category: 'v.string().default("general")' })
-          );
-          return await failure(
-            async () => await publishVersion(env, owner, app, defaulted)
-          );
-        }
+      const required = evolvingFiles({}, { category: "v.string()" });
+      // Its writes keep the field it requires.
+      const files = {
+        ...required,
+        "server/notes.ts": (required["server/notes.ts"] ?? "").replaceAll(
+          "{ title }, { expectedRevision",
+          "{ title, category: found.category }, { expectedRevision"
+        ),
+      };
+      const unanswered = await nextVersion(owner, app, files);
+      const refused = await failure(
+        async () => await publishVersion(env, owner, app, unanswered)
       );
+      const answered = await nextVersion(
+        owner,
+        app,
+        redefined(files, (definition) => ({
+          ...definition,
+          answers: [
+            {
+              table: "table:notes",
+              field: "field:notes.category",
+              value: "general",
+            },
+          ],
+        }))
+      );
+      await publishVersion(env, owner, app, answered);
 
-      expect({ activated, current: await currentOf(app) }).toStrictEqual({
-        activated: "migration.pending",
-        current: 1,
+      expect({
+        refused,
+        rows: await valueOf(owner, app, "notes.rows"),
+      }).toStrictEqual({
+        refused: "migration.required",
+        rows: [{ title: "Launch", category: "general" }],
       });
     });
 
-    it("keeps a version whose failed backfill an admin abandoned refused, resealed or not", async () => {
+    it("keeps a renamed field's values by its stable ID, back and forth across a rollback", async () => {
+      const first = evolvingFiles({ category: "v.string()" });
+      const { owner, app } = await appWith(first);
+      await publishVersion(env, owner, app, 1);
+      await valueOf(owner, app, "notes.create", {
+        title: "Launch",
+        category: "news",
+      });
+      const renamed = definedWith(first, {
+        op: "renameField",
+        table: "notes",
+        field: "category",
+        name: "topic",
+      });
+      const second = await nextVersion(owner, app, {
+        ...renamed,
+        "server/notes.ts": (renamed["server/notes.ts"] ?? "").replaceAll(
+          "category",
+          "topic"
+        ),
+      });
+
+      await publishVersion(env, owner, app, second);
+      const moved = await valueOf(owner, app, "notes.rows");
+      await valueOf(owner, app, "notes.create", {
+        title: "Hiring",
+        topic: "jobs",
+      });
+      await publishVersion(env, owner, app, 1);
+      const back = await valueOf(owner, app, "notes.rows");
+      await publishVersion(env, owner, app, second);
+
+      expect({
+        moved,
+        back,
+        again: await valueOf(owner, app, "notes.rows"),
+      }).toStrictEqual({
+        moved: [{ title: "Launch", topic: "news" }],
+        back: [
+          { title: "Hiring", category: "jobs" },
+          { title: "Launch", category: "news" },
+        ],
+        again: [
+          { title: "Hiring", topic: "jobs" },
+          { title: "Launch", topic: "news" },
+        ],
+      });
+    });
+
+    it("keeps a renamed table's records by its stable ID", async () => {
+      const first = evolvingFiles();
+      const { owner, app } = await appWith(first);
+      await publishVersion(env, owner, app, 1);
+      const id = await valueOf(owner, app, "notes.create", { title: "Launch" });
+      const renamed = definedWith(first, {
+        op: "renameTable",
+        table: "notes",
+        name: "memos",
+      });
+      const second = await nextVersion(owner, app, {
+        ...renamed,
+        "server/notes.ts": (renamed["server/notes.ts"] ?? "").replaceAll(
+          '"notes"',
+          '"memos"'
+        ),
+      });
+
+      await publishVersion(env, owner, app, second);
+      await valueOf(owner, app, "notes.rename", { id, title: "Launched" });
+
+      expect({
+        rows: await valueOf(owner, app, "notes.rows"),
+        audited: await schemaAudit(app, second),
+      }).toMatchObject({
+        rows: [{ title: "Launched" }],
+        audited: {
+          current: {
+            tablesRenamed: 1,
+            fieldsRenamed: 0,
+            tablesMigrated: 0,
+            recordsRewritten: 0,
+          },
+          changes: [
+            {
+              action: "app.data.renamed",
+              detail: {
+                table: "memos",
+                field: null,
+                from: "notes",
+                to: "memos",
+                version: second,
+              },
+            },
+          ],
+        },
+      });
+    });
+
+    it("keeps the store's version moving through a version without tables", async () => {
       const { owner, app } = await appWith(evolvingFiles());
       await publishVersion(env, owner, app, 1);
-      const first = await storeOf(app, 1);
-      if (first === null) {
-        throw new Error("The first version binds no store");
-      }
-      const store = await openStore(env, first.storeId);
-      // A value under a key no version declares, which no default fills
-      // over and no version can change.
-      const odd = newRecordId();
-      await commitTo(store, first.schemaHash, [
-        {
-          op: "insert",
-          table: "notes",
-          id: odd,
-          fields: { title: "Odd", category: 42 },
-        },
-      ]);
-      const files = evolvingFiles(
-        {},
-        { category: 'v.string().default("general")' }
-      );
-      const defaulted = await nextVersion(owner, app, files);
-      await vi.waitFor(
-        async () => {
-          await expect(
-            failure(
-              async () => await publishVersion(env, owner, app, defaulted)
-            )
-          ).resolves.toBe("migration.backfill_failed");
-        },
-        { timeout: 20_000, interval: 200 }
-      );
-      const admin = await person("admin");
-      const backfill = await storeBackfill(env, admin, store.id);
-      if (backfill === null) {
-        throw new Error("No backfill is pending");
-      }
-      await abandonStoreBackfill(env, admin, {
-        store: store.id,
-        target: backfill.target,
-        attempt: backfill.attempt,
+      await valueOf(owner, app, "notes.create", { title: "Launch" });
+      const empty = await nextVersion(owner, app, {
+        ...emptyFiles,
+        "server/notes.ts": "",
       });
-      const reseal = async () =>
-        await failure(
-          async () =>
-            await sealRelease(env, { app, version: defaulted, by: owner })
-        );
-      const resealed = await reseal();
-      // The record goes, and a later version brings the same schema back
-      // into force.
-      await commitTo(store, first.schemaHash, [
-        { op: "delete", table: "notes", id: odd, expectedRevision: 1 },
-      ]);
-      // The same schema, under code changed elsewhere.
-      const again = await nextVersion(owner, app, {
-        ...files,
-        "server/notes.ts": `${files["server/notes.ts"] ?? ""}// Again.\n`,
-      });
-      await vi.waitFor(
-        async () => {
-          await publishVersion(env, owner, app, again);
-        },
-        { timeout: 20_000, interval: 200 }
-      );
-      const resealedAfter = await reseal();
-      const activated = await failure(
-        async () => await publishVersion(env, owner, app, defaulted)
+      await publishVersion(env, owner, app, empty);
+      const back = await nextVersion(owner, app, evolvingFiles());
+
+      const published = await failure(
+        async () => await publishVersion(env, owner, app, back)
       );
 
       expect({
-        resealed,
-        resealedAfter,
-        activated,
-        current: await currentOf(app),
-      }).toStrictEqual({
-        resealed: "migration.abandoned",
-        resealedAfter: "migration.abandoned",
-        activated: "migration.abandoned",
-        current: again,
+        published,
+        rows: await valueOf(owner, app, "notes.rows"),
+      }).toStrictEqual({ published: "ok", rows: [{ title: "Launch" }] });
+    });
+
+    it("migrates a table whose row rule's field is renamed in the same version", async () => {
+      const access = {
+        read: "appMembers",
+        write: "appMembers",
+        rows: { read: [{ kind: "team", field: "team" }] },
+      } as const;
+      const first = {
+        ...appDefinition({
+          name: "Tickets",
+          tables: {
+            tickets: {
+              fields: { title: "v.string()", team: "v.string()" },
+              access,
+            },
+          },
+        }),
+        "server/hello.ts": emptyFiles["server/hello.ts"] ?? "",
+      };
+      const { owner, app } = await appWith(first);
+      await publishVersion(env, owner, app, 1);
+      const [own] = await defaultStores(app);
+      const store = own?.storeId ?? "";
+      // A ticket of team A, as one of its members wrote it.
+      await runInDurableObject(env.DATA_STORES.getByName(store), (_, state) => {
+        const [table] = state.storage.sql
+          .exec<{ id: string }>("SELECT table_id AS id FROM sdk_tables")
+          .toArray();
+        const { hash } = state.storage.sql
+          .exec<{ hash: string }>("SELECT contract_hash AS hash FROM sdk_store")
+          .one();
+        state.storage.sql.exec(
+          `INSERT INTO sdk_records (table_id, record_id, owner_id, revision, created_at, updated_at, value_json, schema_hash)
+            VALUES (?, 'r1', ?, 1, 0, 0, ?, ?)`,
+          table?.id ?? "",
+          owner.userId,
+          JSON.stringify({ team: "t_a", title: "Launch" }),
+          hash
+        );
+      });
+      const renamed = definedWith(
+        first,
+        { op: "renameField", table: "tickets", field: "team", name: "group" },
+        {
+          op: "changeField",
+          table: "tickets",
+          field: "title",
+          type: "v.number()",
+        }
+      );
+      const second = await nextVersion(owner, app, {
+        ...renamed,
+        "server/migrations/title.ts": `import { migration, v } from "@grasp-os/sdk";
+
+export default migration({
+  name: "title",
+  table: "tickets",
+  fromSchema: ${JSON.stringify(await schemaOf(first))},
+  toSchema: ${JSON.stringify(await schemaOf(renamed))},
+  input: v.object({ title: v.string(), team: v.string() }),
+  output: v.object({ title: v.number(), group: v.string() }),
+  fixtures: [
+    { row: { title: "abc", team: "t_a" }, expect: { title: 3, group: "t_a" } },
+  ],
+  handler: (ctx, row) => ({ title: row.title.length, group: row.team }),
+});
+`,
+      });
+
+      const published = await failure(
+        async () => await publishVersion(env, owner, app, second)
+      );
+      const stored = await runInDurableObject(
+        env.DATA_STORES.getByName(store),
+        (_, state) =>
+          state.storage.sql
+            .exec<{ value: string }>(
+              "SELECT value_json AS value FROM sdk_records"
+            )
+            .toArray()
+            .map(({ value }): unknown => JSON.parse(value))
+      );
+
+      expect({ published, stored }).toStrictEqual({
+        published: "ok",
+        stored: [{ group: "t_a", title: 6 }],
       });
     });
 
-    it("makes one of two conflicting versions current when both are activated at once", async () => {
+    it("runs a migration once on every record as it publishes, in one transaction with the schema", async () => {
+      const first = evolvingFiles({ category: "v.string()" });
+      const { owner, app } = await appWith(first);
+      await publishVersion(env, owner, app, 1);
+      for (const [title, category] of [
+        ["Launch", "news"],
+        ["Hiring", "jobs!"],
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one note after the other
+        await valueOf(owner, app, "notes.create", { title, category });
+      }
+      const second = await nextVersion(
+        owner,
+        app,
+        await migratedFiles(first, "row.category.length")
+      );
+
+      await publishVersion(env, owner, app, second);
+
+      expect({
+        rows: await valueOf(owner, app, "notes.rows"),
+        audited: await schemaAudit(app, second),
+      }).toMatchObject({
+        rows: [
+          { title: "Hiring", category: 5 },
+          { title: "Launch", category: 4 },
+        ],
+        audited: {
+          current: {
+            tablesMigrated: 1,
+            recordsRewritten: 2,
+          },
+          changes: [
+            {
+              action: "app.data.migrated",
+              detail: { table: "notes", records: 2, version: second },
+            },
+          ],
+        },
+      });
+    });
+
+    it("changes nothing when its migration fails midway, and the current version keeps running", async () => {
+      const first = evolvingFiles({ category: "v.string()" });
+      const { owner, app } = await appWith(first);
+      await publishVersion(env, owner, app, 1);
+      for (const title of ["Alpha", "Bad", "Zulu"]) {
+        // oxlint-disable-next-line no-await-in-loop -- one note after the other
+        await valueOf(owner, app, "notes.create", { title, category: "news" });
+      }
+      const second = await nextVersion(
+        owner,
+        app,
+        await migratedFiles(
+          first,
+          '(() => { if (row.title === "Bad") throw new Error("No"); return row.category.length; })()'
+        )
+      );
+
+      const refused = await failure(
+        async () => await publishVersion(env, owner, app, second)
+      );
+
+      expect({
+        refused,
+        current: await currentOf(app),
+        rows: await valueOf(owner, app, "notes.rows"),
+      }).toStrictEqual({
+        refused: "migration.failed",
+        current: 1,
+        rows: [
+          { title: "Alpha", category: "news" },
+          { title: "Bad", category: "news" },
+          { title: "Zulu", category: "news" },
+        ],
+      });
+    });
+
+    it("makes one of two conflicting versions current when both are published at once", async () => {
       const { owner, app } = await appWith(evolvingFiles());
       await publishVersion(env, owner, app, 1);
       const asText = await nextVersion(
@@ -929,12 +1255,13 @@ describe(
       const winner = outcomes[0] === "ok" ? asText : asNumber;
       const [refused, made] = outcomes.toSorted();
       expect({
-        // Refused at its seal, once the other's change was in, or at its
-        // store while the other's activation was in flight: either way
-        // before its change was applied there.
-        refused: ["migration.required", "migration.busy"].includes(
-          refused ?? ""
-        ),
+        // Refused at its store, the other's schema applied or being made
+        // current, or by core's compare and set: never both applied.
+        refused: [
+          "migration.required",
+          "migration.busy",
+          "app.conflict",
+        ].includes(refused ?? ""),
         made,
         current: await currentOf(app),
         // The version made current still writes to its store.
@@ -950,59 +1277,322 @@ describe(
       });
     });
 
-    it("finishes an activation whose store applied the schema before it stopped, with the store's evidence", async () => {
+    it("finishes a publish whose store took the schema before it stopped", async () => {
       const { owner, app } = await appWith(evolvingFiles());
       await publishVersion(env, owner, app, 1);
-      const [recorded] = await defaultStores(app);
-      const store = await openStore(
-        env,
-        storeIdSchema.parse(recorded?.storeId)
-      );
       const second = await nextVersion(
         owner,
         app,
         evolvingFiles({ category: "v.string()" })
       );
-      // What a seal that stopped after the store applied its schema left:
-      // the schema applied for version 2, and nothing in core.
-      const applied = await store.defineTables(
-        manifestText(
-          schemaManifest(
-            defineSchema({
-              notes: defineTable({
-                title: v.string().min(1).max(200),
-                category: v.string().optional(),
-              }).access({ read: "appMembers", write: "appMembers" }),
-            })
-          )
-        ),
-        { resourceId: app, resourceVersion: second }
-      );
-
       await publishVersion(env, owner, app, second);
+      // A rollback that stopped after its store took the first version's
+      // schema, and before core made it current.
+      await applyVersionSchema(
+        env,
+        owner,
+        await readBackRelease(env, app, 1),
+        second
+      );
+      // Published again within the minute, it is refused as busy: the
+      // stopped publish may still be going on.
+      const busy = await failure(
+        async () => await publishVersion(env, owner, app, 1)
+      );
+      await settled(app);
+
+      await publishVersion(env, owner, app, 1);
 
       const events = await allEvents();
-      const sealed = events.filter(
+      const made = events.filter(
         (event) =>
-          event.action === "app.release.sealed" &&
+          event.action === "app.version.current" &&
           event.target?.id === app &&
-          event.detail.version === second
+          event.detail.version === 1 &&
+          event.detail.previous === second
       );
       expect({
         current: await currentOf(app),
-        evidence: sealed.map(({ detail }) => detail),
+        changed: made.map(({ detail }) => detail.schemaChanged),
+        writes: await failure(
+          async () =>
+            await valueOf(owner, app, "notes.create", { title: "After" })
+        ),
+      }).toStrictEqual({ current: 1, changed: [false], writes: "ok" });
+      expect(busy).toBe("migration.busy");
+    });
+
+    it("says a publish is unfinished when its migration can't be taken back, audits it, and finishes it as it is published again", async () => {
+      const first = evolvingFiles({ category: "v.string()" });
+      const { owner, app } = await appWith(first);
+      await publishVersion(env, owner, app, 1);
+      await valueOf(owner, app, "notes.create", {
+        title: "Launch",
+        category: "news",
+      });
+      const second = await nextVersion(
+        owner,
+        app,
+        await migratedFiles(first, "row.category.length")
+      );
+
+      // Its migration applied, then core's batch failing: the first
+      // version's schema can't hold the numbers again.
+      const refused = await failure(
+        async () =>
+          await publishVersion(
+            { ...env, DB: failingDb(/update "apps"/iu) },
+            owner,
+            app,
+            second
+          )
+      );
+      const stranded = await codeOfCall(owner, app, "notes.rows");
+      const events = await allEvents();
+      await settled(app);
+      await publishVersion(env, owner, app, second);
+
+      expect({
+        refused,
+        stranded,
+        audited: events
+          .filter(
+            ({ action, target }) =>
+              action === "app.version.unfinished" && target?.id === app
+          )
+          .map(({ detail }) => detail),
+        current: await currentOf(app),
+        rows: await valueOf(owner, app, "notes.rows"),
       }).toStrictEqual({
-        current: second,
-        evidence: [
-          expect.objectContaining({
-            store: store.id,
-            storeContractHash: applied.contract.hash,
-            storePlanHash: applied.contract.planHash,
-            storeContractChanged: true,
-            storeReceipt: applied.contract.receiptId,
-          }),
+        refused: "app.publish_unfinished",
+        stranded: "migration.not_current",
+        audited: [
+          {
+            version: second,
+            current: 1,
+            code: "migration.required",
+          },
         ],
+        current: second,
+        rows: [{ title: "Launch", category: 4 }],
+      });
+    });
+
+    it("puts the current version's schema back when the batch making another current fails, so it keeps working", async () => {
+      const { owner, app } = await appWith(evolvingFiles());
+      await publishVersion(env, owner, app, 1);
+      await valueOf(owner, app, "notes.create", { title: "Launch" });
+      const second = await nextVersion(
+        owner,
+        app,
+        evolvingFiles({ category: "v.string()" })
+      );
+      await publishVersion(env, owner, app, second);
+      const third = await nextVersion(
+        owner,
+        app,
+        evolvingFiles({ category: "v.string()", topic: "v.string()" })
+      );
+
+      // The third's schema applied, then core's batch failing.
+      const refused = await failure(
+        async () =>
+          await publishVersion(
+            { ...env, DB: failingDb(/update "apps"/iu) },
+            owner,
+            app,
+            third
+          )
+      );
+      const writes = await failure(
+        async () =>
+          await valueOf(owner, app, "notes.create", {
+            title: "Hiring",
+            category: "jobs",
+          })
+      );
+
+      expect({
+        refused,
+        current: await currentOf(app),
+        writes,
+        rows: await valueOf(owner, app, "notes.rows"),
+      }).toStrictEqual({
+        refused: "Error: D1 refused the batch",
+        current: second,
+        writes: "ok",
+        rows: [{ title: "Hiring", category: "jobs" }, { title: "Launch" }],
       });
     });
   }
 );
+
+/** Puts `store` in the state of one written before stable IDs: no catalog. */
+const asBeforeStableIds = async (store: string): Promise<void> => {
+  await runInDurableObject(env.DATA_STORES.getByName(store), (_, state) => {
+    state.storage.sql.exec("UPDATE sdk_store SET schema_catalog = NULL");
+  });
+};
+
+/** How many mutation receipts `store` keeps. */
+const receiptsOf = async (store: string): Promise<number> =>
+  await runInDurableObject(env.DATA_STORES.getByName(store), (_, state) =>
+    Number(
+      state.storage.sql
+        .exec("SELECT count(*) AS n FROM sdk_mutation_receipts")
+        .one().n
+    )
+  );
+
+/** The store's reset entries in the audit log: its own, then each table's. */
+const resetAudit = async (store: string) => {
+  const events = await allEvents();
+  return events
+    .filter(
+      ({ action, target, detail }) =>
+        (action === "store.reset" && target?.id === store) ||
+        (action === "app.data.erased" && detail.store === store)
+    )
+    .map(({ action, actor, detail }) => ({ action, actor, detail }));
+};
+
+/** A Notes App with one note, made current, and its store. */
+const notedApp = async () => {
+  const { owner, app } = await appWith(evolvingFiles());
+  await publishVersion(env, owner, app, 1);
+  await valueOf(owner, app, "notes.create", { title: "Launch" });
+  const bound = await storeOf(app, 1);
+  return { owner, app, store: bound?.storeId ?? "" };
+};
+
+describe("resetting an App's data", { timeout: 120_000 }, () => {
+  it("lets a builder reset data from before stable IDs, which nothing reads, and its current version runs again", async () => {
+    const { owner, app, store } = await notedApp();
+    await asBeforeStableIds(store);
+    const before = await codeOfCall(owner, app, "notes.rows");
+
+    await resetLegacyAppData(env, owner, app);
+    const receipts = await receiptsOf(store);
+    await valueOf(owner, app, "notes.create", { title: "Hiring" });
+
+    const actor = { type: "person", userId: owner.userId };
+    expect({
+      before,
+      receipts,
+      rows: await valueOf(owner, app, "notes.rows"),
+      audited: await resetAudit(store),
+    }).toStrictEqual({
+      before: "migration.metadata_missing",
+      receipts: 0,
+      rows: [{ title: "Hiring" }],
+      audited: [
+        {
+          action: "store.reset",
+          actor,
+          detail: {
+            app,
+            everything: 0,
+            tables: 1,
+            records: 1,
+            files: 0,
+            outbox: 0,
+            version: 1,
+          },
+        },
+        {
+          action: "app.data.erased",
+          actor,
+          detail: { store, table: "notes", records: 1 },
+        },
+      ],
+    });
+  });
+
+  it("refuses a builder's reset of data that can still be read, and Grasp staff's, and a stranger's, changing nothing", async () => {
+    const { owner, app } = await notedApp();
+    const stranger = await person("builder");
+
+    expect({
+      readable: await failure(async () => {
+        await resetLegacyAppData(env, owner, app);
+      }),
+      staff: await failure(async () => {
+        await resetLegacyAppData(env, { ...owner, staff: true }, app);
+      }),
+      stranger: await failure(async () => {
+        await resetLegacyAppData(env, stranger, app);
+      }),
+      rows: await valueOf(owner, app, "notes.rows"),
+    }).toStrictEqual({
+      readable: "migration.reset_refused",
+      staff: "role.forbidden",
+      stranger: "app.not_found",
+      rows: [{ title: "Launch" }],
+    });
+  });
+
+  it("lets an admin reset every record, the App's name typed to confirm, and its current version runs again", async () => {
+    const { owner, app, store } = await notedApp();
+    const admin = await person("admin");
+
+    const mistyped = await failure(async () => {
+      await resetAppData(env, admin, app, "notes");
+    });
+    await resetAppData(env, admin, app, "Notes");
+    const audited = await resetAudit(store);
+
+    expect({
+      mistyped,
+      rows: await valueOf(owner, app, "notes.rows"),
+      receipts: await receiptsOf(store),
+      audited: audited.map(({ detail }) => detail),
+    }).toStrictEqual({
+      mistyped: "app.reset_name_mismatch",
+      rows: [],
+      receipts: 0,
+      audited: [
+        {
+          app,
+          everything: 1,
+          tables: 1,
+          records: 1,
+          files: 0,
+          outbox: 0,
+          version: 1,
+        },
+        { store, table: "notes", records: 1 },
+      ],
+    });
+  });
+
+  it("resets nothing, refusing nothing, for an App whose current version has no tables", async () => {
+    const { owner, app } = await appWith(emptyFiles);
+    await publishVersion(env, owner, app, 1);
+    const admin = await person("admin");
+
+    await expect(
+      failure(async () => {
+        await resetAppData(env, admin, app, "Notes");
+      })
+    ).resolves.toBe("ok");
+  });
+
+  it("refuses a full reset to the App's builders and to Grasp staff, changing nothing", async () => {
+    const { owner, app } = await notedApp();
+    const admin = await person("admin");
+
+    expect({
+      builder: await failure(async () => {
+        await resetAppData(env, owner, app, "Notes");
+      }),
+      staff: await failure(async () => {
+        await resetAppData(env, { ...admin, staff: true }, app, "Notes");
+      }),
+      rows: await valueOf(owner, app, "notes.rows"),
+    }).toStrictEqual({
+      builder: "role.forbidden",
+      staff: "role.forbidden",
+      rows: [{ title: "Launch" }],
+    });
+  });
+});

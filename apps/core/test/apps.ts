@@ -206,6 +206,32 @@ export const lostAnswerDb = (writes: RegExp): D1Database => {
 };
 
 /**
+ * Core's database, but a batch holding a statement `writes` matches fails
+ * every time without committing, as D1 refusing it does.
+ */
+export const failingDb = (writes: RegExp): D1Database => {
+  const real = env.DB;
+  let writing = false;
+  return {
+    prepare: (query) => {
+      writing ||= writes.test(query);
+      return real.prepare(query);
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      if (writing) {
+        writing = false;
+        throw new Error("D1 refused the batch");
+      }
+      return await real.batch<T>(statements);
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+};
+
+/**
  * Marks `version` of `app` published (src/app-publish.ts) with the release
  * sealed for it, as making it current requires: for tests that make a version current by hand, as
  * another writer would, to race or bypass the real path.

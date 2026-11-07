@@ -70,6 +70,7 @@ import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { liveStatus } from "./runs.ts";
 import { unique } from "./sign-in.ts";
+import { applied } from "./store-schemas.ts";
 
 // A mutation's workflow notifications (spec 10.7.4; operations.ts stages
 // them, workflow-notifications.ts admits and delivers them), from their
@@ -351,7 +352,7 @@ const fixture = async () => {
   const sealed = await sealedManifest(app);
   const storeId = await storeOfNewApp(env, ada);
   const store = await openStore(env, storeId);
-  await store.defineTables(manifestText(manifest.schema));
+  await store.applySchema(applied(manifestText(manifest.schema)));
   const contract = `job-events-${unique()}`;
   await publishCatalogContract(env, admin, {
     key: contract,
