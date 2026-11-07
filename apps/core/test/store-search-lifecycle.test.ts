@@ -13,16 +13,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { deleteStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { StoreHost } from "../src/store-host.ts";
-import {
-  builder,
-  commit,
-  migrationBatch,
-  newStore,
-  objectOf,
-} from "./pending-stores.ts";
+import { builder, commit, newStore, objectOf } from "./notes-stores.ts";
 import {
   accessedManifest,
-  manifestHash,
+  applied,
+  namedIds,
   newRecordId,
 } from "./store-schemas.ts";
 
@@ -161,7 +156,7 @@ const outcome = async (read: Promise<unknown>): Promise<unknown> => {
 describe("a search's pages", () => {
   it("go on after a write to the table, and expire when the record they end at goes", async () => {
     const store = await newStore();
-    const { schemaHash } = await store.defineTables(v1);
+    const { schemaHash } = await store.applySchema(applied(v1));
     await insert(store, schemaHash, "alpha one", "alpha two", "alpha three");
     await insert(store, schemaHash, "alpha four", "alpha five");
     const db = databaseReader(
@@ -226,11 +221,13 @@ describe("a search's pages", () => {
     const notes = defineSchema({
       notes: defineTable({ title }).searchIndex(["title"]),
     });
-    const { schemaHash } = await store.defineTables(
-      manifestText(
-        accessedManifest(notes, {
-          tables: { notes: { read: "owner", write: "owner" } },
-        })
+    const { schemaHash } = await store.applySchema(
+      applied(
+        manifestText(
+          accessedManifest(notes, {
+            tables: { notes: { read: "owner", write: "owner" } },
+          })
+        )
       )
     );
     await insert(store, schemaHash, "alpha one", "alpha two", "alpha three");
@@ -292,7 +289,7 @@ describe("a search's pages", () => {
 describe("a search index's text", () => {
   it("is gone from the store's pages as soon as a change or deletion commits", async () => {
     const store = await newStore();
-    const { schemaHash } = await store.defineTables(v1);
+    const { schemaHash } = await store.applySchema(applied(v1));
     const [id = ""] = await insert(store, schemaHash, "zyzzyva");
     const stored = await pagesHolding(store, "zyzzyva");
     await commit(store, schemaHash, [
@@ -328,7 +325,7 @@ describe("a search index's text", () => {
 
   it("goes with a deleted store's purge, its index and triggers dropped", async () => {
     const store = await newStore();
-    const { schemaHash } = await store.defineTables(v1);
+    const { schemaHash } = await store.applySchema(applied(v1));
     await insert(store, schemaHash, "secret plans");
     await inHost(store, async (host) => {
       await host.sweepReceipts(new Date(Date.now() + 31 * dayMs));
@@ -365,21 +362,23 @@ const rewritten = (fields: StoreFields): StoreFields => ({
 describe("a search index", () => {
   it("follows a cascade's deletions", async () => {
     const store = await newStore();
-    const { schemaHash } = await store.defineTables(
-      manifestText(
-        schemaManifest(
-          defineSchema({
-            accounts: defineTable({ name: v.string() }).access({
-              read: "appMembers",
-              write: "appMembers",
-            }),
-            contacts: defineTable({
-              name: v.string(),
-              account: v.id("accounts", { onDelete: "cascade" }),
+    const { schemaHash } = await store.applySchema(
+      applied(
+        manifestText(
+          schemaManifest(
+            defineSchema({
+              accounts: defineTable({ name: v.string() }).access({
+                read: "appMembers",
+                write: "appMembers",
+              }),
+              contacts: defineTable({
+                name: v.string(),
+                account: v.id("accounts", { onDelete: "cascade" }),
+              })
+                .searchIndex(["name"])
+                .access({ read: "appMembers", write: "appMembers" }),
             })
-              .searchIndex(["name"])
-              .access({ read: "appMembers", write: "appMembers" }),
-          })
+          )
         )
       )
     );
@@ -422,56 +421,29 @@ describe("a search index", () => {
 
   it("follows a migration's rewrite of a searched field", async () => {
     const store = await newStore();
-    const first = await store.defineTables(v1, {
-      resourceId: "notes-app",
-      resourceVersion: 1,
-    });
+    const first = await store.applySchema(applied(v1));
     await insert(store, first.schemaHash, "Note one", "Note two");
-    const second = await store.defineTables(
-      v2,
-      { resourceId: "notes-app", resourceVersion: 2 },
-      [
-        {
-          name: "rename-notes",
-          table: "notes",
-          fromSchema: first.schemaHash,
-          toSchema: await manifestHash(v2),
-        },
-      ]
-    );
-    const target = second.contract.hash;
-    for (let batch = 1; ; batch += 1) {
-      // One batch after the other, as the backfill's run takes them.
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      const read = await migrationBatch(store, target, batch);
-      if (read.state !== "transform") {
-        break;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      const outcome_ = await objectOf(store).commitTransformed(
-        store.id,
-        JSON.stringify({
-          target,
-          attempt: 1,
-          batch,
-          phase: read.phase,
-          table: read.table,
-          through: read.through,
-          rows: read.rows.map(({ id, revision, fields }) => ({
-            id,
-            revision,
-            fields: rewritten(fields),
-          })),
-        })
-      );
-      if (outcome_.state !== "running") {
-        break;
-      }
-    }
-    await objectOf(store).activateReady(store.id, await manifestHash(v2), {
-      resourceId: "notes-app",
-      resourceVersion: 2,
+    const { migrationId } = await store.beginMigration();
+    const table = namedIds(v2).notes?.id ?? "";
+    const rows = await store.migrationRows(table, null);
+    await store.stageMigration({
+      migrationId,
+      table,
+      rows: rows.map(({ id, revision, fields }) => ({
+        id,
+        revision,
+        fields: rewritten(fields),
+      })),
     });
+    const second = await store.applySchema(
+      applied(v2, {
+        migration: {
+          id: migrationId,
+          from: first.schemaHash,
+          tables: ["notes"],
+        },
+      })
+    );
     const memo = await found(store, second.schemaHash, "memo", 2);
     expect({
       memo: memo.toSorted(),

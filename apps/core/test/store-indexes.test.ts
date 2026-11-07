@@ -20,6 +20,7 @@ import {
 } from "../src/store-expressions.ts";
 import type { FieldTypes } from "../src/store-expressions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
+import { appliedTables } from "./store-schemas.ts";
 
 // A store's declared indexes as real SQLite indexes (store-indexes.ts):
 // installed when a store is handed a schema, named by their definitions,
@@ -122,17 +123,16 @@ const tablesOf = async (store: OpenStore): Promise<string[]> =>
         .map(({ name }) => name)
   );
 
-/** The schemas the store recorded, by hash. */
-const schemasOf = async (store: OpenStore): Promise<string[]> =>
+/** The hash of the store's schema in force; null for none. */
+const schemaOf = async (store: OpenStore): Promise<string | null> =>
   await runInDurableObject(
     env.DATA_STORES.getByName(store.id),
     (_instance, state) =>
       state.storage.sql
-        .exec<{ hash: string }>(
-          "SELECT schema_hash AS hash FROM sdk_schemas ORDER BY schema_hash"
+        .exec<{ hash: string | null }>(
+          "SELECT contract_hash AS hash FROM sdk_store"
         )
-        .toArray()
-        .map(({ hash }) => hash)
+        .toArray()[0]?.hash ?? null
   );
 
 /** SQLite's plan for `sql`, one line per step. */
@@ -154,7 +154,8 @@ const planOf = async (
 describe("declared indexes", () => {
   it("become partial indexes on the table's records, named by their definitions", async () => {
     const store = await newStore();
-    const defined = await store.defineTables(
+    const defined = await appliedTables(
+      store,
       notesManifest([
         ["by_title", ["title"]],
         ["by_done_rank", ["done", "rank", "_createdAt"]],
@@ -179,7 +180,10 @@ describe("declared indexes", () => {
 
   it("put the owner first when the table's records are read by their owner only", async () => {
     const store = await newStore();
-    await store.defineTables(notesManifest([["by_title", ["title"]]], "owner"));
+    await appliedTables(
+      store,
+      notesManifest([["by_title", ["title"]]], "owner")
+    );
     const [index] = await indexesOf(store);
     expect(index?.sql).toContain(
       `ON sdk_records (owner_id, ${fieldExpression("title")}, record_id)`
@@ -192,10 +196,11 @@ describe("declared indexes", () => {
       ["by_title", ["title"]],
       ["by_rank", ["rank"]],
     ]);
-    await store.defineTables(manifest);
+    await appliedTables(store, manifest);
     const before = await indexesOf(store);
-    await store.defineTables(manifest);
-    await store.defineTables(
+    await appliedTables(store, manifest);
+    await appliedTables(
+      store,
       notesManifest([
         ["by_rank", ["rank"]],
         ["by_title", ["title"]],
@@ -204,33 +209,32 @@ describe("declared indexes", () => {
     await expect(indexesOf(store)).resolves.toStrictEqual(before);
   });
 
-  it("are kept for the older schema when a newer one changes them", async () => {
+  it("are made the schema's: a renamed index is the same physical one, a changed one replaces it", async () => {
     const store = await newStore();
-    const older = await store.defineTables(
-      notesManifest([["by_title", ["title"]]])
-    );
+    await appliedTables(store, notesManifest([["by_title", ["title"]]]));
     const [kept] = await indexesOf(store);
-    // A renamed index of the same fields is the same physical index; a
-    // changed one is another, beside the first.
-    const renamed = await store.defineTables(
-      notesManifest([["by_name", ["title"]]])
-    );
-    await expect(indexesOf(store)).resolves.toStrictEqual([kept]);
-    const changed = await store.defineTables(
+    await appliedTables(store, notesManifest([["by_name", ["title"]]]));
+    const renamed = await indexesOf(store);
+    const changed = await appliedTables(
+      store,
       notesManifest([["by_title", ["title", "rank"]]])
     );
     const after = await indexesOf(store);
-    expect(after).toHaveLength(2);
-    expect(after).toContainEqual(kept);
-    await expect(schemasOf(store)).resolves.toStrictEqual(
-      [older.schemaHash, renamed.schemaHash, changed.schemaHash].toSorted()
-    );
+    expect({
+      renamed,
+      replaced: after.length === 1 && after[0]?.name !== kept?.name,
+      schema: await schemaOf(store),
+    }).toStrictEqual({
+      renamed: [kept],
+      replaced: true,
+      schema: changed.schemaHash,
+    });
   });
 
   it("refuse an index whose name SQLite already holds with another definition", async () => {
     const store = await newStore();
     const manifest = notesManifest([["by_title", ["title"]]]);
-    await store.defineTables(manifest);
+    await appliedTables(store, manifest);
     const [index] = await indexesOf(store);
     await runInDurableObject(
       env.DATA_STORES.getByName(store.id),
@@ -241,49 +245,62 @@ describe("declared indexes", () => {
         );
       }
     );
-    await expect(store.defineTables(manifest)).rejects.toThrow(
-      /another definition/u
-    );
+    // A later schema that keeps the index installs again, and finds it.
+    await expect(
+      appliedTables(
+        store,
+        notesManifest([
+          ["by_title", ["title"]],
+          ["by_rank", ["rank"]],
+        ])
+      )
+    ).rejects.toThrow(/another definition/u);
   });
 
   it(`are at most ${storeMaxIndexes} per store, refused before any is created`, async () => {
     const store = await newStore();
     // Nine tables of 32 single-field indexes: 288 in all.
     const tooMany = manyIndexes(9, (index) => [`f${index}`]);
-    await expect(store.defineTables(tooMany)).rejects.toMatchObject({
+    await expect(appliedTables(store, tooMany)).rejects.toMatchObject({
       code: "data.too_many_indexes",
     });
     // Nothing of the refused schema stays: no index, no schema, no table.
     expect({
       indexes: await indexesOf(store),
-      schemas: await schemasOf(store),
+      schema: await schemaOf(store),
       tables: await tablesOf(store),
-    }).toStrictEqual({ indexes: [], schemas: [], tables: [] });
+    }).toStrictEqual({ indexes: [], schema: null, tables: [] });
   });
 
-  it(`count the indexes kept for older schemas against the ${storeMaxIndexes}`, async () => {
+  it(`drops the indexes a newer schema leaves out, so they don't count against the ${storeMaxIndexes}`, async () => {
     const store = await newStore();
-    // Seven tables of 32 indexes, 224, kept for the schema that has them.
-    const older = await store.defineTables(
+    // Seven tables of 32 indexes, 224.
+    await appliedTables(
+      store,
       manyIndexes(7, (index) => [`f${index}`])
     );
-    // A newer schema of other indexes on the same tables adds 224 more.
-    const newer = manyIndexes(7, (index) => [
-      `f${index}`,
-      `f${(index + 1) % 32}`,
-    ]);
-    await expect(store.defineTables(newer)).rejects.toMatchObject({
-      code: "data.too_many_indexes",
-    });
-    await expect(indexesOf(store)).resolves.toHaveLength(224);
-    await expect(schemasOf(store)).resolves.toStrictEqual([older.schemaHash]);
+    const before = await indexesOf(store);
+    // A newer schema of 224 other indexes on the same tables.
+    const newer = await appliedTables(
+      store,
+      manyIndexes(7, (index) => [`f${index}`, `f${(index + 1) % 32}`])
+    );
+    const after = await indexesOf(store);
+    expect({
+      count: after.length,
+      shared: after.filter(({ name }) =>
+        before.some((held) => held.name === name)
+      ).length,
+      schema: await schemaOf(store),
+    }).toStrictEqual({ count: 224, shared: 0, schema: newer.schemaHash });
   });
 });
 
 describe("SQLite's plans", () => {
   it("read a declared index for the emitter's ranges and its order, with no sort", async () => {
     const store = await newStore();
-    const defined = await store.defineTables(
+    const defined = await appliedTables(
+      store,
       notesManifest([["by_done_rank", ["done", "rank"]]], "owner")
     );
     const [index] = await indexesOf(store);
@@ -346,7 +363,8 @@ describe("SQLite's plans", () => {
     for (const key of keys) {
       numbers[key] = number;
     }
-    const defined = await store.defineTables(
+    const defined = await appliedTables(
+      store,
       manifestText(
         schemaManifest(
           defineSchema({
@@ -428,7 +446,7 @@ describe("SQLite's plans", () => {
 
   it("read the fixed default-order indexes when a query names no index", async () => {
     const store = await newStore();
-    const defined = await store.defineTables(notesManifest([]));
+    const defined = await appliedTables(store, notesManifest([]));
     const table = tableIdLiteral(defined.tables.notes ?? "");
     const shared = await planOf(
       store,
@@ -451,7 +469,8 @@ describe("SQLite's plans", () => {
 
   it("keep a field left out, an explicit null and values apart, in that order", async () => {
     const store = await newStore();
-    const defined = await store.defineTables(
+    const defined = await appliedTables(
+      store,
       notesManifest([["by_rank", ["rank"]]])
     );
     const [index] = await indexesOf(store);

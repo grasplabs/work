@@ -19,7 +19,12 @@ import type { Acting } from "../src/auth/identity.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { accessedManifest, memberRoles, newRecordId } from "./store-schemas.ts";
+import {
+  accessedManifest,
+  applied,
+  memberRoles,
+  newRecordId,
+} from "./store-schemas.ts";
 
 // Full-text search of a business store (store-search.ts, store-queries.ts
 // `searchMatches`), through core's way into a store and its Durable
@@ -71,7 +76,9 @@ interface Fixture {
 
 const storeWith = async (mode: AccessMode): Promise<Fixture> => {
   const store = await openStore(env, await storeOfNewApp(env, builder));
-  const { schemaHash } = await store.defineTables(textOf(searchable, mode));
+  const { schemaHash } = await store.applySchema(
+    applied(textOf(searchable, mode))
+  );
   return { store, schemaHash };
 };
 
@@ -405,28 +412,32 @@ describe("a search", () => {
 
   it("is built over the records already there by a version that declares it", async () => {
     const store = await openStore(env, await storeOfNewApp(env, builder));
-    const before = await store.defineTables(textOf(plain, "appMembers"));
+    const before = await store.applySchema(
+      applied(textOf(plain, "appMembers"))
+    );
     await insert({ store, schemaHash: before.schemaHash }, "ada", {
       name: "Initech",
       notes: "staplers",
     });
-    const after = await store.defineTables(textOf(searchable, "appMembers"));
+    const after = await store.applySchema(
+      applied(textOf(searchable, "appMembers"))
+    );
     const fixture = { store, schemaHash: after.schemaHash };
     await insert(fixture, "ada", { name: "Initrode", notes: "staplers" });
     const db = dbOf(fixture, scopeOf(after.schemaHash));
     // Defining the same version again builds nothing twice.
-    await store.defineTables(textOf(searchable, "appMembers"));
+    await store.applySchema(applied(textOf(searchable, "appMembers")));
     expect({
       found: namesOf(
         await db.search("customers", "staplers").collect()
       ).toSorted(),
-      // The older version declares no search index, so it searches none.
+      // The older version's schema isn't the store's any more.
       older: await outcome(
         store.read(scopeOf(before.schemaHash), searchRequest("staplers"))
       ),
     }).toStrictEqual({
       found: ["Initech", "Initrode"],
-      older: "data.invalid_query",
+      older: "migration.not_current",
     });
     await expect(db.search("customers", "staplers").count()).resolves.toBe(2);
   });
@@ -504,8 +515,8 @@ describe("a search's bounds", () => {
 
   it("refuses a table without a search index", async () => {
     const store = await openStore(env, await storeOfNewApp(env, builder));
-    const { schemaHash } = await store.defineTables(
-      textOf(plain, "appMembers")
+    const { schemaHash } = await store.applySchema(
+      applied(textOf(plain, "appMembers"))
     );
     const db = databaseReader(plain, async (request) => {
       const { value } = await store.read(scopeOf(schemaHash), request);

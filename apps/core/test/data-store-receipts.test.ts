@@ -22,6 +22,7 @@ import { StoreHost } from "../src/store-host.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { gatedConsumer } from "./gated-consumer.ts";
 import {
+  applied,
   manifestHash,
   memberRoles,
   newRecordId,
@@ -56,7 +57,7 @@ const scope = {
 /** A new store with a `notes` table. */
 const newStore = async (): Promise<OpenStore> => {
   const store = await openStore(env, await storeOfNewApp(env, builder));
-  await store.defineTables(tablesManifest("notes"));
+  await store.applySchema(applied(tablesManifest("notes")));
   return store;
 };
 

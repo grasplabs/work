@@ -79,7 +79,7 @@ import { AppDataModel } from "./app-data-model.tsx";
 import { AppData } from "./app-data.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { AppSettings, Read } from "./app-settings.tsx";
-import type { AppSettingsSection, StoreChangesRead } from "./app-settings.tsx";
+import type { AppSettingsSection } from "./app-settings.tsx";
 import { readMembers, sharesApp, ShareApp } from "./app-sharing.tsx";
 import { StatusBadge, useStatusMove } from "./app-status.tsx";
 import { readTables, useAppRead } from "./use-app-read.ts";
@@ -911,7 +911,6 @@ const MainArea = ({
   section,
   identity,
   preview,
-  storeChanges,
   building,
   modelChat,
 }: {
@@ -920,7 +919,6 @@ const MainArea = ({
   section: AppSettingsSection | undefined;
   identity: Identity;
   preview: ReactNode;
-  storeChanges: StoreChangesRead;
   /** The chat's draft the preview shows, which the code shows too. */
   building?: ChatBuilding;
   /** The chat whose draft the Data view changes; none without one. */
@@ -955,7 +953,6 @@ const MainArea = ({
         app={app}
         identity={identity}
         section={section}
-        storeChanges={storeChanges}
         within="workspace"
       />
     ) : null}
@@ -1024,7 +1021,6 @@ const Building = ({
   view,
   section,
   identity,
-  storeChanges,
   chatId,
   failure,
   onChatGone,
@@ -1036,7 +1032,6 @@ const Building = ({
   view: WorkspaceView;
   section: AppSettingsSection | undefined;
   identity: Identity;
-  storeChanges: StoreChangesRead;
   /** The App's chat; none while core finds it. */
   chatId: string | undefined;
   /** Why core gave no chat, if it didn't. */
@@ -1140,7 +1135,6 @@ const Building = ({
                 : { chatId, revision: draft?.draft.revision ?? 0, running }
             }
             identity={identity}
-            storeChanges={storeChanges}
             preview={
               <PreviewArea
                 app={app}
@@ -1167,13 +1161,11 @@ const Archived = ({
   view,
   section,
   identity,
-  storeChanges,
 }: {
   app: ViewedApp;
   view: WorkspaceView;
   section: AppSettingsSection | undefined;
   identity: Identity;
-  storeChanges: StoreChangesRead;
 }) => {
   const { busy, failure, move } = useStatusMove(app.id);
   return (
@@ -1188,7 +1180,6 @@ const Archived = ({
       <MainArea
         app={app}
         identity={identity}
-        storeChanges={storeChanges}
         preview={
           <PreviewState
             action={
@@ -1227,7 +1218,6 @@ const Workspace = ({
   view,
   section,
   identity,
-  storeChanges,
   models,
   efforts,
   handedOver,
@@ -1236,7 +1226,6 @@ const Workspace = ({
   view: WorkspaceView;
   section: AppSettingsSection | undefined;
   identity: Identity;
-  storeChanges: StoreChangesRead;
   models: string[];
   efforts: Record<string, ModelEfforts>;
   /** The chat the person came from, building this App (Chat's studio). */
@@ -1267,7 +1256,6 @@ const Workspace = ({
       }}
       efforts={efforts}
       identity={identity}
-      storeChanges={storeChanges}
       models={models}
       section={section}
       view={view}
@@ -1303,7 +1291,6 @@ export const AppWorkspace = ({
   view,
   section,
   identity,
-  storeChanges,
   builds,
   models,
   efforts,
@@ -1313,7 +1300,6 @@ export const AppWorkspace = ({
   view: WorkspaceView;
   section: AppSettingsSection | undefined;
   identity: Identity;
-  storeChanges: StoreChangesRead;
   builds: boolean;
   models: string[];
   efforts: Record<string, ModelEfforts>;
@@ -1325,13 +1311,7 @@ export const AppWorkspace = ({
   }
   if (app.status === "archived") {
     return (
-      <Archived
-        app={app}
-        identity={identity}
-        section={section}
-        storeChanges={storeChanges}
-        view={view}
-      />
+      <Archived app={app} identity={identity} section={section} view={view} />
     );
   }
   return (
@@ -1340,7 +1320,6 @@ export const AppWorkspace = ({
       efforts={efforts}
       handedOver={handedOver}
       identity={identity}
-      storeChanges={storeChanges}
       models={models}
       section={section}
       view={view}

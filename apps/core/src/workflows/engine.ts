@@ -80,15 +80,13 @@ export interface PinnedRun {
 /**
  * A workflow of core's own, not an App's, run on the same engine and
  * dispatcher: extracting an upload's text (knowledge/extraction.ts),
- * filling in a store's defaulted fields before its contract takes them
- * (store-backfill.ts), publishing a document version's sections to
+ * publishing a document version's sections to
  * search (knowledge/indexing.ts), linking a Brain source's entities
  * (packages/brain's entities.ts), or consolidating a scope's episodes into
  * lesson candidates (brain-consolidation.ts).
  */
 export const internalWorkflows = [
   "extraction",
-  "backfill",
   "indexing",
   "linking",
   "consolidation",

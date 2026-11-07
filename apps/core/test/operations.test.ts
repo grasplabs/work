@@ -34,6 +34,7 @@ import { callOperation } from "../src/operations.ts";
 import type { HostedApp, Invocation, Runner } from "../src/operations.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { published } from "./apps.ts";
+import { applied } from "./store-schemas.ts";
 
 // An App's server functions run through core's operation host
 // (operations.ts) against a real business store and the App's real roles:
@@ -435,7 +436,7 @@ const notes = async (): Promise<Fixture> => {
   const { id: appId } = await createApp(env, owner, { name: "Notes" });
   await published(appId);
   const store = await openStore(env, await storeOfNewApp(env, owner));
-  await store.defineTables(manifestText(manifest.schema));
+  await store.applySchema(applied(manifestText(manifest.schema)));
   return { owner, appId, store };
 };
 

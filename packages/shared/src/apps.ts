@@ -898,6 +898,12 @@ export interface AppsApi {
    */
   archive: (app: string) => Promise<App>;
   /**
+   * Resets the App's data, for its builders, never Grasp staff: every
+   * record goes, audited, and its current version runs again on an empty
+   * store.
+   */
+  resetData: (app: string) => Promise<void>;
+  /**
    * Restores an archived App, for its builders, as a draft: refused with
    * `app.stops_pending` while runs it started are still being stopped.
    */
@@ -979,7 +985,7 @@ export const appErrors = defineErrorFamily({
   "app.no_workflows":
     "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild, add it to the App's permissions with addPermission (permission.workflow) and bind it to the App under that alias.",
   "app.generated_file":
-    "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code Grasp generates from it: change them with the definition tools (addTable, addField, changeField, renameField, setAccess, addIndex, addPermission and their remove counterparts, and the preference tools), never by writing them.",
+    "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code Grasp generates from it: change them with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission and their remove counterparts, and the preference tools), never by writing them.",
   "app.definition_invalid":
     "The App's definition.json, from which its grasp.config.ts and server/schema.ts are generated, is missing or isn't valid.",
   "app.chat_has_app":

@@ -1,6 +1,5 @@
 import { isPageFile } from "@grasp-os/compiler";
 import { definitionPath } from "@grasp-os/sdk/definition";
-import type { AppDefinition } from "@grasp-os/sdk/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
@@ -26,7 +25,7 @@ import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import { storedProcessOf } from "@grasp-os/shared/business-processes";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, BlueprintId, StoreId } from "@grasp-os/shared/ids";
+import type { AppId, BlueprintId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -45,11 +44,7 @@ import {
   requireNotArchived,
 } from "./app-access.ts";
 import type { Person } from "./app-access.ts";
-import {
-  definitionFiles,
-  heldDefinition,
-  withDefinitionCode,
-} from "./app-definition.ts";
+import { definitionFiles, withDefinitionCode } from "./app-definition.ts";
 import { refuseWithoutLayout } from "./app-layout.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import { refuseV1Server } from "./app-v1-server.ts";
@@ -74,12 +69,6 @@ import { isUniqueViolation, retriedBatch } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
-import {
-  applyRulesAfterCommit,
-  requireStoreSchemaActive,
-  storeBindings,
-} from "./store-backfill.ts";
-import type { OwedRules } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 
 // The App registry and each App's code. The registry and the versions are
@@ -542,26 +531,6 @@ export const versionFiles = async (
   return Object.fromEntries(await readTree(env, app, row.tree));
 };
 
-/**
- * The definitions a change of App `app` can't rename a field of: the
- * version people use (`current`), and the files the change starts from
- * (`started`: the latest commit, or a draft's base), which may have run
- * and been rolled back from.
- */
-export const heldDefinitions = async (
-  env: Env,
-  app: AppId,
-  current: number | null,
-  started: ReadonlyMap<string, string>
-): Promise<(AppDefinition | null)[]> => [
-  heldDefinition(started),
-  current === null
-    ? null
-    : heldDefinition(
-        new Map(Object.entries(await versionFiles(env, app, current)))
-      ),
-];
-
 /** Creates an App, with no versions yet. */
 export const createApp = async (
   env: Env,
@@ -734,9 +703,7 @@ export const applyChanges = (
   files: Map<string, string>,
   input: unknown,
   /** The App's name, for the empty definition of its first files. */
-  name: string,
-  /** The definitions of its versions a rename can't change (`heldDefinitions`). */
-  held: readonly (AppDefinition | null)[] = []
+  name: string
 ): [string, string | null][] => {
   const changes = Object.entries(
     appErrors.parse("app.invalid", fileChangesSchema, input)
@@ -763,7 +730,7 @@ export const applyChanges = (
   const submitted = new Map(
     [...definitionFiles].map((path) => [path, files.get(path)])
   );
-  withDefinitionCode(files, name, defined, held);
+  withDefinitionCode(files, name, defined);
   checkLimits(files, before);
   checkPaths(files.keys(), added);
   checkMemory(agentsBefore, files.get(appMemoryPath));
@@ -795,11 +762,10 @@ export const commitFiles = async (
   input: unknown,
   message: unknown
 ): Promise<CommittedVersion> => {
-  const { id: appId, name, currentVersion } = await editableApp(env, by, app);
+  const { id: appId, name } = await editableApp(env, by, app);
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
   const { latest, files } = await latestFiles(env, appId);
-  const held = await heldDefinitions(env, appId, currentVersion, files);
-  applyChanges(env, files, input, name, held);
+  applyChanges(env, files, input, name);
   const { tree, json } = await versionTree(files);
   if (tree === latest?.tree) {
     throw appErrors.create("app.nothing_to_commit");
@@ -1317,37 +1283,28 @@ export const makeCurrent = async (
   await requireRunnableRelease(env, appId, number);
   // Imported here, not at the top: releases reach back into this module.
   const { readBackRelease } = await import("./app-releases.ts");
-  await readBackRelease(env, appId, number);
-  await requireStoreSchemaActive(env, appId, number);
+  const release = await readBackRelease(env, appId, number);
   const previous = found.currentVersion;
+  // Last before the batch, after every gate above, so no refused gate
+  // leaves the store changed: the version's schema applied to its store,
+  // its migrations with it, all or nothing (app-schema.ts). The store and
+  // D1 share no transaction: the store takes the schema only over the
+  // version current as the publish began (`previous`), so of two
+  // publishes at once one goes on; the batch is retried here if it fails,
+  // and a version found current after all is answered as such.
+  const { applyVersionSchema } = await import("./app-schema.ts");
+  const applied = await applyVersionSchema(env, by, release, previous);
   const event = createAuditEvent(
     changeEntry(by, "app.version.current", appId, {
       version: number,
       previous,
+      ...(applied === null
+        ? {}
+        : { schemaHash: applied.schemaHash, schemaChanged: applied.changed }),
     }),
     "core"
   );
   const db = drizzle(env.DB);
-  // The rules its store owes from its activation below until the batch
-  // is done, under this call's own ID.
-  const owed: OwedRules = { id: crypto.randomUUID(), kind: "app" };
-  // Last before the batch (with it, below): a ready explicit
-  // migration's store switches to its contract, and a change that checks records (a narrowing,
-  // a field required) is applied (store-backfill.ts), after every gate
-  // above, so no refused gate leaves the version still current locked
-  // out of its store. That goes first because applying can still be
-  // refused (a write since the dry run), and the batch can't be taken
-  // back once it is in; a batch that isn't ours (a lost compare and
-  // set, one that keeps failing) leaves the version current refused its
-  // writes where the change left it behind, never reading more. A
-  // changed access mode or row rule waits for the batch: whatever its
-  // outcome, the store then takes the rules of the version D1 has
-  // current (`applyRulesAfterCommit`), so none is in force that D1
-  // never made current. The store and D1 share no transaction: the
-  // batch is retried here if it fails, and a version found current after
-  // all is answered as such.
-  const bound = await storeBindings(env, appId, number);
-  const owing: StoreId[] = bound.map(({ storeId }) => storeId);
   // Only over the current version read above, so the event's `previous`
   // is the version this replaced. The event is stored only if this batch
   // made it current, and what follows it only then.
@@ -1395,19 +1352,7 @@ export const makeCurrent = async (
           ),
         ])
     );
-  let made: Awaited<ReturnType<typeof batch>>;
-  // The store's activation (`requireStoreSchemaActive`, the last step
-  // before the batch) and the batch share one ending: refused, failed or
-  // committed, the rules of the version D1 has current are applied and
-  // what the store owed is settled, so a refusal never leaves the store
-  // holding other activations back (`migration.busy`).
-  try {
-    await requireStoreSchemaActive(env, appId, number, { activate: owed });
-    made = await batch();
-  } finally {
-    await applyRulesAfterCommit(env, owed, appId, owing);
-  }
-  const [[changed]] = made;
+  const [[changed]] = await batch();
   if (!changed) {
     // Only this call's batch stores its event, and only if it made the
     // version current: found stored, an earlier try committed and its

@@ -49,6 +49,7 @@ import { appDefinition } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, seal } from "./sealed-apps.ts";
+import { applied } from "./store-schemas.ts";
 
 // Actions (spec 7.4, 12): server functions with no database, which
 // compose the App's queries and mutations, each its own invocation, and
@@ -656,7 +657,7 @@ const notes = async (): Promise<Fixture> => {
   const owner = await person();
   const { id: appId } = await createApp(env, owner, { name: "Notes" });
   const store = await openStore(env, await storeOfNewApp(env, owner));
-  await store.defineTables(manifestText(manifest.schema));
+  await store.applySchema(applied(manifestText(manifest.schema)));
   return { owner, appId, store };
 };
 

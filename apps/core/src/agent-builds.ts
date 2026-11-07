@@ -47,7 +47,6 @@ import {
   draftFiles,
   draftOverLatest,
   editableApp,
-  heldDefinitions,
   versionFiles,
   latestVersion,
   proposeDraft,
@@ -810,7 +809,7 @@ export const saveDraftChanges = async (
   env: Env,
   scope: Pick<AgentScope, "workspaceId" | "chatId">,
   writer: DraftWriter,
-  { id, name, currentVersion }: Pick<App, "id" | "name" | "currentVersion">,
+  { id, name }: Pick<App, "id" | "name">,
   {
     draft,
     files,
@@ -823,7 +822,6 @@ export const saveDraftChanges = async (
   admit?: () => Promise<void>
 ): Promise<string[]> => {
   const base = await draftFiles(env, id, { base: draft.base, changes: {} });
-  const held = await heldDefinitions(env, id, currentVersion, base);
   // Changed in place (`applyChanges`): the draft as it is written, its
   // TypeScript fixed and formatted first (`tidied`).
   // The definition and the code generated from it are kept as generated,
@@ -844,8 +842,7 @@ export const saveDraftChanges = async (
         : await tidied(env, id, Object.fromEntries(code))),
       ...Object.fromEntries(generated),
     },
-    name,
-    held
+    name
   );
   refuseAppWorkflows(
     written.flatMap(([path, content]) => (content === null ? [] : [path]))
@@ -923,7 +920,7 @@ export const draftDefinitions = async (
   }
   // An answer belongs to the version it is committed with: what that
   // version's move gives the records that don't fit it, used once, as
-  // the store applies it (store-host.ts, `defineTables`). A draft starts
+  // the store applies it (store-host.ts, `applySchema`). A draft starts
   // with none of its base's: the store's plan of the move from the
   // version people use asks again for any it still needs.
   const own = Object.hasOwn(draft.changes, definitionPath)
@@ -1882,7 +1879,7 @@ build: {
   /**
    * Changes the App's definition in the draft, as the chat's definition
    * tools do (\`addTable\`, \`addField\`, \`changeField\`,
-   * \`renameField\`, \`setAccess\`, \`addIndex\`, \`addPermission\`,
+   * \`renameField\`, \`renameTable\`, \`setAccess\`, \`addIndex\`, \`addPermission\`,
    * \`removeTable\`, \`removeField\`, \`removeIndex\`,
    * \`removePermission\`, \`addPreference\`, \`changePreference\`,
    * \`removePreference\`, \`moveField\`: \`operation\` is \`{ op, ...that tool's input but app }\`), and writes

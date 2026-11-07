@@ -38,16 +38,23 @@ import { appMembers, teamMembers, teams } from "../src/db/core/schema.ts";
 import { callOperation } from "../src/operations.ts";
 import type { Runner } from "../src/operations.ts";
 import type { SessionCheck } from "../src/session-check.ts";
+import type { MigrationRow } from "../src/store-host.ts";
 import { reviewVersion } from "../src/version-review.ts";
 import { appDefinition } from "./app-definitions.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { published, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { refusalOf } from "./migrated-apps.ts";
-import { migrationBatch, objectOf } from "./pending-stores.ts";
-import { appWith, person } from "./sealed-apps.ts";
+import { objectOf, schemaHashOf } from "./notes-stores.ts";
+import { appWith, failure, person } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
-import { manifestHash, newRecordId } from "./store-schemas.ts";
+import {
+  applied,
+  appliedTables,
+  manifestHash,
+  namedIds,
+  newRecordId,
+} from "./store-schemas.ts";
 
 // Row rules (`defineTable(...).access`, store-rules.ts): who reads and who
 // changes which rows of a table, by owner, by a person field, by a team
@@ -516,7 +523,7 @@ const world = async (): Promise<World> => {
   const { id: appId } = await createApp(env, owner, { name: "Requests" });
   await published(appId);
   const store = await openStore(env, await storeOfNewApp(env, owner));
-  const defined = await store.defineTables(manifestText(manifest.schema));
+  const defined = await appliedTables(store, manifestText(manifest.schema));
   const [carol, ada, bob] = await Promise.all([
     person("builder"),
     person("user"),
@@ -1496,7 +1503,7 @@ const ticketsStore = async (
     env,
     await storeOfNewApp(env, await person("builder"))
   );
-  const first = await store.defineTables(v1Text, consumer(1));
+  const first = await store.applySchema(applied(v1Text));
   const ids: string[] = [];
   for (const [index, { by, team }] of tickets.entries()) {
     const id = newRecordId();
@@ -1522,12 +1529,11 @@ const ticketsStore = async (
 };
 
 /**
- * Migrates `store` to v2, standing in for core's transform as the
- * backfill's run would: each batch the store hands out answered with
- * `rewrite` of each of its rows, after `meanwhile` ran on what it was
- * handed. After `handOverAfter` batches, its run hands over to a new one,
- * which goes on from where the store says. What each batch held, and the
- * last batch's outcome.
+ * Migrates `store` to v2, standing in for core's transform as a publish
+ * runs it (migration-run.ts): every ticket the store hands out answered
+ * with `rewrite` of its fields and staged, after `meanwhile` ran on what
+ * was handed; then v2 applied with what was staged. What was handed, and
+ * what applying answered or why it was refused.
  */
 const migrateTickets = async (
   store: OpenStore,
@@ -1536,76 +1542,51 @@ const migrateTickets = async (
     meanwhile = async () => {
       // Nobody writes while it runs.
     },
-    handOverAfter,
   }: {
-    meanwhile?: (
-      handed: readonly { id: string; revision: number }[]
-    ) => Promise<void>;
-    handOverAfter?: number;
+    meanwhile?: (handed: readonly MigrationRow[]) => Promise<void>;
   } = {}
-): Promise<{
-  batches: StoreFields[][];
-  last: unknown;
-  schemaHash: string;
-}> => {
-  const second = await store.defineTables(v2Text, consumer(2), [
-    {
-      name: "rewrite-tickets",
-      table: "tickets",
-      fromSchema: await manifestHash(v1Text),
-      toSchema: await manifestHash(v2Text),
-    },
-  ]);
-  const target = second.contract.hash;
-  const batches: StoreFields[][] = [];
-  let last: unknown;
-  let attempt = 1;
-  for (let batch = 1; ; batch += 1) {
-    if (batches.length === handOverAfter && attempt === 1) {
-      // oxlint-disable-next-line no-await-in-loop -- once
-      attempt = await objectOf(store).restartBackfill(store.id, {
-        target,
-        attempt,
-        ending: true,
-      });
-      batch = 1;
-    }
-    // One batch after the other, as the backfill's run takes them.
+): Promise<{ handed: MigrationRow[]; applied: string; schemaHash: string }> => {
+  const { migrationId, schemaHash: from } = await store.beginMigration();
+  const table = namedIds(v2Text).tickets?.id ?? "";
+  const handed: MigrationRow[] = [];
+  for (let after: string | null = null; ;) {
+    // One page after the other, as a publish reads them.
     // oxlint-disable-next-line no-await-in-loop -- see above
-    const read = await migrationBatch(store, target, batch, attempt);
-    if (read.state !== "transform") {
-      last = read;
+    const page = await store.migrationRows(table, after);
+    if (page.length === 0) {
       break;
     }
-    batches.push(read.rows.map(({ fields }) => fields));
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    await meanwhile(read.rows);
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    last = await objectOf(store).commitTransformed(
-      store.id,
-      JSON.stringify({
-        target,
-        attempt,
-        batch,
-        phase: read.phase,
-        table: read.table,
-        through: read.through,
-        rows: read.rows.map(({ id: row, revision, fields }) => ({
-          id: row,
+    handed.push(...page);
+    after = page.at(-1)?.id ?? null;
+  }
+  await meanwhile(handed);
+  for (let start = 0; start < handed.length; start += 100) {
+    // oxlint-disable-next-line no-await-in-loop -- one batch after the other
+    await store.stageMigration({
+      migrationId,
+      table,
+      rows: handed
+        .slice(start, start + 100)
+        .map(({ id, revision, fields }) => ({
+          id,
           revision,
           fields: rewrite(fields),
         })),
-      })
-    );
-    if (
-      typeof last !== "object" ||
-      last === null ||
-      Reflect.get(last, "state") !== "running"
-    ) {
-      break;
-    }
+    });
   }
-  return { batches, last, schemaHash: second.schemaHash };
+  const answered = await failure(
+    async () =>
+      await store.applySchema(
+        applied(v2Text, {
+          migration: { id: migrationId, from: from ?? "", tables: ["tickets"] },
+        })
+      )
+  );
+  return {
+    handed,
+    applied: answered,
+    schemaHash: await manifestHash(v2Text),
+  };
 };
 
 /** Each ticket of `store` as it stores it, by ID. */
@@ -1619,19 +1600,12 @@ const storedTickets = async (store: OpenStore): Promise<StoreFields[]> =>
       .map(({ value }) => storedFieldsSchema.parse(JSON.parse(value)))
   );
 
-/** The team of each ticket of `store`, as it stores them. */
-const storedTeams = async (store: OpenStore): Promise<unknown[]> => {
-  const tickets = await storedTickets(store);
-  return tickets.map(({ team }) => team);
-};
-
 // A migration's transform reads every ticket, whichever team it is for.
 // A builder in Sales, or the AI for them, ships one that hands Support's
-// tickets to Sales, or carries one team's ticket into another's through
-// the module state a batch's rows share (migration-transform.ts).
+// tickets to Sales (migration-run.ts keeps each call to one team's
+// tickets, so its module state carries nothing between teams).
 describe("a migration of a table with row rules", () => {
-  it("hands a transform one team's tickets a batch, full however they interleave", async () => {
-    // Two teams' tickets, every other one each's: 120 of either.
+  it("applies every ticket's output with the schema, in one transaction", async () => {
     const { store } = await ticketsStore(
       Array.from({ length: 240 }, (_, index) => ({
         by: "bob",
@@ -1639,77 +1613,34 @@ describe("a migration of a table with row rules", () => {
       }))
     );
 
-    const { batches, last } = await migrateTickets(store, (fields) => ({
-      ...fields,
-      kind: "ticket",
-    }));
-
-    expect({
-      teams: batches.map((held) => new Set(held.map(({ team }) => team)).size),
-      held: batches.flat().length,
-      // A batch is a sandbox call. A scan batch takes one team's tickets
-      // of the next 100 and queues the other's, whose work batches are
-      // full: about twice 240 ÷ 100, not one call a ticket.
-      calls: batches.length <= 6,
-      last,
-    }).toMatchObject({
-      teams: batches.map(() => 1),
-      held: 240,
-      calls: true,
-      last: { state: "ready" },
-    });
-  });
-
-  it("transforms every ticket once when its run hands over midway", async () => {
-    const { store } = await ticketsStore(
-      Array.from({ length: 240 }, (_, index) => ({
-        by: "bob",
-        team: index % 2 === 0 ? "support" : "sales",
-      }))
-    );
-
-    // Two scan batches in, with tickets of the other team queued, a new
-    // run takes over from the store's cursor and its queue.
-    const { batches, last } = await migrateTickets(
+    const { handed, applied: answered } = await migrateTickets(
       store,
-      (fields) => ({ ...fields, kind: "ticket" }),
-      { handOverAfter: 2 }
+      (fields) => ({ ...fields, kind: "ticket" })
     );
     const tickets = await storedTickets(store);
 
     expect({
-      last,
-      held: batches.flat().length,
-      kinds: tickets.map(({ kind }) => kind),
-    }).toMatchObject({
-      last: { state: "ready" },
-      held: 240,
-      kinds: tickets.map(() => "ticket"),
+      handed: handed.length,
+      answered,
+      kinds: new Set(tickets.map(({ kind }) => kind)),
+    }).toStrictEqual({
+      handed: 240,
+      answered: "ok",
+      kinds: new Set(["ticket"]),
     });
   });
 
-  it("transforms tickets moved to another team while their batch ran, from the move", async () => {
-    const { store, schemaHash } = await ticketsStore(
-      Array.from({ length: 6 }, (_, index) => ({
-        by: "bob",
-        team: index % 2 === 0 ? "support" : "sales",
-      }))
-    );
-    const moves = ["triage", "archive"];
+  it("changes nothing when a ticket moves to another team while its migration runs", async () => {
+    const { store, schemaHash } = await ticketsStore([
+      { by: "bob", team: "support" },
+      { by: "bob", team: "sales" },
+    ]);
 
-    // As each of the first two batches is transformed, a person moves
-    // one of its tickets to another team: transformed again from the move,
-    // under the audience it then has.
-    const { last } = await migrateTickets(
+    const { applied: answered } = await migrateTickets(
       store,
       (fields) => ({ ...fields, kind: "ticket" }),
       {
-        meanwhile: async (handed) => {
-          const team = moves.shift();
-          const [ticket] = handed;
-          if (team === undefined || ticket === undefined) {
-            return;
-          }
+        meanwhile: async ([ticket]) => {
           await commitAs(
             store,
             schemaHash,
@@ -1717,56 +1648,54 @@ describe("a migration of a table with row rules", () => {
               {
                 op: "patch",
                 table: "tickets",
-                id: ticket.id,
-                fields: { team },
-                expectedRevision: ticket.revision,
+                id: ticket?.id ?? "",
+                fields: { team: "triage" },
+                expectedRevision: ticket?.revision ?? 0,
               },
             ],
             "bob",
-            ["support", "sales", team]
+            ["support", "sales", "triage"]
           );
         },
       }
     );
-    const tickets = await storedTickets(store);
 
+    const tickets = await storedTickets(store);
     expect({
-      last,
-      kinds: tickets.map(({ kind }) => kind),
+      answered,
+      schema: await schemaHashOf(store),
       teams: tickets
         .map(({ team }) => (typeof team === "string" ? team : ""))
         .toSorted((a, b) => a.localeCompare(b)),
-    }).toMatchObject({
-      last: { state: "ready" },
-      kinds: tickets.map(() => "ticket"),
-      teams: ["archive", "sales", "sales", "support", "support", "triage"],
+      kinds: tickets.map(({ kind }) => kind ?? null),
+    }).toStrictEqual({
+      answered: "migration.busy",
+      schema: schemaHash,
+      teams: ["sales", "triage"],
+      kinds: [null, null],
     });
   });
 
-  it("refuses a transform that moves a ticket to another team, writing nothing of its batch", async () => {
-    const { store } = await ticketsStore([
+  it("refuses a transform that moves a ticket to another team, writing nothing", async () => {
+    const { store, schemaHash } = await ticketsStore([
       { by: "bob", team: "support" },
       { by: "bob", team: "support" },
     ]);
 
-    const { last } = await migrateTickets(store, (fields) => ({
+    const { applied: answered } = await migrateTickets(store, (fields) => ({
       ...fields,
       team: "sales",
       kind: "ticket",
     }));
 
-    expect({ last, teams: await storedTeams(store) }).toMatchObject({
-      last: {
-        state: "failed",
-        failure: {
-          table: "tickets",
-          migration: "rewrite-tickets",
-          reason: "rule_changed",
-          issues: [
-            "team: A migration doesn't change a field a row rule reads; a write changes who sees a record",
-          ],
-        },
-      },
+    const tickets = await storedTickets(store);
+    expect({
+      answered,
+      schema: await schemaHashOf(store),
+      teams: tickets.map(({ team }) => team),
+    }).toStrictEqual({
+      answered: "migration.failed",
+      schema: schemaHash,
       teams: ["support", "support"],
     });
   });
@@ -1780,11 +1709,6 @@ describe("a record's history across a migration", () => {
       ...fields,
       kind: "ticket",
     }));
-    await objectOf(store).activateReady(
-      store.id,
-      await manifestHash(v2Text),
-      consumer(2)
-    );
     await commitAs(
       store,
       schemaHash,
@@ -1795,7 +1719,7 @@ describe("a record's history across a migration", () => {
           id,
           fields: { title: "Sales' ticket" },
           unset: [],
-          expectedRevision: 2,
+          expectedRevision: 1,
         },
       ],
       "ada",
@@ -1845,7 +1769,7 @@ describe("a record's long history, read by row rules", () => {
       env,
       await storeOfNewApp(env, await person("builder"))
     );
-    const { schemaHash } = await store.defineTables(v1Text, consumer(1));
+    const { schemaHash } = await store.applySchema(applied(v1Text));
     const id = newRecordId();
     const patch = async (
       fields: Record<string, string>,
@@ -2172,7 +2096,7 @@ describe("deleting a record a row the rules hide refers to", () => {
       env,
       await storeOfNewApp(env, await person("builder"))
     );
-    const { schemaHash } = await store.defineTables(text, consumer(1));
+    const { schemaHash } = await store.applySchema(applied(text));
     const plan = newRecordId();
     await commitAs(
       store,

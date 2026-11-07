@@ -30,9 +30,9 @@ import type {
 } from "./permissions.ts";
 import { eventReferenceData, referenceName } from "./references.ts";
 import { readSchemaAnswers } from "./schema-answer.ts";
+import type { SchemaAnswer } from "./schema-answer.ts";
 import { schemaManifest } from "./schema-manifest.ts";
 import type { SchemaManifest } from "./schema-manifest.ts";
-import type { SchemaAnswer } from "./schema-plan.ts";
 import type { AccessMode, SchemaDefinition } from "./schema.ts";
 import type {
   AnyFunction,
@@ -120,11 +120,11 @@ export interface AppConfig {
   readonly preferences?: AnySchema;
   /**
    * Its answers for the records that lack a field a change of its schema
-   * requires (schema-plan.ts, `SchemaAnswer`): for one field each, the
-   * value they take where the field is absent or null, as a backfill's
-   * default. The store checks every record as the version is made
-   * current, and never writes over a value a record holds. Anything that
-   * reshapes records is a migration (`server/migrations/`).
+   * requires (schema-answer.ts): for one field each, the value they take
+   * where the field is absent, or null where it can't be, filled in as
+   * the version is
+   * published, never over a value a record holds. Anything that reshapes
+   * records is a migration (`server/migrations/`).
    */
   readonly answers?: readonly SchemaAnswer[];
 }

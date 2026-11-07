@@ -22,6 +22,7 @@ import { AppIntegrationsRpc } from "./app-integrations.ts";
 import { AppMembersRpc } from "./app-members.ts";
 import { openAppLink, setAppLink } from "./app-own-links.ts";
 import { removeApp } from "./app-removal.ts";
+import { resetAppData } from "./app-schema.ts";
 import { appAnswerers, updateApp } from "./app-settings.ts";
 import { changeStatus } from "./app-status.ts";
 import type { AppTransition } from "./app-status.ts";
@@ -147,6 +148,12 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
 
   async archive(app: string): Promise<App> {
     return await this.#changeStatus(app, "archive");
+  }
+
+  async resetData(app: string): Promise<void> {
+    await withPerson(this.#check, async (by) => {
+      await resetAppData(this.#env, by, app);
+    });
   }
 
   async restore(app: string): Promise<App> {

@@ -58,21 +58,19 @@ import type { Fragment } from "./store-expressions.ts";
 // - A migration's transform, which reads every row of its table whoever
 //   may, moves a row into other people's sight or carries one row's
 //   values into another's: a transform never changes a field a rule
-//   reads (`rule_changed`, store-migrations.ts and
-//   migration-transform.ts), so a row's audience moves only through
+//   reads (`rule_changed`, store-host.ts `applySchema`, and
+//   migration-run.ts), so a row's audience moves only through
 //   writes, which pass the rules before and after; and each batch holds
 //   rows of one audience (`audienceKey`), the module state of its call
 //   ending with it, so whatever it carries between rows stays with the
 //   rows the same people already see.
-// - A rule changed while versions pinned to the old one still run: the
-//   store reads and writes every version under the rules and access mode
-//   its contract holds, whatever the version declared (store-host.ts,
-//   `underContractRules`), and the contract takes a changed rule only
-//   once core's database made the release that changes it current
-//   (`StoreHost.applyRules`; sdk schema-plan.ts, `ruleChanges`). So an
-//   older version never reads on under looser rules, nor a newer one
-//   under its own before it is current. A schema
-//   change never rewrites a field a rule reads (`rule_field_rewritten`).
+// - A rule changed while versions pinned to the old one still run: a
+//   store reads and writes under one schema, its App's current version's,
+//   applied as that version is published, and refuses a version pinned to
+//   any other (store-host.ts, `migration.not_current`). So an older
+//   version never reads on under looser rules, nor a newer one under its
+//   own before it is current. A schema change never fills in a field a
+//   rule reads (`rule_field_filled`, schema-changes.ts).
 
 /** Who a rule is evaluated for: what core resolved for the invocation. */
 export interface RuleCaller {

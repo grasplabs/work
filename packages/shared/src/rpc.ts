@@ -32,7 +32,6 @@ import type { Role } from "./roles.ts";
 import type { SessionsApi } from "./sign-in.ts";
 import type { SignalsApi } from "./signals.ts";
 import type { StephenRequestsApi } from "./stephen-requests.ts";
-import type { StoresApi } from "./stores.ts";
 import type { UploadsApi } from "./uploads.ts";
 import type { WaitingApi } from "./waiting.ts";
 import type { WorkflowResourcesApi } from "./workflow-resources.ts";
@@ -198,11 +197,6 @@ export interface SessionApi {
    * models its calls use. Admins read them; its own admins change them.
    */
   readonly aiProviders: AiProvidersApi;
-  /**
-   * Business stores: a store's failed schema change, and abandoning it.
-   * Admins only, never Grasp staff.
-   */
-  readonly stores: StoresApi;
   /**
    * Side effects the person's agents, Apps and runs asked for, held until
    * the person confirms or declines them: from chat, from a person using

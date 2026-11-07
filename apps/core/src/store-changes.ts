@@ -48,7 +48,7 @@ import { recordChanges, store } from "./db/data-store/schema.ts";
 //   before and after states the rules admit them to, nothing past a change
 //   that kept no values (`admittedHistoryOf`; app-data.ts, store-host.ts).
 //   A migration's rewrite keeps no change, and never moves a field a row
-//   rule reads (store-migrations.ts, `rule_changed`), so the states a
+//   rule reads (store-host.ts, `rule_changed`), so the states a
 //   history is rebuilt through admit the same people across it.
 
 const dayMs = 24 * 60 * 60 * 1000;

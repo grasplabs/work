@@ -7,7 +7,6 @@ import { LayoutGridIcon } from "lucide-react";
 import { AppSettings, settingsSectionOf } from "../apps/app-settings.tsx";
 import type { AppSettingsSection } from "../apps/app-settings.tsx";
 import { PackageApprovals } from "../apps/package-approvals.tsx";
-import { readStoreChanges } from "../apps/store-changes.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -57,7 +56,7 @@ const PackagesOnlyView = ({ listed }: { listed: DependencyApprovals }) => {
 };
 
 const AppSettingsPage = () => {
-  const { page, packagesOnly, storeChanges } = Route.useLoaderData();
+  const { page, packagesOnly } = Route.useLoaderData();
   const { section } = Route.useSearch();
   const { identity } = Route.useRouteContext();
   const { t } = useLingui();
@@ -105,7 +104,6 @@ const AppSettingsPage = () => {
         identity={identity}
         key={app.id}
         section={section}
-        storeChanges={storeChanges}
         within="page"
       />
     </>
@@ -123,10 +121,7 @@ export const Route = createFileRoute("/_shell/apps/$app_/settings")({
   ): { section?: AppSettingsSection | undefined } => ({
     section: settingsSectionOf(search.section),
   }),
-  loader: async ({ context: { core, identity }, params }) => {
-    // Only for who may abandon a store's failed change: the
-    // organization's own admins. Not awaited: General waits for it.
-    const storeChanges = readStoreChanges(core, identity, params.app);
+  loader: async ({ context: { core }, params }) => {
     const page = await loadFromCore(
       core,
       async (session) => await session.apps.get(params.app)
@@ -142,6 +137,6 @@ export const Route = createFileRoute("/_shell/apps/$app_/settings")({
               await session.dependencies.approvals({ app: params.app })
           )
         : undefined;
-    return { storeChanges, page, packagesOnly };
+    return { page, packagesOnly };
   },
 });

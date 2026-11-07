@@ -7,7 +7,6 @@ import { settingsSectionOf } from "../apps/app-settings.tsx";
 import type { AppSettingsSection } from "../apps/app-settings.tsx";
 import { AppWorkspace } from "../apps/app-workspace.tsx";
 import type { WorkspaceView } from "../apps/app-workspace.tsx";
-import { readStoreChanges } from "../apps/store-changes.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { loadFromCore, orNull } from "../load-from-core.tsx";
 
@@ -31,7 +30,7 @@ const AppWorkspacePage = () => {
       />
     );
   }
-  const { app, models, efforts, storeChanges } = page.data;
+  const { app, models, efforts } = page.data;
   return (
     <AppWorkspace
       app={app}
@@ -43,7 +42,6 @@ const AppWorkspacePage = () => {
       key={app.id}
       models={models}
       section={section}
-      storeChanges={storeChanges}
       view={view ?? "preview"}
     />
   );
@@ -77,7 +75,7 @@ export const Route = createFileRoute("/_shell/apps/$app_/edit")({
     // the workspace carries it on. Core checks it is theirs on each read.
     chat: typeof search.chat === "string" ? search.chat : undefined,
   }),
-  loader: async ({ context: { core, identity }, params }) =>
+  loader: async ({ context: { core }, params }) =>
     await loadFromCore(core, async (session) => {
       // The models leave the workspace as it is when they can't be read:
       // the chat says there is none to ask with.
@@ -92,7 +90,6 @@ export const Route = createFileRoute("/_shell/apps/$app_/edit")({
         efforts: efforts ?? {},
         // Only for who may abandon a store's failed change: the
         // organization's own admins. Not awaited: General waits for it.
-        storeChanges: readStoreChanges(core, identity, params.app),
       };
     }),
 });

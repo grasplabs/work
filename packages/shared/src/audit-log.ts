@@ -179,6 +179,13 @@ const typeRules: readonly {
   // which table and how many of its records, never what they hold.
   { action: "app.data.read", type: "read" },
   { action: "app.data.imported", type: "action" },
+  // A defaulted field, or one the App answered for, filled in on the records
+  // that lacked it as a version was published (core's store-host.ts): one
+  // entry a field, saying how many records took its value.
+  { action: "app.data.filled", type: "action" },
+  // An App's data reset by one of its builders (core's data-stores.ts):
+  // every record gone, its current version run on an empty store.
+  { action: "store.reset", type: "action" },
   { action: "app.webhook.approved", type: "decision" },
   { action: "app.webhook.undeliverable", type: "action" },
   { action: "webhook.call", type: "action" },

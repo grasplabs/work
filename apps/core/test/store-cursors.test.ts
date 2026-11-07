@@ -22,7 +22,7 @@ import type { OpenStore } from "../src/data-stores.ts";
 import { StoreHost } from "../src/store-host.ts";
 import type { AnchorValue } from "../src/store-queries.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { accessedManifest } from "./store-schemas.ts";
+import { accessedManifest, appliedTables } from "./store-schemas.ts";
 
 // Pages of a business store's records and their cursors (store-cursors.ts,
 // store-queries.ts `readPage`), through core's way into a store and its
@@ -71,7 +71,8 @@ interface Fixture {
 
 const storeWith = async (read: AccessMode): Promise<Fixture> => {
   const store = await openStore(env, await storeOfNewApp(env, builder));
-  const defined = await store.defineTables(
+  const defined = await appliedTables(
+    store,
     manifestText(
       accessedManifest(schema, {
         tables: {
@@ -450,28 +451,26 @@ describe("cursors", () => {
     const fixture = await storeWith("owner");
     await insertNotes(fixture, ranked);
     // Another schema of the same store, one optional field more: another
-    // generation of its tables.
-    const later = await fixture.store.defineTables(
-      manifestText(
-        schemaManifest(
-          defineSchema({
-            notes: defineTable({
-              title: v.string(),
-              rank: v.number().nullable().optional(),
-              done: v.boolean().default(false),
-              label: v.string().nullable().optional(),
-              note: v.string().optional(),
-            })
-              .index("by_title", ["title"])
-              .index("by_done_rank", ["done", "rank"])
-              .index("by_label", ["label"])
-              .access({ read: "owner", write: "owner" }),
-            people: defineTable({ name: v.string() }).access({
-              read: "owner",
-              write: "owner",
-            }),
+    // generation of its tables, applied last (below).
+    const laterText = manifestText(
+      schemaManifest(
+        defineSchema({
+          notes: defineTable({
+            title: v.string(),
+            rank: v.number().nullable().optional(),
+            done: v.boolean().default(false),
+            label: v.string().nullable().optional(),
+            note: v.string().optional(),
           })
-        )
+            .index("by_title", ["title"])
+            .index("by_done_rank", ["done", "rank"])
+            .index("by_label", ["label"])
+            .access({ read: "owner", write: "owner" }),
+          people: defineTable({ name: v.string() }).access({
+            read: "owner",
+            write: "owner",
+          }),
+        })
       )
     );
     const scope = scopeOf(fixture.schemaHash);
@@ -516,7 +515,10 @@ describe("cursors", () => {
           consumer: { resourceId: "notes-app", resourceVersion: 2 },
         })
       ),
-      otherSchema: await after({}, cursor, scopeOf(later.schemaHash)),
+      // Last: the store's schema moves on, and the cursor with it.
+      otherSchema: await appliedTables(fixture.store, laterText).then(
+        async ({ schemaHash }) => await after({}, cursor, scopeOf(schemaHash))
+      ),
     }).toStrictEqual({
       same: ["n-ada-00002", "n-ada-00003"],
       notBase64: "data.invalid_cursor",

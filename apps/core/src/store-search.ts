@@ -24,7 +24,7 @@ import type { Fragment } from "./store-expressions.ts";
 //
 // Triggers on `sdk_records` keep it in step, in the transaction of every
 // write that touches a record of its table, whichever path writes it (a
-// commit, a backfill, a migration's batch, a cascade, a preview that is
+// commit, a schema change, a cascade, a preview that is
 // rolled back): a record inserted is added, one whose document or owner
 // changed is replaced, and one deleted is removed before it goes (so its
 // number is still there to find; the migration's own trigger forgets the
@@ -38,19 +38,15 @@ import type { Fragment } from "./store-expressions.ts";
 // purge drops every search index, its triggers and shadow tables before
 // its records (`dropSearches`).
 //
-// Search indexes, like indexes, are never retired yet: a table's index
-// that no retained version declares any more stays, kept in step, until
-// versions are retired (GRA-1480) and drop what none of them pins.
-//
 // Like an index (store-indexes.ts), a search index is named by the hash of
 // its definition (its format's version, the table, the owner column and
 // the fields, in order), never by its author: a changed definition is a
-// new index beside the old, built over the records already there when the
-// schema declaring it is applied, and a consumer pinned to an older schema
-// keeps searching its own. Installing checks what SQLite holds and refuses
-// an object of one of its names with another definition. A store holds at
-// most `storeMaxSearchIndexes`, since every write to a table runs the
-// triggers of every one of its table's indexes.
+// new index, built over the records already there when the schema
+// declaring it is applied, and the one the schema no longer declares is
+// dropped in that transaction. Installing checks what SQLite holds and
+// refuses an object of one of its names with another definition. A store
+// holds at most `storeMaxSearchIndexes`, since every write to a table runs
+// the triggers of every one of its table's indexes.
 //
 // Threat model (who writes the definition: an App's schema, through its
 // manifest; who writes the text searched for: App code, from anyone):
@@ -297,17 +293,28 @@ export const searchObjectsLeft =
   "EXISTS (SELECT 1 FROM sqlite_master WHERE name LIKE 'sdk\\_fts\\_%' ESCAPE '\\')";
 
 /**
- * Drops every search index of a deleted store, with its triggers and
- * shadow tables: run by its purge before its records go, so no deleted
- * record's text is kept in the store's pages and no trigger runs for the
- * records the purge removes.
+ * Drops every search index but those of `keep`, with their triggers and
+ * shadow tables: a schema applied drops those it no longer declares, and
+ * a deleted store's purge drops them all before its records go, so no
+ * deleted record's text is kept in the store's pages and no trigger runs
+ * for the records the purge removes.
  */
-export const dropSearches = (sql: Pick<SqlStorage, "exec">): void => {
+export const dropSearches = (
+  sql: Pick<SqlStorage, "exec">,
+  keep: ReadonlyMap<string, PhysicalSearch> = new Map()
+): void => {
+  const kept = new Set([...keep.values()].map(({ name }) => name));
   const objects = sql
     .exec<{ name: string; type: string; sql: string | null }>(
       "SELECT name, type, sql FROM sqlite_master WHERE name LIKE 'sdk\\_fts\\_%' ESCAPE '\\' AND type IN ('table', 'trigger')"
     )
-    .toArray();
+    .toArray()
+    // Its own name, its triggers' and its shadow tables' all start with
+    // the index's name.
+    .filter(
+      ({ name }) =>
+        !kept.has(name.slice(0, searchPrefix.length + nameHashLength))
+    );
   for (const { name, type } of objects) {
     if (type === "trigger") {
       sql.exec(`DROP TRIGGER IF EXISTS "${name}"`);
@@ -330,10 +337,8 @@ const wordCharacter = /[\p{L}\p{N}]/u;
 /**
  * The FTS5 query for `terms` (`searchTerms`, at least one) in `search`:
  * every word in one of its text fields, the last as a prefix, and, for a
- * table owner-only now (`ownerScoped`, from the store's contract, not
- * the index: a version pinned to an index built while the table was
- * owner-only searches every owner's records once it isn't), the caller's
- * ID in the owner column.
+ * table owner-only now (`ownerScoped`, from the schema in force, not
+ * the index), the caller's ID in the owner column.
  */
 export const searchMatch = (
   search: PhysicalSearch,

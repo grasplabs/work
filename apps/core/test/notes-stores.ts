@@ -9,14 +9,11 @@ import { env } from "cloudflare:workers";
 import type { Acting } from "../src/auth/identity.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import { backfillBatchSchema } from "../src/store-host.ts";
-import type { BackfillOutcome } from "../src/store-host.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { manifestHash, memberRoles, newRecordId } from "./store-schemas.ts";
+import { applied, memberRoles, newRecordId } from "./store-schemas.ts";
 
-// Stores with a defaulted field pending (store-host.ts, `fillMissing`),
-// as the backfill's tests make and look into them: through the store's
-// own way in and its Durable Object.
+// Stores of notes, as the tests of a store's schema changes make and look
+// into them: through the store's own way in and its Durable Object.
 
 export const builder: Acting = {
   userId: "ada",
@@ -44,11 +41,6 @@ export const v1 = notes(noteFields);
 export const withCategory = notes({
   ...noteFields,
   category: v.string().max(20).default("general"),
-});
-
-export const consumer = (resourceVersion: number) => ({
-  resourceId: "notes-app",
-  resourceVersion,
 });
 
 export const newStore = async (): Promise<OpenStore> =>
@@ -121,60 +113,8 @@ export const titled = (count: number): StoreFields[] =>
 export const objectOf = (store: OpenStore) =>
   env.DATA_STORES.getByName(store.id);
 
-/** Batch `batch` of the backfill of `target`, for run `attempt`. */
-export const fill = async (
-  store: OpenStore,
-  target: string,
-  batch: number,
-  attempt = 1
-): Promise<BackfillOutcome> => {
-  const answered = backfillBatchSchema.parse(
-    JSON.parse(
-      await objectOf(store).fillMissing(store.id, { target, attempt, batch })
-    )
-  );
-  if (answered.state === "transform") {
-    throw new Error("A fill's batch asked for a transform");
-  }
-  return answered;
-};
-
-/** Batch `batch` of a migration's backfill: what the store hands core. */
-export const migrationBatch = async (
-  store: OpenStore,
-  target: string,
-  batch: number,
-  attempt = 1
-) =>
-  backfillBatchSchema.parse(
-    JSON.parse(
-      await objectOf(store).fillMissing(store.id, { target, attempt, batch })
-    )
-  );
-
-/** Runs batches from `from` until the backfill is no longer running. */
-export const fillAll = async (
-  store: OpenStore,
-  target: string,
-  { from = 1, attempt = 1 } = {}
-): Promise<BackfillOutcome[]> => {
-  const outcomes: BackfillOutcome[] = [];
-  for (let batch = from; ; batch += 1) {
-    // One batch after the other, as the backfill's run takes them.
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    const outcome = await fill(store, target, batch, attempt);
-    outcomes.push(outcome);
-    if (outcome.state !== "running") {
-      return outcomes;
-    }
-  }
-};
-
-export const statusOf = async (store: OpenStore, schema: string) =>
-  await objectOf(store).schemaStatus(store.id, await manifestHash(schema));
-
-/** The store's contract in force, its hash. */
-export const contractHash = async (store: OpenStore): Promise<string | null> =>
+/** The store's schema in force, its hash. */
+export const schemaHashOf = async (store: OpenStore): Promise<string | null> =>
   await runInDurableObject(
     objectOf(store),
     (_instance, state) =>
@@ -205,19 +145,15 @@ export const notesOf = async (
       )
   );
 
-/** A store holding `count` notes under v1, handed `withCategory`. */
-export const pendingStore = async (
+/** A store holding `count` notes, and `extra`, under v1. */
+export const storeOfNotes = async (
   count: number,
   extra: StoreFields[] = []
 ) => {
   const store = await newStore();
-  const first = await store.defineTables(v1, consumer(1));
-  const ids = await insertAll(store, first.schemaHash, [
-    ...titled(count),
-    ...extra,
-  ]);
-  const second = await store.defineTables(withCategory, consumer(2));
-  return { store, first, second, ids };
+  const { schemaHash } = await store.applySchema(applied(v1));
+  const ids = await insertAll(store, schemaHash, [...titled(count), ...extra]);
+  return { store, schemaHash, ids };
 };
 
 /** The code of an error a call was refused with. */
@@ -231,7 +167,3 @@ export const codeOf = async (call: Promise<unknown>): Promise<unknown> => {
       : error;
   }
 };
-
-/** Retries the failed backfill of `target` (`StoreHost.retryBackfill`). */
-export const retry = async (store: OpenStore, target: string) =>
-  await objectOf(store).retryBackfill(store.id, target);

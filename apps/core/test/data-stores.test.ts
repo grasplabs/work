@@ -38,6 +38,7 @@ import { storeOfNewApp } from "./app-stores.ts";
 import { allEvents } from "./audit-events.ts";
 import { failure } from "./sealed-apps.ts";
 import {
+  applied,
   manifestHash,
   memberRoles,
   newRecordId,
@@ -59,11 +60,8 @@ const builder: Acting = {
 
 const ada = { userId: "ada" };
 const grace = { userId: "grace" };
-const storeManifest = tablesManifest("notes");
-/** A later schema of the same store: one more table. */
-const laterManifest = tablesManifest("notes", "drafts");
+const storeManifest = tablesManifest("notes", "drafts");
 const schemaHash = await manifestHash(storeManifest);
-const laterHash = await manifestHash(laterManifest);
 
 /** Who commits in these tests: one operation's pinned contract, for Ada. */
 const scope = {
@@ -109,8 +107,7 @@ const commitIn = async (
 /** A new store with a `notes` table. */
 const newStore = async (): Promise<OpenStore> => {
   const store = await openStore(env, await storeOfNewApp(env, builder));
-  await store.defineTables(storeManifest);
-  await store.defineTables(laterManifest);
+  await store.applySchema(applied(storeManifest));
   return store;
 };
 
@@ -201,27 +198,14 @@ describe("stores", () => {
     });
   });
 
-  it("mints table IDs, so two stores' tables of one name differ", async () => {
-    const first = await openStore(env, await storeOfNewApp(env, builder));
-    const second = await openStore(env, await storeOfNewApp(env, builder));
-    const firstTables = await first.defineTables(
-      tablesManifest("notes", "people")
-    );
-    const secondTables = await second.defineTables(tablesManifest("notes"));
-
-    expect(firstTables.tables.notes).not.toBe("notes");
-    expect(firstTables.tables.notes).not.toBe(secondTables.tables.notes);
-    // Defining tables again keeps their IDs.
-    await expect(
-      first.defineTables(tablesManifest("notes"))
-    ).resolves.toMatchObject({ storeTables: firstTables.tables });
-  });
-
   it("refuses a table whose name differs only in case from one it holds", async () => {
     const store = await newStore();
     await expect(
-      store.defineTables(tablesManifest("Notes"))
-    ).rejects.toMatchObject({ code: "data.table_conflict" });
+      store.applySchema(applied(tablesManifest("Notes")))
+    ).rejects.toMatchObject({
+      code: "migration.required",
+      details: { refused: [{ table: "Notes", reason: "id_changed" }] },
+    });
     await expect(store.get("people", "x")).rejects.toMatchObject({
       code: "data.unknown_table",
     });
@@ -240,14 +224,13 @@ describe("stores", () => {
     const store = await openStore(env, await storeOfNewApp(env, builder));
     const names = Array.from({ length: storeMaxTables }, (_, n) => `t${n}`);
     await expect(
-      store.defineTables(tablesManifest(...names))
+      store.applySchema(applied(tablesManifest(...names)))
     ).resolves.toBeDefined();
     await expect(
-      store.defineTables(tablesManifest("oneMore"))
+      store.applySchema(applied(tablesManifest("oneMore")))
     ).rejects.toMatchObject({ code: "data.too_many_tables" });
-    // Nothing of the refused definition stays.
-    const { storeTables } = await store.defineTables(tablesManifest("t0"));
-    expect(Object.keys(storeTables)).toHaveLength(storeMaxTables);
+    // Nothing of the refused schema stays: the store's tables still read.
+    await expect(store.get("t0", newRecordId())).resolves.toBeNull();
   });
 
   it("refuses a store it doesn't list, or one deleted, alike", async () => {
@@ -367,28 +350,16 @@ const fieldsOf = (json: Record<string, unknown>): Record<string, unknown> =>
   notesOf(json).fields as Record<string, unknown>;
 
 describe("schemas", () => {
-  it("defines a schema's tables from its manifest and answers its hash, as the SDK computes it", async () => {
+  it("applies a schema from its manifest and answers its hash, as the SDK computes it", async () => {
     const store = await openStore(env, await storeOfNewApp(env, builder));
     const manifest = notesSchema("declared");
-    const defined = await store.defineTables(manifestText(manifest));
-
-    expect(defined.schemaHash).toBe(await hashOf(manifest));
-    expect(Object.keys(defined.tables).toSorted()).toStrictEqual([
-      "notes",
-      "people",
-    ]);
-    // A later schema of fewer tables gets its own; the store keeps them all.
-    const fewer = await store.defineTables(
-      manifestText(
-        schemaManifest(
-          defineSchema({ people: defineTable({ name: v.string() }) })
-        )
-      )
-    );
-    expect(fewer.tables).toStrictEqual({ people: defined.tables.people });
-    expect(fewer.storeTables).toStrictEqual(defined.tables);
+    const defined = await store.applySchema(applied(manifestText(manifest)));
+    expect(defined).toMatchObject({
+      schemaHash: await hashOf(manifest),
+      changed: true,
+    });
     // The same schema declared in another order, its text's keys in yet
-    // another, is the same schema: the same hash, the same tables.
+    // another, is the same schema: the same hash, nothing changed.
     const reordered = manifestText(notesSchema("reordered"));
     const reversed = JSON.stringify(
       JSON.parse(reordered),
@@ -397,38 +368,37 @@ describe("schemas", () => {
           ? Object.fromEntries(Object.entries(part).toReversed())
           : part
     );
-    // Applied again, it leaves the contract as the last schema left it.
-    const again = await store.defineTables(reversed);
-    expect({
-      ...again,
-      contract: [again.contract.hash, again.contract.changed],
-    }).toStrictEqual({
-      ...defined,
-      contract: [fewer.contract.hash, false],
+    await expect(store.applySchema(applied(reversed))).resolves.toMatchObject({
+      schemaHash: defined.schemaHash,
+      changed: false,
     });
   });
 
-  it("a changed access mode waits for its version to be made current", async () => {
+  it("applies a changed access mode at once, as a schema of its own", async () => {
     const store = await openStore(env, await storeOfNewApp(env, builder));
-    const first = await store.defineTables(manifestText(notesManifest()));
-    const looser = await store.defineTables(
-      manifestText(notesManifest({ read: "appMembers" }))
+    const first = await store.applySchema(
+      applied(manifestText(notesManifest()))
     );
-    expect(looser.contract).toMatchObject({ pending: true, awaits: true });
-    expect(looser.contract.hash).not.toBe(first.contract.hash);
+    const looser = await store.applySchema(
+      applied(manifestText(notesManifest({ read: "appMembers" })))
+    );
+    expect(looser.changed).toBeTruthy();
+    expect(looser.changes.accessChanges).toStrictEqual(["notes"]);
+    expect(looser.schemaHash).not.toBe(first.schemaHash);
   });
 
   it("indexes declared in another order alone are the same schema", async () => {
     const store = await openStore(env, await storeOfNewApp(env, builder));
-    const declared = await store.defineTables(manifestText(notesManifest()));
-    const reversed = await store.defineTables(
-      manifestText(notesManifest({ indexes: "reversed" }))
+    const declared = await store.applySchema(
+      applied(manifestText(notesManifest()))
     );
-    expect({ ...reversed, contract: reversed.contract.hash }).toStrictEqual({
-      ...declared,
-      contract: declared.contract.hash,
+    const reversed = await store.applySchema(
+      applied(manifestText(notesManifest({ indexes: "reversed" })))
+    );
+    expect(reversed).toMatchObject({
+      schemaHash: declared.schemaHash,
+      changed: false,
     });
-    expect(reversed.contract.changed).toBeFalsy();
   });
 
   it.each([
@@ -507,7 +477,7 @@ describe("schemas", () => {
     "refuses a schema with %s, and defines nothing of it",
     async (_, text, code) => {
       const store = await openStore(env, await storeOfNewApp(env, builder));
-      await expect(store.defineTables(text)).rejects.toMatchObject({
+      await expect(store.applySchema(applied(text))).rejects.toMatchObject({
         code: "data.invalid_schema",
         details: { code },
       });
@@ -520,11 +490,8 @@ describe("schemas", () => {
   it("refuses anything but a manifest's text", async () => {
     const store = await openStore(env, await storeOfNewApp(env, builder));
     await expect(
-      store.defineTables(asText(notesSchema("declared")))
-    ).rejects.toMatchObject({
-      code: "data.invalid_schema",
-      details: { code: "schema.invalid_manifest" },
-    });
+      store.applySchema(applied(asText(notesSchema("declared"))))
+    ).rejects.toMatchObject({ code: "data.invalid" });
   });
 });
 
@@ -607,7 +574,7 @@ describe("managed fields", () => {
 
     await commitIn(store, {
       principal: grace,
-      schemaHash: laterHash,
+      schemaHash,
       writes: [
         {
           op: "patch",
@@ -631,7 +598,7 @@ describe("managed fields", () => {
       revision: 2,
       // Changing a record doesn't make it someone else's.
       ownerId: "ada",
-      schemaHash: laterHash,
+      schemaHash,
       createdAt: created?.createdAt,
       fields: { title: "Launch day", body: "Agenda" },
     });
@@ -678,7 +645,7 @@ describe("managed fields", () => {
     // The same fields in another order are the same record.
     await commitIn(store, {
       principal: ada,
-      schemaHash: laterHash,
+      schemaHash,
       writes: [
         {
           op: "replace",
@@ -1188,7 +1155,7 @@ describe("writes under the pinned schema's access", () => {
         )
       )
     );
-    const { schemaHash: hash } = await store.defineTables(text);
+    const { schemaHash: hash } = await store.applySchema(applied(text));
     return { store, hash };
   };
 
@@ -1454,7 +1421,7 @@ const linksHash = await manifestHash(linksManifest);
 /** A new store with the `notes` and `links` tables. */
 const newLinkedStore = async (): Promise<OpenStore> => {
   const store = await openStore(env, await storeOfNewApp(env, builder));
-  await store.defineTables(linksManifest);
+  await store.applySchema(applied(linksManifest));
   return store;
 };
 
@@ -1803,41 +1770,6 @@ describe("a store's references", () => {
     await expect(store.get("notes", kept)).resolves.toBeNull();
   });
 
-  it("indexes a write under an older schema the store still holds", async () => {
-    const store = await newLinkedStore();
-    const later = manifestText(
-      schemaManifest(
-        defineSchema({
-          notes: defineTable({ title: v.string() }).access({
-            read: "appMembers",
-            write: "appMembers",
-          }),
-          links: defineTable({ note: v.id("notes").optional() }).access({
-            read: "appMembers",
-            write: "appMembers",
-          }),
-          more: defineTable({ title: v.string() }).access({
-            read: "appMembers",
-            write: "appMembers",
-          }),
-        })
-      )
-    );
-    await store.defineTables(later);
-    const note = await insertLinked(store, "notes", { title: "Kept" });
-    // Written under the first schema, after the later one.
-    await insertLinked(store, "links", { note });
-    await expect(
-      commitIn(store, {
-        principal: ada,
-        schemaHash: await manifestHash(later),
-        writes: [
-          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
-        ],
-      })
-    ).rejects.toMatchObject({ code: "data.referenced" });
-  });
-
   it("lets a record that refers only to itself be deleted", async () => {
     const store = await newLinkedStore();
     const link = newRecordId();
@@ -1852,7 +1784,7 @@ describe("a store's references", () => {
     await expect(store.get("links", link)).resolves.toBeNull();
   });
 
-  it("keeps a reference a newer version wrote through an older version's writes", async () => {
+  it("keeps a reference a newer version wrote through an older version's writes after a rollback", async () => {
     const store = await openStore(env, await storeOfNewApp(env, builder));
     // The older version knows no reference; the newer adds one.
     const older = notesAndLinks({ label: v.string().optional() });
@@ -1864,9 +1796,7 @@ describe("a store's references", () => {
       manifestHash(older),
       manifestHash(newer),
     ]);
-    await store.defineTables(older);
-    // The older version writes first, so the store reads its contract
-    // before the newer version widens it.
+    await store.applySchema(applied(older));
     const note = newRecordId();
     await commitIn(store, {
       principal: ada,
@@ -1875,7 +1805,7 @@ describe("a store's references", () => {
         { op: "insert", id: note, table: "notes", fields: { title: "Kept" } },
       ],
     });
-    await store.defineTables(newer);
+    await store.applySchema(applied(newer));
     const link = newRecordId();
     await commitIn(store, {
       principal: ada,
@@ -1884,7 +1814,9 @@ describe("a store's references", () => {
         { op: "insert", id: link, table: "links", fields: { pin: note } },
       ],
     });
-    // Rolled back: the older version patches the link, then replaces it.
+    // Rolled back: the older version patches the link, then replaces it,
+    // the field it doesn't declare kept.
+    await store.applySchema(applied(older));
     await commitIn(store, {
       principal: ada,
       schemaHash: olderHash,
@@ -1911,28 +1843,34 @@ describe("a store's references", () => {
         },
       ],
     });
-    await expect(
-      Promise.all(
-        [olderHash, newerHash].map(
-          async (pinned) =>
-            await refusalOf(
-              async () =>
-                await commitIn(store, {
-                  principal: ada,
-                  schemaHash: pinned,
-                  writes: [
-                    {
-                      op: "delete",
-                      table: "notes",
-                      id: note,
-                      expectedRevision: 1,
-                    },
-                  ],
-                })
-            )
+    const refusals = [];
+    for (const [text, pinned] of [
+      [older, olderHash],
+      [newer, newerHash],
+    ] as const) {
+      // One version after the other, as a rollback and a publish again.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await store.applySchema(applied(text));
+      refusals.push(
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await refusalOf(
+          async () =>
+            await commitIn(store, {
+              principal: ada,
+              schemaHash: pinned,
+              writes: [
+                {
+                  op: "delete",
+                  table: "notes",
+                  id: note,
+                  expectedRevision: 1,
+                },
+              ],
+            })
         )
-      )
-    ).resolves.toStrictEqual([
+      );
+    }
+    expect(refusals).toStrictEqual([
       { code: "data.referenced", details: { table: "notes", id: note } },
       { code: "data.referenced", details: { table: "notes", id: note } },
     ]);
@@ -1971,7 +1909,7 @@ const cascadeHash = await manifestHash(cascadeManifest);
 /** A new store with the `notes`, `links` and `subs` tables. */
 const newCascadeStore = async (): Promise<OpenStore> => {
   const store = await openStore(env, await storeOfNewApp(env, builder));
-  await store.defineTables(cascadeManifest);
+  await store.applySchema(applied(cascadeManifest));
   return store;
 };
 
@@ -2020,8 +1958,7 @@ describe("a store's cascades", () => {
       manifestHash(older),
       manifestHash(newer),
     ]);
-    await store.defineTables(older);
-    await store.defineTables(newer);
+    await store.applySchema(applied(newer));
     const note = newRecordId();
     const link = newRecordId();
     await commitIn(store, {
@@ -2032,6 +1969,7 @@ describe("a store's cascades", () => {
         { op: "insert", id: link, table: "links", fields: { pin: note } },
       ],
     });
+    await store.applySchema(applied(older));
     await commitIn(store, {
       principal: ada,
       schemaHash: olderHash,
@@ -3096,7 +3034,7 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
 
   it("deletes the records of everyone a cascade reaches, each batch's audited per owner", async () => {
     const store = await openStore(env, await storeOfNewApp(env, builder));
-    await store.defineTables(ownedManifest);
+    await store.applySchema(applied(ownedManifest));
     const [note = ""] = await insertOwned(store, ada, "notes", [
       { title: "Root" },
     ]);

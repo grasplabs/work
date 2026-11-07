@@ -9,7 +9,7 @@ import { defineSchema, defineTable, v } from "../src/values.ts";
 // records of it, and how the runner calls its handler: pure checks of a
 // declaration and of the runner, so unit tests. That the host runs it in a
 // capability-free sandbox and validates what it answers is tested through
-// the host (apps/core/test/migration-transform.test.ts).
+// the host (apps/core/test/migration-run.test.ts).
 
 const fromSchema = "a".repeat(64);
 const toSchema = "b".repeat(64);

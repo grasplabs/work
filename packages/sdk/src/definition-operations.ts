@@ -18,6 +18,7 @@ import type {
   DefinedRule,
   DefinedTable,
 } from "./definition.ts";
+import { referencesRenamed } from "./descriptor-references.ts";
 import {
   isBrowserPermission,
   isPermission,
@@ -88,6 +89,11 @@ export type DefinitionOperation =
       readonly op: "renameField";
       readonly table: string;
       readonly field: string;
+      readonly name: string;
+    }
+  | {
+      readonly op: "renameTable";
+      readonly table: string;
       readonly name: string;
     }
   | {
@@ -280,8 +286,8 @@ const withIndex = (
 
 /**
  * The table named `name` gone, with its answers. Its records stay in the
- * App's store, never dropped (schema-plan.ts): a table of that name added
- * again later is a new table, with an ID of its own.
+ * App's store, never dropped: a table of that name can't be added again,
+ * as the store keeps the name for those records.
  */
 const withoutTable = (
   definition: AppDefinition,
@@ -544,6 +550,43 @@ const withAccess = (
   });
 };
 
+/**
+ * `definition` with table `from` named `name`: its ID kept, so its
+ * records follow it on the store, and every field referring to it
+ * (`v.id`) naming it anew. A name another table has, in any case, is
+ * refused: the store tells tables apart regardless of case.
+ */
+const withTableRenamed = (
+  definition: AppDefinition,
+  from: string,
+  name: string
+): AppDefinition => {
+  const table = tableNamed(definition, from);
+  if (
+    definition.tables.some(
+      (held) => held.name.toLowerCase() === name.toLowerCase()
+    )
+  ) {
+    return refuse(
+      `The App has a table \`${name}\` already, or one whose name differs from it only in case.`
+    );
+  }
+  const names = new Map([[table.name, name]]);
+  const referring = (field: DefinedField): DefinedField => ({
+    ...field,
+    type: referencesRenamed(field.type, names),
+  });
+  return {
+    ...definition,
+    preferences: definition.preferences.map(referring),
+    tables: definition.tables.map((held) => ({
+      ...held,
+      ...(held.id === table.id ? { name } : {}),
+      fields: held.fields.map(referring),
+    })),
+  };
+};
+
 /** The definition after `operation`, before it is checked. */
 const applied = (
   definition: AppDefinition,
@@ -607,6 +650,9 @@ const applied = (
     }
     case "moveField": {
       return withFieldMoved(definition, operation);
+    }
+    case "renameTable": {
+      return withTableRenamed(definition, operation.table, operation.name);
     }
     case "setAccess": {
       return withAccess(definition, operation);
