@@ -1578,7 +1578,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.call",
       async (by): Promise<DraftCall> => {
         const id = await this.#buildable(by, app);
-        const { chatId } = this.ctx.props;
+        const { chatId, workspaceId } = this.ctx.props;
         if (typeof method !== "string") {
           throw appErrors.create("app.invalid", {
             issues: ["A function's path and its input, as plain data."],
@@ -1596,7 +1596,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         let run: DraftRun;
         let kind: "query" | "mutation" | "action";
         try {
-          run = await draftRunOf(this.env, by, id, chatId);
+          run = await draftRunOf(this.env, by, id, chatId, workspaceId);
           const operation = Object.hasOwn(run.release.app.operations, method)
             ? run.release.app.operations[method]
             : undefined;

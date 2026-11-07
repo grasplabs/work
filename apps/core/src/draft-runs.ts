@@ -211,10 +211,12 @@ export const draftRunOf = async (
   env: Env,
   by: Pick<Identity, "userId" | "role" | "teams">,
   app: AppId,
-  chatId: ChatId
+  chatId: ChatId,
+  /** The Workspace object the chat is in: the person's own, unless the
+   * chat's agent names another it runs in (agent-builds.ts). */
+  workspaceId: WorkspaceId = personalWorkspaceId(by.userId)
 ): Promise<DraftRun> => {
   await editableApp(env, by, app);
-  const workspaceId = personalWorkspaceId(by.userId);
   const { draft, seed } = await workspace(env, workspaceId).previewRun(
     chatId,
     by.userId,
