@@ -1144,7 +1144,23 @@ const defaultSendTimeoutMs = 150_000;
  * stands for marks that couldn't be read (`sendMarksOf`), and holds every
  * change.
  */
-const sendMarkSchema = z.object({ change: z.int().nullable(), at: z.number() });
+const sendMarkSchema = z.object({
+  change: z.int().nullable(),
+  at: z.number(),
+  /** The script it changes. */
+  script: z.string().optional(),
+  /**
+   * The fingerprint of the upload it sent (`uploadFingerprint`): one with
+   * the same is the same call, landing late or not.
+   */
+  fingerprint: z.string().optional(),
+});
+
+/** An upload as its mark names it: its script, and its fingerprint. */
+interface MarkedUpload {
+  script: string;
+  fingerprint: string;
+}
 
 /** The marks on an operation (`clientProvisions.sending`), by sender. */
 const sendMarksSchema = z.record(z.string(), sendMarkSchema);
@@ -1174,7 +1190,10 @@ const sendMarksOf = (
 /**
  * Whether a call marked in `marks` by a sender other than `except`, for
  * change `change` or one before it, may still land: sent less than
- * `sendSettleMs` ago. An earlier change's counts too: a release or a
+ * `sendSettleMs` ago. With `sameUpload`, a mark of this change for that
+ * upload's script with its fingerprint doesn't count, as it is the same
+ * call, nor one of this change for another script, which it doesn't
+ * change. An earlier change's counts too: a release or a
  * rollback that took the client over must not send before what the
  * change it replaced sent has landed, or that call would land after it
  * and undo it.
@@ -1183,13 +1202,21 @@ const othersSending = (
   marks: z.infer<typeof sendMarksSchema>,
   change: number,
   except: string,
-  now: number
+  now: number,
+  sameUpload?: MarkedUpload
 ): boolean =>
   Object.entries(marks).some(
     ([sender, mark]) =>
       sender !== except &&
       (mark.change === null || mark.change <= change) &&
-      now - mark.at < sendSettleMs
+      now - mark.at < sendSettleMs &&
+      !(
+        sameUpload !== undefined &&
+        mark.change === change &&
+        mark.script !== undefined &&
+        (mark.script !== sameUpload.script ||
+          mark.fingerprint === sameUpload.fingerprint)
+      )
   );
 
 /** The marks on client `clientId`'s operation, as stored now. */
@@ -1231,7 +1258,8 @@ const markPath = (sender: string): string =>
  */
 const othersSettled = async (
   context: ProvisionContext,
-  { operation, held }: Pick<Loaded, "operation" | "held">
+  { operation, held }: Pick<Loaded, "operation" | "held">,
+  sameUpload?: MarkedUpload
 ): Promise<void> => {
   const sender = senderOf(held);
   const delayMs = context.observe?.retryDelayMs ?? defaultObserveDelayMs;
@@ -1241,7 +1269,8 @@ const othersSettled = async (
       await sendMarks(context.db, held.clientId),
       operation.change,
       sender,
-      Date.now()
+      Date.now(),
+      sameUpload
     )
   ) {
     await scheduler.wait(delayMs);
@@ -1261,7 +1290,10 @@ const othersSettled = async (
  * - a release or a rollback that took the client waits, before it sends,
  *   for every mark of the changes before it (`othersSettled`);
  * - a retry of a step waits, before it sends, for any call another
- *   attempt (one that timed out and went on) still has on its way.
+ *   attempt (one that timed out and went on, or died) still has on its
+ *   way, but the very upload it makes itself, once its script is at the
+ *   release's last migration (`upload`). Each mark names its upload's
+ *   script and fingerprint for this.
  *
  * Marked in the same statement that checks the claim, so a call is sent
  * only marked; cleared by the sender alone, and by the change, not the
@@ -1272,15 +1304,16 @@ const othersSettled = async (
 const sendHolding = async (
   context: ProvisionContext,
   { operation, held }: Loaded,
-  send: (signal: AbortSignal) => Promise<void>
+  send: (signal: AbortSignal) => Promise<void>,
+  { upload, same }: { upload: MarkedUpload; same: boolean }
 ): Promise<void> => {
   const { db } = context;
   const sender = senderOf(held);
-  await othersSettled(context, { operation, held });
+  await othersSettled(context, { operation, held }, same ? upload : undefined);
   const marked = await db
     .update(clientProvisions)
     .set({
-      sending: sql`json_set(coalesce(${clientProvisions.sending}, '{}'), ${markPath(sender)}, json(${JSON.stringify({ change: operation.change, at: Date.now() })}))`,
+      sending: sql`json_set(coalesce(${clientProvisions.sending}, '{}'), ${markPath(sender)}, json(${JSON.stringify({ change: operation.change, at: Date.now(), ...upload })}))`,
     })
     .where(and(eq(clientProvisions.id, operation.id), stillHolds(held)))
     .returning({ id: clientProvisions.id });
@@ -1851,12 +1884,18 @@ const sendUpload = async (
     target,
     upload,
     revoked,
+    fingerprint,
+    sameUpload,
   }: {
     app: App;
     worker: WorkerEntry;
     target: ScriptTarget;
     upload: WorkerUpload;
     revoked: readonly string[];
+    /** The upload's fingerprint, marked with it (`sendHolding`). */
+    fingerprint: string;
+    /** Whether another attempt's same upload on its way needn't be waited for. */
+    sameUpload: boolean;
   }
 ): Promise<string | null> => {
   const { api, db, store } = context;
@@ -1888,14 +1927,22 @@ const sendUpload = async (
     progress,
     { app, history: worker.durableObjectMigrations },
     async (sent) => {
-      await sendHolding(context, loaded, async (signal) => {
-        await uploadTargetScript(
-          api,
-          target,
-          { ...upload, ...(assetsJwt === undefined ? {} : { assetsJwt }) },
-          { signal, sent }
-        );
-      });
+      await sendHolding(
+        context,
+        loaded,
+        async (signal) => {
+          await uploadTargetScript(
+            api,
+            target,
+            { ...upload, ...(assetsJwt === undefined ? {} : { assetsJwt }) },
+            { signal, sent }
+          );
+        },
+        {
+          upload: { script: target.scriptName, fingerprint },
+          same: sameUpload,
+        }
+      );
     }
   );
   const after = await observed(
@@ -1962,12 +2009,26 @@ const upload = async (
     secrets,
   });
   const lastTag = worker.durableObjectMigrations.at(-1)?.tag;
-  // Another attempt's upload of this Worker may still be on its way: what
-  // the script runs, and so the migrations this one sends, is read once it
-  // landed.
-  await othersSettled(context, loaded);
+  // Another attempt's upload of this Worker may still be on its way
+  // (`othersSettled`), or a run's of the change before. One of this change
+  // with this very fingerprint, once the script is at the release's last
+  // Durable Object migration, is the call this one makes: landing late, it
+  // changes nothing, so it isn't waited for. Every other is, and the
+  // script, and so the migrations this one sends, read again once it
+  // landed. An attempt doesn't send what an earlier one did when what it
+  // reads has changed since (settings, sign-in, secrets, the generation,
+  // the rotation's window): its fingerprint differs then.
+  let before = await targetMigrationState(api, target);
+  const sameUpload = before.exists && before.migrationTag === lastTag;
+  await othersSettled(
+    context,
+    loaded,
+    sameUpload ? { script: target.scriptName, fingerprint } : undefined
+  );
+  if (!sameUpload) {
+    before = await targetMigrationState(api, target);
+  }
   const progress = await progressNow(db, loaded.operation.id);
-  const before = await targetMigrationState(api, target);
   const present = new Set(
     before.exists ? await targetSecretNames(api, target) : []
   );
@@ -2025,6 +2086,8 @@ const upload = async (
         },
       },
       revoked,
+      fingerprint,
+      sameUpload,
     });
     await recordDropped(db, loaded, progress, { app, target, revoked });
     await recordProgress(db, loaded, {

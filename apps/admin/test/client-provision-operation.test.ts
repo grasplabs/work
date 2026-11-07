@@ -2108,6 +2108,91 @@ describe("provisioning a placed client", () => {
     });
   });
 
+  it.each([
+    { upload: "the same upload", waits: false },
+    { upload: "another upload (read with other settings)", waits: true },
+  ])(
+    "after a dead attempt's core upload landed, marked, the next attempt waits for it only when it was $upload",
+    async ({ waits }) => {
+      const manifest = await importRelease();
+      const { clientId, held } = await setUp(manifest);
+      // Core's upload lands, with its migration, and its answer never
+      // arrives: its attempt's mark stays, as a dead isolate's would.
+      cloudflare.failNext(isCoreUpload, "lost");
+      await expect(failing(held)).resolves.toMatchObject({ status: 0 });
+      if (waits) {
+        await db
+          .update(clientProvisions)
+          .set({
+            sending: sql`(SELECT json_group_object(key, json_set(value, '$.fingerprint', 'another')) FROM json_each(${clientProvisions.sending}))`,
+          })
+          .where(eq(clientProvisions.clientId, clientId));
+      }
+      const uploads = () => cloudflare.calls.filter(isCoreUpload).length;
+      const sentBefore = uploads();
+      // Time under the test's control: the retry waits this long between
+      // reads of a mark it holds on to (`othersSettled`), and between
+      // reads back of what it wrote (`observed`). Before core's upload went
+      // out, such a wait is the retry holding on to the mark: held until
+      // the test lets it go. After, it passes at once.
+      const markWaitMs = 60_000;
+      const waiting = Promise.withResolvers<"waiting">();
+      const letGo = Promise.withResolvers<null>();
+      const wait = scheduler.wait.bind(scheduler);
+      const waitSpy = vi
+        .spyOn(scheduler, "wait")
+        .mockImplementation(async (ms, options) => {
+          if (ms % markWaitMs !== 0) {
+            await wait(ms, options);
+          } else if (uploads() > sentBefore) {
+            await wait(0, options);
+          } else {
+            waiting.resolve("waiting");
+            await letGo.promise;
+          }
+        });
+
+      try {
+        const run = runClientProvision(
+          { ...context, observe: { retryDelayMs: markWaitMs } },
+          await attempt(clientId)
+        );
+        // Whichever comes first: the retry finishing, or waiting for the mark.
+        const first = await Promise.race([
+          run.then(() => "finished" as const),
+          waiting.promise,
+        ]);
+        const meanwhile = await operationOf(clientId);
+        const whileMarked = {
+          first,
+          uploads: uploads() - sentBefore,
+          status: meanwhile?.status,
+        };
+        // Aged out: no call of it can land any more.
+        await db
+          .update(clientProvisions)
+          .set({
+            sending: sql`(SELECT json_group_object(key, json_set(value, '$.at', 0)) FROM json_each(${clientProvisions.sending}))`,
+          })
+          .where(eq(clientProvisions.clientId, clientId));
+        letGo.resolve(null);
+        await run;
+        const after = await operationOf(clientId);
+
+        expect({ whileMarked, status: after?.status }).toStrictEqual({
+          // The same upload: it goes on without waiting. Another: nothing
+          // goes out while the mark is fresh.
+          whileMarked: waits
+            ? { first: "waiting", uploads: 0, status: "running" }
+            : { first: "finished", uploads: 1, status: "done" },
+          status: "done",
+        });
+      } finally {
+        waitSpy.mockRestore();
+      }
+    }
+  );
+
   it("takes the real release live in Workers for Platforms with no AI Gateway or AI binding, Grasp's AI key on its connect alone, and without mail", async () => {
     const real = await importRealRelease();
     const { account, clientId, held } = await setUp(
