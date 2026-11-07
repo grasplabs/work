@@ -22,10 +22,6 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-<<<<<<< HEAD
-    "@babel/parser": "catalog:",
-=======
->>>>>>> dd9a831107 (refactor(sdk,compiler,core): parse workflow expressions with oxc)
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "catalog:"
   }
