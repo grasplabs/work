@@ -67,7 +67,7 @@ const partOf = async <T>(
 
 /**
  * How many signals of each kind the person reads: every improvement
- * signal for admins, each engine's they build for builders (an engine
+ * signal for admins, each App's they build for builders (an App
  * whose signals core refuses them left out), and their own collections'.
  * Null when they read none.
  */
@@ -83,9 +83,9 @@ const signalCounts = async (
     if (!canBuild(person.role)) {
       return [];
     }
-    const engines = (await orNone(apps.list())) ?? [];
+    const openable = (await orNone(apps.list())) ?? [];
     const each = await Promise.all(
-      engines.map(async ({ id }) => await orNone(signals.list({ app: id })))
+      openable.map(async ({ id }) => await orNone(signals.list({ app: id })))
     );
     return each.filter((read) => read !== undefined);
   };

@@ -16,7 +16,7 @@ import { NotLoaded } from "../load-from-core.tsx";
 // The dashboard, as the prototype's (`routes/dashboard.tsx`, the wide
 // `Page` with its `PageHeading`): what waits on the person, each with its
 // next step; under it the widget board (widget-board.tsx), the
-// prototype's return, goals, teams and workflows, then the engines, the
+// prototype's return, goals, teams and workflows, then the Apps, the
 // runs this week, and what could be better, from the daily signals; and,
 // for admins, the latest of what Grasp and people did. With a plan for the interviews, the heading says the programme's
 // week and stage, and the weekly report's bar is under what waits: when

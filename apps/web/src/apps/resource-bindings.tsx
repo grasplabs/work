@@ -50,7 +50,7 @@ import {
   targetOf,
 } from "./binding-form.ts";
 
-// What an engine's actions reach through its declared resources (core's
+// What an App's actions reach through its declared resources (core's
 // resource-bindings.ts): the models, integrations, knowledge and templates
 // its current version declares, whether a binding serves each now and,
 // when it doesn't, why. An admin binds each one to something that may
@@ -58,7 +58,7 @@ import {
 // Grasp staff or builders) and checks every choice again; the page only
 // offers the controls to those core gives choices to.
 
-/** An engine's resources, with the connections an admin may name. */
+/** An App's resources, with the connections an admin may name. */
 export interface ResourcesPage {
   review: ResourceBindingsReview;
   /** The connections the viewer can see, to name connection permissions. */
@@ -557,10 +557,10 @@ const Undeclared = ({
   const { i18n } = useLingui();
   return (
     <section
-      aria-labelledby="engine-undeclared-resources"
+      aria-labelledby="app-undeclared-resources"
       className="flex flex-col gap-3"
     >
-      <h3 className="text-sm font-medium" id="engine-undeclared-resources">
+      <h3 className="text-sm font-medium" id="app-undeclared-resources">
         <Trans>No longer declared</Trans>
       </h3>
       <p className="text-muted-foreground max-w-prose">
@@ -611,7 +611,7 @@ const Undeclared = ({
 };
 
 /**
- * The engine's declared resources and their bindings; with the controls
+ * The App's declared resources and their bindings; with the controls
  * when the viewer `decides` them (an admin of the organization).
  */
 export const ResourceBindings = ({
@@ -638,8 +638,8 @@ export const ResourceBindings = ({
     });
   };
   return (
-    <section aria-labelledby="engine-resources" className="flex flex-col gap-4">
-      <h2 className="font-medium" id="engine-resources">
+    <section aria-labelledby="app-resources" className="flex flex-col gap-4">
+      <h2 className="font-medium" id="app-resources">
         <Trans>Resources</Trans>
       </h2>
       <p className="text-muted-foreground max-w-prose">

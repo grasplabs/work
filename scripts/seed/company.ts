@@ -45,7 +45,7 @@ export interface Person {
  * Who works with Grasp: the prototype's members, but Ruben Altena, who is
  * Grasp's staff, not the company's. The configured admin of the local
  * stack, whom a developer signs in as, is the COO. Lisa de Vries is a
- * viewer in the prototype, but she owns the service desk's domain, which
+ * viewer in the prototype, but she owns the service desk's App, which
  * takes a builder in core. Jeroen Mulder, the finance assistant the
  * prototype's finance cockpit names, signs in too: he puts the supplier
  * invoices in, since core lets nobody decide on a run they started.

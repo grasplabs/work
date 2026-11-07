@@ -36,21 +36,21 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { abandonFailureText } from "./store-change-errors.ts";
 
-// A schema change of a store the engine uses (store-backfill.ts in core),
+// A schema change of a store the App uses (store-backfill.ts in core),
 // for the organization's admins: while its new fields' defaults are being
 // filled in, and once filling them in failed on a record, which blocks
-// every schema change of that store, whichever engine's, until the record
+// every schema change of that store, whichever App's, until the record
 // is mended or an admin abandons the change (core's store-abandon.ts).
 // Only admins read it, so only they see any of it: for anyone else the
-// engine page doesn't read it at all.
+// App page doesn't read it at all.
 
-/** Where the engine page shows its stores' changes, for links to them. */
+/** Where the App page shows its stores' changes, for links to them. */
 export const storeChangesAnchor = "store-changes";
 
 /**
  * What an explicit migration's failure means: its migration, table and
  * record, and what its transform threw or why its output was refused,
- * which only admins and the migration's own engine are shown.
+ * which only admins and the migration's own App are shown.
  */
 const MigrationFailureText = ({ failure }: { failure: MigrationFailure }) => {
   const { migration, table, id, issues } = failure;
@@ -304,23 +304,22 @@ export const StoreChange = ({
   );
 };
 
-/** What abandoning a change took out of force, named for the engine's page. */
+/** What abandoning a change took out of force, named for the App's page. */
 export const Abandoned = ({
   abandoned,
   name,
-  engine,
+  app: { id: appId, name: appName },
 }: {
   abandoned: AbandonedBackfill;
-  /** What the engine calls the store. */
+  /** What the App calls the store. */
   name: string;
-  engine: App;
+  app: App;
 }) => {
   const { t } = useLingui();
-  const engineName = engine.name;
   const releases = formatList(
     abandoned.releases.map(({ app, version }) =>
-      app === engine.id
-        ? t`${ph({ appName: engineName })}, version ${version}`
+      app === appId
+        ? t`${ph({ appName })}, version ${version}`
         : t`App ${app}, version ${version}`
     )
   );
@@ -390,37 +389,37 @@ export const abandonChange = async (
   }
 };
 
-/** A read of the engine's stores' changes, which the page doesn't wait for. */
+/** A read of the App's stores' changes, which the page doesn't wait for. */
 type ChangesRead = Promise<Loaded<AppStoreBackfill[]>>;
 
-/** The engine's stores' changes, read from core. */
+/** The App's stores' changes, read from core. */
 const readChangesOf = async (
   core: Pick<CoreConnection, "withSession">,
-  engine: string
+  app: string
 ): ChangesRead =>
   await loadFromCore(
     core,
-    async (session) => await session.stores.appBackfills(engine)
+    async (session) => await session.stores.appBackfills(app)
   );
 
 /**
- * The read of the engine's stores' changes, for its loader: started only
+ * The read of the App's stores' changes, for its loader: started only
  * for the organization's own admins, never Grasp staff, who alone may
  * abandon one; nothing, and nothing asked of core, for anyone else.
  */
 export const readStoreChanges = (
   core: Pick<CoreConnection, "withSession">,
   viewer: { role: string; staff: boolean },
-  engine: string
+  app: string
 ): ChangesRead | undefined =>
-  isMemberAdmin(viewer) ? readChangesOf(core, engine) : undefined;
+  isMemberAdmin(viewer) ? readChangesOf(core, app) : undefined;
 
 const StoreChangesOf = ({
   changes,
-  engine,
+  app,
 }: {
   changes: ChangesRead;
-  engine: App;
+  app: App;
 }) => {
   const { t } = useLingui();
   const core = useCore();
@@ -455,7 +454,7 @@ const StoreChangesOf = ({
           async (session) => await session.stores.abandonBackfill(input)
         ),
       async () => {
-        const read = readChangesOf(core, engine.id);
+        const read = readChangesOf(core, app.id);
         setReread({ of: changes, read });
         // Waited for, so the controls stay off until what they act on is
         // back. A failed read never throws: it shows where the list was.
@@ -498,7 +497,7 @@ const StoreChangesOf = ({
           {"abandoned" in outcome ? (
             <Abandoned
               abandoned={outcome.abandoned}
-              engine={engine}
+              app={app}
               name={outcome.name}
             />
           ) : (
@@ -511,16 +510,14 @@ const StoreChangesOf = ({
 };
 
 /**
- * The engine's stores' pending changes, as `readStoreChanges` read them;
+ * The App's stores' pending changes, as `readStoreChanges` read them;
  * nothing for anyone it didn't read them for.
  */
 export const StoreChanges = ({
   changes,
-  engine,
+  app,
 }: {
   changes: ChangesRead | undefined;
-  engine: App;
+  app: App;
 }) =>
-  changes === undefined ? null : (
-    <StoreChangesOf changes={changes} engine={engine} />
-  );
+  changes === undefined ? null : <StoreChangesOf changes={changes} app={app} />;

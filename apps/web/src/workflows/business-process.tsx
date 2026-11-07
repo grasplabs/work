@@ -143,7 +143,7 @@ export const ProcessGlyph = ({
   </svg>
 );
 
-/** A process's icon on a grey tile, where a line begins, as an engine's is. */
+/** A process's icon on a grey tile, where a line begins. */
 export const ProcessTile = ({ process }: { process: BusinessProcess }) => (
   <span
     aria-hidden="true"

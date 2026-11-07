@@ -27,7 +27,7 @@ import { signalKindLooks } from "./signals.tsx";
 // workflow, what could be better, and, for admins, how many people the
 // interviews heard. No hours, euros or goals: core keeps none of them. It
 // is Markdown, which the dialog shows and the export saves or prints
-// (export/export-file.tsx); what people typed (workflow and engine names)
+// (export/export-file.tsx); what people typed (workflow and App names)
 // is escaped, never read as Markdown.
 
 /** What the report says, each part as core read it, or why it couldn't. */

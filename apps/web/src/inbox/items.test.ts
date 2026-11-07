@@ -368,7 +368,7 @@ describe(inboxItems, () => {
         { label: "Package", value: "left-pad@1.3.0" },
         { label: "Advisory", value: "MAL-2026-1" },
       ],
-      about: { kind: "engine", engine: "app-invoices", place: "packages" },
+      about: { kind: "app", app: "app-invoices", place: "packages" },
       urgent: true,
     });
   });
@@ -662,7 +662,7 @@ describe(TargetLink, () => {
       packages: await hrefOf(about("packages:packages-1")),
       revoked: await hrefOf(about("revoked:revoked-1")),
       goLive: await hrefOf(about("goLive:app-invoices:4")),
-      app: await hrefOf({ kind: "engine", engine: app }),
+      app: await hrefOf({ kind: "app", app }),
     }).toStrictEqual({
       packages: `/apps/${app}/settings?section=packages`,
       revoked: `/apps/${app}/settings?section=packages`,

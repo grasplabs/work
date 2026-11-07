@@ -41,7 +41,7 @@ import type { Board } from "./widget-board.tsx";
 
 // What the dashboard reads, each part on its own so one that fails or
 // hangs leaves the rest: what waits on the person, the person's layout of
-// the widget board and what it shows (the workflows, the engines, the
+// the widget board and what it shows (the workflows, the Apps, the
 // runs over time, the signals), the programme with Grasp and its weekly
 // report, both as core counts and reads them, and, for admins, the latest of the audit
 // trail.
@@ -174,7 +174,7 @@ export const readWaiting = async (
 
 /**
  * Whether core refused the read to this person's role (admins read every
- * improvement signal, an engine's builders its own): their having none to
+ * improvement signal, an App's builders its own): their having none to
  * see, not a failure. Any other error is one.
  */
 const refusedToRole = (error: unknown): boolean =>
@@ -199,13 +199,13 @@ const orNone = async <T>(read: Promise<T>): Promise<T | undefined> => {
 
 /**
  * The improvement signals this person may read: every one for admins,
- * each engine's they build for builders (one read per engine, those core
+ * each App's they build for builders (one read per App, those core
  * refuses left out), none for anyone else.
  */
 const readImprovement = async (
   session: Session,
   identity: Identity,
-  engines: readonly string[]
+  apps: readonly string[]
 ): Promise<ImprovementSignals | undefined> => {
   if (isAdmin(identity.role)) {
     return await orNone(session.signals.list());
@@ -214,7 +214,7 @@ const readImprovement = async (
     return undefined;
   }
   const each = await Promise.all(
-    engines.map(async (app) => await orNone(session.signals.list({ app })))
+    apps.map(async (app) => await orNone(session.signals.list({ app })))
   );
   const read = each.filter((signals) => signals !== undefined);
   if (read.length === 0) {
@@ -231,7 +231,7 @@ const readImprovement = async (
   };
 };
 
-/** The signals this person sees, with the engines' names. */
+/** The signals this person sees, with the Apps' names. */
 const readSignals = async (
   session: Session,
   identity: Identity
@@ -248,7 +248,7 @@ const readSignals = async (
   return {
     improvement,
     knowledge,
-    engines: new Map(apps.map(({ id, name }) => [id, name])),
+    appNames: new Map(apps.map(({ id, name }) => [id, name])),
   };
 };
 
@@ -364,7 +364,7 @@ export const readDashboard = async (
     core,
     async (session) => await readSignals(session, identity)
   );
-  const engines = loadFromCore(core, openableApps);
+  const apps = loadFromCore(core, openableApps);
   const goals = readGoals(core, workflows);
   // The full view's days, once: the block shows the last week of them.
   const runs = loadFromCore(
@@ -407,7 +407,7 @@ export const readDashboard = async (
       returns: noReturns,
       goals,
       workflows,
-      engines,
+      apps,
       runs,
       signals,
       spend,

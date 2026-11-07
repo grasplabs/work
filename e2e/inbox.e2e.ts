@@ -7,7 +7,7 @@ import { apiOf, peopleIn } from "./people.ts";
 // The inbox, at its address: what waits on the person as a list, the item
 // chosen beside it with its actions, and what was done. Someone with
 // nothing waiting sees that said; someone given the permission approves
-// packages proposed for an engine from it, and the item leaves the list;
+// packages proposed for an App from it, and the item leaves the list;
 // an admin also reads the latest of what Grasp and people did. It grants a
 // package approver, so it runs with the other package approval tests.
 
@@ -49,8 +49,8 @@ test("someone given the permission approves packages from the inbox, and the ite
   const { admin, builder, approver } = peopleIn("inbox");
   const asAdmin = apiOf(admin);
   const asBuilder = apiOf(builder);
-  const engine = `Charts ${crypto.randomUUID().slice(0, 8)}`;
-  const { id: app } = await asBuilder.api.apps.create({ name: engine });
+  const appName = `Charts ${crypto.randomUUID().slice(0, 8)}`;
+  const { id: app } = await asBuilder.api.apps.create({ name: appName });
   await asAdmin.api.dependencies.grantApprover({
     type: "person",
     userId: approver.userId,
@@ -82,7 +82,7 @@ test("someone given the permission approves packages from the inbox, and the ite
   const page = await pageOf(approver);
   await page.goto("/inbox");
   const list = page.getByRole("region", { name: "What waits on you" });
-  const row = list.getByRole("button", { name: new RegExp(engine, "u") });
+  const row = list.getByRole("button", { name: new RegExp(appName, "u") });
   await expect(row).toBeVisible(pageRead);
   await expect(row).toContainText("Packages");
 
@@ -103,7 +103,7 @@ test("someone given the permission approves packages from the inbox, and the ite
   await row.click();
   await expect(row).toHaveAttribute("aria-current", "true");
   const item = page.getByRole("article", {
-    name: `Approve the packages for ${engine}?`,
+    name: `Approve the packages for ${appName}?`,
   });
   await expect(
     item.getByText("Draw the quarter's totals as a chart.")
@@ -114,11 +114,11 @@ test("someone given the permission approves packages from the inbox, and the ite
 
   // Approving waits for the whole graph to be shown.
   const approve = item.getByRole("button", {
-    name: `Approve the packages for ${engine}`,
+    name: `Approve the packages for ${appName}`,
   });
   await expect(approve.first()).toBeDisabled();
   await item
-    .getByRole("button", { name: `Show the packages for ${engine}` })
+    .getByRole("button", { name: `Show the packages for ${appName}` })
     .click();
   await expect(
     item.getByRole("cell", { name: "charts@3.1.0", exact: true })
@@ -129,7 +129,7 @@ test("someone given the permission approves packages from the inbox, and the ite
   await expect(
     page
       .getByRole("status")
-      .filter({ hasText: `Approved: Packages for ${engine}.` })
+      .filter({ hasText: `Approved: Packages for ${appName}.` })
   ).toHaveCount(1);
   await expect
     .poll(async () => {

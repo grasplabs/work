@@ -33,14 +33,14 @@ describe("moving a widget", () => {
       "return",
       "goals",
       "workflows",
-      "engines",
+      "apps",
       "runs",
     ]);
     expect(placeWidget(defaultWidgets, "return", 2)).toStrictEqual([
       "goals",
       "workflows",
       "return",
-      "engines",
+      "apps",
       "runs",
       "signals",
     ]);
@@ -54,7 +54,7 @@ describe("moving a widget", () => {
       "return",
       "goals",
       "workflows",
-      "engines",
+      "apps",
       "signals",
       "runs",
     ]);
@@ -62,7 +62,7 @@ describe("moving a widget", () => {
       "workflows",
       "return",
       "goals",
-      "engines",
+      "apps",
       "runs",
       "signals",
     ]);
@@ -70,7 +70,7 @@ describe("moving a widget", () => {
 
   it("leaves the board as it is for a widget not on it", () => {
     const board = ["runs", "signals"] as const;
-    expect(moveWidget(board, "engines", 1)).toStrictEqual(board);
+    expect(moveWidget(board, "apps", 1)).toStrictEqual(board);
   });
 });
 
@@ -80,7 +80,7 @@ describe("taking off and adding widgets", () => {
     expect(without).toStrictEqual([
       "return",
       "workflows",
-      "engines",
+      "apps",
       "runs",
       "signals",
     ]);
@@ -89,7 +89,7 @@ describe("taking off and adding widgets", () => {
     expect(again).toStrictEqual([
       "return",
       "workflows",
-      "engines",
+      "apps",
       "runs",
       "signals",
       "goals",
@@ -111,7 +111,7 @@ describe("taking off and adding widgets", () => {
   });
 
   it("puts what a board saved before the newer widgets were there beside them", () => {
-    const saved = ["workflows", "engines", "runs", "signals"] as const;
+    const saved = ["workflows", "apps", "runs", "signals"] as const;
     expect(differsFromDefault(saved, defaultWidgets)).toBeTruthy();
     expect(missingWidgets(saved, defaultWidgets)).toStrictEqual([
       "return",

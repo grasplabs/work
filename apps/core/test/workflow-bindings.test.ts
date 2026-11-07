@@ -330,7 +330,7 @@ const appOf = async (owner: Person): Promise<string> => {
   const app = crypto.randomUUID();
   await env.DB.batch([
     env.DB.prepare(
-      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Engine', '', ?, ?)"
+      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'App', '', ?, ?)"
     ).bind(app, owner.userId, Date.now()),
     env.DB.prepare(
       "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, approved) VALUES (?, 1, 'tree', 0, ?, 'Version', ?, 1)"
@@ -768,7 +768,7 @@ describe("approving a workflow's binding", () => {
     // A permission an App holds on a connection: not the workflow's.
     const app = crypto.randomUUID();
     await env.DB.prepare(
-      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Engine', '', ?, ?)"
+      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'App', '', ?, ?)"
     )
       .bind(app, ada.userId, Date.now())
       .run();

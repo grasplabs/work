@@ -5,16 +5,16 @@ import { appDefinition } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
-// An engine's declared permissions and their bindings, end to end in a
-// real browser: a builder's engine declares `ai`, which its action asks;
-// an admin finds it unbound on the engine's page, binds it to a model and
+// An App's declared permissions and their bindings, end to end in a
+// real browser: a builder's App declares `ai`, which its action asks;
+// an admin finds it unbound on the App's page, binds it to a model and
 // revokes the binding, while the builder sees each state and nothing to
 // act on. That the action's next request is refused once the binding is
 // revoked, and served while it stands, is core's own test, at the
 // request's boundary (resource-bindings.test.ts): the review this page
 // shows resolves a binding exactly as that request does.
 
-/** The engine's files: an action that asks its `ai`. */
+/** The App's files: an action that asks its `ai`. */
 const writerFiles = (): Record<string, string> => ({
   ...appDefinition({
     name: "Desk",
@@ -41,8 +41,8 @@ export const draft = action({
 `,
 });
 
-/** A builder's new engine of `files`, with its first version current. */
-const engineOf = async (
+/** A builder's new App of `files`, with its first version current. */
+const appOf = async (
   builder: Parameters<typeof apiOf>[0],
   files: Record<string, string>
 ): Promise<string> => {
@@ -71,11 +71,11 @@ const resourceOn = async (page: Page, app: string, alias: string) => {
 
 const unbound = "The App's actions can't use it until an admin binds it.";
 
-test("an admin binds an engine's AI to a model, with no budget of its own, and revokes it; its builder only sees", async ({
+test("an admin binds an App's AI to a model, with no budget of its own, and revokes it; its builder only sees", async ({
   pageOf,
 }) => {
   const { builder, admin } = peopleIn("resourceBindings");
-  const app = await engineOf(builder, writerFiles());
+  const app = await appOf(builder, writerFiles());
 
   // Declared, and so far bound to nothing.
   const deciding = await pageOf(admin);

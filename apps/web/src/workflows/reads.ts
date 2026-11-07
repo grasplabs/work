@@ -10,8 +10,8 @@ import type {
 import type { Session } from "../core.ts";
 
 // Lists core refuses to the user role while sharing Apps is switched off:
-// such a person has no engine to list, so a refusal reads as none, not as
-// a failure. Shared by the Workflows and Engines pages.
+// such a person has no App to list, so a refusal reads as none, not as
+// a failure. Shared by the Workflows and Apps pages.
 
 /** Whether core refused a read to the person's role. */
 const refused = (error: unknown): boolean =>
@@ -29,7 +29,7 @@ export const noneIfRefused = async <T>(read: Promise<T[]>): Promise<T[]> => {
   }
 };
 
-/** The engines (core's Apps) core lets the person open: their own, those shared with them, and every one for admins. */
+/** The Apps core lets the person open: their own, those shared with them, and every one for admins. */
 export const openableApps = async (session: Session): Promise<App[]> =>
   await noneIfRefused(session.apps.list());
 

@@ -1158,7 +1158,7 @@ describe("model calls", () => {
     const app = crypto.randomUUID();
     await env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Engine', '', ?, ?)"
+        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'App', '', ?, ?)"
       ).bind(app, ada.userId, Date.now()),
       env.DB.prepare(
         "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, approved) VALUES (?, 1, 'tree', 0, ?, 'Version', ?, 1)"

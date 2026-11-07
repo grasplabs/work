@@ -7,23 +7,23 @@ import { apiOf, peopleIn } from "./people.ts";
 // An App's approved npm packages, and taking an approval back: its
 // builders see them under Packages in its settings; someone who may approve
 // packages sees them too, and only them when they aren't one of the
-// engine's members, and retires or revokes them after reading what that
+// App's members, and retires or revokes them after reading what that
 // ends. The approval is written as a person's decision leaves it
 // (dependency-request.ts): a local stack can't resolve from the registry.
 
 /** How long a page may take to show what core said. */
 const pageRead = { timeout: 20_000 };
 
-/** An engine of `builder`'s with one approved package, and `approver` given the permission. */
-const engineWithPackages = async (
+/** An App of `builder`'s with one approved package, and `approver` given the permission. */
+const appWithPackages = async (
   scene:
-    | "enginePackages"
-    | "enginePackagesBuilder"
-    | "enginePackagesRefresh"
-    | "enginePackagesFresh"
-    | "enginePackagesTab"
-    | "enginePackagesBusy"
-    | "enginePackagesStale",
+    | "appPackages"
+    | "appPackagesBuilder"
+    | "appPackagesRefresh"
+    | "appPackagesFresh"
+    | "appPackagesTab"
+    | "appPackagesBusy"
+    | "appPackagesStale",
   name: string
 ) => {
   const people = peopleIn(scene);
@@ -79,11 +79,11 @@ const retireElsewhere = async (
   as.core[Symbol.dispose]();
 };
 
-test("someone who may approve packages and isn't a member sees only an engine's packages, and retires them", async ({
+test("someone who may approve packages and isn't a member sees only an App's packages, and retires them", async ({
   pageOf,
 }) => {
-  const { builder, approver, app } = await engineWithPackages(
-    "enginePackages",
+  const { builder, approver, app } = await appWithPackages(
+    "appPackages",
     "Charts"
   );
 
@@ -129,13 +129,13 @@ test("someone who may approve packages and isn't a member sees only an engine's 
   await expect(builderRow.getByRole("button")).toHaveCount(0);
 });
 
-test("someone who may approve packages and builds other engines sees only this one's packages", async ({
+test("someone who may approve packages and builds other Apps sees only this one's packages", async ({
   pageOf,
 }) => {
   // An approver's organization role doesn't decide it: core lets them
-  // list the packages of an engine they aren't a member of.
-  const { approver, app } = await engineWithPackages(
-    "enginePackagesBuilder",
+  // list the packages of an App they aren't a member of.
+  const { approver, app } = await appWithPackages(
+    "appPackagesBuilder",
     "Ledger"
   );
 
@@ -158,8 +158,8 @@ test("someone who may approve packages and builds other engines sees only this o
 test("reads the packages again when a decision fails, keeping why", async ({
   pageOf,
 }) => {
-  const { approver, app, request } = await engineWithPackages(
-    "enginePackagesRefresh",
+  const { approver, app, request } = await appWithPackages(
+    "appPackagesRefresh",
     "Ledger"
   );
   const page = await pageOf(approver);
@@ -197,8 +197,8 @@ test("reads the packages again when a decision fails, keeping why", async ({
 test("shows the packages as the page reads them again, when someone else ended them meanwhile", async ({
   pageOf,
 }) => {
-  const { approver, app, request } = await engineWithPackages(
-    "enginePackagesFresh",
+  const { approver, app, request } = await appWithPackages(
+    "appPackagesFresh",
     "Budget"
   );
   const page = await pageOf(approver);
@@ -238,8 +238,8 @@ test("shows the packages as the page reads them again, when someone else ended t
 test("reads a builder's packages when their section opens, not when the page loaded", async ({
   pageOf,
 }) => {
-  const { builder, approver, app, request } = await engineWithPackages(
-    "enginePackagesTab",
+  const { builder, approver, app, request } = await appWithPackages(
+    "appPackagesTab",
     "Forecast"
   );
   const page = await pageOf(builder);
@@ -263,10 +263,7 @@ test("reads a builder's packages when their section opens, not when the page loa
 test("stays busy until the list was read again, so a decision is never sent twice", async ({
   pageOf,
 }) => {
-  const { approver, app } = await engineWithPackages(
-    "enginePackagesBusy",
-    "Payroll"
-  );
+  const { approver, app } = await appWithPackages("appPackagesBusy", "Payroll");
   const page = await pageOf(approver);
   await page.goto(`/apps/${app}/settings?section=packages`);
   await page
@@ -316,8 +313,8 @@ test("stays busy until the list was read again, so a decision is never sent twic
 test("says the list may be out of date when it can't be read again", async ({
   pageOf,
 }) => {
-  const { admin, approver, app, grant } = await engineWithPackages(
-    "enginePackagesStale",
+  const { admin, approver, app, grant } = await appWithPackages(
+    "appPackagesStale",
     "Travel"
   );
   const page = await pageOf(approver);

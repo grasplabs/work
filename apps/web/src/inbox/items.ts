@@ -33,7 +33,7 @@ import type { Loaded } from "../load-from-core.tsx";
 // lists today fills those it has (a connection to sign in to again) and
 // kinds of its own: a change an agent wants to make, a change sent for
 // the person whose answer was lost, a permission an App
-// or agent asked for, packages proposed for an engine, a version of an
+// or agent asked for, packages proposed for an App, a version of an
 // App the person answers for
 // up for review. Core keeps nothing the inbox adds (put away until a date, given
 // to someone, dismissed with why), so none of that is here. Pure.
@@ -70,11 +70,10 @@ export type Target =
    * an approver with no role in the App.
    */
   | {
-      kind: "engine";
-      engine: string;
+      kind: "app";
+      app: string;
       place?: "connections" | "packages" | "versions";
     }
-  | { kind: "app"; app: string }
   | { kind: "integration"; integration: string }
   | { kind: "chat"; chat: string }
   | { kind: "brain" }
@@ -183,7 +182,7 @@ export const heldName = (action: PendingAction): string => {
 };
 
 /**
- * Where a held write came from: its chat, or its engine (an App's or a run
+ * Where a held write came from: its chat, or its App (its own or a run
  * of its workflow's). An independent workflow's run has no page to go to.
  */
 const heldAbout = ({ context }: PendingAction): Target | undefined => {
@@ -193,7 +192,7 @@ const heldAbout = ({ context }: PendingAction): Target | undefined => {
   if (context.type === "workflowRun") {
     return undefined;
   }
-  return { kind: "engine", engine: context.appId };
+  return { kind: "app", app: context.appId };
 };
 
 /** A change an agent or App wants to make, held until the person approves it. */
@@ -312,8 +311,8 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
       about:
         request.subject.type === "app"
           ? {
-              kind: "engine",
-              engine: request.subject.appId,
+              kind: "app",
+              app: request.subject.appId,
               place: "connections",
             }
           : undefined,
@@ -323,14 +322,14 @@ const requestItems = (pending: PendingRequests): InboxItem[] =>
     };
   });
 
-/** Packages proposed for an engine, which someone given the permission approves. */
+/** Packages proposed for an App, which someone given the permission approves. */
 const packageItems = (
   requests: readonly DependencyRequest[],
   policyGeneration: number
 ): InboxItem[] =>
   requests.map((request) => {
     // An App or a workflow, in one queue: only an App has a page to go to.
-    const engine = request.subject.name;
+    const subjectName = request.subject.name;
     const kind = request.subject.type === "workflow" ? t`Workflow` : t`App`;
     const targets = formatList(
       request.targets.map((target) => i18n._(targetNames[target]))
@@ -339,11 +338,11 @@ const packageItems = (
     return {
       id: `packages:${request.id}`,
       kind: "packages",
-      title: t`Approve the packages for ${ph({ app: engine })}?`,
-      context: t`Packages for ${ph({ app: engine })}`,
+      title: t`Approve the packages for ${ph({ app: subjectName })}?`,
+      context: t`Packages for ${ph({ app: subjectName })}`,
       body: [request.purpose],
       facts: [
-        { label: kind, value: engine },
+        { label: kind, value: subjectName },
         { label: t`Asked by`, value: request.requestedBy.name },
         {
           label: t`Packages`,
@@ -356,7 +355,7 @@ const packageItems = (
       ],
       about:
         request.subject.type === "app"
-          ? { kind: "engine", engine: request.subject.id, place: "packages" }
+          ? { kind: "app", app: request.subject.id, place: "packages" }
           : undefined,
       forWhom: { role: t`package approvers` },
       date: request.requestedAt,
@@ -383,7 +382,7 @@ const versionItems = (
         t`A new version of ${name} is up for review, and you answer for it. It runs once it is made current, under Versions in the App's settings.`,
       ],
       facts: [{ label: t`Version`, value: String(version) }],
-      about: { kind: "engine", engine: app.id, place: "versions" },
+      about: { kind: "app", app: app.id, place: "versions" },
       forWhom: { person: me },
       // Core says what waits now, not since when: as of the read.
       date: readAt,
@@ -513,7 +512,7 @@ const revokedSubject = (
   subject.type === "app"
     ? {
         name: subject.appName,
-        about: { kind: "engine", engine: subject.app, place: "packages" },
+        about: { kind: "app", app: subject.app, place: "packages" },
       }
     : {
         name: subject.workflowName,

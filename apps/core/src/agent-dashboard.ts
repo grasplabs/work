@@ -15,7 +15,7 @@ import { personalWorkspaceId } from "./personal-workspace.ts";
 // model gateway counted as theirs, recorded as the chat's agent acting for
 // them. The agent hands over what was asked and gets back only the
 // widget's ID: the widget, its title and what the model said of it are
-// written from the names of the person's engines and workflows, which the
+// written from the names of the person's Apps and workflows, which the
 // agent may hold no permission to read, so they stay on the dashboard.
 
 /** A widget Grasp made for the person, as the chat's agent knows it. */

@@ -4,7 +4,7 @@ import type {
   DeclaredResource,
 } from "@grasp-os/shared/resource-bindings";
 
-// What an admin's bind form of an engine's resource (resource-bindings.tsx)
+// What an admin's bind form of an App's resource (resource-bindings.tsx)
 // decides, apart from how it looks: what it starts on, what it sends, and
 // when it starts afresh. A refreshed review can change what is declared or
 // offered under a form, so what it sends is built from the declaration as
@@ -97,7 +97,7 @@ const choiceIds = (choices: BindingChoices | null): string[] => {
 };
 
 /**
- * What a resource's forms start afresh on: the engine and version, the
+ * What a resource's forms start afresh on: the App and version, the
  * declaration, its binding, and what is offered for it.
  */
 export const formKey = (

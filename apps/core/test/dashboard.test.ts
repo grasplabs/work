@@ -30,9 +30,9 @@ describe("a person's dashboard", () => {
     });
 
     // Saving again replaces the whole board.
-    await dashboard.saveLayout({ widgets: ["engines", "runs"] });
+    await dashboard.saveLayout({ widgets: ["apps", "runs"] });
     await expect(dashboard.layout()).resolves.toStrictEqual({
-      widgets: ["engines", "runs"],
+      widgets: ["apps", "runs"],
     });
   });
 
@@ -48,7 +48,7 @@ describe("a person's dashboard", () => {
     await ann.dashboard.saveLayout({ widgets: ["signals"] });
 
     await expect(bob.dashboard.layout()).resolves.toBeNull();
-    await bob.dashboard.saveLayout({ widgets: ["workflows", "engines"] });
+    await bob.dashboard.saveLayout({ widgets: ["workflows", "apps"] });
     await expect(ann.dashboard.layout()).resolves.toStrictEqual({
       widgets: ["signals"],
     });
@@ -56,7 +56,7 @@ describe("a person's dashboard", () => {
 
   it("refuses widgets there are none of, one twice, or anything but a board, and keeps what was saved", async () => {
     const { dashboard } = await person();
-    await dashboard.saveLayout({ widgets: ["engines"] });
+    await dashboard.saveLayout({ widgets: ["apps"] });
     const save = async (layout: unknown) =>
       await outcome(
         dashboard.saveLayout(
@@ -71,7 +71,7 @@ describe("a person's dashboard", () => {
       unknown: await save({ widgets: ["workflows", "weather"] }),
       twice: await save({ widgets: ["runs", "runs"] }),
       tooMany: await save({
-        widgets: ["workflows", "engines", "runs", "signals", "workflows"],
+        widgets: ["workflows", "apps", "runs", "signals", "workflows"],
       }),
       noList: await save({ widgets: "runs" }),
       more: await save({ widgets: ["runs"], owner: "someone-else" }),
@@ -85,7 +85,7 @@ describe("a person's dashboard", () => {
       nothing: "dashboard.invalid_layout",
     });
     await expect(dashboard.layout()).resolves.toStrictEqual({
-      widgets: ["engines"],
+      widgets: ["apps"],
     });
   });
 });

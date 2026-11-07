@@ -251,14 +251,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   await expect(titles).toHaveText([...without, "Apps"]);
   await expect
     .poll(saved)
-    .toStrictEqual([
-      "return",
-      "goals",
-      "workflows",
-      "runs",
-      "signals",
-      "engines",
-    ]);
+    .toStrictEqual(["return", "goals", "workflows", "runs", "signals", "apps"]);
 
   // Moved a place back with the keys on its grip, which keeps them.
   const grip = page.getByRole("button", {
@@ -285,14 +278,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   await expect(grip).toBeFocused();
   await expect
     .poll(saved)
-    .toStrictEqual([
-      "return",
-      "goals",
-      "workflows",
-      "runs",
-      "engines",
-      "signals",
-    ]);
+    .toStrictEqual(["return", "goals", "workflows", "runs", "apps", "signals"]);
   await page.reload();
   await expect(titles).toHaveText(moved);
 
@@ -302,14 +288,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   await expect(reset).toHaveCount(0);
   await expect
     .poll(saved)
-    .toStrictEqual([
-      "return",
-      "goals",
-      "workflows",
-      "engines",
-      "runs",
-      "signals",
-    ]);
+    .toStrictEqual(["return", "goals", "workflows", "apps", "runs", "signals"]);
   await page.reload();
   await expect(titles).toHaveText(begun);
   await expect(page.getByRole("alert")).toHaveCount(0);
@@ -351,7 +330,7 @@ test("an admin sees the latest activity, with the way to the audit trail", async
   await expect(page).toHaveURL(/\/settings\/audit$/u);
 });
 
-test("someone given the permission approves the packages proposed for an engine, and an admin without it isn't asked", async ({
+test("someone given the permission approves the packages proposed for an App, and an admin without it isn't asked", async ({
   pageOf,
 }) => {
   const { admin, builder, approver } = peopleIn("dependencyApproval");

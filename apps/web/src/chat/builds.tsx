@@ -24,10 +24,10 @@ import { Link } from "@tanstack/react-router";
 import { HammerIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { makeCurrentFailure } from "../apps/store-change-errors.ts";
+import { storeChangesAnchor } from "../apps/store-changes.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
-import { makeCurrentFailure } from "../engines/store-change-errors.ts";
-import { storeChangesAnchor } from "../engines/store-changes.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
@@ -484,7 +484,7 @@ type MadeCurrent = { made: true } | ReturnType<typeof makeCurrentFailure>;
  * Makes `version` of `app` current, and with `publish` then publishes the
  * App (a draft until then: its users can't open it, its triggers don't
  * fire), or says why core refused: a store's failed change it waits on
- * points to the engine's page (`link`). Outside the component, as the
+ * points to the App's page (`link`). Outside the component, as the
  * React Compiler can't compile `try`.
  */
 const setCurrentOf = async (

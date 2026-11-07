@@ -35,7 +35,7 @@ const WorkflowName = ({ workflow }: { workflow: WorkflowMonthSpend }) => {
   return <span className="truncate">{name}</span>;
 };
 
-/** A workflow that spent this month: its name, its engine for an App's, and what a run cost. */
+/** A workflow that spent this month: its name, its App for an App's, and what a run cost. */
 const SpendLine = ({ workflow }: { workflow: WorkflowMonthSpend }) => {
   const { t } = useLingui();
   const domain =

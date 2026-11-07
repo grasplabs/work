@@ -312,27 +312,25 @@ export const actorOf = (
     };
   }
   if (actor.type === "workflow") {
-    const engine = appName(directory, actor.appId);
+    const app = appName(directory, actor.appId);
     const { workflowId } = actor;
     return {
-      label: i18n._(msg`${ph({ app: engine })}: run of ${workflowId}`),
+      label: i18n._(msg`${ph({ app })}: run of ${workflowId}`),
       id: actor.runId,
     };
   }
   if (actor.type === "guest") {
-    const engine = appName(directory, actor.appId);
+    const app = appName(directory, actor.appId);
     const person = personName(directory, actor.invitedBy);
     return {
-      label: i18n._(
-        msg`Guest of ${ph({ app: engine })}, invited for ${person}`
-      ),
+      label: i18n._(msg`Guest of ${ph({ app })}, invited for ${person}`),
       id: actor.chatId,
     };
   }
   if (actor.type === "visitor") {
-    const engine = appName(directory, actor.appId);
+    const app = appName(directory, actor.appId);
     return {
-      label: i18n._(msg`Visitor of ${ph({ app: engine })}`),
+      label: i18n._(msg`Visitor of ${ph({ app })}`),
       id: actor.sessionId ?? actor.appId,
     };
   }

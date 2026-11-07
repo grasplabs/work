@@ -1,13 +1,13 @@
 /**
- * The demo domains' apps (core's pages): a page per domain that starts
+ * The demo Apps' pages: a page per App that starts
  * a run of one of the workflows its App binds and follows it, as the
  * typed page SDK does (`useWorkflow(workflows.x)`). Decisions are
  * answered in the inbox and on the decision page, and a workflow's runs
  * are in its overview and activity: a page sees only the runs it
  * starts. Each reads nothing else: no permission, no connection.
  */
-import { engines } from "./engines.ts";
-import type { WorkflowSeed } from "./engines.ts";
+import { apps } from "./apps.ts";
+import type { WorkflowSeed } from "./apps.ts";
 
 /** A component's name for workflow alias `alias`: `mortgageFiles` → `MortgageFiles`. */
 const componentOf = (alias: string): string =>
@@ -17,7 +17,7 @@ const componentOf = (alias: string): string =>
  * A page with a card for each workflow in `workflows`: a button that
  * starts a run of it with its sample input, and the run as it goes on.
  */
-const domainPage = ({
+const appPage = ({
   title,
   intro,
   workflows,
@@ -116,8 +116,8 @@ ${workflows
 export const Route = createFileRoute("/")({ component: Page });
 `;
 
-/** The page of each domain that has one: its file's name, title and intro. */
-const domainPages: Record<
+/** The page of each App that has one: its file's name, title and intro. */
+const pageOfApp: Record<
   string,
   { name: string; title: string; intro: string }
 > = {
@@ -142,25 +142,25 @@ const domainPages: Record<
 };
 
 /**
- * The pages of each domain, by domain name, then by page name: the
+ * The pages of each App, by App name, then by page name: the
  * prototype's apps (`apps` in noordkade.ts), each over the workflows of
- * its domain, since a page starts only its own App's. The prototype's
+ * its App, since a page starts only its own App's. The prototype's
  * charts of revenue, tickets and leads read systems no connection brings
  * yet, and its run histories are the workflows' own pages now.
  */
-export const enginePages: Record<
+export const appPages: Record<
   string,
   Record<string, string>
 > = Object.fromEntries(
-  engines.flatMap(({ name, workflows }) => {
-    const page = domainPages[name];
+  apps.flatMap(({ name, workflows }) => {
+    const page = pageOfApp[name];
     return page === undefined
       ? []
       : [
           [
             name,
             {
-              [page.name]: domainPage({
+              [page.name]: appPage({
                 title: page.title,
                 intro: page.intro,
                 workflows,

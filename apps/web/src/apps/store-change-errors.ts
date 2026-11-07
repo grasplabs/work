@@ -74,7 +74,7 @@ const backfillFailedTexts = {
   stalled: msg`This version changes the App's data, and the change can't be applied: filling in its new fields stopped making progress.`,
 } as const;
 
-/** Where the engine's page helps, by the failure's reason. */
+/** Where the App's page helps, by the failure's reason. */
 const backfillFailedLinks = {
   invalid_value: msg`An admin can see the record that holds it back, and abandon the change, in the App's settings.`,
   too_large: msg`An admin can see the record that holds it back, and abandon the change, in the App's settings.`,
@@ -163,7 +163,7 @@ const rollbackIncompatibleText = (error: unknown): string => {
 
 /**
  * Why a version couldn't be made current and, when a store's failed
- * change holds it back, what to say of the engine's page (`link`), where an
+ * change holds it back, what to say of the App's page (`link`), where an
  * admin sees it and can abandon it.
  */
 export const makeCurrentFailure = (

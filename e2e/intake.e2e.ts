@@ -50,7 +50,7 @@ const intakeFor = async (admin: Person): Promise<string> => {
     // builders' alone).
     await api.apps.publish(created.app.id);
     // Its stakeholder chats, through the permission just granted, bound as
-    // an admin binds them on the engine's Resources tab.
+    // an admin binds them on the App's Resources tab.
     const guests = created.permissions.find(
       ({ binding }) => binding === "GUESTS"
     );
