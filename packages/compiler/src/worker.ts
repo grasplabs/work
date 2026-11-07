@@ -665,9 +665,12 @@ export const buildPagesIncrementally = async (
   // The design system's checks of every class the pages write, beside
   // the type check, which a preview's frame skips too (`checks`).
   if (checks) {
+    const looked = new Set<string>();
     for (const record of records) {
-      // oxlint-disable-next-line no-await-in-loop -- the design system loads once, then each is quick
-      errors.push(...(await classProblems(record.path, record.classes)));
+      errors.push(
+        // oxlint-disable-next-line no-await-in-loop -- the design system loads once, then each is quick
+        ...(await classProblems(record.path, record.classes, looked))
+      );
     }
   }
   // The App's declarations aren't modules, but they name modules for

