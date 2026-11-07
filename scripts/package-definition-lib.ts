@@ -95,6 +95,7 @@ import {
   declarationExtension,
   generatedServerFolder,
   hostGeneratedFolder,
+  isGeneratedPath,
   routeTreePath,
   sourceFolder,
 } from "../packages/compiler/src/inputs.ts";
@@ -460,8 +461,15 @@ const planApp = async (
   if (tree.source !== undefined) {
     project.add(`app/${routeTreePath}`, tree.source);
   }
+  // What the build adds of its own (the root route), never what the host
+  // generates: those modules, the data model the build reads among them,
+  // are written above, once, from the registration.
   for (const [file, text] of Object.entries(built)) {
-    if (!Object.hasOwn(app.files, file) && !Object.hasOwn(tree.routes, file)) {
+    if (
+      !Object.hasOwn(app.files, file) &&
+      !Object.hasOwn(tree.routes, file) &&
+      !isGeneratedPath(file)
+    ) {
       project.add(`app/${safePath(file, "app")}`, text);
     }
   }
