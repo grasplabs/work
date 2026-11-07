@@ -3,8 +3,9 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { publishVersion } from "../src/app-publish.ts";
 import { sealRelease } from "../src/app-releases.ts";
-import { commitFiles, setCurrentVersion, versionFiles } from "../src/apps.ts";
+import { commitFiles, versionFiles } from "../src/apps.ts";
 import { buildPages, versionPages } from "../src/pages.ts";
 import { buildOnSave, draftLintBuild } from "../src/save-builds.ts";
 import { holdingBuilds } from "./build-holds.ts";
@@ -301,7 +302,7 @@ export const Route = createFileRoute("/")({ component: Desk });
     const holding = holdingBuilds(env.FILES, held.promise);
 
     // Answers while builds are still held.
-    const made = await setCurrentVersion(
+    const made = await publishVersion(
       { ...env, FILES: holding },
       by,
       app,

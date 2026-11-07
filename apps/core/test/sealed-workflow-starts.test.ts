@@ -14,11 +14,12 @@ import {
   callPageFunction,
   evaluateAppQuery,
 } from "../src/app-functions.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
-import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { appFor, commitFiles } from "../src/apps.ts";
 import { readWorkflowWatch } from "../src/page-workflows.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
@@ -140,7 +141,7 @@ describe("a sealed App's functions", { timeout: 120_000 }, () => {
     const fixture = await appWith(files(), "Requests");
     const { owner, app } = fixture;
     const release = await seal(fixture);
-    await setCurrentVersion(env, owner, app, 1);
+    await publishVersion(env, owner, app, 1);
     const bob = await person("user");
     await env.DB.prepare(
       "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
@@ -276,7 +277,7 @@ const requestsApp = async (
 ) => {
   const fixture = await appWith(files(), "Requests", owner);
   const release = await seal(fixture);
-  await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+  await publishVersion(env, fixture.owner, fixture.app, 1);
   for (const member of members) {
     // oxlint-disable-next-line no-await-in-loop -- a row each
     await env.DB.prepare(
@@ -333,7 +334,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
     const fixture = await appWith(files(), "Requests");
     const { owner, app } = fixture;
     const release = await seal(fixture);
-    await setCurrentVersion(env, owner, app, 1);
+    await publishVersion(env, owner, app, 1);
     const [bob, carol] = await Promise.all([person("user"), person("user")]);
     for (const member of [bob, carol]) {
       // oxlint-disable-next-line no-await-in-loop -- two rows, one each
@@ -714,7 +715,7 @@ const pinnedApp = async (
     version: 1,
   });
   const release = await seal(fixture);
-  await setCurrentVersion(env, owner, fixture.app, 1);
+  await publishVersion(env, owner, fixture.app, 1);
   for (const member of members) {
     // oxlint-disable-next-line no-await-in-loop -- a row each
     await env.DB.prepare(
@@ -1203,7 +1204,7 @@ describe("a workflow reference's run history", { timeout: 180_000 }, () => {
       "Seal again"
     );
     const next = await seal(fixture, 2);
-    await setCurrentVersion(env, owner, app, 2);
+    await publishVersion(env, owner, app, 2);
     const nextHistory = queryReference(next, "followUp", "history");
     const askNext = async (input: unknown) => {
       const answer = await callAppFunction(

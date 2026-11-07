@@ -31,7 +31,7 @@ import { manifestHash, memberRoles, newRecordId } from "./store-schemas.ts";
 // its tables, indexes and the consumer's receipt, and refused otherwise.
 // Through the store's own way in (data-stores.ts) and its Durable Object;
 // the rules themselves are unit-tested in the SDK (schema-plan.test.ts),
-// activation end to end in app-activation.test.ts.
+// activation end to end in app-publish-stores.test.ts.
 
 const builder: Acting = {
   userId: "ada",

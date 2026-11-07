@@ -1,13 +1,10 @@
 import type { AppId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
-import { and, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { z } from "zod";
 
-import { commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { publishVersion } from "../src/app-publish.ts";
+import { commitFiles } from "../src/apps.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
 import {
   failedOutside,
   inputMismatch,
@@ -30,27 +27,6 @@ const optionalCategorySchema = notesOfFields({
   title: "v.string().min(1).max(200)",
   category: 'v.enum(["launch", "general"]).optional()',
 });
-
-/** What the report of `version`'s candidate says of rolling back from it. */
-const reportedRollback = async (
-  app: string,
-  version: number
-): Promise<unknown> => {
-  const row = await drizzle(env.DB)
-    .select({ report: appCandidateReports.report })
-    .from(appCandidateReports)
-    .innerJoin(
-      appCandidates,
-      eq(appCandidates.id, appCandidateReports.candidateId)
-    )
-    .where(
-      and(eq(appCandidates.appId, app), eq(appCandidates.version, version))
-    )
-    .get();
-  return z
-    .object({ rollback: z.unknown() })
-    .parse(JSON.parse(row?.report ?? "{}")).rollback;
-};
 
 // An explicit migration run end to end (spec 17.2): an App's release
 // declares it, the seal hands it to the App's store as its pending
@@ -158,7 +134,7 @@ describe("an explicit migration's run", { timeout: 180_000 }, () => {
         ),
       /update "apps" set "current_version"/iu
     );
-    const current = await setCurrentVersion(
+    const current = await publishVersion(
       { ...env, DB: racing },
       fixture.owner,
       fixture.app,
@@ -191,7 +167,7 @@ describe("an explicit migration's run", { timeout: 180_000 }, () => {
     // Ready, it hasn't taken over: version 1's schema still writes.
     const before = await object.schemaStatus(store.id, fixture.firstSchema);
 
-    const current = await setCurrentVersion(env, fixture.owner, fixture.app, 3);
+    const current = await publishVersion(env, fixture.owner, fixture.app, 3);
     const after = await object.schemaStatus(
       store.id,
       release.manifest.schemaHash,
@@ -265,7 +241,7 @@ export default appTest({
     );
 
     const refused = await refusalOf(
-      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+      async () => await publishVersion(env, fixture.owner, fixture.app, 3)
     );
     const current = await env.DB.prepare(
       "SELECT current_version AS version FROM apps WHERE id = ?"
@@ -324,13 +300,9 @@ export default appTest({
       },
       { timeout: 120_000, interval: 500 }
     );
-    await setCurrentVersion(env, fixture.owner, fixture.app, 3);
-    const rollback = await reportedRollback(fixture.app, 3);
-    const back = await setCurrentVersion(env, fixture.owner, fixture.app, 1);
-    expect({ rollback, back: back.currentVersion }).toStrictEqual({
-      rollback: { to: 1, eligible: true },
-      back: 1,
-    });
+    await publishVersion(env, fixture.owner, fixture.app, 3);
+    const back = await publishVersion(env, fixture.owner, fixture.app, 1);
+    expect(back.currentVersion).toBe(1);
   });
 
   it("rolls back past the migration once every record fits the version before, keeping what it derived", async () => {
@@ -349,14 +321,14 @@ export default appTest({
       },
       { timeout: 120_000, interval: 500 }
     );
-    await setCurrentVersion(env, fixture.owner, fixture.app, 3);
+    await publishVersion(env, fixture.owner, fixture.app, 3);
     // Version 3 requires the category; version 1 writes notes without it,
     // so the migration left it behind.
     const left = await object.schemaStatus(store.id, fixture.firstSchema);
     // Made current again, its schema is planned onto the contract and
     // every record checked against it (store-schema-changes.ts): they all
     // fit, the category kept, as optional.
-    const back = await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+    const back = await publishVersion(env, fixture.owner, fixture.app, 1);
     const records = await notesOf(store);
 
     expect({
@@ -366,7 +338,6 @@ export default appTest({
       categorised: records.every(
         ({ fields }) => typeof fields.category === "string"
       ),
-      rollback: await reportedRollback(fixture.app, 3),
     }).toStrictEqual({
       left: {
         state: "ready",
@@ -379,7 +350,6 @@ export default appTest({
       back: 1,
       status: { state: "active" },
       categorised: true,
-      rollback: { to: 1, eligible: true },
     });
   });
 
@@ -411,7 +381,7 @@ export default appTest({
       { timeout: 120_000, interval: 500 }
     );
     const refused = await refusalOf(
-      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+      async () => await publishVersion(env, fixture.owner, fixture.app, 3)
     );
     const records = await notesOf(store);
 
@@ -463,7 +433,7 @@ export default appTest({
     const object = env.DATA_STORES.getByName(store.id);
 
     const refused = await refusalOf(
-      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+      async () => await publishVersion(env, fixture.owner, fixture.app, 3)
     );
 
     expect({

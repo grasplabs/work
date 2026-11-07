@@ -10,6 +10,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
+import { artifactKey } from "./app-releases.ts";
 import {
   auditedBatch,
   outboxedEventWhere,
@@ -18,13 +19,12 @@ import {
 } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
+  appVersions,
   apps,
   sdkArtifactCandidates,
-  sdkArtifactDeletions,
   sdkReleaseArtifacts,
   sdkReleaseManifests,
   sdkReleasePins,
-  sdkReleaseTombstones,
   sdkResourceBindings,
 } from "./db/core/schema.ts";
 import {
@@ -37,47 +37,34 @@ import {
 // What could go wrong, and what stops it:
 //
 // - A release is deleted while something still runs on it, or might: it
-//   is kept while it is the App's current or pending version, for 90
-//   days after it last was (stamped as it stops being current, apps.ts,
-//   and by every sweep; or after its seal, if it never was), while an
-//   open page's lease on it holds (15 minutes from the last renewal),
-//   while a workflow run of that version is active, while any pin holds
-//   it (a run, a compatible migration, a pinned trigger, an admin's legal
-//   hold), and once revoked, for good. Nothing App code does shortens
-//   any of it.
-// - A release becomes unreferenced and referenced again in between: the
-//   sweep marks it first, deletes it only once the mark is a day old, and
-//   deletes it in a statement that checks every reference again, so a
-//   lease or a pin taken during the grace keeps it.
-// - A deleted release's version comes back as other code: its manifest
-//   hash is kept (`sdk_release_tombstones`), written in the transaction
-//   that deletes it, and sealing that version again must make the same
-//   manifest (app-releases.ts).
+//   is kept while it is the App's current or pending version, while it is
+//   one of the App's last `keptReleases` releases (a rollback's), for a
+//   day after its seal (a publish under way), while an open page's lease
+//   on it holds (15 minutes from the last renewal), while a workflow run
+//   of that version is active, while any pin holds it (a run, a
+//   compatible migration, a pinned trigger, an admin's legal hold), and
+//   once revoked, for good. Nothing App code does shortens any of it.
+// - A release is referenced again as it goes: the statement that deletes
+//   it checks every reference again, and a pin or a lease needs the
+//   release's row, so one is either taken first and keeps it, or refused.
+// - A deleted release's version is made current untested: deleting it
+//   clears its version's `published` status in the same transaction, so
+//   it runs again only once published again, sealed anew and tested
+//   (app-publish.ts).
+// - A revoked release comes back: it is kept for good, so its version can
+//   neither be sealed again nor made current (`version.revoked`).
 // - An artifact other releases share is deleted with one of them:
 //   artifacts are content-addressed, so releases share bytes. Each seal
-//   reserves the artifacts it names (`sdk_release_artifacts`) before it
-//   stores them; bytes are deleted only once no reservation names them,
-//   under a mark (`sdk_artifact_deletions`) placed in the same statement
-//   that checks there is none, and a seal reserves only where there is no
-//   mark (app-releases.ts). Only the mark's owner deletes the bytes, and
-//   it removes the mark only once its delete is done; a seal that finds a
-//   mark waits for it to go, then reserves and stores the bytes again. So
-//   no late delete of a deletion in flight reaches bytes a seal wrote
-//   after it.
-// - A deleter stalls past the takeover (plain workerd has no wall-clock
-//   cap): each mark has a deadline, 15 minutes after it was placed
-//   (`markDeadlineMs`). The owner gives up if its own clock is past it
-//   just before it deletes, and every await before that is cut off well
-//   short of it (`deletionStepMs`). A mark is taken over only an hour
-//   after it was placed (`markTakeoverMs`), long after its owner gave up.
-//   What remains is one R2 delete already sent when the deadline passed,
-//   which would have to stay in flight for the 45 minutes between the
-//   deadline and a takeover.
+//   references the artifacts it names (`sdk_release_artifacts`) before it
+//   stores them, and bytes are deleted only once no reference names them.
+//   A reference written in the moment between that check and the delete
+//   loses its bytes; such a release is refused as it is made current,
+//   which reads every byte back (`makeCurrent`), so it never runs.
 // - Bytes are left behind: removing a release's or an unfinished seal's
-//   reservation queues its bytes (`sdk_artifact_candidates`) in the same
+//   references queues its bytes (`sdk_artifact_candidates`) in the same
 //   statement, and a sweep dequeues each only once its bytes are dealt
-//   with, page by page, so a sweep that stops or fails half-way leaves
-//   the rest queued for the next.
+//   with, page by page, so a sweep that stops or fails half-way leaves the
+//   rest queued for the next.
 // - Pins pile up: every page leases its release over and over. A lapsed
 //   lease is deleted by the next sweep, and a release's pins with it.
 // - A release turns out to be dangerous: an admin of the organization
@@ -91,24 +78,14 @@ import {
 /** How long an open page's lease on its release lasts without renewal. */
 export const frameLeaseMs = 15 * 60_000;
 
-/** How long a release is kept after it was last current, at least. */
-export const releaseRetentionMs = 90 * 24 * 60 * 60_000;
-
-/** How long a release found unreferenced waits before it is deleted. */
-export const releaseGraceMs = 24 * 60 * 60_000;
+/** How many of an App's latest releases are kept, to roll back to. */
+export const keptReleases = 10;
 
 /**
- * How old a deletion mark must be before someone else takes it over: an
- * hour, longer than any invocation of core runs (a request's or a clock's
- * wall-clock limit is 15 minutes), so its owner has stopped for good.
+ * How long a seal may take: a release is kept this long after it was
+ * sealed, and a seal's references this long while no release names them.
  */
-export const markTakeoverMs = 60 * 60_000;
-
-/** How long a mark's owner may take to finish it, from when it was placed. */
-export const markDeadlineMs = 15 * 60_000;
-
-/** The longest any one step of a deletion may take before it gives up. */
-export const deletionStepMs = 60_000;
+export const sealGraceMs = 24 * 60 * 60_000;
 
 /** Queued bytes one page of a sweep deals with, and the pages per sweep. */
 export const candidatePage = 100;
@@ -139,14 +116,16 @@ type Admin = Identity & Pick<Acting, "actor">;
  * That the release `manifests` names is kept by something at `now`, as
  * SQL over its row (see the header).
  */
-const referenced = (now: Date): SQL => {
-  const retained = new Date(now.getTime() - releaseRetentionMs);
-  return sql`(
+const referenced = (now: Date): SQL =>
+  sql`(
     ${sdkReleaseManifests.revokedAt} IS NOT NULL
+    OR ${sdkReleaseManifests.sealedAt} > ${now.getTime() - sealGraceMs}
     OR EXISTS (SELECT 1 FROM apps WHERE apps.id = ${sdkReleaseManifests.appId}
       AND (apps.current_version = ${sdkReleaseManifests.version}
         OR apps.pending_version = ${sdkReleaseManifests.version}))
-    OR COALESCE(${sdkReleaseManifests.lastCurrentAt}, ${sdkReleaseManifests.sealedAt}) > ${retained.getTime()}
+    OR (SELECT COUNT(*) FROM sdk_release_manifests AS newer
+      WHERE newer.app_id = ${sdkReleaseManifests.appId}
+        AND newer.version > ${sdkReleaseManifests.version}) < ${keptReleases}
     OR EXISTS (SELECT 1 FROM sdk_release_pins AS pins
       WHERE pins.app_id = ${sdkReleaseManifests.appId}
         AND pins.version = ${sdkReleaseManifests.version}
@@ -159,7 +138,6 @@ const referenced = (now: Date): SQL => {
           sql`, `
         )}))
   )`;
-};
 
 /** The row of release `key`. */
 const releaseIs = (key: ReleaseKey): SQL | undefined =>
@@ -402,32 +380,6 @@ export const revokeRelease = async (
   }
 };
 
-/**
- * Marks `sha256` for deletion, for a new owner, where no reservation
- * names it: a new mark, or one older than `markTakeoverMs`, taken over.
- * Placed at the real time, never a sweep's scheduled one, so its deadline
- * is truly 15 minutes off.
- * The owner, when this caller now owns the mark; undefined otherwise (the
- * bytes are reserved, or another live deleter owns the mark).
- */
-export const markArtifact = async (
-  env: Env,
-  sha256: string
-): Promise<string | undefined> => {
-  const owner = crypto.randomUUID();
-  const now = Date.now();
-  const marked = await env.DB.prepare(
-    `INSERT INTO sdk_artifact_deletions (sha256, owner, started_at)
-     SELECT ?1, ?2, ?3 WHERE NOT EXISTS (SELECT 1 FROM sdk_release_artifacts WHERE sha256 = ?1)
-     ON CONFLICT (sha256) DO UPDATE SET owner = excluded.owner, started_at = excluded.started_at
-       WHERE sdk_artifact_deletions.started_at < ?4
-     RETURNING owner`
-  )
-    .bind(sha256, owner, now, now - markTakeoverMs)
-    .all<{ owner: string }>();
-  return marked.results[0]?.owner === owner ? owner : undefined;
-};
-
 /** `work`, or a failure once `ms` have passed without it settling. */
 export const within = async <T>(work: Promise<T>, ms: number): Promise<T> => {
   const limit = deadline(ms);
@@ -439,85 +391,11 @@ export const within = async <T>(work: Promise<T>, ms: number): Promise<T> => {
 };
 
 /**
- * Finishes the deletion `owner` marked: deletes the bytes while it still
- * owns the mark and its deadline hasn't passed by `clock`, then the mark,
- * only once the delete is done. True when the bytes are gone; false when
- * the mark is another's, or past its deadline (left to be taken over).
- */
-export const finishDeletion = async (
-  env: Env,
-  sha256: string,
-  owner: string,
-  clock: () => number = Date.now
-): Promise<boolean> => {
-  const db = drizzle(env.DB);
-  const [mark] = await within(
-    db
-      .select({
-        owner: sdkArtifactDeletions.owner,
-        startedAt: sdkArtifactDeletions.startedAt,
-      })
-      .from(sdkArtifactDeletions)
-      .where(eq(sdkArtifactDeletions.sha256, sha256)),
-    deletionStepMs
-  );
-  if (mark?.owner !== owner) {
-    return false;
-  }
-  // The fence: past its deadline, the mark may soon be another's.
-  if (clock() > mark.startedAt.getTime() + markDeadlineMs) {
-    log.warn("release.deletion_abandoned", { sha256 });
-    return false;
-  }
-  await within(env.FILES.delete(`release-artifacts/${sha256}`), deletionStepMs);
-  await within(
-    db
-      .delete(sdkArtifactDeletions)
-      .where(
-        and(
-          eq(sdkArtifactDeletions.sha256, sha256),
-          eq(sdkArtifactDeletions.owner, owner)
-        )
-      ),
-    deletionStepMs
-  );
-  return true;
-};
-
-/**
- * Deletes the bytes of each of `hashes` no reservation names any more:
- * marks it, in the statement that checks there is none, deletes the
- * bytes, then the mark.
- */
-export const deleteUnreservedArtifacts = async (
-  env: Env,
-  hashes: readonly string[]
-): Promise<void> => {
-  for (const sha256 of hashes) {
-    // One after the other: each is a mark, a delete and an unmark; one
-    // that fails leaves the rest to go on.
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      const owner = await markArtifact(env, sha256);
-      if (owner !== undefined) {
-        // oxlint-disable-next-line no-await-in-loop -- see above
-        await finishDeletion(env, sha256, owner);
-      }
-    } catch (error) {
-      log.error("release.artifact_delete_failed", {
-        sha256,
-        ...errorFields(error),
-      });
-    }
-  }
-};
-
-/**
  * Deals with the queued bytes (`sdk_artifact_candidates`), page by page,
- * at most `candidatePages` pages: each is dequeued once its bytes are
- * deleted, reserved again, or marked by another live deleter (theirs to
- * finish, or a takeover's). Bytes whose deletion failed or was abandoned
- * stay queued for the next sweep.
+ * at most `candidatePages` pages: each nothing references any more is
+ * deleted, and each is dequeued once dealt with (deleted, or referenced
+ * again: shared, so never deleted). Bytes whose deletion failed stay
+ * queued for the next sweep.
  */
 const drainCandidates = async (env: Env): Promise<void> => {
   const db = drizzle(env.DB);
@@ -529,31 +407,29 @@ const drainCandidates = async (env: Env): Promise<void> => {
       .select({
         sha256: sdkArtifactCandidates.sha256,
         queuedAt: sdkArtifactCandidates.queuedAt,
+        referenced: sql<number>`EXISTS (SELECT 1 FROM sdk_release_artifacts AS refs
+          WHERE refs.sha256 = sdk_artifact_candidates.sha256)`,
       })
       .from(sdkArtifactCandidates)
       .where(sql`${sdkArtifactCandidates.sha256} > ${after}`)
       .orderBy(sdkArtifactCandidates.sha256)
       .limit(candidatePage);
-    for (const { sha256, queuedAt } of queued) {
+    for (const { sha256, queuedAt, referenced: shared } of queued) {
       try {
-        // oxlint-disable-next-line no-await-in-loop -- see above
-        const owner = await markArtifact(env, sha256);
-        const dealt =
-          owner === undefined ||
-          // oxlint-disable-next-line no-await-in-loop -- see above
-          (await finishDeletion(env, sha256, owner));
-        if (dealt) {
-          // Only as read: queued again since, it is the next sweep's.
-          // oxlint-disable-next-line no-await-in-loop -- see above
-          await db
-            .delete(sdkArtifactCandidates)
-            .where(
-              and(
-                eq(sdkArtifactCandidates.sha256, sha256),
-                eq(sdkArtifactCandidates.queuedAt, queuedAt)
-              )
-            );
+        if (shared === 0) {
+          // oxlint-disable-next-line no-await-in-loop -- one after the other
+          await env.FILES.delete(artifactKey(sha256));
         }
+        // Only as read: queued again since, it is the next sweep's.
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await db
+          .delete(sdkArtifactCandidates)
+          .where(
+            and(
+              eq(sdkArtifactCandidates.sha256, sha256),
+              eq(sdkArtifactCandidates.queuedAt, queuedAt)
+            )
+          );
       } catch (error) {
         log.error("release.artifact_delete_failed", {
           sha256,
@@ -570,7 +446,7 @@ const drainCandidates = async (env: Env): Promise<void> => {
 };
 
 /**
- * Queues the bytes of the reservations `where` selects, to be dealt with,
+ * Queues the bytes of the references `where` selects, to be dealt with,
  * at the real time: queued again, an entry's time is renewed, so a drain
  * that read it before dequeues it no more.
  */
@@ -595,10 +471,10 @@ const queueReserved = (
     });
 
 /**
- * Removes the reservations `where` matches and queues their bytes, in one
+ * Removes the references `where` matches and queues their bytes, in one
  * transaction, for a seal that won't name them after all (a JSON
  * workflow's publication that lost its race, workflow-builds.ts): the
- * sweep deletes bytes no other reservation names.
+ * sweep deletes bytes nothing else references.
  */
 export const releaseReservations = async (
   env: Env,
@@ -611,47 +487,24 @@ export const releaseReservations = async (
   ]);
 };
 
-/** Deletes one release found unreferenced a grace ago, if it still is. */
+/**
+ * Deletes release `key` if nothing keeps it at `now`, in the statement
+ * that checks it, with its bindings, pins and references (its bytes
+ * queued), and its version's `published` status, in one transaction.
+ * Whether it was deleted.
+ */
 const deleteRelease = async (
   env: Env,
   key: ReleaseKey,
   now: Date
 ): Promise<boolean> => {
   const db = drizzle(env.DB);
-  const graceOver = new Date(now.getTime() - releaseGraceMs);
-  /** That the release may go now: the statement that deletes it checks it. */
-  const deletable = and(
-    releaseIs(key),
-    lt(sdkReleaseManifests.unreferencedSince, graceOver),
-    sql`NOT ${referenced(now)}`
-  );
   /** That the release's manifest row is gone: deleted by this batch. */
   const gone = sql`NOT EXISTS (SELECT 1 FROM sdk_release_manifests WHERE app_id = ${key.app} AND version = ${key.version})`;
-  const [, [deleted]] = await db.batch([
-    // Its hash first, in the same transaction, only if it may go.
-    db
-      .insert(sdkReleaseTombstones)
-      .select(
-        db
-          .select({
-            appId: sdkReleaseManifests.appId,
-            version: sdkReleaseManifests.version,
-            manifestHash: sdkReleaseManifests.manifestHash,
-            deletedAt: sql<Date>`${now.getTime()}`.as("deleted_at"),
-          })
-          .from(sdkReleaseManifests)
-          .where(deletable)
-      )
-      .onConflictDoUpdate({
-        target: [sdkReleaseTombstones.appId, sdkReleaseTombstones.version],
-        set: {
-          manifestHash: sql`excluded.manifest_hash`,
-          deletedAt: sql`excluded.deleted_at`,
-        },
-      }),
+  const [[deleted]] = await db.batch([
     db
       .delete(sdkReleaseManifests)
-      .where(deletable)
+      .where(and(releaseIs(key), sql`NOT ${referenced(now)}`))
       .returning({ appId: sdkReleaseManifests.appId }),
     db.delete(sdkResourceBindings).where(
       and(
@@ -672,7 +525,19 @@ const deleteRelease = async (
           gone
         )
       ),
-    // Its bytes queued as their reservations go, in one transaction.
+    // Its version runs again only once published again: sealed anew and
+    // its tests run on what was sealed (app-publish.ts).
+    db
+      .update(appVersions)
+      .set({ status: null })
+      .where(
+        and(
+          eq(appVersions.appId, key.app),
+          eq(appVersions.version, key.version),
+          gone
+        )
+      ),
+    // Its bytes queued as its references go, in one transaction.
     queueReserved(
       db,
       and(
@@ -695,7 +560,7 @@ const deleteRelease = async (
 };
 
 /**
- * Removes the reservations of seals that never finished, a grace before
+ * Removes the references of seals that never finished, a day before
  * `now`, and queues their bytes, in one transaction: the sweep's step
  * before it deals with the queue.
  */
@@ -705,10 +570,7 @@ export const queueOrphanedReservations = async (
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const orphaned = and(
-    lt(
-      sdkReleaseArtifacts.reservedAt,
-      new Date(now.getTime() - releaseGraceMs)
-    ),
+    lt(sdkReleaseArtifacts.reservedAt, new Date(now.getTime() - sealGraceMs)),
     sql`NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS manifests
       WHERE manifests.app_id = ${sdkReleaseArtifacts.appId}
         AND manifests.version = ${sdkReleaseArtifacts.version})`,
@@ -719,7 +581,7 @@ export const queueOrphanedReservations = async (
         AND versions.version = ${sdkReleaseArtifacts.version})`,
     // Nor a test run's build while its row is kept
     // (workflows/candidate-runs.ts): the sweep of test runs deletes the
-    // row, and with it what keeps the reservation.
+    // row, and with it what keeps the reference.
     sql`NOT EXISTS (SELECT 1 FROM workflow_candidate_runs AS candidates
       WHERE candidates.reservation = ${sdkReleaseArtifacts.appId})`
   );
@@ -730,23 +592,13 @@ export const queueOrphanedReservations = async (
 };
 
 /**
- * The retention sweep (see the header), from the clock: notes which
- * releases are current, deletes lapsed leases, marks releases nothing
- * keeps, unmarks those something keeps again, deletes those marked a
- * grace ago that still nothing keeps, with the bytes no other release
- * names, and finishes deletions whose deleter stopped and reservations of
+ * The retention sweep (see the header), from the clock: deletes lapsed
+ * leases, then the releases nothing keeps, each checked again as it is
+ * deleted, with the bytes nothing else references, and the references of
  * seals that never finished.
  */
 export const sweepReleases = async (env: Env, now: Date): Promise<void> => {
   const db = drizzle(env.DB);
-  await db
-    .update(sdkReleaseManifests)
-    .set({ lastCurrentAt: now })
-    .where(
-      sql`EXISTS (SELECT 1 FROM apps WHERE apps.id = ${sdkReleaseManifests.appId}
-        AND (apps.current_version = ${sdkReleaseManifests.version}
-          OR apps.pending_version = ${sdkReleaseManifests.version}))`
-    );
   await db
     .delete(sdkReleasePins)
     .where(
@@ -755,36 +607,13 @@ export const sweepReleases = async (env: Env, now: Date): Promise<void> => {
         sql`${sdkReleasePins.expiresAt} <= ${now.getTime()}`
       )
     );
-  await db
-    .update(sdkReleaseManifests)
-    .set({ unreferencedSince: null })
-    .where(
-      and(
-        sql`${sdkReleaseManifests.unreferencedSince} IS NOT NULL`,
-        referenced(now)
-      )
-    );
-  await db
-    .update(sdkReleaseManifests)
-    .set({ unreferencedSince: now })
-    .where(
-      and(
-        isNull(sdkReleaseManifests.unreferencedSince),
-        sql`NOT ${referenced(now)}`
-      )
-    );
   const due = await db
     .select({
       app: sdkReleaseManifests.appId,
       version: sdkReleaseManifests.version,
     })
     .from(sdkReleaseManifests)
-    .where(
-      lt(
-        sdkReleaseManifests.unreferencedSince,
-        new Date(now.getTime() - releaseGraceMs)
-      )
-    )
+    .where(sql`NOT ${referenced(now)}`)
     .limit(sweepBatch);
   for (const { app, version } of due) {
     try {
@@ -808,19 +637,6 @@ export const sweepReleases = async (env: Env, now: Date): Promise<void> => {
       });
     }
   }
-  // Deletions whose deleter stopped: taken over and finished.
-  const stale = await db
-    .select({ sha256: sdkArtifactDeletions.sha256 })
-    .from(sdkArtifactDeletions)
-    .where(
-      // By the real time, as marks are placed by it.
-      lt(sdkArtifactDeletions.startedAt, new Date(Date.now() - markTakeoverMs))
-    )
-    .limit(sweepBatch);
-  await deleteUnreservedArtifacts(
-    env,
-    stale.map(({ sha256 }) => sha256)
-  );
   await queueOrphanedReservations(env, now);
   await drainCandidates(env);
 };

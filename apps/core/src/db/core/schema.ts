@@ -1,6 +1,5 @@
 import { appWebhookEvents } from "@grasp-os/shared/app-webhooks";
 import type { AppWebhookEvent } from "@grasp-os/shared/app-webhooks";
-import { candidateStates } from "@grasp-os/shared/apps";
 import type { AgentProposer } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
@@ -974,7 +973,8 @@ export const appOrigins = sqliteTable("app_origins", {
 });
 
 /**
- * Every committed version of an App, never changed or deleted. `tree` is
+ * Every committed version of an App, never deleted, and never changed but
+ * its publishing `status`. `tree` is
  * the SHA-256 of the version's files, which are stored under it in R2
  * (`src/apps.ts`). Versions count up from 1 per App, and the primary key
  * makes two commits of the same version conflict instead of both landing.
@@ -1031,18 +1031,24 @@ export const appVersions = sqliteTable(
      * previous release writes gets none.
      */
     proposedBy: text("proposed_by", { mode: "json" }).$type<AgentProposer>(),
+    /**
+     * Where publishing left the version (src/app-publish.ts): `published`
+     * once it was built, sealed and its tests passed, so it may be made
+     * current; `failed` when its last publish was refused. Null for one
+     * never published, and again once the retention sweep deleted its
+     * release: sealed again, it is published again. The only column of a
+     * version that changes.
+     */
+    status: text({ enum: ["published", "failed"] }),
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
 );
 
 /**
- * Candidates: one frozen version of an App on its way to being made
- * current (spec 22.1, src/app-candidates.ts). A candidate pins the
- * version, its source tree and the version it expects to replace
- * (`based_on`, 0 for an App with none current), and moves forward
- * through its states only (`candidateStates`), each move a compare and
- * set on its state and, while it runs, on the lease of whoever runs it.
- * Triggers keep what it pins and the moves it may make (migration 0126).
+ * Unused: candidates were replaced by one publish (src/app-publish.ts) and
+ * a version's `status`. Kept, unread and unwritten, while a release that
+ * still writes it may serve or be rolled back to (expand, then contract);
+ * dropped in a later release, with its reports and triggers.
  */
 export const appCandidates = sqliteTable(
   "app_candidates",
@@ -1056,7 +1062,7 @@ export const appCandidates = sqliteTable(
     basedOn: integer("based_on").notNull(),
     /** The candidate this one repairs, if it does. */
     previousCandidate: text("previous_candidate"),
-    state: text({ enum: candidateStates }).notNull(),
+    state: text().notNull(),
     /** How many runs claimed it, the one running included. */
     attempt: integer().notNull().default(0),
     /** Whose run holds it, and until when; null while none does. */
@@ -1083,11 +1089,7 @@ export const appCandidates = sqliteTable(
   ]
 );
 
-/**
- * A verified candidate's report (spec 22.2, step 11): canonical text
- * holding only identities and hashes core itself computed, stored once
- * with its SHA-256. Never updated or deleted (migration 0126).
- */
+/** Unused, as `app_candidates` is: dropped with it in a later release. */
 export const appCandidateReports = sqliteTable("app_candidate_reports", {
   candidateId: text("candidate_id")
     .primaryKey()
@@ -1116,14 +1118,13 @@ export const sdkReleaseManifests = sqliteTable(
     manifest: text().notNull(),
     sealedAt: timestamp("sealed_at").notNull(),
     /**
-     * When the retention sweep last saw the version current or pending
-     * (src/release-retention.ts): it is kept at least 90 days after that.
-     * Null for one never seen so; its seal starts its retention then.
+     * Unused since retention keeps the last versions rather than 90 days
+     * (src/release-retention.ts): dropped in a later release.
      */
     lastCurrentAt: timestamp("last_current_at"),
     /**
-     * When the sweep first found nothing that keeps it: deleted once that
-     * has held for a day and still holds. Null while something keeps it.
+     * Unused since the sweep deletes a release in the one statement that
+     * checks nothing keeps it: dropped in a later release.
      */
     unreferencedSince: timestamp("unreferenced_since"),
     /**
@@ -1136,15 +1137,15 @@ export const sdkReleaseManifests = sqliteTable(
 );
 
 /**
- * Which sealed releases name which artifact, by its SHA-256 (src/app-
- * releases.ts, src/release-retention.ts): a seal reserves its artifacts
- * here before it stores their bytes, and an artifact's bytes are deleted
- * only once no row names it, under a deletion mark
- * (`sdk_artifact_deletions`) a seal can't reserve past. A reservation of
- * a seal that never finished is swept with its release's grace. `app_id`
- * is the release's resource: an App, or an independent workflow whose
- * version's build is sealed (src/workflow-builds.ts), whose reservations
- * stay as long as its version, for good.
+ * Which sealed releases name which artifact, by its SHA-256: the
+ * artifact's reference count (src/app-releases.ts,
+ * src/release-retention.ts). A seal writes its rows before it stores the
+ * bytes, and the bytes are deleted only once no row names them, so bytes
+ * releases share are never deleted. A row of a seal that never finished
+ * is swept a day later. `app_id` is the release's resource: an App, or
+ * an independent workflow whose version's build is sealed
+ * (src/workflow-builds.ts), whose rows stay as long as its version, for
+ * good.
  */
 export const sdkReleaseArtifacts = sqliteTable(
   "sdk_release_artifacts",
@@ -1161,12 +1162,9 @@ export const sdkReleaseArtifacts = sqliteTable(
 );
 
 /**
- * An artifact's bytes being deleted: marked when no release named it, so
- * no seal reserves it again until the bytes are gone and the mark is
- * removed. Only its owner finishes a mark, before its deadline (15
- * minutes after it was placed), and removes it only once the bytes are
- * deleted; a mark an hour old is taken over by whoever finds it
- * (src/release-retention.ts).
+ * Unused since an artifact's bytes go once nothing references them
+ * (`sdk_release_artifacts`), with no deletion marks: dropped in a later
+ * release.
  */
 export const sdkArtifactDeletions = sqliteTable("sdk_artifact_deletions", {
   sha256: text().primaryKey(),
@@ -1175,10 +1173,10 @@ export const sdkArtifactDeletions = sqliteTable("sdk_artifact_deletions", {
 });
 
 /**
- * Bytes whose last reservation went: queued in the statement that removes
- * the reservation, and dequeued only once the bytes are dealt with
- * (deleted, reserved again, or another deleter's), so no bytes are ever
- * left without a reservation or a queue entry (src/release-retention.ts).
+ * Bytes whose last reference went: queued in the statement that removes
+ * the reference, and dequeued only once the bytes are deleted, or
+ * referenced again, so no bytes are ever left without a reference or a
+ * queue entry (src/release-retention.ts).
  */
 export const sdkArtifactCandidates = sqliteTable("sdk_artifact_candidates", {
   sha256: text().primaryKey(),
@@ -1186,9 +1184,9 @@ export const sdkArtifactCandidates = sqliteTable("sdk_artifact_candidates", {
 });
 
 /**
- * The manifest hash of each sealed release the retention sweep deleted:
- * sealing that App version again must make the same manifest, so a
- * version's number never comes to name other code.
+ * Unused since a version whose release was deleted is published again,
+ * tests and all, before it runs (src/app-publish.ts): dropped in a later
+ * release.
  */
 export const sdkReleaseTombstones = sqliteTable(
   "sdk_release_tombstones",

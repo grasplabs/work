@@ -9,8 +9,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { publishVersion } from "../src/app-publish.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { setCurrentVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { exportAppDefinition } from "../src/definition-export.ts";
 import { grantApprover } from "../src/dependencies/approvers.ts";
@@ -208,7 +208,7 @@ const appSealingPackage = async (license: string) => {
     version: 1,
   });
   await seal(fixture);
-  await setCurrentVersion(env, owner, app, 1);
+  await publishVersion(env, owner, app, 1);
   return { owner, app, admin, pkg, workflow, graphHash };
 };
 
@@ -240,7 +240,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       });
     }
     const release = await seal(fixture);
-    await setCurrentVersion(env, owner, app, 1);
+    await publishVersion(env, owner, app, 1);
 
     let exported: Awaited<ReturnType<typeof exportAppDefinition>> | undefined;
     const audited = await auditedDuring(async () => {
@@ -397,7 +397,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       version: 1,
     });
     await seal(fixture);
-    await setCurrentVersion(env, owner, app, 1);
+    await publishVersion(env, owner, app, 1);
 
     const exported = await exportAppDefinition(env, owner, app);
     expect({
@@ -512,7 +512,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
   it("refuses a package past its byte budget, or one whose files hold a known secret format, naming the file and never the match", async () => {
     const budgeted = await appWith(files(), "Requests");
     await seal(budgeted);
-    await setCurrentVersion(env, budgeted.owner, budgeted.app, 1);
+    await publishVersion(env, budgeted.owner, budgeted.app, 1);
     // Built here, so no file of the repository holds one.
     const token = ["ghp", "_", "Q".repeat(36)].join("");
     const leaky = await appWith(
@@ -523,7 +523,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
       "Requests"
     );
     await seal(leaky);
-    await setCurrentVersion(env, leaky.owner, leaky.app, 1);
+    await publishVersion(env, leaky.owner, leaky.app, 1);
 
     const refused = await refusal(
       exportAppDefinition(env, leaky.owner, leaky.app)
@@ -556,7 +556,7 @@ describe("exporting an App's definition", { timeout: 120_000 }, () => {
     const fixture = await appWith(files(), "Requests");
     const { owner, app } = fixture;
     await seal(fixture);
-    await setCurrentVersion(env, owner, app, 1);
+    await publishVersion(env, owner, app, 1);
     await publishedApp(app);
     const user = await person("user");
     await env.DB.prepare(

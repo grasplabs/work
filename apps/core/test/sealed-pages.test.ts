@@ -4,7 +4,6 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
 
 import {
   heldManifest,
@@ -13,7 +12,7 @@ import {
   versionManifest,
 } from "../src/app-releases.ts";
 import { versionFiles } from "../src/apps.ts";
-import { appCandidateReports, appCandidates } from "../src/db/core/schema.ts";
+import { appVersions } from "../src/db/core/schema.ts";
 import {
   frameAccess,
   frameKey,
@@ -185,28 +184,6 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
       ].toSorted(),
       built: 0,
     });
-  });
-
-  it("carries every page's hash in the candidate's report", async () => {
-    const { builder, app, id } = await published();
-    const bundle = await builder.api.pages.open(app);
-
-    const db = drizzle(env.DB);
-    const [candidate] = await db
-      .select()
-      .from(appCandidates)
-      .where(eq(appCandidates.appId, id))
-      .all();
-    const report = await db
-      .select()
-      .from(appCandidateReports)
-      .where(eq(appCandidateReports.candidateId, candidate?.id ?? ""))
-      .get();
-    const { pages } = z
-      .object({ release: z.object({ pages: z.string().nullable() }) })
-      .parse(JSON.parse(report?.report ?? "null")).release;
-
-    expect(pages).toBe(bundle.artifact);
   });
 
   it("refuses to open a page whose sealed bytes are gone, and builds nothing", async () => {
@@ -532,10 +509,10 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
     const refused = await failure(
       async () => await builder.api.apps.versions.setCurrent(app, version)
     );
-    const candidates = await drizzle(env.DB)
+    const versions = await drizzle(env.DB)
       .select()
-      .from(appCandidates)
-      .where(eq(appCandidates.appId, id))
+      .from(appVersions)
+      .where(eq(appVersions.appId, id))
       .all();
 
     const { currentVersion } = await builder.api.apps.get(app);
@@ -543,11 +520,11 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
     expect({
       refused,
       current: currentVersion,
-      outcome: candidates.find((row) => row.version === version)?.state,
+      status: versions.find((row) => row.version === version)?.status,
     }).toStrictEqual({
       refused: "page.build_failed",
       current: 1,
-      outcome: "repairable_failed",
+      status: "failed",
     });
   });
 });

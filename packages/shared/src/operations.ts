@@ -264,7 +264,6 @@ export const draftSealFailures: ReadonlySet<string> = new Set([
   "version.build_failed",
   "version.inspection_failed",
   "version.invalid_manifest",
-  "version.unstable_manifest",
 ]);
 
 /**

@@ -13,8 +13,9 @@ import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
-import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { appFor, commitFiles } from "../src/apps.ts";
 import {
   appMembers,
   appResourceBindings,
@@ -176,7 +177,7 @@ const sealedApp = async (
 ): Promise<Sealed> => {
   const fixture = await appWith(files, name);
   const release = await seal(fixture);
-  await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+  await publishVersion(env, fixture.owner, fixture.app, 1);
   return { ...fixture, release };
 };
 
@@ -188,7 +189,7 @@ const nextVersion = async (
 ): Promise<Sealed> => {
   await commitFiles(env, sealed.owner, sealed.app, files, "Next version");
   const release = await seal(sealed, version);
-  await setCurrentVersion(env, sealed.owner, sealed.app, version);
+  await publishVersion(env, sealed.owner, sealed.app, version);
   return { ...sealed, release };
 };
 

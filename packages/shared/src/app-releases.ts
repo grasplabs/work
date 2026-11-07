@@ -22,13 +22,14 @@ import { defineErrorFamily } from "./errors.ts";
  * version 4 names the SDK it seals by `sdkVersion` alone, the platform
  * release's own, never gated on; version 5 seals a runner whose
  * `installMutationRuntime` the host's isolate module imports, so an older
- * one is refused rather than failing each call. A release sealed in
- * another format is
+ * one is refused rather than failing each call; version 6 records the one
+ * inspection a seal makes, where earlier ones recorded two. A release
+ * sealed in another format is
  * refused as such (`version.format_unsupported`), sealing it again
  * included, since its manifest is stored for good: a new version
  * replaces it, and none is read as this.
  */
-export const releaseFormatVersion = 5;
+export const releaseFormatVersion = 6;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 
@@ -188,14 +189,13 @@ export const checkEvidenceSchema = z.strictObject({
   }),
   /** SHA-256 of what the checks read and made, each canonical JSON but the texts. */
   observed: z.strictObject({
-    /** Each inspection's text as the sandbox answered it: not sealed, so not recomputed. */
-    symbolicInspection: sha256Schema,
-    finalInspection: sha256Schema,
-    /** The registration both inspections read. */
+    /** The inspection's text as the sandbox answered it: not sealed, so not recomputed. */
+    inspection: sha256Schema,
+    /** The registration the inspection read. */
     manifest: sha256Schema,
     /** The modules the type check passed, by flat name. */
     checkedModules: sha256Schema,
-    /** The SDK modules both inspections ran with, by name. */
+    /** The SDK modules the inspection ran with, by name. */
     sdkModules: sha256Schema,
     /** What running the explicit migrations on their fixtures found. */
     migrations: sha256Schema,
@@ -215,15 +215,14 @@ export const versionErrors = defineErrorFamily({
     "This version's server code failed while it was inspected.",
   "version.invalid_manifest":
     "This version's registration isn't one the platform accepts.",
-  "version.unstable_manifest":
-    "This version's registration changed between two inspections of the same code.",
   "version.store_unbound":
     "This version declares tables or preferences, but no store is bound for it.",
-  "version.seal_busy":
-    "Some of this version's artifacts are being deleted. Seal it again in a moment.",
+  "version.seal_busy": "Sealing this version took too long. Publish it again.",
   "version.seal_conflict":
     "This version was already sealed with a different manifest.",
   "version.not_sealed": "This version hasn't been sealed.",
+  "version.unpublished":
+    "This version hasn't been published, or its release was deleted since. Publish it again.",
   "version.export_too_large":
     "This App and the workflow versions it binds are more than one export holds.",
   "version.export_secret_found":

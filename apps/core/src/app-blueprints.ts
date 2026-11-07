@@ -52,7 +52,6 @@ import {
   storeBlueprintTree,
   storeTree,
   hasPages,
-  supersededBy,
   toApp,
   toVersion,
   versionFiles,
@@ -158,9 +157,9 @@ import {
 // only the App's builders changed stays theirs, and a file both changed
 // stays theirs, listed as a conflict. Nothing is written until a builder
 // accepts exactly the update they saw (`acceptBlueprintUpdate`): then it
-// is the App's next version, theirs, made current only through a
-// verified candidate as any version (app-candidates.ts), with the same
-// checks, approvals and permissions as any. It ships no workflows and
+// is the App's next version, theirs, made current only by publishing it
+// as any version (app-publish.ts), with the same checks, approvals and
+// permissions as any. It ships no workflows and
 // asks for nothing: a copy's builders ask for what the newer code needs.
 // So a customer's edit is never overwritten, and an update grants
 // nothing it didn't before.
@@ -596,6 +595,7 @@ export const createFromBlueprint = async (
     approved: blueprint.approved ? 1 : null,
     pages: hasPages(files),
     proposedBy: null,
+    status: null,
   };
   const db = drizzle(env.DB);
   // The App, only while the blueprint is still there and, for a marked
@@ -869,8 +869,8 @@ export const blueprintUpdate = async (
  * moved on to the code it took, in one audited batch. Refused as
  * `app.conflict` when what they saw no longer holds: the blueprint
  * changed again, a version was committed meanwhile, or the update was
- * accepted already. Nothing is made current: the version goes through a
- * verified candidate, as any (`setCurrent`), and asks for nothing.
+ * accepted already. Nothing is made current: the version is published,
+ * as any (`setCurrent`), and asks for nothing.
  */
 export const acceptBlueprintUpdate = async (
   env: Env,
@@ -943,6 +943,7 @@ export const acceptBlueprintUpdate = async (
     approved: null,
     pages: hasPages(files),
     proposedBy: null,
+    status: null,
   };
   // Nothing of the App's files changes when each of the blueprint's
   // changes was the App's already, or conflicts: only its origin moves on.
@@ -960,9 +961,6 @@ export const acceptBlueprintUpdate = async (
           })
         ),
         updated(row.version),
-        // A person's commit, as any: it supersedes the open candidates of
-        // the versions before it.
-        ...supersededBy(db, by, appId, row.version),
       ] as const)
     : ([moveOrigin, updated(latest.version)] as const);
   try {

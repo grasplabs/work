@@ -9,9 +9,10 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appFor, setCurrentVersion } from "../src/apps.ts";
+import { appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { decisionOutcome, openDecision } from "../src/decisions/decisions.ts";
 import { appHost } from "../src/durable-objects.ts";
@@ -201,7 +202,7 @@ const followingRuns = async (
   });
   const fixture = await appWith(files(), "Requests", builder.acting);
   await seal(fixture);
-  await setCurrentVersion(env, builder.acting, fixture.app, 1);
+  await publishVersion(env, builder.acting, fixture.app, 1);
   await bindWorkflowToApp(env, builder.acting, workflow.id, {
     app: fixture.app,
     alias: "followUp",
@@ -436,7 +437,7 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       version: 1,
     });
     await seal(fixture);
-    await setCurrentVersion(env, builder.acting, fixture.app, 1);
+    await publishVersion(env, builder.acting, fixture.app, 1);
     await env.DB.prepare(
       "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
     )
@@ -542,7 +543,7 @@ describe("a page's live workflow queries", { timeout: 120_000 }, () => {
       version: 1,
     });
     await seal(fixture);
-    await setCurrentVersion(env, builder.acting, fixture.app, 1);
+    await publishVersion(env, builder.acting, fixture.app, 1);
     await env.DB.prepare(
       "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'user', ?, ?)"
     )

@@ -9,17 +9,12 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { activateVersion } from "../src/app-activation.ts";
 import { callAppFunction } from "../src/app-functions.ts";
 import { addMember, removeMember } from "../src/app-members.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import {
-  commitFiles,
-  createApp,
-  findApp,
-  setCurrentVersion,
-} from "../src/apps.ts";
+import { commitFiles, createApp, findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { deleteStore, openStore } from "../src/data-stores.ts";
 import { appDefaultStores } from "../src/db/core/schema.ts";
@@ -35,10 +30,10 @@ import { aroundEngine } from "./runs.ts";
 import { failure, person, sweptAway } from "./sealed-apps.ts";
 import { newRecordId } from "./store-schemas.ts";
 
-// Making a version of spec 8's layout current seals it on the App's one
+// Publishing a version of spec 8's layout seals it on the App's one
 // default store, which the host creates the first time a version needs
 // one and binds to every later version, so the App's data outlives its
-// versions; nothing makes such a version current unsealed.
+// versions.
 
 /** The Notes App's definition, named `title`, its tables `notes` and `more`. */
 const notesSpec = (title: string, more: AppSpec["tables"] = {}): AppSpec => ({
@@ -264,7 +259,7 @@ describe(
   () => {
     it("seals it on the App's own store, which the host creates, and its functions run", async () => {
       const { owner, app } = await appWith(notesFiles());
-      const activated = await activateVersion(env, owner, app, 1);
+      const activated = await publishVersion(env, owner, app, 1);
       expect(activated.currentVersion).toBe(1);
 
       const release = await loadRelease(env, app, 1);
@@ -284,12 +279,12 @@ describe(
 
     it("binds every later version to the same store, so the data stays", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       const first = await loadRelease(env, app, 1);
       await call(owner, first, "notes.create", { title: "Kept" });
 
       await commitFiles(env, owner, app, notesFiles("Notes 2"), "Second");
-      await activateVersion(env, owner, app, 2);
+      await publishVersion(env, owner, app, 2);
       const second = await loadRelease(env, app, 2);
       expect(second.store?.storeId).toBe(first.store?.storeId);
       await expect(defaultStores(app)).resolves.toHaveLength(1);
@@ -303,7 +298,7 @@ describe(
 
     it("lets another builder of the App activate on the store the first one's activation created", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       const first = await loadRelease(env, app, 1);
       await call(owner, first, "notes.create", { title: "Shared" });
       // A second builder, who doesn't manage the store the first created.
@@ -314,7 +309,7 @@ describe(
         role: "builder",
       });
       await commitFiles(env, other, app, notesFiles("Notes 2"), "Second");
-      const activated = await activateVersion(env, other, app, 2);
+      const activated = await publishVersion(env, other, app, 2);
       const second = await loadRelease(env, app, 2);
       expect([
         activated.currentVersion,
@@ -337,7 +332,7 @@ describe(
 
     it("creates no store for an App without tables", async () => {
       const { owner, app } = await appWith(emptyFiles);
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       await expect(storeOf(app, 1)).resolves.toBeNull();
       await expect(defaultStores(app)).resolves.toHaveLength(0);
     });
@@ -345,8 +340,8 @@ describe(
     it("gives two Apps two stores, never one between them", async () => {
       const first = await appWith(notesFiles());
       const second = await appWith(notesFiles());
-      await activateVersion(env, first.owner, first.app, 1);
-      await activateVersion(env, second.owner, second.app, 1);
+      await publishVersion(env, first.owner, first.app, 1);
+      await publishVersion(env, second.owner, second.app, 1);
       const [a] = await defaultStores(first.app);
       const [b] = await defaultStores(second.app);
       expect(a?.storeId).toBeDefined();
@@ -357,7 +352,7 @@ describe(
       const { app } = await appWith(notesFiles());
       const stranger = await person("builder");
       await expect(
-        failure(async () => await activateVersion(env, stranger, app, 1))
+        failure(async () => await publishVersion(env, stranger, app, 1))
       ).resolves.toBe("app.not_found");
       await expect(defaultStores(app)).resolves.toHaveLength(0);
       await expect(currentOf(app)).resolves.toBeNull();
@@ -366,8 +361,8 @@ describe(
     it("gives two first activations at once one store, listed and audited once", async () => {
       const { owner, app } = await appWith(notesFiles());
       const outcomes = await Promise.all([
-        failure(async () => await activateVersion(env, owner, app, 1)),
-        failure(async () => await activateVersion(env, owner, app, 1)),
+        failure(async () => await publishVersion(env, owner, app, 1)),
+        failure(async () => await publishVersion(env, owner, app, 1)),
       ]);
       expect(outcomes).toContain("ok");
       const stores = await defaultStores(app);
@@ -386,17 +381,17 @@ describe(
 
     it("refuses a revoked version, even one revoked as it is made current", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       await commitFiles(env, owner, app, notesFiles("Notes 2"), "Second");
-      await activateVersion(env, owner, app, 2);
+      await publishVersion(env, owner, app, 2);
       await commitFiles(env, owner, app, notesFiles("Notes 3"), "Third");
-      await activateVersion(env, owner, app, 3);
+      await publishVersion(env, owner, app, 3);
       const admin = await person("admin");
 
       // Revoked before: refused at the check.
       await revokeRelease(env, admin, { app, version: 1 }, "Leaks data");
       await expect(
-        failure(async () => await setCurrentVersion(env, owner, app, 1))
+        failure(async () => await publishVersion(env, owner, app, 1))
       ).resolves.toBe("version.revoked");
 
       // Revoked between the check and the change: refused by the change.
@@ -406,32 +401,30 @@ describe(
       await expect(
         failure(
           async () =>
-            await setCurrentVersion({ ...env, DB: racing }, owner, app, 2)
+            await publishVersion({ ...env, DB: racing }, owner, app, 2)
         )
       ).resolves.toBe("version.revoked");
       await expect(currentOf(app)).resolves.toBe(3);
     });
 
-    it("refuses a rollback onto a store retention let go, and gives later versions a fresh one", async () => {
+    it("rolls back onto a fresh store once retention let go of the version and its store, and later versions share it", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       const [deleted] = await defaultStores(app);
       await commitFiles(env, owner, app, withoutNotes, "No tables");
-      await activateVersion(env, owner, app, 2);
+      await publishVersion(env, owner, app, 2);
       // Version 1 kept binds its store; once retention lets it go, the
       // store can be deleted.
       await sweptAway(app, 1);
       await deleteStore(env, owner, deleted?.storeId ?? "");
 
-      // Sealed again, version 1 would bind a fresh store: another release
-      // than the one deleted, which its number never comes to name.
-      await expect(
-        failure(async () => await activateVersion(env, owner, app, 1))
-      ).resolves.toBe("version.seal_conflict");
-      await expect(currentOf(app)).resolves.toBe(2);
+      // Published again, sealed anew on the App's fresh default store: its
+      // records went with the store an admin deleted.
+      const back = await publishVersion(env, owner, app, 1);
+      expect(back.currentVersion).toBe(1);
 
       await commitFiles(env, owner, app, notesFiles("Notes 3"), "Tables again");
-      await activateVersion(env, owner, app, 3);
+      await publishVersion(env, owner, app, 3);
       const [fresh] = await defaultStores(app);
       expect(fresh?.storeId).not.toBe(deleted?.storeId);
       const release = await loadRelease(env, app, 3);
@@ -443,10 +436,10 @@ describe(
 
     it("refuses a version whose store is deleted as it is made current", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       const [store] = await defaultStores(app);
       await commitFiles(env, owner, app, withoutNotes, "No tables");
-      await activateVersion(env, owner, app, 2);
+      await publishVersion(env, owner, app, 2);
       // Its store gone as the statement runs (deletion itself is refused
       // while version 1 is kept: this is the guard behind that).
       const racing = racingDb(async () => {
@@ -459,23 +452,15 @@ describe(
       await expect(
         failure(
           async () =>
-            await setCurrentVersion({ ...env, DB: racing }, owner, app, 1)
+            await publishVersion({ ...env, DB: racing }, owner, app, 1)
         )
       ).resolves.toBe("data.store_unavailable");
       await expect(currentOf(app)).resolves.toBe(2);
     });
 
-    it("never makes such a version current unsealed", async () => {
-      const { owner, app } = await appWith(notesFiles());
-      await expect(
-        failure(async () => await setCurrentVersion(env, owner, app, 1))
-      ).resolves.toBe("version.not_sealed");
-      await expect(currentOf(app)).resolves.toBeNull();
-    });
-
     it("refuses a version that can't be sealed, and leaves the current one", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       await commitFiles(
         env,
         owner,
@@ -484,7 +469,7 @@ describe(
         "Broken"
       );
       await expect(
-        failure(async () => await activateVersion(env, owner, app, 2))
+        failure(async () => await publishVersion(env, owner, app, 2))
       ).resolves.not.toBe("ok");
       await expect(currentOf(app)).resolves.toBe(1);
     });
@@ -519,7 +504,7 @@ describe("an App's store", { timeout: 120_000 }, () => {
       id: first.userId,
       role: "builder",
     });
-    await activateVersion(env, first, app, 1);
+    await publishVersion(env, first, app, 1);
     const [recorded] = await defaultStores(app);
     const store = recorded?.storeId ?? "";
     const whileBuilding = await deleting(first, store);
@@ -540,7 +525,7 @@ describe("an App's store", { timeout: 120_000 }, () => {
 
   it("is managed by none of the App's users, nor anyone outside it, nor a builder whose organization role no longer builds", async () => {
     const { owner, app } = await appWith(notesFiles());
-    await activateVersion(env, owner, app, 1);
+    await publishVersion(env, owner, app, 1);
     const [recorded] = await defaultStores(app);
     const store = recorded?.storeId ?? "";
     const reader = await person("builder");
@@ -586,10 +571,10 @@ describe("an App's store", { timeout: 120_000 }, () => {
 describe("a store's definitions", { timeout: 120_000 }, () => {
   it("are recorded once each, numbered, and the store's active one follows the current version", async () => {
     const { owner, app } = await appWith(notesFiles());
-    await activateVersion(env, owner, app, 1);
+    await publishVersion(env, owner, app, 1);
     // The same schema and operations under another name: one definition.
     await commitFiles(env, owner, app, notesFiles("Notes 2"), "Renamed");
-    await activateVersion(env, owner, app, 2);
+    await publishVersion(env, owner, app, 2);
     // Another table: a second definition.
     const widened = {
       ...notesFiles("Notes 3"),
@@ -598,7 +583,7 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
       ),
     };
     await commitFiles(env, owner, app, widened, "Tags");
-    await activateVersion(env, owner, app, 3);
+    await publishVersion(env, owner, app, 3);
     const [recorded] = await defaultStores(app);
     const store = recorded?.storeId ?? "";
     const definitions = await env.DB.prepare(
@@ -628,12 +613,12 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
         }>();
     const afterThree = await active();
     // Rolled back: the store's active definition is version 1's again.
-    await activateVersion(env, owner, app, 1);
+    await publishVersion(env, owner, app, 1);
     const afterRollback = await active();
     // A version without a schema binds no store: the store serves no
     // definition while it is current.
     await commitFiles(env, owner, app, withoutNotes, "No tables");
-    await activateVersion(env, owner, app, 4);
+    await publishVersion(env, owner, app, 4);
     const unbound = await active();
     const [first, third] = await Promise.all([
       loadRelease(env, app, 1),
@@ -686,7 +671,7 @@ describe(
   () => {
     it("applies an optional field, and an older version made current again keeps it", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
 
       const second = await nextVersion(
@@ -694,7 +679,7 @@ describe(
         app,
         evolvingFiles({ category: "v.string()" })
       );
-      await activateVersion(env, owner, app, second);
+      await publishVersion(env, owner, app, second);
       const renamed = await valueOf(owner, app, "notes.create", {
         title: "Hiring",
         category: "jobs",
@@ -706,7 +691,7 @@ describe(
 
       // Back to the first version: it reads and writes its own fields,
       // and keeps what the second stored.
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.rename", {
         id: renamed,
         title: "Hired",
@@ -717,7 +702,7 @@ describe(
       });
       const firstRows = await valueOf(owner, app, "notes.rows");
 
-      await activateVersion(env, owner, app, second);
+      await publishVersion(env, owner, app, second);
       expect({
         first: firstRows,
         second: await valueOf(owner, app, "notes.rows"),
@@ -733,16 +718,16 @@ describe(
 
     it("makes an older version current again after a newer one changed only its indexes", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
       const indexed = await nextVersion(
         owner,
         app,
         evolvingFiles({}, {}, { indexed: true })
       );
-      await activateVersion(env, owner, app, indexed);
+      await publishVersion(env, owner, app, indexed);
 
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
 
       expect({
         current: await currentOf(app),
@@ -754,7 +739,7 @@ describe(
       const { owner, app } = await appWith(
         evolvingFiles({ category: "v.string()" })
       );
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.create", {
         title: "Launch",
         category: "news",
@@ -766,7 +751,7 @@ describe(
         evolvingFiles({ category: "v.number()" })
       );
       await expect(
-        failure(async () => await activateVersion(env, owner, app, retyped))
+        failure(async () => await publishVersion(env, owner, app, retyped))
       ).resolves.toBe("migration.required");
 
       expect({
@@ -780,7 +765,7 @@ describe(
 
     it("fills in a defaulted field in the background, then makes the version current", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
       const defaulted = await nextVersion(
         owner,
@@ -793,16 +778,16 @@ describe(
       // holds on to; one note's backfill may be done before the answer).
       await vi.waitFor(
         async () => {
-          await activateVersion(env, owner, app, defaulted);
+          await publishVersion(env, owner, app, defaulted);
         },
         { timeout: 20_000, interval: 200 }
       );
       const filled = await valueOf(owner, app, "notes.rows");
       // The first version, made current again, writes without the field;
       // the store fills it in.
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Hiring" });
-      await activateVersion(env, owner, app, defaulted);
+      await publishVersion(env, owner, app, defaulted);
 
       expect({
         filled,
@@ -818,7 +803,7 @@ describe(
 
     it("answers migration.pending, not an error, while the engine that runs its backfill is unavailable", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Launch" });
 
       // The engine can't be reached, from the seal on: the backfill the
@@ -835,7 +820,7 @@ describe(
             evolvingFiles({}, { category: 'v.string().default("general")' })
           );
           return await failure(
-            async () => await activateVersion(env, owner, app, defaulted)
+            async () => await publishVersion(env, owner, app, defaulted)
           );
         }
       );
@@ -848,7 +833,7 @@ describe(
 
     it("keeps a version whose failed backfill an admin abandoned refused, resealed or not", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       const first = await storeOf(app, 1);
       if (first === null) {
         throw new Error("The first version binds no store");
@@ -874,7 +859,7 @@ describe(
         async () => {
           await expect(
             failure(
-              async () => await activateVersion(env, owner, app, defaulted)
+              async () => await publishVersion(env, owner, app, defaulted)
             )
           ).resolves.toBe("migration.backfill_failed");
         },
@@ -908,13 +893,13 @@ describe(
       });
       await vi.waitFor(
         async () => {
-          await activateVersion(env, owner, app, again);
+          await publishVersion(env, owner, app, again);
         },
         { timeout: 20_000, interval: 200 }
       );
       const resealedAfter = await reseal();
       const activated = await failure(
-        async () => await activateVersion(env, owner, app, defaulted)
+        async () => await publishVersion(env, owner, app, defaulted)
       );
 
       expect({
@@ -932,7 +917,7 @@ describe(
 
     it("makes one of two conflicting versions current when both are activated at once", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       const asText = await nextVersion(
         owner,
         app,
@@ -945,8 +930,8 @@ describe(
       );
 
       const outcomes = await Promise.all([
-        failure(async () => await activateVersion(env, owner, app, asText)),
-        failure(async () => await activateVersion(env, owner, app, asNumber)),
+        failure(async () => await publishVersion(env, owner, app, asText)),
+        failure(async () => await publishVersion(env, owner, app, asNumber)),
       ]);
 
       const winner = outcomes[0] === "ok" ? asText : asNumber;
@@ -975,7 +960,7 @@ describe(
 
     it("finishes an activation whose store applied the schema before it stopped, with the store's evidence", async () => {
       const { owner, app } = await appWith(evolvingFiles());
-      await activateVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       const [recorded] = await defaultStores(app);
       const store = await openStore(
         env,
@@ -1002,7 +987,7 @@ describe(
         { resourceId: app, resourceVersion: second }
       );
 
-      await activateVersion(env, owner, app, second);
+      await publishVersion(env, owner, app, second);
 
       const events = await allEvents();
       const sealed = events.filter(

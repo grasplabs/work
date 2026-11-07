@@ -21,7 +21,6 @@ import {
 } from "../src/store-abandon.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
 import { StoreHost } from "../src/store-host.ts";
-import { verifiedCandidate } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   codeOf,
@@ -131,7 +130,12 @@ const registerApp = async (
     createdAt: new Date(),
   });
   if (currentVersion !== null) {
-    await verifiedCandidate(app, currentVersion);
+    // Published, as making it current requires.
+    await env.DB.prepare(
+      "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, status) VALUES (?, ?, 'test', 0, 'test', '', 0, 'published')"
+    )
+      .bind(app, currentVersion)
+      .run();
     await drizzle(env.DB)
       .update(apps)
       .set({ currentVersion })

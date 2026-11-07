@@ -5,7 +5,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { activateVersion } from "../src/app-activation.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
@@ -123,7 +123,7 @@ const failuresOf = async (
   on: Env = env
 ): Promise<unknown> => {
   try {
-    await activateVersion(on, owner, app, 1);
+    await publishVersion(on, owner, app, 1);
   } catch (error) {
     if (isExpectedError(error) && error.code === "version.tests_failed") {
       return error.details?.failures;
@@ -370,7 +370,7 @@ describe("a test session's live queries", { timeout: 120_000 }, () => {
   /** A session of a sealed Notes App's test run, and its release. */
   const session = async () => {
     const built = await appWith(appFiles);
-    await activateVersion(env, built.owner, built.app, 1);
+    await publishVersion(env, built.owner, built.app, 1);
     const release = await loadRelease(env, built.app, 1);
     const host = fixtureHostFor(env, release, appFiles);
     return { host, release, opened: await host.open("notes", "live") };
@@ -492,7 +492,7 @@ describe("a test session's live queries", { timeout: 120_000 }, () => {
       },
     });
     const built = await appWith(appFiles);
-    await activateVersion(env, built.owner, built.app, 1);
+    await publishVersion(env, built.owner, built.app, 1);
     const release = await loadRelease(env, built.app, 1);
     const host = fixtureHostFor(
       envWith({ DATA_STORES: stores }),

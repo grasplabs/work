@@ -5,8 +5,8 @@ import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { publishVersion } from "../src/app-publish.ts";
 import { sealRelease } from "../src/app-releases.ts";
-import { setCurrentVersion } from "../src/apps.ts";
 import { grantReviewed, racingDb, release, reviewedOf } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -303,7 +303,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     };
 
     const events = await auditedDuring(async () => {
-      await setCurrentVersion(racing, await builder.api.whoami(), app, version);
+      await publishVersion(racing, await builder.api.whoami(), app, version);
     });
     const listed = await permissionsOf(admin, app);
 
@@ -432,21 +432,20 @@ describe("An App's next version", { timeout: 60_000 }, () => {
       "Reviewed"
     );
     // The admin makes it current after the builder's request read the
-    // App, and before it freezes its candidate: the builder's request
-    // finds it current, answers as one made after the admin's would, and
-    // writes nothing. (Once the builder holds its candidate to make it
-    // current, the admin's request is the one turned away, as busy.)
+    // App, and before it marks the version published: the builder's
+    // request finds it current, answers as one made after the admin's
+    // would, and writes nothing.
     const racing: Env = {
       ...env,
       DB: racingDb(async () => {
         await admin.api.apps.versions.setCurrent(app, version);
-      }, /^insert into "app_candidates"/iu),
+      }, /^update "app_versions" set "status"/iu),
     };
 
     let answered = "";
     const events = await auditedDuring(async () => {
       answered = await outcome(
-        setCurrentVersion(racing, await builder.api.whoami(), app, version)
+        publishVersion(racing, await builder.api.whoami(), app, version)
       );
     });
 
@@ -487,7 +486,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     };
 
     // Checked as an admin when the request came in.
-    await setCurrentVersion(racing, await admin.api.whoami(), app, version);
+    await publishVersion(racing, await admin.api.whoami(), app, version);
     const statuses = await env.DB.prepare(
       "SELECT binding, status FROM permissions WHERE subject_id = ? ORDER BY binding"
     )

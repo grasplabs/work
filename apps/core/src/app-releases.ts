@@ -61,13 +61,10 @@ import { checkEvidenceText, evidenceMatches } from "./check-evidence.ts";
 import { appStoreFor, openStore } from "./data-stores.ts";
 import {
   businessStoreVersions,
-  sdkArtifactDeletions,
-  sdkReleaseArtifacts,
   sdkReleaseManifests,
-  sdkReleaseTombstones,
   sdkResourceBindings,
 } from "./db/core/schema.ts";
-import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
+import { isUniqueViolation, notNullFailed } from "./db/d1.ts";
 import { withReferencesText } from "./draft-references.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { hostModules } from "./host-modules.ts";
@@ -78,7 +75,6 @@ import {
 } from "./migration-transform.ts";
 import { pageArtifact, versionPages } from "./pages.ts";
 import type { BuildProfile, BuiltPage, PageBuildResult } from "./pages.ts";
-import { finishDeletion, markArtifact } from "./release-retention.ts";
 import { defineSchemaOnStore, schemaStatus } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 
@@ -94,11 +90,13 @@ import { liveStoreSql } from "./store-deletion.ts";
 //   text, read by declaring the App again through the SDK's constructors
 //   (`readAppManifest`), which refuses anything no declaration makes.
 // - The registration depends on references that don't exist yet: the
-//   first inspection lends symbolic ones, which resolve only against the
+//   inspection lends symbolic ones, which resolve only against the
 //   registration; the host then generates the real modules from what it
-//   read, builds the code again with them, inspects it again, and refuses
-//   to seal unless both inspections read exactly the same (`unstable`).
-//   Nothing symbolic is sealed.
+//   read and builds and type-checks the code again with them, which is
+//   what is sealed. It isn't inspected again: the host decides everything
+//   a call may do from the registration read here (operations.ts), never
+//   from what the code would register, so code that registered otherwise
+//   with the real modules gains nothing. Nothing symbolic is sealed.
 // - A release is changed after it was sealed: its manifest is canonical
 //   text stored once with its SHA-256 (a second seal of the version with
 //   another manifest is refused), and every artifact is stored under the
@@ -109,6 +107,11 @@ import { liveStoreSql } from "./store-deletion.ts";
 //   and the evidence of the seal's checks against the identities and
 //   artifacts it names (check-evidence.ts).
 //   A new version is a new manifest; a sealed one never changes.
+// - Bytes a release names are deleted: each seal references its artifacts
+//   (`sdk_release_artifacts`) before it stores them and before its
+//   manifest, which it writes only while every reference stands; bytes go
+//   only once nothing references them (release-retention.ts), so bytes
+//   releases share are never deleted.
 // - A release reaches a store it shouldn't: no App code, request or
 //   manifest field names a store. The seal binds its App's own store, the
 //   one `app_default_stores` keys by the App (data-stores.ts,
@@ -178,12 +181,6 @@ interface SealRequest {
   readonly version: number;
   /** Who seals it: one of the App's builders. */
   readonly by: Acting;
-  /**
-   * Called once its code is inspected and checked, before it is built
-   * and stored: a candidate's move from checking to building
-   * (app-candidates.ts). Not called for a version sealed already.
-   */
-  readonly building?: () => Promise<void>;
 }
 
 /** A release as the host runs it: verified, every hash checked. */
@@ -359,7 +356,7 @@ const verifiedRelease = async (
   /**
    * Whether the sealed pages are read too. A load to run the App's code
    * leaves them: they are read, and checked against their hashes, when a
-   * page opens (`sealedPage`), and by a candidate's read-back.
+   * page opens (`sealedPage`), and by a read-back (`readBackRelease`).
    */
   { pages }: { pages: boolean }
 ): Promise<Omit<Release, "manifestHash">> => {
@@ -640,43 +637,24 @@ export const loadRelease = async (
 };
 
 /**
- * The sealed manifest of `version` of `app` and its hash, checked against
- * the hash and the store binding core recorded, with every artifact it
- * names read back from storage and verified as `loadRelease` verifies
- * them (`verifiedRelease`), but never from or into the isolate's cache of
- * verified releases, so a later load still reads storage: what a
- * candidate's report names (app-candidates.ts). `version.artifact_corrupt`
- * for an artifact missing or changed.
+ * The sealed release of `app`'s `version`, read back from storage and
+ * verified as `loadRelease` verifies it (`verifiedRelease`), pages
+ * included, but never from or into the isolate's cache of verified
+ * releases, so a later load still reads storage: what sealing a version
+ * again and making one current check (`makeCurrent`).
+ * `version.artifact_corrupt` for an artifact missing or changed.
  */
 export const readBackRelease = async (
   env: Env,
   app: AppId,
   version: number
-): Promise<{ manifest: ReleaseManifest; hash: string }> => {
-  const checked = await checkedManifest(env, app, version);
-  await verifiedRelease(storedArtifacts(env), checked.manifest, {
+): Promise<Release> => {
+  const { manifest, hash } = await checkedManifest(env, app, version);
+  const release = await verifiedRelease(storedArtifacts(env), manifest, {
     pages: true,
   });
-  return checked;
+  return { ...release, manifestHash: hash };
 };
-
-/**
- * A digest of the artifacts a manifest names (path, hash and size of
- * each): what a candidate's report records of a release read back, and
- * what activation compares against read back again.
- */
-export const artifactDigest = async (
-  manifest: ReleaseManifest
-): Promise<string> =>
-  await sha256Hex(
-    canonicalText(
-      manifest.artifacts.map(({ path, sha256, bytes }) => ({
-        path,
-        sha256,
-        bytes,
-      }))
-    )
-  );
 
 /**
  * The sealed build of the pages of `app`'s `version`: the very bytes
@@ -751,20 +729,6 @@ export const sealedSurfaces = async (
   }
 };
 
-/**
- * Whether `app`'s sealed `version` carries its pages' build, from its
- * manifest alone: for a candidate's report, which then reads it
- * (`sealedPage`).
- */
-export const sealsPages = async (
-  env: Env,
-  app: AppId,
-  version: number
-): Promise<boolean> => {
-  const { manifest } = await checkedManifest(env, app, version);
-  return manifest.artifacts.some(({ path }) => path === pageArtifactPath);
-};
-
 /** A draft release as its keeper stores it (sealed-previews.ts). */
 export interface StoredDraft {
   /** Its manifest's canonical text. */
@@ -807,107 +771,30 @@ export const loadDraftRelease = async (
   };
 };
 
-/** How often, and how long, a seal waits for a deletion in flight. */
-const reserveWait = { attempts: 50, ms: 200 };
-
 /**
- * Reserves `hashes` for release `key` (release-retention.ts), so no sweep
- * deletes their bytes once this release names them; a reservation made
- * again is renewed, so a seal retried long after a failed one isn't swept
- * as an orphan while it runs. Where a deletion of one is in flight, the
- * seal waits for its owner to finish it (the seal stores the bytes after
- * this, so they outlive that deletion); a deletion whose owner stopped
- * (`markTakeoverMs`) is taken over and finished here.
- * `version.seal_busy` if a deletion is still in flight after the wait.
- * `key.app` is the release's resource: an App, or an independent workflow
- * whose version seals its build (workflow-builds.ts).
+ * References `hashes` from release `key` (`sdk_release_artifacts`), so no
+ * sweep deletes their bytes once this release names them
+ * (release-retention.ts): written before the bytes are stored. A
+ * reference made again is renewed, so a seal retried long after a failed
+ * one isn't swept as an orphan while it runs. `key.app` is the release's
+ * resource: an App, or an independent workflow whose version seals its
+ * build (workflow-builds.ts).
  */
 export const reserveArtifacts = async (
   env: Env,
   key: { app: string; version: number },
   hashes: readonly string[]
 ): Promise<void> => {
-  const unique = [...new Set(hashes)];
-  for (let attempt = 1; attempt <= reserveWait.attempts; attempt += 1) {
-    const now = Date.now();
-    // One batch, one transaction: each reserved only where no deletion
-    // mark is.
-    // oxlint-disable-next-line no-await-in-loop -- tried again in turn
-    await env.DB.batch(
-      unique.map((sha256) =>
-        env.DB.prepare(
-          `INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at)
-           SELECT ?1, ?2, ?3, ?4 WHERE NOT EXISTS (SELECT 1 FROM sdk_artifact_deletions WHERE sha256 = ?1)
-           ON CONFLICT (sha256, app_id, version) DO UPDATE SET reserved_at = excluded.reserved_at`
-        ).bind(sha256, key.app, key.version, now)
-      )
-    );
-    // Done only once every hash is reserved for this release: a hash the
-    // batch skipped for a mark whose owner finished it just after is
-    // simply tried again.
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    const reserved = await drizzle(env.DB)
-      .select({ sha256: sdkReleaseArtifacts.sha256 })
-      .from(sdkReleaseArtifacts)
-      .where(
-        and(
-          eq(sdkReleaseArtifacts.appId, key.app),
-          eq(sdkReleaseArtifacts.version, key.version),
-          inList(sdkReleaseArtifacts.sha256, unique)
-        )
-      );
-    const have = new Set(reserved.map(({ sha256 }) => sha256));
-    const missing = unique.filter((sha256) => !have.has(sha256));
-    if (missing.length === 0) {
-      return;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    const marked = await drizzle(env.DB)
-      .select({ sha256: sdkArtifactDeletions.sha256 })
-      .from(sdkArtifactDeletions)
-      .where(inList(sdkArtifactDeletions.sha256, missing));
-    if (marked.length === 0) {
-      // Unmarked since the batch: reserved on the next try, at once.
-      continue;
-    }
-    for (const { sha256 } of marked) {
-      // Only a mark whose owner stopped is taken over; a live one is
-      // its owner's to finish.
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      const owner = await markArtifact(env, sha256);
-      if (owner !== undefined) {
-        // oxlint-disable-next-line no-await-in-loop -- see above
-        await finishDeletion(env, sha256, owner);
-      }
-    }
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    await scheduler.wait(reserveWait.ms);
-  }
-  throw versionErrors.create("version.seal_busy");
-};
-
-/**
- * Refuses (`version.seal_conflict`) a seal of a version sealed before and
- * deleted since unless it makes the same manifest (`hash`): a version's
- * number never comes to name other code.
- */
-const requireAsTombstoned = async (
-  env: Env,
-  key: { app: AppId; version: number },
-  hash: string
-): Promise<void> => {
-  const tombstone = await drizzle(env.DB)
-    .select({ hash: sdkReleaseTombstones.manifestHash })
-    .from(sdkReleaseTombstones)
-    .where(
-      and(
-        eq(sdkReleaseTombstones.appId, key.app),
-        eq(sdkReleaseTombstones.version, key.version)
-      )
-    )
-    .get();
-  if (tombstone !== undefined && tombstone.hash !== hash) {
-    throw versionErrors.create("version.seal_conflict");
+  const now = Date.now();
+  const statements = [...new Set(hashes)].map((sha256) =>
+    env.DB.prepare(
+      `INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at)
+       VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT (sha256, app_id, version) DO UPDATE SET reserved_at = excluded.reserved_at`
+    ).bind(sha256, key.app, key.version, now)
+  );
+  if (statements.length > 0) {
+    await env.DB.batch(statements);
   }
 };
 
@@ -949,7 +836,7 @@ const definedPreferences = async (
  * - The contract refuses them (`migration.preference_changed`): another
  *   version with other preferences was sealed on the store between this
  *   one's check and now. The seal fails with it, so the version is never
- *   activated (activation seals first, app-activation.ts), and sealing it
+ *   published (publishing seals first, app-publish.ts), and sealing it
  *   again fails the same way (`resealed`). It serves no preference call
  *   either way (store-host.ts, `readPreferences`).
  * - Anything else (the store unreachable): logged, and the release stands.
@@ -1209,9 +1096,9 @@ const boundStore = async (
 };
 
 /**
- * A release sealed already: its artifacts reserved again before it is
- * answered, so sealing a version always leaves its release protected,
- * whatever happened to its reservations; then loaded, every byte checked.
+ * A release sealed already: its artifacts referenced again before it is
+ * answered, so sealing a version always leaves its release protected;
+ * then read back, every byte checked (`readBackRelease`).
  * Its store's definition was recorded with its seal, in the same write.
  * One whose store abandoned the target its schema waited on is refused
  * (`migration.abandoned`), as a fresh seal of it would be: its store
@@ -1229,7 +1116,7 @@ const resealed = async (
     { app, version },
     named.artifacts.map(({ sha256 }) => sha256)
   );
-  const release = await loadRelease(env, app, version);
+  const release = await readBackRelease(env, app, version);
   if (release.store !== null) {
     const status = await schemaStatus(
       env,
@@ -1266,7 +1153,7 @@ const storeEvidence = (
 
 /** What sealing makes of an App's files, before the host binds or stores any of it. */
 interface InspectedRelease {
-  /** The registration, read the same by both inspections. */
+  /** The registration, as the inspection read it. */
   readonly manifest: AppManifest;
   /** The modules generated from it, with the release's identity. */
   readonly generated: Readonly<Record<string, string>>;
@@ -1279,14 +1166,14 @@ interface InspectedRelease {
   };
   readonly schema: string;
   readonly evidence: ReleaseManifest["migrationEvidence"];
-  /** What each inspection answered, recorded in the check's evidence. */
-  readonly inspections: { readonly symbolic: string; readonly final: string };
+  /** What the inspection answered, recorded in the check's evidence. */
+  readonly inspection: string;
 }
 
 /**
  * `files`, an App's code for release `key`, built and inspected as a seal
- * does (see the header): twice, the second time with the modules
- * generated from the first, and refused unless both read the same; then
+ * does (see the header): inspected with symbolic references, then built
+ * and type-checked with the modules generated from what it read; then
  * each explicit migration run on its fixtures. `version.unsealable` for
  * files not of spec 8's layout.
  */
@@ -1300,12 +1187,12 @@ const inspectForSeal = async (
   if (!isAppLayout(files)) {
     throw versionErrors.create("version.unsealable");
   }
-  // The SDK read once: the modules both inspections run with are the
+  // The SDK read once: the modules the inspection runs with are the
   // modules sealed with the release, and what it runs with.
   const sdk = await serverSdkModules(env.ASSETS);
 
-  // The first inspection: symbolic references, resolved against the
-  // registration they come with.
+  // Symbolic references, resolved against the registration they come
+  // with.
   const symbolic = await builtCode(
     env,
     {
@@ -1316,10 +1203,10 @@ const inspectForSeal = async (
     key.app,
     { profile }
   );
-  const firstText = await inspected(env, symbolic, sdk.modules);
-  const manifest = readManifest(firstText);
+  const inspection = await inspected(env, symbolic, sdk.modules);
+  const manifest = readManifest(inspection);
 
-  // The real modules, then the same code again with them: the workflows
+  // The real modules, then the same code built with them: the workflows
   // it declares as the App binds them now, sealed with it.
   const generated = await generateModules(
     manifest,
@@ -1334,11 +1221,6 @@ const inspectForSeal = async (
     key.app,
     profile
   );
-  const secondText = await inspected(env, final, sdk.modules);
-  const reread = readManifest(secondText);
-  if (canonicalText(reread) !== canonicalText(manifest)) {
-    throw versionErrors.create("version.unstable_manifest");
-  }
 
   const schema = await schemaHash(manifest.schema);
   requireMigrationsTarget(manifest.migrations, schema);
@@ -1358,14 +1240,13 @@ const inspectForSeal = async (
     sdk,
     schema,
     evidence,
-    inspections: { symbolic: firstText, final: secondText },
+    inspection,
   };
 };
 
 /**
  * Every page of `files` (of `key.version` of an App), built with the
- * references the release is sealing (`generated`), as a candidate's
- * building stage builds them (app-candidates.ts), so opening a page of
+ * references the release is sealing (`generated`), so opening a page of
  * the release never compiles. The build is the one a save made, from the
  * build cache, when its files are the same. `page.build_failed` for a
  * page that doesn't build, `page.build_slow` for a build that doesn't
@@ -1424,7 +1305,7 @@ const packaged = async (
     pages?: PageBuildResult | null;
   }
 ): Promise<PackagedRelease> => {
-  const { manifest, generated, final, sdk, schema, evidence, inspections } =
+  const { manifest, generated, final, sdk, schema, evidence, inspection } =
     built;
   const contracts = generated[generatedPaths.contracts] ?? "";
   const kit = await kitModules(env.ASSETS);
@@ -1450,7 +1331,7 @@ const packaged = async (
   const report = await checkEvidenceText(
     identity,
     { manifest, modules: final, sdk: sdk.modules },
-    inspections
+    inspection
   );
   const artifacts = await Promise.all([
     ...Object.entries(final).map(
@@ -1565,7 +1446,6 @@ export const sealRelease = async (
   );
   const bound = await boundStore(env, request, built.manifest, built.schema);
   const store = bound?.binding ?? null;
-  await request.building?.();
   // Every page built and sealed with the release, so none is compiled
   // when it opens.
   const pages = await builtPages(env, { app, version }, files, built.generated);
@@ -1576,12 +1456,11 @@ export const sealRelease = async (
     { tree: row.tree, store, pages }
   );
   const { manifest, final, sdk, schema } = built;
-  await requireAsTombstoned(env, { app, version }, hash);
 
-  // Reserved first, so no retention sweep deletes bytes this release will
-  // name (release-retention.ts); then the bytes, each under its hash, so a
-  // manifest never names a missing artifact. Storing the same bytes again
-  // changes nothing.
+  // Referenced first, so no retention sweep deletes bytes this release
+  // will name (release-retention.ts); then the bytes, each under its hash,
+  // so a manifest never names a missing artifact. Storing the same bytes
+  // again changes nothing.
   await reserveArtifacts(
     env,
     { app, version },
@@ -1603,8 +1482,8 @@ export const sealRelease = async (
         appId: app,
         version,
         // The hash only while every artifact the manifest names is
-        // reserved for this release: otherwise NULL, which the column
-        // refuses, and the whole seal with it. Reservations go only with
+        // referenced by this release: otherwise NULL, which the column
+        // refuses, and the whole seal with it. References go only with
         // the manifest, so no sweep deletes bytes a sealed release names.
         manifestHash: sql`(SELECT ${hash} WHERE NOT EXISTS (
           SELECT 1 FROM json_each(${text}, '$.artifacts') AS named

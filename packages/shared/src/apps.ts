@@ -539,9 +539,8 @@ export interface AppVersionsApi {
   review: (app: string, version: number) => Promise<VersionReview>;
   /**
    * Makes a version the one that runs, after review or to roll back,
-   * through a candidate verified for it (frozen, checked, built, sealed
-   * and verified, then made current only over the version it was based
-   * on). By
+   * publishing it first if it isn't yet (built, sealed and its tests run),
+   * then made current only over the version current as it began. By
    * anyone but one of the organization's admins (Grasp staff too, and a
    * rollback too), it asks again for the App's permissions on a
    * connection or to start a workflow: they allow
@@ -794,7 +793,7 @@ export interface AppBlueprintsApi {
   update: (app: string) => Promise<BlueprintUpdate | null>;
   /**
    * Commits the update the builder saw as the App's next version, which
-   * is made current, as any, through a verified candidate. Its builders.
+   * is published and made current as any. Its builders.
    */
   acceptUpdate: (app: string, accepted: AcceptedUpdate) => Promise<AppVersion>;
 }
@@ -936,39 +935,6 @@ export interface AppsApi {
   readonly data: AppDataApi;
 }
 
-/**
- * The states of a candidate: one frozen version of an App on its way to
- * being made current (spec 22.1, core's app-candidates.ts). It moves
- * forward through `frozen`, `checking`, `building`, `verifying` and
- * `verified` to `active`, or ends in one of the outcomes: a defect a
- * repair can fix (`repairable_failed`), something outside the App's code
- * in the way (`operationally_blocked`), a refusal no repair of the code
- * changes (`rejected`), or a newer change by a person (`superseded`).
- * `active` and the outcomes are final; a repair is a new candidate.
- */
-export const candidateStates = [
-  "frozen",
-  "checking",
-  "building",
-  "verifying",
-  "verified",
-  "active",
-  "repairable_failed",
-  "operationally_blocked",
-  "rejected",
-  "superseded",
-] as const;
-export type CandidateState = (typeof candidateStates)[number];
-
-/** The states of a candidate still on its way: neither active nor ended. */
-export const openCandidateStates = [
-  "frozen",
-  "checking",
-  "building",
-  "verifying",
-  "verified",
-] as const satisfies readonly CandidateState[];
-
 /** Why a call to the App registry was refused. */
 export const appErrors = defineErrorFamily({
   "app.invalid": "That isn't a valid request for an App.",
@@ -990,16 +956,6 @@ export const appErrors = defineErrorFamily({
   "app.v1_server":
     "An App no longer has files under app/: its server code is grasp.config.ts, server/schema.ts and its functions in server/. Delete the files under app/ and commit again.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
-  "app.candidate_busy":
-    "This version is already being checked to be made current. Try again in a moment.",
-  "app.candidate_attempts":
-    "Checking this version to make it current failed too many times for reasons outside its code. Try again later.",
-  "app.candidate_environment":
-    "This version was checked by an earlier release of the platform, so it must be checked again before it's made current.",
-  "app.candidate_release_changed":
-    "This version's sealed release no longer matches the one that was checked, so it can't be made current. Make the change again to check it anew.",
-  "app.candidate_superseded":
-    "A newer change to this App replaced this version's check before it finished. Make the version current again if you still want it.",
   "app.not_running": "The App has no current version to run yet.",
   "app.no_version": "Make a version of the App current before publishing it.",
   "app.link_taken": "Another App has that link. Choose another.",

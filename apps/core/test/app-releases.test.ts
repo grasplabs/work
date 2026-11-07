@@ -14,7 +14,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { inspected } from "../src/app-inspection.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import {
   loadDraftRelease,
   loadRelease,
@@ -22,12 +22,7 @@ import {
   sealRelease,
 } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import {
-  commitFiles,
-  createApp,
-  findVersion,
-  setCurrentVersion,
-} from "../src/apps.ts";
+import { commitFiles, createApp, findVersion } from "../src/apps.ts";
 import { deleteStore, openStore } from "../src/data-stores.ts";
 import {
   sdkReleaseManifests,
@@ -934,7 +929,6 @@ describe(
         manifest: member(evidence, "observed").manifest,
         checkedModules: member(evidence, "observed").checkedModules,
         sdkModules: member(evidence, "observed").sdkModules,
-        finalInspection: member(evidence, "observed").finalInspection,
       }).toStrictEqual({
         reportHash: entry.sha256,
         source: {
@@ -957,27 +951,19 @@ describe(
         ),
         checkedModules: await sha256Hex(canonicalJson(release.modules)),
         sdkModules: await sha256Hex(canonicalJson(release.sdk)),
-        // The same code and SDK register the same: what inspecting the
-        // sealed release answers now is what the seal's inspection did.
-        finalInspection: await sha256Hex(
-          await inspected(env, release.modules, release.sdk)
-        ),
       });
     });
 
-    it.each(["symbolicInspection", "finalInspection"])(
-      "loads with another %s hash: the inspection texts aren't sealed, so only the manifest hash and the audit chain bind it",
-      async (field) => {
-        const fixture = await appWith(notesFiles());
-        const release = await seal(fixture);
-        await rewrite(fixture.app, release, {
-          evidence: inSection("observed", (section) => {
-            section[field] = otherHash;
-          }),
-        });
-        await expect(refusedLoad(fixture.app)).resolves.toBe("loaded");
-      }
-    );
+    it("loads with another inspection hash: the inspection text isn't sealed, so only the manifest hash and the audit chain bind it", async () => {
+      const fixture = await appWith(notesFiles());
+      const release = await seal(fixture);
+      await rewrite(fixture.app, release, {
+        evidence: inSection("observed", (section) => {
+          section.inspection = otherHash;
+        }),
+      });
+      await expect(refusedLoad(fixture.app)).resolves.toBe("loaded");
+    });
 
     it("refuses a draft release whose evidence names another source", async () => {
       const fixture = await appWith(notesFiles());
@@ -1625,22 +1611,6 @@ JSON.stringify = (value, ...rest) => {
     );
   });
 
-  it("can't register differently each time it is inspected", async () => {
-    // A query whose argument's name is new each time.
-    const shifting = `import { v } from "@grasp-os/sdk";
-import { query } from "@server/_generated/server";
-
-export const shifting = query({
-  args: { [Math.random().toString(36).slice(2, 10)]: v.string() },
-  returns: v.null(),
-  handler: () => null,
-});
-`;
-    await expect(sealedWith({ "server/shifting.ts": shifting })).resolves.toBe(
-      "version.unstable_manifest"
-    );
-  });
-
   it.each([
     [
       "server code that imports the Workers runtime",
@@ -1705,7 +1675,7 @@ export const shifting = query({
   it("keeps its store from being deleted while any release kept binds it, and lets it go once retention removed them", async () => {
     const fixture = await appWith(notesFiles());
     await seal(fixture);
-    await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+    await publishVersion(env, fixture.owner, fixture.app, 1);
     const current = await failure(async () => {
       await deleteStore(env, fixture.owner, fixture.store);
     });
@@ -1722,11 +1692,11 @@ export const shifting = query({
       "Two"
     );
     await seal(fixture, 2);
-    await setCurrentVersion(env, fixture.owner, fixture.app, 2);
+    await publishVersion(env, fixture.owner, fixture.app, 2);
     const retained = await failure(async () => {
       await deleteStore(env, fixture.owner, fixture.store);
     });
-    // Retention lets version 1 go: past its 90 days, then the grace.
+    // Retention lets version 1 go: no longer among the App's latest.
     await sweptAway(fixture.app, 1);
     await deleteStore(env, fixture.owner, fixture.store);
     expect([

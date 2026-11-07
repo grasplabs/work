@@ -4,39 +4,43 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { callAppFunction, invocationFor } from "../src/app-functions.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { commitFiles } from "../src/apps.ts";
 import { callOperation } from "../src/operations.ts";
 import type { Runner } from "../src/operations.ts";
 import {
   candidatePage,
-  deleteUnreservedArtifacts,
-  finishDeletion,
   leaseRelease,
-  markArtifact,
-  markDeadlineMs,
-  markTakeoverMs,
   pinRelease,
   placeHold,
   queueOrphanedReservations,
-  releaseGraceMs,
   releaseHold,
-  releaseRetentionMs,
   revokeRelease,
+  sealGraceMs,
   sweepReleases,
   unpinRelease,
 } from "../src/release-retention.ts";
 import { hostedRelease } from "../src/release-runner.ts";
 import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
-import { appWith, artifactKey, failure, person, seal } from "./sealed-apps.ts";
+import {
+  appWith,
+  artifactKey,
+  failure,
+  newerReleases,
+  person,
+  seal,
+  sweptAway,
+} from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
 // How long sealed releases stay, and how one is revoked (spec 16.3),
 // through real D1, R2 and seals: what keeps a release, that nothing
 // referenced is deleted, that shared bytes outlive the release that goes,
-// and that a seal and a sweep can't delete what the other relies on.
+// and that a deleted release's version runs again only once published
+// again.
 
 const files = (label: string): Record<string, string> => ({
   ...appDefinition({
@@ -81,12 +85,12 @@ const twoVersions = async (
 ): Promise<Fixture & { first: Release; second: Release }> => {
   const fixture = await appWith(files("one"));
   const first = await seal(fixture);
-  await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+  await publishVersion(env, fixture.owner, fixture.app, 1);
   // The sweep sees version 1 current.
   await sweepReleases(env, start);
   await commitFiles(env, fixture.owner, fixture.app, files("two"), "Two");
   const second = await seal(fixture, 2);
-  await setCurrentVersion(env, fixture.owner, fixture.app, 2);
+  await publishVersion(env, fixture.owner, fixture.app, 2);
   await sweepReleases(env, start);
   return { ...fixture, first, second };
 };
@@ -117,59 +121,79 @@ const loadedHash = async (app: Fixture["app"], version: number) => {
 /** `start`, `ms` later. */
 const after = (start: Date, ms: number): Date => new Date(start.getTime() + ms);
 
+/** Queues `hashes` for the sweep, as removing their last reference does. */
+const queueForSweep = async (...hashes: string[]): Promise<void> => {
+  await env.DB.batch(
+    hashes.map((sha256) =>
+      env.DB.prepare(
+        "INSERT INTO sdk_artifact_candidates (sha256, queued_at) VALUES (?, ?)"
+      ).bind(sha256, Date.now())
+    )
+  );
+};
+
 describe("retention", { timeout: 120_000 }, () => {
   it("keeps the current version however old it is", async () => {
     const start = new Date();
     const { app, second } = await twoVersions(start);
-    await sweepsAt(
-      after(start, 400 * day),
-      after(start, 400 * day + 2 * releaseGraceMs)
-    );
+    const removeNewer = await newerReleases(app);
+    await sweepsAt(after(start, 400 * day));
+    await removeNewer();
     const loaded = await loadRelease(env, app, 2);
     expect(loaded.manifestHash).toBe(second.manifestHash);
   });
 
-  it("keeps a version 90 days after it was last current, then a grace, then deletes it and only its own bytes", async () => {
+  it("keeps a version among the App's latest and for a day after its seal, then deletes it, only its own bytes, and unpublishes it", async () => {
     const start = new Date();
     const { app, first, second } = await twoVersions(start);
-    // Within the 90 days, and within the grace once past them: kept.
-    await sweepsAt(
-      after(start, releaseRetentionMs - day),
-      after(start, releaseRetentionMs + 60_000),
-      after(start, releaseRetentionMs + releaseGraceMs - 60_000)
-    );
+    // One of the App's latest releases, however old: kept.
+    await sweepsAt(after(start, 400 * day));
     await expect(loadedHash(app, 1)).resolves.toBe(first.manifestHash);
-    // A grace after it was first found unreferenced: deleted.
-    await sweepsAt(after(start, releaseRetentionMs + releaseGraceMs + 120_000));
-    await expect(
-      failure(async () => await loadRelease(env, app, 1))
-    ).resolves.toBe("version.not_sealed");
+    // No longer among them, but sealed within the day: kept.
+    const removeNewer = await newerReleases(app);
+    await sweepsAt(after(start, sealGraceMs - 60_000));
+    await expect(loadedHash(app, 1)).resolves.toBe(first.manifestHash);
+    // A day after its seal: deleted.
+    await sweepsAt(after(start, sealGraceMs + day));
+    await removeNewer();
+    const status = await env.DB.prepare(
+      "SELECT status FROM app_versions WHERE app_id = ? AND version = 1"
+    )
+      .bind(app)
+      .first<{ status: string | null }>();
     // Its own bytes are gone; the bytes the current version shares with it
     // stay, and the current version loads whole.
-    expect([
-      await stored(first, "modules/app~server~notes.js"),
-      await stored(first, "server/_generated/server.ts"),
-    ]).toStrictEqual([false, true]);
-    await expect(loadedHash(app, 2)).resolves.toBe(second.manifestHash);
+    expect({
+      first: await failure(async () => await loadRelease(env, app, 1)),
+      own: await stored(first, "modules/app~server~notes.js"),
+      shared: await stored(first, "server/_generated/server.ts"),
+      second: await loadedHash(app, 2),
+      status: status?.status,
+    }).toStrictEqual({
+      first: "version.not_sealed",
+      own: false,
+      shared: true,
+      second: second.manifestHash,
+      status: null,
+    });
   });
 
   it("keeps a version an open page leases, for as long as it renews", async () => {
     const start = new Date();
     const { app, first } = await twoVersions(start);
+    const removeNewer = await newerReleases(app);
     const key = { app, version: 1 };
-    const past = after(start, releaseRetentionMs + day);
+    const past = after(start, sealGraceMs + day);
     const minute = 60_000;
     await leaseRelease(env, key, "frame-1", past);
-    // Leased: not marked while the lease holds; marked once it lapses.
-    await sweepsAt(past, after(past, 10 * minute), after(past, 20 * minute));
-    // The page comes back within the grace and renews: the next sweep
-    // finds it held again, and the grace starts over once it lapses.
-    await leaseRelease(env, key, "frame-1", after(past, 30 * minute));
-    const renewedLapse = after(past, 20 * minute + releaseGraceMs + minute);
-    await sweepsAt(after(past, 35 * minute), renewedLapse);
+    // Leased and renewed: kept.
+    await sweepsAt(past, after(past, 10 * minute));
+    await leaseRelease(env, key, "frame-1", after(past, 12 * minute));
+    await sweepsAt(after(past, 20 * minute));
     await expect(loadedHash(app, 1)).resolves.toBe(first.manifestHash);
-    // Not renewed again: a grace after the lease lapsed, it goes.
-    await sweepsAt(after(renewedLapse, releaseGraceMs + minute));
+    // Not renewed again: once the lease lapsed, it goes.
+    await sweepsAt(after(past, 30 * minute));
+    await removeNewer();
     await expect(
       failure(async () => await loadRelease(env, app, 1))
     ).resolves.toBe("version.not_sealed");
@@ -183,8 +207,9 @@ describe("retention", { timeout: 120_000 }, () => {
     )
       .bind(crypto.randomUUID(), app, start.getTime())
       .run();
-    const past = after(start, releaseRetentionMs + day);
-    await sweepsAt(past, after(past, 2 * releaseGraceMs));
+    const removeNewer = await newerReleases(app);
+    await sweepsAt(after(start, sealGraceMs + day));
+    await removeNewer();
     await expect(loadedHash(app, 1)).resolves.toBe(first.manifestHash);
   });
 
@@ -195,14 +220,13 @@ describe("retention", { timeout: 120_000 }, () => {
     const key = { app, version: 1 };
     await placeHold(env, admin, key, "legal-1", "Litigation");
     await placeHold(env, admin, key, "legal-1", "Again");
-    const past = after(start, releaseRetentionMs + day);
-    await sweepsAt(past, after(past, 2 * releaseGraceMs));
+    const removeNewer = await newerReleases(app);
+    const past = after(start, sealGraceMs + day);
+    await sweepsAt(past);
     await expect(loadedHash(app, 1)).resolves.toBe(first.manifestHash);
     await releaseHold(env, admin, key, "legal-1");
-    await sweepsAt(
-      after(past, 3 * releaseGraceMs),
-      after(past, 4 * releaseGraceMs + 60_000)
-    );
+    await sweepsAt(after(past, 60_000));
+    await removeNewer();
     await expect(
       failure(async () => await loadRelease(env, app, 1))
     ).resolves.toBe("version.not_sealed");
@@ -266,26 +290,6 @@ describe("retention", { timeout: 120_000 }, () => {
     expect(pins.results).toStrictEqual([]);
   });
 
-  it("counts a version's retention from when it stopped being current, not from the next sweep", async () => {
-    const fixture = await appWith(files("one"));
-    await seal(fixture);
-    await setCurrentVersion(env, fixture.owner, fixture.app, 1);
-    await commitFiles(env, fixture.owner, fixture.app, files("two"), "Two");
-    await seal(fixture, 2);
-    await setCurrentVersion(env, fixture.owner, fixture.app, 2);
-    // Sealed long ago, and never swept while current.
-    await env.DB.prepare(
-      "UPDATE sdk_release_manifests SET sealed_at = ? WHERE app_id = ? AND version = 1"
-    )
-      .bind(Date.now() - 200 * day, fixture.app)
-      .run();
-    const now = new Date();
-    await sweepsAt(after(now, 60_000), after(now, releaseGraceMs + 2 * 60_000));
-    await expect(loadedHash(fixture.app, 1)).resolves.toMatch(
-      /^[0-9a-f]{64}$/u
-    );
-  });
-
   it("pins only what was sealed", async () => {
     const fixture = await appWith(files("one"));
     await expect(
@@ -302,7 +306,7 @@ describe("retention", { timeout: 120_000 }, () => {
 });
 
 describe("shared bytes", { timeout: 120_000 }, () => {
-  it("are reserved for every artifact a release names, its sealed SDK included", async () => {
+  it("are referenced for every artifact a release names, its sealed SDK included", async () => {
     const fixture = await appWith(files("one"));
     const release = await seal(fixture);
     const rows = await env.DB.prepare(
@@ -318,124 +322,25 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     ]).toStrictEqual([true, []]);
   });
 
-  it("are never deleted while a release reserves them", async () => {
+  it("are never deleted while a release references them", async () => {
     const start = new Date();
     const { app, second } = await twoVersions(start);
     const entry = second.manifest.artifacts.find(
       ({ path }) => path === "server/_generated/server.ts"
     );
-    await deleteUnreservedArtifacts(env, [entry?.sha256 ?? ""]);
+    await queueForSweep(entry?.sha256 ?? "");
+    await sweepsAt(new Date());
     await expect(
       stored(second, "server/_generated/server.ts")
     ).resolves.toBeTruthy();
     await expect(loadedHash(app, 2)).resolves.toBe(second.manifestHash);
   });
 
-  it("being deleted are written by a seal only after the deleter's own delete", async () => {
-    // A deleter marks the server module's bytes (every App's are the
-    // same), and stalls before deleting them.
-    const sha256 = await sha256Hex(serverModuleSource);
-    await env.DB.prepare("DELETE FROM sdk_release_artifacts WHERE sha256 = ?")
-      .bind(sha256)
-      .run();
-    const owner = await markArtifact(env, sha256);
-    expect(owner).toBeDefined();
-    const fixture = await appWith(files("one"));
-    const sealing = seal(fixture);
-    // The seal has reserved its other artifacts, and waits on the mark.
-    const reserving = async (): Promise<void> => {
-      for (let attempt = 0; attempt < 600; attempt += 1) {
-        // oxlint-disable-next-line no-await-in-loop -- polled in turn
-        const rows = await env.DB.prepare(
-          "SELECT 1 FROM sdk_release_artifacts WHERE app_id = ? LIMIT 1"
-        )
-          .bind(fixture.app)
-          .all();
-        if (rows.results.length > 0) {
-          return;
-        }
-        // oxlint-disable-next-line no-await-in-loop -- see above
-        await scheduler.wait(50);
-      }
-      throw new Error("The seal never reserved");
-    };
-    await reserving();
-    await scheduler.wait(500);
-    const mark = await env.DB.prepare(
-      "SELECT owner FROM sdk_artifact_deletions WHERE sha256 = ?"
-    )
-      .bind(sha256)
-      .first<{ owner: string }>();
-    // Still the deleter's: the seal took nothing over.
-    expect(mark?.owner).toBe(owner);
-    await finishDeletion(env, sha256, owner ?? "");
-    const release = await sealing;
-    await expect(
-      stored(release, "server/_generated/server.ts")
-    ).resolves.toBeTruthy();
-    await expect(loadedHash(fixture.app, 1)).resolves.toBe(
-      release.manifestHash
-    );
-  });
-
-  it("skipped by a seal for a mark finished just after are reserved by it all the same", async () => {
-    const sha256 = await sha256Hex(serverModuleSource);
-    await env.DB.prepare("DELETE FROM sdk_release_artifacts WHERE sha256 = ?")
-      .bind(sha256)
-      .run();
-    const owner = (await markArtifact(env, sha256)) ?? "";
-    const fixture = await appWith(files("one"));
-    const batch = env.DB.batch.bind(env.DB);
-    let finished = false;
-    // The deleter finishes right after the seal's reservation batch
-    // skipped these bytes for its mark, before the seal looks again.
-    const finishing = async <T>(
-      statements: D1PreparedStatement[]
-    ): Promise<D1Result<T>[]> => {
-      const results = await batch<T>(statements);
-      if (!finished) {
-        const [skipped, others] = await Promise.all([
-          env.DB.prepare(
-            "SELECT 1 FROM sdk_release_artifacts WHERE sha256 = ? AND app_id = ?"
-          )
-            .bind(sha256, fixture.app)
-            .first(),
-          env.DB.prepare(
-            "SELECT 1 FROM sdk_release_artifacts WHERE app_id = ? LIMIT 1"
-          )
-            .bind(fixture.app)
-            .first(),
-        ]);
-        if (skipped === null && others !== null) {
-          finished = true;
-          await finishDeletion(env, sha256, owner);
-        }
-      }
-      return results;
-    };
-    Reflect.set(env.DB, "batch", finishing);
-    let release: Release;
-    try {
-      release = await seal(fixture);
-    } finally {
-      Reflect.set(env.DB, "batch", batch);
-    }
-    const reserved = await env.DB.prepare(
-      "SELECT 1 AS reserved FROM sdk_release_artifacts WHERE sha256 = ? AND app_id = ?"
-    )
-      .bind(sha256, fixture.app)
-      .first<{ reserved: number }>();
-    expect([finished, reserved?.reserved]).toStrictEqual([true, 1]);
-    await expect(
-      stored(release, "server/_generated/server.ts")
-    ).resolves.toBeTruthy();
-  });
-
-  it("a seal named and lost the reservation of keep it from sealing", async () => {
+  it("a seal named and lost the reference of keep it from sealing", async () => {
     const fixture = await appWith(files("one"));
     const sha256 = await sha256Hex(serverModuleSource);
     const put = env.FILES.put.bind(env.FILES);
-    // A reservation gone between the seal reserving and recording it.
+    // A reference gone between the seal writing and recording it.
     const losing = async (
       ...args: Parameters<typeof put>
     ): ReturnType<typeof put> => {
@@ -459,31 +364,7 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     ).resolves.toBe("version.not_sealed");
   });
 
-  it("being deleted by a deleter that stopped are taken over by a seal", async () => {
-    const sha256 = await sha256Hex(serverModuleSource);
-    await env.DB.prepare("DELETE FROM sdk_release_artifacts WHERE sha256 = ?")
-      .bind(sha256)
-      .run();
-    // A mark its deleter placed long ago, and never finished.
-    await env.DB.prepare(
-      "INSERT INTO sdk_artifact_deletions (sha256, owner, started_at) VALUES (?, 'stopped', ?)"
-    )
-      .bind(sha256, Date.now() - 2 * markTakeoverMs)
-      .run();
-    const fixture = await appWith(files("one"));
-    const release = await seal(fixture);
-    const marks = await env.DB.prepare(
-      "SELECT sha256 FROM sdk_artifact_deletions WHERE sha256 = ?"
-    )
-      .bind(sha256)
-      .all();
-    expect(marks.results).toStrictEqual([]);
-    await expect(
-      stored(release, "server/_generated/server.ts")
-    ).resolves.toBeTruthy();
-  });
-
-  it("a sealed release lost the reservations of are reserved again by sealing it again", async () => {
+  it("a sealed release lost the references of are referenced again by sealing it again", async () => {
     const fixture = await appWith(files("one"));
     const release = await seal(fixture);
     await env.DB.prepare(
@@ -506,9 +387,9 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     ]).toStrictEqual([release.manifestHash, []]);
   });
 
-  it("a seal reserves again are reserved anew, so a sweep can't take them mid-seal", async () => {
+  it("a seal references again are referenced anew, so a sweep can't take them mid-seal", async () => {
     const fixture = await appWith(files("one"));
-    // A seal of this version failed a long time ago, after reserving.
+    // A seal of this version failed a long time ago, after referencing.
     const sha256 = await sha256Hex(serverModuleSource);
     await env.DB.prepare(
       "INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at) VALUES (?, ?, 1, ?)"
@@ -525,7 +406,7 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     expect(row?.reservedAt).toBeGreaterThanOrEqual(before);
   });
 
-  it("a seal never finished reserved are swept a grace later", async () => {
+  it("a seal never finished referenced are swept a day later", async () => {
     const start = new Date();
     const orphan = "f".repeat(64);
     await env.FILES.put(artifactKey(orphan), "left behind");
@@ -534,38 +415,15 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     )
       .bind(orphan, start.getTime())
       .run();
-    await sweepsAt(after(start, releaseGraceMs - 60_000));
+    await sweepsAt(after(start, sealGraceMs - 60_000));
     await expect(env.FILES.head(artifactKey(orphan))).resolves.not.toBeNull();
-    await sweepsAt(after(start, releaseGraceMs + 60_000));
+    await sweepsAt(after(start, sealGraceMs + 60_000));
     await expect(env.FILES.head(artifactKey(orphan))).resolves.toBeNull();
   });
 });
 
-describe("bytes left without a reservation", { timeout: 120_000 }, () => {
-  it("are deleted by a deleter only before its mark's deadline", async () => {
-    const sha256 = await sha256Hex(crypto.randomUUID());
-    await env.FILES.put(artifactKey(sha256), "bytes");
-    const owner = (await markArtifact(env, sha256)) ?? "";
-    // Its own clock says the deadline passed: it gives up, leaving all.
-    const late = await finishDeletion(
-      env,
-      sha256,
-      owner,
-      () => Date.now() + markDeadlineMs + 1000
-    );
-    const mark = await env.DB.prepare(
-      "SELECT owner FROM sdk_artifact_deletions WHERE sha256 = ?"
-    )
-      .bind(sha256)
-      .first<{ owner: string }>();
-    expect([late, mark?.owner]).toStrictEqual([false, owner]);
-    await expect(env.FILES.head(artifactKey(sha256))).resolves.not.toBeNull();
-    // In time, it deletes them.
-    await expect(finishDeletion(env, sha256, owner)).resolves.toBeTruthy();
-    await expect(env.FILES.head(artifactKey(sha256))).resolves.toBeNull();
-  });
-
-  it("one of which fails to delete leave the others deleted", async () => {
+describe("bytes left without a reference", { timeout: 120_000 }, () => {
+  it("one of which fails to delete leave the others deleted, and it queued", async () => {
     const hashes = await Promise.all(
       [1, 2, 3].map(async () => await sha256Hex(crypto.randomUUID()))
     );
@@ -584,9 +442,10 @@ describe("bytes left without a reservation", { timeout: 120_000 }, () => {
       }
       await remove(...args);
     };
+    await queueForSweep(...hashes);
     Reflect.set(env.FILES, "delete", failingOne);
     try {
-      await deleteUnreservedArtifacts(env, hashes);
+      await sweepsAt(new Date());
     } finally {
       Reflect.set(env.FILES, "delete", remove);
     }
@@ -595,7 +454,15 @@ describe("bytes left without a reservation", { timeout: 120_000 }, () => {
         async (sha256) => (await env.FILES.head(artifactKey(sha256))) !== null
       )
     );
-    expect(left).toStrictEqual([false, true, false]);
+    const still = await env.DB.prepare(
+      "SELECT sha256 FROM sdk_artifact_candidates WHERE sha256 IN (?, ?, ?)"
+    )
+      .bind(...hashes)
+      .all<{ sha256: string }>();
+    expect([left, still.results]).toStrictEqual([
+      [false, true, false],
+      [{ sha256: hashes[1] }],
+    ]);
   });
 
   it("of more seals than one page holds are all deleted", async () => {
@@ -618,7 +485,7 @@ describe("bytes left without a reservation", { timeout: 120_000 }, () => {
         ).bind(sha256, start.getTime())
       )
     );
-    await sweepsAt(after(start, releaseGraceMs + 60_000));
+    await sweepsAt(after(start, sealGraceMs + 60_000));
     const left = await Promise.all(
       hashes.map(async (sha256) => await env.FILES.head(artifactKey(sha256)))
     );
@@ -643,7 +510,7 @@ describe("bytes left without a reservation", { timeout: 120_000 }, () => {
         await env.DB.prepare(
           "INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at) VALUES (?, 'app_gone', 1, ?)"
         )
-          .bind(sha256, Date.now() - 2 * releaseGraceMs)
+          .bind(sha256, Date.now() - 2 * sealGraceMs)
           .run();
         await queueOrphanedReservations(env, new Date());
       }
@@ -663,27 +530,14 @@ describe("bytes left without a reservation", { timeout: 120_000 }, () => {
     expect(queued.results).toStrictEqual([{ sha256 }]);
   });
 
-  it("are deleted by a sweep that starts late, its marks placed at the real time", async () => {
-    const sha256 = await sha256Hex(crypto.randomUUID());
-    await env.FILES.put(artifactKey(sha256), "queued");
-    await env.DB.prepare(
-      "INSERT INTO sdk_artifact_candidates (sha256, queued_at) VALUES (?, ?)"
-    )
-      .bind(sha256, Date.now())
-      .run();
-    // Scheduled 20 minutes ago: a mark placed then would be past its deadline.
-    await sweepsAt(new Date(Date.now() - 20 * 60_000));
-    await expect(env.FILES.head(artifactKey(sha256))).resolves.toBeNull();
-  });
-
   it("a sweep queued and didn't get to are dealt with by the next", async () => {
     const [gone, kept] = await Promise.all([
       sha256Hex(crypto.randomUUID()),
       sha256Hex(crypto.randomUUID()),
     ]);
     await env.FILES.put(artifactKey(gone), "queued");
-    await env.FILES.put(artifactKey(kept), "reserved again");
-    // Queued as their reservations went; one was reserved again since.
+    await env.FILES.put(artifactKey(kept), "referenced again");
+    // Queued as their references went; one was referenced again since.
     await env.DB.batch([
       env.DB.prepare(
         "INSERT INTO sdk_artifact_candidates (sha256, queued_at) VALUES (?1, ?3), (?2, ?3)"
@@ -769,8 +623,9 @@ describe("revocation", { timeout: 120_000 }, () => {
     const { app, first } = await twoVersions(start);
     const admin = await person("admin");
     await revokeRelease(env, admin, { app, version: 1 }, "Leaks data");
-    const past = after(start, 2 * releaseRetentionMs);
-    await sweepsAt(past, after(past, 2 * releaseGraceMs));
+    const removeNewer = await newerReleases(app);
+    await sweepsAt(after(start, 400 * day));
+    await removeNewer();
     const row = await env.DB.prepare(
       "SELECT manifest_hash AS hash FROM sdk_release_manifests WHERE app_id = ? AND version = 1"
     )
@@ -832,33 +687,34 @@ describe("revocation", { timeout: 120_000 }, () => {
 });
 
 describe("a deleted release", { timeout: 120_000 }, () => {
-  it("seals again only as itself", async () => {
+  it("runs again only once published again, sealed anew and tested", async () => {
     const start = new Date();
-    const { app, owner, store, first } = await twoVersions(start);
-    await sweepsAt(
-      after(start, releaseRetentionMs + 60_000),
-      after(start, releaseRetentionMs + releaseGraceMs + 120_000)
+    const { app, owner } = await twoVersions(start);
+    await sweptAway(app, 1);
+    // Nobody makes it current as it is, whoever writes.
+    await expect(
+      failure(
+        async () =>
+          await env.DB.prepare(
+            "UPDATE apps SET current_version = 1 WHERE id = ?"
+          )
+            .bind(app)
+            .run()
+      )
+    ).resolves.toContain("apps are made current from a published version");
+    const back = await publishVersion(env, owner, app, 1);
+    const events = await allEvents();
+    const published = events.filter(
+      (event) =>
+        event.action === "app.version.published" &&
+        event.target?.id === app &&
+        event.detail?.version === 1
     );
-    await expect(
-      failure(async () => await loadRelease(env, app, 1))
-    ).resolves.toBe("version.not_sealed");
-    // A tombstone naming another manifest: the seal is refused.
-    await env.DB.prepare(
-      "UPDATE sdk_release_tombstones SET manifest_hash = ? WHERE app_id = ? AND version = 1"
-    )
-      .bind("0".repeat(64), app)
-      .run();
-    await expect(
-      failure(async () => await seal({ owner, app, store }, 1))
-    ).resolves.toBe("version.seal_conflict");
-    // Its own: the same release again.
-    await env.DB.prepare(
-      "UPDATE sdk_release_tombstones SET manifest_hash = ? WHERE app_id = ? AND version = 1"
-    )
-      .bind(first.manifestHash, app)
-      .run();
-    const again = await seal({ owner, app, store }, 1);
-    expect(again.manifestHash).toBe(first.manifestHash);
+    expect({
+      current: back.currentVersion,
+      published: published.length,
+      loads: await failure(async () => await loadRelease(env, app, 1)),
+    }).toStrictEqual({ current: 1, published: 2, loads: "ok" });
   });
 
   it("leaves its store serving its App alone, even with every binding gone", async () => {

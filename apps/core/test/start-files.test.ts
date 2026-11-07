@@ -21,10 +21,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { appStartFiles } from "../src/app-start-files.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appFor, setCurrentVersion } from "../src/apps.ts";
+import { appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
@@ -177,7 +178,7 @@ const reviewsApp = async () => {
     version: 1,
   });
   await seal(fixture);
-  await setCurrentVersion(env, builder.acting, fixture.app, 1);
+  await publishVersion(env, builder.acting, fixture.app, 1);
   const asked = await requestPermission(
     env,
     builder.acting,

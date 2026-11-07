@@ -22,10 +22,11 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
-import { appFor, setCurrentVersion } from "../src/apps.ts";
+import { appFor } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { readWorkflowWatch } from "../src/page-workflows.ts";
@@ -278,7 +279,7 @@ const invoicesApp = async (actions: readonly string[][]) => {
     version: 1,
   });
   await seal(fixture);
-  await setCurrentVersion(env, builder.acting, fixture.app, 1);
+  await publishVersion(env, builder.acting, fixture.app, 1);
   const grants: string[] = [];
   for (const each of actions) {
     // oxlint-disable-next-line no-await-in-loop -- one grant after the other
