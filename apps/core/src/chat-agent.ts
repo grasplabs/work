@@ -140,10 +140,10 @@ export const historyKind = "grasp.history";
 export const questionKind = "grasp.question";
 
 /**
- * What the host tells the turn under way that it answers (a build job's
- * end): pi's steer while its tools run, else pi's follow-up, which starts a
- * run of its own once the run answers. Part of the turn, as the person
- * asked nothing.
+ * What the host tells the turn under way that it answers (what the turn's
+ * check found, chat-harness.ts): pi's steer while its tools run, else pi's
+ * follow-up, which starts a run of its own once the run answers. Part of
+ * the turn, as the person asked nothing.
  */
 export const noticeKind = "grasp.notice";
 

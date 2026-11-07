@@ -528,6 +528,10 @@ export const buildJobStatuses = [
  * tree it is about to commit over `intendedParent`: what a commit step
  * run again reconciles with, rather than committing twice. Deleted with
  * the chat.
+ *
+ * Unused since build jobs went (GRA-1633): nothing writes it, and a chat's
+ * rows go with it. Kept so a rollback to the release before still has it;
+ * a later release drops it (expand, then contract).
  */
 export const chatBuildJobs = sqliteTable(
   "chat_build_jobs",

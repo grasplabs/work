@@ -503,65 +503,22 @@ export declare const more: readonly string[];
     ).rejects.toThrow("Built again");
   });
 
-  it("sweeps the per-file type checks earlier builds kept, which nothing writes any more", async () => {
-    // Kept by builds before the check moved to its own isolate: never
-    // read again, so the sweep empties them once their time is up.
-    const key = `screen-checks/${crypto.randomUUID()}.json`;
-    await env.FILES.put(key, "{}");
-    await sweptAt(Date.now() + buildKeepMs + 24 * 60 * 60 * 1000);
-    await expect(env.FILES.head(key)).resolves.toBeNull();
-  });
-
-  it("keeps a cached build while it is used, and builds one the sweep took again, the same", async () => {
+  it("keeps a cached build for its time, and builds one the sweep took again, the same", async () => {
     const files = page(`kept ${crypto.randomUUID()}`);
     const built = await buildPages(env, files, "app-test");
-    const fromCache = async (at: number, failWrites = false) => {
-      // R2, as core writes to it, counting what is written, or failing it.
-      let writes = 0;
-      const counted = {
-        ...env,
-        LOADER: noBuilds,
-        FILES: {
-          get: env.FILES.get.bind(env.FILES),
-          put: async (...args: Parameters<R2Bucket["put"]>) => {
-            writes += 1;
-            if (failWrites) {
-              throw new Error("R2 is out");
-            }
-            return await env.FILES.put(...args);
-          },
-        },
-      };
-      vi.useFakeTimers({ toFake: ["Date"] });
-      vi.setSystemTime(at);
-      try {
-        const served = await buildPages(counted, files, "app-test");
-        return { served, writes };
-      } finally {
-        vi.useRealTimers();
-      }
-    };
     const day = 24 * 60 * 60 * 1000;
     const now = Date.now();
-    // Served a day on, it stays as it is; past half its time, it is
-    // written again as used then, so a build in use never reaches the
-    // sweep's limit.
-    const refreshed = now + buildKeepMs / 2 + day;
-    const soon = await fromCache(now + day);
-    // A refresh that fails still serves the build.
-    const unwritten = await fromCache(refreshed, true);
-    const later = await fromCache(refreshed);
     // An object of another kind of cache, which this sweep leaves alone.
     await env.FILES.put("package-builds/kept.json", "{}");
-    // Past its first use's time, but not its last's: kept.
-    await sweptAt(now + buildKeepMs + day);
+    // Within its time: kept.
+    await sweptAt(now + buildKeepMs - day);
     const kept = await buildPages(
       { ...env, LOADER: noBuilds },
       files,
       "app-test"
     );
-    // Past its last use's time: gone.
-    await sweptAt(refreshed + buildKeepMs + day);
+    // Past its time: gone.
+    await sweptAt(now + buildKeepMs + day);
     const swept = await buildPages(
       { ...env, LOADER: noBuilds },
       files,
@@ -572,21 +529,60 @@ export declare const more: readonly string[];
     );
     const rebuilt = await buildPages(env, files, "app-test");
     expect({
-      soon,
-      unwritten,
-      later,
       kept,
       swept,
       rebuilt,
       other: (await env.FILES.head("package-builds/kept.json")) !== null,
     }).toStrictEqual({
-      soon: { served: built, writes: 0 },
-      unwritten: { served: built, writes: 1 },
-      later: { served: built, writes: 1 },
       kept: built,
       swept: "Built again",
       rebuilt: built,
       other: true,
+    });
+  });
+
+  it("writes a cached build in use again once it is a week old, so the sweep never takes it, and resumes no other prefix's sweep", async () => {
+    const files = page(`used ${crypto.randomUUID()}`);
+    const built = await buildPages(env, files, "app-test");
+    const servedAt = async (at: number) => {
+      // R2, as core writes to it, counting what is written.
+      let writes = 0;
+      const counted = {
+        ...env,
+        LOADER: noBuilds,
+        FILES: {
+          get: env.FILES.get.bind(env.FILES),
+          put: async (...args: Parameters<R2Bucket["put"]>) => {
+            writes += 1;
+            return await env.FILES.put(...args);
+          },
+        },
+      };
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(at);
+      try {
+        return { served: await buildPages(counted, files, "app-test"), writes };
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+    const day = 24 * 60 * 60 * 1000;
+    const soon = await servedAt(Date.now() + day);
+    const weekOn = await servedAt(Date.now() + 8 * day);
+    // A sweep's state from before the one cache: its cursor is another
+    // prefix's, which the sweep never lists the cache with.
+    await env.FILES.put(
+      "build-cache-sweep.json",
+      JSON.stringify({ prefix: "page-builds/", cursor: "elsewhere" })
+    );
+    await sweptAt(Date.now());
+    expect({
+      soon,
+      weekOn: { served: weekOn.served, written: weekOn.writes > 0 },
+    }).toStrictEqual({
+      soon: { served: built, writes: 0 },
+      // Written again as it is served: its age starts over.
+      weekOn: { served: built, written: true },
     });
   });
 

@@ -39,6 +39,7 @@ import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { z } from "zod";
 
 import { apisFor } from "./agent-apis.ts";
+import { turnCheck } from "./agent-builds.ts";
 import { isMessage, showThinkingName } from "./agent-messages.ts";
 import { chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentScope } from "./agent-scope.ts";
@@ -152,6 +153,13 @@ const gateway = "grasp";
  * the input, so the turn's last input is found by it (`#lastInputOf`).
  */
 const noticeRequestPrefix = (turnId: string): string => `notice:${turnId}:`;
+
+/**
+ * Most checks of a turn's drafts (`turnCheck`, agent-builds.ts): as the
+ * agent's instructions stop it once the same error comes back three
+ * times, so a turn that can't fix its drafts spends no more on trying.
+ */
+const maxTurnChecks = 3;
 
 /** What a turn that only showed its thinking is asked, once, before it ends. */
 const wordsPlease =
@@ -511,8 +519,6 @@ export class ChatHarness {
    * claimed in memory at once by `run`: the chat takes no other meanwhile.
    */
   #active: string | undefined;
-  /** The turn whose notices are taken now: while its `run` waits on pi. */
-  #noticesFor: string | undefined;
   /** The rebase under way (`rebase`): a note waits for it. */
   #rebasing: Promise<void> | undefined;
   /** Whether pi runs the agent now (`pi.live.run`). */
@@ -641,11 +647,6 @@ export class ChatHarness {
       ? (live.data.generation?.message ?? null)
       : null;
     const running = live.success && live.data.run !== undefined;
-    // A turn a restart left, with no `run` waiting on it, takes no notice
-    // once its runs end; a `run` that waits stops taking them itself.
-    if (this.#running && !running && this.#taking === undefined) {
-      this.#noticesFor = undefined;
-    }
     this.#running = running;
     this.#partial = partial;
     if (partial !== null) {
@@ -700,10 +701,6 @@ export class ChatHarness {
     if (this.#active !== undefined && this.#active !== request.turnId) {
       throw agentErrors.create("agent.busy");
     }
-    // A turn a restart left takes no notice once another is asked.
-    if (this.#noticesFor !== request.turnId) {
-      this.#noticesFor = undefined;
-    }
     this.#active = request.turnId;
     const end = this.#take(request);
     this.#taking = { turnId: request.turnId, end };
@@ -742,7 +739,6 @@ export class ChatHarness {
       await this.#settle(request.turnId);
       throw error;
     }
-    this.#noticesFor = request.turnId;
     // After the submit: a stop that came before it was kept, and one that
     // comes after it stops the run itself.
     const stopped = await this.#harness.snapshot(StoppedDoc, context);
@@ -750,6 +746,40 @@ export class ChatHarness {
       await this.#conversation.abort(context);
     }
     let { settled, newest } = await this.#ended(request.turnId, submission);
+    // The turn's check of the drafts it wrote, each time it would answer
+    // having written since the last (agent-builds.ts): what fails goes back
+    // to it, to fix in this turn, until they pass or it answers without
+    // writing again, and at most `maxTurnChecks` times: the third that
+    // fails ends the turn, its problems left in the chat as they are. A
+    // stopped or failed run ends it, as it ends the turn.
+    let checked: string | undefined;
+    for (let round = 1; round <= maxTurnChecks; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one round after another
+      const answered = await this.#endOf(settled);
+      const check =
+        answered.outcome === "answered"
+          ? // oxlint-disable-next-line no-await-in-loop -- see above
+            await turnCheck(this.#env, request.scope, request.turnId, checked)
+          : undefined;
+      if (check?.notice === undefined || round === maxTurnChecks) {
+        break;
+      }
+      checked = check.drafts;
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await this.#conversation.submit(
+        {
+          type: "input",
+          content: check.notice,
+          // Once a round, however often the turn is asked.
+          requestId: `${noticeRequestPrefix(request.turnId)}check:${round}`,
+          whenBusy: "steer",
+          entry: { kind: noticeKind },
+        },
+        context
+      );
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      ({ settled, newest } = await this.#ended(request.turnId, submission));
+    }
     if (await this.#wantsWords(newest)) {
       // Once a turn, by its request ID, however often it is asked.
       await this.#conversation.submit(
@@ -853,11 +883,6 @@ export class ChatHarness {
   ): Promise<{ settled: SettledSubmissionRecord; newest?: EntryRecord }> {
     await asked.wait(context);
     await this.#conversation.waitForIdle(context);
-    // No notice of this turn is taken from here on. One taken before had
-    // its commit on pi's line already (`notify`), so a read on the line
-    // comes after it, and after the run it started, if it started one:
-    // that run is the turn's too.
-    this.#noticesFor = undefined;
     let newest = await this.#newest();
     while (this.#running) {
       // oxlint-disable-next-line no-await-in-loop -- until pi is idle
@@ -914,7 +939,7 @@ export class ChatHarness {
 
   /**
    * The last input of turn `turnId` pi keeps: its question, or a notice it
-   * took after (`notify`), found by their request IDs.
+   * took after (`noticeRequestPrefix`), found by their request IDs.
    */
   async #lastInputOf(turnId: string): Promise<Submission | undefined> {
     let cursor: Cursor | undefined;
@@ -1034,8 +1059,7 @@ export class ChatHarness {
    * the next question rebases (`#submit`), the guard holding every request
    * meanwhile. A rebase can take longer than an object may block. A
    * parked task is read from pi's state, as an earlier open may have
-   * parked it and reset before it ended the turn. The turn takes its
-   * notices again, as its run did.
+   * parked it and reset before it ended the turn.
    */
   async setUpStored(): Promise<void> {
     const turn = await this.#harness.snapshot(TurnDoc, context);
@@ -1047,7 +1071,6 @@ export class ChatHarness {
     if (!this.#running || request === undefined) {
       return;
     }
-    this.#noticesFor = request.turnId;
     const { tasks } = await this.#harness.inspect(context);
     this.#parked = tasks.some(
       ({ state }) =>
@@ -1073,7 +1096,7 @@ export class ChatHarness {
     }
   }
 
-  /** The chat's turn not yet settled, if there is one: its build jobs' turn. */
+  /** The chat's turn not yet settled, if there is one: what a stop ends. */
   activeTurn(): string | undefined {
     return this.#active;
   }
@@ -1085,31 +1108,6 @@ export class ChatHarness {
     if (this.#behind) {
       this.#syncSoon();
     }
-  }
-
-  /**
-   * Tells turn `turnId` `text` for it to answer, never shown as the
-   * person's: pi's steer, placed after the tool round under way, or as the
-   * run answers, when it starts a run that answers it; on an idle chat it
-   * starts that run at once. Once per `key`, however often it is sent,
-   * under a request ID of the turn's (`noticeRequestPrefix`). None once
-   * that turn's `run` stopped taking them. Checked with nothing awaited
-   * before the submit, which puts its commit on pi's line at once.
-   */
-  async notify(turnId: string, key: string, text: string): Promise<void> {
-    if (this.#noticesFor !== turnId) {
-      return;
-    }
-    await this.#conversation.submit(
-      {
-        type: "input",
-        content: text,
-        requestId: `${noticeRequestPrefix(turnId)}${key}`,
-        whenBusy: "steer",
-        entry: { kind: noticeKind },
-      },
-      context
-    );
   }
 
   /**

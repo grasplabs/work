@@ -48,7 +48,9 @@ const thread = async (
   partial: ChatPartial | null = null,
   tools: readonly ChatToolEvent[] = [],
   /** What core says a picture of thinking is drawn from; it can't be read without. */
-  ground?: ThinkingGround
+  ground?: ThinkingGround,
+  /** Whether the turn runs on past its answer, checking its drafts. */
+  checking?: boolean
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -79,7 +81,8 @@ const thread = async (
         }}
         output={null}
         partial={partial}
-        running={partial !== null}
+        running={partial !== null || checking !== undefined}
+        checking={checking}
         tools={tools}
       />
     ),
@@ -115,6 +118,9 @@ const firstStep = () => {
         : document.querySelector(`#${shows}`)?.textContent,
   };
 };
+
+/** What the thread's live status line says now. */
+const status = () => document.querySelector("output")?.textContent;
 
 /** The way to the brain under an answer, if there is one. */
 const findWay = () =>
@@ -157,6 +163,35 @@ describe(ChatThread, () => {
       line: "Thinking",
       open: true,
       shows: "Add two to two.",
+    });
+  });
+
+  it("says it checks the App while its turn checks the drafts it wrote, past its answer", async () => {
+    const answered: ChatMessage[] = [
+      asked,
+      {
+        id: 2,
+        role: "assistant",
+        text: "The desk is written.",
+        citations: [],
+        code: [],
+        tools: [],
+        end: "done",
+        at: "2026-10-27T09:00:05.000Z",
+      },
+    ];
+    await thread(answered, null, [], undefined, true);
+    const checking = status();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    // Running on without a check: what it does otherwise.
+    await thread(answered, null, [], undefined, false);
+
+    expect({ checking, otherwise: status() }).toStrictEqual({
+      checking: "Checking the App…",
+      otherwise: "Thinking",
     });
   });
 

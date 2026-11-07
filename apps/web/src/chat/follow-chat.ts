@@ -40,6 +40,8 @@ export interface ChatView {
   held: number;
   /** Changes whenever the agent writes or drops a draft: read them again. */
   drafts: number;
+  /** Whether the turn checks the drafts it wrote now, past its answer. */
+  checking: boolean;
   /** Whether the first update has come. */
   loaded: boolean;
 }
@@ -54,6 +56,7 @@ export const emptyView: ChatView = {
   stopped: null,
   held: 0,
   drafts: 0,
+  checking: false,
   loaded: false,
 };
 
@@ -91,6 +94,7 @@ export const applyUpdate = (view: ChatView, update: ChatUpdate): ChatView => {
     stopped: update.stopped,
     held: update.held,
     drafts: update.drafts,
+    checking: update.checking ?? false,
     loaded: true,
   };
 };

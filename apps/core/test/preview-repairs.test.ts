@@ -15,6 +15,7 @@ import {
   openTestRun,
   pausedReply,
   says,
+  turnChecks,
 } from "./agent-chat.ts";
 import { appDefinition, withoutDefinition } from "./app-definitions.ts";
 import { release, requestGranted } from "./apps.ts";
@@ -117,17 +118,13 @@ export const shouting = query({
   };
 };
 
-/**
- * Checks the draft as proposing it would, without proposing it: a check
- * job (`env.build.submit`), followed until it ends, in a code step's code.
- */
-const checkJob =
-  '(async () => { const { job } = await env.build.submit(app.id, { kind: "check" }); for (;;) { const view = await env.build.job(job); if (view.status !== "running") { return view.result; } await scheduler.wait(100); } })()';
+/** Checks the draft as proposing it would, without proposing it, in a code step's code. */
+const checkCall = "env.build.check(app.id)";
 
 /** Checks the draft, with what its functions wrote in the preview. */
 const checkLogs = `export default async (self, env) => {
   const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-  const { preview } = await ${checkJob};
+  const { preview } = await ${checkCall};
   return {
     messages: preview.logs.map(({ message }) => message),
     leftOut: preview.logsLeftOut,
@@ -170,7 +167,7 @@ const write = (
 /** Checks the draft, with what its preview reported. */
 const check = `export default async (self, env) => {
   const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-  const checked = await ${checkJob};
+  const checked = await ${checkCall};
   return {
     passed: checked.passed,
     problems: checked.preview.problems.map(({ source, at, message }) => ({ source, at, message })),
@@ -404,12 +401,133 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     });
   });
 
+  it("tells the turn how many problems its preview ran into as it answers, never their text, which the agent reads only as data", async () => {
+    const { builder, app, chatId, stub, provider } = await setUp([
+      codeStep(write(desk(false))),
+      says("The desk is written."),
+      // What the turn's check found: read as data.
+      codeStep(check),
+      says("The total fails."),
+    ]);
+    const id = chatIdSchema.parse(chatId);
+    // The side panel has the draft's first write open.
+    await stub.saveDraft(id, app, 1, desk(true), [], 0, {
+      runId: await openTestRun(stub, id),
+    });
+    await previewAt(builder, chatId, 1);
+
+    const asked = stub.ask(id, { text: "Make the desk show the total", model });
+    const broken = await previewAt(builder, chatId, 2);
+    const { outcome } = await asked;
+
+    const [, read] = await codeResults(stub, chatId);
+    // The turn's one check, of its one draft: the server's failure and
+    // the page's report, or the first of them, as the check found them.
+    const [[counted]] = z
+      .tuple([
+        z.tuple([z.object({ app: z.string(), previewProblems: z.number() })]),
+      ])
+      .parse(turnChecks(provider));
+    expect({
+      outcome,
+      broken,
+      counted: { app: counted.app, some: counted.previewProblems > 0 },
+      read: returned(read?.text),
+      // The attack text reaches the model only inside a tool's result.
+      outsideResults: saidOutsideResults(provider),
+    }).toMatchObject({
+      outcome: "answered",
+      broken: "contract.invalid_return",
+      counted: { app, some: true },
+      read: { passed: false, problems: [{ at: "desk.total" }, { at: "/" }] },
+      outsideResults: provider.requests.map(() => false),
+    });
+  });
+
+  it("shows the chat's watchers the turn checking what it wrote, past its answer, and not once it ends", async () => {
+    const { builder, chatId, stub } = await setUp([
+      codeStep(write(desk(true))),
+      says("The desk is written."),
+    ]);
+    // Seen as the page sees it: whether the turn checks, update by update.
+    const seen: boolean[] = [];
+    const subscription = await builder.api.chats.watch(
+      chatId,
+      null,
+      (update) => {
+        seen.push(update.checking === true);
+      }
+    );
+
+    // No preview is open: the check waits a moment for one to report, so
+    // it is under way long enough for an update to show it.
+    await stub.ask(chatIdSchema.parse(chatId), {
+      text: "Build the invoice desk",
+      model,
+    });
+    await vi.waitFor(() => {
+      expect(seen.at(-1)).toBeFalsy();
+    });
+    await subscription.release();
+
+    expect(seen).toContain(true);
+  });
+
+  it("tells the turn where its server code fails, never what it threw, which the agent reads only as data", async () => {
+    // Registration throws the attacker's words, made as it runs: the code
+    // the agent writes never holds them.
+    const throwing = {
+      ...desk(true),
+      "server/desk.ts": `${desk(true)["server/desk.ts"] ?? ""}
+throw new Error(atob(${JSON.stringify(btoa(attack))}));
+`,
+    };
+    const { chatId, stub, provider } = await setUp([
+      codeStep(write(throwing)),
+      says("The desk is written."),
+      // What the turn's check found: read as data.
+      codeStep(`export default async (self, env) => {
+        const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
+        const { server } = await env.build.check(app.id);
+        return server.diagnostics.map(({ message }) => message);
+      };`),
+      says("Its registration throws."),
+    ]);
+
+    const { outcome } = await stub.ask(chatIdSchema.parse(chatId), {
+      text: "Build the invoice desk",
+      model,
+    });
+
+    const [, read] = await codeResults(stub, chatId);
+    expect({
+      outcome,
+      checks: turnChecks(provider),
+      read: JSON.stringify(returned(read?.text)).includes(attack),
+      // The attack text reaches the model only inside a tool's result.
+      outsideResults: saidOutsideResults(provider),
+    }).toMatchObject({
+      outcome: "answered",
+      checks: [
+        [
+          {
+            diagnostics: [
+              { file: "server/desk.ts", rule: "server", severity: "error" },
+            ],
+          },
+        ],
+      ],
+      read: true,
+      outsideResults: provider.requests.map(() => false),
+    });
+  });
+
   it("waits a moment for the preview of a write checked at once, its lint failing too, and fails on what it ran into", async () => {
     const { builder, app, chatId, stub } = await setUp([
       codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
         await env.build.write(app.id, ${JSON.stringify(agentWritten(desk(false)))});
-        const checked = await ${checkJob};
+        const checked = await ${checkCall};
         return {
           passed: checked.passed,
           lint: checked.lint.status,
@@ -459,7 +577,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
   it("shows a warning its preview reports, such as React's development warnings, and fails only on a problem, however many warnings came first", async () => {
     const kinds = `export default async (self, env) => {
       const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
-      const checked = await ${checkJob};
+      const checked = await ${checkCall};
       return { passed: checked.passed, kinds: checked.preview.problems.map(({ kind }) => kind) };
     };`;
     const { builder, app, chatId, stub } = await setUp([

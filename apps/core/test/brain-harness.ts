@@ -1321,14 +1321,13 @@ const readTextsOf = async (
 
 /**
  * The persona's Workspace object's tables that a chat's code could change
- * and no turn changes on its own: drafts, build jobs
+ * and no turn changes on its own: drafts
  * and dashboards; and its chats, messages, sources and code runs, but
  * the trial's own chat, whose turns write those as they go.
  */
 const workspaceTables = [
   "chat_drafts",
   "chat_draft_files",
-  "chat_build_jobs",
   "dashboards",
   "dashboard_widgets",
 ] as const;

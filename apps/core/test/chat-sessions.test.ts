@@ -139,8 +139,7 @@ describe("a chat's ChatSession", () => {
     const provider = await fakeProviderFor(
       [model, smallModel],
       first.reply,
-      says("First."),
-      says("The build ended.")
+      says("First.")
     );
     const { session, request } = sessionOf(asking, userId);
     const asked = outcomeOf(session().run(request("turn-a", "First?")));
@@ -162,9 +161,6 @@ describe("a chat's ChatSession", () => {
     }).catch(() => {
       // Aborting fails the call that aborted: that is the restart.
     });
-    // The first call to reach it: how a build job of the first turn ended.
-    const notice = `Build job ${crypto.randomUUID()} ended.`;
-    await session().notify("turn-a", crypto.randomUUID(), notice);
     first.release();
     const again = await session().run(request("turn-a", "First?"));
     expect({
@@ -175,64 +171,12 @@ describe("a chat's ChatSession", () => {
       sentTo: provider.requests.map(
         ({ body }) => z.object({ model: z.string() }).parse(body).model
       ),
-      noticed: JSON.stringify(provider.requests.at(-1)?.body).includes(notice),
     }).toStrictEqual({
       refused: agentErrors.create("agent.busy").message,
       cutShort: true,
-      // The answer to the notice, the turn's last.
-      again: "The build ended.",
-      sentTo: Array.from({ length: 3 }, () => "claude-sonnet-4-5"),
-      noticed: true,
+      again: "First.",
+      sentTo: Array.from({ length: 2 }, () => "claude-sonnet-4-5"),
     });
-  });
-
-  it("takes no notice for a turn a restart cut short once it ended on its own, and the next question goes through", async () => {
-    const { userId } = await signedInWithRole(idp, "user");
-    const asking = await chatOf(userId);
-    const first = pausedReply(says("First."), 1);
-    const provider = await fakeProviderFor(
-      [model],
-      first.reply,
-      says("First."),
-      says("Second."),
-      says("Never asked.")
-    );
-    const { session, request } = sessionOf(asking, userId);
-    void outcomeOf(session().run(request("turn-a", "First?")));
-    await vi.waitFor(
-      () => {
-        expect(provider.requests).toHaveLength(1);
-      },
-      { timeout: 10_000 }
-    );
-    // A restart mid-answer, nobody asking for the turn again: its alarm
-    // resumes it, and it ends on its own.
-    await runInDurableObject(session(), (_instance, state) => {
-      state.abort("Restarted by the test");
-    }).catch(() => {
-      // Aborting fails the call that aborted: that is the restart.
-    });
-    await runDurableObjectAlarm(session());
-    first.release();
-    await vi.waitFor(
-      async () => {
-        await expect(
-          asking.stub.chatSummary(asking.chat.id, userId)
-        ).resolves.toMatchObject({ running: false });
-        expect(provider.requests).toHaveLength(2);
-      },
-      { timeout: 15_000 }
-    );
-    // The next question, as a build job the first turn submitted ends.
-    const notice = `Build job ${crypto.randomUUID()} ended.`;
-    const asked = outcomeOf(session().run(request("turn-b", "Second?")));
-    await session().notify("turn-a", crypto.randomUUID(), notice);
-    expect({
-      answer: await asked,
-      noticed: provider.requests.some(({ body }) =>
-        JSON.stringify(body).includes(notice)
-      ),
-    }).toStrictEqual({ answer: "Second.", noticed: false });
   });
 
   it("takes the next question when both objects restarted before the chat's own object took the last", async () => {

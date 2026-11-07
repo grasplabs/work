@@ -3716,6 +3716,11 @@ msgstr "Gecontroleerd tot en met item {through}…"
 msgid "Checking it against your numbers…"
 msgstr "Wordt gecontroleerd tegen je cijfers…"
 
+#. Grasp checks the App it changed (its types, lint and preview) before its turn ends.
+#: src/chat/thread.tsx
+msgid "Checking the App…"
+msgstr "De App wordt gecontroleerd…"
+
 #: src/workflows/definition-editor.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Checking…"

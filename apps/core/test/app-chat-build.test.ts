@@ -9,6 +9,7 @@ import {
   says,
   toolResults,
   toolStep,
+  turnChecks,
 } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi, unique } from "./sign-in.ts";
@@ -163,23 +164,6 @@ const mistyped = operations.replace('column: "todo" }', 'column: "later" }');
 const calling = (app: string) =>
   `export default async (self, env) => await env.build.call(${JSON.stringify(app)}, "cards.list", {});`;
 
-/**
- * Code that checks the draft of `app` as proposing it would, without
- * proposing it (a check job, followed until it ends), and calls its
- * `cards.list`.
- */
-const checking = (app: string) => `export default async (self, env) => {
-  const check = await (async () => { const { job } = await env.build.submit(${JSON.stringify(app)}, { kind: "check" }); for (;;) { const view = await env.build.job(job); if (view.status !== "running") { return view.result; } await scheduler.wait(100); } })();
-  const called = await env.build.call(${JSON.stringify(app)}, "cards.list", {});
-  return {
-    passed: check.passed,
-    server: check.server.status,
-    diagnostics: check.server.diagnostics.map(({ file, line, message }) => ({ file, line, message })),
-    pages: check.pages.status,
-    called,
-  };
-};`;
-
 /** What a code step returned, as JSON. */
 const returned = (text: string | undefined): unknown =>
   z.unknown().parse(JSON.parse(text?.replace("Returned:\n", "") ?? "null"));
@@ -193,7 +177,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       "server/cards.ts": mistyped,
       "src/routes/index.tsx": page,
     };
-    const { stub } = await personalChatsOf(
+    const { stub, provider } = await personalChatsOf(
       builder.userId,
       toolStep("readDocs", { path: "/reference/server" }),
       toolStep("writeFile", {
@@ -218,7 +202,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
         app: app.id,
         files: { "server/cards.ts": operations },
       }),
-      codeStep(checking(app.id)),
+      codeStep(calling(app.id)),
       says("The board is drafted.")
     );
     const chat = await builder.api.chats.forApp(app.id);
@@ -267,13 +251,11 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
         .split("\n")
         .some((line) => line.startsWith("server/cards.ts:16: ")),
     }).toStrictEqual({ code: "version.build_failed", located: true });
-    expect(returned(fixed?.text)).toStrictEqual({
-      passed: true,
-      server: "ok",
-      diagnostics: [],
-      pages: "ok",
-      called: { ok: true, answer: [] },
-    });
+    expect({
+      called: returned(fixed?.text),
+      // The turn's check of the draft, as it answered, found nothing.
+      checks: turnChecks(provider),
+    }).toStrictEqual({ called: { ok: true, answer: [] }, checks: [] });
     expect(
       drafts.map(({ app: drafted, changed }) => ({ app: drafted, changed }))
     ).toStrictEqual([

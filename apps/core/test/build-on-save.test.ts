@@ -210,8 +210,8 @@ export const Route = createFileRoute("/")({ component: Desk });
     const files = page(crypto.randomUUID());
     const held = Promise.withResolvers<boolean>();
     // The build cache, which answers only once the test lets it: the
-    // build waits on its receipt before it starts.
-    const holding = holdingBuilds(env.DB, held.promise);
+    // build waits on its entry before it starts.
+    const holding = holdingBuilds(env.FILES, held.promise);
 
     // The compiler, counting the builds that start it.
     let built = 0;
@@ -227,7 +227,7 @@ export const Route = createFileRoute("/")({ component: Desk });
     };
 
     const builds = await buildOnSave(
-      { ...env, DB: holding, BUILD_WAIT_MS: "50" },
+      { ...env, FILES: holding, BUILD_WAIT_MS: "50" },
       {
         app: appIdSchema.parse(crypto.randomUUID()),
         version: 1,
@@ -266,13 +266,13 @@ export const Route = createFileRoute("/")({ component: Desk });
     const by = await builder.api.whoami();
     const held = Promise.withResolvers<boolean>();
     // The build cache answers only once the test lets it: every build
-    // waits on its receipt, a second one too.
-    const holding = holdingBuilds(env.DB, held.promise);
+    // waits on its entry, a second one too.
+    const holding = holdingBuilds(env.FILES, held.promise);
 
     // Answers while the cache is still held: a second build would wait on
     // it, and the commit with it, until the test timed out.
     const committed = await commitFiles(
-      { ...env, DB: holding, BUILD_WAIT_MS: "50" },
+      { ...env, FILES: holding, BUILD_WAIT_MS: "50" },
       by,
       app,
       page(crypto.randomUUID()),
@@ -296,15 +296,13 @@ export const Route = createFileRoute("/")({ component: Desk });
     // version got, sealed first, as a review would.
     await sealRelease(env, { app: appIdSchema.parse(app), version, by });
     const held = Promise.withResolvers<boolean>();
-    // Page builds answer only once the test lets them: making the
-    // version current reads its files and workflows, never a page build.
-    const holding = holdingBuilds(env.DB, held.promise, (key) =>
-      key.startsWith("page-builds/")
-    );
+    // Builds answer only once the test lets them: making the version
+    // current reads its files and workflows, never a build.
+    const holding = holdingBuilds(env.FILES, held.promise);
 
-    // Answers while page builds are still held.
+    // Answers while builds are still held.
     const made = await setCurrentVersion(
-      { ...env, DB: holding },
+      { ...env, FILES: holding },
       by,
       app,
       version
@@ -317,12 +315,12 @@ export const Route = createFileRoute("/")({ component: Desk });
   it("answers a page whose build doesn't finish within the build wait as still building, rather than wait on", async () => {
     const files = page(crypto.randomUUID());
     const held = Promise.withResolvers<boolean>();
-    const holding = holdingBuilds(env.DB, held.promise);
+    const holding = holdingBuilds(env.FILES, held.promise);
 
     // What an open, a review or a preview builds through.
     const slow = await outcome(
       versionPages(
-        { ...env, DB: holding, BUILD_WAIT_MS: "50" },
+        { ...env, FILES: holding, BUILD_WAIT_MS: "50" },
         files,
         1,
         "app-test",

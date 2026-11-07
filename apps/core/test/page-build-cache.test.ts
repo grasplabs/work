@@ -1,19 +1,17 @@
 import { appCompilerName, typeCheckerName } from "@grasp-os/compiler";
-import { sha256Hex } from "@grasp-os/shared/encoding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { cachedFilesManifest, filesManifest } from "../src/app-inspection.ts";
-import { quarantineAfter } from "../src/build-cache.ts";
+import { buildCachePrefix } from "../src/build-cache.ts";
 import { buildPages, versionPages } from "../src/pages.ts";
 import { notesFiles } from "./notes-client-app.ts";
 
-// The compiler's builds kept in R2, served again only as the build that
-// passed its gates wrote them (build-cache.ts). From its threat model:
-// bytes under a key that no build kept (forged, cut short, rotted) served
-// as a verified build; one bad object quarantining a key on its own;
-// builds of the same files at once each running the compiler; a holder
-// that died keeping the key from ever being built.
+// The toolchain's output kept in R2, served again only as core kept it
+// (build-cache.ts). From its threat model: bytes core never kept under a
+// key (forged, cut short, rotted, or moved there from another key) served
+// as a build; an entry that can't be read failing the build; and views of
+// one App's page at once each running the compiler.
 
 /** A page of this test's own, so nothing else built it. */
 const page = (): Record<string, string> => ({
@@ -61,21 +59,52 @@ const noBuilds: WorkerLoader = {
   },
 };
 
-/** A build of fresh files, its cache key and its bytes, as core kept them. */
+/** The cache's keys now. */
+const cacheKeys = async (): Promise<Set<string>> => {
+  const keys = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- one page after another
+    const listed = await env.FILES.list({ prefix: buildCachePrefix, cursor });
+    for (const { key } of listed.objects) {
+      keys.add(key);
+    }
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor !== undefined);
+  return keys;
+};
+
+/** The entries `run` kept, by key, with their text. */
+const keptBy = async (
+  run: () => Promise<unknown>
+): Promise<Map<string, string>> => {
+  const before = await cacheKeys();
+  await run();
+  const kept = new Map<string, string>();
+  for (const key of await cacheKeys()) {
+    if (!before.has(key)) {
+      // oxlint-disable-next-line no-await-in-loop -- few entries, read in turn
+      const object = await env.FILES.get(key);
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      kept.set(key, (await object?.text()) ?? "");
+    }
+  }
+  return kept;
+};
+
+/** A build of fresh files, and the key and text of its kept entry. */
 const keptBuild = async () => {
   const files = page();
-  const built = await buildPages(env, files, "app-test");
+  let built: unknown;
+  const entries = await keptBy(async () => {
+    built = await buildPages(env, files, "app-test");
+  });
   const text = JSON.stringify(built);
-  const sha256 = await sha256Hex(text);
-  const row = await env.DB.prepare(
-    "SELECT key, object_key AS objectKey FROM build_receipts WHERE sha256 = ?"
-  )
-    .bind(sha256)
-    .first<{ key: string; objectKey: string }>();
-  if (row === null) {
-    throw new Error("The build has no receipt");
+  const [key] = [...entries].find(([, entry]) => entry === text) ?? [];
+  if (key === undefined) {
+    throw new Error("The build kept no entry");
   }
-  return { files, built, text, key: row.key, objectKey: row.objectKey };
+  return { files, built, text, key };
 };
 
 /** A build that passed no gate, as forged bytes would claim. */
@@ -86,190 +115,48 @@ const forged = JSON.stringify({
   pages: {},
 });
 
-const receiptOf = async (key: string) =>
-  await env.DB.prepare(
-    "SELECT sha256, object_key AS objectKey, integrity_failures AS failures, quarantined_at AS quarantinedAt FROM build_receipts WHERE key = ?"
-  )
-    .bind(key)
-    .first<{
-      sha256: string | null;
-      objectKey: string | null;
-      failures: number;
-      quarantinedAt: number | null;
-    }>();
-
-/** Forges the bytes of `key`'s kept build, under the object its receipt names. */
-const forgeKept = async (key: string): Promise<void> => {
-  const receipt = await receiptOf(key);
-  if (receipt?.objectKey === null || receipt?.objectKey === undefined) {
-    throw new Error("The build has no object");
-  }
-  await env.FILES.put(receipt.objectKey, forged);
-};
-
 describe("the build cache", { timeout: 120_000 }, () => {
-  it("serves no bytes its receipt doesn't vouch for, builds them again, and keeps the bad ones for operators", async () => {
-    const { files, built, text, key } = await keptBuild();
+  it("serves no bytes core didn't keep under their key, and builds them again", async () => {
+    const { files, built, key } = await keptBuild();
+    const other = await keptBuild();
+    const kept = await env.FILES.get(key);
     const { started, loader } = counting();
+    const counted = { ...env, LOADER: loader };
 
-    // Forged under a key with a receipt: a mismatch, counted once.
-    await forgeKept(key);
-    const afterForgery = await buildPages(
-      { ...env, LOADER: loader },
-      files,
-      "app-test"
-    );
-    const counted = await receiptOf(key);
-    // Written with no receipt at all: built again, not counted.
-    await env.DB.prepare("DELETE FROM build_receipts WHERE key = ?")
-      .bind(key)
-      .run();
+    // Forged in place, its MAC kept: it no longer holds.
+    await env.FILES.put(key, forged, { customMetadata: kept?.customMetadata });
+    const afterForgery = await buildPages(counted, files, "app-test");
+    // Forged with no MAC at all.
     await env.FILES.put(key, forged);
-    const unreceipted = await buildPages(
-      { ...env, LOADER: loader },
-      files,
-      "app-test"
-    );
-    const kept = await env.FILES.list({ prefix: `build-quarantine/${key}/` });
-    const restored = await receiptOf(key);
+    const unsigned = await buildPages(counted, files, "app-test");
+    // Another build core kept, moved here with its own MAC.
+    const moved = await env.FILES.get(other.key);
+    await env.FILES.put(key, other.text, {
+      customMetadata: moved?.customMetadata,
+    });
+    const afterMove = await buildPages(counted, files, "app-test");
 
     expect({
       afterForgery,
-      unreceipted,
+      unsigned,
+      afterMove,
       started: { ...started },
-      counted: {
-        failures: counted?.failures,
-        quarantined: counted?.quarantinedAt,
-      },
-      receipt: restored?.sha256,
-      kept: kept.objects.length,
-      // The good bytes are back, and served from the cache again.
+      // Made again, it is served from the cache again.
       served: await buildPages({ ...env, LOADER: noBuilds }, files, "app-test"),
     }).toStrictEqual({
       afterForgery: built,
-      unreceipted: built,
-      started: { compiler: 2, typeChecker: 2 },
-      counted: { failures: 1, quarantined: null },
-      receipt: await sha256Hex(text),
-      kept: 1,
+      unsigned: built,
+      afterMove: built,
+      started: { compiler: 3, typeChecker: 3 },
       served: built,
     });
   });
 
-  it("counts one bad build once, however many find it at once", async () => {
+  it("builds again when a kept entry can't be read", async () => {
     const { files, built, key } = await keptBuild();
-    await forgeKept(key);
-    const found = await Promise.all(
-      ["app-one", "app-two", "app-three"].map(
-        async (app) => await buildPages(env, files, app)
-      )
-    );
-    const receipt = await receiptOf(key);
-
-    expect({
-      found: found.every(
-        (each) => JSON.stringify(each) === JSON.stringify(built)
-      ),
-      failures: receipt?.failures,
-    }).toStrictEqual({ found: true, failures: 1 });
-  });
-
-  it("quarantines a key once its kept builds fail their check repeatedly, and still builds it, never from the cache", async () => {
-    const { files, built, key } = await keptBuild();
-    for (let round = 0; round < quarantineAfter; round += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one round after another
-      await forgeKept(key);
-      // oxlint-disable-next-line no-await-in-loop -- one round after another
-      await buildPages(env, files, "app-test");
-    }
-    const quarantined = await receiptOf(key);
-    const { started, loader } = counting();
-    const again = await buildPages(
-      { ...env, LOADER: loader },
-      files,
-      "app-test"
-    );
-    const stored = await env.FILES.get(quarantined?.objectKey ?? key);
-
-    expect({
-      failures: quarantined?.failures,
-      quarantined: quarantined?.quarantinedAt !== null,
-      again,
-      started: { ...started },
-      // Nothing is written to the cache for it any more.
-      stored: await stored?.text(),
-    }).toStrictEqual({
-      failures: quarantineAfter,
-      quarantined: true,
-      again: built,
-      started: { compiler: 1, typeChecker: 1 },
-      stored: forged,
-    });
-  });
-
-  it("waits for the build another holds the lease for, and takes over one whose holder died", async () => {
-    const { files, built, text, key } = await keptBuild();
-    const forget = async () => {
-      await env.DB.prepare("DELETE FROM build_receipts WHERE key = ?")
-        .bind(key)
-        .run();
-    };
-    // Another isolate holds the lease and keeps its build a moment later.
-    await forget();
-    await env.DB.prepare(
-      "INSERT INTO build_receipts (key, holder, lease_expires_at) VALUES (?, 'elsewhere', ?)"
-    )
-      .bind(key, Date.now() + 60_000)
-      .run();
-    const waiting = buildPages({ ...env, LOADER: noBuilds }, files, "app-test");
-    await scheduler.wait(600);
-    await env.FILES.put(`${key}~elsewhere`, text);
-    await env.DB.prepare(
-      "UPDATE build_receipts SET object_key = ?, sha256 = ?, built_at = ?, holder = NULL, lease_expires_at = NULL WHERE key = ?"
-    )
-      .bind(`${key}~elsewhere`, await sha256Hex(text), Date.now(), key)
-      .run();
-    const shared = await waiting;
-
-    // A holder that died: its lease ran out, so this one builds.
-    await forget();
-    await env.DB.prepare(
-      "INSERT INTO build_receipts (key, holder, lease_expires_at) VALUES (?, 'dead', ?)"
-    )
-      .bind(key, Date.now() - 1000)
-      .run();
-    const { started, loader } = counting();
-    const takenOver = await buildPages(
-      { ...env, LOADER: loader },
-      files,
-      "app-test"
-    );
-
-    const lease = await env.DB.prepare(
-      "SELECT holder FROM build_receipts WHERE key = ?"
-    )
-      .bind(key)
-      .first<{ holder: string | null }>();
-
-    expect({
-      shared,
-      takenOver,
-      started: { ...started },
-      released: lease?.holder,
-    }).toStrictEqual({
-      shared: built,
-      takenOver: built,
-      started: { compiler: 1, typeChecker: 1 },
-      released: null,
-    });
-  });
-
-  it("builds again when a kept build's object can't be read", async () => {
-    const { files, built, objectKey } = await keptBuild();
-    // Its receipt is there; reading the object it names fails.
     const unreadable: Pick<R2Bucket, "get" | "put"> = {
       get: async (...args: Parameters<R2Bucket["get"]>) => {
-        if (args[0] === objectKey) {
+        if (args[0] === key) {
           throw new Error("R2 is out");
         }
         return await env.FILES.get(...args);
@@ -290,22 +177,12 @@ describe("the build cache", { timeout: 120_000 }, () => {
     });
   });
 
-  it("still builds when R2 can't be read or written, and keeps nothing unreceipted", async () => {
+  it("still builds when R2 can't be read or written, and keeps nothing", async () => {
     const files = page();
     // Every read and write of R2 fails, as in an outage.
     const out: Pick<R2Bucket, "get" | "put"> = {
-      get: async (...args: Parameters<R2Bucket["get"]>) => {
-        if (args[0].length > 0) {
-          throw new Error("R2 is out");
-        }
-        return await env.FILES.get(...args);
-      },
-      put: async (...args: Parameters<R2Bucket["put"]>) => {
-        if (args[0].length > 0) {
-          throw new Error("R2 is out");
-        }
-        return await env.FILES.put(...args);
-      },
+      get: async () => await Promise.reject(new Error("R2 is out")),
+      put: async () => await Promise.reject(new Error("R2 is out")),
     };
     const built = await buildPages({ ...env, FILES: out }, files, "app-test");
     // Nothing was kept, so the next build compiles again.
@@ -323,15 +200,8 @@ describe("the build cache", { timeout: 120_000 }, () => {
     });
   });
 
-  it("compiles once for many views of one App at once, and hands an uncacheable build to them all", async () => {
-    const { files, built, key } = await keptBuild();
-    // Quarantined: no build of it is kept, so none is shared through R2.
-    for (let round = 0; round < quarantineAfter; round += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one round after another
-      await forgeKept(key);
-      // oxlint-disable-next-line no-await-in-loop -- one round after another
-      await buildPages(env, files, "app-test");
-    }
+  it("compiles once for many views of one App's page at once", async () => {
+    const files = page();
     const { started, loader } = counting();
     const views = await Promise.all(
       Array.from(
@@ -344,24 +214,9 @@ describe("the build cache", { timeout: 120_000 }, () => {
     expect({
       started: { ...started },
       all: views.every(
-        (view) => JSON.stringify(view) === JSON.stringify(built)
+        (view) => JSON.stringify(view) === JSON.stringify(views[0])
       ),
     }).toStrictEqual({ started: { compiler: 1, typeChecker: 1 }, all: true });
-  });
-
-  it("builds the same files asked for at once by two Apps once", async () => {
-    const files = page();
-    const { started, loader } = counting();
-    const both = await Promise.all(
-      ["app-one", "app-two"].map(
-        async (app) => await buildPages({ ...env, LOADER: loader }, files, app)
-      )
-    );
-
-    expect({ same: both[0], started: { ...started } }).toStrictEqual({
-      same: both[1],
-      started: { compiler: 1, typeChecker: 1 },
-    });
   });
 
   it("keeps a preview's build apart from production's: neither serves the other, and their artifacts differ", async () => {
@@ -406,55 +261,53 @@ describe("the build cache", { timeout: 120_000 }, () => {
   });
 });
 
-/** The receipts of inspected manifests, by key, with the object each names. */
-const inspectionReceipts = async (): Promise<Map<string, string | null>> => {
-  const { results } = await env.DB.prepare(
-    "SELECT key, object_key AS objectKey FROM build_receipts WHERE key LIKE 'inspections/%'"
-  ).all<{ key: string; objectKey: string | null }>();
-  return new Map(results.map(({ key, objectKey }) => [key, objectKey]));
-};
-
 /** The Notes App with server code of its own, so nothing else inspected it. */
 const ownNotes = (): Record<string, string> => ({
   ...notesFiles,
   "server/notes.ts": `${notesFiles["server/notes.ts"] ?? ""}\n// ${crypto.randomUUID()}\n`,
 });
 
-/** What `files`' first inspection for `profile` kept: its receipt's key and object. */
+/** What `files`' first inspection for `profile` kept: its manifest's entry. */
 const keptInspection = async (
   files: Record<string, string>,
   profile: "preview" | "production"
 ) => {
-  const before = await inspectionReceipts();
-  const manifest = await filesManifest(env, files, "app-test", { profile });
-  const added = [...(await inspectionReceipts())].filter(
-    ([key]) => !before.has(key)
-  );
-  const [kept] = added;
-  if (added.length !== 1 || kept === undefined || kept[1] === null) {
-    throw new Error("The inspection kept no one receipt");
+  let manifest: Awaited<ReturnType<typeof filesManifest>> | undefined;
+  const kept = await keptBy(async () => {
+    manifest = await filesManifest(env, files, "app-test", { profile });
+  });
+  // The manifest's entry, among the builds the inspection kept: a build
+  // says whether it is `ok`, a manifest doesn't.
+  const [key] =
+    [...kept].find(([, text]) => {
+      const entry: unknown = JSON.parse(text);
+      return typeof entry === "object" && entry !== null && !("ok" in entry);
+    }) ?? [];
+  if (key === undefined || manifest === undefined) {
+    throw new Error("The inspection kept no manifest");
   }
-  return { manifest, key: kept[0], objectKey: kept[1] };
+  return { manifest, key };
 };
 
 describe("the inspection cache", { timeout: 120_000 }, () => {
-  it("reads back no manifest its receipt doesn't vouch for, and inspects again", async () => {
+  it("reads back no manifest core didn't keep, and inspects again", async () => {
     const files = ownNotes();
-    const { manifest, objectKey } = await keptInspection(files, "production");
-    const kept = await env.FILES.get(objectKey);
+    const { manifest, key } = await keptInspection(files, "production");
+    const kept = await env.FILES.get(key);
     const text = (await kept?.text()) ?? "";
     // A manifest that reads, naming the App otherwise: forged over the
-    // object its receipt names, as anyone who can write R2 could.
+    // entry, its MAC kept, as anyone who can write R2 could.
     await env.FILES.put(
-      objectKey,
-      JSON.stringify({ ...JSON.parse(text), name: "Forged" })
+      key,
+      JSON.stringify({ ...JSON.parse(text), name: "Forged" }),
+      { customMetadata: kept?.customMetadata }
     );
 
     const sidebar = await cachedFilesManifest(env, files);
     const inspectedAgain = await filesManifest(env, files, "app-test");
 
     expect({
-      // The sidebar shows only what core vouches for, so nothing now.
+      // The sidebar shows only what core kept, so nothing now.
       sidebar,
       name: inspectedAgain.name,
       restored: await cachedFilesManifest(env, files),

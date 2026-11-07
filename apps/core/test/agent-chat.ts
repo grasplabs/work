@@ -7,7 +7,7 @@ import { env } from "cloudflare:workers";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { fakeProvider, testModel } from "./model-provider.ts";
-import type { Answer, ProviderReply } from "./model-provider.ts";
+import type { Answer, FakeProvider, ProviderReply } from "./model-provider.ts";
 
 // A chat's agent, as the tests drive it: the Workspace object's loop, the
 // code it runs in isolates of their own, the model gateway and connect, all
@@ -121,6 +121,32 @@ export const transcript = async (
   chatId: string
 ): Promise<Message[]> =>
   await runInDurableObject(stub, (instance) => instance.messages(chatId));
+
+/** How the notice of a turn's check begins (agent-builds.ts, `turnCheck`). */
+const turnCheckStart = "Grasp checked the drafts you wrote this turn";
+
+/** Every string in `value`, however deep. */
+const stringsIn = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).flatMap((each: unknown) => stringsIn(each));
+  }
+  return [];
+};
+
+/**
+ * What each turn's check of the chat's drafts found, as the model read it
+ * (agent-builds.ts, `turnCheck`): the drafts that failed, one entry for
+ * each check that found something, as the last request to the model
+ * carried them. A notice is the turn's own, never one of the chat's
+ * messages, so the request is where it shows.
+ */
+export const turnChecks = (provider: FakeProvider): unknown[] =>
+  stringsIn(provider.requests.at(-1)?.body)
+    .filter((text) => text.startsWith(turnCheckStart))
+    .map((text): unknown => JSON.parse(text.slice(text.indexOf("\n") + 1)));
 
 /** What the code steps of the chat returned, or threw, as the model read it. */
 export const codeResults = async (stub: WorkspaceStub, chatId: string) => {

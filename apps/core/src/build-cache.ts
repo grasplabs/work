@@ -1,523 +1,322 @@
-import { sha256Hex } from "@grasp-os/shared/encoding";
+import {
+  compilerVersion,
+  lintKey,
+  lintRecordOf,
+  moduleRecordOf,
+} from "@grasp-os/compiler";
+import type {
+  Diagnostic,
+  Increments,
+  pageIncrementKeys,
+} from "@grasp-os/compiler";
+import {
+  fromBase64Url,
+  sha256Hex,
+  toBase64Url,
+} from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
+import { mapConcurrently } from "@grasp-os/shared/release";
 
-import { buildReceipts } from "./db/core/schema.ts";
+import { derivedHmacKey } from "./derived-keys.ts";
 
-// The compiler's builds, kept in R2 and served again only as the build
-// that passed its gates wrote them (pages.ts `cachedBuild`). Core's D1
-// holds the trusted record of each (`build_receipts`): the SHA-256 and
-// size of its bytes, and the key's lease, so builds of the same files run
-// once whichever isolate asks.
+// What the toolchain makes of App code, kept in R2 (in the EU) under the
+// hash of what it was made from and the toolchain's version: a whole
+// build, an inspected manifest, a JSON workflow's expression check, one
+// module's transform (the compiler's increments.ts) or one file's lint.
+// The same input makes the same output, so whichever isolate makes an
+// entry first keeps it, and any other making it meanwhile writes the same.
+// A release with a new toolchain (`compilerVersion`: its kit, SDKs and
+// policy) misses every entry, and each is made again the first time it
+// is asked for.
 //
-// From the threat model (GRA-406), each way a cached build could stand in
-// for one that never passed its gates, and what closes it:
-//
-// - Cache poisoning (a stray or forged object, a write cut short, bytes
-//   that rotted): an object is served only when its bytes hash to its
-//   receipt, which only core writes, and only the build holding the key's
-//   lease, after the bytes are written, under an object of its own. R2's
-//   own metadata is never trusted for it. An object no receipt names, or
-//   with another hash, is never served: the build runs again.
-// - Different inputs under one key: the key is the build's kind and
-//   compiler call, a key schema (`keySchema`), the compiler's version (its
-//   kit, SDKs and policy) and the SHA-256 of the exact files the build
-//   reads (pages.ts `buildKey`).
-// - Repeated integrity failure: a kept build whose bytes fail their check
-//   is counted once on the receipt, however many read it; at
-//   `quarantineAfter` such builds, the key is quarantined, its bad bytes are kept
-//   for operators under `build-quarantine/`, an error is logged as the
-//   alert, and nothing is served from or written to the cache for it. Its
-//   builds still take the lease, so one runs at a time.
-// - Builds of the same files at once in several isolates: the first takes
-//   the key's lease and builds; the others wait for its receipt. One whose
-//   holder died outlives it (`lease_expires_at`) and is taken again; a
-//   receipt whose bytes are good is served whether or not the lease was
-//   given back.
-// - Cached bytes granting anything: a compile build holds App code alone.
-//   Package bytes reach a page, server or workflow through admission
-//   where they are served or sealed (packages/serve.ts,
-//   workflows/sealed-packages.ts), never through this cache.
+// Cache poisoning (a stray or forged object, bytes cut short or rotted):
+// each entry carries an HMAC of its key and text under a key derived from
+// core's secret, so whoever can write to the bucket but doesn't hold that
+// secret can't have core take text of theirs as its own work, nor move
+// an entry to another key. One that fails its check is logged and taken
+// for a miss: it is made again, and the new entry replaces it. Cached
+// bytes grant nothing: package bytes reach an App through admission where
+// they are served or sealed (packages/serve.ts), never through this cache.
 
-/** Part of every cache key: a change to what a key means builds again. */
-export const keySchema = "r1";
+/** Where every entry is kept: swept by age (pages.ts `sweepBuilds`). */
+export const buildCachePrefix = "build-cache/";
 
-/** Integrity failures of one key before it is quarantined. */
-export const quarantineAfter = 3;
+/** The purpose its MACs are derived for (derived-keys.ts). */
+const macPurpose = "build-cache";
 
-/**
- * How long a build waiting for another's receipt waits before it looks
- * again: from the first, doubling to the most, so waiters on a cold cache
- * (a new compiler, every page building) don't hammer core's database.
- */
-export const waitBackoff = { firstMs: 250, mostMs: 4000 } as const;
-
-/** What a cached build is written with: when it was last used. */
-export const usedNow = (): R2PutOptions => ({
-  customMetadata: { usedAt: String(Date.now()) },
-});
-
-/**
- * When a cached build was last used: as it was last written, or, for one
- * written before builds said so, when it was uploaded.
- */
-export const lastUsedOf = (object: R2Object): number => {
-  const usedAt = Number(object.customMetadata?.usedAt);
-  return Number.isFinite(usedAt) && usedAt > 0
-    ? usedAt
-    : object.uploaded.getTime();
-};
-
-/** Where quarantined bytes are kept for operators. */
-const quarantinePrefix = "build-quarantine/";
-
-/** What a cached build's R2 reads and writes need. */
+/** What the cache reads and writes from core's env. */
 export interface CacheEnv {
-  DB: D1Database;
+  BETTER_AUTH_SECRET: string;
   FILES: Pick<R2Bucket, "get" | "put">;
 }
 
-/** What the cache holds for a key, as checked against its receipt. */
-export type CacheRead =
-  | { state: "hit"; text: string; object: R2Object; objectKey: string }
-  | { state: "miss" }
-  | { state: "quarantined" };
-
-const receiptOf = async (env: CacheEnv, key: string) =>
-  await drizzle(env.DB)
-    .select()
-    .from(buildReceipts)
-    .where(eq(buildReceipts.key, key))
-    .get();
-
 /**
- * Counts an integrity failure of `key`'s build kept at `builtAt`, whose
- * object held `text`, once for that build however many readers find it:
- * kept for operators, and past `quarantineAfter` builds that failed, the
- * key quarantined.
+ * The key of what `parts` make (its input, files as `inOrder` has them),
+ * by the kind of entry it is (a `page-build`, a `lint`), under the
+ * toolchain's version.
  */
-const integrityFailed = async (
+export const cacheKeyOf = async (
+  kind: string,
+  parts: readonly unknown[]
+): Promise<string> =>
+  `${buildCachePrefix}${compilerVersion}/${kind}/${await sha256Hex(JSON.stringify(parts))}.json`;
+
+/** `files` by path, in order: the same files are the same part of a key. */
+export const inOrder = (
+  files: Readonly<Record<string, string>>
+): [string, string][] =>
+  Object.entries(files).toSorted(([a], [b]) => (a < b ? -1 : 1));
+
+const encoder = new TextEncoder();
+
+/** What an entry's MAC covers: its text under its key, never one alone. */
+const signed = (key: string, text: string) =>
+  encoder.encode(JSON.stringify([key, text]));
+
+const macOf = async (
   env: CacheEnv,
   key: string,
-  builtAt: Date | null,
   text: string
-): Promise<void> => {
-  if (builtAt === null) {
-    return;
-  }
-  const [counted] = await drizzle(env.DB)
-    .update(buildReceipts)
-    .set({
-      integrityFailures: sql`${buildReceipts.integrityFailures} + 1`,
-      failedBuiltAt: builtAt,
-      quarantinedAt: sql`CASE WHEN ${buildReceipts.integrityFailures} + 1 >= ${quarantineAfter} THEN ${Date.now()} ELSE ${buildReceipts.quarantinedAt} END`,
-    })
-    .where(
-      and(
-        eq(buildReceipts.key, key),
-        eq(buildReceipts.builtAt, builtAt),
-        or(
-          isNull(buildReceipts.failedBuiltAt),
-          ne(buildReceipts.failedBuiltAt, builtAt)
-        )
+): Promise<string> =>
+  toBase64Url(
+    new Uint8Array(
+      await crypto.subtle.sign(
+        "HMAC",
+        await derivedHmacKey(env, macPurpose, ["sign", "verify"]),
+        signed(key, text)
       )
     )
-    .returning({
-      failures: buildReceipts.integrityFailures,
-      quarantinedAt: buildReceipts.quarantinedAt,
-    });
-  if (counted === undefined) {
-    // Counted already, by another reader of the same build.
-    return;
-  }
-  try {
-    await env.FILES.put(`${quarantinePrefix}${key}/${Date.now()}`, text);
-  } catch (error) {
-    log.error("build.cache_quarantine_write_failed", {
-      key,
-      ...errorFields(error),
-    });
-  }
-  log.error("build.cache_integrity_failed", {
-    key,
-    failures: counted.failures,
-  });
-  if (counted.quarantinedAt !== null) {
-    // The alert: operators look at what is kept under the prefix.
-    log.error("build.cache_quarantined", { key, failures: counted.failures });
-  }
-};
+  );
 
-/** Whether `key` is quarantined: its receipt alone. */
-const isQuarantined = async (env: CacheEnv, key: string): Promise<boolean> => {
-  const receipt = await receiptOf(env, key);
-  return receipt !== undefined && receipt.quarantinedAt !== null;
-};
-
-/**
- * What the cache holds for `key`, checked against its receipt: the bytes
- * when they hash to it, otherwise nothing to serve.
- */
-export const readVerified = async (
-  env: CacheEnv,
-  key: string
-): Promise<CacheRead> => {
-  // The receipt first, then the object it names: each holder keeps its
-  // bytes under an object of its own (`objectKeyOf`), written once, so a
-  // receipt and its object never race. A receipt that can't be read
-  // throws: nothing vouches for cached bytes then. Bytes that can't be
-  // read are a miss: the build runs, under the lease.
-  const receipt = await receiptOf(env, key);
-  if (receipt?.quarantinedAt !== null && receipt?.quarantinedAt !== undefined) {
-    return { state: "quarantined" };
-  }
-  const objectKey = receipt?.objectKey ?? null;
-  const expected = receipt?.sha256 ?? null;
-  if (objectKey === null || expected === null) {
-    return { state: "miss" };
-  }
-  let object: R2ObjectBody | null = null;
-  let text: string | undefined;
-  try {
-    object = await env.FILES.get(objectKey);
-    text = await object?.text();
-  } catch (error) {
-    log.warn("build.cache_read_failed", { key, ...errorFields(error) });
-    return { state: "miss" };
-  }
-  if (object === null || text === undefined) {
-    return { state: "miss" };
-  }
-  if ((await sha256Hex(text)) !== expected) {
-    await integrityFailed(env, key, receipt?.builtAt ?? null, text);
-    return { state: "miss" };
-  }
-  return { state: "hit", text, object, objectKey };
-};
-
-/**
- * Writes `text` again under `objectKey`, `key`'s kept build, as used now:
- * only while its receipt still names that object with those bytes, so a
- * refresh never brings back an object a newer build replaced.
- */
-export const refreshKept = async (
+const macHolds = async (
   env: CacheEnv,
   key: string,
-  objectKey: string,
   text: string,
-  options: R2PutOptions
-): Promise<void> => {
-  const receipt = await receiptOf(env, key);
-  if (
-    receipt?.objectKey !== objectKey ||
-    receipt.sha256 !== (await sha256Hex(text)) ||
-    receipt.quarantinedAt !== null
-  ) {
-    return;
-  }
-  await env.FILES.put(objectKey, text, options);
-};
-
-/** The object `holder` keeps `key`'s bytes under: under the key's prefix, for the sweep. */
-export const objectKeyOf = (key: string, holder: string): string =>
-  `${key}~${holder}`;
-
-/**
- * Takes `key`'s lease for `holder` for `ms`, if nobody holds it or the
- * one who does outlived it; whether it did. One statement: two builds
- * never both take it.
- */
-const takeLease = async (
-  env: CacheEnv,
-  key: string,
-  holder: string,
-  ms: number
+  stated: string | undefined
 ): Promise<boolean> => {
-  const now = Date.now();
-  const expires = new Date(now + ms);
-  const [taken] = await drizzle(env.DB)
-    .insert(buildReceipts)
-    .values({ key, holder, leaseExpiresAt: expires })
-    .onConflictDoUpdate({
-      target: buildReceipts.key,
-      set: { holder, leaseExpiresAt: expires },
-      setWhere: or(
-        isNull(buildReceipts.leaseExpiresAt),
-        lt(buildReceipts.leaseExpiresAt, new Date(now))
-      ),
-    })
-    .returning({ holder: buildReceipts.holder });
-  return taken?.holder === holder;
-};
-
-/**
- * Holds `key`'s lease for `holder` another `ms` from now, if it still
- * holds it: a build of many calls renews it as each starts, so it holds it
- * throughout, while one that died still gives it up a lease's time after
- * its last renewal.
- */
-const renewLease = async (
-  env: CacheEnv,
-  key: string,
-  holder: string,
-  ms: number
-): Promise<void> => {
-  await drizzle(env.DB)
-    .update(buildReceipts)
-    .set({ leaseExpiresAt: new Date(Date.now() + ms) })
-    .where(and(eq(buildReceipts.key, key), eq(buildReceipts.holder, holder)));
-};
-
-/** Gives `key`'s lease back if `holder` holds it; logged, never thrown. */
-const giveBack = async (
-  env: CacheEnv,
-  key: string,
-  holder: string
-): Promise<void> => {
-  try {
-    await drizzle(env.DB)
-      .update(buildReceipts)
-      .set({ holder: null, leaseExpiresAt: null })
-      .where(and(eq(buildReceipts.key, key), eq(buildReceipts.holder, holder)));
-  } catch (error) {
-    log.error("build.cache_lease_release_failed", {
-      key,
-      ...errorFields(error),
-    });
-  }
-};
-
-/**
- * Keeps `text` as `key`'s build, written by `holder`: the bytes under an
- * object of the holder's own, then the receipt naming it, only while
- * `holder` still holds the lease. A holder that lost its lease writes at
- * most an object no receipt names, which the sweep removes; the build
- * that took the lease over is left alone. Nothing for a quarantined key.
- */
-const keep = async (
-  env: CacheEnv,
-  key: string,
-  holder: string,
-  text: string,
-  options: R2PutOptions
-): Promise<void> => {
-  const receipt = await receiptOf(env, key);
-  if (
-    receipt === undefined ||
-    receipt.holder !== holder ||
-    receipt.quarantinedAt !== null
-  ) {
-    return;
-  }
-  const objectKey = objectKeyOf(key, holder);
-  await env.FILES.put(objectKey, text, options);
-  await drizzle(env.DB)
-    .update(buildReceipts)
-    .set({
-      objectKey,
-      sha256: await sha256Hex(text),
-      bytes: new TextEncoder().encode(text).byteLength,
-      builtAt: new Date(),
-    })
-    .where(
-      and(
-        eq(buildReceipts.key, key),
-        eq(buildReceipts.holder, holder),
-        isNull(buildReceipts.quarantinedAt)
-      )
-    );
-};
-
-/**
- * Keeps `text`, already made, as `key`'s: under the key's lease, taken for
- * `ms`, as a build keeps its bytes (`keep`), then given back. Whether it
- * was kept: not while another holds the lease (it keeps its own), nor for
- * a quarantined key.
- */
-export const keepUnderLease = async (
-  env: CacheEnv,
-  key: string,
-  text: string,
-  ms: number
-): Promise<boolean> => {
-  const holder = crypto.randomUUID();
-  if (!(await takeLease(env, key, holder, ms))) {
+  if (stated === undefined) {
     return false;
   }
+  let mac: Uint8Array<ArrayBuffer>;
   try {
-    await keep(env, key, holder, text, usedNow());
-  } finally {
-    await giveBack(env, key, holder);
+    mac = fromBase64Url(stated);
+  } catch {
+    return false;
   }
-  const receipt = await receiptOf(env, key);
-  return receipt?.objectKey === objectKeyOf(key, holder);
+  return await crypto.subtle.verify(
+    "HMAC",
+    await derivedHmacKey(env, macPurpose, ["sign", "verify"]),
+    mac,
+    signed(key, text)
+  );
 };
 
-/** What a build answers, and whether its bytes may be kept. */
-export interface Built {
-  text: string;
-  cache: boolean;
-}
-
-/** How a cached build came about, for its metrics. */
-export type CacheOutcome = "hit" | "shared" | "built" | "quarantined";
+/** Keeps `text` under `key`, with its MAC; logged, never thrown, when it can't. */
+export const writeCache = async (
+  env: CacheEnv,
+  key: string,
+  text: string
+): Promise<void> => {
+  try {
+    await env.FILES.put(key, text, {
+      customMetadata: { mac: await macOf(env, key, text) },
+    });
+  } catch (error) {
+    // What it made stands: it is made again at its next use.
+    log.warn("build.cache_write_failed", { key, ...errorFields(error) });
+  }
+};
 
 /**
- * `key`'s build: from the cache when its bytes hash to its receipt;
- * otherwise built by `build` under the key's lease, and kept (`options`)
- * when it may be, or the build another isolate holding the lease kept
- * meanwhile. A build waited for at most `leaseMs`, the lease's own time:
- * past it, the lease is taken over. A build of many calls renews the
- * lease (`renew`, another `leaseMs` from then) as each starts.
+ * How old an entry may be when it is read before it is written again, so
+ * one in use never ages into the sweep (pages.ts `buildKeepMs`): once a
+ * week at most, whatever reads it.
+ */
+const refreshAfterMs = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * The text kept under `key`, if core kept it: undefined for a miss, for
+ * an entry whose MAC doesn't hold (logged), and when R2 can't be read. An
+ * entry read past {@link refreshAfterMs} is written again, its age reset.
+ */
+export const readCache = async (
+  env: CacheEnv,
+  key: string
+): Promise<string | undefined> => {
+  let object: R2ObjectBody | null;
+  let text: string;
+  try {
+    object = await env.FILES.get(key);
+    if (object === null) {
+      return undefined;
+    }
+    text = await object.text();
+  } catch (error) {
+    log.warn("build.cache_read_failed", { key, ...errorFields(error) });
+    return undefined;
+  }
+  if (!(await macHolds(env, key, text, object.customMetadata?.mac))) {
+    // The alert: nothing but core writes there.
+    log.error("build.cache_untrusted", { key });
+    return undefined;
+  }
+  if (Date.now() - object.uploaded.getTime() > refreshAfterMs) {
+    await writeCache(env, key, text);
+  }
+  return text;
+};
+
+/** How an entry came about, for its metrics. */
+export type CacheOutcome = "hit" | "built";
+
+/**
+ * The entry under `key`: kept, or made by `make` and kept when it may be
+ * (`cache`: false for what the load, not the input, decided).
  */
 export const throughCache = async (
   env: CacheEnv,
   key: string,
-  leaseMs: number,
-  build: (renew: () => Promise<void>) => Promise<Built>,
-  options: () => R2PutOptions,
-  signal?: AbortSignal
-): Promise<{
-  text: string;
-  outcome: CacheOutcome;
-  /** For a hit, its object (when it was last used) and where it is. */
-  object?: R2Object;
-  objectKey?: string;
-}> => {
-  // Given up on before or while it read: it serves nothing.
-  signal?.throwIfAborted();
-  const first = await readVerified(env, key);
-  signal?.throwIfAborted();
-  if (first.state === "hit") {
-    return {
-      text: first.text,
-      outcome: "hit",
-      object: first.object,
-      objectKey: first.objectKey,
-    };
+  make: () => Promise<{ text: string; cache: boolean }>
+): Promise<{ text: string; outcome: CacheOutcome }> => {
+  const kept = await readCache(env, key);
+  if (kept !== undefined) {
+    return { text: kept, outcome: "hit" };
   }
-  const holder = crypto.randomUUID();
-  let waitMs: number = waitBackoff.firstMs;
-  for (;;) {
-    // Given up on while waiting: it takes no lease and serves nothing.
-    signal?.throwIfAborted();
-    // oxlint-disable-next-line no-await-in-loop -- one try at a time
-    if (await takeLease(env, key, holder, leaseMs)) {
-      break;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- waiting for the holder
-    await scheduler.wait(waitMs);
-    waitMs = Math.min(waitMs * 2, waitBackoff.mostMs);
-    signal?.throwIfAborted();
-    // oxlint-disable-next-line no-await-in-loop -- waiting for the holder
-    const now = await readVerified(env, key);
-    // Given up on while it read: it serves nothing, not even a shared build.
-    signal?.throwIfAborted();
-    if (now.state === "hit") {
-      return { text: now.text, outcome: "shared" };
-    }
+  const made = await make();
+  if (made.cache) {
+    await writeCache(env, key, made.text);
+  }
+  return { text: made.text, outcome: "built" };
+};
+
+/** Most entries read or kept at once. */
+const concurrency = 8;
+
+/** The parsed entry under `key`, or nothing. */
+const readJson = async (env: CacheEnv, key: string): Promise<unknown> => {
+  const text = await readCache(env, key);
+  if (text === undefined) {
+    return undefined;
   }
   try {
-    // Kept by another holder between the first read and taking the lease.
-    const kept = await readVerified(env, key);
-    signal?.throwIfAborted();
-    if (kept.state === "hit") {
-      return { text: kept.text, outcome: "shared" };
-    }
-    const built = await build(async () => {
-      await renewLease(env, key, holder, leaseMs);
-    });
-    const quarantined = await isQuarantined(env, key);
-    if (built.cache && !quarantined) {
-      try {
-        await keep(env, key, holder, built.text, options());
-      } catch (error) {
-        // The build stands: what it left of the cache has no receipt, and
-        // is built again at its next use.
-        log.error("build.cache_keep_failed", { key, ...errorFields(error) });
+    const parsed: unknown = JSON.parse(text);
+    return parsed;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The keys of what a pages build of some files may reuse and keep, by
+ * path (`pageIncrementKeys`): the compiler's, which it checks again on
+ * reuse.
+ */
+export type IncrementKeys = Awaited<ReturnType<typeof pageIncrementKeys>>;
+
+/** Where the transform the compiler keys `key` is kept. */
+const moduleCacheKey = async (key: string): Promise<string> =>
+  await cacheKeyOf("module", [key]);
+
+/**
+ * What earlier builds kept of a pages build whose modules have `keys`:
+ * each module's transform, by its key, shaped as a record of its own file.
+ */
+export const readModules = async (
+  env: CacheEnv,
+  keys: IncrementKeys
+): Promise<Increments> => {
+  const found: Increments = { modules: {} };
+  await mapConcurrently(
+    Object.entries(keys.modules),
+    concurrency,
+    async ([path, key]) => {
+      const record = moduleRecordOf(
+        await readJson(env, await moduleCacheKey(key)),
+        path
+      );
+      if (record !== undefined) {
+        found.modules[key] = record;
       }
     }
-    return {
-      text: built.text,
-      outcome: quarantined ? "quarantined" : "built",
-    };
-  } finally {
-    await giveBack(env, key, holder);
-  }
+  );
+  return found;
 };
 
 /**
- * Forgets what the receipts naming `objectKeys` say of them, the objects
- * the sweep deleted: the object, its hash, size and time. A lease or a
- * quarantine on the row stays; once neither holds anything, the receipt
- * sweep removes the row (`sweepReceipts`).
+ * Keeps what a pages build whose modules have `keys` transformed now
+ * (`fresh`): only a record of one of its own files under the key `keys`
+ * gives it, so nothing is kept under a key it doesn't stand for.
  */
-export const forgetReceipts = async (
+export const keepModules = async (
   env: CacheEnv,
-  objectKeys: readonly string[]
-): Promise<void> => {
-  const db = drizzle(env.DB);
-  // Within D1's bound values.
-  for (let start = 0; start < objectKeys.length; start += 90) {
-    // oxlint-disable-next-line no-await-in-loop -- a chunk at a time
-    await db
-      .update(buildReceipts)
-      .set({ objectKey: null, sha256: null, bytes: null, builtAt: null })
-      .where(
-        inArray(buildReceipts.objectKey, objectKeys.slice(start, start + 90))
+  keys: IncrementKeys,
+  fresh: Increments
+): Promise<number> => {
+  const kept = Object.entries(fresh.modules).filter(
+    ([key, record]) =>
+      keys.modules[record.path] === key &&
+      moduleRecordOf(record, record.path) !== undefined
+  );
+  await mapConcurrently(kept, concurrency, async ([key, record]) => {
+    await writeCache(env, await moduleCacheKey(key), JSON.stringify(record));
+  });
+  return kept.length;
+};
+
+/** Where the lint of `path` (`source`) is kept (`lintKey`). */
+const lintCacheKey = async (
+  path: string,
+  source: string,
+  designContext: string
+): Promise<string> =>
+  await cacheKeyOf("lint", [await lintKey(path, source, designContext)]);
+
+/**
+ * What earlier lints found in each of `files` (by path) whose result is
+ * kept under the key of its content and, for a page or a component, of
+ * the App's others (`designContext`): the rest are linted again.
+ */
+export const readLints = async (
+  env: CacheEnv,
+  files: Readonly<Record<string, string>>,
+  designContext: string
+): Promise<Record<string, Diagnostic[]>> => {
+  const found: Record<string, Diagnostic[]> = {};
+  await mapConcurrently(
+    Object.entries(files),
+    concurrency,
+    async ([path, source]) => {
+      const record = lintRecordOf(
+        await readJson(env, await lintCacheKey(path, source, designContext)),
+        path
       );
-  }
+      if (record !== undefined) {
+        found[path] = record.diagnostics;
+      }
+    }
+  );
+  return found;
 };
 
-/** How long a quarantined key stays quarantined before it is tried again. */
-export const quarantineKeepMs = 24 * 60 * 60 * 1000;
-
-/** Most receipts one run of the sweep removes. */
-const receiptSweepBatch = 500;
-
-/**
- * Removes the receipts that hold nothing, as of `now`: those with no
- * object whose lease ran out (a build that kept nothing, or a holder that
- * died), and quarantines older than {@link quarantineKeepMs}, so the key
- * is tried again. At most {@link receiptSweepBatch} a run.
- */
-export const sweepReceipts = async (
+/** Keeps what the lint found in each of `files` (`linted`, by path). */
+export const keepLints = async (
   env: CacheEnv,
-  now: Date
+  files: Readonly<Record<string, string>>,
+  designContext: string,
+  linted: Readonly<Record<string, Diagnostic[]>>
 ): Promise<void> => {
-  const db = drizzle(env.DB);
-  // Never a row whose lease a build still holds: it is building now.
-  const unleased = or(
-    isNull(buildReceipts.leaseExpiresAt),
-    lt(buildReceipts.leaseExpiresAt, now)
+  await mapConcurrently(
+    Object.entries(linted),
+    concurrency,
+    async ([path, diagnostics]) => {
+      const source = files[path];
+      if (source !== undefined) {
+        await writeCache(
+          env,
+          await lintCacheKey(path, source, designContext),
+          JSON.stringify({ path, diagnostics })
+        );
+      }
+    }
   );
-  const stale = and(
-    unleased,
-    or(
-      and(isNull(buildReceipts.objectKey), isNull(buildReceipts.quarantinedAt)),
-      lt(
-        buildReceipts.quarantinedAt,
-        new Date(now.getTime() - quarantineKeepMs)
-      )
-    )
-  );
-  const keys = await db
-    .select({ key: buildReceipts.key })
-    .from(buildReceipts)
-    .where(stale)
-    .limit(receiptSweepBatch);
-  for (let start = 0; start < keys.length; start += 90) {
-    // oxlint-disable-next-line no-await-in-loop -- a chunk at a time
-    await db.delete(buildReceipts).where(
-      and(
-        inArray(
-          buildReceipts.key,
-          keys.slice(start, start + 90).map(({ key }) => key)
-        ),
-        // Still stale as it goes: a lease taken meanwhile is kept.
-        stale
-      )
-    );
-  }
 };

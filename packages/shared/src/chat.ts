@@ -856,6 +856,12 @@ export interface ChatUpdate {
    * the object last started.
    */
   drafts: number;
+  /**
+   * Whether the turn checks the drafts it wrote now, past its answer
+   * (core's agent-builds.ts, `turnCheck`): the chat takes no question
+   * until it ends. Left out by an earlier release.
+   */
+  checking?: boolean;
 }
 
 /**

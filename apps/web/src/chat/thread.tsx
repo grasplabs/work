@@ -407,15 +407,18 @@ const Working = ({
   doing,
   file,
   thinking,
+  checking = false,
   arrivals = noArrivals,
 }: {
   doing: WorkState;
   file?: string;
   thinking?: ThinkingOf;
+  /** The turn checks the drafts it wrote, past its answer. */
+  checking?: boolean;
   arrivals?: readonly (number | undefined)[];
 }) => {
   const { t } = useLingui();
-  const label =
+  let label =
     file === undefined
       ? {
           reading: t`Reading the workspace`,
@@ -428,7 +431,13 @@ const Working = ({
           comment:
             "Grasp reads a file the person attached; {file} is its name.",
         });
-  if (thinking !== undefined) {
+  if (checking) {
+    label = t({
+      message: "Checking the App…",
+      comment:
+        "Grasp checks the App it changed (its types, lint and preview) before its turn ends.",
+    });
+  } else if (thinking !== undefined) {
     return (
       <ThinkingLine arrivals={arrivals} fallback={label} thinking={thinking} />
     );
@@ -967,6 +976,7 @@ export const ChatThread = ({
   output,
   partial,
   running,
+  checking = false,
   tools = noTools,
   onRetry,
   compact = false,
@@ -982,6 +992,8 @@ export const ChatThread = ({
   partial: ChatPartial | null;
   /** Whether the agent is working on the chat now. */
   running: boolean;
+  /** Whether its turn checks the drafts it wrote now, past its answer. */
+  checking?: boolean;
   /**
    * The calls the chat's code made: what it did to the dashboard, under its
    * step, and what it reads, while it reads it.
@@ -1048,6 +1060,7 @@ export const ChatThread = ({
     if (doing !== undefined && replies[0]?.id === id) {
       return (
         <Working
+          checking={checking}
           doing={doing}
           file={file}
           {...(thinking === undefined

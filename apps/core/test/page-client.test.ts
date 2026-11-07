@@ -654,8 +654,8 @@ export const Route = createFileRoute("/")({ component: Notes });
 
 /** How many inspected manifests core keeps. */
 const inspections = async (): Promise<number> => {
-  const { objects } = await env.FILES.list({ prefix: "inspections/" });
-  return objects.length;
+  const { objects } = await env.FILES.list({ prefix: "build-cache/" });
+  return objects.filter(({ key }) => key.includes("/inspection/")).length;
 };
 /** The diagnostics of version 1 of an App holding `files`, as core builds its pages. */
 const diagnosticsOf = async (

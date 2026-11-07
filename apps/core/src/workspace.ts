@@ -101,7 +101,6 @@ import {
   chatAuthority,
   chatContext,
   revokedSince,
-  runRefusal,
   workspaceAgentIdSchema,
 } from "./agent-scope.ts";
 import type {
@@ -122,13 +121,6 @@ import {
   turnSource,
 } from "./brain-capture.ts";
 import type { CaptureStore, TurnFacts } from "./brain-capture.ts";
-import { BuildJobRecords } from "./build-job-records.ts";
-import type {
-  BuildJobAdmission,
-  BuildJobEnd,
-  BuildJobOpening,
-  BuildJobRow,
-} from "./build-job-records.ts";
 import {
   channelText,
   heldWriteRefusal,
@@ -171,8 +163,10 @@ import migrations from "./db/workspace/migrations/migrations.js";
 import {
   auditOutbox,
   brainCaptureIntents,
+  chatBuildJobs,
   chatCodeRuns,
   chatDraftFiles,
+  chatDraftVersions,
   maxToolCallIdChars,
   chatDocuments,
   chatDrafts,
@@ -210,7 +204,6 @@ import { functionProblem, PreviewReports } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import type { WorkContext } from "./restricted.ts";
 import { SealedPreviews } from "./sealed-previews.ts";
-import { runEngine } from "./workflows/engine.ts";
 
 export type Chat = typeof chats.$inferSelect;
 
@@ -249,25 +242,6 @@ interface LiveTurn {
  * reports counts toward the agent's check of the draft.
  */
 const appVersionRevision = -2;
-
-/** A build job, with the chat's agent and person it acts for. */
-export type BuildJob = BuildJobRow & { agentId: string; personId: string };
-
-/** What the agent of a chat is told as a build job it submitted ends. */
-const jobEnded = (job: BuildJobRow, status: BuildJobEnd["status"]): string => {
-  if (status === "cancelled") {
-    return "was cancelled";
-  }
-  if (status === "revoked") {
-    return "ended: a permission of yours was revoked since it was submitted";
-  }
-  if (status === "failed") {
-    return "failed";
-  }
-  return job.kind === "check"
-    ? "finished checking the draft"
-    : "finished: the draft was proposed, or its check says why not";
-};
 
 /**
  * A chat's draft of an App (agent-builds.ts): the version it started
@@ -784,6 +758,8 @@ export class Workspace extends DurableObject<Env> {
    * it wasn't the model (see `ChatUpdate.stopped`). In memory only.
    */
   readonly #stopped = new Map<ChatId, string>();
+  /** The chats whose turn checks the drafts it wrote now (`turnChecking`). */
+  readonly #checking = new Set<ChatId>();
   /**
    * The widgets Grasp is making or changing now, by `<person>/<widget>`,
    * each until when it holds them (`claimWidget`).
@@ -839,8 +815,6 @@ export class Workspace extends DurableObject<Env> {
   /** Who follows each chat (`watch`), by chat and watch ID. */
   readonly #watchers = new Map<ChatId, Map<string, ChatWatch>>();
 
-  /** The chats' build jobs (build-jobs.ts). */
-  readonly #jobs = new BuildJobRecords(this.#db);
   /** Every version of the chats' drafts (draft-versions.ts). */
   readonly #versions = new DraftVersions(this.#db);
 
@@ -2258,7 +2232,7 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * The chat's turn under way, as its ChatSession, which owns it, says:
-   * what its build jobs belong to, and what a stop ends.
+   * what a stop ends.
    */
   async #activeTurn(chatId: ChatId): Promise<string | undefined> {
     return await this.#toSession(
@@ -2680,173 +2654,10 @@ export class Workspace extends DurableObject<Env> {
     if (turnId === undefined) {
       return false;
     }
-    // The build jobs it submitted are the turn's work: they end with it.
-    this.#terminateJobs(this.#jobs.cancelRunning(id, turnId));
     await this.#toSession(id, async (session) => {
       await session.abort(turnId);
     });
     return true;
-  }
-
-  /**
-   * Opens a build job of the chat for its open code run `runId`, in the
-   * same step as the check that the run is open (build-jobs.ts): bound to
-   * the run's turn, the draft of App `appId` as it is now (its revision),
-   * and the authority the run acts on (granted when it opened). Its ID is
-   * random. Refused, opening nothing, once the chat has as many jobs
-   * running as it may. The run's turn is its ChatSession's, through a
-   * restart of this object too.
-   */
-  async openBuildJob(
-    chatId: ChatId,
-    runId: string,
-    job: Pick<BuildJobOpening, "appId" | "kind" | "message">
-  ): Promise<{ id: string; revision: number } | { refused: "jobs" }> {
-    const turnId = await this.#activeTurn(chatId);
-    // After the await: the run is checked open in the step that opens.
-    const lease = this.admitFromCodeRun(chatId, runId);
-    if (lease.call !== "open" || turnId === undefined) {
-      throw runRefusal(lease.call === "revoked" ? "revoked" : "ended");
-    }
-    if (this.#jobs.full(chatId)) {
-      return { refused: "jobs" };
-    }
-    const id = crypto.randomUUID();
-    const { revision } = this.draft(chatId, job.appId);
-    this.#jobs.open({
-      ...job,
-      id,
-      chatId,
-      turnId,
-      runId,
-      revision,
-      grantedAt: lease.openedAt,
-    });
-    return { id, revision };
-  }
-
-  /** The chat's running build jobs, with when each was submitted. */
-  runningBuildJobs(chatId: ChatId): { id: string; createdAt: Date }[] {
-    return this.#jobs.running(chatId);
-  }
-
-  /**
-   * The chat's build job `id`, with the agent and person it acts for, as
-   * the chat has them now; none for another chat's, or a deleted chat's.
-   */
-  buildJob(chatId: unknown, id: string): BuildJob | undefined {
-    const chat = chatIdSchema.safeParse(chatId);
-    const row = chat.success ? this.#jobs.byId(chat.data, id) : undefined;
-    if (row === undefined) {
-      return undefined;
-    }
-    const { agentId, personId } = this.#chat(row.chatId);
-    return { ...row, agentId, personId };
-  }
-
-  /**
-   * Whether the chat's build job `id` may take a step or have a write
-   * admitted now, with when its authority was granted (agent-scope.ts
-   * reads revocations since). A job the object lacks is cancelled.
-   */
-  admitFromBuildJob(chatId: unknown, id: string): BuildJobAdmission {
-    const chat = chatIdSchema.safeParse(chatId);
-    // A chat being deleted admits nothing of its jobs (`deleteChat`).
-    return chat.success && !this.#deleting.has(chat.data)
-      ? this.#jobs.admission(chat.data, id)
-      : { call: "cancelled" };
-  }
-
-  /**
-   * Ends the chat's running build job `id` as `end` says, once: `false`
-   * when it had ended already. The turn that submitted it is told how it
-   * ended, in a notice it answers, even once it has answered, never shown
-   * as the person's: its ChatSession, which owns the turn, takes it only
-   * while that turn runs (`ChatSession.notify`), through a restart of
-   * either object too, so no other turn ever is. Nothing of its result
-   * goes with it: the agent reads that with `env.build.job`. Asked again,
-   * it sends a notice still owed (`#notifyEnded`); it throws while it
-   * can't, so the job's last step is tried again.
-   */
-  async endBuildJob(
-    chatId: unknown,
-    id: string,
-    end: BuildJobEnd
-  ): Promise<boolean> {
-    const chat = chatIdSchema.safeParse(chatId);
-    if (!chat.success) {
-      return false;
-    }
-    const ended = this.#jobs.end(chat.data, id, end);
-    await this.#notifyEnded(chat.data, id);
-    return ended;
-  }
-
-  /**
-   * Tells the turn that submitted the chat's ended build job `id` how it
-   * ended, while the job owes it that (`noticeOwed`, set as it ended):
-   * its ChatSession takes it once, by the job's ID, or drops it once that
-   * turn ended. Cleared only once it was sent, so a call that fails, or a
-   * restart before it is cleared, leaves it owed: the job's end, tried
-   * again (its last step), sends it again. Throws when it can't be sent.
-   */
-  async #notifyEnded(chatId: ChatId, id: string): Promise<void> {
-    const job = this.#jobs.byId(chatId, id);
-    if (job === undefined || job.status === "running" || !job.noticeOwed) {
-      return;
-    }
-    // Being deleted: it tells nothing, and nothing is owed.
-    if (!this.#deleting.has(chatId)) {
-      const text = `Build job ${id} (${job.kind} of App ${job.appId}, submitted by code run ${job.runId}) ${jobEnded(job, job.status)}. Read how it ended with \`env.build.job("${id}")\`.`;
-      await this.#toSession(chatId, async (session) => {
-        await session.notify(job.turnId, id, text);
-      });
-    }
-    this.#jobs.noticed(chatId, id);
-  }
-
-  /**
-   * Records the tree the chat's running build job `id` is about to commit
-   * over `parent` (build-jobs.ts): `false` once the job has ended.
-   */
-  intendBuildCommit(
-    chatId: unknown,
-    id: string,
-    parent: number | null,
-    tree: string
-  ): boolean {
-    return this.#jobs.intend(chatIdSchema.parse(chatId), id, parent, tree);
-  }
-
-  /** Records the version the chat's build job `id` committed: its receipt. */
-  recordBuildReceipt(chatId: unknown, id: string, version: number): void {
-    this.#jobs.receipt(chatIdSchema.parse(chatId), id, version);
-  }
-
-  /**
-   * Terminates the engine's instances of build jobs the object just
-   * ended, with nobody waiting: each refuses every later step anyway
-   * (build-jobs.ts), so this only stops their work sooner.
-   */
-  #terminateJobs(ids: readonly string[]): void {
-    if (ids.length === 0) {
-      return;
-    }
-    const engine = runEngine(this.env);
-    this.ctx.waitUntil(
-      Promise.all(
-        ids.map(async (id) => {
-          try {
-            await engine.terminate(id);
-          } catch (error) {
-            log.warn("agent.job_terminate_failed", {
-              jobId: id,
-              ...errorFields(error),
-            });
-          }
-        })
-      )
-    );
   }
 
   /**
@@ -3696,9 +3507,6 @@ export class Workspace extends DurableObject<Env> {
       throw agentErrors.create("agent.busy");
     }
     this.#deleting.add(id);
-    // Its build jobs end before anything here awaits, so none commits while
-    // it is deleted; they stay ended should the delete then fail.
-    this.#terminateJobs(this.#jobs.cancelRunning(id));
     try {
       const workspaceId = workspaceIdSchema.parse(this.ctx.id.name);
       const declined = await this.env.CONNECT.declineChatActions({
@@ -3729,7 +3537,6 @@ export class Workspace extends DurableObject<Env> {
       });
       // Their rows go with it below.
       this.ctx.storage.transactionSync(() => {
-        this.#jobs.deleteChat(id);
         this.#db
           .delete(brainCaptureIntents)
           .where(eq(brainCaptureIntents.evidenceId, id))
@@ -3751,6 +3558,11 @@ export class Workspace extends DurableObject<Env> {
           .where(eq(chatRunSources.chatId, id))
           .run();
         this.#db.delete(chatCodeRuns).where(eq(chatCodeRuns.chatId, id)).run();
+        // An earlier release's build jobs of the chat (schema.ts).
+        this.#db
+          .delete(chatBuildJobs)
+          .where(eq(chatBuildJobs.chatId, id))
+          .run();
         this.#db
           .delete(chatToolEvents)
           .where(eq(chatToolEvents.chatId, id))
@@ -3816,9 +3628,6 @@ export class Workspace extends DurableObject<Env> {
     await Promise.allSettled([...this.#sent, ...this.#delivering]);
     const held = this.#db.select({ id: chats.id }).from(chats).all();
     const ids = held.map(({ id }) => id);
-    for (const id of ids) {
-      this.#terminateJobs(this.#jobs.cancelRunning(id));
-    }
     if (ids.length > 0) {
       await eraseCaptured(this.env, ids);
     }
@@ -5149,6 +4958,47 @@ export class Workspace extends DurableObject<Env> {
     turn.created = Math.max(0, turn.created - 1);
   }
 
+  /**
+   * Whether the chat's turn checks the drafts it wrote now
+   * (agent-builds.ts, `turnCheck`): what its watchers show while the turn
+   * goes on past its answer.
+   */
+  turnChecking(chatId: unknown, checking: boolean): void {
+    const chat = chatIdSchema.safeParse(chatId);
+    if (!chat.success) {
+      return;
+    }
+    if (checking) {
+      this.#checking.add(chat.data);
+    } else {
+      this.#checking.delete(chat.data);
+    }
+    this.#changed(chat.data);
+  }
+
+  /**
+   * The Apps whose drafts the chat's agent wrote in turn `turnId`: those
+   * with a version of that turn's (draft-versions.ts), kept with the
+   * draft, so a restart forgets none.
+   */
+  turnDrafts(chatId: unknown, turnId: string): string[] {
+    const chat = chatIdSchema.safeParse(chatId);
+    if (!chat.success) {
+      return [];
+    }
+    return this.#db
+      .selectDistinct({ appId: chatDraftVersions.appId })
+      .from(chatDraftVersions)
+      .where(
+        and(
+          eq(chatDraftVersions.chatId, chat.data),
+          eq(chatDraftVersions.turnId, turnId)
+        )
+      )
+      .all()
+      .map(({ appId }) => appId);
+  }
+
   /** Tells the chat's watchers it changed, with the messages just stored. */
   #changed(chatId: ChatId, messages: readonly ChatMessage[] = []): void {
     for (const watch of this.#watchers.get(chatId)?.values() ?? []) {
@@ -5168,6 +5018,7 @@ export class Workspace extends DurableObject<Env> {
       stopped: stopped ?? null,
       held: this.#heldVersions.get(chatId) ?? 0,
       drafts: this.#draftVersions.get(chatId) ?? 0,
+      checking: this.#checking.has(chatId),
     };
   }
 

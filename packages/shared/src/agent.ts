@@ -37,15 +37,6 @@ export const agentErrors = defineErrorFamily({
     "This turn read something its chat can no longer read, so it stopped. Ask again to go on without it.",
   "agent.run_calls_spent":
     "This code run has made all the API calls one run may. Run the rest in another code step.",
-  "agent.job_not_found": "This chat has no such build job.",
-  "agent.jobs_exhausted":
-    "This chat has as many build jobs running as it may. Wait for one to end, then submit again.",
-  "agent.job_cancelled":
-    "This build job was cancelled, so it does nothing more.",
-  "agent.job_revoked":
-    "A permission of this chat's agent was revoked since this build job was submitted, so it does nothing more.",
-  "agent.build_queue_timeout":
-    "This build job waited an hour for a free build slot and didn't get one. Submit it again later.",
   "agent.write_untraced":
     "This change names an ID or value that neither the person said in this chat nor anything you read holds, so it wasn't asked for. Use only what they said or what you read; ask them for what is missing.",
   "agent.write_recipient_unsaid":
