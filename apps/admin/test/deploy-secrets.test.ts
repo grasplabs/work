@@ -94,13 +94,20 @@ describe("a Worker's secrets", () => {
     expect(names).toContain("ROUTER_SECRET_PREVIOUS");
   });
 
-  it("drop the previous keys once the rotation's window has closed", async () => {
-    const names = Object.keys(await byName("connect", 2, liveLongAgo));
-    expect(names.toSorted()).toStrictEqual([
-      "CAPABILITY_SIGNING_KEY",
-      "COMPOSIO_API_KEY",
-      "TOKEN_ENCRYPTION_KEY",
-    ]);
+  it("drop the previous keys once the rotation's window has closed, but connect's previous vault key", async () => {
+    await expect(byName("connect", 2, liveLongAgo)).resolves.toStrictEqual({
+      COMPOSIO_API_KEY: "composio",
+      CAPABILITY_SIGNING_KEY: await derived("capability", 2),
+      TOKEN_ENCRYPTION_KEY: await derived("token-encryption", 2, "base64"),
+      // Tokens may still be sealed under it.
+      TOKEN_ENCRYPTION_KEY_PREVIOUS: await derived(
+        "token-encryption",
+        1,
+        "base64"
+      ),
+    });
+    const coreNames = Object.keys(await byName("core", 2, liveLongAgo));
+    expect(coreNames).not.toContain("ROUTER_SECRET_PREVIOUS");
   });
 
   it("refuse every derived name, every previous name and every sealed name given as a shared one", async () => {

@@ -171,21 +171,15 @@ export const coreOriginOf = async (
  * - A stale read. A read from before the recorded version (an isolate of
  *   an earlier version still answering) names another version: `drifted`,
  *   held. Never cached: core answers `no-store`. The version recorded is
- *   the one connect named in the operation's probe, after its secrets were
- *   delivered (src/hosting/operation.ts), and never the one recorded
- *   before this run changed connect: an isolate of that version answering
- *   the probe first is asked again until a new version answers, and if
- *   none does, no version is recorded, which holds; what was superseded
- *   stays noted until a version is recorded, so a retry refuses it too. A
- *   version is recorded only when two reads a moment apart name it, so an
- *   isolate of a version this run made before its last secret (its
- *   upload's, say) answering once isn't taken for the latest. One
- *   answering both reads still can be: the namespace's writes don't say
- *   which version they made (an upload answers with the script, a secret
- *   with its name and type), so there is no id to wait for. A later read
- *   naming the newest version then reads as `drifted`, which holds. Core's in a
- *   namespace likewise: never the superseded one, and its health and its
- *   probe naming the same.
+ *   the one connect named in the operation's probe, after its upload,
+ *   which carries its secrets: the run's one write to connect, so one
+ *   version (src/hosting/operation.ts). Never the one recorded before
+ *   this run changed connect: an isolate of that version answering the
+ *   probe first is asked again until a new version answers, and if none
+ *   does, no version is recorded, which holds; what was superseded stays
+ *   noted until a version is recorded, so a retry refuses it too. Core's
+ *   in a namespace likewise: never the superseded one, and its health and
+ *   its probe naming the same.
  * - No answer: no version metadata (plain workerd), connect down, core
  *   down, too slow, or an older core without the request. `unknown`, which
  *   holds every secret the Worker holds.

@@ -17,7 +17,7 @@ import {
 } from "@grasp-os/shared/release";
 import { deriveRouterSecret, routerHostKey } from "@grasp-os/shared/router";
 import { env } from "cloudflare:workers";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -69,7 +69,7 @@ import {
 } from "../src/runners.ts";
 import type { HeldClient } from "../src/runners.ts";
 import { adminWorkflows } from "../src/workflow-runs.ts";
-import { envelope, notFound } from "./cloudflare-api-kit.ts";
+import { notFound } from "./cloudflare-api-kit.ts";
 import type { AccountState, ApiCall, CoreState } from "./cloudflare-api-kit.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { clientScripts, graspAccount } from "./grasp-account.ts";
@@ -339,42 +339,26 @@ const laggingUploads = (stale: number): Map<string, number> => {
   return answeredStale;
 };
 
-/** What a user Worker's script in a dispatch namespace has: where its secrets are read. */
-const scriptPartPath =
-  /\/workers\/dispatch\/namespaces\/[^/]+\/scripts\/(?<script>[^/]+)\/(?<rest>.+)$/u;
-
-/**
- * Cloudflare's read-after-write lag on what the secrets step reads back:
- * after each `PUT` of a user Worker's secret, the next `stale` reads of
- * its secrets answer `staleAnswer`, as from before it. Returns how many
- * reads were answered so, by script.
- */
-const laggingAfterSecrets = (
-  stale: number,
-  staleAnswer: unknown
-): Map<string, number> => {
-  const behind = new Map<string, number>();
-  const answeredStale = new Map<string, number>();
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const request = new Request(input, init);
-    const found = scriptPartPath.exec(new URL(request.url).pathname)?.groups;
-    if (found?.script !== undefined) {
-      const { script, rest } = found;
-      if (request.method === "PUT" && rest === "secrets") {
-        behind.set(script, stale);
-      } else if (
-        request.method === "GET" &&
-        rest === "secrets" &&
-        (behind.get(script) ?? 0) > 0
-      ) {
-        behind.set(script, (behind.get(script) ?? 0) - 1);
-        answeredStale.set(script, (answeredStale.get(script) ?? 0) + 1);
-        return envelope(staleAnswer);
-      }
-    }
-    return await cloudflare.fetch(input, init);
-  });
-  return answeredStale;
+/** The names of the secrets recorded as removed from client `clientId`'s scripts. */
+const revokedNamesOf = async (clientId: string): Promise<string[]> => {
+  const recorded = await db
+    .select({ detail: auditEvents.detail })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.clientId, clientId),
+        eq(auditEvents.action, "provision.secret_revoked")
+      )
+    );
+  return recorded
+    .map(
+      ({ detail }) =>
+        z
+          .object({ script: z.string(), name: z.string() })
+          .loose()
+          .parse(JSON.parse(detail ?? "{}")).name
+    )
+    .toSorted((x, y) => x.localeCompare(y));
 };
 
 /** Runs the operation expecting it to fail, its logged failure kept out of the output, and returns the error. */
@@ -685,19 +669,8 @@ const stops: Stop[] = [
     },
   },
   {
-    step: "secrets",
-    stopped: "core",
-    code: "cloudflare_400_10000",
-    plan: () => {
-      cloudflare.failNext(
-        (call) => call.method === "PUT" && call.path.endsWith("/secrets"),
-        400
-      );
-    },
-  },
-  {
     step: "probe",
-    stopped: "secrets",
+    stopped: "core",
     code: "smoke_check_failed",
     plan: (_account, clientId) => {
       // As many failed health checks as the smoke check tries.
@@ -964,7 +937,6 @@ describe("provisioning a placed client", () => {
       "provision.connect",
       "provision.worker_live",
       "provision.core",
-      "provision.secrets",
       "provision.probe",
       "provision.route",
       "provision.done",
@@ -1407,7 +1379,7 @@ describe("provisioning a placed client", () => {
     }).toMatchObject({
       operation: {
         status: "failed",
-        step: "secrets",
+        step: "core",
         error: "smoke_check_failed",
       },
       routed: false,
@@ -1428,7 +1400,7 @@ describe("provisioning a placed client", () => {
         operation: await operationOf(clientId),
         routed: await routed(clientId),
       }).toMatchObject({
-        operation: { status: "failed", step: "secrets", error: code },
+        operation: { status: "failed", step: "core", error: code },
         routed: false,
       });
 
@@ -1645,10 +1617,9 @@ describe("provisioning a placed client", () => {
         return row?.versionId ?? null;
       };
       const before = await recordedConnect();
-      // A second release (connect uploaded again, its secrets delivered
-      // again), or the same release run again with its secrets rotated
-      // (only its secrets delivered again): each write a new version;
-      // isolates of the one before still answering core for a moment.
+      // A second release, or the same release run again with its secrets
+      // rotated: connect uploaded again, a new version; isolates of the
+      // one before still answering core for a moment.
       if (change === "release") {
         const second = await importRelease(
           { notes: "feat(core): second" },
@@ -1718,10 +1689,6 @@ describe("provisioning a placed client", () => {
 
   it.each([
     {
-      worker: "connect" as const,
-      answers: "a version made earlier in the run once",
-    },
-    {
       worker: "core" as const,
       answers: "the version recorded before the run, until they stop",
     },
@@ -1767,26 +1734,19 @@ describe("provisioning a placed client", () => {
       const rerun = await attempt(clientId);
       let stopped: unknown = null;
       let whileOld: string | null = null;
-      if (worker === "connect") {
-        // Its upload's version, made before its secrets': not the latest.
-        cloudflare.coreOf(clientId).connectAnswersFirst = [
-          "made-earlier-in-this-run",
-        ];
-      } else {
-        // Its old isolates answer its health and its probe alike: the run
-        // stops rather than record what it superseded, and goes on once
-        // they're gone.
-        cloudflare.coreOf(clientId).answeringVersion = before.core ?? "none";
-        const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-        stopped = await runClientProvision(namespaced, rerun).then(
-          () => null,
-          (error: unknown) => error
-        );
-        errors.mockRestore();
-        const meanwhile = await recordedOf();
-        whileOld = meanwhile.core ?? null;
-        delete cloudflare.coreOf(clientId).answeringVersion;
-      }
+      // Its old isolates answer its health and its probe alike: the run
+      // stops rather than record what it superseded, and goes on once
+      // they're gone.
+      cloudflare.coreOf(clientId).answeringVersion = before.core ?? "none";
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      stopped = await runClientProvision(namespaced, rerun).then(
+        () => null,
+        (error: unknown) => error
+      );
+      errors.mockRestore();
+      const meanwhile = await recordedOf();
+      whileOld = meanwhile.core ?? null;
+      delete cloudflare.coreOf(clientId).answeringVersion;
       await runClientProvision(namespaced, rerun);
       const scripts = await scriptsOf(clientId);
       const live = account.namespaces
@@ -1883,6 +1843,83 @@ describe("provisioning a placed client", () => {
       changed: true,
       status: "done",
       recorded: live ?? "none",
+    });
+  });
+
+  it("records a namespace connect as its retry's upload, not an earlier attempt's still answering, when the retry changed its shared secrets", async () => {
+    const manifest = await importRelease({}, bindsConnect);
+    const { account, clientId, held } = await setUp(
+      manifest,
+      clientDispatchNamespace
+    );
+    const namespaced = {
+      ...context,
+      router: {
+        ...context.router,
+        dispatcher: cloudflare.dispatcher(account.id, clientDispatchNamespace),
+      },
+    };
+    await runClientProvision(namespaced, held);
+    const { connect } = await scriptsOf(clientId);
+    const liveConnect = () =>
+      account.namespaces.get(clientDispatchNamespace)?.get(connect)
+        ?.deployments[0]?.versions[0]?.version_id;
+    const recordedVersions = async () => {
+      const rows = await db
+        .select({
+          worker: clientWorkers.worker,
+          versionId: clientWorkers.versionId,
+        })
+        .from(clientWorkers)
+        .where(eq(clientWorkers.clientId, clientId));
+      return Object.fromEntries(
+        rows.map(({ worker, versionId }) => [worker, versionId])
+      );
+    };
+    const before = await recordedVersions();
+    const second = await importRelease(
+      { notes: "feat(core): second" },
+      bindsConnect
+    );
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: second.releaseId,
+    });
+    const rerun = await attempt(clientId);
+    // The first attempt uploads connect, then stops before its probe
+    // passes: only core's old isolates answer.
+    cloudflare.coreOf(clientId).answeringVersion = before.core ?? "none";
+    const stopped = await failing(rerun, namespaced);
+    delete cloudflare.coreOf(clientId).answeringVersion;
+    const firstUpload = liveConnect();
+    // Retried with connect's shared secret rotated, so connect is uploaded
+    // again; an isolate of the first attempt's upload answers first.
+    cloudflare.coreOf(clientId).connectAnswersFirst = [firstUpload ?? null];
+    await runClientProvision(
+      {
+        ...namespaced,
+        secrets: {
+          ...secrets,
+          shared: {
+            connect: { ...secrets.shared.connect, COMPOSIO_API_KEY: "rotated" },
+          },
+        },
+      },
+      rerun
+    );
+    const retryUpload = liveConnect();
+    const operation = await operationOf(clientId);
+    const recorded = await recordedVersions();
+
+    expect({
+      stopped: stopped instanceof Error,
+      uploadedAgain: retryUpload !== firstUpload,
+      status: operation?.status,
+      recorded: recorded.connect,
+    }).toStrictEqual({
+      stopped: true,
+      uploadedAgain: true,
+      status: "done",
+      recorded: retryUpload ?? "none",
     });
   });
 
@@ -2205,7 +2242,7 @@ describe("provisioning a placed client", () => {
     }).toMatchObject({
       operation: {
         status: "failed",
-        step: "secrets",
+        step: "core",
         error: "probe_unqualified",
       },
       inNamespace: [connect, core].toSorted(),
@@ -2367,25 +2404,7 @@ describe("provisioning a placed client", () => {
     });
   });
 
-  it("reads delivered secrets back through Cloudflare's lag, and goes on", async () => {
-    const manifest = await importRelease();
-    const { clientId, held } = await setUp(manifest);
-    // The secrets listed as before the last delivery: none of them.
-    const stale = laggingAfterSecrets(3, []);
-
-    await runClientProvision(context, held);
-
-    expect({
-      operation: await operationOf(clientId),
-      staleReads: [...stale.values()],
-    }).toMatchObject({
-      operation: { status: "done" },
-      // Each Worker's secrets read back once the lag passed.
-      staleReads: [3, 3],
-    });
-  });
-
-  it("removes the secrets a placed client's scripts are no longer given, once the ones they are given are there", async () => {
+  it("gives each script exactly its secrets in its upload, and records by name each one the upload no longer gives", async () => {
     const manifest = await importRelease();
     const { account, clientId, held } = await setUp(manifest);
     // Rotated, and not live yet: each key that rotates goes with its
@@ -2417,21 +2436,12 @@ describe("provisioning a placed client", () => {
     await expect(failing(held, unbound)).resolves.toMatchObject({
       code: "probe_unqualified",
     });
-    const writes = cloudflare.calls
+    // No call writes a secret on its own: each goes with its script.
+    const secretWrites = cloudflare.calls
       .slice(before)
       .filter(
         ({ method, path }) => path.includes("/secrets") && method !== "GET"
       );
-    // Each script's secrets: every one given put before any is removed.
-    const putsThenDeletes = (script: string): boolean => {
-      const methods = writes
-        .filter(({ path }) => path.includes(`/scripts/${script}/`))
-        .map(({ method }) => method);
-      return (
-        methods.includes("DELETE") &&
-        methods.lastIndexOf("PUT") < methods.indexOf("DELETE")
-      );
-    };
 
     expect({
       rotating: {
@@ -2439,7 +2449,7 @@ describe("provisioning a placed client", () => {
         connect: previousKeys(rotating.connect),
       },
       after: { core: namesOn(core), connect: namesOn(connect) },
-      putsThenDeletes: [putsThenDeletes(core), putsThenDeletes(connect)],
+      secretWrites: secretWrites.length,
     }).toStrictEqual({
       rotating: {
         core: ["ROUTER_SECRET_PREVIOUS"],
@@ -2456,7 +2466,7 @@ describe("provisioning a placed client", () => {
           "TOKEN_ENCRYPTION_KEY_PREVIOUS",
         ].toSorted((a, b) => a.localeCompare(b)),
       },
-      putsThenDeletes: [true, true],
+      secretWrites: 0,
     });
 
     // The step names what it removed, never a value.
@@ -2466,7 +2476,7 @@ describe("provisioning a placed client", () => {
       .where(
         and(
           eq(auditEvents.clientId, clientId),
-          eq(auditEvents.action, "provision.secrets")
+          inArray(auditEvents.action, ["provision.connect", "provision.core"])
         )
       );
     const removed = steps
@@ -2505,59 +2515,7 @@ describe("provisioning a placed client", () => {
     );
   });
 
-  it("keeps every secret it gives when a removal fails partway, and a retry finishes the removal", async () => {
-    const manifest = await importRelease();
-    const { account, clientId, held } = await setUp(manifest);
-    await expect(failing(held, unbound)).resolves.toMatchObject({
-      code: "probe_unqualified",
-    });
-    const { core } = await scriptsOf(clientId);
-    const onCore = (): Map<string, string> =>
-      account.namespaces.get(namespace)?.get(core)?.versions.at(-1)?.secrets ??
-      new Map<string, string>();
-    const given = [...onCore().keys()];
-    onCore().set("STRAY_ONE", "one");
-    onCore().set("STRAY_TWO", "two");
-    // Removing the second keeps failing, as an API error would, its
-    // retries too, until the run gives up.
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const request = new Request(input, init);
-      if (
-        request.method === "DELETE" &&
-        request.url.endsWith("/secrets/STRAY_TWO")
-      ) {
-        return Response.json(
-          {
-            success: false,
-            errors: [{ code: 10_013, message: "An unknown error" }],
-            messages: [],
-            result: null,
-          },
-          { status: 500 }
-        );
-      }
-      return await cloudflare.fetch(input, init);
-    });
-
-    await expect(failing(held)).resolves.toBeDefined();
-    const afterFailure = new Set(onCore().keys());
-    vi.mocked(globalThis.fetch).mockImplementation(cloudflare.fetch);
-    await expect(failing(held, unbound)).resolves.toMatchObject({
-      code: "probe_unqualified",
-    });
-
-    expect({
-      keptGiven: given.every((name) => afterFailure.has(name)),
-      strayLeftAfterFailure: afterFailure.has("STRAY_TWO"),
-      afterRetry: [...onCore().keys()].toSorted((a, b) => a.localeCompare(b)),
-    }).toStrictEqual({
-      keptGiven: true,
-      strayLeftAfterFailure: true,
-      afterRetry: given.toSorted((a, b) => a.localeCompare(b)),
-    });
-  });
-
-  it("removes a secret it doesn't give from a script it already delivered to, while a rotation keeps connect's previous vault key", async () => {
+  it("uploads a script again that holds a secret it doesn't give, while a rotation keeps connect's previous vault key", async () => {
     const manifest = await importRelease();
     const { account, clientId, held } = await setUp(manifest);
     // Rotating: connect is given TOKEN_ENCRYPTION_KEY_PREVIOUS, the key
@@ -2574,7 +2532,7 @@ describe("provisioning a placed client", () => {
       account.namespaces.get(namespace)?.get(script)?.versions.at(-1)
         ?.secrets ?? new Map<string, string>();
 
-    // Delivered already, and recorded so: one secret more on connect.
+    // Uploaded already, and recorded so: one secret more on connect.
     secretsOn(connect).set("STRAY_KEY", "stray-value");
     await expect(failing(held, unbound)).resolves.toMatchObject({
       code: "probe_unqualified",
@@ -2583,79 +2541,167 @@ describe("provisioning a placed client", () => {
     expect(secretsOn(connect).has("STRAY_KEY")).toBeFalsy();
   });
 
-  it("records each secret it removes as it removes it, so a run that fails after one keeps its name", async () => {
+  it("records no secret as removed while the upload that would drop it hasn't landed, and both once it has", async () => {
     const manifest = await importRelease();
     const { account, clientId, held } = await setUp(manifest);
     await expect(failing(held, unbound)).resolves.toMatchObject({
       code: "probe_unqualified",
     });
     const { core } = await scriptsOf(clientId);
-    const strayed = account.namespaces
-      .get(namespace)
-      ?.get(core)
-      ?.versions.at(-1)?.secrets;
-    strayed?.set("STRAY_A", "a-value");
-    strayed?.set("STRAY_B", "b-value");
-    // The second removal is refused: the run stops there.
-    let deletes = 0;
+    const onCore = (): Map<string, string> =>
+      account.namespaces.get(namespace)?.get(core)?.versions.at(-1)?.secrets ??
+      new Map<string, string>();
+    onCore().set("STRAY_A", "a-value");
+    onCore().set("STRAY_B", "b-value");
+    const revokedNames = async () => await revokedNamesOf(clientId);
+
+    // Core's upload is refused: its script keeps what it held.
+    cloudflare.failNext(isUpload(core), 400);
+    await expect(failing(held)).resolves.toBeDefined();
+    const whileRefused = {
+      recorded: await revokedNames(),
+      strays: ["STRAY_A", "STRAY_B"].filter((name) => onCore().has(name)),
+    };
+    await expect(failing(held, unbound)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+
+    expect({
+      whileRefused,
+      recorded: await revokedNames(),
+      strays: ["STRAY_A", "STRAY_B"].filter((name) => onCore().has(name)),
+    }).toStrictEqual({
+      whileRefused: { recorded: [], strays: ["STRAY_A", "STRAY_B"] },
+      recorded: ["STRAY_A", "STRAY_B"],
+      strays: [],
+    });
+  });
+
+  it("records the secrets an upload dropped when its run dies after it landed, on the next run", async () => {
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
+    await expect(failing(held, unbound)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+    const { core } = await scriptsOf(clientId);
+    const onCore = (): Map<string, string> =>
+      account.namespaces.get(namespace)?.get(core)?.versions.at(-1)?.secrets ??
+      new Map<string, string>();
+    onCore().set("STRAY_KEY", "stray-value");
+
+    // Core's upload lands, without the stray; its run dies reading it back.
+    let reads = 0;
+    cloudflare.failNext((call) => {
+      if (call.method === "GET" && call.path.endsWith(`/scripts/${core}`)) {
+        reads += 1;
+      }
+      return reads === 2;
+    }, 400);
+    await expect(failing(held)).resolves.toBeDefined();
+    const afterDeath = {
+      onCore: onCore().has("STRAY_KEY"),
+      recorded: await revokedNamesOf(clientId),
+    };
+    await expect(failing(held, unbound)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+
+    expect({
+      afterDeath,
+      recorded: await revokedNamesOf(clientId),
+    }).toStrictEqual({
+      afterDeath: { onCore: false, recorded: [] },
+      recorded: ["STRAY_KEY"],
+    });
+  });
+
+  it("records a shared secret an upload dropped when its run died after it landed, though it is given again by the next run", async () => {
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
+    await expect(failing(held, unbound)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+    const { connect } = await scriptsOf(clientId);
+    const onConnect = (): Map<string, string> =>
+      account.namespaces.get(namespace)?.get(connect)?.versions.at(-1)
+        ?.secrets ?? new Map<string, string>();
+    const { COMPOSIO_API_KEY: _dropped, ...rest } =
+      secrets.shared.connect ?? {};
+
+    // Composio's key is no longer given: connect's upload lands without
+    // it, and its run dies reading it back.
+    let reads = 0;
+    cloudflare.failNext((call) => {
+      if (call.method === "GET" && call.path.endsWith(`/scripts/${connect}`)) {
+        reads += 1;
+      }
+      return reads === 2;
+    }, 400);
+    await expect(
+      failing(held, {
+        ...unbound,
+        secrets: { ...secrets, shared: { connect: rest } },
+      })
+    ).resolves.toBeDefined();
+    const afterDeath = {
+      onConnect: onConnect().has("COMPOSIO_API_KEY"),
+      recorded: await revokedNamesOf(clientId),
+    };
+    // Given again before the retry: its upload gives the key back.
+    await expect(failing(held, unbound)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+
+    expect({
+      afterDeath,
+      onConnect: onConnect().has("COMPOSIO_API_KEY"),
+      recorded: await revokedNamesOf(clientId),
+    }).toStrictEqual({
+      afterDeath: { onConnect: false, recorded: [] },
+      onConnect: true,
+      recorded: ["COMPOSIO_API_KEY"],
+    });
+  });
+
+  it("keeps what Cloudflare's answer to a refused upload says out of its error, as it may quote the upload's secrets", async () => {
+    const manifest = await importRelease();
+    const { clientId, held } = await setUp(manifest);
+    const quoted = "the-value-it-was-sent";
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input, init);
-      if (
-        request.method === "DELETE" &&
-        new URL(request.url).pathname.includes("/secrets/")
-      ) {
-        deletes += 1;
-        if (deletes === 2) {
-          return Response.json(
-            {
-              success: false,
-              errors: [{ code: 10_000, message: "Refused" }],
-              messages: [],
-              result: null,
-            },
-            { status: 400 }
-          );
-        }
+      if (request.method === "PUT" && request.url.endsWith("-core")) {
+        return Response.json(
+          {
+            success: false,
+            errors: [{ code: 10_021, message: `binding text ${quoted}` }],
+            messages: [],
+            result: null,
+          },
+          { status: 400 }
+        );
       }
       return await cloudflare.fetch(input, init);
     });
 
     const error = await failing(held);
-    const recorded = await db
-      .select({ detail: auditEvents.detail })
-      .from(auditEvents)
-      .where(
-        and(
-          eq(auditEvents.clientId, clientId),
-          eq(auditEvents.action, "provision.secret_revoked")
-        )
-      );
-    const names = recorded.map(
-      ({ detail }) =>
-        z
-          .object({ script: z.string(), name: z.string() })
-          .loose()
-          .parse(JSON.parse(detail ?? "{}")).name
-    );
-    const now = account.namespaces
-      .get(namespace)
-      ?.get(core)
-      ?.versions.at(-1)?.secrets;
-    const strays = ["STRAY_A", "STRAY_B"].filter(
-      (name) => now?.has(name) === true
-    );
+    const operation = await operationOf(clientId);
+    const recorded = JSON.stringify([
+      await db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.clientId, clientId)),
+      operation,
+    ]);
 
     expect({
-      failed: error !== null,
-      // One removed before the refusal, and recorded; the other still there.
-      recorded: names,
-      left: strays,
+      code: operation?.error,
+      inError: error instanceof Error && error.message.includes(quoted),
+      inRecords: recorded.includes(quoted),
     }).toStrictEqual({
-      failed: true,
-      recorded: ["STRAY_A", "STRAY_B"].filter((name) => !strays.includes(name)),
-      left: [strays[0]],
+      code: "cloudflare_400_10021",
+      inError: false,
+      inRecords: false,
     });
-    expect(strays).toHaveLength(1);
   });
 
   it("marks a rotated client's generation live once its hostname is published, and audits it", async () => {
@@ -3815,19 +3861,6 @@ const crashPoints: CrashPoint[] = [
       cloudflare.failNext(isUpload(core), 400);
     },
     bothRanB: false,
-    connectRanB: true,
-  },
-  {
-    at: "after core's upload",
-    started: true,
-    claimed: true,
-    plan: () => {
-      cloudflare.failNext(
-        (call) => call.method === "PUT" && call.path.endsWith("/secrets"),
-        400
-      );
-    },
-    bothRanB: true,
     connectRanB: true,
   },
   {

@@ -71,7 +71,9 @@ export class CloudflareApiError extends Error {
     status: number,
     errors: readonly ApiMessage[]
   ) {
-    const reasons = errors.map(({ code, message }) => `${code} ${message}`);
+    const reasons = errors.map(({ code, message }) =>
+      message === "" ? String(code) : `${code} ${message}`
+    );
     super(
       `Cloudflare API ${method} ${path} failed (${status === 0 ? "no response" : status})${reasons.length > 0 ? `: ${reasons.join("; ")}` : ""}`
     );
@@ -124,6 +126,13 @@ export interface ApiCall {
    * 429 or a lost answer (src/runners.ts).
    */
   beforeSend?: () => Promise<void>;
+  /**
+   * Whether what it sends carries secrets (a script upload's secret
+   * bindings): its error then keeps Cloudflare's codes alone, never its
+   * messages, which may quote what was sent, as an error's message can
+   * reach a log line or a workflow's record of a failed step.
+   */
+  carriesSecrets?: boolean;
 }
 
 /** A result, with the page of a list it is. */
@@ -311,7 +320,10 @@ export const cloudflareApi = ({
         call.method,
         call.path,
         status,
-        envelope?.errors ?? []
+        (envelope?.errors ?? []).map(({ code, message }) => ({
+          code,
+          message: call.carriesSecrets === true ? "" : message,
+        }))
       );
     }
     await pause(call, wait);

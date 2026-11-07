@@ -18,7 +18,8 @@
  * keys that support rotation also get the previous generation's value: core accepts the
  * previous router secret while every router isolate moves to the new one,
  * connect checks capabilities signed with the previous key, and its cron
- * seals tokens again under the new vault key. Rotating also changes
+ * seals tokens again under the new vault key. Connect's previous vault
+ * key stays after the window (`keptAfterWindow`). Rotating also changes
  * `BETTER_AUTH_SECRET`, which has no previous value: everyone is signed
  * out and signs in again.
  */
@@ -61,6 +62,11 @@ interface DerivedSecret {
   encoding: SecretEncoding;
   /** Where the previous generation's value goes, for a key its Worker rotates. */
   previous?: string;
+  /**
+   * Whether the previous value stays once the rotation's window closes,
+   * for as long as the client has rotated at all.
+   */
+  keptAfterWindow?: boolean;
 }
 
 /** Core's router secret (core's src/router-secret.ts): 64 hex characters. */
@@ -92,25 +98,21 @@ const capabilityKey = (previous?: string): DerivedSecret => ({
   ...(previous === undefined ? {} : { previous }),
 });
 
-/** Connect's vault key (connect's src/vault.ts): 32 bytes, base64. */
+/**
+ * Connect's vault key (connect's src/vault.ts): 32 bytes, base64. Its
+ * previous value stays after the rotation's window: tokens, flows and
+ * owed revokes may still be sealed under it if connect's cron's reseal
+ * fell behind, and dropping it would leave them unreadable for good. It
+ * goes once connect can confirm nothing is sealed under it.
+ */
 const tokenEncryptionKey: DerivedSecret = {
   name: "TOKEN_ENCRYPTION_KEY",
   purpose: "token-encryption",
   master: "clientKey",
   encoding: "base64",
   previous: "TOKEN_ENCRYPTION_KEY_PREVIOUS",
+  keptAfterWindow: true,
 };
-
-/**
- * Previous keys a placed client's delivery never removes once their window
- * closes (src/hosting/operation.ts, `revokeRetired`): connect's vault
- * key, which tokens, flows and owed revokes may still be sealed under if
- * its cron's reseal fell behind; removing it would leave them unreadable
- * for good. It goes once connect can confirm nothing is sealed under it.
- */
-export const retainedPreviousKeys: ReadonlySet<string> = new Set([
-  "TOKEN_ENCRYPTION_KEY_PREVIOUS",
-]);
 
 /** Each app's derived secrets. */
 const derivedSecrets: Readonly<Record<string, readonly DerivedSecret[]>> = {
@@ -187,8 +189,9 @@ export interface ClientGeneration {
 /**
  * The secrets derived for `client` that the Worker `app` runs with: each
  * at the client's generation, and at the previous one where the Worker
- * takes it, until `rotationWindowMs` after the generation went live. Only
- * the client's own: never a master key, never a shared secret.
+ * takes it, until `rotationWindowMs` after the generation went live, or
+ * for good where it's kept after the window. Only the client's own: never
+ * a master key, never a shared secret.
  */
 export const derivedWorkerSecrets = async (
   app: string,
@@ -212,7 +215,8 @@ export const derivedWorkerSecrets = async (
   for (const secret of derivedSecrets[app] ?? []) {
     // oxlint-disable-next-line no-await-in-loop -- a few per Worker
     values.set(secret.name, await derive(secret, client.generation));
-    if (secret.previous !== undefined && rotating) {
+    const kept = secret.keptAfterWindow === true && client.generation > 1;
+    if (secret.previous !== undefined && (rotating || kept)) {
       // oxlint-disable-next-line no-await-in-loop -- a few per Worker
       values.set(secret.previous, await derive(secret, client.generation - 1));
     }

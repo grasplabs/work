@@ -8,27 +8,26 @@
  *    made, and its resources are allocated in its inventory.
  * 2. `resources`: its databases and buckets exist, each id recorded
  *    (`ensureClientResources`).
- * 4. `migrations`: the release's D1 migrations, applied to the inventory's
+ * 3. `migrations`: the release's D1 migrations, applied to the inventory's
  *    databases, by their observed ids.
- * 3. and 6. `connect`, then `core`: each Worker rendered onto the client's
+ * 4. and 5. `connect`, then `core`: each Worker rendered onto the client's
  *    inventory (`renderClientWorker`) and uploaded as its stable script,
- *    with its Durable Object migrations, then observed.
- * 5. `secrets`: the client's derived secrets and the shared ones its
- *    Workers need, delivered by name to each script, then observed.
- * 7. `probe`: core answers its health check as the version live, with the
+ *    with its Durable Object migrations and its secrets (the client's
+ *    derived and sealed ones, and the shared ones it needs), then
+ *    observed.
+ * 6. `probe`: core answers its health check as the version live, with the
  *    router secret the router will send (`smokeAnswering`), then the
  *    admin's signed probe (src/hosting/probe.ts): it runs as this
  *    client, each private binding the release gives core and connect
  *    answers, and its clock and connect's are armed.
- * 8. `route`: the client's hostname in the router's map.
- * 9. `done`: the operation recorded complete, the client active and the
+ * 7. `route`: the client's hostname in the router's map.
+ * 8. `done`: the operation recorded complete, the client active and the
  *    runner's claim released, in one batch.
  *
- * Steps 3 and 6 are one upload per Worker: a script is created by its
- * first upload, which carries its modules and Durable Object migrations,
- * and it goes live at once. Secrets come after (step 5), so an upload
- * keeps the secrets its script has, and any upload makes the next run
- * deliver them again. The client stays unreachable until step 8.
+ * Steps 4 and 5 are one upload per Worker: a script is created by its
+ * first upload, which carries its modules, Durable Object migrations and
+ * secrets, and it goes live at once, one version with all of them. The
+ * client stays unreachable until step 7.
  *
  * Every step can run again: a retry, by the same runner or one that took
  * the client over, runs the operation from its first step, and each step
@@ -37,10 +36,10 @@
  * domain's zone is found by its name, and sending turned on only where
  * it's off; an upload whose
  * fingerprint (everything that went into it) is recorded, and whose
- * script is observed at the release's migration tag, isn't made again;
- * secrets whose fingerprint is recorded aren't delivered again. Nothing
- * here deletes: an automatic retry never removes a resource, script or
- * secret.
+ * script is observed at the release's migration tag and holding exactly
+ * its secrets by name, isn't made again. Nothing here deletes: an
+ * automatic retry never removes a resource or script, and a secret goes
+ * only by an upload that no longer gives it.
  *
  * Every write to the admin's records is conditional on the runner still
  * holding the client (`stillHolds`), and it checks it holds the client
@@ -94,14 +93,16 @@ import { findD1Database } from "../cloudflare/accounts.ts";
 import { CloudflareApiError } from "../cloudflare/api.ts";
 import type { CloudflareApi } from "../cloudflare/api.ts";
 import {
-  deleteTargetSecret,
-  putTargetSecret,
   targetMigrationState,
   targetSecretNames,
   uploadTargetAssets,
   uploadTargetScript,
 } from "../cloudflare/workers.ts";
-import type { ScriptTarget } from "../cloudflare/workers.ts";
+import type {
+  ScriptTarget,
+  Secret,
+  WorkerUpload,
+} from "../cloudflare/workers.ts";
 import { actIfChanged } from "../db/act.ts";
 import type { Actor, AdminDatabase } from "../db/act.ts";
 import { clientProvisions, clients, clientWorkers } from "../db/schema.ts";
@@ -116,7 +117,6 @@ import type { RouterHosts, SmokeOptions } from "../deploy/router.ts";
 import { sealedWorkerSecrets } from "../deploy/sealed-secrets.ts";
 import {
   clientAuthSecret,
-  retainedPreviousKeys,
   sharedSecretPrints,
   workerSecrets,
 } from "../deploy/secrets.ts";
@@ -177,10 +177,6 @@ export const provisionOperationErrorCodes = [
   "wfp_schedule_unqualified",
   /** A script isn't at the release's Durable Object migration after its upload. */
   "upload_unobserved",
-  /** A script lacks a secret after it was delivered. */
-  "secrets_unobserved",
-  /** A script still has a secret it's no longer given after it was removed. */
-  "secret_unrevoked",
   /** No qualified way to probe core in this destination (Workers for Platforms, until GRA-430). */
   "probe_unqualified",
   /** Core didn't answer the admin's signed probe, as a core from before it doesn't. */
@@ -255,7 +251,6 @@ export const provisionSteps = [
   "migrations",
   "connect",
   "core",
-  "secrets",
   "probe",
   "route",
 ] as const;
@@ -319,7 +314,7 @@ export interface ProvisionContext {
 /**
  * Tries of reading back what a step just wrote. Cloudflare's API can
  * answer from before a write for a moment after it (read-after-write lag),
- * so a script just uploaded, or a secret just put, can read as missing.
+ * so a script just uploaded can read as missing.
  */
 const observeAttempts = 6;
 /** The first wait between tries, doubling after: about 31 s in all. */
@@ -354,19 +349,25 @@ const observed = async <T>(
 const progressSchema = z.object({
   /** Each Worker's last upload: the fingerprint of everything in it. */
   uploads: z.record(z.string(), z.string()).default({}),
-  /** Each Worker's delivered secrets: their fingerprint, names and values. */
-  secrets: z.record(z.string(), z.string()).default({}),
   /**
-   * Each Worker's shared secrets as last delivered, each by name with its
+   * Each Worker's shared secrets as last uploaded, each by name with its
    * own keyed fingerprint (`sharedSecretPrints`): what proves a rotated
    * shared secret reached the client (src/rollout/shared-secrets.ts).
    */
   shared: z.record(z.string(), z.record(z.string(), z.string())).default({}),
   /**
+   * Each Worker's secrets its next upload no longer gives, by name: noted
+   * before the upload is sent, recorded as revoked (`recordRevoked`) and
+   * cleared once an upload is observed. A run that dies between, the
+   * upload landed, leaves them here for the next run's, which reads the
+   * script without them.
+   */
+  revoking: z.record(z.string(), z.array(z.string())).default({}),
+  /**
    * Each Worker in a namespace whose version this run is about to change
-   * (an upload, a secret), by app: the version recorded live before it,
-   * which the probe never records again (`connectAnswering`): an isolate
-   * of it still answering hasn't the secrets just delivered. Cleared when
+   * with an upload, by app: the version recorded live before it, which the
+   * probe never records again (`freshConnectVersion`): an isolate of it
+   * still answering runs the release and secrets it replaced. Cleared when
    * the probe records a version.
    */
   superseded: z.record(z.string(), z.string()).default({}),
@@ -405,8 +406,8 @@ const appSchema = z.enum(apps);
  * metadata and a service binding, which renders to the connect gateway (a
  * user Worker can't bind another, 10143; `renderOptionsOf`). A
  * `send_email` binding uploads, but whether it delivers is GRA-965's
- * spike, still open: it's left out there (`withoutMail`). The vars and secrets the admin adds go in the
- * upload's own metadata and secrets calls.
+ * spike, still open: it's left out there (`withoutMail`). The vars and
+ * secrets the admin adds go in the upload's own metadata.
  */
 const wfpBindings: ReadonlySet<string> = new Set([
   "d1",
@@ -1076,8 +1077,8 @@ const recordedVersionOf = async (
 /**
  * Notes on `progress` the version recorded live for `app` in a namespace
  * as this run reaches its upload step (`recordedBefore`), and records it:
- * the step clears the record whether or not it uploads, so a write after
- * it (a secret) still finds what it supersedes.
+ * the step clears the record whether or not it uploads, so a later run's
+ * upload still finds what it supersedes.
  */
 const noteRecordedBefore = async (
   db: AdminDatabase,
@@ -1716,10 +1717,212 @@ const migrate = async (
 const uploadFingerprintPurpose = "grasp-os console placed upload fingerprint";
 
 /**
- * Steps 3 and 6 for Worker `app`: rendered onto the client's inventory and
- * uploaded as its script, unless the upload recorded with the same
- * fingerprint is observed already; then observed at the release's last
- * Durable Object migration, and recorded as what the client runs.
+ * Records each secret of `removed` as removed from `target`'s script,
+ * gone with the upload that no longer gives it, by name only, while
+ * `held` holds the client (`provision.secret_revoked`).
+ */
+const recordRevoked = async (
+  db: AdminDatabase,
+  { operation, held }: Loaded,
+  target: ScriptTarget,
+  removed: readonly string[]
+): Promise<void> => {
+  for (const name of removed) {
+    // oxlint-disable-next-line no-await-in-loop -- a few at most
+    const recorded = await actIfChanged(
+      db,
+      "system",
+      db
+        .update(clientProvisions)
+        .set({ updatedAt: new Date() })
+        .where(and(eq(clientProvisions.id, operation.id), stillHolds(held))),
+      {
+        action: "provision.secret_revoked",
+        clientId: held.clientId,
+        target: operation.releaseId,
+        detail: {
+          operation: operation.id,
+          run: held.runId,
+          script: target.scriptName,
+          name,
+        },
+      }
+    );
+    if (!recorded) {
+      // oxlint-disable-next-line no-await-in-loop -- stops at the first
+      await assertHolds(db, held);
+    }
+  }
+};
+
+/**
+ * A fingerprint of everything Worker `worker`'s upload to `target` carries:
+ * its code, static files, settings, bindings as rendered for the client,
+ * vars, and its secrets' names and values (through their own keyed
+ * fingerprint). HMAC-SHA256 under a key HKDF derives from `clientKey`
+ * for this purpose alone, so the recorded fingerprint tells nothing about
+ * the secret values that went into it.
+ */
+const uploadFingerprint = async (
+  clientKey: string,
+  {
+    target,
+    manifest,
+    worker,
+    bindings,
+    vars,
+    secrets,
+  }: {
+    target: ScriptTarget;
+    manifest: ReleaseManifest;
+    worker: WorkerEntry;
+    bindings: readonly Record<string, unknown>[];
+    vars: Readonly<Record<string, unknown>>;
+    secrets: readonly Secret[];
+  }
+): Promise<string> =>
+  await keyedHash(
+    await hkdfHmacKey(clientKey, uploadFingerprintPurpose, ["sign"]),
+    {
+      target,
+      releaseId: manifest.releaseId,
+      compatibilityDate: manifest.compatibilityDate,
+      compatibilityFlags: worker.compatibilityFlags,
+      mainModule: worker.mainModule,
+      modules: worker.modules.map(({ name, type, sha256 }) => [
+        name,
+        type,
+        sha256,
+      ]),
+      assets: worker.assets ?? null,
+      observability: worker.observability,
+      durableObjectMigrations: worker.durableObjectMigrations,
+      bindings,
+      vars,
+      secrets: await secretsFingerprint(clientKey, secrets),
+    }
+  );
+
+/**
+ * Whether `present`, the names of a script's secrets, are exactly
+ * `given`: every one given there, and nothing else. By name both ways,
+ * never by count alone.
+ */
+const holdsExactly = (
+  given: ReadonlySet<string>,
+  present: ReadonlySet<string>
+): boolean =>
+  given.size === present.size && [...given].every((name) => present.has(name));
+
+/**
+ * Records `revoked`, the secrets an observed upload of Worker `app`
+ * dropped (`recordRevoked`), and clears them from `progress`'s
+ * `revoking`, which the caller records.
+ */
+const recordDropped = async (
+  db: AdminDatabase,
+  loaded: Loaded,
+  progress: Progress,
+  {
+    app,
+    target,
+    revoked,
+  }: { app: App; target: ScriptTarget; revoked: readonly string[] }
+): Promise<void> => {
+  await recordRevoked(db, loaded, target, revoked);
+  const { [app]: _recorded, ...revoking } = progress.revoking;
+  progress.revoking = revoking;
+};
+
+/**
+ * Sends Worker `app`'s `upload` to `target` and observes it: its static
+ * files first, then, with the secrets it drops (`revoked`) noted in
+ * `progress` (`revoking`), the script itself, marked (`sendHolding`) and
+ * counted as run (`uploadCountedAsRun`); then read back at its release's
+ * last Durable Object migration, which it returns (null for none).
+ */
+const sendUpload = async (
+  context: ProvisionContext,
+  loaded: Loaded,
+  progress: Progress,
+  {
+    app,
+    worker,
+    target,
+    upload,
+    revoked,
+  }: {
+    app: App;
+    worker: WorkerEntry;
+    target: ScriptTarget;
+    upload: WorkerUpload;
+    revoked: readonly string[];
+  }
+): Promise<string | null> => {
+  const { api, db, store } = context;
+  const lastTag = worker.durableObjectMigrations.at(-1)?.tag;
+  // Its static files first, with a deadline of their own: they're named
+  // by their content and change nothing a script runs until its upload
+  // names them, so they need no mark (`sendHolding`) and don't spend the
+  // upload's. Each request checks this attempt still holds the client.
+  const assets = workerAssets(store, worker);
+  const assetsJwt =
+    assets === undefined
+      ? undefined
+      : await uploadTargetAssets(api, target, assets, {
+          signal: AbortSignal.timeout(
+            context.sendTimeoutMs ?? defaultSendTimeoutMs
+          ),
+          beforeSend: async () => {
+            await assertHolds(db, loaded.held);
+          },
+        });
+  await noteSuperseded(db, loaded, progress, app);
+  if (revoked.length > 0) {
+    progress.revoking = { ...progress.revoking, [app]: [...revoked] };
+    await recordProgress(db, loaded, progress);
+  }
+  await uploadCountedAsRun(
+    db,
+    loaded,
+    progress,
+    { app, history: worker.durableObjectMigrations },
+    async (sent) => {
+      await sendHolding(context, loaded, async (signal) => {
+        await uploadTargetScript(
+          api,
+          target,
+          { ...upload, ...(assetsJwt === undefined ? {} : { assetsJwt }) },
+          { signal, sent }
+        );
+      });
+    }
+  );
+  const after = await observed(
+    context,
+    async () => await targetMigrationState(api, target),
+    (state) => state.exists && state.migrationTag === lastTag
+  );
+  if (!after.exists || after.migrationTag !== lastTag) {
+    throw new ProvisionOperationError(
+      "upload_unobserved",
+      `${target.scriptName} isn't at migration ${lastTag ?? "none"} after its upload`
+    );
+  }
+  return after.migrationTag ?? null;
+};
+
+/**
+ * Steps 4 and 5 for Worker `app`: rendered onto the client's inventory and
+ * uploaded as its script with its secrets, unless the upload recorded with
+ * the same fingerprint is observed already, its script holding exactly
+ * those secrets by name (one can be deleted, or another set, by hand
+ * since); then observed at the release's last Durable Object migration,
+ * and recorded as what the client runs. A secret the script held that the
+ * upload no longer gives (a previous generation's key past its window, a
+ * sealed or shared secret no longer given, one set by hand) is gone with
+ * it, and recorded by name (`recordRevoked`). Only the secrets' keyed
+ * fingerprint is recorded.
  */
 const upload = async (
   context: ProvisionContext,
@@ -1748,28 +1951,16 @@ const upload = async (
     app,
     app === "core" ? coreVarsOf(context, loaded) : {}
   );
-  const fingerprint = await keyedHash(
-    await hkdfHmacKey(context.secrets.clientKey, uploadFingerprintPurpose, [
-      "sign",
-    ]),
-    {
-      target,
-      releaseId: manifest.releaseId,
-      compatibilityDate: manifest.compatibilityDate,
-      compatibilityFlags: worker.compatibilityFlags,
-      mainModule: worker.mainModule,
-      modules: worker.modules.map(({ name, type, sha256 }) => [
-        name,
-        type,
-        sha256,
-      ]),
-      assets: worker.assets ?? null,
-      observability: worker.observability,
-      durableObjectMigrations: worker.durableObjectMigrations,
-      bindings: rendered.bindings,
-      vars,
-    }
-  );
+  const secrets = await secretsOf(context, loaded, app);
+  const given = new Set(secrets.map(({ name }) => name));
+  const fingerprint = await uploadFingerprint(context.secrets.clientKey, {
+    target,
+    manifest,
+    worker,
+    bindings: rendered.bindings,
+    vars,
+    secrets,
+  });
   const lastTag = worker.durableObjectMigrations.at(-1)?.tag;
   // Another attempt's upload of this Worker may still be on its way: what
   // the script runs, and so the migrations this one sends, is read once it
@@ -1777,10 +1968,26 @@ const upload = async (
   await othersSettled(context, loaded);
   const progress = await progressNow(db, loaded.operation.id);
   const before = await targetMigrationState(api, target);
+  const present = new Set(
+    before.exists ? await targetSecretNames(api, target) : []
+  );
   const done =
     progress.uploads[app] === fingerprint &&
     before.exists &&
-    before.migrationTag === lastTag;
+    before.migrationTag === lastTag &&
+    holdsExactly(given, present);
+  // What an earlier run's upload dropped but didn't record (`revoking`)
+  // and the script no longer holds: gone already, whether given again
+  // since or not, so recorded before this upload can give it back.
+  const gone = (progress.revoking[app] ?? []).filter(
+    (name) => !present.has(name)
+  );
+  if (gone.length > 0) {
+    await recordDropped(db, loaded, progress, { app, target, revoked: gone });
+    await recordProgress(db, loaded, progress);
+  }
+  // What it holds that it's no longer given: what this upload drops.
+  const revoked = [...present].filter((name) => !given.has(name));
   if (before.exists) {
     // What it was observed at, whatever this upload does next.
     await recordMigrated(
@@ -1803,67 +2010,31 @@ const upload = async (
       manifest,
       worker,
       rendered.bindings,
-      vars
+      vars,
+      secrets
     );
-    // Its static files first, with a deadline of their own: they're named
-    // by their content and change nothing a script runs until its upload
-    // names them, so they need no mark (`sendHolding`) and don't spend the
-    // upload's. Each request checks this attempt still holds the client.
-    const assets = workerAssets(store, worker);
-    const assetsJwt =
-      assets === undefined
-        ? undefined
-        : await uploadTargetAssets(api, target, assets, {
-            signal: AbortSignal.timeout(
-              context.sendTimeoutMs ?? defaultSendTimeoutMs
-            ),
-            beforeSend: async () => {
-              await assertHolds(db, held);
-            },
-          });
-    await noteSuperseded(db, loaded, progress, app);
-    // Delivered secrets go with the next delivery, whatever this upload
-    // keeps.
-    const { [app]: _delivered, ...secrets } = progress.secrets;
-    progress.secrets = secrets;
-    await uploadCountedAsRun(
-      db,
-      loaded,
-      progress,
-      { app, history: worker.durableObjectMigrations },
-      async (sent) => {
-        await sendHolding(context, loaded, async (signal) => {
-          await uploadTargetScript(
-            api,
-            target,
-            {
-              ...prepared,
-              metadata: {
-                ...prepared.metadata,
-                ...(migrations === undefined ? {} : { migrations }),
-              },
-              ...(assetsJwt === undefined ? {} : { assetsJwt }),
-            },
-            { signal, sent }
-          );
-        });
-      }
-    );
-    const after = await observed(
-      context,
-      async () => await targetMigrationState(api, target),
-      (state) => state.exists && state.migrationTag === lastTag
-    );
-    if (!after.exists || after.migrationTag !== lastTag) {
-      throw new ProvisionOperationError(
-        "upload_unobserved",
-        `${target.scriptName} isn't at migration ${lastTag ?? "none"} after its upload`
-      );
-    }
+    const migrated = await sendUpload(context, loaded, progress, {
+      app,
+      worker,
+      target,
+      upload: {
+        ...prepared,
+        metadata: {
+          ...prepared.metadata,
+          ...(migrations === undefined ? {} : { migrations }),
+        },
+      },
+      revoked,
+    });
+    await recordDropped(db, loaded, progress, { app, target, revoked });
     await recordProgress(db, loaded, {
       ...progress,
       uploads: { ...progress.uploads, [app]: fingerprint },
-      migrated: { ...progress.migrated, [app]: after.migrationTag ?? null },
+      migrated: { ...progress.migrated, [app]: migrated },
+      shared: {
+        ...progress.shared,
+        [app]: await sharedSecretPrints(context.secrets, app),
+      },
     });
   }
   if (app === "core") {
@@ -1904,172 +2075,13 @@ const upload = async (
   if (!recorded) {
     await assertHolds(db, held);
   }
-  await recordStep(db, loaded, app, { uploaded: done ? 0 : 1 });
-};
-
-/**
- * Records that secret `name` was removed from `target`'s script, by name
- * only, while `held` holds the client (`provision.secret_revoked`).
- */
-const recordRevoked = async (
-  db: AdminDatabase,
-  { operation, held }: Loaded,
-  target: ScriptTarget,
-  name: string
-): Promise<void> => {
-  const recorded = await actIfChanged(
-    db,
-    "system",
-    db
-      .update(clientProvisions)
-      .set({ updatedAt: new Date() })
-      .where(and(eq(clientProvisions.id, operation.id), stillHolds(held))),
-    {
-      action: "provision.secret_revoked",
-      clientId: held.clientId,
-      target: operation.releaseId,
-      detail: {
-        operation: operation.id,
-        run: held.runId,
-        script: target.scriptName,
-        name,
-      },
-    }
-  );
-  if (!recorded) {
-    await assertHolds(db, held);
-  }
-};
-
-/**
- * Removes from `target`'s script every secret `present` names that isn't
- * among `given` (a previous generation's key past its window, a sealed or
- * shared secret no longer given), once `given` is observed there: the
- * replacement before the revocation. Then observes them gone; returns the
- * names it removed, for the step's record. The admin is the only writer of
- * a client script's secrets, so whatever else it holds is retired, but for
- * connect's previous vault key (`retainedPreviousKeys`).
- */
-const revokeRetired = async (
-  context: ProvisionContext,
-  loaded: Loaded,
-  target: ScriptTarget,
-  given: ReadonlySet<string>,
-  present: ReadonlySet<string>
-): Promise<string[]> => {
-  const { api, db } = context;
-  const retired = [...present].filter(
-    (name) => !given.has(name) && !retainedPreviousKeys.has(name)
-  );
-  for (const name of retired) {
-    // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-    await sendHolding(context, loaded, async (signal) => {
-      await deleteTargetSecret(api, target, name, { signal });
-    });
-    // Recorded as it goes, by name: a run that fails after it still
-    // leaves what it removed in the audit log.
-    // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-    await recordRevoked(db, loaded, target, name);
-  }
-  if (retired.length === 0) {
-    return [];
-  }
-  const after = await observed(
-    context,
-    async () => new Set(await targetSecretNames(api, target)),
-    (names) => retired.every((name) => !names.has(name))
-  );
-  const left = retired.find((name) => after.has(name));
-  if (left !== undefined) {
-    throw new ProvisionOperationError(
-      "secret_unrevoked",
-      `${target.scriptName} still has ${left} after its removal`
-    );
-  }
-  return retired;
-};
-
-/**
- * Step 5: each Worker's secrets delivered by name to its script, unless
- * the same secrets are recorded as delivered since its last upload and
- * the script holds exactly them by name; then observed by name, and any
- * other secret the script holds removed (`revokeRetired`). Only their
- * keyed fingerprint is recorded.
- */
-const deliverSecrets = async (
-  context: ProvisionContext,
-  loaded: Loaded,
-  inventory: readonly ClientResource[]
-): Promise<void> => {
-  const { api, db } = context;
-  let delivered = 0;
-  const revoked: string[] = [];
-  for (const app of appsOf(loaded.manifest)) {
-    const target = targetOf(loaded, inventory, app);
-    // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
-    const secrets = await secretsOf(context, loaded, app);
-    // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
-    const print = await secretsFingerprint(context.secrets.clientKey, secrets);
-    // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
-    const progress = await progressNow(db, loaded.operation.id);
-    const given = new Set(secrets.map(({ name }) => name));
-    if (progress.secrets[app] === print) {
-      // Delivered since the last upload, but a secret can be deleted, or
-      // another set, since: skip only when the script holds exactly them.
-      // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
-      const present = new Set(await targetSecretNames(api, target));
-      // By name both ways: every one given is there, and nothing else is
-      // but connect's previous vault key. Never by count, which another
-      // secret can make up for one given also being a retained key.
-      const exactly =
-        [...given].every((name) => present.has(name)) &&
-        [...present].every(
-          (name) => given.has(name) || retainedPreviousKeys.has(name)
-        );
-      if (exactly) {
-        continue;
-      }
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
-    await noteSuperseded(db, loaded, progress, app);
-    for (const secret of secrets) {
-      // oxlint-disable-next-line no-await-in-loop -- one secret at a time
-      await sendHolding(context, loaded, async (signal) => {
-        await putTargetSecret(api, target, secret, { signal });
-      });
-      delivered += 1;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
-    const names = await observed(
-      context,
-      async () => new Set(await targetSecretNames(api, target)),
-      (present) => secrets.every(({ name }) => present.has(name))
-    );
-    const missing = secrets.find(({ name }) => !names.has(name));
-    if (missing !== undefined) {
-      throw new ProvisionOperationError(
-        "secrets_unobserved",
-        `${target.scriptName} lacks ${missing.name} after its delivery`
-      );
-    }
-    // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
-    const removed = await revokeRetired(context, loaded, target, given, names);
-    revoked.push(...removed);
-    // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
-    const shared = await sharedSecretPrints(context.secrets, app);
-    // oxlint-disable-next-line no-await-in-loop -- one Worker at a time
-    await recordProgress(db, loaded, {
-      ...progress,
-      secrets: { ...progress.secrets, [app]: print },
-      shared: { ...progress.shared, [app]: shared },
-    });
-  }
   // The names removed, never a value: what an operator set by hand and
   // lost here can be read back from the step.
-  await recordStep(db, loaded, "secrets", {
-    delivered,
-    revoked: revoked.length,
-    revokedNames: revoked.join(","),
+  const removed = [...gone, ...revoked];
+  await recordStep(db, loaded, app, {
+    uploaded: done ? 0 : 1,
+    revoked: removed.length,
+    revokedNames: removed.join(","),
   });
 };
 
@@ -2079,8 +2091,7 @@ const deliverSecrets = async (
  * (src/rollout/drift.ts). Core's is the version its probe answered as;
  * connect's, read from its script in an account's own Workers, or in a
  * namespace, whose versions Cloudflare's API doesn't list, the version
- * connect named to core in the probe (`connectVersion`): after its secrets
- * were delivered, so the version they were delivered to, or none when it
+ * connect named to core in the probe (`connectVersion`), or none when it
  * named none. Only while the runner holds the client.
  */
 const recordLiveVersions = async (
@@ -2107,16 +2118,16 @@ const recordLiveVersions = async (
 };
 
 /**
- * The version a namespace connect answers as after this run's writes to
+ * The version a namespace connect answers as after this run's upload of
  * it, read twice in a row the same: `first`, what it named in the probe,
  * then asked again (`connectVersionOf`) after a wait, until two reads in a
- * row name one version, and not the one recorded before those writes
- * (`superseded`), which an isolate of it still answering would name
- * without the secrets just delivered. Two reads apart the same keep an
- * isolate of a version made earlier in this run (its upload's, before its
- * secrets') from being taken for the latest. Null when none settles, so
- * none is recorded, which holds every secret connect holds
- * (src/rollout/drift.ts).
+ * row name one version, and not the one recorded before the upload
+ * (`superseded`), which an isolate of it still answering would name. Two
+ * reads apart the same keep an isolate of a version an earlier attempt's
+ * upload made, never recorded and so never `superseded`, from being taken
+ * for this one's, whose secrets a retry may have changed since. Null when
+ * none settles, so none is recorded, which holds every secret connect
+ * holds (src/rollout/drift.ts).
  */
 const freshConnectVersion = async (
   context: ProvisionContext,
@@ -2592,9 +2603,6 @@ const runOperation = async (
       // oxlint-disable-next-line no-await-in-loop -- connect, then core
       await upload(context, loaded, inventory, app);
     }
-
-    step = "secrets";
-    await deliverSecrets(context, loaded, inventory);
 
     step = "probe";
     const script = await probe(context, loaded, inventory);

@@ -96,17 +96,13 @@ export const cloudLines: readonly CloudLine[] = [
   {
     id: "install",
     steps: ["connect", "core"],
-    label: () => "Installing Grasp",
-    details: () => ["Its connect, then its core, uploaded and observed live"],
-  },
-  {
-    id: "sign_in",
-    steps: ["secrets"],
     label: ({ signIn }) =>
       signIn === null
-        ? "Setting up sign-in"
-        : `Setting up sign-in with ${signIn}`,
-    details: () => ["Its keys and sign-in delivered to its Workers"],
+        ? "Installing Grasp and setting up sign-in"
+        : `Installing Grasp and setting up sign-in with ${signIn}`,
+    details: () => [
+      "Its connect, then its core, uploaded with their keys and sign-in, and observed live",
+    ],
   },
   {
     id: "reachable",

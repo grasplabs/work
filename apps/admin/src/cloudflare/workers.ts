@@ -1,7 +1,7 @@
 /**
  * The Cloudflare calls a placed client's deploy makes: uploading its
- * scripts (with their static assets), their secrets, cron schedules and
- * workers.dev route, reading what is live, and applying D1 migrations.
+ * scripts (with their static assets and secrets), reading what is live,
+ * and applying D1 migrations.
  */
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
@@ -405,14 +405,9 @@ export interface Secret {
 }
 
 /**
- * Bindings an upload keeps from the script's latest version, as Wrangler
- * asks: the secrets, which are delivered after it by name.
- */
-const keptBindings = ["secret_text", "secret_key"];
-
-/**
  * The upload's form: the metadata, then each module under its name. It
- * keeps the latest version's secrets.
+ * keeps nothing of the latest version: its bindings, secrets included,
+ * are all it runs with.
  */
 const uploadForm = ({
   releaseId,
@@ -427,7 +422,6 @@ const uploadForm = ({
     JSON.stringify({
       ...metadata,
       bindings,
-      keep_bindings: keptBindings,
       ...(assetsJwt === undefined
         ? {}
         : { assets: { ...metadata.assets, jwt: assetsJwt } }),
@@ -710,10 +704,10 @@ export const applyD1Migrations = async (
  * destination's Workers for Platforms dispatch namespace. The calls are the
  * ones Cloudflare documents for user Workers, under
  * `/accounts/{account_id}/workers/dispatch/namespaces/{namespace}/scripts/{script_name}`:
- * the upload (`PUT`, multipart, as an account's own script upload, with
- * `keep_bindings`), the script's details (`GET`, whose
+ * the upload (`PUT`, multipart, as an account's own script upload, its
+ * secrets among its bindings), the script's details (`GET`, whose
  * `script.migration_tag` is the last Durable Object migration it ran),
- * its static assets' upload session, and its secrets (`PUT` and `GET`
+ * its static assets' upload session, and its secrets' names (`GET`
  * `.../secrets`). Nothing more is assumed of a namespace: qualifying these
  * on a real account is GRA-430's.
  */
@@ -741,9 +735,7 @@ export const deleteTargetScript = async (
 
 /**
  * Uploads `upload` as the script `target` names, live at once (a dispatch
- * namespace has no gradual deployments), keeping the secrets its latest
- * version has (`keep_bindings`): a placed client's secrets are delivered
- * after it, by name (`putTargetSecret`). An upload that runs a Durable
+ * namespace has no gradual deployments), with its secrets. An upload that runs a Durable
  * Object migration isn't retried after a server error or no answer: if it
  * went through, its migration ran, and sending it again would be refused
  * on the migration's tag. The caller reads the script's migration tag to
@@ -762,6 +754,8 @@ export const uploadTargetScript = async (
       method: "PUT",
       path: targetPath(target),
       idempotent: upload.metadata.migrations === undefined,
+      // Its metadata holds the script's secrets.
+      carriesSecrets: true,
       ...(signal === undefined ? {} : { signal }),
     },
     uploadForm(upload),
@@ -809,53 +803,6 @@ export const targetMigrationState = async (
       return { exists: false };
     }
     throw error;
-  }
-};
-
-/**
- * Sets the secret `secret` on the script `target` names. Its value goes
- * only into the request body, never into a path or an error.
- */
-export const putTargetSecret = async (
-  api: CloudflareApi,
-  target: ScriptTarget,
-  secret: Secret,
-  { signal }: { signal?: AbortSignal } = {}
-): Promise<void> => {
-  await api.call(
-    {
-      method: "PUT",
-      path: `${targetPath(target)}/secrets`,
-      json: { name: secret.name, text: secret.value, type: "secret_text" },
-      ...(signal === undefined ? {} : { signal }),
-    },
-    z.unknown()
-  );
-};
-
-/**
- * Removes the secret `name` from the script `target` names. One that's
- * already gone counts as removed, so a retried step succeeds.
- */
-export const deleteTargetSecret = async (
-  api: CloudflareApi,
-  target: ScriptTarget,
-  name: string,
-  { signal }: { signal?: AbortSignal } = {}
-): Promise<void> => {
-  try {
-    await api.call(
-      {
-        method: "DELETE",
-        path: `${targetPath(target)}/secrets/${encodeURIComponent(name)}`,
-        ...(signal === undefined ? {} : { signal }),
-      },
-      z.unknown()
-    );
-  } catch (error) {
-    if (!isNotFound(error)) {
-      throw error;
-    }
   }
 };
 
