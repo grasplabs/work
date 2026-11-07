@@ -178,6 +178,34 @@ export const racingDb = (
 };
 
 /**
+ * Core's database, but a batch holding a statement `writes` matches commits
+ * and then fails, once, as a batch whose answer was lost does.
+ */
+export const lostAnswerDb = (writes: RegExp): D1Database => {
+  const real = env.DB;
+  let writing = false;
+  let lost = false;
+  return {
+    prepare: (query) => {
+      writing ||= writes.test(query);
+      return real.prepare(query);
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      const results = await real.batch<T>(statements);
+      if (writing && !lost) {
+        lost = true;
+        throw new Error("D1 lost the batch's answer");
+      }
+      return results;
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+};
+
+/**
  * Marks `version` of `app` published (src/app-publish.ts), as making it
  * current requires: for tests that make a version current by hand, as
  * another writer would, to race or bypass the real path.

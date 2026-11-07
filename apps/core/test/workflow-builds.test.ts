@@ -15,7 +15,7 @@ import {
   publishWorkflowVersion,
   workflowSource,
 } from "../src/workflow-resources.ts";
-import { racingDb } from "./apps.ts";
+import { lostAnswerDb, racingDb } from "./apps.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
@@ -380,6 +380,28 @@ describe("JSON workflow builds", () => {
       source: text,
       modules: true,
       tasks: 0,
+    });
+  });
+
+  it("keeps a version whose publishing batch committed though its answer was lost, through a sweep", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
+    const lost = await outcome(
+      publishWorkflowVersion(
+        {
+          ...env,
+          DB: lostAnswerDb(/^insert into "workflow_resource_versions"/iu),
+        },
+        by,
+        workflow.id,
+        { definition: definitionOf("kept"), basedOn: null }
+      )
+    );
+    await sweepReleases(env, new Date());
+    const loaded = await outcome(loadWorkflowBuild(env, workflow.id, 1));
+    expect({ lost: lost === "ok", loaded }).toStrictEqual({
+      lost: false,
+      loaded: "ok",
     });
   });
 

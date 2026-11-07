@@ -33,6 +33,14 @@ import { inList } from "./db/d1.ts";
 //   (`sealReferencedSql`), so such a seal is refused, never sealed short.
 // - References left by a seal that never finished: removed once their seal
 //   is a day old and no row names it, and their rows collected after.
+// - A seal's cleanup after an error drops references a live row names: the
+//   final batch may have committed though D1 answered an error, so
+//   references go only while no row names their seal (`unnamedSql`), the
+//   same condition the sweep holds to.
+// - Bytes left once a bulk delete failed after their rows went: each sweep
+//   also lists one page of keys from a random point and deletes those whose
+//   generation is no row's (`sweepStrayKeys`); a key's generation is never
+//   a row's again, so this deletes nothing a reference can come to name.
 
 /** How long a seal's references stay while no row names it. */
 export const unnamedSealMs = 24 * 60 * 60_000;
@@ -206,13 +214,26 @@ export const collectArtifacts = async (
 };
 
 /**
- * Removes seal `seal`'s references, then collects what they named
- * (`collectArtifacts`): for a seal whose row wasn't written, or went.
+ * That no row names the seal of the reference `sdk_artifact_refs`, as SQL:
+ * no release, workflow version or test run.
+ */
+const unnamedSql = sql`NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS manifests
+    WHERE manifests.seal_id = sdk_artifact_refs.seal)
+  AND NOT EXISTS (SELECT 1 FROM workflow_resource_versions AS versions
+    WHERE versions.seal_id = sdk_artifact_refs.seal)
+  AND NOT EXISTS (SELECT 1 FROM workflow_candidate_runs AS candidates
+    WHERE candidates.reservation = sdk_artifact_refs.seal)`;
+
+/**
+ * Removes seal `seal`'s references, only while no row names it
+ * (`unnamedSql`), then collects what they named (`collectArtifacts`): for
+ * a seal whose row wasn't written, or went. A row written though its batch
+ * answered an error keeps them.
  */
 export const releaseSeal = async (env: Env, seal: string): Promise<void> => {
   const dropped = await drizzle(env.DB)
     .delete(sdkArtifactRefs)
-    .where(eq(sdkArtifactRefs.seal, seal))
+    .where(and(eq(sdkArtifactRefs.seal, seal), unnamedSql))
     .returning({ sha256: sdkArtifactRefs.sha256 });
   await collectArtifacts(
     env,
@@ -232,6 +253,56 @@ export const releaseSealQuietly = async (
   }
 };
 
+/** Where artifacts' keys are, and how one is read: `<sha256>/<generation>`. */
+const artifactsPrefix = "artifacts/";
+const strayKeyPattern =
+  /^artifacts\/(?<sha256>[0-9a-f]{64})\/(?<generation>[0-9a-f-]+)$/u;
+
+/**
+ * Deletes, from one page of artifact keys listed after a random point, the
+ * keys whose generation is no live row's: bytes a failed bulk delete left.
+ * A generation is never a row's again once its row went, and a seal
+ * uploads only to the generation of a row its reference keeps, so no such
+ * key is one a reference names or comes to name. One bounded page a
+ * sweep, from wherever it lands, so every key is reached in time.
+ */
+export const sweepStrayKeys = async (
+  env: Env,
+  startAfter = `${artifactsPrefix}${crypto.randomUUID().replaceAll("-", "")}`
+): Promise<void> => {
+  const page = await env.FILES.list({
+    prefix: artifactsPrefix,
+    startAfter,
+    limit: keysPerDelete,
+  });
+  const keys = page.objects.flatMap(({ key }) => {
+    const { sha256, generation } = strayKeyPattern.exec(key)?.groups ?? {};
+    return sha256 === undefined || generation === undefined
+      ? []
+      : [{ key, sha256, generation }];
+  });
+  if (keys.length === 0) {
+    return;
+  }
+  const live = await generationsOf(
+    env,
+    keys.map(({ sha256 }) => sha256)
+  );
+  const stray = keys.filter(
+    ({ sha256, generation }) => live.get(sha256) !== generation
+  );
+  if (stray.length > 0) {
+    try {
+      await env.FILES.delete(stray.map(({ key }) => key));
+    } catch (error) {
+      log.error("artifact.stray_delete_failed", {
+        keys: stray.length,
+        ...errorFields(error),
+      });
+    }
+  }
+};
+
 /** The most unreferenced artifact rows one statement of the sweep deletes. */
 export const collectBatch = 500;
 
@@ -242,21 +313,19 @@ const collectBatches = 20;
  * The retention sweep's artifact step, at `now`: removes the references
  * of seals no row names a day after they were made, then deletes the
  * artifact rows nothing references, `collectBatch` a statement, each
- * checking in the statement that deletes, and their bytes.
+ * checking in the statement that deletes, and their bytes; then one page
+ * of stray keys (`sweepStrayKeys`).
  */
 export const sweepArtifacts = async (env: Env, now: Date): Promise<void> => {
   const db = drizzle(env.DB);
-  await db.delete(sdkArtifactRefs).where(
-    and(
-      lt(sdkArtifactRefs.createdAt, new Date(now.getTime() - unnamedSealMs)),
-      sql`NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS manifests
-          WHERE manifests.seal_id = ${sdkArtifactRefs.seal})`,
-      sql`NOT EXISTS (SELECT 1 FROM workflow_resource_versions AS versions
-          WHERE versions.seal_id = ${sdkArtifactRefs.seal})`,
-      sql`NOT EXISTS (SELECT 1 FROM workflow_candidate_runs AS candidates
-          WHERE candidates.reservation = ${sdkArtifactRefs.seal})`
-    )
-  );
+  await db
+    .delete(sdkArtifactRefs)
+    .where(
+      and(
+        lt(sdkArtifactRefs.createdAt, new Date(now.getTime() - unnamedSealMs)),
+        unnamedSql
+      )
+    );
   for (let batch = 0; batch < collectBatches; batch += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one batch after another
     const gone = await db
@@ -275,7 +344,8 @@ export const sweepArtifacts = async (env: Env, now: Date): Promise<void> => {
     // oxlint-disable-next-line no-await-in-loop -- as above
     await deleteKeys(env, gone);
     if (gone.length < collectBatch) {
-      return;
+      break;
     }
   }
+  await sweepStrayKeys(env);
 };

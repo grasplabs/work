@@ -5,7 +5,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { callAppFunction, invocationFor } from "../src/app-functions.ts";
 import { publishVersion } from "../src/app-publish.ts";
-import { loadRelease, readBackRelease } from "../src/app-releases.ts";
+import {
+  loadRelease,
+  readBackRelease,
+  sealRelease,
+} from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, isPublished } from "../src/apps.ts";
 import { callOperation } from "../src/operations.ts";
@@ -25,9 +29,11 @@ import {
   collectArtifacts,
   collectBatch,
   storeArtifacts,
+  sweepStrayKeys,
   unnamedSealMs,
 } from "../src/sealed-artifacts.ts";
 import { appDefinition } from "./app-definitions.ts";
+import { lostAnswerDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   appWith,
@@ -432,6 +438,51 @@ describe("shared bytes", { timeout: 120_000 }, () => {
       references: 300,
       uploaded: true,
     });
+  });
+
+  it("of a release whose sealing batch committed though its answer was lost stay, through a sweep", async () => {
+    const fixture = await appWith(files("one"));
+    const lost = await failure(
+      async () =>
+        await sealRelease(
+          {
+            ...env,
+            DB: lostAnswerDb(/^insert into "sdk_release_manifests"/iu),
+          },
+          {
+            app: fixture.app,
+            version: 1,
+            store: fixture.store,
+            by: fixture.owner,
+          }
+        )
+    );
+    await sweepsAt(new Date());
+    const release = await readBackRelease(env, fixture.app, 1);
+    expect({
+      lost,
+      references: release.manifest.artifacts.length > 0,
+      readBack: release.manifestHash.length,
+    }).toStrictEqual({
+      lost: "Error: D1 lost the batch's answer",
+      references: true,
+      readBack: 64,
+    });
+  });
+
+  it("left in storage by a failed bulk delete are deleted by a later sweep, never a live one's", async () => {
+    const fixture = await appWith(files("one"));
+    const release = await seal(fixture);
+    const [live] = release.manifest.artifacts;
+    const sha256 = live?.sha256 ?? "";
+    // Bytes of a generation whose row went, as a failed bulk delete leaves them.
+    const stray = `artifacts/${sha256}/${crypto.randomUUID()}`;
+    await env.FILES.put(stray, "left behind");
+    await sweepStrayKeys(env, "artifacts/");
+    expect({
+      stray: await env.FILES.head(stray),
+      live: await kept(sha256),
+    }).toStrictEqual({ stray: null, live: true });
   });
 
   it("a seal named and lost the reference of keep it from sealing", async () => {
