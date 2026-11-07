@@ -29,7 +29,7 @@ import {
   auditProvenanceMaxItems,
 } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
-import { sha256Hex } from "@grasp-os/shared/encoding";
+import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { identifierSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
