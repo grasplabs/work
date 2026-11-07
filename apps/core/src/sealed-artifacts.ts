@@ -38,7 +38,8 @@ import { inList } from "./db/d1.ts";
 //   references go only while no row names their seal (`unnamedSql`), the
 //   same condition the sweep holds to.
 // - Bytes left once a bulk delete failed after their rows went: each sweep
-//   also lists one page of keys from a random point and deletes those whose
+//   also lists the next page of keys, going on where the last sweep stopped
+//   and from the start once the listing ended, and deletes those whose
 //   generation is no row's (`sweepStrayKeys`); a key's generation is never
 //   a row's again, so this deletes nothing a reference can come to name.
 
@@ -255,26 +256,37 @@ export const releaseSealQuietly = async (
 
 /** Where artifacts' keys are, and how one is read: `<sha256>/<generation>`. */
 const artifactsPrefix = "artifacts/";
+
+/**
+ * Where the stray-key sweep keeps the last key it listed, which the next
+ * sweep lists after: outside `artifacts/`, so never listed itself.
+ */
+export const strayCursorKey = "sweeps/artifact-keys-after";
 const strayKeyPattern =
   /^artifacts\/(?<sha256>[0-9a-f]{64})\/(?<generation>[0-9a-f-]+)$/u;
 
 /**
- * Deletes, from one page of artifact keys listed after a random point, the
- * keys whose generation is no live row's: bytes a failed bulk delete left.
- * A generation is never a row's again once its row went, and a seal
- * uploads only to the generation of a row its reference keeps, so no such
- * key is one a reference names or comes to name. One bounded page a
- * sweep, from wherever it lands, so every key is reached in time.
+ * Deletes, from the next page of artifact keys, the keys whose generation
+ * is no live row's: bytes a failed bulk delete left. A generation is never
+ * a row's again once its row went, and a seal uploads only to the
+ * generation of a row its reference keeps, so no such key is one a
+ * reference names or comes to name. One bounded page a sweep, after the
+ * last key the previous sweep listed (`strayCursorKey`), and from the start
+ * once the listing ended, so the whole prefix is covered in turn.
  */
-export const sweepStrayKeys = async (
-  env: Env,
-  startAfter = `${artifactsPrefix}${crypto.randomUUID().replaceAll("-", "")}`
-): Promise<void> => {
+export const sweepStrayKeys = async (env: Env): Promise<void> => {
+  const saved = await env.FILES.get(strayCursorKey);
+  const startAfter = saved === null ? undefined : await saved.text();
   const page = await env.FILES.list({
     prefix: artifactsPrefix,
     startAfter,
     limit: keysPerDelete,
   });
+  // Where the next sweep goes on: after this page, or from the start.
+  const last = page.objects.at(-1)?.key;
+  await (page.truncated && last !== undefined
+    ? env.FILES.put(strayCursorKey, last)
+    : env.FILES.delete(strayCursorKey));
   const keys = page.objects.flatMap(({ key }) => {
     const { sha256, generation } = strayKeyPattern.exec(key)?.groups ?? {};
     return sha256 === undefined || generation === undefined

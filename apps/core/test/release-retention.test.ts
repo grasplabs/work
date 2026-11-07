@@ -29,6 +29,7 @@ import {
   collectArtifacts,
   collectBatch,
   storeArtifacts,
+  strayCursorKey,
   sweepStrayKeys,
   unnamedSealMs,
 } from "../src/sealed-artifacts.ts";
@@ -469,19 +470,25 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     });
   });
 
-  it("left in storage by a failed bulk delete are deleted by a later sweep, never a live one's", async () => {
+  it("left in storage by a failed bulk delete are deleted by a later sweep, never a live one's, after the listing wraps", async () => {
     const fixture = await appWith(files("one"));
     const release = await seal(fixture);
     const [live] = release.manifest.artifacts;
     const sha256 = live?.sha256 ?? "";
-    // Bytes of a generation whose row went, as a failed bulk delete leaves them.
-    const stray = `artifacts/${sha256}/${crypto.randomUUID()}`;
+    // Bytes of a generation whose row went, as a failed bulk delete leaves
+    // them, sorting before where the last sweep stopped.
+    const stray = `artifacts/${"0".repeat(64)}/${crypto.randomUUID()}`;
     await env.FILES.put(stray, "left behind");
-    await sweepStrayKeys(env, "artifacts/");
+    await env.FILES.put(strayCursorKey, `artifacts/${"f".repeat(64)}`);
+    // Goes on after the saved key, finds the listing's end, and wraps.
+    await sweepStrayKeys(env);
+    const beforeWrap = (await env.FILES.head(stray)) !== null;
+    await sweepStrayKeys(env);
     expect({
+      beforeWrap,
       stray: await env.FILES.head(stray),
       live: await kept(sha256),
-    }).toStrictEqual({ stray: null, live: true });
+    }).toStrictEqual({ beforeWrap: true, stray: null, live: true });
   });
 
   it("a seal named and lost the reference of keep it from sealing", async () => {
