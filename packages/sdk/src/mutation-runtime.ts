@@ -25,6 +25,16 @@ import {
 // each answers as the platform's does. The isolate runs one invocation and
 // is thrown away, so nothing reaches another call.
 
+/**
+ * The intrinsics the replacements call while App code runs, taken as this
+ * module loads, before any App module does: a replacement never looks one
+ * up again, so App code replacing `Reflect.construct`, `Reflect.apply` or
+ * `Object.defineProperty` is never handed the platform's `File`,
+ * `generateKey` or the like, nor the arguments that carry a fixed time.
+ */
+const { apply, construct } = Reflect;
+const { defineProperty, getOwnPropertyDescriptor } = Object;
+
 /** When a mutation started, and the seed of its randomness (64 hex digits). */
 export interface MutationStart {
   readonly startedAt: number;
@@ -92,15 +102,51 @@ const unavailable = (what: string): Error =>
     `A mutation answers the same when it runs again: ${what} isn't available in one. Use an action.`
   );
 
-/** `options` with `key` set to `value` when it doesn't set it. */
+/**
+ * `options`' own enumerable fields, with `key` set to `value` where they
+ * leave it out or set it to `undefined` (as the platform reads an
+ * undefined member as one not given). Without a prototype, so nothing App
+ * code puts on `Object.prototype` is read as one of its fields; each
+ * field defined, never set, so no setter of App code's sees one.
+ */
 const withDefault = (
   options: unknown,
   key: string,
   value: number
-): Record<string, unknown> => ({
-  [key]: value,
-  ...(typeof options === "object" && options !== null ? options : {}),
-});
+): Record<string, unknown> => {
+  const given: Record<string, unknown> = {
+    __proto__: null,
+    ...(typeof options === "object" && options !== null ? options : {}),
+  };
+  const set: unknown = getOwnPropertyDescriptor(given, key)?.value;
+  return { __proto__: null, ...given, [key]: set === undefined ? value : set };
+};
+
+/**
+ * `args` with `value` at `index`, each element defined, never set: an
+ * array App code put an index setter on `Array.prototype` for never hands
+ * it the value.
+ */
+const argumentsWith = (
+  args: readonly unknown[],
+  index: number,
+  value: unknown
+): unknown[] => {
+  const given: unknown[] = [];
+  const length = args.length > index ? args.length : index + 1;
+  for (let at = 0; at < length; at += 1) {
+    // SAFETY: a data descriptor's fields; `__proto__: null` only sets its
+    // prototype, so no `get` or `set` of App code's is read as one.
+    defineProperty(given, at, {
+      __proto__: null,
+      value: at === index ? value : args[at],
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    } as PropertyDescriptor);
+  }
+  return given;
+};
 
 /**
  * Puts in place of the global class `name` (and its prototype's
@@ -125,9 +171,12 @@ const sealTimedClass = (
     // `Object.prototype`, where App code could define one.
     __proto__: null,
     construct: (target, args: unknown[], newTarget) => {
-      const given = [...args];
-      given[index] = withDefault(args[index], key, time());
-      const made: unknown = Reflect.construct(target, given, newTarget);
+      const given = argumentsWith(
+        args,
+        index,
+        withDefault(args[index], key, time())
+      );
+      const made: unknown = construct(target, given, newTarget);
       // SAFETY: constructing the platform's class makes one of its instances.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       return made as object;
@@ -200,11 +249,7 @@ export const installMutationRuntime = (): ((start: MutationStart) => void) => {
         if (fixed !== undefined || typeof platformGenerateKey !== "function") {
           throw unavailable("generating a key");
         }
-        const generated: unknown = Reflect.apply(
-          platformGenerateKey,
-          this,
-          args
-        );
+        const generated: unknown = apply(platformGenerateKey, this, args);
         return generated;
       },
     }),
@@ -221,7 +266,7 @@ export const installMutationRuntime = (): ((start: MutationStart) => void) => {
           name: unknown,
           options?: unknown
         ): unknown {
-          const marked: unknown = Reflect.apply(platformMark, this, [
+          const marked: unknown = apply(platformMark, this, [
             name,
             withDefault(options, "startTime", performanceNow()),
           ]);
@@ -236,7 +281,7 @@ export const installMutationRuntime = (): ((start: MutationStart) => void) => {
           if (fixed !== undefined) {
             throw unavailable("performance.measure");
           }
-          const measured: unknown = Reflect.apply(platformMeasure, this, args);
+          const measured: unknown = apply(platformMeasure, this, args);
           return measured;
         }
       ),

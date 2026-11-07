@@ -958,6 +958,39 @@ const formatter = new Intl.DateTimeFormat("en-GB", {
   fractionalSecondDigits: 3,
 });
 
+/**
+ * What \`Reflect.construct\`, replaced while a file is made, is handed to
+ * construct: a file of it, made as the platform makes one, if any.
+ */
+const swappedConstruct = () => {
+  const real = Reflect.construct;
+  let handed: unknown;
+  Object.defineProperty(Reflect, "construct", {
+    configurable: true,
+    writable: true,
+    value: (target: never, args: never, newTarget?: never) => {
+      handed = target;
+      return real(target, args, newTarget);
+    },
+  });
+  try {
+    new File([], "a");
+  } finally {
+    Object.defineProperty(Reflect, "construct", { configurable: true, writable: true, value: real });
+  }
+  return typeof handed === "function" ? new (handed as typeof File)([], "a").lastModified : null;
+};
+
+/** A file made while an index setter on \`Array.prototype\` takes what's set. */
+const settersOnArrays = () => {
+  Object.defineProperty(Array.prototype, "2", { configurable: true, set: () => {} });
+  try {
+    return new File([], "a").lastModified;
+  } finally {
+    Reflect.deleteProperty(Array.prototype, "2");
+  }
+};
+
 const read = () => ({
   now: Date.now(),
   date: new Date().getTime(),
@@ -966,6 +999,9 @@ const read = () => ({
   performanceNow: performance.now(),
   formatted: formatter.format(),
   fileTime: new File([], "a").lastModified,
+  fileUndefined: new File([], "a", { lastModified: undefined }).lastModified,
+  fileSetters: settersOnArrays(),
+  handedFile: swappedConstruct(),
   // Where the platform has the timeline's marks: its compatibility date
   // decides.
   markTime: "mark" in performance ? performance.mark("a").startTime : null,
@@ -1047,6 +1083,9 @@ const readSchema = z.strictObject({
   performanceNow: z.number(),
   formatted: z.string(),
   fileTime: z.number(),
+  fileUndefined: z.number(),
+  fileSetters: z.number(),
+  handedFile: z.number().nullable(),
   markTime: z.number().nullable(),
   random: z.number(),
   heldRandom: z.number(),
@@ -1080,6 +1119,9 @@ const timesOf = (read: z.infer<typeof readSchema>) => ({
   descriptorNow: read.descriptorNow,
   formatted: read.formatted,
   fileTime: read.fileTime,
+  fileUndefined: read.fileUndefined,
+  fileSetters: read.fileSetters,
+  handedFile: read.handedFile,
 });
 
 describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
@@ -1120,6 +1162,10 @@ describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
       descriptorNow: before.now,
       formatted: formatter.format(before.now),
       fileTime: before.now,
+      fileUndefined: before.now,
+      fileSetters: before.now,
+      // Never handed the platform's \`File\`.
+      handedFile: null,
     };
     expect({
       again,
