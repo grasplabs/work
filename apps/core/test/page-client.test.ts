@@ -306,7 +306,7 @@ describe("the session client", { timeout: 120_000 }, () => {
       app,
       call,
       keyed.idempotencyKey,
-      false
+      { streaming: false }
     );
     const frames = await actionInvocation(env, name).open({
       by: { userId: opened.admin.userId, role: "admin", teams: [] },
@@ -418,7 +418,7 @@ describe("the session client", { timeout: 120_000 }, () => {
       appIdSchema.parse(opened.app),
       readFunctionRequest(request),
       keyed.idempotencyKey,
-      false
+      { streaming: false }
     );
     const stub = actionInvocation(env, name);
     // Its receipt kept past its time, so only its tombstone is left.

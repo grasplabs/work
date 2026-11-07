@@ -34,7 +34,6 @@ import { adminKickoffResponse } from "./admin-kickoff.ts";
 import { adminSnapshotResponse } from "./admin-snapshot.ts";
 import { aiStatusReportResponse } from "./ai-status-report.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
-import { appFunctionRoute } from "./app-function-route.ts";
 import { appLinkResponse, linkRouteOf } from "./app-link-route.ts";
 import { appVisitorResponse } from "./app-visitors.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
@@ -67,6 +66,7 @@ import { interviewStoryResponse } from "./onboarding/story.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import { transcriptionResponse } from "./onboarding/transcription.ts";
 import { packageArtifactResponse } from "./packages/serve.ts";
+import { pageCallRoute } from "./page-calls.ts";
 import { pageFrameResponse, pageModuleResponse } from "./page-frame.ts";
 import {
   connectVersionResponse,
@@ -302,7 +302,7 @@ const appCallResponse = async (
 ): Promise<Response | undefined> => {
   // A page's call of one of its App's functions, or of a streaming
   // action's (`<path>/<app>/<stream | attach | cancel>`).
-  const pageCall = await appFunctionRoute(request, env, pathname, requestId);
+  const pageCall = await pageCallRoute(request, env, pathname, requestId);
   if (pageCall !== undefined) {
     return pageCall;
   }

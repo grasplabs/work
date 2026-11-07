@@ -3,8 +3,15 @@ import type {
   PreviewRefresh,
   PreviewUpdate,
 } from "@grasp-os/shared/chat";
+import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId } from "@grasp-os/shared/ids";
+import {
+  appFunctionPath,
+  pageLeaseHeader,
+  pagePersonHeader,
+} from "@grasp-os/shared/pages";
+import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
@@ -12,14 +19,18 @@ import { z } from "zod";
 import { sealDraftRelease } from "../src/app-releases.ts";
 import { draftFiles } from "../src/apps.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
+import type { Draft } from "../src/workspace.ts";
 import { openTestRun } from "./agent-chat.ts";
+import { clientOrigin } from "./sign-in-config.ts";
+import { routed } from "./sign-in.ts";
 import type { signedInApi } from "./sign-in.ts";
 
 // A chat's preview of its draft of an App of spec 8's layout, as a test
-// drives it (sealed-previews.ts): a draft written as the chat's agent
-// writes one, and calls of its functions as a page of the draft sends
-// them, by references read from the draft release the chat keeps.
+// drives it (draft-runs.ts): a draft written as the chat's agent writes
+// one, and calls of its functions as a page of the draft sends them, on
+// every page's call path under the preview's lease, by references read
+// from the draft sealed as its preview seals it.
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
@@ -59,7 +70,7 @@ export const chatWithDraft = async (
   return { chatId, revision: await write(changes, 0), write };
 };
 
-/** What the test reads of a kept draft release's manifest. */
+/** What the test reads of a draft release's manifest. */
 export const keptManifestSchema = z.object({
   resourceVersion: z.int(),
   artifacts: z.array(z.object({ path: z.string(), sha256: z.string() })),
@@ -81,18 +92,15 @@ const answerSchema = z.object({
   ]),
 });
 
-/**
- * The contracts of the App's version `appVersion`, sealed as the preview
- * seals a version a frame shows: kept nowhere (sealed-previews.ts).
- */
-const versionContracts = async (
+/** The contracts of `draft`, a draft of `app`, sealed as its preview seals it. */
+const draftContracts = async (
   app: AppId,
-  appVersion: number
+  draft: Pick<Draft, "base" | "changes">
 ): Promise<string | undefined> => {
   const sealed = await sealDraftRelease(
     env,
-    { app, version: appVersion + 1 },
-    await draftFiles(env, app, { base: appVersion, changes: {} })
+    { app, version: (draft.base ?? 0) + 1 },
+    await draftFiles(env, app, draft)
   );
   const manifest = keptManifestSchema.parse(JSON.parse(sealed.manifest));
   const sha256 = manifest.artifacts.find(
@@ -104,42 +112,10 @@ const versionContracts = async (
   return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
 };
 
-/** The contracts of the draft release the chat's object keeps. */
-const keptContracts = async (
-  person: Person,
-  chatId: ChatId,
-  app: AppId
-): Promise<string | undefined> => {
-  const kept = await runInDurableObject(chatsOf(person), (_instance, state) => {
-    const [keptRelease] = state.storage.sql
-      .exec<{ manifest: string }>(
-        "SELECT manifest FROM preview_releases WHERE chat_id = ? AND app_id = ?",
-        chatId,
-        app
-      )
-      .toArray();
-    const manifest = keptManifestSchema.parse(
-      JSON.parse(keptRelease?.manifest ?? "null")
-    );
-    const sha256 = manifest.artifacts.find(
-      (artifact) => artifact.path === ".grasp/contracts.json"
-    )?.sha256;
-    const [contracts] = state.storage.sql
-      .exec<{ content: string }>(
-        "SELECT content FROM preview_release_artifacts WHERE chat_id = ? AND sha256 = ?",
-        chatId,
-        sha256 ?? ""
-      )
-      .toArray();
-    return contracts?.content;
-  });
-  return kept;
-};
-
 /**
- * The call of `path` with `input` as a page of the draft at `revision`
- * sends it: its reference read from the contracts of the draft release
- * the chat's object keeps, sealed first if it isn't yet.
+ * The call of `path` with `input` as a page of the chat's draft of `app`
+ * sends it: its reference read from the contracts of the draft as it is
+ * now, or of the App's version `revision` names.
  */
 export const requestFor = async (
   person: Person,
@@ -151,17 +127,96 @@ export const requestFor = async (
   path: string,
   input: unknown = {}
 ): Promise<string> => {
-  await chatsOf(person).previewReferences(chatId, person.userId, app, revision);
-  const text =
+  const draft =
     typeof revision === "number"
-      ? await keptContracts(person, chatId, app)
-      : await versionContracts(app, revision.appVersion);
-  const read = contractsSchema.parse(JSON.parse(text ?? "null"));
+      ? await chatsOf(person).previewDraft(chatId, person.userId, app)
+      : { base: revision.appVersion, changes: {} };
+  const read = contractsSchema.parse(
+    JSON.parse((await draftContracts(app, draft)) ?? "null")
+  );
   return JSON.stringify({
     reference: { name: path, kind: read.manifest.operations[path]?.kind },
     input,
   });
 };
+
+/** The leases previews opened with, by person, chat and App. */
+const leases = new Map<string, Promise<string>>();
+
+/**
+ * The lease the chat's preview of `app` opens with, for `person`: opened
+ * once, as a frame keeps its lease across the draft's writes.
+ */
+export const previewLease = async (
+  person: Person,
+  chatId: string,
+  app: string
+): Promise<string> => {
+  const key = JSON.stringify([person.userId, chatId, app]);
+  const kept =
+    leases.get(key) ??
+    (async () => {
+      const { lease } = await person.api.chats.preview(chatId, app);
+      if (lease === undefined) {
+        throw new Error("The preview opened with no lease.");
+      }
+      return lease;
+    })();
+  leases.set(key, kept);
+  try {
+    return await kept;
+  } catch (error) {
+    leases.delete(key);
+    throw error;
+  }
+};
+
+/**
+ * A call of the chat's preview of `app`, as its frame's page sends it: on
+ * every page's call path (page-calls.ts), under the preview's lease (read
+ * as the preview opens, unless given). Answers what core answered.
+ */
+export const previewCall = async (
+  person: Person,
+  chatId: string,
+  app: string,
+  request: string,
+  lease?: string
+): Promise<unknown> => {
+  const response = await routed(`${appFunctionPath}/${app}`, {
+    method: "POST",
+    headers: {
+      origin: clientOrigin,
+      "content-type": "application/json",
+      cookie: person.session,
+      [pagePersonHeader]: person.userId,
+      [pageLeaseHeader]: lease ?? (await previewLease(person, chatId, app)),
+    },
+    body: request,
+  });
+  const answer: unknown = await response.json();
+  if (!response.ok) {
+    const { code, message } = errorPayloadSchema.parse(answer);
+    throw Object.assign(new Error(message), { code });
+  }
+  return answer;
+};
+
+/**
+ * Follows a live query of the chat's preview of `app`, as its frame does:
+ * over the page's socket, on a frame opened with the preview's lease.
+ */
+export const previewWatch = async (
+  person: Person,
+  chatId: string,
+  app: string,
+  request: string,
+  onSnapshot: (push: QuerySnapshotPush) => void,
+  lease?: string
+) =>
+  await person.api.pages
+    .frame(app, lease ?? (await previewLease(person, chatId, app)))
+    .watchQuery(request, onSnapshot);
 
 /** What a call of a preview's function answered: its value, or its error's code. */
 export const outcome = (answer: unknown): unknown => {
@@ -201,4 +256,15 @@ export const previewStores = async (
         app
       )
       .toArray()
+  );
+
+/**
+ * Whether throwaway store `id` was emptied for good: its object discarded,
+ * so it refuses every call (`DataStore.emptyThrowaway`).
+ */
+export const storeEmptied = async (id: string): Promise<boolean> =>
+  await runInDurableObject(
+    inJurisdiction(env, env.DATA_STORES).getByName(id),
+    (_instance, state) =>
+      state.storage.kv.get("grasp_fixture_discarded") === true
   );

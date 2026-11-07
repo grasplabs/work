@@ -48,17 +48,17 @@ import {
 } from "./apps.ts";
 import { appHost } from "./durable-objects.ts";
 import { isStub } from "./page-callbacks.ts";
-import type { PageCallback, StillOpen } from "./page-callbacks.ts";
+import type { PageCallback } from "./page-callbacks.ts";
 import {
   deliveryOf,
   deliveryAt,
   delivering,
-  leasedBuild,
+  readLease,
   leaseFor,
   requireDelivery,
   standingOf,
 } from "./page-delivery.ts";
-import type { LeasedBuild } from "./page-delivery.ts";
+import type { LeasedBuild, PageLease } from "./page-delivery.ts";
 import { frameAccess, stageFrame } from "./page-frame.ts";
 import { versionPageCodes } from "./page-references.ts";
 import { QuerySubscriptions, pageReads } from "./query-subscriptions.ts";
@@ -105,7 +105,8 @@ import {
 //
 // A callback the App keeps (a page's subscription) outlives the call
 // that passed it, so each push through it checks again that the person
-// still has a role in the App (`stillHasRole`), once per reading of the
+// still has a role in the App (the live queries' gate, query-subscriptions.ts,
+// and `followVersion`), once per reading of the
 // connection's session (at most every `sessionRecheckMs`) per App and
 // connection. Once they don't (signed out, unshared, a team left, a role
 // changed, a source they can't read), the callback is released and
@@ -250,7 +251,7 @@ const openPage = async (
     version,
     artifact,
     frameToken: await frameAccess(env, artifact),
-    lease: await leaseFor(env, by.userId, id, build),
+    lease: await leaseFor(env, by.userId, id, { kind: "release", build }),
   };
 };
 
@@ -258,10 +259,9 @@ const openPage = async (
  * The pages of a published App's current version, for a visitor
  * (app-visitors.ts), which open at `/`: built and staged as `openPage`
  * does, once their build gets the App's data now, and leased to `visitor`
- * (`visitor:<session>`), a name no member's session has, so the lease
- * opens none of the App's functions (app-function-route.ts needs a
- * member's session too). Null while the App runs no version or has no
- * pages.
+ * (`visitor:<session>`), a name no member's session has, so it opens the
+ * App's functions only as that visitor, with their session's token
+ * (page-calls.ts). Null while the App runs no version or has no pages.
  */
 export const visitorPage = async (
   env: Env,
@@ -291,7 +291,7 @@ export const visitorPage = async (
     version,
     artifact,
     frameToken: await frameAccess(env, artifact),
-    lease: await leaseFor(env, visitor, id, build),
+    lease: await leaseFor(env, visitor, id, { kind: "release", build }),
   };
 };
 
@@ -513,10 +513,11 @@ const followVersion = (
 const hasRoleNow = async (
   env: Env,
   by: Identity,
-  app: AppId
+  app: AppId,
+  role: "user" | "builder"
 ): Promise<boolean> => {
   try {
-    await usableApp(env, by, app);
+    await usableApp(env, by, app, role);
     return true;
   } catch (error) {
     if (isExpectedError(error)) {
@@ -524,57 +525,6 @@ const hasRoleNow = async (
     }
     throw error;
   }
-};
-
-/**
- * Whether the person behind the connection still has `role` in `app`
- * (any role: `user`), before each push: the connection's own session check
- * (`check`), the reading of their session, role and teams that every call
- * shares, Grasp staff's window included, then the App's rules (`appFor`),
- * read again with each new reading of the session and kept until the next.
- * So a push never rests on an older reading than a call would, and a
- * stream of pushes costs one look at the App's rules every few seconds.
- * Anything that goes wrong on the way is a no: a callback must not
- * outlive access because a check failed. A session that ended also closes
- * the connection, as on any call. For the callbacks of an App's pages,
- * and of a draft's preview (chats-rpc.ts).
- */
-export const stillHasRole = (
-  env: Env,
-  check: SessionCheck,
-  app: AppId,
-  role: "user" | "builder" = "user"
-): StillOpen => {
-  const refused = (error: unknown): false => {
-    if (!isExpectedError(error)) {
-      log.error("page.access_check_failed", {
-        appId: app,
-        ...errorFields(error),
-      });
-    }
-    return false;
-  };
-  const hasRole = async (person: Identity): Promise<boolean> => {
-    try {
-      await usableApp(env, person, app, role);
-      return true;
-    } catch (error) {
-      return refused(error);
-    }
-  };
-  let latest: { person: Identity; open: Promise<boolean> } | undefined;
-  return async () => {
-    let person: Identity;
-    try {
-      person = await check();
-    } catch (error) {
-      return refused(error);
-    }
-    if (latest?.person !== person) {
-      latest = { person, open: hasRole(person) };
-    }
-    return await latest.open;
-  };
 };
 
 /** Where in the App a problem happened, as the page reports it. */
@@ -624,20 +574,25 @@ interface FrameConnection {
   /** Who the frame was opened for. */
   readonly userId: string;
   readonly app: AppId;
-  /** The build core leased the frame, if the lease was core's for them. */
-  readonly build: LeasedBuild | undefined;
+  /** What core leased the frame, if the lease was core's for them. */
+  readonly lease: PageLease | undefined;
   /** The connection's live queries, bounded for the whole tab. */
   readonly queries: QuerySubscriptions;
 }
 
 /**
  * One frame's way to its App on the connection a tab's frames share
- * (`PagesApi.frame`). Threat model, and how each is closed:
+ * (`PagesApi.frame`): a running App's page, or a builder's preview of
+ * their draft, as the frame's lease names it (page-calls.ts says how one
+ * path for both is kept apart). Threat model, and how each is closed:
  *
  * - Frame A decided on frame B's build: every call is decided on the
- *   build this frame's own lease named, never on what another frame of
+ *   lease this frame was opened with, never on what another frame of
  *   the App runs, so a frame
  *   whose build was revoked is refused while another frame's goes on.
+ * - A preview reaching the App's real data: a draft's frame reads only
+ *   its draft on the throwaway store (draft-runs.ts), and starts, follows
+ *   and answers no workflow run (`app.preview_side_effect`).
  * - A closed frame following on: what it follows through here (its live
  *   queries, its runs' updates, the callbacks its server calls passed)
  *   is kept in `#held`, and `close`, or the page letting go of the stub,
@@ -692,18 +647,29 @@ export class PageFrameRpc extends CoreRpcTarget implements PageFrameApi {
     return by;
   }
 
+  /** The build of the App's release the frame runs, if its lease names one. */
+  get #build(): LeasedBuild | undefined {
+    const { lease } = this.#connection;
+    return lease?.kind === "release" ? lease.build : undefined;
+  }
+
   /**
-   * `run`, once this request of the person's is counted (`admitted`), if
-   * the frame's build gets the App's data now (`delivering`).
+   * `run`, a step of one of the App's workflow runs, once this request of
+   * the person's is counted (`admitted`), if the frame's build gets the
+   * App's data now (`delivering`): never a draft's, whose preview starts,
+   * follows and answers no real run.
    */
   async #delivered<Answer>(
     operation: string,
     run: (by: Identity) => Promise<Answer>
   ): Promise<Answer> {
     const by = await this.#person();
-    const { env, app, build } = this.#connection;
+    const { env, app, lease } = this.#connection;
     const id = await admitted(env, by, app);
-    return await delivering(env, by, id, build, operation, async () => {
+    if (lease?.kind === "draft") {
+      throw appErrors.create("app.preview_side_effect");
+    }
+    return await delivering(env, by, id, this.#build, operation, async () => {
       // Closed while it was admitted: nothing runs.
       this.#open();
       return await run(by);
@@ -744,12 +710,20 @@ export class PageFrameRpc extends CoreRpcTarget implements PageFrameApi {
 
   async delivery(): Promise<PageDelivery> {
     const by = await this.#person();
-    const { env, app, build } = this.#connection;
+    const { env, app, lease } = this.#connection;
     // The person's role in the App first, as every call's: someone who
     // lost it hears that, never how the App's build stands. Nobody's frame
-    // of an archived App is delivered anything.
-    const { id } = await usableApp(env, by, app);
-    return deliveryOf(await standingOf(env, id, build));
+    // of an archived App is delivered anything. A draft's reaches none of
+    // the App's data, so only its builder counts.
+    const { id } = await usableApp(
+      env,
+      by,
+      app,
+      lease?.kind === "draft" ? "builder" : "user"
+    );
+    return lease?.kind === "draft"
+      ? "open"
+      : deliveryOf(await standingOf(env, id, this.#build));
   }
 
   async reviewDecision(
@@ -757,14 +731,14 @@ export class PageFrameRpc extends CoreRpcTarget implements PageFrameApi {
     decision: string,
     answer: unknown
   ): Promise<DecisionReview> {
-    const { env, app, build } = this.#connection;
+    const { env, app } = this.#connection;
     return await this.#delivered(
       "reviewDecision",
       async (by) =>
         await reviewPageDecision(
           env,
           by,
-          { app, version: build?.version },
+          { app, version: this.#build?.version },
           run,
           decision,
           answer
@@ -778,14 +752,14 @@ export class PageFrameRpc extends CoreRpcTarget implements PageFrameApi {
     revision: string,
     answer: unknown
   ): Promise<DecisionConfirmation> {
-    const { env, app, build } = this.#connection;
+    const { env, app } = this.#connection;
     return await this.#delivered(
       "confirmDecision",
       async (by) =>
         await confirmPageDecision(
           env,
           by,
-          { app, version: build?.version },
+          { app, version: this.#build?.version },
           run,
           decision,
           revision,
@@ -800,14 +774,14 @@ export class PageFrameRpc extends CoreRpcTarget implements PageFrameApi {
     answer: unknown,
     confirmation?: string
   ): Promise<DecisionView> {
-    const { env, app, build } = this.#connection;
+    const { env, app } = this.#connection;
     return await this.#delivered(
       "decide",
       async (by) =>
         await decidePageRun(
           env,
           by,
-          { app, version: build?.version },
+          { app, version: this.#build?.version },
           run,
           decision,
           answer,
@@ -821,7 +795,7 @@ export class PageFrameRpc extends CoreRpcTarget implements PageFrameApi {
     onSnapshot: (snapshot: QuerySnapshotPush) => void
   ): Promise<Subscription> {
     const by = await this.#person();
-    const { env, app, build, queries } = this.#connection;
+    const { env, app, lease, queries } = this.#connection;
     // Following is a request like any other; what core then pushes is
     // not counted (query-subscriptions.ts bounds it).
     const id = await admitted(env, by, app);
@@ -834,12 +808,15 @@ export class PageFrameRpc extends CoreRpcTarget implements PageFrameApi {
     }
     // A window counts as the pages it reads (query-windows.ts).
     await admitWindow(env, by, id, request);
-    await requireDelivery(env, by, id, build, {
-      operation: "watchQuery",
-      stage: "admission",
-    });
+    // A draft's builder is checked as it is read (draft-runs.ts).
+    if (lease?.kind !== "draft") {
+      await requireDelivery(env, by, id, this.#build, {
+        operation: "watchQuery",
+        stage: "admission",
+      });
+    }
     return await this.#hold((ended) =>
-      queries.subscribe(by, id, build, request, onSnapshot, ended)
+      queries.subscribe(by, id, lease, request, onSnapshot, ended)
     );
   }
 
@@ -880,11 +857,16 @@ export class PagesRpc extends CoreRpcTarget implements PagesApi {
     this.#check = check;
     this.#queries = new QuerySubscriptions(
       env,
-      pageReads(env, check, async (by, app, build) => {
-        if (!(await hasRoleNow(env, by, app))) {
+      pageReads(env, check, async (by, app, lease) => {
+        // A draft's preview is its builder's alone, and reaches none of
+        // the App's data, so nothing else is read for it.
+        if (lease?.kind === "draft") {
+          return (await hasRoleNow(env, by, app, "builder")) ? "open" : "role";
+        }
+        if (!(await hasRoleNow(env, by, app, "user"))) {
           return "role";
         }
-        return await deliveryAt(env, by, app, build, {
+        return await deliveryAt(env, by, app, lease?.build, {
           operation: "watchQuery",
           stage: "push",
         });
@@ -916,16 +898,15 @@ export class PagesRpc extends CoreRpcTarget implements PagesApi {
   async frame(app: string, lease: string): Promise<PageFrameRpc> {
     return await withPerson(this.#check, async (by) => {
       const { id } = await usableApp(this.#env, by, app);
-      // Core's own lease names the build, never the page or the frame; a
-      // lease core didn't sign for them and this App names none, and is
-      // decided as code core didn't serve.
-      const build = await leasedBuild(this.#env, by.userId, id, lease);
+      // Core's own lease names the build and what it runs on, never the
+      // page or the frame; a lease core didn't sign for them and this App
+      // names none, and is decided as code core didn't serve.
       return new PageFrameRpc({
         env: this.#env,
         check: this.#check,
         userId: by.userId,
         app: id,
-        build,
+        lease: await readLease(this.#env, by.userId, id, lease),
         queries: this.#queries,
       });
     });

@@ -751,7 +751,7 @@ export const sealedSurfaces = async (
   }
 };
 
-/** A draft release as its keeper stores it (sealed-previews.ts). */
+/** A draft release as its keeper stores it (draft-runs.ts). */
 export interface StoredDraft {
   /** Its manifest's canonical text. */
   readonly manifest: string;
@@ -1349,10 +1349,10 @@ export interface SealedDraft extends StoredDraft {
  * Seals `files`, a chat's draft of `key.app`, as the release of the
  * version it would become (`key.version`), exactly as `sealRelease` seals
  * a version (see the header), but bound to no store and stored nowhere:
- * its keeper (sealed-previews.ts) keeps what this answers, and loads it
+ * its keeper (draft-runs.ts) keeps what this answers, and loads it
  * back through `loadDraftRelease`. Stored nowhere a version's release is,
  * so nothing that runs a version (`loadRelease`) ever finds it, even when
- * it names a committed one (a read-only preview's, `readOnlyReferences`).
+ * it names a committed one (a read-only preview's, `draftReferences`).
  */
 export const sealDraftRelease = async (
   env: Env,

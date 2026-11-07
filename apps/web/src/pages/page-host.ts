@@ -442,7 +442,7 @@ const callFailed = (): Error =>
 /**
  * Calls one of `app`'s functions with `request`, as the frame sent it,
  * for the build `lease` names and the person the frame was opened for
- * (core's app-function-route.ts): a plain request, so core bounds its
+ * (core's page-calls.ts): a plain request, so core bounds its
  * bytes as it reads them. Core's answer, or its refusal as an error with
  * its code: `auth.principal_changed` when the browser's session is no
  * longer `person`'s.
@@ -756,26 +756,6 @@ const refusedInPreview = async (): Promise<never> => {
   throw appErrors.create("app.preview_side_effect");
 };
 
-/** Whether `frame` is a stream's last: its result, a refusal, or the end. */
-const isLastFrame = (frame: unknown): boolean =>
-  typeof frame === "object" &&
-  frame !== null &&
-  "type" in frame &&
-  (frame.type === "result" ||
-    frame.type === "refused" ||
-    frame.type === "closed");
-
-/** Tells the frame its stream's connection ended. Never throws. */
-const handedClosed = async (
-  onFrame: (frame: unknown) => Promise<unknown>
-): Promise<void> => {
-  try {
-    await onFrame({ type: "closed" });
-  } catch {
-    // The frame is gone.
-  }
-};
-
 /**
  * What a preview's frame is told beyond its calls while it takes its
  * draft's writes (`runPreview`): the frame reported a problem, or a call
@@ -791,30 +771,12 @@ export interface PreviewFollow {
 
 /** Whether `answer`, a preview call's, failed through the draft's own fault. */
 const failedByDraft = (answer: unknown): boolean => {
-  let parsed: unknown = answer;
-  if (typeof answer === "string") {
-    try {
-      parsed = JSON.parse(answer);
-    } catch {
-      return false;
-    }
-  }
-  const error = refusalOf(parsed);
+  const error = refusalOf(answer);
   const code: unknown =
     typeof error === "object" && error !== null
       ? Reflect.get(error, "code")
       : undefined;
   return typeof code === "string" && isDraftFault(code);
-};
-
-/** Whether a query's push is core's refusal of a revision the draft moved past. */
-const outdatedPush = (push: unknown): boolean => {
-  const error = refusalOf(push);
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    Reflect.get(error, "code") === "app.preview_outdated"
-  );
 };
 
 /** A live query the frame follows in a preview, followed again at each revision. */
@@ -826,8 +788,6 @@ interface PreviewWatch {
   subscription?: Promise<{ release: () => Promise<void> }>;
   /** Which of its subscriptions is current: the last one asked for. */
   generation: number;
-  /** Its current subscription was refused as of a revision moved past. */
-  outdated: boolean;
   ended: boolean;
   /**
    * The highest push number the frame was handed (`QuerySnapshotPush`'s
@@ -867,17 +827,17 @@ const releaseWatch = async (
 };
 
 /**
- * A preview of the chat's draft: what its page reports to the chat's agent; it starts no
- * workflow run, finds none, and follows none. A draft of spec 8's layout
- * runs on its draft release (core's sealed-previews.ts): its function
- * calls and live queries go there, on a store of the preview's own.
+ * A preview of the chat's draft: what its page reports to the chat's
+ * agent; it starts no workflow run, finds none, and follows none. Its
+ * function calls, streams and live queries go where every page's go, under
+ * the bundle's lease, which names the builder's draft (core's
+ * page-calls.ts): they run on the draft as it is, on a store of the
+ * preview's own. A version of the draft opened read-only has no lease:
+ * nothing it calls runs (`app.preview_outdated`).
  *
- * Its calls name the revision the frame shows; once the frame takes a
- * newer one (`moved`), its live queries are followed again at that one,
- * the old ones let go only once the new ones are asked for, so the
- * page's data never goes. A push refusing a revision the draft moved
- * past never reaches the frame: its query is followed again once the
- * frame moves on.
+ * Once the frame takes a newer revision (`moved`), its live queries are
+ * followed again, so they read the draft's new code, the old ones let go
+ * only once the new ones are asked for, so the page's data never goes.
  */
 export const previewTarget = (
   link: FrameLink,
@@ -885,18 +845,29 @@ export const previewTarget = (
   bundle: PreviewBundle,
   location: FrameLocation,
   follow?: PreviewFollow
-): FrameTarget & { moved: (at: PreviewAt) => void } => {
-  const { app } = bundle;
-  // What its calls name: what its refresh shows, or the revision of a
+): FrameTarget & { moved: (at: PreviewAt) => void; close: () => void } => {
+  const { app, lease } = bundle;
+  const hold =
+    lease === undefined
+      ? undefined
+      : { lease, frame: holdFrame(link, { app, lease }) };
+  /** The frame's hold and lease: a version opened read-only calls nothing. */
+  const leased = (): { lease: string; frame: FrameHold } => {
+    if (hold === undefined) {
+      throw appErrors.create("app.preview_outdated");
+    }
+    return hold;
+  };
+  // What its reports name: what its refresh shows, or the revision of a
   // version of the draft opened read-only.
   let shows: PreviewAt =
     bundle.refresh === undefined ? bundle.revision : shownAt(bundle.refresh);
   const watches = new Set<PreviewWatch>();
   /**
-   * The build of the page code running now, read as each call or report
-   * arrives: while the frame tries an update, its first render and mount
-   * effects run that update's code, and what they call or report is that
-   * build's, a failure too; otherwise the build it shows.
+   * The build of the page code running now, read as each report arrives:
+   * while the frame tries an update, its first render and mount effects
+   * run that update's code, and what they report is that build's;
+   * otherwise the build it shows.
    */
   const runningAt = (): PreviewAt => follow?.runningAt() ?? shows;
   /** Ends `watch` for good: the frame hears its query is no longer followed. */
@@ -908,17 +879,15 @@ export const previewTarget = (
     }
   };
   /**
-   * Follows `watch`'s query at the revision the frame shows, as its
-   * current subscription. Core letting go of it ends the watch, as core
-   * letting go of the frame's own callback would (the frame follows it
-   * again then), unless another subscription took its place or core
-   * only refused a revision the frame is moving past.
+   * Follows `watch`'s query, as its current subscription. Core letting go
+   * of it ends the watch, as core letting go of the frame's own callback
+   * would (the frame follows it again then), unless another subscription
+   * took its place.
    */
   const subscribe = async (
     watch: PreviewWatch
   ): Promise<{ release: () => Promise<void> }> => {
     watch.generation += 1;
-    watch.outdated = false;
     const { generation } = watch;
     // The first subscription's pushes go as core numbers them; each that
     // takes another's place, past what the frame was handed already.
@@ -926,10 +895,6 @@ export const previewTarget = (
     const current = (): boolean => watch.generation === generation;
     const relay = Object.assign(
       async (push: unknown): Promise<unknown> => {
-        if (outdatedPush(push)) {
-          watch.outdated ||= current();
-          return null;
-        }
         if (!current()) {
           return null;
         }
@@ -945,22 +910,14 @@ export const previewTarget = (
       },
       {
         [Symbol.dispose]: () => {
-          if (current() && !watch.outdated) {
+          if (current()) {
             endWatch(watch);
           }
         },
       }
     );
-    return await on(
-      link,
-      async ({ chats }) =>
-        await chats.previewWatchQuery(
-          chatId,
-          app,
-          shows,
-          watch.request,
-          forCore(relay)
-        )
+    return await leased().frame.use(
+      async (frame) => await frame.watchQuery(watch.request, forCore(relay))
     );
   };
   return {
@@ -974,78 +931,39 @@ export const previewTarget = (
         }
       }
     },
+    close: () => {
+      hold?.frame.close();
+    },
     callFunction: async (request) => {
-      const at = runningAt();
-      const answer = await on(
-        link,
-        async ({ chats }) =>
-          await chats.previewFunction(chatId, app, at, request)
+      const held = leased();
+      const answer = await held.frame.asPerson(
+        async (person) =>
+          await callFunction(app, { lease: held.lease, person }, request)
       );
       if (failedByDraft(answer)) {
         follow?.problem();
       }
       return answer;
     },
-    // A streaming action runs in the draft's preview too, on its draft
-    // release and store (core's sealed-previews.ts), relayed over the
-    // page's connection while the person may still have it.
     streamFunction: async (what, request, onFrame, onEnded) => {
-      const at = runningAt();
-      return await on(link, async ({ chats }) => {
-        let ended = false;
-        // A last frame came, even if the frame hasn't taken it yet: no
-        // `closed` goes after it.
-        let lastCame = false;
-        const end = (): void => {
-          if (!ended) {
-            ended = true;
-            onEnded();
-          }
-        };
-        const subscription = await chats.previewStream(
-          chatId,
-          app,
-          at,
-          what,
-          request,
-          forCore(async (frame: unknown) => {
-            const last = isLastFrame(frame);
-            lastCame ||= last;
-            try {
-              return await onFrame(frame);
-            } finally {
-              if (last) {
-                end();
-              }
-            }
-          })
-        );
-        // The connection dropped before the last frame: the frame hears
-        // `closed`, as a live page's stream does when its request ends,
-        // so it attaches again (on the next connection) rather than wait.
-        const stub: unknown = subscription;
-        if (stub instanceof RpcStub) {
-          stub.onRpcBroken(() => {
-            if (!(ended || lastCame)) {
-              end();
-              void handedClosed(onFrame);
-            }
-          });
-        }
-        return {
-          release: () => {
-            end();
-            void subscription.release();
-          },
-        };
-      });
+      const held = leased();
+      return await held.frame.asPerson(
+        async (person) =>
+          await followStream(
+            app,
+            { lease: held.lease, person },
+            what,
+            request,
+            onFrame,
+            onEnded
+          )
+      );
     },
     cancelStream: async (request) => {
-      const at = runningAt();
-      return await on(
-        link,
-        async ({ chats }) =>
-          await chats.previewCancelStream(chatId, app, at, request)
+      const held = leased();
+      return await held.frame.asPerson(
+        async (person) =>
+          await cancelStream(app, { lease: held.lease, person }, request)
       );
     },
     report: async (problem) => {
@@ -1072,7 +990,6 @@ export const previewTarget = (
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         toFrame: onSnapshot.dup() as RpcStub<SnapshotCallback>,
         generation: 0,
-        outdated: false,
         ended: false,
         handed: 0,
       };
@@ -1613,7 +1530,9 @@ export const runPreview = (
       connect: (link, bundle, _refused, cleanups) => {
         const opened = bundle.refresh;
         if (opened === undefined || revisions === undefined) {
-          return { target: previewTarget(link, chatId, bundle, location) };
+          const target = previewTarget(link, chatId, bundle, location);
+          cleanups.push(target.close);
+          return { target };
         }
         const moves: { to?: (at: PreviewAt) => void } = {};
         health =
@@ -1682,6 +1601,7 @@ export const runPreview = (
           revisions.listener = undefined;
           updates.close();
           stopFollowing();
+          target.close();
         });
         return { target };
       },

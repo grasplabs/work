@@ -29,7 +29,7 @@ import { AppVersionsRpc } from "./app-versions-rpc.ts";
 import {
   appVisitorGrantsOf,
   setAppVisitorGrants,
-} from "./app-visitor-calls.ts";
+} from "./app-visitor-grants.ts";
 import { appVisitors, setAppVisitors } from "./app-visitors.ts";
 import { AppWebhooksRpc } from "./app-webhooks.ts";
 import {

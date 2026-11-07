@@ -15,7 +15,7 @@ import { appHost, workspace } from "./durable-objects.ts";
 //   App's own Durable Object, with its pages' problems;
 // - a draft's preview's lines go to the chat's Workspace object, for the
 //   agent's next check of the draft (preview-reports.ts): each isolate a
-//   draft's sealed preview runs a function in (sealed-previews.ts), named
+//   draft's sealed preview runs a function in (draft-runs.ts), named
 //   by that function. Its
 //   props are core's, fixed as the isolate is made, never App code's: its
 //   lines reach only that chat's preview, at that revision.

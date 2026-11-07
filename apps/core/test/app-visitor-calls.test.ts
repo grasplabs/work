@@ -1,8 +1,13 @@
 import { peopleReferences } from "@grasp-os/sdk/host";
 import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
-import { appIdSchema } from "@grasp-os/shared/ids";
-import { pageLimits } from "@grasp-os/shared/pages";
+import { appIdSchema, chatIdSchema } from "@grasp-os/shared/ids";
+import {
+  appFunctionPath,
+  pageLeaseHeader,
+  pageLimits,
+  pageVisitorHeader,
+} from "@grasp-os/shared/pages";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -12,7 +17,7 @@ import { loadRelease } from "../src/app-releases.ts";
 import { deliveredToVisitor } from "../src/app-visitors.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
-import { leasedBuild } from "../src/page-delivery.ts";
+import { leasedBuild, leaseFor } from "../src/page-delivery.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { appDefinition } from "./app-definitions.ts";
 import { published } from "./apps.ts";
@@ -20,6 +25,7 @@ import { mockIdp } from "./idp.ts";
 import { captureMail } from "./mail-capture.ts";
 import type { CapturedMail } from "./mail-capture.ts";
 import { person as actingPerson } from "./sealed-apps.ts";
+import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
   openRpc,
@@ -32,7 +38,7 @@ import {
 } from "./sign-in.ts";
 
 // A visitor's calls of a published App's functions, as the App itself
-// (app-visitor-calls.ts), from its threat model: calling what wasn't
+// (app-visitor-grants.ts, through page-calls.ts), from its threat model: calling what wasn't
 // granted, or an action; reaching a member's data, or another visitor's;
 // escalating through a workflow or a resource; keeping a grant after it
 // was taken away, by fewer grants, a new version or unpublishing;
@@ -217,17 +223,29 @@ const toOf = (message: EmailMessageBuilder): string => {
 };
 
 const visitSchema = z.object({
+  app: z.string(),
   page: z.object({ lease: z.string() }).loose().nullable(),
 });
 
 const sessionSchema = z.object({ token: z.string() });
 
-/** A visitor signed in to the App at `link`: their token and lease. */
+/** A visitor signed in, as their page holds them. */
+interface Visitor {
+  token: string;
+  lease: string;
+  /** The App their session opens. */
+  app: string;
+}
+
+/**
+ * Signs `address` in as a visitor of the App at `link`, mailed a code at
+ * `mail`, and opens the App: their session's token and their page's lease.
+ */
 const visitor = async (
   mail: CapturedMail,
   link: string,
   address: string
-): Promise<{ token: string; lease: string }> => {
+): Promise<Visitor> => {
   await post({ action: "ask", link, address });
   const code = await vi.waitFor(() => {
     const message = mail.sent.findLast((each) => toOf(each) === address);
@@ -241,8 +259,8 @@ const visitor = async (
   const signedInAs = await post({ action: "sign_in", link, address, code });
   const { token } = sessionSchema.parse(await signedInAs.json());
   const opened = await post({ action: "open", token });
-  const { page } = visitSchema.parse(await opened.json());
-  return { token, lease: page?.lease ?? "" };
+  const { app, page } = visitSchema.parse(await opened.json());
+  return { token, lease: page?.lease ?? "", app };
 };
 
 const answerSchema = z.object({
@@ -253,13 +271,43 @@ const answerSchema = z.object({
 });
 
 /**
+ * A visitor's page's call, `request`, of `app` (theirs unless said): on
+ * every page's call path (page-calls.ts), their session's token in its
+ * header, their lease in its own.
+ */
+const postCall = async (
+  who: Pick<Visitor, "token" | "lease" | "app">,
+  request: string,
+  app = who.app
+): Promise<Response> =>
+  await routed(`${appFunctionPath}/${app}`, {
+    method: "POST",
+    headers: {
+      origin: clientOrigin,
+      "content-type": "application/json",
+      [pageVisitorHeader]: who.token,
+      [pageLeaseHeader]: who.lease,
+    },
+    body: request,
+  });
+
+/** What a call answered: its value, or the code it was refused with. */
+const answered = async (response: Response): Promise<unknown> => {
+  if (!response.ok) {
+    return errorPayloadSchema.parse(await response.json()).code;
+  }
+  const { result } = answerSchema.parse(await response.json());
+  return result.ok ? result.value : result.error.code;
+};
+
+/**
  * What a visitor's call of `path` answers: its value, or the code it was
  * refused with, at the HTTP level or in the result.
  */
 const call = async (
   app: string,
   version: number,
-  who: { token: string; lease: string },
+  who: Visitor,
   path: string,
   input: unknown = {}
 ): Promise<unknown> => {
@@ -271,17 +319,7 @@ const call = async (
     },
     input,
   });
-  const response = await post({
-    action: "call",
-    token: who.token,
-    lease: who.lease,
-    request,
-  });
-  if (!response.ok) {
-    return errorPayloadSchema.parse(await response.json()).code;
-  }
-  const { result } = answerSchema.parse(await response.json());
-  return result.ok ? result.value : result.error.code;
+  return await answered(await postCall(who, request, app));
 };
 
 /**
@@ -289,25 +327,26 @@ const call = async (
  * (`reference`) answers: its value, or the code it was refused with.
  */
 const read = async (
-  who: { token: string; lease: string },
+  who: Visitor,
   reference: (typeof peopleReferences)[keyof typeof peopleReferences],
   input: unknown
-): Promise<unknown> => {
-  const response = await post({
-    action: "call",
-    token: who.token,
-    lease: who.lease,
-    request: JSON.stringify({
-      reference: { name: reference.name, kind: "query" },
-      input,
-    }),
+): Promise<unknown> =>
+  await answered(
+    await postCall(
+      who,
+      JSON.stringify({
+        reference: { name: reference.name, kind: "query" },
+        input,
+      })
+    )
+  );
+
+/** A call of `portal.add` with `text`, as a visitor's page writes it. */
+const add = (text: string): string =>
+  JSON.stringify({
+    reference: { name: "portal.add", kind: "mutation" },
+    input: { text },
   });
-  if (!response.ok) {
-    return errorPayloadSchema.parse(await response.json()).code;
-  }
-  const { result } = answerSchema.parse(await response.json());
-  return result.ok ? result.value : result.error.code;
-};
 
 /** A visitor caller a function answered as JSON text, its session left out. */
 const visitorCallerOf = (answer: unknown): unknown => {
@@ -877,6 +916,68 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
       answer: await revokedWhile("answer"),
       error: await revokedWhile("error"),
     }).toStrictEqual({ answer: expected, error: expected });
+  });
+
+  it("never reach a builder's draft, another App or a stream on the path every page calls on", async () => {
+    const domain = newDomain();
+    const { builder, app, link, version } = await portal(domain);
+    const mail = await mailbox();
+    await builder.api.apps.setVisitorGrants(app, ["portal.add", "portal.mine"]);
+    const ana = await visitor(mail, link, `ana@${domain}`);
+    // The builder's preview of a draft of the App, and the lease it opened
+    // with; and a draft's lease signed for ana's own session, as core
+    // never signs one, should a bug of its ever do so.
+    const chat = await builder.api.chats.forApp(app);
+    const preview = await builder.api.chats.preview(chat.id, app);
+    const sessions = await env.DB.prepare(
+      "SELECT id FROM app_visitor_sessions WHERE app_id = ?"
+    )
+      .bind(app)
+      .all<{ id: string }>();
+    const forHer = await leaseFor(
+      env,
+      `visitor:${sessions.results[0]?.id ?? ""}`,
+      appIdSchema.parse(app),
+      {
+        kind: "draft",
+        artifact: preview.artifact,
+        chatId: chatIdSchema.parse(chat.id),
+      }
+    );
+    const other = await portal(newDomain());
+    const streamed = await routed(`${appFunctionPath}/${app}/stream`, {
+      method: "POST",
+      headers: {
+        origin: clientOrigin,
+        "content-type": "application/json",
+        [pageVisitorHeader]: ana.token,
+        [pageLeaseHeader]: ana.lease,
+      },
+      body: add("streamed"),
+    });
+
+    expect({
+      buildersDraft: await answered(
+        await postCall({ ...ana, lease: preview.lease ?? "" }, add("draft"))
+      ),
+      draftForHer: await answered(
+        await postCall({ ...ana, lease: forHer }, add("draft"))
+      ),
+      anotherApp: await answered(await postCall(ana, add("other"), other.app)),
+      forgedToken: await answered(
+        await postCall({ ...ana, token: "a".repeat(43) }, add("forged"))
+      ),
+      stream: await answered(streamed),
+      mine: await call(app, version, ana, "portal.mine"),
+    }).toStrictEqual({
+      // Signed for the builder: no lease of hers, so code core didn't serve.
+      buildersDraft: "page.unreviewed",
+      draftForHer: "app.preview_side_effect",
+      anotherApp: "visitor.signed_out",
+      forgedToken: "visitor.signed_out",
+      stream: "contract.invalid_request",
+      mine: [],
+    });
   });
 
   it("are granted only by the App's builders, never staff or its users", async () => {

@@ -192,7 +192,7 @@ const typeRules: readonly {
   { action: "app.visitor_refused", type: "permission" },
   { action: "app.visitor_code_sent", type: "action" },
   // The functions a version grants visitors (core's
-  // src/app-visitor-calls.ts) are who may do what; a visitor's call of
+  // src/app-visitor-grants.ts) are who may do what; a visitor's call of
   // one runs it.
   { action: "app.visitor_granted", type: "permission" },
   { action: "app.visitor_ungranted", type: "permission" },

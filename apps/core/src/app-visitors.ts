@@ -11,6 +11,7 @@ import {
   appVisitorListSchema,
   appVisitorRequestSchema,
   appVisitorSessionHours,
+  appVisitorTokenSchema,
 } from "@grasp-os/shared/app-visitors";
 import type {
   AppVisitorEntry,
@@ -24,7 +25,6 @@ import { isExpectedError, requestErrors } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { pageErrors } from "@grasp-os/shared/pages";
 import type { PageBundle } from "@grasp-os/shared/pages";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -44,7 +44,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { callVisitorFunction } from "./app-functions.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
-import { grantHeld } from "./app-visitor-calls.ts";
+import { grantHeld } from "./app-visitor-grants.ts";
 import { editableApp, toApp } from "./apps.ts";
 import {
   auditedBatch,
@@ -106,11 +106,13 @@ import { requireNotStaff } from "./sharing.ts";
 //   App's own code. A visitor never holds a member's session, so `/rpc`
 //   and every member's route refuse them.
 // - The page reaching past the App. The page runs in the frame core
-//   serves for every page (page-frame.ts). Its calls come here, never
-//   through a member's route (which needs a member's session; the lease a
-//   visitor's page gets is for `visitor:<session>`, which no member's
-//   is), and run as the App itself, only for the functions its builders
-//   granted visitors (app-visitor-calls.ts): never as a member.
+//   serves for every page (page-frame.ts). Its calls go through every
+//   page's one call path with the session's token (page-calls.ts), which
+//   hands them here (`visitorCall`) and never to a member's call: the
+//   lease a visitor's page gets is for `visitor:<session>`, which no
+//   member's is, and names the App's release, never a draft. They run as
+//   the App itself, only for the functions its builders granted visitors
+//   (app-visitor-grants.ts): never as a member.
 // - Access that outlives its reason. On every open and call, the session
 //   must be unexpired (8 hours at most), the App still published, and the
 //   address still listed; removing it from the list ends it at once, and
@@ -130,13 +132,12 @@ const minuteMs = 60 * 1000;
 const hourMs = 60 * minuteMs;
 
 /**
- * The most bytes a visitor's request may carry: a call's request
- * (`functionRequestMaxBytes`, as a member's page may send) written as a
- * JSON string, where escaping can at most double it, and room for the
- * rest (the action, a session and a lease). Every other request is far
- * smaller, and checked field by field once it is parsed.
+ * The most bytes a request of a visitor's page here may carry: an action,
+ * a link, an address, a code or a session, each checked once it is parsed.
+ * Its calls go through every page's call path (page-calls.ts), bounded
+ * there as a member's page's are.
  */
-const requestMaxLength = 2 * functionRequestMaxBytes + 4 * 1024;
+const requestMaxLength = 4 * 1024;
 
 /** Most rows the sweep deletes of each, a run. */
 const sweptPerRun = 500;
@@ -693,24 +694,42 @@ export const deliveredToVisitor = async <Answer>(
   return answer;
 };
 
+/** A visitor's call of one of the App's functions, as their page sent it. */
+export interface VisitorCall {
+  /** Their session's token (`pageVisitorHeader`). */
+  readonly token: string;
+  /** The App the call's path names: their session's, or refused. */
+  readonly app: string;
+  /** The lease their frame was opened with. */
+  readonly lease: string | null;
+  /** Reads the call's body, bounded, once the call was counted. */
+  readonly read: () => Promise<string>;
+}
+
 /**
- * A call of one of the App's functions by a visitor, from its page
- * (app-visitor-calls.ts): run as the App itself, only for a function the
- * App's current version grants visitors, while the session is live, the
- * App published and the address listed, each read again before every
- * commit. Counted per visitor and per App before anything runs.
+ * A call of one of the App's functions by a visitor, from its page,
+ * through every page's call path (page-calls.ts): run as the App itself,
+ * only for a function the App's current version grants visitors, while
+ * the session is live, the App published and the address listed, each
+ * read again before every commit; never on a draft. Counted per visitor
+ * and per App before its body is read.
  */
-const callAsVisitor = async (
+export const visitorCall = async (
   env: Env,
-  token: string,
-  lease: string,
-  request: string
+  { token, app, lease, read }: VisitorCall
 ): Promise<FunctionAnswer> => {
-  const session = await sessionOf(env, token);
+  const parsedToken = appVisitorTokenSchema.safeParse(token);
+  const session = parsedToken.success
+    ? await sessionOf(env, parsedToken.data)
+    : undefined;
   if (session === undefined) {
     throw appVisitorErrors.create("visitor.signed_out");
   }
   const appId = appIdSchema.parse(session.appId);
+  // A session opens its own App and no other, whatever the path names.
+  if (appId !== app) {
+    throw appVisitorErrors.create("visitor.signed_out");
+  }
   const found = await publishedApp(env, appId);
   if (
     found === undefined ||
@@ -746,8 +765,10 @@ const callAsVisitor = async (
     );
     throw appVisitorErrors.create("visitor.not_granted");
   };
+  const request = await read();
   // Only a build whose code gets the App's data, as for a member's call:
   // before it runs, and again before its answer or error is handed over.
+  // A draft's lease is never a visitor's, and is refused (`leasedBuild`).
   const build = await leasedBuild(env, principal, appId, lease);
   const target = { app: appId, sessionId: session.id, build };
   return await deliveredToVisitor(
@@ -795,7 +816,7 @@ const callAsVisitor = async (
 };
 
 /** The HTTP status of each refusal a visitor meets. */
-const statusFor: Record<string, number> = {
+export const visitorStatusFor: Readonly<Record<string, number>> = {
   "visitor.invalid": 400,
   "visitor.code_invalid": 401,
   "visitor.signed_out": 401,
@@ -867,11 +888,6 @@ export const appVisitorResponse = async (
         await signOut(env, body.token);
         return Response.json({ signedOut: true });
       }
-      case "call": {
-        return Response.json(
-          await callAsVisitor(env, body.token, body.lease, body.request)
-        );
-      }
       default: {
         return body satisfies never;
       }
@@ -881,7 +897,7 @@ export const appVisitorResponse = async (
       throw error;
     }
     // A page refused (unreviewed or revoked) is the App's to fix: 409.
-    return errorResponse(statusFor[error.code] ?? 409, error, requestId);
+    return errorResponse(visitorStatusFor[error.code] ?? 409, error, requestId);
   }
 };
 

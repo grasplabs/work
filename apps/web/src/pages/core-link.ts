@@ -102,7 +102,7 @@ const settled = async (promise: Promise<unknown>): Promise<void> => {
  *   connection made again is someone else's, and it is checked before
  *   it is handed out. What goes by plain request instead (a page's
  *   function calls) names the link's person, and core refuses it for
- *   anyone else's cookie (core's app-function-route.ts).
+ *   anyone else's cookie (core's page-calls.ts).
  * - A reconnect racing a call: a call made while the link connects again
  *   waits for the new connection, and gets the refusal instead of it.
  *   One sent on the old connection breaks with it.

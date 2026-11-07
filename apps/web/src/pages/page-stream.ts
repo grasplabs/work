@@ -9,7 +9,7 @@ import type { StreamCallAction } from "@grasp-os/shared/pages";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 
 // The page's side of a page's streaming action (spec 10.7.6, core's
-// app-function-route.ts and action-invocation.ts): the request posted
+// page-calls.ts and action-invocation.ts): the request posted
 // under the page's lease, its frames read as JSON lines and handed to
 // the frame one at a time. The frame's port drops a session that has
 // more waiting unread than it holds (@grasp-os/shared/page-port), so

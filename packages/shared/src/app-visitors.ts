@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import { appLinkSchema } from "./apps.ts";
 import { defineErrorFamily } from "./errors.ts";
-import { functionRequestMaxBytes } from "./operation-limits.ts";
 
 // Visitors (core's app-visitors.ts): someone who isn't a member opens a
 // published App at its own link (`appLinkSchema`), once they sign in with
@@ -10,12 +9,13 @@ import { functionRequestMaxBytes } from "./operation-limits.ts";
 // one at a domain they listed, can ask for a code. A visitor's session
 // opens that one App's pages and nothing else. Its pages call only the
 // functions the App's builders granted visitors, for the version they
-// granted them on, and those run as the App itself, never as a member
-// (core's app-visitor-calls.ts).
+// granted them on, and those run as the App itself, never as a member,
+// through every page's one call path, the session's token in its own
+// header (core's page-calls.ts, `pageVisitorHeader`).
 // How each part can be attacked, and what stops it, is in core's
 // app-visitors.ts.
 
-/** Where a visitor's page talks to core: one POST per action. */
+/** Where a visitor's page signs in, opens its App and signs out. */
 export const appVisitorApiPath = "/api/app-visitor";
 
 /** Where a visitor opens an App: the page, then the App's link. */
@@ -150,19 +150,6 @@ export const appVisitorRequestSchema = z.discriminatedUnion("action", [
   z.strictObject({
     action: z.literal("sign_out"),
     token: appVisitorTokenSchema,
-  }),
-  /**
-   * A call of one of the App's functions from its page, as the page
-   * client writes it (`request`, JSON text), with the lease its frame was
-   * opened with.
-   */
-  z.strictObject({
-    action: z.literal("call"),
-    token: appVisitorTokenSchema,
-    lease: z.string().max(256),
-    // As many characters as a call's bytes; the call itself counts its
-    // bytes (`functionRequestMaxBytes`) before it parses them.
-    request: z.string().max(functionRequestMaxBytes),
   }),
 ]);
 export type AppVisitorRequest = z.input<typeof appVisitorRequestSchema>;

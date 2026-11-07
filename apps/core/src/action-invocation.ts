@@ -1,5 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import type { AppId } from "@grasp-os/shared/ids";
+import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -30,6 +30,7 @@ import { formSubmissionOf, queueFormSent } from "./app-webhook-queue.ts";
 import type { FormSubmission } from "./app-webhook-queue.ts";
 import { currentVersionOf } from "./apps.ts";
 import { actionInvocations } from "./db/core/schema.ts";
+import { draftRunOf, invokeDraftAction } from "./draft-runs.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 
@@ -102,6 +103,12 @@ export interface InvocationOpen {
   /** The fingerprint of `by`'s access as core admitted it (`accessOf`). */
   readonly access: string;
   readonly app: AppId;
+  /**
+   * The builder's draft it runs on, in this chat of theirs (draft-runs.ts),
+   * rather than the App's current release: from core's lease, never the
+   * request.
+   */
+  readonly draft?: ChatId;
   /** The object's own name (`invocationName`), which the App's object holds. */
   readonly name: string;
   readonly call: FunctionRequest;
@@ -147,9 +154,10 @@ interface Started {
   /**
    * The release version that ran it. The name is shared across versions
    * of one contract, so a receipt is handed over only while this version,
-   * and the caller's, aren't revoked.
+   * and the caller's, aren't revoked. Null for a builder's draft, which
+   * runs no release (draft-runs.ts).
    */
-  readonly version: number;
+  readonly version: number | null;
   /**
    * The object's own name (`invocationName`), which its inventory row
    * (`action_invocations`) is under.
@@ -434,7 +442,7 @@ export class ActionInvocation extends DurableObject<Env> {
   async version(userId: string): Promise<number | undefined> {
     await Promise.resolve();
     const record = this.#record();
-    return record?.owner === userId ? record.version : undefined;
+    return record?.owner === userId ? (record.version ?? undefined) : undefined;
   }
 
   /**
@@ -578,14 +586,16 @@ export class ActionInvocation extends DurableObject<Env> {
     }
     // Nothing of what ran under a release revoked since is handed over,
     // nor while the App's current release is revoked, as a new call would
-    // be refused.
+    // be refused. A draft's runs no release.
     try {
-      for (const version of new Set([
-        record.version,
-        await currentVersionOf(this.env, spec.app),
-      ])) {
-        // oxlint-disable-next-line no-await-in-loop -- one or two, in turn
-        await requireNotRevoked(this.env, spec.app, version);
+      if (record.version !== null) {
+        for (const version of new Set([
+          record.version,
+          await currentVersionOf(this.env, spec.app),
+        ])) {
+          // oxlint-disable-next-line no-await-in-loop -- one or two, in turn
+          await requireNotRevoked(this.env, spec.app, version);
+        }
       }
     } catch (error) {
       return resultOf(refused(error));
@@ -653,13 +663,17 @@ export class ActionInvocation extends DurableObject<Env> {
     // run's own (`invokeAppAction`) refuses it with `version.mismatch`
     // before any of the App's code runs: no receipt is kept
     // (`keepsReceipt`), so the same key may be sent again and runs in the
-    // new version.
-    let version: number;
+    // new version. A builder's draft runs as it is when its run starts.
+    let runsOn: { readonly version: number } | { readonly draft: ChatId };
     try {
-      version = await currentVersionOf(this.env, spec.app);
+      runsOn =
+        spec.draft === undefined
+          ? { version: await currentVersionOf(this.env, spec.app) }
+          : { draft: spec.draft };
     } catch (error) {
       return resultOf(refused(error));
     }
+    const version = "version" in runsOn ? runsOn.version : null;
     const host = appHost(this.env, spec.app);
     const held = await host.holdInvocation(
       spec.by.userId,
@@ -727,38 +741,39 @@ export class ActionInvocation extends DurableObject<Env> {
       changed: Promise.withResolvers(),
     };
     this.#live = live;
+    // A draft's run tells no webhook: a preview changes nothing real.
     this.#form =
-      spec.form === undefined
+      spec.form === undefined || spec.draft !== undefined
         ? undefined
         : { runId, app: spec.app, call: spec.call, ...spec.form };
     await this.ctx.storage.setAlarm(deadline + settleMarginMs);
+    const progress = spec.streaming
+      ? {
+          progress: {
+            publish: (value: Json) => {
+              live.progress = { seq: (live.progress?.seq ?? 0) + 1, value };
+              wake(live);
+            },
+          },
+        }
+      : {};
+    const runs = { ...progress, cancelled: live.stop.signal, deadline };
     const run = async (): Promise<void> => {
       let outcome: Outcome;
       try {
-        outcome = await invokeAppAction(
-          this.env,
-          spec.by,
-          spec.app,
-          spec.call,
-          {
-            version,
-            ...(spec.streaming
-              ? {
-                  progress: {
-                    publish: (value: Json) => {
-                      live.progress = {
-                        seq: (live.progress?.seq ?? 0) + 1,
-                        value,
-                      };
-                      wake(live);
-                    },
-                  },
-                }
-              : {}),
-            cancelled: live.stop.signal,
-            deadline,
-          }
-        );
+        outcome =
+          "version" in runsOn
+            ? await invokeAppAction(this.env, spec.by, spec.app, spec.call, {
+                ...runs,
+                version: runsOn.version,
+              })
+            : await invokeDraftAction(
+                this.env,
+                spec.by,
+                await draftRunOf(this.env, spec.by, spec.app, runsOn.draft),
+                spec.call,
+                runs
+              );
       } catch (error) {
         outcome = { result: refused(error), reached: false, effects: 0 };
       }
@@ -890,9 +905,10 @@ export class ActionInvocation extends DurableObject<Env> {
 /**
  * The name of the invocation `call` starts, for `userId` in `app`, as a
  * streaming action's or a plain one's: never both, so a plain call and a
- * stream under one key never share an object. Not the App's version:
- * like a mutation's receipt, an action's outlives a publish that keeps the
- * function; other input is refused by its input's hash.
+ * stream under one key never share an object; nor a run of a builder's
+ * draft (`draft`) and one of the App's release. Not the App's
+ * version: like a mutation's receipt, an action's outlives a publish that
+ * keeps the function; other input is refused by its input's hash.
  */
 export const invocationName = async (
   userId: string,
@@ -901,11 +917,23 @@ export const invocationName = async (
     readonly reference: Pick<FunctionRequest["reference"], "name">;
   },
   key: string,
-  streaming: boolean
+  {
+    streaming,
+    draft,
+  }: {
+    streaming: boolean;
+    /** A builder's draft's: its chat, and its preview's seed (draft-runs.ts). */
+    draft?: { readonly chatId: ChatId; readonly seed: string };
+  }
 ): Promise<string> => {
   const { name } = call.reference;
+  const named = [streaming ? "stream" : "action", userId, app, name, key];
+  // A release's as it always was; a draft's apart, and new once its
+  // preview's data is dropped, so nothing it kept outlives that.
   return await sha256Hex(
-    canonicalJson([streaming ? "stream" : "action", userId, app, name, key])
+    canonicalJson(
+      draft === undefined ? named : [...named, draft.chatId, draft.seed]
+    )
   );
 };
 

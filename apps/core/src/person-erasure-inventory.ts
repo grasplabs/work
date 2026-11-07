@@ -149,7 +149,7 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.app_visitor_entries": {
     company: "an App's visitor list, and the builder who listed each",
   },
-  // The App functions a version grants its visitors (app-visitor-calls.ts),
+  // The App functions a version grants its visitors (app-visitor-grants.ts),
   // with the builder who granted each (`granted_by`): the App's own
   // settings, as other settings a builder changed are.
   "core.app_visitor_grants": {

@@ -29,6 +29,7 @@ import { indexApps } from "./knowledge/apps-collection.ts";
 import { advanceExports } from "./knowledge/brain-export.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
+import { sweepLegacyPreviewStores } from "./legacy-preview-stores.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
 import { checkReadings } from "./onboarding/documents.ts";
@@ -38,7 +39,6 @@ import { sweepBuilds } from "./pages.ts";
 import { retryErasures } from "./person-erasure.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
-import { sweepPreviewStores } from "./sealed-previews.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
 import { sendStephenSummaries } from "./stephen-summary.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
@@ -265,10 +265,11 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     period: "quarterHour",
     run: sweepPageFrames,
   },
+  // CONTRACT: goes with `preview_fixture_stores` (legacy-preview-stores.ts).
   {
     name: "pages.previews",
     period: "quarterHour",
-    run: sweepPreviewStores,
+    run: sweepLegacyPreviewStores,
   },
   { name: "pages.builds", period: "quarterHour", run: sweepBuilds },
   {

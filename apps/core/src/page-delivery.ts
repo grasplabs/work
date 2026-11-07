@@ -1,10 +1,13 @@
+import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { OutputClass } from "@grasp-os/shared/data-policy";
 import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import { authErrors } from "@grasp-os/shared/errors";
 import type { CodedError } from "@grasp-os/shared/errors";
-import type { AppId } from "@grasp-os/shared/ids";
+import { chatIdSchema } from "@grasp-os/shared/ids";
+import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
 import {
   artifactSchema,
   pageErrors,
@@ -93,33 +96,76 @@ export interface LeasedBuild {
   readonly version: number;
 }
 
-/** What a lease signs: who was handed which build of which App. */
-const leased = (
-  userId: string,
-  app: AppId,
-  { artifact, version }: LeasedBuild
-): Uint8Array =>
-  encoder.encode(canonicalJson([userId, app, artifact, version]));
+/**
+ * What a frame runs, as core leased it: a build of the App's release,
+ * whose calls the App's current release answers on the App's store; or a
+ * build of a builder's draft in one of their chats, whose calls that
+ * draft answers on a throwaway store with no resources (draft-runs.ts).
+ * Which one is signed with the rest, so nothing a frame or a page sends
+ * picks it, and no store is ever named at all: it follows from this.
+ */
+export type PageLease =
+  | { readonly kind: "release"; readonly build: LeasedBuild }
+  | {
+      readonly kind: "draft";
+      readonly artifact: string;
+      readonly chatId: ChatId;
+    };
+
+/** What a lease signs: who was handed which build of which App, run on what. */
+const leased = (principal: string, app: AppId, lease: PageLease): Uint8Array =>
+  encoder.encode(
+    canonicalJson(
+      lease.kind === "release"
+        ? [principal, app, lease.build.artifact, lease.build.version, null]
+        : [principal, app, lease.artifact, null, lease.chatId]
+    )
+  );
+
+/** `lease` as JSON, to key what is shared only under the same one. */
+export const leaseKey = (lease: PageLease | undefined): Json => {
+  if (lease === undefined) {
+    return null;
+  }
+  return lease.kind === "release"
+    ? ["release", lease.build.artifact, lease.build.version]
+    : ["draft", lease.artifact, lease.chatId];
+};
+
+/** How a lease names a draft: this, then the chat's ID in base64url. */
+const draftMark = "d";
 
 /**
- * Core's word that it handed `build` of `app` to `userId`: the build's
- * hash, the version it was opened from and a MAC only core can make (a
- * key derived from its auth secret). The page gives it back when it opens
- * the frame (`PagesApi.frame`); it says which build of which version.
+ * Core's word that it handed `lease` of `app` to `principal` (a member's
+ * ID, or a visitor's `visitor:<session>`): the build's hash, the version
+ * or the draft it runs on, and a MAC only core can make (a key derived
+ * from its auth secret). The page sends it with every call (page-calls.ts)
+ * and when it opens a frame (`PagesApi.frame`).
  */
 export const leaseFor = async (
   env: Env,
-  userId: string,
+  principal: string,
   app: AppId,
-  build: LeasedBuild
+  lease: PageLease
 ): Promise<string> => {
   const key = await derivedHmacKey(env, leasePurpose, ["sign", "verify"]);
-  const mac = await crypto.subtle.sign("HMAC", key, leased(userId, app, build));
-  return `${build.artifact}.${build.version}.${toBase64Url(new Uint8Array(mac))}`;
+  const mac = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    leased(principal, app, lease)
+  );
+  const [artifact, target] =
+    lease.kind === "release"
+      ? [lease.build.artifact, String(lease.build.version)]
+      : [
+          lease.artifact,
+          `${draftMark}${toBase64Url(encoder.encode(lease.chatId))}`,
+        ];
+  return `${artifact}.${target}.${toBase64Url(new Uint8Array(mac))}`;
 };
 
-/** The longest a lease is: a hash, a version, two dots and a MAC. */
-const leaseMaxLength = 144;
+/** The longest a lease is: a hash, a version or a chat, two dots and a MAC. */
+const leaseMaxLength = 256;
 
 /**
  * Why a page's request, through its page, is refused for whom it names
@@ -148,31 +194,56 @@ export const personRefusal = (
 /** A version as a lease writes it: a positive integer, in decimal. */
 const leasedVersion = /^[1-9]\d{0,9}$/u;
 
+/** The target a lease names, read back: a version, or a draft's chat. */
+const targetOf = (artifact: string, target: string): PageLease | undefined => {
+  if (leasedVersion.test(target)) {
+    return { kind: "release", build: { artifact, version: Number(target) } };
+  }
+  if (!target.startsWith(draftMark)) {
+    return undefined;
+  }
+  try {
+    const chat = chatIdSchema.safeParse(
+      new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+        fromBase64Url(target.slice(draftMark.length))
+      )
+    );
+    return chat.success
+      ? { kind: "draft", artifact, chatId: chat.data }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 /**
- * The build `lease` says core handed `userId` for `app`, or `undefined`
- * for anything core didn't sign for exactly them and that App.
+ * What `lease` says core handed `principal` for `app`, or `undefined` for
+ * anything core didn't sign for exactly them and that App: code core
+ * didn't serve.
  */
-export const leasedBuild = async (
+export const readLease = async (
   env: Env,
-  userId: string,
+  principal: string,
   app: AppId,
   lease: unknown
-): Promise<LeasedBuild | undefined> => {
+): Promise<PageLease | undefined> => {
   if (typeof lease !== "string" || lease.length > leaseMaxLength) {
     return undefined;
   }
-  const [artifact, version, mac, ...more] = lease.split(".");
+  const [artifact, target, mac, ...more] = lease.split(".");
   if (
+    artifact === undefined ||
+    target === undefined ||
     mac === undefined ||
     more.length > 0 ||
-    version === undefined ||
-    !leasedVersion.test(version) ||
-    !artifactSchema.safeParse(artifact).success ||
-    artifact === undefined
+    !artifactSchema.safeParse(artifact).success
   ) {
     return undefined;
   }
-  const build: LeasedBuild = { artifact, version: Number(version) };
+  const read = targetOf(artifact, target);
+  if (read === undefined) {
+    return undefined;
+  }
   let signature: Uint8Array<ArrayBuffer>;
   try {
     signature = fromBase64Url(mac);
@@ -184,9 +255,29 @@ export const leasedBuild = async (
     "HMAC",
     key,
     signature,
-    leased(userId, app, build)
+    leased(principal, app, read)
   );
-  return signed ? build : undefined;
+  return signed ? read : undefined;
+};
+
+/**
+ * The build of the App's release `lease` says core handed `principal` for
+ * `app`, or `undefined` for code core didn't serve: for what only a
+ * release's page reaches (its files, its links, a visitor's calls). A
+ * draft's lease is refused there (`app.preview_side_effect`), never taken
+ * for none, which the App's data being `ordinary` would let through.
+ */
+export const leasedBuild = async (
+  env: Env,
+  principal: string,
+  app: AppId,
+  lease: unknown
+): Promise<LeasedBuild | undefined> => {
+  const read = await readLease(env, principal, app, lease);
+  if (read?.kind === "draft") {
+    throw appErrors.create("app.preview_side_effect");
+  }
+  return read?.build;
 };
 
 /** What core holds for one build of an App's page, read in one statement. */

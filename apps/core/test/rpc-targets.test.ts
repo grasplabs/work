@@ -1,15 +1,11 @@
-import { chatIdSchema } from "@grasp-os/shared/ids";
 import type { RpcTarget } from "capnweb";
 import { RpcStub } from "capnweb";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { workspace } from "../src/durable-objects.ts";
 import { CoreRpcTarget } from "../src/rpc-target.ts";
 import { browserApi } from "../src/rpc.ts";
 import type { CoreRpc } from "../src/rpc.ts";
-import { openTestRun } from "./agent-chat.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -218,58 +214,6 @@ const calls = {
     const subscription = holding(held, await chats.watch(id, null, page.stub));
     // The chat as it is now, pushed at once: let go of after that, as a
     // page does, not while it's on its way.
-    await page.pushed;
-    return subscription;
-  },
-  "authenticate.chats.previewStream": async (chats, { app, userId, held }) => {
-    const { id } = await chats.create("Streamed");
-    const chatId = chatIdSchema.parse(id);
-    const chatsOf = workspace(env, personalWorkspaceId(userId));
-    await chatsOf.saveDraft(chatId, app, 1, { "notes.md": "drafted" }, [], 0, {
-      runId: await openTestRun(chatsOf, chatId),
-    });
-    const pushed = Promise.withResolvers<true>();
-    const frames = new RpcStub(async () => {
-      pushed.resolve(true);
-      return await Promise.resolve(null);
-    });
-    // A draft that seals no release: the stream's refused result, pushed
-    // at once, ends it, and the hold is let go of after that.
-    const subscription = holding(
-      held,
-      await chats.previewStream(
-        id,
-        app,
-        1,
-        "stream",
-        JSON.stringify({
-          reference: { name: "notes.run", kind: "action" },
-          input: {},
-          idempotencyKey: crypto.randomUUID(),
-        }),
-        frames
-      )
-    );
-    await pushed.promise;
-    return subscription;
-  },
-  "authenticate.chats.previewWatchQuery": async (
-    chats,
-    { app, userId, held }
-  ) => {
-    const { id } = await chats.create("Previewed");
-    const chatId = chatIdSchema.parse(id);
-    const chatsOf = workspace(env, personalWorkspaceId(userId));
-    await chatsOf.saveDraft(chatId, app, 1, { "notes.md": "drafted" }, [], 0, {
-      runId: await openTestRun(chatsOf, chatId),
-    });
-    const page = pageStub();
-    // A draft that seals no release: its refusal, pushed at once, ends the
-    // subscription, which is let go of after that, as a page does.
-    const subscription = holding(
-      held,
-      await chats.previewWatchQuery(id, app, 1, "{}", page.stub)
-    );
     await page.pushed;
     return subscription;
   },
@@ -519,8 +463,6 @@ describe("what a browser reaches over core's connection", () => {
         "authenticate.pages.frame: PageFrameRpc",
         "authenticate.pages.frame.watchQuery: Subscription",
         "authenticate.pages.watchVersion: Subscription",
-        "authenticate.chats.previewWatchQuery: Subscription",
-        "authenticate.chats.previewStream: Subscription",
       ])
     );
   });

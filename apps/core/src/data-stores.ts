@@ -641,6 +641,43 @@ export const openFixtureStore = (
 ): OpenStore => storeClient(env, id);
 
 /**
+ * A throwaway store (draft-runs.ts): an object of the stores' namespace
+ * that core's inventory never lists, so `openStore` never opens it and no
+ * release binds it. Held with `holdThrowawayStore`, or it empties itself.
+ */
+export const throwawayStore = (
+  env: Pick<Env, "DATA_STORES" | "DURABLE_OBJECT_JURISDICTION">,
+  id: StoreId
+): OpenStore => storeClient(env, id);
+
+/**
+ * Holds throwaway store `id` until `until`, when it empties itself unless
+ * held again (`DataStore.holdThrowaway`, which refuses a listed store, and
+ * one emptied for good).
+ */
+export const holdThrowawayStore = async (
+  env: Pick<Env, "DATA_STORES" | "DURABLE_OBJECT_JURISDICTION">,
+  id: StoreId,
+  until: number
+): Promise<void> => {
+  await inJurisdiction(env, env.DATA_STORES)
+    .getByName(id)
+    .holdThrowaway(id, until);
+};
+
+/**
+ * Empties throwaway store `id` for good, at once: it refuses every call
+ * after, one under way included, and is never held again
+ * (`DataStore.emptyThrowaway`).
+ */
+export const emptyThrowawayStore = async (
+  env: Pick<Env, "DATA_STORES" | "DURABLE_OBJECT_JURISDICTION">,
+  id: StoreId
+): Promise<void> => {
+  await inJurisdiction(env, env.DATA_STORES).getByName(id).emptyThrowaway(id);
+};
+
+/**
  * Discards fixture store `id`: its object refuses for any store the
  * inventory lists (`DataStore.discardFixture`).
  */

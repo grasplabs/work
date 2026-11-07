@@ -426,7 +426,7 @@ describe("Grasp staff's views, audited", () => {
           check,
           userId: staff.userId,
           app: appIdSchema.parse(app),
-          build: undefined,
+          lease: undefined,
           // SAFETY: never reached: the Apps don't exist, so no call goes
           // past its check to follow a query.
           // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -548,7 +548,7 @@ describe("Grasp staff's views, audited", () => {
       check: staffAudited(env, async () => await Promise.resolve(staff)),
       userId: staff.userId,
       app: appIdSchema.parse(crypto.randomUUID()),
-      build: undefined,
+      lease: undefined,
       // SAFETY: never reached: every call is checked first, and the App
       // doesn't exist, so none follows a query.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY

@@ -19,12 +19,13 @@ import {
 import { appVisitorGrants, auditOutbox } from "./db/core/schema.ts";
 import { requireNotStaff } from "./sharing.ts";
 
-// A visitor's calls of a published App's functions (app-visitors.ts for
-// how a visitor signs in; app-functions.ts, `callVisitorFunction`, for the
-// call). A visitor is never a person: their calls run as the App itself,
-// under what its builders granted visitors, and nothing a member holds.
-// How each can be attacked, and what stops it, each with a test in
-// test/app-visitor-calls.test.ts:
+// What a published App's visitors may call, and how their calls are held
+// to it (app-visitors.ts for how a visitor signs in and `visitorCall`;
+// page-calls.ts for the one path every page calls on; app-functions.ts,
+// `callVisitorFunction`, for the call). A visitor is never a person: their
+// calls run as the App itself, under what its builders granted visitors,
+// and nothing a member holds. How each can be attacked, and what stops it,
+// each with a test in test/app-visitor-calls.test.ts:
 //
 // - Calling what wasn't granted. A version grants visitors nothing until
 //   a builder grants functions of it by path (`setAppVisitorGrants`): only
