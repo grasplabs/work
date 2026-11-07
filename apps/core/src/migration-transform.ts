@@ -11,8 +11,7 @@ import type { MigrationManifest } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { MigrationEvidence } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
-import type { Json } from "@grasp-os/shared/json";
+import { canonicalJson, canonicalText, isRecord } from "@grasp-os/shared/json";
 import { jsonOf } from "@grasp-os/shared/operations";
 import { documentMaxBytes } from "@grasp-os/shared/stores";
 import type { StoreFields } from "@grasp-os/shared/stores";
@@ -333,9 +332,6 @@ const objectText = (fields: Readonly<Record<string, unknown>>): string =>
     fields,
   });
 
-const isObject = (json: Json | undefined): json is Record<string, Json> =>
-  typeof json === "object" && json !== null && !Array.isArray(json);
-
 /** What `schema` makes of `value`, as JSON fields, or its issues. */
 const validated = (
   schema: ReturnType<typeof schemaFromDescriptor>,
@@ -354,7 +350,7 @@ const validated = (
     };
   }
   const json = jsonOf(result.value);
-  return isObject(json)
+  return isRecord(json)
     ? { fields: json }
     : { issues: ["The value isn't an object of fields"], named: [] };
 };

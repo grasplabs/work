@@ -1,3 +1,4 @@
+import { sha512Integrity } from "@grasp-os/shared/encoding";
 /**
  * What one npm tarball needs, read without running any of it: unpacked
  * (tarball.ts), its own package.json read, and every reason Grasp can't
@@ -20,7 +21,7 @@
  * compare with the registry's metadata the graph was resolved from: a
  * tarball that says otherwise is refused there.
  */
-import { sha512Integrity } from "@grasp-os/shared/encoding";
+import { isRecord } from "@grasp-os/shared/json";
 import type {
   PackageInspection,
   PackageLimits,
@@ -56,15 +57,12 @@ const stringRecord = (value: unknown): Record<string, string> | undefined => {
     : undefined;
 };
 
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /** A record of any values, absent as empty; undefined for another shape. */
 const plainRecord = (value: unknown): Record<string, unknown> | undefined => {
   if (value === undefined) {
     return {};
   }
-  return isPlainRecord(value) ? value : undefined;
+  return isRecord(value) ? value : undefined;
 };
 
 /** A list of strings (`os`, `cpu`), absent as empty; undefined otherwise. */
@@ -86,7 +84,7 @@ const optionalPeersOf = (value: unknown): string[] | undefined => {
   }
   const optional: string[] = [];
   for (const [peer, entry] of Object.entries(meta)) {
-    if (!isPlainRecord(entry)) {
+    if (!isRecord(entry)) {
       return undefined;
     }
     if (entry.optional === true) {

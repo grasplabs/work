@@ -1,5 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
@@ -380,15 +380,9 @@ const valueOf = ({ result }: { result: OperationResult }): Json => {
 const codeOf = ({ result }: { result: OperationResult }): string =>
   result.ok ? "ok" : result.error.code;
 
-/** Whether `value` is a JSON object: `Array.isArray` doesn't narrow a readonly array. */
-const isObject = (
-  value: Json | undefined
-): value is Readonly<Record<string, Json | undefined>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /** A field of a JSON object. */
 const field = (value: Json | undefined, key: string): Json | undefined =>
-  isObject(value) ? value[key] : undefined;
+  isRecord(value) ? value[key] : undefined;
 
 /** The titles of the notes on a page. */
 const titlesOn = (page: Json): (Json | undefined)[] => {

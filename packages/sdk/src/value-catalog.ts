@@ -1,11 +1,7 @@
 // Pinned validation catalogs for the semantic values (`v.money()`,
 // `v.schedule()`). They are data in the SDK, not a question to the runtime:
 // `Intl` answers differently per engine and ICU release, and a value must
-// validate the same in a browser and in workerd. A host checks it runs the
-// same catalog version before it activates an App.
-
-/** Names the catalogs below; changes whenever one of them does. */
-export const valueCatalogVersion = "iso4217-cldr48.tz2026c";
+// validate the same in a browser and in workerd.
 
 const words = (list: string): ReadonlySet<string> => new Set(list.split(" "));
 

@@ -3,6 +3,7 @@ import type {
   ConnectorContract,
   ConnectorContractAction,
 } from "@grasp-os/shared/connect";
+import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 import { allowedTool, composioServer } from "./connections.ts";
@@ -77,9 +78,6 @@ const actionNamePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
 
 /** What a tool without an output schema answers: its text. */
 const textAnswer = JSON.stringify({ type: "string" });
-
-const isRecord = (value: Json | undefined): value is Record<string, Json> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
  * Whether `value` is JSON nesting at most `maxJsonDepth` deep: walked

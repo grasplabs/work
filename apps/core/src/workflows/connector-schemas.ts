@@ -1,4 +1,4 @@
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { jsonOf } from "@grasp-os/shared/operations";
 
@@ -32,12 +32,6 @@ import type { ReadSchema } from "../connector-contracts.ts";
 //   approval compares the stored schema, canonically, with what connect
 //   serves for that very connection (workflow-bindings.ts), and a contract
 //   never changes once published (workflow-catalog.ts).
-
-/** Whether `value` is a JSON object. */
-const isRecord = (
-  value: Json | undefined
-): value is Readonly<Record<string, Json | undefined>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** The JSON Schema `text` holds as an envelope, if it is one. */
 export const envelopedSchema = (text: string | undefined): Json | undefined => {

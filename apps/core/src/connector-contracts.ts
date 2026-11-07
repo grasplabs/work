@@ -1,5 +1,6 @@
 import type { ValueSchema } from "@grasp-os/sdk";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
+import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { jsonOf } from "@grasp-os/shared/operations";
 
@@ -22,9 +23,6 @@ type Draft = Record<string, Json>;
 
 /** The most a schema nests here, as the SDK's descriptors do. */
 const maxDepth = 32;
-
-const isRecord = (value: Json | undefined): value is Record<string, Json> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** Whether `value` is a JSON array: `Array.isArray` doesn't narrow a readonly one. */
 const isList = (value: Json | undefined): value is readonly Json[] =>

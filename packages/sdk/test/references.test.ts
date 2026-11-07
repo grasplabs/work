@@ -1,10 +1,10 @@
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { describe, expect, test } from "vite-plus/test";
 
+import { decisionFingerprint } from "../src/generate.ts";
 import {
   contractFingerprint,
   declaredWorkflows,
-  decisionFingerprint,
   preferenceOperations,
   eventFingerprint,
   generateModules,

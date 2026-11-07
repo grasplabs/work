@@ -13,6 +13,7 @@ import { runFunction } from "@grasp-os/sdk/runner";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
 import type { AppId } from "@grasp-os/shared/ids";
+import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
@@ -523,23 +524,18 @@ const idOf = (value: Json): Id<"notes"> => {
   return value as Id<"notes">;
 };
 
-/** A JSON object: `Array.isArray` doesn't narrow a readonly array type. */
-const isObject = (
-  value: Json | undefined
-): value is Readonly<Record<string, Json | undefined>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+/** Whether `value` is a JSON array: `Array.isArray` doesn't narrow a readonly one. */
+const isList = (value: Json | undefined): value is readonly Json[] =>
+  Array.isArray(value);
 
 /** A field of a JSON object. */
 const fieldOf = (value: Json | undefined, key: string): Json | undefined =>
-  isObject(value) && Object.hasOwn(value, key) ? value[key] : undefined;
+  isRecord(value) && Object.hasOwn(value, key) ? value[key] : undefined;
 
 /** The IDs of a page's notes, in order. */
 const idsOf = (page: Json): (Json | undefined)[] => {
   const items = fieldOf(page, "items");
-  const notesOf: readonly Json[] =
-    typeof items === "object" && items !== null && !isObject(items)
-      ? items
-      : [];
+  const notesOf: readonly Json[] = isList(items) ? items : [];
   return notesOf.map((item) => fieldOf(item, "_id"));
 };
 
@@ -1142,10 +1138,9 @@ describe("a mutation's own staged state", () => {
       await call(fixture, owner, "query", "notes.list", { pagination: {} })
     );
     const items = fieldOf(page, "items");
-    const titles =
-      typeof items === "object" && items !== null && !isObject(items)
-        ? items.map((item) => fieldOf(item, "title"))
-        : [];
+    const titles = isList(items)
+      ? items.map((item) => fieldOf(item, "title"))
+      : [];
     expect({
       runs,
       taken,

@@ -1,5 +1,6 @@
 import type { ConnectorEventType } from "@grasp-os/shared/connect";
 import { connectorEventActions } from "@grasp-os/shared/connect";
+import { isRecord } from "@grasp-os/shared/json";
 import type {
   TriggerKind,
   TriggerSummary,
@@ -38,9 +39,6 @@ export const kindLabels = {
   email: msg`Email trigger`,
   webhook: msg`Webhook trigger`,
 } as const satisfies Record<TriggerKind, MessageDescriptor>;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** A field of `config` at `path`, if it is text. */
 const textAt = (config: unknown, ...path: string[]): string | undefined => {

@@ -4,6 +4,8 @@
  * against the store, kept apart from the deploy so it can be tested
  * without an account.
  */
+import { isRecord } from "@grasp-os/shared/json";
+
 import { parseJsonc } from "./jsonc.ts";
 
 /** The `store_id` a config names instead of a real one. */
@@ -40,9 +42,6 @@ const field = (value: unknown, key: string): unknown =>
   typeof value === "object" && value !== null
     ? Reflect.get(value, key)
     : undefined;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
  * Where the deployed Worker's Secrets Store bindings sit in `config`: its

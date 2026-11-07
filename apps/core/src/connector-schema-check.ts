@@ -1,3 +1,4 @@
+import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 // The constraints of a generated connector contract's JSON Schema that a
@@ -88,9 +89,6 @@ const formats: Readonly<Record<string, (text: string) => boolean>> = {
 
 /** The most a schema nests here, as the SDK's descriptors do. */
 const maxDepth = 32;
-
-const isRecord = (value: Json | undefined): value is Schema =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const isList = (value: Json | undefined): value is readonly Json[] =>
   Array.isArray(value);

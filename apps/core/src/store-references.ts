@@ -1,4 +1,5 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
+import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import type { StoreFields } from "@grasp-os/shared/stores";
 
@@ -51,10 +52,6 @@ const tableOf = (descriptor: {
 /** Whether `value` is a JSON array. */
 const isArray = (value: Json): value is readonly Json[] => Array.isArray(value);
 
-/** Whether `value` is a plain JSON object. */
-const isObject = (value: Json): value is Readonly<Record<string, Json>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /** The references `value` makes under `descriptor`. */
 const referencesIn = (
   descriptor: ValueDescriptor,
@@ -69,13 +66,13 @@ const referencesIn = (
       found.push({ id: value, tables: [tableOf(descriptor)] });
     }
   } else if (descriptor.kind === "object") {
-    if (isObject(value)) {
+    if (isRecord(value)) {
       for (const [name, field] of Object.entries(descriptor.fields)) {
         referencesIn(field, value[name], found);
       }
     }
   } else if (descriptor.kind === "record") {
-    if (isObject(value)) {
+    if (isRecord(value)) {
       for (const entry of Object.values(value)) {
         referencesIn(descriptor.value, entry, found);
       }
@@ -139,17 +136,17 @@ const filesIn = (
     return;
   }
   if (descriptor.kind === "file") {
-    if (isObject(value) && typeof value.id === "string") {
+    if (isRecord(value) && typeof value.id === "string") {
       found.add(value.id);
     }
   } else if (descriptor.kind === "object") {
-    if (isObject(value)) {
+    if (isRecord(value)) {
       for (const [name, field] of Object.entries(descriptor.fields)) {
         filesIn(field, value[name], found);
       }
     }
   } else if (descriptor.kind === "record") {
-    if (isObject(value)) {
+    if (isRecord(value)) {
       for (const entry of Object.values(value)) {
         filesIn(descriptor.value, entry, found);
       }

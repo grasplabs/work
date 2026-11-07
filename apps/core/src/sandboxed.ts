@@ -1,3 +1,4 @@
+import { isRecord } from "@grasp-os/shared/json";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 
 import { sandboxDeadlineHeader, sandboxWaitHeader } from "./sandbox-headers.ts";
@@ -95,9 +96,6 @@ const deadlineOf = (env: SandboxedEnv): number => {
     ? set
     : sandboxDeadlineMs;
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
 
 /** Disposes `value` if it is disposable, as an RPC call's promise is. */
 const disposeOf = (value: unknown): void => {

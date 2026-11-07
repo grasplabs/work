@@ -1,3 +1,4 @@
+import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
@@ -104,14 +105,11 @@ const cursorRefusals: ReadonlySet<string> = new Set([
   "data.cursor_expired",
 ]);
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /** Whether an operation's argument descriptor declares `pagination`. */
 const takesPages = (args: unknown): boolean =>
-  isObject(args) &&
+  isRecord(args) &&
   args.kind === "object" &&
-  isObject(args.fields) &&
+  isRecord(args.fields) &&
   Object.hasOwn(args.fields, "pagination");
 
 /** Whether `value`, part of a JSON answer, is a list. */
@@ -124,7 +122,7 @@ const pageOf = (
   | { items: Json[]; hasMore: false }
   | { items: Json[]; hasMore: true; nextCursor: string }
   | undefined => {
-  if (!isObject(value) || !isList(value.items)) {
+  if (!isRecord(value) || !isList(value.items)) {
     return undefined;
   }
   const { items, hasMore, nextCursor } = value;
@@ -350,7 +348,7 @@ export const readWindow = async (
     throw operationErrors.create("contract.not_paginated");
   }
   const { input } = request;
-  if (!isObject(input) || Object.hasOwn(input, "pagination")) {
+  if (!isRecord(input) || Object.hasOwn(input, "pagination")) {
     // `pagination` is core's to supply: a caller never pages a window.
     throw operationErrors.create("contract.invalid_args");
   }

@@ -597,7 +597,7 @@ describe("an App's store", { timeout: 120_000 }, () => {
 });
 
 describe("a store's definitions", { timeout: 120_000 }, () => {
-  it("are recorded once each, numbered, and the store's active one follows the current version", async () => {
+  it("are recorded once each, numbered, and bound by each version", async () => {
     const { owner, app } = await appWith(notesFiles());
     await publishVersion(env, owner, app, 1);
     // The same schema and operations under another name: one definition.
@@ -629,36 +629,11 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
     )
       .bind(store)
       .all<{ version: number; definition: number }>();
-    const active = async () =>
-      await env.DB.prepare(
-        "SELECT active_schema_version AS version, active_schema_hash AS schemaHash, active_operation_manifest_hash AS operations FROM business_stores WHERE id = ?"
-      )
-        .bind(store)
-        .first<{
-          version: number | null;
-          schemaHash: string | null;
-          operations: string | null;
-        }>();
-    const afterThree = await active();
-    // Rolled back: the store's active definition is version 1's again.
-    await publishVersion(env, owner, app, 1);
-    const afterRollback = await active();
-    // A version without a schema binds no store: the store serves no
-    // definition while it is current.
-    await commitFiles(env, owner, app, withoutNotes, "No tables");
-    await publishVersion(env, owner, app, 4);
-    const unbound = await active();
     const [first, third] = await Promise.all([
       loadRelease(env, app, 1),
       loadRelease(env, app, 3),
     ]);
-    expect([
-      definitions.results,
-      bound.results,
-      afterThree,
-      afterRollback,
-      unbound,
-    ]).toStrictEqual([
+    expect([definitions.results, bound.results]).toStrictEqual([
       [
         {
           version: 1,
@@ -678,17 +653,6 @@ describe("a store's definitions", { timeout: 120_000 }, () => {
         { version: 2, definition: 1 },
         { version: 3, definition: 2 },
       ],
-      {
-        version: 2,
-        schemaHash: third.store?.schemaHash,
-        operations: third.store?.operationManifestHash,
-      },
-      {
-        version: 1,
-        schemaHash: first.store?.schemaHash,
-        operations: first.store?.operationManifestHash,
-      },
-      { version: null, schemaHash: null, operations: null },
     ]);
   });
 });

@@ -1,3 +1,4 @@
+import { isRecord } from "@grasp-os/shared/json";
 // A workflow's input, as a form a person fills in to start it by hand
 // (start-run.tsx): an object whose fields are each text, a number, a yes
 // or no, one of a few choices, or a person (one of the organization's
@@ -20,9 +21,6 @@ export type StartValues = Record<string, string | boolean>;
 
 /** Why a field's value can't be sent. */
 export type StartFieldProblem = "missing" | "number" | "integer";
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** `schema` as one field named `name`, if it is one a form can ask for. */
 const fieldOf = (

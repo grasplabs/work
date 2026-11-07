@@ -1,6 +1,7 @@
 import type { OperationReference, ValueSchema } from "@grasp-os/sdk";
 import { GraspClient } from "@grasp-os/sdk/client";
 import { GraspProvider } from "@grasp-os/sdk/react";
+import { isRecord } from "@grasp-os/shared/json";
 import { act } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
@@ -36,14 +37,13 @@ type Transport = Extract<
   { readonly watch: unknown }
 >;
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+/** The field `key` of `value`, if it is a record. */
+const read = (value: unknown, key: string): unknown =>
+  isRecord(value) ? value[key] : undefined;
 
 /** What `body` asks for: its function, input and window. */
 const sentOf = (body: string): Sent => {
   const parsed: unknown = JSON.parse(body);
-  const read = (value: unknown, key: string): unknown =>
-    isRecord(value) ? value[key] : undefined;
   const contractId = read(read(parsed, "reference"), "name");
   const input = read(parsed, "input");
   const extent = read(read(parsed, "window"), "extent");

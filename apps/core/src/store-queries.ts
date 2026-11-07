@@ -10,6 +10,7 @@ import type {
   ManifestTable,
   SchemaManifest,
 } from "@grasp-os/sdk/host";
+import { isRecord } from "@grasp-os/shared/json";
 import {
   queryMaxGroups,
   queryMaxResults,
@@ -360,9 +361,6 @@ export const validates = (
   return !(checked instanceof Promise) && checked.issues === undefined;
 };
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /** The keys each object-valued semantic kind holds (spec 32.1). */
 const semanticKeys: Readonly<
   Partial<Record<ValueDescriptor["kind"], readonly string[]>>
@@ -395,7 +393,7 @@ const projectedObject = (
   if (Array.isArray(value)) {
     throw unprojectable();
   }
-  if (!isPlainObject(value)) {
+  if (!isRecord(value)) {
     return value;
   }
   const shown: Record<string, unknown> = {};
@@ -465,7 +463,7 @@ const projected = (value: unknown, descriptor: ValueDescriptor): unknown => {
     );
   }
   if (descriptor.kind === "record") {
-    if (!isPlainObject(value)) {
+    if (!isRecord(value)) {
       throw unprojectable();
     }
     return Object.fromEntries(
@@ -484,7 +482,7 @@ const projected = (value: unknown, descriptor: ValueDescriptor): unknown => {
   if (descriptor.kind === "union") {
     return projectedUnion(value, descriptor.members, projected);
   }
-  if (isPlainObject(value) || Array.isArray(value)) {
+  if (isRecord(value) || Array.isArray(value)) {
     throw unprojectable();
   }
   return value;
@@ -502,7 +500,7 @@ const projectedFields = (
     kind: "object",
     fields,
   });
-  return isPlainObject(projection) ? projection : {};
+  return isRecord(projection) ? projection : {};
 };
 
 /**

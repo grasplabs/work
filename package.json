@@ -49,7 +49,6 @@
     "@types/semver": "catalog:",
     "aws4fetch": "catalog:",
     "capnweb": "catalog:",
-    "eslint": "catalog:",
     "lightningcss": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

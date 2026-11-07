@@ -1,5 +1,6 @@
 import type { Api } from "@earendil-works/pi-ai";
 import { toBase64 } from "@grasp-os/shared/encoding";
+import { isRecord } from "@grasp-os/shared/json";
 
 // A document a model reads as it is: a PDF, for Grasp's own conversion of
 // uploads into the Brain (knowledge/extract.ts, through
@@ -30,9 +31,6 @@ const documentPartTypes = {
   "anthropic-messages": "document",
   "openai-completions": "file",
 } as const satisfies Partial<Record<Api, string>>;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** Whether a document can be sent to `api`. */
 export const takesDocuments = (

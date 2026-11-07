@@ -28,7 +28,6 @@ import {
   sdkReleaseManifests,
   sdkResourceBindings,
 } from "../src/db/core/schema.ts";
-import { versionPageCodes } from "../src/page-references.ts";
 import { buildAppCode, buildAppTests, buildPages } from "../src/pages.ts";
 import { appDefinition, definitionOf } from "./app-definitions.ts";
 import type { AppSpec } from "./app-definitions.ts";
@@ -580,17 +579,6 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     async (_format, sealedIn) => {
       const fixture = await appWith(notesFiles());
       const release = await seal(fixture);
-      // Its pages, as a release sealed before pages were file routes holds
-      // them: under screens/, none under src/routes/.
-      const pages = async () =>
-        await failure(
-          async () =>
-            await versionPageCodes(env, fixture.app, 1, notesFiles(), {
-              unsealed: "refuse",
-            })
-        );
-      // In this format, that is an App without pages.
-      const current = await pages();
       await rewrite(fixture.app, release, { manifest: sealedIn });
       // Sealed for good: sealing the version again is refused the same way,
       // so a new version is what replaces it.
@@ -598,14 +586,11 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
         Promise.all([
           failure(async () => await loadRelease(env, fixture.app, 1)),
           failure(async () => await seal(fixture)),
-          pages(),
         ])
       ).resolves.toStrictEqual([
         "version.format_unsupported",
         "version.format_unsupported",
-        "version.format_unsupported",
       ]);
-      expect(current).toBe("page.not_found");
     }
   );
 

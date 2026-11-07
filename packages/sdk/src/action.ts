@@ -1,4 +1,5 @@
 import type { MemoryPack, RecallInput } from "./brain.ts";
+import { actionHandlers, isActionHandler } from "./handlers.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import { descriptorOf } from "./value-schema.ts";
@@ -646,12 +647,6 @@ export interface Action {
 /** A handler as the runner calls it. */
 export type AnyActionHandler = (ctx: unknown, args: unknown) => unknown;
 
-const isHandler = (value: unknown): value is AnyActionHandler =>
-  typeof value === "function";
-
-/** The handler of each action `action` declared, by its value. */
-const handlers = new WeakMap<object, AnyActionHandler>();
-
 const definitionKeys: ReadonlySet<string> = new Set([
   "args",
   "returns",
@@ -741,7 +736,7 @@ export const action = <
     }
   }
   const handler = dataOf(definition, "handler");
-  if (!isHandler(handler)) {
+  if (!isActionHandler(handler)) {
     return refuse("An action's `handler` is a function.");
   }
   if (!isPlainObject(dataOf(definition, "args"))) {
@@ -756,24 +751,6 @@ export const action = <
     uses: usesOf(dataOf(definition, "uses")),
   });
   const declared: Action = freeze({ "~action": contract });
-  if (typeof weakSet === "function") {
-    apply(weakSet, handlers, [declared, handler]);
-  }
+  actionHandlers.add(declared, handler);
   return declared;
-};
-
-/**
- * The handler of `value` if `action` declared it; undefined for anything
- * else, a lookalike included. For the runner (compute-runner.ts) only.
- */
-export const actionHandler = (value: unknown): AnyActionHandler | undefined => {
-  if (
-    (typeof value !== "object" && typeof value !== "function") ||
-    value === null ||
-    typeof weakGet !== "function"
-  ) {
-    return undefined;
-  }
-  const found: unknown = apply(weakGet, handlers, [value]);
-  return isHandler(found) ? found : undefined;
 };

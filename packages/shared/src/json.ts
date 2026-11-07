@@ -7,6 +7,15 @@ export type Json =
   | readonly Json[]
   | { readonly [key: string]: Json | undefined };
 
+/** Whether `value` is an object and not an array: a record of its keys. */
+export function isRecord(
+  value: Json | undefined
+): value is Readonly<Record<string, Json>>;
+export function isRecord(value: unknown): value is Record<string, unknown>;
+export function isRecord(value: unknown): boolean {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // `Array.isArray` doesn't narrow a readonly array type.
 const isJsonArray = (value: Json): value is readonly Json[] =>
   Array.isArray(value);

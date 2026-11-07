@@ -15,8 +15,6 @@ const generated = [
   "**/src/db/**/migrations/**",
   // Release fixtures and the golden manifest the release test writes.
   "scripts/release/testdata/**",
-  // Third-party files vendored byte for byte, pinned by their hashes.
-  "packages/*/vendor/**",
   // What the host generates for an App, byte for byte (spec 8), and the
   // config and schema an App's definition generates (the SDK's
   // definition-source.ts), which its commits must equal.
@@ -151,7 +149,6 @@ export default defineConfig({
           "apps/web/src/interview/**",
           "apps/web/src/tour/**",
           "apps/web/src/voice/**",
-          "apps/web/src/routes/_shell.onboarding*",
           "apps/web/src/routes/interview*",
           "apps/web/src/routes/setup*",
           "apps/web/src/frame/onboarding-frame.tsx",

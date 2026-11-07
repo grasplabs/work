@@ -1,11 +1,9 @@
+import { isRecord } from "@grasp-os/shared/json";
 // A step's fields as the definition text holds them, for changing that one
 // step from the canvas: core's `editStep` replaces the fields of the step
 // at a diagram's pointer (`DiagramTask.pointer`), keeping its ID, and this
 // reads the fields it replaces from the same text the diagram was drawn
 // from. Only own keys and array indexes are walked, as core walks them.
-
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const indexPattern = /^(?:0|[1-9]\d*)$/u;
 
@@ -14,7 +12,7 @@ const childOf = (value: unknown, token: string): unknown => {
   if (Array.isArray(value)) {
     return indexPattern.test(token) ? value.at(Number(token)) : undefined;
   }
-  return isObject(value) && Object.hasOwn(value, token)
+  return isRecord(value) && Object.hasOwn(value, token)
     ? value[token]
     : undefined;
 };
@@ -48,7 +46,7 @@ export const stepFieldsAt = (
   for (const token of tokens) {
     value = childOf(value, token);
   }
-  if (!isObject(value) || typeof value.id !== "string") {
+  if (!isRecord(value) || typeof value.id !== "string") {
     return undefined;
   }
   const { id: _id, ...fields } = value;

@@ -152,16 +152,15 @@ interface Started {
   readonly version: number;
   /**
    * The object's own name (`invocationName`), which its inventory row
-   * (`action_invocations`) is under. Absent from records written before
-   * there was an inventory, which have no row.
+   * (`action_invocations`) is under.
    */
-  readonly name?: string;
+  readonly name: string;
   /**
    * When its run started: the same for every reader of that run, its
    * receipt and its tombstone, and new for a fresh run under the key once
-   * they are gone. Absent from records written before it was kept.
+   * they are gone.
    */
-  readonly startedAt?: number;
+  readonly startedAt: number;
   /**
    * The form its run sent, succeeded and not yet told to the App's
    * webhooks: kept with the receipt in one write, and told from here,
@@ -194,10 +193,9 @@ type Record =
       readonly state: "expired";
       /**
        * When its tombstone ends and the key is free again: an alarm before
-       * it (a form's retry) leaves it. Absent from records written before
-       * it was kept, which go at their first alarm.
+       * it (a form's retry) leaves it.
        */
-      readonly expiresAt?: number;
+      readonly expiresAt: number;
     });
 
 /** An invocation this object runs now, or ran since it last woke. */
@@ -516,7 +514,7 @@ export class ActionInvocation extends DurableObject<Env> {
       }
       // A tombstone is kept to its own end, whatever earlier alarm a form's
       // retry set: only then is the key free to start the action again.
-      if (record.expiresAt !== undefined && now < record.expiresAt) {
+      if (now < record.expiresAt) {
         await this.#alarmAt(record.expiresAt);
         return;
       }
@@ -617,10 +615,7 @@ export class ActionInvocation extends DurableObject<Env> {
    * A row that can't be deleted stays behind, naming an empty object,
    * until the object next empties itself.
    */
-  async #unlist(name: string | undefined): Promise<void> {
-    if (name === undefined) {
-      return;
-    }
+  async #unlist(name: string): Promise<void> {
     try {
       await drizzle(this.env.DB)
         .delete(actionInvocations)
@@ -808,10 +803,7 @@ export class ActionInvocation extends DurableObject<Env> {
     // receipt, a join and an attach all share.
     const form = this.#form;
     const untold =
-      result.ok &&
-      form?.runId === live.runId &&
-      outcome.path !== undefined &&
-      record.startedAt !== undefined
+      result.ok && form?.runId === live.runId && outcome.path !== undefined
         ? formSubmissionOf({
             app: form.app,
             userId: record.owner,

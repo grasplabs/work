@@ -1,3 +1,4 @@
+import { isRecord } from "@grasp-os/shared/json";
 import type { workflowStepEditSchema } from "@grasp-os/shared/workflow-resources";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { stepListPaths } from "@grasp-os/workflow-schema/format";
@@ -38,9 +39,6 @@ const tokensOf = (pointer: string): string[] =>
 
 type JsonRecord = Record<string, unknown>;
 
-const isObject = (value: unknown): value is JsonRecord =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 const indexPattern = /^(?:0|[1-9]\d*)$/u;
 
 /** The array index `token` names, or -1 for none. */
@@ -68,7 +66,7 @@ const listIn = (step: JsonRecord, path: string): unknown[] => {
   let key = first ?? "";
   if (second !== undefined) {
     const inner = own(step, key) ?? {};
-    if (!isObject(inner)) {
+    if (!isRecord(inner)) {
       throw notFound();
     }
     step[key] = inner;
@@ -101,7 +99,7 @@ const walk = (document: JsonRecord, tokens: readonly string[]): unknown[] => {
     const holder = tokens.slice(0, -size);
     if (holder.length >= 2 && indexOf(holder.at(-1)) >= 0) {
       const step = walk(document, holder.slice(0, -1))[indexOf(holder.at(-1))];
-      if (isObject(step) && listPathsOf(own(step, "type")).includes(path)) {
+      if (isRecord(step) && listPathsOf(own(step, "type")).includes(path)) {
         return listIn(step, path);
       }
     }
@@ -129,7 +127,7 @@ export const applyStepEdit = (source: string, edit: StepEdit): string => {
   } catch {
     throw workflowResourceErrors.create("workflow.draft_not_json");
   }
-  if (!isObject(document)) {
+  if (!isRecord(document)) {
     throw workflowResourceErrors.create("workflow.draft_not_json");
   }
   if (edit.kind === "change") {
@@ -137,7 +135,7 @@ export const applyStepEdit = (source: string, edit: StepEdit): string => {
     const list = walk(document, tokens.slice(0, -1));
     const index = indexOf(tokens.at(-1));
     const step = list[index];
-    const id = isObject(step) ? own(step, "id") : undefined;
+    const id = isRecord(step) ? own(step, "id") : undefined;
     if (typeof id !== "string") {
       throw notFound();
     }

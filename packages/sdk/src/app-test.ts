@@ -1,7 +1,7 @@
 // oxlint-disable max-classes-per-file -- a suite's own definition error, and the two failures a test can have, each a few lines
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { messageOf } from "@grasp-os/shared/errors";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 import type {
@@ -51,7 +51,7 @@ export type PublicReference<Kind extends ReferenceKind> = Callable<
  * The most snapshots a live query keeps that `next` hasn't taken: one
  * more fails the test.
  */
-export const maxBufferedSnapshots = 100;
+const maxBufferedSnapshots = 100;
 
 /**
  * A live query a principal follows (`subscribe`), as a page follows
@@ -281,9 +281,6 @@ export class TestDefinitionError extends Error {
 const refuseSuite: (message: string) => never = (message) => {
   throw new TestDefinitionError(message);
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** The suite `definition` declares, as `kind`, checked and frozen. */
 const readSuite = <Test extends AppTestFunction | WorkflowTestFunction>(
@@ -618,7 +615,7 @@ const readPush = (
  * again from a fresh read; so does a test, but one core can't keep
  * following at all fails it.
  */
-export const maxLostInARow = 5;
+const maxLostInARow = 5;
 
 /** How long a test waits to follow again after each loss in a row, in ms. */
 const refollowMs = 50;

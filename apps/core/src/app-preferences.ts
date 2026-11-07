@@ -9,7 +9,7 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
-import { canonicalText } from "@grasp-os/shared/json";
+import { canonicalText, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
@@ -210,14 +210,10 @@ const storeOf = (env: Env, caller: PreferencesCaller) => {
   };
 };
 
-/** Whether `value` is a JSON object. */
-const isObject = (value: unknown): value is Record<string, Json> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /** The names of the fields `preferences` declares. */
 const declaredNames = (preferences: unknown): ReadonlySet<string> =>
   new Set(
-    isObject(preferences) && isObject(preferences.fields)
+    isRecord(preferences) && isRecord(preferences.fields)
       ? Object.keys(preferences.fields)
       : []
   );
@@ -246,13 +242,15 @@ const chosenOf = (stored: StoredPreferences): Record<string, Json> => {
   if (stored.valueJson === null) {
     return {};
   }
-  let chosen: unknown;
+  let chosen: Json;
   try {
-    chosen = JSON.parse(stored.valueJson);
+    // SAFETY: core wrote it, as the canonical text of the fields it checked.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    chosen = JSON.parse(stored.valueJson) as Json;
   } catch {
     throw dataErrors.create("data.incompatible_record");
   }
-  if (!isObject(chosen)) {
+  if (!isRecord(chosen)) {
     throw dataErrors.create("data.incompatible_record");
   }
   return chosen;
@@ -345,7 +343,7 @@ export const answerPreferences = async (
     return answerGet(operation, caller, storeId, stored);
   }
   const { expectedRevision, patch } = args;
-  if (!isObject(patch)) {
+  if (!isRecord(patch)) {
     throw operationErrors.create("contract.invalid_args");
   }
   const key =
