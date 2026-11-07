@@ -167,7 +167,7 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
         revision: update.revision,
         appVersion: update.appVersion,
         served: served.status,
-        drafted: served.code.includes('"Drafted "'),
+        drafted: /["`]Drafted ["`]/u.test(served.code),
       },
     }).toStrictEqual({
       latest: {
@@ -267,7 +267,7 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
         revision: refresh.revision,
         appVersion: refresh.appVersion,
         served: fixed.status,
-        says: fixed.code.includes('"Fixed "'),
+        says: /["`]Fixed ["`]/u.test(fixed.code),
       },
     }).toStrictEqual({
       opened: {
