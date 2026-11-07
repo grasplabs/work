@@ -8,8 +8,7 @@ import type {
   NamedDependencySubject,
 } from "@grasp-os/shared/dependencies";
 import { roleErrors } from "@grasp-os/shared/roles";
-import { and, eq, sql } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { appFor, editableApp } from "../apps.ts";
@@ -17,7 +16,6 @@ import type { Acting } from "../auth/identity.ts";
 import {
   appMembers,
   apps,
-  dependencyRequests,
   members,
   teamMembers,
   workflowResourceMembers,
@@ -28,21 +26,6 @@ import { requireWorkflowRole } from "../workflow-resources.ts";
 // Whose packages a request is (an App, or an independent workflow), and
 // who builds it: who may ask for its packages, decide them, and is told
 // when the clock finds something wrong with them.
-
-/** That a row of `dependency_requests` is `subject`'s, as SQL. */
-export const ofSubject = (subject: DependencySubject): SQL =>
-  and(
-    eq(dependencyRequests.subjectType, subject.type),
-    eq(dependencyRequests.subjectId, subject.id)
-  ) ?? sql`0`;
-
-/** What the audit log names a subject as, as every other event of either does. */
-export const auditTargetOf = (
-  subject: DependencySubject
-): { type: "app" | "workflow_resource"; id: string } => ({
-  type: subject.type === "app" ? "app" : "workflow_resource",
-  id: subject.id,
-});
 
 /** The subject a caller names (`{ app }` or `{ workflow }`), or `dependency.invalid`. */
 export const subjectOfInput = (input: unknown): DependencySubject =>

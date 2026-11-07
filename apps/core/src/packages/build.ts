@@ -1,4 +1,5 @@
-import { actorOf } from "@grasp-os/shared/audit";
+import type { PackageTarget } from "@grasp-os/compiler";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import type { DependencySubject } from "@grasp-os/shared/dependencies";
 import { sha512Integrity } from "@grasp-os/shared/encoding";
 import {
@@ -10,14 +11,26 @@ import type { GraspLock, PackageTarball } from "@grasp-os/shared/packages";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed } from "../audit-outbox.ts";
-import type { Acting } from "../auth/identity.ts";
+import type { OutboxEnv } from "../audit-outbox.ts";
+import { cacheKeyOf, throughCache } from "../build-cache.ts";
+import type { CacheEnv } from "../build-cache.ts";
 import { PlatformBoundError, platformRunner } from "../platform-sandbox.ts";
 import type { PlatformEnv } from "../platform-sandbox.ts";
 import { inOrderReader } from "../sandbox-session.ts";
 import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
+import {
+  approvedLock,
+  auditTargetOf,
+  latestApproval,
+  refuseMalware,
+} from "./approvals.ts";
 import { knownMalwareIn } from "./malware.ts";
-import { approvedLock, refuseMalware } from "./requests.ts";
-import { auditTargetOf } from "./subjects.ts";
+
+/** What building an approved graph reads from core's env. */
+export type PackageBuildEnv = PlatformEnv &
+  CacheEnv &
+  OutboxEnv &
+  Pick<Env, "DB" | "CONNECT">;
 
 // Building an approved graph: its tarballs fetched through connect and
 // checked against the lock's integrity here, then bundled into one module
@@ -70,11 +83,12 @@ export const runBuilder = async (
   env: PlatformEnv,
   whose: string,
   lock: GraspLock,
-  tarballs: PackageTarball[]
+  tarballs: PackageTarball[],
+  target: PackageTarget
 ): Promise<unknown> => {
   const { inCore, run } = platformRunner(env, whose);
   if (inCore) {
-    return await run("package-builder", "build", [lock, tarballs]);
+    return await run("package-builder", "build", [lock, tarballs, target]);
   }
   // On the sandbox host neither the tarballs nor the modules fit one of a
   // session's messages: they go a chunk at a time, each read once, in order.
@@ -95,6 +109,7 @@ export const runBuilder = async (
     tarballs.map(({ key, tarball }) => ({ key, size: tarball.byteLength })),
     inOrderReader(tarballs.map(({ key, tarball }) => [key, tarball] as const)),
     write,
+    target,
   ]);
   const parsed = packageBuildAnswerSchema.safeParse(answer);
   if (!parsed.success || !parsed.data.ok) {
@@ -103,6 +118,7 @@ export const runBuilder = async (
   const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
   return {
     ok: true,
+    refused: parsed.data.refused,
     modules: Object.fromEntries(
       Object.keys(parsed.data.modules).map((entry) => [
         entry,
@@ -114,20 +130,24 @@ export const runBuilder = async (
 
 /**
  * Each entry of `subject`'s approved graph `graphHash`, built into one ES
- * module, by entry, for `by` (one of its builders), audited as an install
+ * module for `target`, by entry, audited as an install by `actor`
  * (`dependency.built`); and the approval it stands on.
  */
 export const buildPackages = async (
-  env: Env,
-  by: Acting,
+  env: PackageBuildEnv,
+  actor: AuditActor,
   subject: DependencySubject,
-  graphHash: string
-): Promise<{ approval: string; modules: Record<string, string> }> => {
+  graphHash: string,
+  target: PackageTarget
+): Promise<{
+  approval: string;
+  modules: Record<string, string>;
+  refused: Record<string, string[]>;
+}> => {
   // Refused at once where nothing bounds the builder, before any tarball
   // is fetched.
   sessionHost(env);
   const { approval, lock } = await approvedLock(env, subject, graphHash);
-  const actor = by.actor ?? actorOf(by);
   const locked = Object.values(lock.packages);
   const [first, ...rest] = await knownMalwareIn(env, locked);
   if (first !== undefined) {
@@ -159,7 +179,8 @@ export const buildPackages = async (
       env,
       `${subject.type}:${subject.id}`,
       lock,
-      tarballs
+      tarballs,
+      target
     );
   } catch (error) {
     if (!(error instanceof PlatformBoundError)) {
@@ -186,8 +207,13 @@ export const buildPackages = async (
       refusals: built.data.refusals,
     });
   }
-  const { modules } = built.data;
-  if (lock.entries.some((entry) => !Object.hasOwn(modules, entry))) {
+  const { modules, refused } = built.data;
+  if (
+    lock.entries.some(
+      (entry) =>
+        !Object.hasOwn(modules, entry) && !Object.hasOwn(refused, entry)
+    )
+  ) {
     throw new Error("The package builder left out an entry.");
   }
   const db = drizzle(env.DB);
@@ -200,9 +226,45 @@ export const buildPackages = async (
         [subject.type]: subject.id,
         graphHash,
         approval,
+        target,
         entries: lock.entries.length,
       },
     }),
   ]);
-  return { approval, modules };
+  return { approval, modules, refused };
+};
+
+/**
+ * What an App's page (`browser`) or server (`worker`) build is handed of
+ * its approved packages (the compiler's `packageModulesFile`): its
+ * latest approval's graph, each entry bundled for `target`, cached by
+ * graph and target as every build is; none while it has no approval. A
+ * graph revoked since is no approval: the next build refuses what imports
+ * it, as not approved.
+ */
+export const appPackageModules = async (
+  env: PackageBuildEnv,
+  app: string,
+  target: PackageTarget
+): Promise<string | undefined> => {
+  const subject: DependencySubject = { type: "app", id: app };
+  const graphHash = await latestApproval(env, subject);
+  if (graphHash === undefined) {
+    return undefined;
+  }
+  const { text } = await throughCache(
+    env,
+    await cacheKeyOf("app-packages", [graphHash, target]),
+    async () => {
+      const { modules } = await buildPackages(
+        env,
+        { type: "system" },
+        subject,
+        graphHash,
+        target
+      );
+      return { text: JSON.stringify({ graphHash, modules }), cache: true };
+    }
+  );
+  return text;
 };

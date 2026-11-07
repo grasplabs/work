@@ -90,9 +90,10 @@ export default {
           async () =>
             await buildPackages(
               { ...env, SANDBOX_HOST: undefined },
-              builder,
+              { type: "person", userId: builder.userId },
               { type: "workflow", id: "workflow-test" },
-              "0".repeat(64)
+              "0".repeat(64),
+              "worker"
             )
         )
       );

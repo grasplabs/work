@@ -66,6 +66,7 @@ export const pageTests = [
   "test/migration-transform.test.ts",
   "test/custom-migration-runs.test.ts",
   "test/app-functions.test.ts",
+  "test/app-packages.test.ts",
   "test/app-invocation-isolation.test.ts",
   "test/release-retention.test.ts",
   "test/release-controls.test.ts",

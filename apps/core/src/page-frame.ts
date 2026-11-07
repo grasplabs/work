@@ -1,3 +1,4 @@
+import { graphsOfModules } from "@grasp-os/compiler";
 import {
   fromBase64Url,
   sha256Hex,
@@ -25,6 +26,7 @@ import { z } from "zod";
 
 import { signInConfig } from "./auth/config.ts";
 import { derivedHmacKey } from "./derived-keys.ts";
+import { graphApproved } from "./packages/approvals.ts";
 import { pageFramePolicy } from "./security-headers.ts";
 
 // The document an App's page runs in, and the only code it can run.
@@ -1357,6 +1359,23 @@ const hashSource = async (text: string): Promise<string> => {
 };
 
 /**
+ * Whether `manifest`'s build bundles approved packages revoked as malware
+ * since: a frame of it runs nothing, and isn't served.
+ */
+const bundlesRevoked = async (
+  env: Env,
+  manifest: FrameManifest
+): Promise<boolean> => {
+  for (const graph of graphsOfModules(Object.keys(manifest.app))) {
+    // oxlint-disable-next-line no-await-in-loop -- one graph a build, at most
+    if (!(await graphApproved(env, graph))) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
  * The frame's document for the build its address names, under a policy
  * that runs that build's modules and nothing else; core sets its other
  * headers with everyone else's. Only with a token core made for that
@@ -1420,6 +1439,9 @@ export const pageFrameResponse = async (
     // Its modules sit in a scope shared with other builds (a preview's,
     // every write of its draft): a policy naming that directory would run
     // them too, so only a frame taking the draft's updates is served it.
+    return refused(403);
+  }
+  if (await bundlesRevoked(env, manifest)) {
     return refused(403);
   }
   const origin = signInConfig(env)?.origin ?? url.origin;

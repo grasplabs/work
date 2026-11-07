@@ -1,5 +1,6 @@
 import { packageModuleName } from "@grasp-os/compiler";
-import { packageLimits } from "@grasp-os/shared/packages";
+import { actorOf } from "@grasp-os/shared/audit";
+import { packageErrors, packageLimits } from "@grasp-os/shared/packages";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { workflowModuleLimits } from "@grasp-os/shared/workflow-modules";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -44,12 +45,22 @@ export const sealPackages = async (
   if (by.staff) {
     throw roleErrors.create("role.forbidden");
   }
-  const { approval, modules: built } = await buildPackages(
+  const {
+    approval,
+    modules: built,
+    refused,
+  } = await buildPackages(
     env,
-    by,
+    by.actor ?? actorOf(by),
     { type: "workflow", id: workflow },
-    graphHash
+    graphHash,
+    "worker"
   );
+  // A compute module may import every entry its version seals.
+  const unbuilt = Object.values(refused).flat();
+  if (unbuilt.length > 0) {
+    throw packageErrors.create("package.refused", { refusals: unbuilt });
+  }
   const entries = Object.entries(built);
   if (entries.length > workflowModuleLimits.files) {
     throw invalid(

@@ -75,9 +75,11 @@ export {
 export {
   appModuleName,
   computePackagesFile,
+  graphsOfModules,
   kitModuleName,
   packageModuleName,
   packageModulePrefix,
+  packageModulesFile,
   previewRuntime,
   pageRuntime,
 } from "./kit.ts";
@@ -649,3 +651,4 @@ export const ultraciteCode = async (assets: Fetcher): Promise<PlatformCode> =>
       cpuMs: isolateSettings.limits.cpuMs,
     };
   });
+export type { PackageTarget } from "./packages/build.ts";

@@ -7,6 +7,7 @@ import {
   appModuleName,
   kitModuleName,
   ownEntry,
+  packageModuleIn,
   packageModuleName,
   pageDataModel,
   pageReferences,
@@ -322,7 +323,9 @@ export const pageTypeImportError = (
       ? undefined
       : `"${specifier}" holds the types of the App's tables, generated from server/schema.ts, which this App doesn't have yet.`;
   }
-  return specifier === "lucide-react" || kit.imports.includes(specifier)
+  return specifier === "lucide-react" ||
+    kit.imports.includes(specifier) ||
+    packageModuleIn(files, specifier) !== undefined
     ? undefined
     : `"${specifier}" is outside the kit. Pages can import the App's own files and ${packagesOf(kit)}.`;
 };
@@ -396,9 +399,10 @@ export const importError = (
   ) {
     return `Pages import only { v } from ${sdkRoot}, and its types: the rest is the App's server code.`;
   }
-  return kit.imports.includes(specifier)
+  return kit.imports.includes(specifier) ||
+    packageModuleIn(files, specifier) !== undefined
     ? undefined
-    : `"${specifier}" is outside the kit. Pages can import the App's own files and ${packagesOf(kit)}.`;
+    : `"${specifier}" is outside the kit and the App's approved packages. Pages can import the App's own files, ${packagesOf(kit)}, and the npm packages its builder approved: ask for one with env.build.resolveDependencies, and import it once it is approved.`;
 };
 
 /** What one compiled file imports, by flat module name. */
@@ -454,6 +458,11 @@ export const rewriteImports = (
       imported.app.add(module);
       return module;
     }
+    const approved = packageModuleIn(files, specifier);
+    if (approved !== undefined) {
+      imported.app.add(approved);
+      return approved;
+    }
     if (!isRelative(specifier)) {
       if (!allowed.has(specifier)) {
         throw new Error(
@@ -476,6 +485,30 @@ export const rewriteImports = (
       : undefined
   );
 };
+
+/**
+ * Points an approved package's page module (`code`, bundled in core's
+ * package builder with the kit's React left out) at the kit: React and
+ * React DOM are the kit's own modules, never a copy of the package's, and
+ * it imports nothing else. Adds the kit modules it points at to
+ * `imported`.
+ */
+export const rewritePackageImports = (
+  code: string,
+  kit: Kit,
+  imported: ModuleImports
+): string =>
+  pointImports(code, (specifier) => {
+    const module =
+      specifier === undefined ? undefined : kitModuleName(specifier);
+    if (module === undefined || !Object.hasOwn(kit.moduleImports, module)) {
+      throw new Error(
+        `An approved package imports ${String(specifier)}, which neither it nor the kit has.`
+      );
+    }
+    imported.kit.add(module);
+    return module;
+  });
 
 /**
  * Code built here that runs outside the pages: a JSON workflow's

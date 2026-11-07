@@ -419,7 +419,7 @@ export default {
         await outcomeOf(async () => {
           for (const _ of [1, 2]) {
             // oxlint-disable-next-line no-await-in-loop -- one after the other
-            await runBuilder(builderEnv, whose, lock, [tarball]);
+            await runBuilder(builderEnv, whose, lock, [tarball], "worker");
           }
           return reads.builder;
         })
@@ -427,7 +427,9 @@ export default {
     }
     return Response.json(
       await outcomeOf(async () =>
-        builtModules(await runBuilder(builderEnv, whose, lock, [tarball]))
+        builtModules(
+          await runBuilder(builderEnv, whose, lock, [tarball], "worker")
+        )
       )
     );
   },

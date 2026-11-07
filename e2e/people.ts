@@ -348,6 +348,7 @@ const cast = {
   exports: { admin: "admin" },
   chatBuilds: { builder: "builder" },
   chatPackages: { builder: "builder" },
+  chartPackages: { builder: "builder" },
   dashboard: { user: "user", admin: "admin" },
   dashboardBoard: { builder: "builder" },
   dashboardLayout: { user: "user" },

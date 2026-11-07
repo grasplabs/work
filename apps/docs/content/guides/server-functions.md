@@ -117,3 +117,7 @@ export const canManage = query({
   },
 });
 ```
+
+## npm packages
+
+Server functions import the npm packages the App's builder approved by name, as Pages do (see [Pages](/guides/pages)). They run in the App's isolate, which has no network: a package that calls `fetch` fails there. Reach other systems through the App's connections.

@@ -388,11 +388,16 @@ export interface PackageTarball {
   tarball: Uint8Array;
 }
 
-/** What the builder answers a build with: each entry's module, or why not. */
+/**
+ * What the builder answers a build with: each entry's module, and why
+ * each entry that doesn't build for its target doesn't; or why nothing
+ * could be read.
+ */
 export const packageBuildAnswerSchema = z.discriminatedUnion("ok", [
   z.strictObject({
     ok: z.literal(true),
     modules: z.record(packageEntrySchema, z.string()),
+    refused: z.record(packageEntrySchema, z.array(z.string().max(500)).max(50)),
   }),
   z.strictObject({
     ok: z.literal(false),

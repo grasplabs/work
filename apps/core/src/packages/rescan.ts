@@ -14,8 +14,8 @@ import {
 } from "../audit-outbox.ts";
 import { dependencyRequests } from "../db/core/schema.ts";
 import { packageNoticed } from "../notifications.ts";
+import { malwareEntries, requestEntry, snapshotOf } from "./approvals.ts";
 import { scanPackages } from "./malware.ts";
-import { malwareEntries, requestEntry, snapshotOf } from "./requests.ts";
 import { buildersOf } from "./subjects.ts";
 
 // Approved packages scanned again on core's clock (clock.ts): each

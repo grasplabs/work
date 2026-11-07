@@ -2003,9 +2003,11 @@ build: {
    * Asks for the App's npm packages: resolved into one exact graph from the
    * npm registry and proposed as one request, which the App's builder
    * approves or denies on a card in this chat. You can't approve it, and
-   * nothing may use the packages until they do. Another request for the
-   * App replaces one still waiting. Known malware is refused; lookalike
-   * names and advisories are shown to the builder.
+   * nothing may use the packages until they do; once approved, the App's
+   * Pages and server functions import them by name from your next write.
+   * Another request for the App replaces one still waiting, so ask for
+   * every package the App needs at once. Known malware is refused;
+   * lookalike names and advisories are shown to the builder.
    */
   resolveDependencies(app: string, intent: {
     /** Why the App needs them, for the builder deciding. */

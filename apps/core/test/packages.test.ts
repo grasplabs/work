@@ -1,4 +1,5 @@
 import type { AgentProposer } from "@grasp-os/shared/apps";
+import { actorOf } from "@grasp-os/shared/audit";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import { chatIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
@@ -346,9 +347,10 @@ describe("building approved packages", () => {
       outcome(
         buildPackages(
           env,
-          builder,
+          actorOf(builder),
           { type: "workflow", id: workflow },
-          request.graphHash
+          request.graphHash,
+          "worker"
         )
       )
     ).resolves.toBe("dependency.approval_required");
@@ -362,9 +364,10 @@ describe("building approved packages", () => {
     const events = await auditedDuring(async () => {
       ({ modules } = await buildPackages(
         env,
-        builder,
+        actorOf(builder),
         { type: "workflow", id: workflow },
-        request.graphHash
+        request.graphHash,
+        "worker"
       ));
     });
 
@@ -391,9 +394,10 @@ describe("building approved packages", () => {
       outcome(
         buildPackages(
           env,
-          builder,
+          actorOf(builder),
           { type: "workflow", id: workflow },
-          request.graphHash
+          request.graphHash,
+          "worker"
         )
       )
     ).resolves.toBe("package.integrity_mismatch");
@@ -430,28 +434,38 @@ describe("building approved packages", () => {
       entries.map((entry) => `${name}/${entry}`)
     );
 
-    const { code, details } = await failure(
-      buildPackages(
-        env,
-        builder,
-        { type: "workflow", id: workflow },
-        request.graphHash
-      )
+    const { modules, refused } = await buildPackages(
+      env,
+      actorOf(builder),
+      { type: "workflow", id: workflow },
+      request.graphHash,
+      "worker"
     );
+    const entry = (base: string) => `${name}/${base}`;
 
-    expect({ code, refusals: details.refusals }).toStrictEqual({
-      code: "package.refused",
-      refusals: [
-        expect.stringContaining("left-pad, which it doesn't depend on"),
-        expect.stringContaining("node:fs, which is never fetched"),
-        expect.stringContaining(
-          "https://example.com/x.js, which is never fetched"
-        ),
-        expect.stringContaining("../../x.js, which isn't a file of its own"),
-        expect.stringContaining(
-          `${name}/linked, which ${name}@1.0.0 doesn't export`
-        ),
-      ],
+    expect({ built: Object.keys(modules), refused }).toStrictEqual({
+      built: [],
+      refused: {
+        [entry("undeclared")]: [
+          expect.stringContaining("left-pad, which it doesn't depend on"),
+        ],
+        [entry("builtin")]: [
+          expect.stringContaining("node:fs, which is never fetched"),
+        ],
+        [entry("remote")]: [
+          expect.stringContaining(
+            "https://example.com/x.js, which is never fetched"
+          ),
+        ],
+        [entry("climbs")]: [
+          expect.stringContaining("../../x.js, which isn't a file of its own"),
+        ],
+        [entry("linked")]: [
+          expect.stringContaining(
+            `${entry("linked")}, which ${name}@1.0.0 doesn't export`
+          ),
+        ],
+      },
     });
   });
 
@@ -461,9 +475,10 @@ describe("building approved packages", () => {
     const build = async (stop: Parameters<typeof sandboxStopping>[0]) =>
       await buildPackages(
         { ...env, SANDBOX_HOST: sandboxStopping(stop).host },
-        builder,
+        actorOf(builder),
         { type: "workflow", id: workflow },
-        request.graphHash
+        request.graphHash,
+        "worker"
       );
 
     expect({
@@ -505,9 +520,10 @@ describe("rescanning approved packages", () => {
       build: await outcome(
         buildPackages(
           env,
-          builder,
+          actorOf(builder),
           { type: "workflow", id: workflow },
-          request.graphHash
+          request.graphHash,
+          "worker"
         )
       ),
     }).toStrictEqual({

@@ -60,6 +60,7 @@ import {
   kitModule,
   typesModule,
   kitModuleName,
+  kitPeers,
   kitStylesheet,
   previewRefresh,
   previewRuntime,
@@ -100,13 +101,7 @@ const ownPackages: Readonly<Record<string, string>> = {
 const require = createRequire(path.join(root, "package.json"));
 
 /** The modules of React and React DOM the kit provides, by specifier. */
-const reactSpecifiers = [
-  "react",
-  "react/jsx-runtime",
-  "react/compiler-runtime",
-  "react-dom",
-  "react-dom/client",
-];
+const reactSpecifiers = kitPeers;
 /** What App code may import besides `@grasp-os/ui` and lucide-react icons. */
 const reactImports = ["react", "react/jsx-runtime"];
 

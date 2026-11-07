@@ -113,7 +113,8 @@ describe("a build task's CPU on-prem", () => {
         entries: ["missing"],
         packages: {},
       },
-      []
+      [],
+      "worker"
     );
     expect({
       built: built.ok,

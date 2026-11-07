@@ -54,6 +54,7 @@ import {
   computeCodeWith,
   generatedWorkflowCode,
   rewriteImports,
+  rewritePackageImports,
   pageTypeImportError,
   importSitesOf,
 } from "./imports.ts";
@@ -84,8 +85,12 @@ import {
 } from "./inputs.ts";
 import {
   appModuleName,
+  bundledPackagesOf,
   computePackagesFile,
+  packageEntriesOf,
   kitModuleName,
+  packageModulesByName,
+  packageModulesFile,
   kitStylesheet,
   ownEntry,
   previewRefresh,
@@ -508,6 +513,43 @@ const ownRecord = (record: Record<string, unknown>, key: string): unknown =>
  * runs in the checker's isolate (checked-build.ts): `buildPages`' last
  * gate, beside its compile and import checks.
  */
+/**
+ * Adds each approved package's module (`packages`) to a pages build's
+ * `modules` and `imports`, pointed at the kit's React: what a page
+ * imports of it loads from the build's own directory. Answers what
+ * doesn't point.
+ */
+const addPackageModules = (
+  packages: ReadonlyMap<string, string>,
+  modules: Record<string, string>,
+  imports: Map<string, ModuleImports>
+): Diagnostic[] =>
+  [...packages].flatMap(([name, code]) => {
+    const imported: ModuleImports = { app: new Set(), kit: new Set() };
+    try {
+      modules[name] = rewritePackageImports(code, kit, imported);
+      imports.set(name, imported);
+      return [];
+    } catch (error) {
+      return [problem("imports", messageOf(error))];
+    }
+  });
+
+/**
+ * Each approved package entry as a module of no declared types, for a
+ * type check: what it exports is the package's, unchecked.
+ */
+const packageDeclarations = (
+  entries: readonly string[]
+): Record<string, string> =>
+  entries.length === 0
+    ? {}
+    : {
+        ".grasp/packages.d.ts": entries
+          .map((entry) => `declare module ${JSON.stringify(entry)};`)
+          .join("\n"),
+      };
+
 const pagesCheck = (
   app: Record<string, string>,
   {
@@ -573,7 +615,11 @@ export const buildPagesIncrementally = async (
     fresh,
     metrics,
   });
-  const app = buildFiles(files);
+  // The App's approved packages, bundled by core: modules of the build,
+  // never App files, so held to no App limit.
+  const { [packageModulesFile]: bundled, ...given } = files;
+  const packages = packageModulesByName(bundledPackagesOf(bundled));
+  const app = buildFiles(given);
   const tooMuch = appCodeLimitErrors(app);
   if (tooMuch.length > 0) {
     return done({ ok: false, diagnostics: tooMuch });
@@ -592,7 +638,11 @@ export const buildPagesIncrementally = async (
   // Only pages, components and the references they import are
   // compiled, whatever else is passed: what isn't is refused above, and
   // kept out should that ever miss it. Declarations are only types.
-  const { sources, known: paths, typeFiles: typed } = pageSources(app);
+  const {
+    sources,
+    known: paths,
+    typeFiles: typed,
+  } = pageSources(app, packages.keys());
   const known = new Set(paths);
   // What a type may name: the build's files and its declarations.
   const typeFiles = new Set(typed);
@@ -699,12 +749,16 @@ export const buildPagesIncrementally = async (
   // compile errors still fail it.
   const typeCheck = checks
     ? pagesCheck(
-        tree.source === undefined
-          ? routed
-          : { ...routed, [routeTreePath]: tree.source },
+        {
+          ...(tree.source === undefined
+            ? routed
+            : { ...routed, [routeTreePath]: tree.source }),
+          ...packageDeclarations(packageEntriesOf(bundled)),
+        },
         { found: errors, unparsed, untyped }
       )
     : undefined;
+  errors.push(...addPackageModules(packages, modules, imports));
   if (errors.some((diagnostic) => isError(diagnostic))) {
     return done({ ok: false, diagnostics: errors, calls }, typeCheck);
   }
@@ -927,14 +981,7 @@ export const buildComputeModules = (
   if (!built.ok) {
     return { built };
   }
-  const declared: Record<string, string> =
-    named.packages.length === 0
-      ? {}
-      : {
-          ".grasp/packages.d.ts": named.packages
-            .map((entry) => `declare module ${JSON.stringify(entry)};`)
-            .join("\n"),
-        };
+  const declared = packageDeclarations(named.packages);
   return {
     built,
     typeCheck: {
@@ -1080,8 +1127,13 @@ const buildAppCodeNoting = (
   // every migration. Built as the
   // host's own code, never type-checked as the App's.
   code[serverEntryPath] = serverEntrySource(Object.keys(code));
-  const known = new Set(Object.keys(code));
-  const modules: Record<string, string> = {};
+  // The App's approved packages, bundled by core for its isolate, which
+  // has no network: each loads as a module of the build, by flat name.
+  const packages = packageModulesByName(
+    bundledPackagesOf(files[packageModulesFile])
+  );
+  const known = new Set([...Object.keys(code), ...packages.keys()]);
+  const modules: Record<string, string> = Object.fromEntries(packages);
   const errors: Diagnostic[] = [];
   // Only server code becomes a module, whatever else is passed: what isn't
   // is refused above, and never compiled, should that check ever miss it.
@@ -1173,8 +1225,13 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
   // every migration. Built as the
   // host's own code, never type-checked as the App's.
   code[serverEntryPath] = serverEntrySource(Object.keys(code));
-  const known = new Set(Object.keys(code));
-  const modules: Record<string, string> = {};
+  // The App's approved packages, bundled by core for its isolate, which
+  // has no network: each loads as a module of the build, by flat name.
+  const packages = packageModulesByName(
+    bundledPackagesOf(files[packageModulesFile])
+  );
+  const known = new Set([...Object.keys(code), ...packages.keys()]);
+  const modules: Record<string, string> = Object.fromEntries(packages);
   const errors: Diagnostic[] = [];
   for (const [path, source] of Object.entries(code)) {
     if (appCodeKind(path) === "test") {
@@ -1235,10 +1292,14 @@ export const checkAppCode = (
   // it declares none, so a correct one checks and a wrong output fails here,
   // before the host refuses it at run time anyway.
   const checked = { ...appCodeFiles(files), ...tests };
+  const approved = packageEntriesOf(files[packageModulesFile]);
   return {
     built,
     typeCheck: {
-      request: typeCheckRequest(checked, appCodeTarget),
+      request: typeCheckRequest(
+        { ...checked, ...packageDeclarations(approved) },
+        appCodeTarget
+      ),
       found: built.ok ? [] : built.diagnostics,
       unparsed: [...unparsed],
       // A draft whose server code doesn't register is checked against the

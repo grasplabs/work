@@ -37,11 +37,22 @@ import {
   legacy,
 } from "resolve.exports";
 
+import { kitPeers } from "../kit.ts";
+
 /**
- * The conditions a package's `exports` are read with: a Worker's, as a
- * workflow's compute sandbox runs them.
+ * Where a build runs: a page, in the browser, beside the kit's React; or
+ * an isolate (an App's server code, a workflow's compute), a Worker's.
  */
-const conditions = ["workerd", "worker", "import", "module"];
+export type PackageTarget = "browser" | "worker";
+
+/** The conditions a package's `exports` are read with, by target. */
+const conditionsOf: Record<PackageTarget, string[]> = {
+  browser: ["browser", "import", "module"],
+  worker: ["workerd", "worker", "import", "module"],
+};
+
+/** React's own packages: in a page, only ever the kit's. */
+const reactPackages = new Set(["react", "react-dom"]);
 
 /** The extensions and index files Node tries for a path without one. */
 const candidates = (path: string): string[] => [
@@ -175,7 +186,11 @@ const fileOf = (pkg: Unpacked, path: string): string | undefined =>
  * package.json: `exports` if it has them, else `module` or `main` for the
  * package itself, else the path. Undefined when nothing matches.
  */
-const exported = (pkg: Unpacked, subpath: string): string | undefined => {
+const exported = (
+  pkg: Unpacked,
+  subpath: string,
+  conditions: readonly string[]
+): string | undefined => {
   let target: string | undefined;
   if (pkg.manifest.exports === undefined) {
     target =
@@ -227,8 +242,10 @@ const isLocated = (value: unknown): value is Located =>
  */
 const lockPlugin = (
   lock: GraspLock,
-  packages: ReadonlyMap<string, Unpacked>
+  packages: ReadonlyMap<string, Unpacked>,
+  target: PackageTarget
 ): Plugin => {
+  const conditions = conditionsOf[target];
   /** Package `name` as `from` depends on it, or as the lock's direct one. */
   const dependency = (name: string, from?: Located): string | undefined => {
     const edges =
@@ -242,6 +259,16 @@ const lockPlugin = (
   const bare = (specifier: string, from?: Located): OnResolveResult => {
     const name = entryPackage(specifier);
     const who = from?.key ?? "The code";
+    // A page's React is the kit's, whatever version a package asks for:
+    // left for the page build to point at the kit's module, and refused
+    // past what the kit has, never bundled as a second copy.
+    if (target === "browser" && reactPackages.has(name)) {
+      return kitPeers.includes(specifier)
+        ? { path: specifier, external: true }
+        : refused(
+            `${who} imports ${specifier}, which the kit's React doesn't have.`
+          );
+    }
     const key = dependency(name, from);
     const pkg = key === undefined ? undefined : packages.get(key);
     if (key === undefined || pkg === undefined) {
@@ -250,7 +277,7 @@ const lockPlugin = (
       );
     }
     const subpath = `.${specifier.slice(name.length)}`;
-    const file = exported(pkg, subpath);
+    const file = exported(pkg, subpath, conditions);
     return file === undefined
       ? refused(`${who} imports ${specifier}, which ${key} doesn't export.`)
       : located({ key, file });
@@ -279,24 +306,24 @@ const lockPlugin = (
         // the package's root.
         let inside: string | undefined;
         if (path.startsWith("#")) {
-          let target: string | undefined;
+          let mapped: string | undefined;
           try {
-            target = importsOf(pkg.manifest, path, {
+            mapped = importsOf(pkg.manifest, path, {
               conditions,
               unsafe: true,
             })?.[0];
           } catch {
-            target = undefined;
+            mapped = undefined;
           }
-          if (target === undefined) {
+          if (mapped === undefined) {
             return refused(
               `${from.key} imports ${path}, which it doesn't map.`
             );
           }
-          if (!target.startsWith("./")) {
-            return bare(target, from);
+          if (!mapped.startsWith("./")) {
+            return bare(mapped, from);
           }
-          inside = withinPackage(target);
+          inside = withinPackage(mapped);
         } else if (path.startsWith(".")) {
           const slash = from.file.lastIndexOf("/");
           inside = withinPackage(
@@ -368,6 +395,7 @@ const refusalsOf = (messages: readonly Message[]): string[] =>
 export const buildLock = async (
   lock: GraspLock,
   tarballs: readonly PackageTarball[],
+  target: PackageTarget,
   wasmModule: WebAssembly.Module
 ): Promise<PackageBuildAnswer> => {
   started ??= initialize({ wasmModule, worker: false });
@@ -387,7 +415,9 @@ export const buildLock = async (
     throw error;
   }
   const modules: Record<string, string> = {};
-  const failed: Message[] = [];
+  // Each entry on its own: one that can't run here (a page's chart in an
+  // isolate, say) leaves the others, and says why.
+  const unbuilt: Record<string, string[]> = {};
   for (const entry of lock.entries) {
     try {
       // One entry at a time: esbuild's memory is the isolate's.
@@ -399,7 +429,7 @@ export const buildLock = async (
         platform: "neutral",
         write: false,
         logLevel: "silent",
-        plugins: [lockPlugin(lock, packages)],
+        plugins: [lockPlugin(lock, packages, target)],
       });
       modules[entry] = result.outputFiles[0]?.text ?? "";
     } catch (error) {
@@ -411,9 +441,8 @@ export const buildLock = async (
       if (!Array.isArray(errors)) {
         throw error;
       }
-      failed.push(...errors.filter(isMessage));
+      unbuilt[entry] = refusalsOf(errors.filter(isMessage));
     }
   }
-  const refusals = refusalsOf(failed);
-  return refusals.length > 0 ? { ok: false, refusals } : { ok: true, modules };
+  return { ok: true, modules, refused: unbuilt };
 };

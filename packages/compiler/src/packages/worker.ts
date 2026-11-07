@@ -20,6 +20,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { assertNoBindings } from "../authority.ts";
 import { buildLock } from "./build.ts";
+import type { PackageTarget } from "./build.ts";
 import esbuildWasm from "./esbuild.wasm";
 
 /** A tarball as the on-prem sandbox host hands it over: its size, not its bytes. */
@@ -38,10 +39,11 @@ export default class PackageBuilder extends WorkerEntrypoint {
   // RPC exposes prototype methods only, so these can't be static.
   async build(
     lock: GraspLock,
-    tarballs: PackageTarball[]
+    tarballs: PackageTarball[],
+    target: PackageTarget
   ): Promise<PackageBuildAnswer> {
     assertNoBindings(this.env, this.ctx.props, "The package builder");
-    return await buildLock(lock, tarballs, esbuildWasm);
+    return await buildLock(lock, tarballs, target, esbuildWasm);
   }
 
   /**
@@ -54,7 +56,8 @@ export default class PackageBuilder extends WorkerEntrypoint {
     lock: GraspLock,
     headers: TarballHeader[],
     read: ChunkRead,
-    write: WriteChunk
+    write: WriteChunk,
+    target: PackageTarget
   ): Promise<PackageBuildAnswer> {
     // Before a tarball is read: the isolate is checked as it is called.
     assertNoBindings(this.env, this.ctx.props, "The package builder");
@@ -64,7 +67,7 @@ export default class PackageBuilder extends WorkerEntrypoint {
       // oxlint-disable-next-line no-await-in-loop
       tarballs.push({ key, tarball: await readWhole(read, key, size) });
     }
-    const answer = await this.build(lock, tarballs);
+    const answer = await this.build(lock, tarballs, target);
     if (!answer.ok) {
       return answer;
     }
@@ -78,6 +81,6 @@ export default class PackageBuilder extends WorkerEntrypoint {
       }
       modules[entry] = "";
     }
-    return { ok: true, modules };
+    return { ok: true, modules, refused: answer.refused };
   }
 }

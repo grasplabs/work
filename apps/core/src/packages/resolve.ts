@@ -28,9 +28,10 @@ import satisfies from "semver/functions/satisfies";
 import validRange from "semver/ranges/valid";
 
 import type { Acting } from "../auth/identity.ts";
+import { refuseMalware } from "./approvals.ts";
 import { lookalikeFindings } from "./lookalikes.ts";
 import { scanPackages, whenFree } from "./malware.ts";
-import { propose, refuseMalware } from "./requests.ts";
+import { propose } from "./requests.ts";
 import { builtSubject } from "./subjects.ts";
 
 // Resolving what a source asks for into one exact graph, and proposing it
