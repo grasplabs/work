@@ -898,6 +898,12 @@ export interface AppsApi {
    */
   archive: (app: string) => Promise<App>;
   /**
+   * Resets the App's data, for its builders, never Grasp staff: every
+   * record goes, audited, and its current version runs again on an empty
+   * store.
+   */
+  resetData: (app: string) => Promise<void>;
+  /**
    * Restores an archived App, for its builders, as a draft: refused with
    * `app.stops_pending` while runs it started are still being stopped.
    */

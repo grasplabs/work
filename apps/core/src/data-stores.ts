@@ -306,6 +306,26 @@ export const appStoreFor = async (
   return recorded.store;
 };
 
+/**
+ * Resets the data of App `app`'s store for `by` (`StoreHost.resetData`,
+ * audited in the store's own transaction): its store, if it has one that
+ * lives, or null. Its caller decides who may.
+ */
+export const resetAppStore = async (
+  env: Env,
+  by: Acting,
+  app: AppId
+): Promise<StoreId | null> => {
+  const recorded = await recordedStoreOf(env, app);
+  if (recorded?.live !== true) {
+    return null;
+  }
+  await inJurisdiction(env, env.DATA_STORES)
+    .getByName(recorded.store)
+    .resetData(recorded.store, by.actor ?? actorOf(by), app);
+  return recorded.store;
+};
+
 /** The App a store serves: whose roles decide who manages it. */
 type StoreApp = Pick<App, "id" | "owner" | "status"> & {
   /** Whether the App was removed (app-removal.ts): its admins' alone then. */

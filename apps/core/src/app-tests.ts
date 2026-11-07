@@ -502,7 +502,6 @@ const createFixtureStore = async (
     manifest: manifestText(release.app.schema),
     ids,
     actor: { type: "app", appId: app, part: "server" },
-    principal: app,
   });
   return store;
 };

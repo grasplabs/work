@@ -318,7 +318,6 @@ const draftStore = async (
     ids: run.ids,
     answers: release.app.answers ?? [],
     actor: { type: "person", userId },
-    principal: userId,
   });
   heldStores.set(id, now);
   return store;

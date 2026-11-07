@@ -132,7 +132,7 @@ import {
   pruneHistory,
   recordChangesIn,
 } from "./store-changes.ts";
-import type { ChangeInput, ChangeOrigin } from "./store-changes.ts";
+import type { ChangeInput } from "./store-changes.ts";
 import { decodeCursor, encodeCursor } from "./store-cursors.ts";
 import type { CursorBinding } from "./store-cursors.ts";
 import { inventoriedDeleted, recordStoreDeleted } from "./store-deletion.ts";
@@ -627,6 +627,23 @@ const purgedTables = [
 ] as const;
 
 /**
+ * What a reset of the store's data removes (`StoreHost.resetData`), in
+ * this order: what refers to records first, tables last.
+ */
+const resetTables = [
+  "sdk_file_refs",
+  "sdk_record_refs",
+  "sdk_cascade_members",
+  "sdk_cascade_jobs",
+  "sdk_search_docs",
+  "sdk_record_changes",
+  "sdk_import_rows",
+  "sdk_migration_rows",
+  "sdk_records",
+  "sdk_tables",
+] as const;
+
+/**
  * A form's intent without what the form sent (`app.form_sent`, core's
  * app-webhook-queue.ts): its values are kept only to hand them to the
  * App's webhooks, and may hold fields no record keeps.
@@ -790,12 +807,12 @@ const schemaApplySchema = z.strictObject({
     })
   ),
   answers: z.array(schemaAnswerSchema).max(schemaAnswersMax).default([]),
-  /** Who publishes: whom the records' history names for what it fills in. */
+  /** Who publishes: whom the audit log names for what it fills in. */
   actor: auditActorSchema,
-  principal: identifierSchema,
   /** The version published, and the one current as its publish began. */
   version: z
     .strictObject({
+      app: identifierSchema,
       number: z.int().min(1),
       basedOn: z.int().min(1).nullable(),
     })
@@ -1023,23 +1040,12 @@ const migratedFields = (
   return fields;
 };
 
-/** `fields` with each of `fills` it lacks (or holds null in) filled in. */
-const filledFields = (
+/** Whether `fields` lacks `fill`'s field, or holds null where it can't. */
+const lacks = (
   fields: StoreFields,
-  fills: readonly PlannedFill[]
-): StoreFields => {
-  const missing = fills.filter(({ field, absent, nulls }) =>
-    Object.hasOwn(fields, field) ? nulls && fields[field] === null : absent
-  );
-  return missing.length === 0
-    ? fields
-    : {
-        ...fields,
-        ...Object.fromEntries(
-          missing.map(({ field, value }) => [field, value])
-        ),
-      };
-};
+  { field, absent, nulls }: PlannedFill
+): boolean =>
+  Object.hasOwn(fields, field) ? nulls && fields[field] === null : absent;
 
 /** A receipt's seed: 32 bytes, as hex. */
 const seedPattern = /^[0-9a-f]{64}$/u;
@@ -1209,19 +1215,11 @@ export class StoreHost {
     dropIndexes(this.ctx.storage.sql, target.indexes);
     dropSearches(this.ctx.storage.sql, target.searches);
     const moved = this.#tablesOf(plan);
-    const commit = this.#nextCommit();
-    const rewritten = this.#rewriteRecords(plan, {
+    const { rewritten, filled } = this.#rewriteRecords(plan, {
       held,
       manifest,
       migration,
       schemaHash,
-      origin: {
-        source: "schema_change",
-        actor: change.actor,
-        principal: change.principal,
-        commit,
-      },
-      now,
     });
     const lacking = plan.checks.flatMap((check) =>
       check.answer === null ? this.#lacking(plan, check) : []
@@ -1231,6 +1229,22 @@ export class StoreHost {
         refused: [],
         lacking,
       });
+    }
+    // What it filled in, one audit entry a field, in this transaction: in
+    // the audit log exactly when the records hold it. A store made for a
+    // draft or a test has no version, and no records to fill.
+    for (const [fill, taken] of filled) {
+      if (version !== undefined) {
+        this.#keepEvent(change.actor, "app.data.filled", {
+          target: { type: "app", id: version.app },
+          detail: {
+            table: fill.table,
+            field: fill.field,
+            version: version.number,
+            records: taken,
+          },
+        });
+      }
     }
     this.#markSensitive(manifest);
     installIndexes(this.ctx.storage.sql, target.indexes);
@@ -1318,10 +1332,10 @@ export class StoreHost {
    * read at (`migration.busy` for one changed since, or added); any other
    * table's with its renamed fields under their new names and its fills
    * where records lack them. Each record keeps its revision and update
-   * time: a schema change is no edit. What a fill gives a record is in
-   * its history; a migration's rewrite keeps none, as it changes no
-   * field a row rule reads (store-changes.ts). Answers the IDs of the
-   * tables rewritten.
+   * time, and its history gets nothing: a schema change is no edit, and
+   * what it filled in is one audit entry for each field (`#applyIn`).
+   * Answers the IDs of the tables rewritten, and how many records each
+   * fill gave its value, by fill.
    */
   #rewriteRecords(
     plan: SchemaChangePlan,
@@ -1330,19 +1344,15 @@ export class StoreHost {
       manifest,
       migration,
       schemaHash,
-      origin,
-      now,
     }: {
       held: HeldSchema | undefined;
       manifest: SchemaManifest;
       migration: z.output<typeof schemaApplySchema>["migration"];
       schemaHash: string;
-      origin: ChangeOrigin;
-      now: number;
     }
-  ): Set<string> {
+  ): { rewritten: Set<string>; filled: Map<PlannedFill, number> } {
     const rewritten = new Set<string>();
-    const sensitive = this.#sensitivity();
+    const filled = new Map<PlannedFill, number>();
     const migrated = new Set(migration?.tables);
     for (const [tableId, table] of Object.entries(plan.catalog)) {
       const renames = plan.renamedFields.filter(
@@ -1361,10 +1371,24 @@ export class StoreHost {
         now: table,
         rules: new Set(ruleFieldsOf(manifest.tables[table.name]?.rules)),
       };
-      const rewrite = (record: RewrittenRecord): StoreFields =>
-        isMigrated
-          ? migratedFields(record, guarded)
-          : filledFields(renamedFields(record.stored, renames), fills);
+      const rewrite = (record: RewrittenRecord): StoreFields => {
+        if (isMigrated) {
+          return migratedFields(record, guarded);
+        }
+        const renamed = renamedFields(record.stored, renames);
+        const lacking = fills.filter((fill) => lacks(renamed, fill));
+        for (const fill of lacking) {
+          filled.set(fill, (filled.get(fill) ?? 0) + 1);
+        }
+        return lacking.length === 0
+          ? renamed
+          : {
+              ...renamed,
+              ...Object.fromEntries(
+                lacking.map(({ field, value }) => [field, value])
+              ),
+            };
+      };
       let after = "";
       for (;;) {
         const rows = this.ctx.storage.sql
@@ -1391,7 +1415,6 @@ export class StoreHost {
         if (rows.length === 0) {
           break;
         }
-        const changes: ChangeInput[] = [];
         for (const row of rows) {
           after = row.record_id;
           const record: RewrittenRecord = {
@@ -1422,24 +1445,11 @@ export class StoreHost {
             tableId,
             row.record_id
           );
-          // A migration's rewrite keeps no change (store-changes.ts); a
-          // fill keeps what it gave, under the new names.
-          if (!isMigrated) {
-            changes.push({
-              tableId,
-              tableName: table.name,
-              recordId: row.record_id,
-              before: renamedFields(record.stored, renames),
-              after: next,
-              sensitive: sensitive(table.name),
-            });
-          }
         }
-        recordChangesIn(this.#db, changes, origin, now);
         rewritten.add(tableId);
       }
     }
-    return rewritten;
+    return { rewritten, filled };
   }
 
   /**
@@ -1466,6 +1476,47 @@ export class StoreHost {
       .toArray();
     const lacking = row?.records ?? 0;
     return lacking === 0 ? [] : [{ table, field, records: lacking }];
+  }
+
+  /**
+   * Resets the store's data, in one transaction: every record, its
+   * references, search entries and history, every table, index and
+   * staged migration go, and the schema with its catalog, so the next
+   * schema applies as to a new store. Receipts, the outbox, files and
+   * people's preferences stay: they aren't records of a schema. What a
+   * store made before stable IDs holds can only be reset (its schema has
+   * no catalog, `migration.metadata_missing`). Audited as `actor`'s, for
+   * App `app`.
+   */
+  resetData(storeId: StoreId, actor: AuditActor, app: string): void {
+    const by = auditActorSchema.parse(actor);
+    const appId = identifierSchema.parse(app);
+    this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId);
+      // In the transaction that resets it: in the audit log exactly when
+      // the data is gone.
+      this.#keepEvent(by, "store.reset", {
+        target: { type: "store", id: storeId },
+        detail: { app: appId },
+      });
+      dropIndexes(this.ctx.storage.sql, new Map());
+      dropSearches(this.ctx.storage.sql);
+      for (const table of resetTables) {
+        this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
+      }
+      this.#db
+        .update(store)
+        .set({
+          contractHash: null,
+          contractManifest: null,
+          schemaCatalog: null,
+          schemaVersion: null,
+          schemaAppliedAt: null,
+          historyBytes: 0,
+        })
+        .run();
+    });
+    this.#schemas.clear();
   }
 
   /**
@@ -4257,22 +4308,6 @@ export class StoreHost {
         .run();
       this.#moved(changed);
     }
-  }
-
-  /**
-   * The store's next commit, counted: what a schema change's writes are
-   * recorded under in the change history, as a commit's writes are.
-   */
-  #nextCommit(): number {
-    const counted = this.#db
-      .update(store)
-      .set({ commits: sql`${store.commits} + 1` })
-      .returning({ commits: store.commits })
-      .get();
-    if (counted === undefined) {
-      throw new Error("A bound store has no row");
-    }
-    return counted.commits;
   }
 
   /**

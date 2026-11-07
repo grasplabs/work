@@ -545,7 +545,7 @@ export const migrationErrors = defineErrorFamily({
   "migration.preference_changed":
     "This version changes a preference people may already have chosen. Keep each preference as it was (only its default may change), or add a new preference under a new name.",
   "migration.metadata_missing":
-    "This store holds records but no catalog of its schema, so no schema can be applied to it.",
+    "This App's data was stored before schemas were applied by stable ID, so it can't be read or changed any more. Reset the App's data in its settings, then publish it again.",
   "migration.metadata_corrupt":
     "This store's record of its preferences is damaged, so no version can change them until it is repaired.",
   "migration.busy":

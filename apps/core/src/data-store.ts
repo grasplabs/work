@@ -101,12 +101,24 @@ export class DataStore extends DurableObject<Env> {
     return this.#host;
   }
 
-  /** `StoreHost.applySchema`. */
+  /** `StoreHost.applySchema`; its fills' events handed to core. */
   async applySchema(
     storeId: StoreId,
     change: SchemaApply
   ): Promise<AppliedSchema> {
-    return await this.#live().applySchema(storeId, change);
+    const applied = await this.#live().applySchema(storeId, change);
+    await this.#afterFiles();
+    return applied;
+  }
+
+  /** `StoreHost.resetData`; its event handed to core. */
+  async resetData(
+    storeId: StoreId,
+    actor: AuditActor,
+    app: string
+  ): Promise<void> {
+    this.#live().resetData(storeId, actor, app);
+    await this.#afterFiles();
   }
 
   /** `StoreHost.beginMigration`. */
@@ -242,7 +254,7 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /**
-   * After a file's change that may have recorded audit events: the alarm
+   * After a change that may have recorded audit events: the alarm
    * set for what is due, and the events handed to core now, as far as
    * they go (the alarm hands over whatever this doesn't).
    */

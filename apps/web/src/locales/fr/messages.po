@@ -3179,11 +3179,6 @@ msgid "By {by}"
 msgstr "Par {by}"
 
 #: src/apps/app-data.tsx
-msgctxt "a change's source: the platform filled in a value the record lacked as a new version of the App's data model took effect"
-msgid "by a change of the App's data model"
-msgstr "par une modification du modèle de données de l'App"
-
-#: src/apps/app-data.tsx
 msgctxt "a change's source"
 msgid "by an import"
 msgstr "par une importation"
@@ -3252,6 +3247,7 @@ msgstr "Impossible de proposer Démarrer : {unread}"
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
 #: src/apps/app-remove.tsx
+#: src/apps/app-reset.tsx
 #: src/apps/app-sharing.tsx
 #: src/apps/app-status.tsx
 #: src/apps/app-versions.tsx
@@ -5114,6 +5110,10 @@ msgstr "Chaque lundi matin, pour vous"
 msgid "Every other app Grasp can connect to."
 msgstr "Toutes les autres apps que Grasp peut connecter."
 
+#: src/apps/app-reset.tsx
+msgid "Every record it holds is gone for good, and its current version runs again with no records. Its pages, versions, members and files stay."
+msgstr "Tous ses enregistrements disparaissent définitivement et sa version actuelle repart sans enregistrements. Ses pages, versions, membres et fichiers restent."
+
 #: src/apps/app-data.tsx
 msgid "Every row is checked first. If one is wrong, nothing is added."
 msgstr "Chaque ligne est d'abord vérifiée. Si l'une est incorrecte, rien n'est ajouté."
@@ -6886,6 +6886,10 @@ msgstr "Son identifiant est supprimé, et chaque application et chaque workflow 
 #: src/workflows/resource-params.tsx
 msgid "Its current version has no parameters."
 msgstr "Sa version actuelle n’a aucun paramètre."
+
+#: src/apps/app-settings.tsx
+msgid "Its data"
+msgstr "Ses données"
 
 #: src/apps/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
@@ -10704,6 +10708,18 @@ msgstr "Obligatoire"
 msgid "Reset"
 msgstr "Réinitialiser"
 
+#: src/apps/app-reset.tsx
+msgid "Reset {name}’s data?"
+msgstr "Réinitialiser les données de {name} ?"
+
+#: src/apps/app-reset.tsx
+msgid "Reset data"
+msgstr "Réinitialiser les données"
+
+#: src/apps/app-reset.tsx
+msgid "Reset for good"
+msgstr "Réinitialiser définitivement"
+
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps"
 msgstr "Réinitialiser ce qu'il conserve"
@@ -10711,6 +10727,10 @@ msgstr "Réinitialiser ce qu'il conserve"
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps?"
 msgstr "Réinitialiser ce qu'il conserve ?"
+
+#: src/apps/app-settings.tsx
+msgid "Resetting removes every record the App holds and applies its current version again, with no records."
+msgstr "La réinitialisation supprime tous les enregistrements de l'App et applique de nouveau sa version actuelle, sans enregistrements."
 
 #: src/apps/app-workspace.tsx
 msgid "Resize the chat"

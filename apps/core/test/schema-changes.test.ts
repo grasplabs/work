@@ -58,7 +58,6 @@ const change = (
   manifest: text,
   ids,
   actor: { type: "person", userId: "ada" },
-  principal: "ada",
   ...more,
 });
 
@@ -676,7 +675,7 @@ describe("two publishes of one store at once", { timeout: 120_000 }, () => {
   it("applies a version's schema only over the version its publish was based on", async () => {
     const { store } = await storeWith({ title: "Launch" });
     await store.applySchema(
-      change(v1, v1Ids, { version: { number: 1, basedOn: null } })
+      change(v1, v1Ids, { version: { app: "notes", number: 1, basedOn: null } })
     );
     const asText = notesText({ title, colour: v.string().optional() });
     const asNumber = notesText({ title, colour: v.number().optional() });
@@ -686,16 +685,18 @@ describe("two publishes of one store at once", { timeout: 120_000 }, () => {
     });
 
     await store.applySchema(
-      change(asText, ids, { version: { number: 2, basedOn: 1 } })
+      change(asText, ids, { version: { app: "notes", number: 2, basedOn: 1 } })
     );
     const second = await codeOf(
       store.applySchema(
-        change(asNumber, ids, { version: { number: 3, basedOn: 1 } })
+        change(asNumber, ids, {
+          version: { app: "notes", number: 3, basedOn: 1 },
+        })
       )
     );
     // The first publish, asked again, finds its own schema there.
     const again = await store.applySchema(
-      change(asText, ids, { version: { number: 2, basedOn: 1 } })
+      change(asText, ids, { version: { app: "notes", number: 2, basedOn: 1 } })
     );
 
     expect({

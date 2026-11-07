@@ -5,9 +5,10 @@ import type { Identity } from "@grasp-os/shared/rpc";
 
 import { schemaIdsOf } from "./app-definition.ts";
 import type { Release } from "./app-releases.ts";
-import { versionFiles } from "./apps.ts";
-import { openStore } from "./data-stores.ts";
+import { editableApp, versionFiles } from "./apps.ts";
+import { openStore, resetAppStore } from "./data-stores.ts";
 import { runMigrations } from "./migration-run.ts";
+import { requireNotStaff } from "./sharing.ts";
 import type { AppliedSchema } from "./store-host.ts";
 
 // A version's schema applied to its App's store as the version is made
@@ -71,8 +72,36 @@ export const applyVersionSchema = async (
     ids,
     answers: (release.app.answers ?? []).map((answer) => ({ ...answer })),
     actor: actorOf(by),
-    principal: by.userId,
-    version: { number: version, basedOn },
+    version: { app, number: version, basedOn },
     ...(migration === undefined ? {} : { migration }),
   });
+};
+
+/**
+ * Resets App `app`'s data for `by`, one of its builders and never Grasp
+ * staff (whether a client's data goes is the client's decision): every
+ * record of its store goes (data-stores.ts, `resetAppStore`, audited),
+ * and its current version's schema is applied to the empty store, so the
+ * App runs again at once. What a store from before stable IDs holds
+ * (`migration.metadata_missing`) is only ever reset.
+ */
+export const resetAppData = async (
+  env: Env,
+  by: Identity,
+  app: unknown
+): Promise<void> => {
+  requireNotStaff(by);
+  const found = await editableApp(env, by, app);
+  const store = await resetAppStore(env, by, found.id);
+  if (store === null || found.currentVersion === null) {
+    return;
+  }
+  // Imported here, not at the top: releases reach back into apps.ts.
+  const { readBackRelease } = await import("./app-releases.ts");
+  await applyVersionSchema(
+    env,
+    by,
+    await readBackRelease(env, found.id, found.currentVersion),
+    found.currentVersion
+  );
 };

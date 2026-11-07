@@ -7,6 +7,7 @@ import { schemaHash } from "@grasp-os/sdk/host";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -21,7 +22,7 @@ import {
   sealRelease,
 } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { applyVersionSchema } from "../src/app-schema.ts";
+import { applyVersionSchema, resetAppData } from "../src/app-schema.ts";
 import { commitFiles, createApp, findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { deleteStore } from "../src/data-stores.ts";
@@ -815,16 +816,33 @@ describe(
       await publishVersion(env, owner, app, 1);
       await valueOf(owner, app, "notes.create", { title: "Hiring" });
       await publishVersion(env, owner, app, defaulted);
+      const events = await allEvents();
 
+      // One event per fill, counting its records: none per record.
       expect({
         filled,
         after: await valueOf(owner, app, "notes.rows"),
+        audited: events
+          .filter(
+            ({ action, target }) =>
+              action === "app.data.filled" && target?.id === app
+          )
+          .map(({ actor, detail }) => ({ actor, detail })),
       }).toStrictEqual({
         filled: [{ title: "Launch", category: "general" }],
         after: [
           { title: "Hiring", category: "general" },
           { title: "Launch", category: "general" },
         ],
+        audited: [1, 1].map((records) => ({
+          actor: { type: "person", userId: owner.userId },
+          detail: {
+            table: "notes",
+            field: "category",
+            version: defaulted,
+            records,
+          },
+        })),
       });
     });
 
@@ -1089,3 +1107,77 @@ describe(
     });
   }
 );
+
+/** The error code of `path` of `app`'s current release for `by`, or "ok". */
+const codeOfCall = async (
+  by: Caller,
+  app: AppId,
+  path: string,
+  input: Json = {}
+): Promise<string> => {
+  const current = await currentOf(app);
+  const result = await call(
+    by,
+    await loadRelease(env, app, current ?? 0),
+    path,
+    input
+  );
+  return result.ok ? "ok" : result.error.code;
+};
+
+describe("resetting an App's data", { timeout: 120_000 }, () => {
+  it("empties a store from before stable IDs, which nothing reads, and its current version runs again", async () => {
+    const { owner, app } = await appWith(evolvingFiles());
+    await publishVersion(env, owner, app, 1);
+    await valueOf(owner, app, "notes.create", { title: "Launch" });
+    const release = await storeOf(app, 1);
+    const store = release?.storeId ?? "";
+    // A store as one written before stable IDs holds it: no catalog.
+    await runInDurableObject(env.DATA_STORES.getByName(store), (_, state) => {
+      state.storage.sql.exec("UPDATE sdk_store SET schema_catalog = NULL");
+    });
+    const before = await codeOfCall(owner, app, "notes.rows");
+
+    await resetAppData(env, owner, app);
+    await valueOf(owner, app, "notes.create", { title: "Hiring" });
+    const events = await allEvents();
+
+    expect({
+      before,
+      rows: await valueOf(owner, app, "notes.rows"),
+      audited: events
+        .filter(
+          ({ action, target }) =>
+            action === "store.reset" && target?.id === store
+        )
+        .map(({ actor, detail }) => ({ actor, detail })),
+    }).toStrictEqual({
+      before: "migration.metadata_missing",
+      rows: [{ title: "Hiring" }],
+      audited: [
+        { actor: { type: "person", userId: owner.userId }, detail: { app } },
+      ],
+    });
+  });
+
+  it("is refused to Grasp staff and to someone who doesn't build the App, who change nothing", async () => {
+    const { owner, app } = await appWith(evolvingFiles());
+    await publishVersion(env, owner, app, 1);
+    await valueOf(owner, app, "notes.create", { title: "Launch" });
+    const stranger = await person("builder");
+
+    expect({
+      staff: await failure(async () => {
+        await resetAppData(env, { ...owner, staff: true }, app);
+      }),
+      stranger: await failure(async () => {
+        await resetAppData(env, stranger, app);
+      }),
+      rows: await valueOf(owner, app, "notes.rows"),
+    }).toStrictEqual({
+      staff: "role.forbidden",
+      stranger: "app.not_found",
+      rows: [{ title: "Launch" }],
+    });
+  });
+});

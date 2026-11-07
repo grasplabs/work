@@ -77,6 +77,7 @@ export const rpcParamNames: ParamNames = {
     "overview": [],
     "publish": ["app"],
     "remove": ["app"],
+    "resetData": ["app"],
     "restore": ["app"],
     "setLink": ["app","link"],
     "setVisitorGrants": ["app","functions"],

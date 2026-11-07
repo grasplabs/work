@@ -130,7 +130,6 @@ export const applied = (
   manifest: text,
   ids: namedIds(text),
   actor: { type: "person", userId: "ada" },
-  principal: "ada",
   ...more,
 });
 

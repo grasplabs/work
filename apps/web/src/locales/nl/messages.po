@@ -3179,11 +3179,6 @@ msgid "By {by}"
 msgstr "Door {by}"
 
 #: src/apps/app-data.tsx
-msgctxt "a change's source: the platform filled in a value the record lacked as a new version of the App's data model took effect"
-msgid "by a change of the App's data model"
-msgstr "door een wijziging van het datamodel van de App"
-
-#: src/apps/app-data.tsx
 msgctxt "a change's source"
 msgid "by an import"
 msgstr "door een import"
@@ -3252,6 +3247,7 @@ msgstr "Starten kan niet worden aangeboden: {unread}"
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
 #: src/apps/app-remove.tsx
+#: src/apps/app-reset.tsx
 #: src/apps/app-sharing.tsx
 #: src/apps/app-status.tsx
 #: src/apps/app-versions.tsx
@@ -5114,6 +5110,10 @@ msgstr "Elke maandagochtend, naar jou"
 msgid "Every other app Grasp can connect to."
 msgstr "Alle andere apps die Grasp kan verbinden."
 
+#: src/apps/app-reset.tsx
+msgid "Every record it holds is gone for good, and its current version runs again with no records. Its pages, versions, members and files stay."
+msgstr "Alle records zijn voorgoed weg en de huidige versie draait opnieuw zonder records. Pagina's, versies, leden en bestanden blijven."
+
 #: src/apps/app-data.tsx
 msgid "Every row is checked first. If one is wrong, nothing is added."
 msgstr "Elke rij wordt eerst gecontroleerd. Klopt er één niet, dan wordt niets toegevoegd."
@@ -6886,6 +6886,10 @@ msgstr "De inloggegevens worden verwijderd en elke app en elke workflow verliest
 #: src/workflows/resource-params.tsx
 msgid "Its current version has no parameters."
 msgstr "De huidige versie heeft geen parameters."
+
+#: src/apps/app-settings.tsx
+msgid "Its data"
+msgstr "Gegevens"
 
 #: src/apps/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
@@ -10704,6 +10708,18 @@ msgstr "Verplicht"
 msgid "Reset"
 msgstr "Resetten"
 
+#: src/apps/app-reset.tsx
+msgid "Reset {name}’s data?"
+msgstr "Gegevens van {name} resetten?"
+
+#: src/apps/app-reset.tsx
+msgid "Reset data"
+msgstr "Gegevens resetten"
+
+#: src/apps/app-reset.tsx
+msgid "Reset for good"
+msgstr "Definitief resetten"
+
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps"
 msgstr "Wat het bewaart resetten"
@@ -10711,6 +10727,10 @@ msgstr "Wat het bewaart resetten"
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps?"
 msgstr "Wat het bewaart resetten?"
+
+#: src/apps/app-settings.tsx
+msgid "Resetting removes every record the App holds and applies its current version again, with no records."
+msgstr "Resetten verwijdert alle records van de App en past de huidige versie opnieuw toe, zonder records."
 
 #: src/apps/app-workspace.tsx
 msgid "Resize the chat"

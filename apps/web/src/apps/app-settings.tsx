@@ -58,6 +58,7 @@ import { AppIntegrations } from "./app-integrations.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { AppOwner } from "./app-owner.tsx";
 import { RemoveApp } from "./app-remove.tsx";
+import { ResetAppData } from "./app-reset.tsx";
 import { buildsApp } from "./app-role.ts";
 import { AppMembers, readMembers } from "./app-sharing.tsx";
 import {
@@ -424,6 +425,16 @@ const ForBuilders = ({
           </div>
         </SettingsBody>
       </SettingsSection>
+      {app.status === "archived" || identity.staff ? null : (
+        <SettingsSection
+          description={t`Resetting removes every record the App holds and applies its current version again, with no records.`}
+          title={t`Its data`}
+        >
+          <SettingsBody>
+            <ResetAppData app={app} />
+          </SettingsBody>
+        </SettingsSection>
+      )}
       <SettingsSection
         description={t`An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}
         title={t`Putting it away`}
