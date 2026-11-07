@@ -827,6 +827,12 @@ const schemaApplySchema = z.strictObject({
       basedOn: z.int().min(1).nullable(),
     })
     .optional(),
+  /**
+   * Only while the schema in force is the one applied at this time: a
+   * publish putting back the current version's schema over its own, which
+   * another publish of the same version may have applied again since.
+   */
+  onlyIfAppliedAt: z.int().min(0).optional(),
   /** The migration whose output is staged, and the tables it transforms. */
   migration: z
     .strictObject({
@@ -847,6 +853,8 @@ export interface AppliedSchema {
   readonly changes: SchemaChanges;
   /** How many records it rewrote: renamed, filled in or migrated. */
   readonly records: number;
+  /** When it was applied: what undoing it waits on (`onlyIfAppliedAt`). */
+  readonly appliedAt: number;
 }
 
 /** The schema a change applies, its hash, indexes and searches planned. */
@@ -1097,17 +1105,15 @@ const migratedFields = (
   if (record.staged === null) {
     throw migrationErrors.create("migration.busy");
   }
-  const declared = Object.entries(now.fields).flatMap(([id, field]) =>
-    field.kept === true
+  const declared = Object.entries(now.fields).flatMap(([id, field]) => {
+    const held =
+      was !== undefined && Object.hasOwn(was.fields, id)
+        ? was.fields[id]
+        : undefined;
+    return field.kept === true
       ? []
-      : [
-          {
-            field,
-            old: was?.fields[id]?.name ?? field.name,
-            oldType: was?.fields[id]?.type,
-          },
-        ]
-  );
+      : [{ field, old: held?.name ?? field.name, oldType: held?.type }];
+  });
   const renamedFrom = new Set(
     declared.flatMap(({ field, old }) => (old === field.name ? [] : [old]))
   );
@@ -1142,6 +1148,39 @@ const migratedFields = (
     }
   }
   return fields;
+};
+
+/**
+ * The tables of `plan` with a field referring to records whose type
+ * changed (its `onDelete`, say), references following renamed tables:
+ * whether their records cascade is the new type's to say.
+ */
+const cascadesChanged = (
+  held: HeldSchema | undefined,
+  plan: SchemaChangePlan
+): string[] => {
+  const tableNames = new Map(
+    plan.renamedTables.map(({ from, to }) => [from, to])
+  );
+  return Object.entries(plan.catalog).flatMap(([tableId, table]) => {
+    const was =
+      held !== undefined && Object.hasOwn(held.catalog, tableId)
+        ? held.catalog[tableId]
+        : undefined;
+    const changed = Object.entries(table.fields).some(([id, field]) => {
+      const before =
+        was !== undefined && Object.hasOwn(was.fields, id)
+          ? was.fields[id]
+          : undefined;
+      return (
+        before !== undefined &&
+        holdsReference(field.type) &&
+        canonicalText(referencesRenamed(before.type, tableNames)) !==
+          canonicalText(field.type)
+      );
+    });
+    return changed ? [tableId] : [];
+  });
 };
 
 /** Whether `fields` lacks `fill`'s field, or holds null where it can't. */
@@ -1251,11 +1290,8 @@ export class StoreHost {
   ): AppliedSchema {
     const { manifest, schemaHash } = target;
     this.#bind(storeId);
-    const now = Date.now();
     const { version } = change;
-    if (version !== undefined) {
-      this.#requireBase(version, now);
-    }
+    const now = this.#requireApplicable(change);
     const held = this.#held();
     const { migration } = change;
     if (migration !== undefined && migration.from !== held?.hash) {
@@ -1290,6 +1326,7 @@ export class StoreHost {
         changed: false,
         changes: summaryOf(plan, new Set()),
         records: 0,
+        appliedAt: now,
       };
     }
     // The indexes the schema no longer declares go before any record is
@@ -1308,6 +1345,7 @@ export class StoreHost {
         new Map(renames.map(({ from, to }) => [from, to]))
       );
     }
+    const recascaded = cascadesChanged(held, plan);
     const { rewritten, filled } = this.#rewriteRecords(plan, {
       held,
       manifest,
@@ -1322,6 +1360,9 @@ export class StoreHost {
         refused: [],
         lacking,
       });
+    }
+    for (const tableId of recascaded) {
+      this.#recascade(tableId, plan.catalog[tableId]);
     }
     if (version !== undefined) {
       this.#auditChange(change.actor, version, plan, {
@@ -1357,7 +1398,77 @@ export class StoreHost {
       changed: true,
       changes: summaryOf(plan, migrated),
       records: [...rewritten.values()].reduce((sum, taken) => sum + taken, 0),
+      appliedAt: now,
     };
+  }
+
+  /**
+   * Sets again whether each reference of table `tableId`'s records
+   * cascades, as `table` (its catalog entry after a schema change)
+   * declares its fields: a reference kept by several places cascades
+   * only if every one says so, as a commit keeps it (`#indexReferences`).
+   * Only what a record already refers to: a schema change never changes
+   * a reference's value.
+   */
+  #recascade(tableId: string, table: CatalogTable | undefined): void {
+    if (table === undefined) {
+      return;
+    }
+    const declared = Object.fromEntries(
+      Object.values(table.fields).map(({ name, type }) => [name, type])
+    );
+    const tableIds = new Map(
+      this.#tableRows().map((row) => [row.name, row.tableId])
+    );
+    let after = "";
+    for (;;) {
+      const rows = this.ctx.storage.sql
+        .exec<{ record_id: string; value_json: string }>(
+          "SELECT record_id, value_json FROM sdk_records WHERE table_id = ? AND record_id > ? ORDER BY record_id LIMIT ?",
+          tableId,
+          after,
+          rewritePage
+        )
+        .toArray();
+      if (rows.length === 0) {
+        return;
+      }
+      for (const row of rows) {
+        after = row.record_id;
+        const fields = storedFieldsSchema.parse(JSON.parse(row.value_json));
+        const cascades = new Map<
+          string,
+          { to: string; id: string; cascade: boolean }
+        >();
+        for (const reference of recordReferences(declared, fields)) {
+          for (const { table: name, cascade } of reference.tables) {
+            const to = tableIds.get(name);
+            if (to !== undefined) {
+              const key = keyOf(to, reference.id);
+              cascades.set(key, {
+                to,
+                id: reference.id,
+                cascade: (cascades.get(key)?.cascade ?? true) && cascade,
+              });
+            }
+          }
+        }
+        for (const { to, id, cascade } of cascades.values()) {
+          this.#db
+            .update(recordRefs)
+            .set({ cascade })
+            .where(
+              and(
+                eq(recordRefs.tableId, tableId),
+                eq(recordRefs.recordId, row.record_id),
+                eq(recordRefs.toTableId, to),
+                eq(recordRefs.toRecordId, id)
+              )
+            )
+            .run();
+        }
+      }
+    }
   }
 
   /**
@@ -1420,16 +1531,60 @@ export class StoreHost {
   }
 
   /**
+   * Refuses `change` where it may not apply, and answers the time it is
+   * applied at, later than any apply before it, so one is told from
+   * another. A change without a version, to a store that holds one, is
+   * refused (`migration.invalid`): an App's store holds the version of
+   * what it applied, and only a draft's or a test's never does, so none
+   * goes past the base check (`#requireBase`). One that undoes an apply
+   * (`onlyIfAppliedAt`) goes only while nothing was applied since: another
+   * publish that applied since answers for the store now.
+   */
+  #requireApplicable({
+    version,
+    onlyIfAppliedAt,
+  }: Pick<
+    z.output<typeof schemaApplySchema>,
+    "version" | "onlyIfAppliedAt"
+  >): number {
+    const stored = this.#db
+      .select({
+        version: store.schemaVersion,
+        appliedAt: store.schemaAppliedAt,
+      })
+      .from(store)
+      .get();
+    const now = Math.max(Date.now(), (stored?.appliedAt ?? 0) + 1);
+    if (version !== undefined) {
+      this.#requireBase(version, now);
+    } else if (stored?.version !== null && stored?.version !== undefined) {
+      throw migrationErrors.create("migration.invalid", {
+        reason: "A change of an App's store names the version it applies",
+      });
+    }
+    if (
+      onlyIfAppliedAt !== undefined &&
+      stored?.appliedAt !== onlyIfAppliedAt
+    ) {
+      throw migrationErrors.create("migration.busy");
+    }
+    return now;
+  }
+
+  /**
    * Refuses applying `version`'s schema over another version's that a
    * publish applied less than `publishSettleMs` ago (`migration.busy`):
    * a publish over the same base making it current now, of which that
-   * one goes on, whichever version either publishes, so two publishes of
-   * one version never both go on. Over the version the publish was based
-   * on it goes on: a publish putting the current version's schema back
-   * over its own is based on its own.
+   * one goes on. Over the version the publish was based on, or its own
+   * again, it goes on: a publish putting the current version's schema
+   * back is based on its own, and of two publishes of one version, core
+   * makes one current and the other loses its compare-and-set.
    */
   #requireBase(
-    version: { readonly number: number; readonly basedOn: number | null },
+    version: {
+      readonly number: number | null;
+      readonly basedOn: number | null;
+    },
     now: number
   ): void {
     const row = this.#db
@@ -1443,6 +1598,7 @@ export class StoreHost {
       row?.version !== null &&
       row?.version !== undefined &&
       row.version !== version.basedOn &&
+      row.version !== version.number &&
       now - (row.appliedAt ?? 0) < publishSettleMs
     ) {
       throw migrationErrors.create("migration.busy");
@@ -1668,27 +1824,7 @@ export class StoreHost {
     const reset = new Map<string, number>();
     const applied = this.ctx.storage.transactionSync(() => {
       this.#bind(storeId);
-      const row = this.#db
-        .select({
-          hash: store.contractHash,
-          manifest: store.contractManifest,
-          catalog: store.schemaCatalog,
-        })
-        .from(store)
-        .get();
-      const unreadable =
-        row?.hash !== null &&
-        row?.hash !== undefined &&
-        (row.manifest === null || row.catalog === null);
-      if (!input.everything && !unreadable) {
-        throw migrationErrors.create("migration.reset_refused");
-      }
-      // Only over the version it was asked for as current, as a publish
-      // goes only over its base: one published meanwhile refuses it.
-      const version = applying?.change.version;
-      if (version !== undefined) {
-        this.#requireBase(version, Date.now());
-      }
+      this.#requireResettable(input.everything, applying?.change.version);
       const held = this.ctx.storage.sql
         .exec<{ name: string; records: number; generation: number }>(
           `SELECT t.name AS name, count(r.record_id) AS records,
@@ -1766,6 +1902,41 @@ export class StoreHost {
     this.#movedIds.clear();
     this.#tell(Object.fromEntries(reset));
     return applied;
+  }
+
+  /**
+   * Refuses a reset of the store's data where it may not go: without
+   * `everything`, of a store that can still be read
+   * (`migration.reset_refused`); and over another version than `version`,
+   * the one it was asked for as current (none, without a schema to apply),
+   * as a publish goes only over its base (`#requireBase`): one published
+   * meanwhile refuses it.
+   */
+  #requireResettable(
+    everything: boolean,
+    version:
+      | { readonly number: number; readonly basedOn: number | null }
+      | undefined
+  ): void {
+    const row = this.#db
+      .select({
+        hash: store.contractHash,
+        manifest: store.contractManifest,
+        catalog: store.schemaCatalog,
+      })
+      .from(store)
+      .get();
+    const unreadable =
+      row?.hash !== null &&
+      row?.hash !== undefined &&
+      (row.manifest === null || row.catalog === null);
+    if (!everything && !unreadable) {
+      throw migrationErrors.create("migration.reset_refused");
+    }
+    this.#requireBase(
+      { number: version?.number ?? null, basedOn: version?.basedOn ?? null },
+      Date.now()
+    );
   }
 
   /**

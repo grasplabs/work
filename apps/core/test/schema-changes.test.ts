@@ -316,6 +316,44 @@ describe("a schema change by stable ID", { timeout: 120_000 }, () => {
     });
   });
 
+  it("restricts a reference that cascaded once its field says so", async () => {
+    const store = await newStore();
+    const access = { read: "appMembers", write: "appMembers" } as const;
+    const schema = (note: ValueShape[string]) =>
+      manifestText(
+        schemaManifest(
+          defineSchema({
+            notes: defineTable({ title }).access(access),
+            people: defineTable({ note }).access(access),
+          })
+        )
+      );
+    const ids: SchemaIds = {
+      notes: { id: notesId, fields: { title: "field:title" } },
+      people: { id: peopleId, fields: { note: "field:note" } },
+    };
+    const first = await store.applySchema(
+      change(schema(v.id("notes", { onDelete: "cascade" })), ids)
+    );
+    const note = newRecordId();
+    await commit(store, first.schemaHash, [
+      { op: "insert", table: "notes", id: note, fields: { title: "Launch" } },
+      { op: "insert", table: "people", id: newRecordId(), fields: { note } },
+    ]);
+
+    const restricted = await store.applySchema(
+      change(schema(v.id("notes")), ids)
+    );
+
+    await expect(
+      codeOf(
+        commit(store, restricted.schemaHash, [
+          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+        ])
+      )
+    ).resolves.toBe("data.referenced");
+  });
+
   it("renames a field and fills in another in one change", async () => {
     const { store } = await storeWith({ title: "Launch", category: "news" });
     const v2 = notesText({
@@ -860,6 +898,59 @@ describe("a schema change's migration", { timeout: 120_000 }, () => {
     });
   });
 
+  it("refuses an output that takes over a kept field's name for a field referring to records", async () => {
+    const { store, ids } = await storeWith({ title: "Launch" });
+    const [note = ""] = ids;
+    const linked = (link: ValueShape[string]) =>
+      notesText({ title, category: v.string().optional(), link });
+    const withLink = idsOf("notes", notesId, {
+      title: "field:title",
+      category: "field:category",
+      link: "field:link",
+    });
+    await store.applySchema(change(linked(v.string().optional()), withLink));
+    const kept = await store.applySchema(change(v1, v1Ids));
+    await commit(store, kept.schemaHash, [
+      {
+        op: "patch",
+        table: "notes",
+        id: note,
+        fields: { title: "Linked" },
+        expectedRevision: 1,
+      },
+    ]);
+    const before = await schemaHashOf(store);
+
+    // A new field, under the kept one's name, now referring to notes.
+    const migration = await staged(store, (fields) => ({
+      ...fields,
+      link: note,
+    }));
+    const refused = await store
+      .applySchema(
+        change(
+          linked(v.id("notes").optional()),
+          idsOf("notes", notesId, {
+            title: "field:title",
+            category: "field:category",
+            link: "field:link2",
+          }),
+          { migration }
+        )
+      )
+      .catch((error: unknown) => error);
+
+    expect({ refused, schema: await schemaHashOf(store) }).toMatchObject({
+      refused: {
+        code: "migration.required",
+        details: {
+          refused: [{ table: "notes", field: "link", reason: "name_taken" }],
+        },
+      },
+      schema: before,
+    });
+  });
+
   it("leaves a field renamed in the same change under its new name alone", async () => {
     const { store } = await storeWith({ title: "Launch", category: "news" });
     // Its output under the new names, with the old name core merges back
@@ -911,29 +1002,101 @@ describe("two publishes of one store at once", { timeout: 120_000 }, () => {
         })
       )
     );
-    // Another publish of the same version, over the same base: one of
-    // two publishes that can't both go on either.
-    const again = await codeOf(
-      store.applySchema(
-        change(asText, ids, {
-          version: { app: "notes", number: 2, basedOn: 1 },
-        })
-      )
+    // Another publish of the same version finds its schema there: core
+    // makes one of the two current.
+    const again = await store.applySchema(
+      change(asText, ids, { version: { app: "notes", number: 2, basedOn: 1 } })
     );
 
     expect({
       second,
-      again,
+      again: again.changed,
       schema: await schemaHashOf(store),
     }).toStrictEqual({
       second: "migration.busy",
-      again: "migration.busy",
+      again: false,
       schema: await manifestHash(asText),
     });
+  });
+
+  it("puts a schema back only while nothing applied it again since", async () => {
+    const { store } = await storeWith({ title: "Launch" });
+    await store.applySchema(
+      change(v1, v1Ids, { version: { app: "notes", number: 1, basedOn: null } })
+    );
+    const v2 = notesText({ title, colour: v.string().optional() });
+    const ids = idsOf("notes", notesId, {
+      title: "field:title",
+      colour: "field:colour",
+    });
+    const first = await store.applySchema(
+      change(v2, ids, { version: { app: "notes", number: 2, basedOn: 1 } })
+    );
+    // The same version, published again at once: its publish answers now.
+    await store.applySchema(
+      change(v2, ids, { version: { app: "notes", number: 2, basedOn: 1 } })
+    );
+
+    // The first publish's batch failed: it would put version 1 back.
+    const putBack = await codeOf(
+      store.applySchema(
+        change(v1, v1Ids, {
+          version: { app: "notes", number: 1, basedOn: 2 },
+          onlyIfAppliedAt: first.appliedAt,
+        })
+      )
+    );
+
+    expect({ putBack, schema: await schemaHashOf(store) }).toStrictEqual({
+      putBack: "migration.busy",
+      schema: await manifestHash(v2),
+    });
+  });
+
+  it("refuses a change without a version to a store that holds one", async () => {
+    const { store } = await storeWith({ title: "Launch" });
+    await store.applySchema(
+      change(v1, v1Ids, { version: { app: "notes", number: 1, basedOn: null } })
+    );
+
+    await expect(
+      codeOf(
+        store.applySchema(
+          change(notesText({ title, colour: v.string().optional() }), {
+            notes: {
+              id: notesId,
+              fields: { title: "field:title", colour: "field:colour" },
+            },
+          })
+        )
+      )
+    ).resolves.toBe("migration.invalid");
   });
 });
 
 describe("a reset of a store's data", { timeout: 120_000 }, () => {
+  it("is refused without a version current while one was just applied", async () => {
+    const { store } = await storeWith({ title: "Launch" });
+    // A first publish's schema, applied as the reset read no version current.
+    await store.applySchema(
+      change(v1, v1Ids, { version: { app: "notes", number: 1, basedOn: null } })
+    );
+    const before = await heldBy(store);
+
+    const refused = await codeOf(
+      env.DATA_STORES.getByName(store.id).resetData(store.id, {
+        actor: { type: "person", userId: "ada" },
+        app: "notes",
+        everything: true,
+      })
+    );
+
+    expect({ refused, held: await heldBy(store) }).toStrictEqual({
+      refused: "migration.busy",
+      held: before,
+    });
+  });
+
   it("is refused while another version's publish just applied its schema, changing nothing", async () => {
     const { store } = await storeWith({ title: "Launch" });
     await store.applySchema(

@@ -92,7 +92,8 @@ export const applyVersionSchema = async (
   env: Env,
   by: Identity,
   release: Release,
-  basedOn: number | null
+  basedOn: number | null,
+  onlyIfAppliedAt?: number
 ): Promise<AppliedSchema | null> => {
   const storeId =
     release.store?.storeId ??
@@ -105,6 +106,7 @@ export const applyVersionSchema = async (
   const migration = await runMigrations(env, store, release, change.ids);
   return await store.applySchema({
     ...change,
+    ...(onlyIfAppliedAt === undefined ? {} : { onlyIfAppliedAt }),
     ...(migration === undefined ? {} : { migration }),
   });
 };
@@ -143,14 +145,18 @@ const recordUnfinished = async (
  * again), the store stays on `version`'s schema and only `version` can
  * run on it: refused loudly (`app.publish_unfinished`, audited as
  * `app.version.unfinished`), and publishing `version` again finishes it
- * (the store holds its schema already). The store and D1 share no
- * transaction, so such a publish can't be made impossible: only seen.
+ * (the store holds its schema already). Only while the store holds what
+ * this publish applied at `appliedAt`: another publish of the same
+ * version that applied it again since answers for the store, and nothing
+ * is put back under it. The store and D1 share no transaction, so such a
+ * publish can't be made impossible: only seen.
  */
 export const unfinishedPublish = async (
   env: Env,
   by: Identity,
   app: AppId,
-  version: number
+  version: number,
+  appliedAt: number
 ): Promise<void> => {
   const { currentVersion } = await findApp(env, app);
   if (currentVersion === null || currentVersion === version) {
@@ -163,10 +169,16 @@ export const unfinishedPublish = async (
       env,
       by,
       await readBackRelease(env, app, currentVersion),
-      version
+      version,
+      appliedAt
     );
     return;
   } catch (error) {
+    // Another publish of the version applied it again since: it answers
+    // for the store, and makes the version current or puts it back.
+    if (isExpectedError(error) && error.code === "migration.busy") {
+      return;
+    }
     log.error("app.publish_unfinished", {
       app,
       version,
@@ -201,9 +213,10 @@ const resetWith = async (
     found.currentVersion === null
       ? null
       : await readBackRelease(env, found.id, found.currentVersion);
-  // A version with no tables has no schema to apply.
+  // A version with no tables applies its schema (none) all the same,
+  // so the reset goes only over the version current as it was asked for.
   const apply =
-    release === null || release.store === null || found.currentVersion === null
+    release === null || found.currentVersion === null
       ? undefined
       : await schemaApplyOf(env, by, release, found.currentVersion);
   await resetAppStore(env, by, found.id, {

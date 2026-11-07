@@ -295,19 +295,6 @@ const codeOfCall = async (
   return result.ok ? "ok" : result.error.code;
 };
 
-/**
- * App `app`'s store as a minute after the schema it holds was applied:
- * a publish that stopped meanwhile has settled (store-host.ts,
- * `publishSettleMs`), and another may go over it.
- */
-const settled = async (app: AppId): Promise<void> => {
-  const [own] = await defaultStores(app);
-  const store = own?.storeId ?? "";
-  await runInDurableObject(env.DATA_STORES.getByName(store), (_, state) => {
-    state.storage.sql.exec("UPDATE sdk_store SET schema_applied_at = 0");
-  });
-};
-
 /** Commits `files` as the App's next version, and answers its number. */
 const nextVersion = async (
   owner: Caller,
@@ -1334,12 +1321,6 @@ describe(
         await readBackRelease(env, app, 1),
         second
       );
-      // Published again within the minute, it is refused as busy: the
-      // stopped publish may still be going on.
-      const busy = await failure(
-        async () => await publishVersion(env, owner, app, 1)
-      );
-      await settled(app);
 
       await publishVersion(env, owner, app, 1);
 
@@ -1359,7 +1340,6 @@ describe(
             await valueOf(owner, app, "notes.create", { title: "After" })
         ),
       }).toStrictEqual({ current: 1, changed: [false], writes: "ok" });
-      expect(busy).toBe("migration.busy");
     });
 
     it("says a publish is unfinished when its migration can't be taken back, audits it, and finishes it as it is published again", async () => {
@@ -1389,7 +1369,6 @@ describe(
       );
       const stranded = await codeOfCall(owner, app, "notes.rows");
       const events = await allEvents();
-      await settled(app);
       await publishVersion(env, owner, app, second);
 
       expect({
@@ -1603,6 +1582,29 @@ describe("resetting an App's data", { timeout: 120_000 }, () => {
         { store, table: "notes", records: 1 },
       ],
     });
+  });
+
+  it("resets over a current version without tables, applying its schema (none) as its version", async () => {
+    const { owner, app } = await appWith(evolvingFiles());
+    await publishVersion(env, owner, app, 1);
+    await valueOf(owner, app, "notes.create", { title: "Launch" });
+    const empty = await nextVersion(owner, app, {
+      ...emptyFiles,
+      "server/notes.ts": "",
+    });
+    await publishVersion(env, owner, app, empty);
+    const admin = await person("admin");
+
+    const reset = await failure(async () => {
+      await resetAppData(env, admin, app, "Notes");
+    });
+    // Its tables back, and empty: the reset took every record.
+    await publishVersion(env, owner, app, 1);
+
+    expect({
+      reset,
+      rows: await valueOf(owner, app, "notes.rows"),
+    }).toStrictEqual({ reset: "ok", rows: [] });
   });
 
   it("resets nothing, refusing nothing, for an App whose current version has no tables", async () => {

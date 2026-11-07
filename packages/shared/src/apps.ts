@@ -981,7 +981,7 @@ export const appErrors = defineErrorFamily({
   "app.archived": "The App is archived. A builder can restore it.",
   "app.remove_unarchived": "Archive the App before removing it.",
   "app.publish_unfinished":
-    "This version's data model reached the App's data, but the version couldn't be made current, and the current version's data model can't be put back. Publish this version again in a minute to finish it.",
+    "This version's data model reached the App's data, but the version couldn't be made current, and the current version's data model can't be put back. Publish this version again to finish it.",
   "app.reset_name_mismatch":
     "Type the App's name exactly as it is to reset its data.",
   "app.remove_forbidden":

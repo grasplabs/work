@@ -49,7 +49,8 @@ import { fitted } from "./store-queries.ts";
 // - an ID changed: a name in force arriving under another ID
 //   (`id_changed`), or a name another ID holds, kept ones included
 //   (`name_taken`), so one field's values are never read as another's. A
-//   migrated table's output may take over a kept field's name;
+//   migrated table's output may take over a kept field's name, unless the
+//   new field refers to records or a row rule reads it;
 // - a default or answer for a field that holds a record ID or a file
 //   (`reference_filled`): the store's reference and file indexes follow
 //   only writes it checks;
@@ -406,6 +407,26 @@ const keptField = (
   kept: true,
 });
 
+/**
+ * Field `field` (ID `id`) of a migrated table `was` holds, renamed all
+ * the same, by ID: its history follows the new name.
+ */
+const planMigratedRename = (
+  plan: MutablePlan,
+  input: TableInput,
+  { id, field, was }: { id: string; field: string; was: CatalogTable }
+): void => {
+  const previous = own(was.fields, id);
+  if (previous !== undefined && previous.name !== field) {
+    plan.renamedFields.push({
+      tableId: input.tableId,
+      table: input.name,
+      from: previous.name,
+      to: field,
+    });
+  }
+};
+
 /** Plans one table's fields onto `plan`; answers its catalog entry. */
 const planTable = (plan: MutablePlan, input: TableInput): CatalogTable => {
   const { name, table, ids, was, migrated } = input;
@@ -417,7 +438,15 @@ const planTable = (plan: MutablePlan, input: TableInput): CatalogTable => {
     const holder = Object.entries(heldFields).find(
       ([other, held]) => other !== id && held.name === field
     );
-    if (holder !== undefined && !(migrated && holder[1].kept === true)) {
+    // A migration's output may take over a kept field's name under a new
+    // ID, but not for a field the store's reference index or a row rule
+    // reads: the kept values were never checked as such.
+    const takesOver =
+      migrated &&
+      holder?.[1].kept === true &&
+      !holdsReference(type) &&
+      !ruleFields(table).has(field);
+    if (holder !== undefined && !takesOver) {
       const [holderId, holding] = holder;
       plan.refused.push({
         table: name,
@@ -433,16 +462,7 @@ const planTable = (plan: MutablePlan, input: TableInput): CatalogTable => {
       // its migration, whose output must fit.
       planField(plan, input, { id, field, type });
     } else if (was !== undefined) {
-      // Renamed all the same, by ID: its history follows the new name.
-      const previous = own(was.fields, id);
-      if (previous !== undefined && previous.name !== field) {
-        plan.renamedFields.push({
-          tableId: input.tableId,
-          table: name,
-          from: previous.name,
-          to: field,
-        });
-      }
+      planMigratedRename(plan, input, { id, field, was });
     }
   }
   for (const [id, field] of Object.entries(heldFields)) {

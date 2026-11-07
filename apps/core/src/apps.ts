@@ -1369,7 +1369,9 @@ export const makeCurrent = async (
         ])
     );
   const [[changed]] = await batch().catch(async (error: unknown) => {
-    await unfinishedPublish(env, by, appId, number);
+    if (applied !== null) {
+      await unfinishedPublish(env, by, appId, number, applied.appliedAt);
+    }
     throw error;
   });
   if (!changed) {
@@ -1389,7 +1391,9 @@ export const makeCurrent = async (
       waitUntil(versionMadeCurrent(env, appId));
       return await editableApp(env, by, appId);
     }
-    await unfinishedPublish(env, by, appId, number);
+    if (applied !== null) {
+      await unfinishedPublish(env, by, appId, number, applied.appliedAt);
+    }
     requireNotArchived(await findApp(env, appId));
     // Revoked or deleted since it was checked: refused as such.
     await requireRunnableRelease(env, appId, number);
