@@ -288,7 +288,7 @@ const sealedExpressionSchema = z.strictObject({
   pointer: z.string().max(sealedBuildLimits.pointerLength),
   /** Its task; null for the workflow's output. */
   taskId: taskIdSchema.nullable(),
-  stage: z.enum(["taskIf", "taskDefinition", "workflowOutputAs"]),
+  stage: z.enum(["taskIf", "taskDefinition", "taskState", "workflowOutputAs"]),
   /** What it must answer: a condition a boolean. */
   result: z.enum(["boolean", "json"]),
   source: z.string().max(sealedBuildLimits.expressionLength),

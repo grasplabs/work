@@ -30,6 +30,7 @@ import { eventTypeKey } from "../src/workflows/event-envelopes.ts";
 import { countedStep } from "../src/workflows/host.ts";
 import { admitRunEvent } from "../src/workflows/run-events.ts";
 import type { HostedSealedRun } from "../src/workflows/sealed-run.ts";
+import { allEvents } from "./audit-events.ts";
 import { endLiveResourceRuns } from "./json-workflow-apps.ts";
 import { answeringProvider, connectModels } from "./model-provider.ts";
 import {
@@ -42,6 +43,7 @@ import {
   decisionsOf,
   decisionWorkflow,
   descriptorOf,
+  echoingMail,
   engineStep,
   failedWith,
   hello,
@@ -118,6 +120,27 @@ const declared = {
     mail: { kind: "connector", contract: "composio.mail@1" },
     summary: { kind: "model", contract: "summary" },
   },
+  /** What the workflow keeps between runs: what the state tests write. */
+  state: {
+    last: { type: "string" },
+    previous: { type: "string" },
+    runs: { type: "integer", minimum: 1 },
+    kind: { type: "string" },
+    never: { type: "boolean" },
+    who: { type: "string", "x-grasp-value": { kind: "person" } },
+    profile: {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    // A closed object whose field has a default: `{}` fits it.
+    badge: {
+      type: "object",
+      properties: { label: { type: "string", default: "unknown" } },
+      additionalProperties: false,
+    },
+  },
 };
 
 const greeting = {
@@ -147,12 +170,14 @@ const generatedPath = generatedWorkflowEntry;
 const generated = async (
   steps: unknown[],
   output?: { schema: unknown; value: unknown },
-  bindings: Record<string, unknown> = declared.bindings
+  bindings: Record<string, unknown> = declared.bindings,
+  state: Record<string, unknown> = declared.state
 ) => {
   const result = checkWorkflow({
     $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
     params: declared.params,
     bindings,
+    state,
     ...(output === undefined ? {} : { output }),
     steps,
   });
@@ -2049,6 +2074,332 @@ describe("a grasp-workflow/1 run's inbox on the run host", () => {
           types: [await eventTypeKey("replies", replying.replyType)],
         },
       ],
+    });
+  });
+});
+
+/** How many times run `runId`'s steps wrote the workflow's state. */
+const stateWrites = async (runId: string): Promise<number> => {
+  const events = await allEvents();
+  return events.filter(
+    ({ action, target }) =>
+      action === "workflow.state.written" && target?.id === runId
+  ).length;
+};
+
+/** A mail to the run's person, its subject what the state kept, or "none". */
+const remember = {
+  id: "remember",
+  type: "do",
+  binding: "mail",
+  operation: "mail.send",
+  arguments: {
+    to: { $expr: "input.who" },
+    subject: { $expr: 'state.last ?? "none"' },
+  },
+  state: {
+    last: { $expr: "output.messageId" },
+    previous: { $expr: 'state.last ?? "none"' },
+    runs: { $expr: "(state.runs ?? 0) + 1" },
+    kind: "visit",
+  },
+};
+
+/** What a run read of `remember`'s state: as its output's schema and value. */
+const readState = {
+  schema: objectOf({
+    last: { type: "string" },
+    previous: { type: "string" },
+    runs: { type: "number" },
+    kind: { type: "string" },
+  }),
+  value: {
+    last: { $expr: 'state.last ?? "none"' },
+    previous: { $expr: 'state.previous ?? "none"' },
+    runs: { $expr: "state.runs ?? 0" },
+    kind: { $expr: 'state.kind ?? "none"' },
+  },
+};
+
+// What a step keeps in its workflow's state, end to end: written by the
+// host from the record of the step that kept it, once that step
+// succeeded, and read by the workflow's next run as `state.<key>`, the
+// snapshot its start froze. Each test has a workflow of its own, so its
+// state starts empty.
+describe("a grasp-workflow/1 workflow's state on the run host", () => {
+  // Its workflows bind a model, as every sealed workflow does: approved
+  // only once the organization has one, whichever tests ran before.
+  beforeAll(async () => {
+    await connectModels(`test-model-key-${crypto.randomUUID()}`, [
+      allowedModel,
+    ]);
+  });
+
+  afterAll(endLiveResourceRuns);
+
+  it("keeps a step's state once it succeeded, which the next run reads, and nothing of a step its `if` skipped", async () => {
+    const kept = await sealedWorkflow();
+    await echoingMail(kept.mail.id, "m-1");
+    const { source, sealed: withTable } = await generated(
+      [
+        remember,
+        {
+          id: "never",
+          type: "do",
+          if: { $expr: 'input.who === "nobody"' },
+          binding: "mail",
+          operation: "mail.send",
+          arguments: { to: { $expr: "input.who" }, subject: "skipped" },
+          state: { never: true },
+        },
+      ],
+      {
+        schema: objectOf({
+          ...readState.schema.properties,
+          never: { type: "boolean" },
+        }),
+        value: { ...readState.value, never: { $expr: "state.never ?? false" } },
+      }
+    );
+    const first = await waitingRun(kept);
+    const ranFirst = await ranAs(first, source, {
+      engine: retryingEngine(),
+      sealed: withTable,
+    });
+    await echoingMail(kept.mail.id, "m-2");
+    // Started once the first ended: its start reads what that one kept.
+    const second = await waitingRun(kept);
+    const ranSecond = await ranAs(second, source, {
+      engine: retryingEngine(),
+      sealed: withTable,
+    });
+    const third = await waitingRun(kept);
+    const ranThird = await ranAs(third, source, {
+      engine: retryingEngine(),
+      sealed: withTable,
+    });
+    expect({ ranFirst, ranSecond, ranThird }).toStrictEqual({
+      // The snapshot of its start: nothing kept yet, whatever it keeps.
+      ranFirst: {
+        ended: {
+          last: "none",
+          previous: "none",
+          runs: 0,
+          kind: "none",
+          never: false,
+        },
+        tampered: [],
+      },
+      // What the first's call answered, what it read then, and its count.
+      ranSecond: {
+        ended: {
+          last: "m-1",
+          previous: "none",
+          runs: 1,
+          kind: "visit",
+          never: false,
+        },
+        tampered: [],
+      },
+      ranThird: {
+        ended: {
+          last: "m-2",
+          previous: "m-1",
+          runs: 2,
+          kind: "visit",
+          never: false,
+        },
+        tampered: [],
+      },
+    });
+  });
+
+  it("writes a step's state once, whichever activation replays it or runs it again", async () => {
+    const kept = await sealedWorkflow();
+    await echoingMail(kept.mail.id, "m-1");
+    const { source, sealed: withTable } = await generated(
+      [remember],
+      readState
+    );
+    const runId = await waitingRun(kept);
+    const journal = new Map<string, Journaled>();
+    const ran: string[] = [];
+    const first = await ranAs(runId, source, {
+      engine: journalingEngine(journal, ran),
+      sealed: withTable,
+    });
+    // A later activation replays the journaled step; one that lost the
+    // journal runs it again, its call answering otherwise, its key the
+    // same.
+    const replayed = await ranAs(runId, source, {
+      engine: journalingEngine(journal, ran),
+      sealed: withTable,
+    });
+    await echoingMail(kept.mail.id, "m-2");
+    const again = await ranAs(runId, source, {
+      engine: retryingEngine(),
+      sealed: withTable,
+    });
+    const next = await waitingRun(kept);
+    const read = await ranAs(next, source, {
+      engine: retryingEngine(),
+      sealed: withTable,
+    });
+    const nothing = { last: "none", previous: "none", runs: 0, kind: "none" };
+    expect({
+      first,
+      replayed,
+      again,
+      ran: ran.filter((name) => name.startsWith("remember:")).length,
+      writes: await stateWrites(runId),
+      // The first write's: the step run again wrote nothing.
+      read: read.ended,
+    }).toStrictEqual({
+      first: { ended: nothing, tampered: [] },
+      replayed: { ended: nothing, tampered: [] },
+      again: { ended: nothing, tampered: [] },
+      ran: 1,
+      writes: 1,
+      read: { last: "m-1", previous: "none", runs: 1, kind: "visit" },
+    });
+  });
+
+  it("holds each value to its key's declared schema as the step records it, failing the step and keeping nothing of one that doesn't fit", async () => {
+    const kept = await sealedWorkflow();
+    await echoingMail(kept.mail.id, "m-1");
+    /** `remember`, keeping `state` alone. */
+    const keepingOnly = async (state: Record<string, unknown>) =>
+      await generated([{ ...remember, state }], {
+        schema: objectOf({
+          who: { type: "string" },
+          id: { type: "string" },
+          label: { type: "string" },
+        }),
+        value: {
+          who: { $expr: 'state.who ?? "none"' },
+          id: { $expr: 'state.profile?.id ?? "none"' },
+          // Typed by the schema's output, `label` filled in: read as such.
+          label: { $expr: 'state.badge?.label.toUpperCase() ?? "none"' },
+        },
+      });
+    /** What a run of `state`'s step ended with, and what it wrote. */
+    const ranKeeping = async (state: Record<string, unknown>) => {
+      const { source, sealed: withTable } = await keepingOnly(state);
+      const runId = await waitingRun(kept);
+      const ran = await ranAs(runId, source, {
+        engine: retryingEngine(),
+        sealed: withTable,
+      });
+      return { ended: ran.ended, writes: await stateWrites(runId) };
+    };
+    const refused = {
+      // What the mail answered is text: `runs` is an integer.
+      notInteger: await ranKeeping({ runs: { $expr: "output.messageId" } }),
+      // Not a reference to a person: it has a space.
+      notPerson: await ranKeeping({ who: { $expr: '"not " + "a person"' } }),
+      // A closed object with a key it doesn't declare, never stripped.
+      extraKey: await ranKeeping({
+        profile: { $expr: "({ id: output.messageId, extra: 1 })" },
+      }),
+    };
+    const fits = await ranKeeping({
+      who: "user_1",
+      profile: { $expr: "({ id: output.messageId })" },
+      badge: {},
+    });
+    const { source, sealed: withTable } = await keepingOnly({});
+    const next = await waitingRun(kept);
+    const read = await ranAs(next, source, {
+      engine: retryingEngine(),
+      sealed: withTable,
+    });
+    // Each call took effect before its record failed.
+    const failed = { ended: "workflow.failed_after_effect", writes: 0 };
+    expect({ refused, fits, read: read.ended }).toStrictEqual({
+      refused: { notInteger: failed, notPerson: failed, extraKey: failed },
+      // The one that fits: read back as it was kept, its defaults filled in.
+      fits: { ended: { who: "none", id: "none", label: "none" }, writes: 1 },
+      read: { who: "user_1", id: "m-1", label: "UNKNOWN" },
+    });
+  });
+
+  it("reads a value an older version kept under another schema as never kept, which the version that kept it still reads", async () => {
+    const kept = await sealedWorkflow();
+    /** A version keeping `value` as `count` of `schema`, ending with what it read. */
+    const version = async (schema: Record<string, unknown>, value: unknown) =>
+      await generated(
+        [{ ...remember, state: { count: value } }],
+        {
+          schema: objectOf({ read: { type: "string" } }),
+          value: { read: { $expr: "typeof state.count" } },
+        },
+        declared.bindings,
+        { count: schema }
+      );
+    const v1 = await version({ type: "string" }, "many");
+    const v2 = await version({ type: "number" }, 3);
+    const runOf = async (built: Awaited<ReturnType<typeof generated>>) => {
+      const runId = await waitingRun(kept);
+      const ran = await ranAs(runId, built.source, {
+        engine: retryingEngine(),
+        sealed: built.sealed,
+      });
+      return ran.ended;
+    };
+    const wrote = await runOf(v1);
+    const again = await runOf(v1);
+    // v2 declares a number: the string v1 kept reads as never kept.
+    const newer = await runOf(v2);
+    expect({ wrote, again, newer }).toStrictEqual({
+      wrote: { read: "undefined" },
+      again: { read: "string" },
+      newer: { read: "undefined" },
+    });
+  });
+
+  it("keeps state from a step in each item of a loop, the last item's last", async () => {
+    const kept = await sealedWorkflow();
+    const { source, sealed: withTable } = await generated(
+      [
+        {
+          id: "rows",
+          type: "forEach",
+          items: { $expr: "input.rows" },
+          do: [
+            {
+              ...remember,
+              arguments: { to: { $expr: "item" }, subject: "row" },
+              state: { last: { $expr: "item" } },
+            },
+          ],
+        },
+      ],
+      {
+        schema: objectOf({ last: { type: "string" } }),
+        value: { last: { $expr: 'state.last ?? "none"' } },
+      }
+    );
+    const withRows = (run: HostedSealedRun) =>
+      withTable({ ...run, input: { rows: ["a", "b", "c"] } });
+    const first = await waitingRun(kept);
+    const ranFirst = await ranAs(first, source, {
+      engine: retryingEngine(),
+      sealed: withRows,
+    });
+    const second = await waitingRun(kept);
+    const ranSecond = await ranAs(second, source, {
+      engine: retryingEngine(),
+      sealed: withRows,
+    });
+    expect({
+      ranFirst,
+      writes: await stateWrites(first),
+      ranSecond,
+    }).toStrictEqual({
+      ranFirst: { ended: { last: "none" }, tampered: [] },
+      // Each item's step writes under its own key.
+      writes: 3,
+      ranSecond: { ended: { last: "c" }, tampered: [] },
     });
   });
 });

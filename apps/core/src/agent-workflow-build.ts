@@ -493,7 +493,7 @@ const workflowBuildDeclaration = `/**
  * the App \`start\` on it (ask with \`env.build.requestPermission\`,
  * \`{ type: "workflow", workflowId }\`). Say so.
  *
- * A document is \`{ $schema, input?, output?: { schema, value }, params?, bindings?, steps }\`.
+ * A document is \`{ $schema, input?, output?: { schema, value }, params?, bindings?, state?, steps }\`.
  * \`input\` and \`output.schema\` are JSON Schemas. \`params\` are values people set
  * without editing the workflow: \`{ [name]: { kind: "text" | "number" | "money" | "person"
  * | "schedule" | "template", label, sensitive?: false, default?, currency? } }\`, sensitive
@@ -509,6 +509,8 @@ const workflowBuildDeclaration = `/**
  * returns is its step's output, which the run records: return a file's reference
  * \`{ file: <id> }\`, never its content, and hand that reference to the next action, which reads
  * it. Of the Brain, return only what the next step needs.
+ * \`state\` declares what the workflow keeps between its runs: \`{ [key]: <JSON Schema> }\`, at
+ * most 64 KB in all.
  *
  * Each step is \`{ id, type, title?, if?, ... }\`: \`id\` is a stable key (lower-case words
  * and dashes, never changed once made; rename by \`title\`), \`if\` an expression that skips it.
@@ -516,6 +518,9 @@ const workflowBuildDeclaration = `/**
  *   operation, a catalog operation, the workflow's own compute or action);
  * - \`agent\`: \`{ binding, instructions, input, output, timeout? }\` asks a model binding for an
  *   answer matching the JSON Schema \`output\`;
+ * - a \`do\` or \`agent\` step may also take \`state: { [key]: value }\`: declared keys it writes once it
+ *   succeeds, \`output\` being its result there. A restricted or test run reads the state but
+ *   doesn't change it;
  * - \`decision\`: \`{ binding, recipients, prompt, input, timeout? }\` asks people through a decision
  *   binding and waits: \`recipients\` 1 to ${decisionLimits.recipients} of \`person:<user ID>\`, \`team:<team ID>\` and
  *   \`role:<role>\`, the first answer decides; its output is \`{ timedOut: false, approved, by, payload }\`,
@@ -537,7 +542,8 @@ const workflowBuildDeclaration = `/**
  * Values are JSON; any part may be an expression \`{ "$expr": "steps.extract.output.total" }\`,
  * a JavaScript expression over \`input\`, \`params\`, \`steps.<id>.output\` (earlier steps only),
  * \`inbox.<alias>\` (the run's reply address for event binding \`<alias>\`: give it a mail as its
- * reply-to, then wait on that binding for the reply) and, in a catch, \`error\`. A string is always text, never interpolated. At most
+ * reply-to, then wait on that binding for the reply), \`state.<key>\` (what earlier runs kept,
+ * \`undefined\` until written) and, in a catch, \`error\`. A string is always text, never interpolated. At most
  * ${formatLimits.steps} steps in all.
  * Never write judgement, an outside system or a person's approval as code: when the catalog
  * has no contract for such a step, say which one (its kind, input and output) an admin

@@ -15,6 +15,9 @@ import {
   paramKinds,
   paramNamePattern,
   recipientPattern,
+  stateDeclarationDescription,
+  stateDescription,
+  stateKeyPattern,
   stepIdPattern,
   waitDescription,
   workflowSchemaUrl,
@@ -59,6 +62,7 @@ const stepKinds = {
       operation: { type: "string", minLength: 1, maxLength: 256 },
       arguments: ref("value"),
       timeout: ref("duration"),
+      state: ref("state"),
     },
     ["binding"]
   ),
@@ -70,6 +74,7 @@ const stepKinds = {
       input: ref("value"),
       output: { type: "object" },
       timeout: ref("duration"),
+      state: ref("state"),
     },
     ["binding", "instructions", "input", "output"]
   ),
@@ -259,6 +264,13 @@ export const workflowSchema: Schema = {
       propertyNames: { pattern: aliasPattern },
       additionalProperties: ref("binding"),
     },
+    state: {
+      description: stateDeclarationDescription,
+      type: "object",
+      maxProperties: formatLimits.stateKeys,
+      propertyNames: ref("stateKey"),
+      additionalProperties: { type: "object" },
+    },
     steps: ref("steps"),
   },
   additionalProperties: false,
@@ -300,6 +312,23 @@ export const workflowSchema: Schema = {
       maxLength: sealedBuildLimits.eventTypeLength,
     },
     duration: { type: "string", pattern: durationPattern },
+    // Only a `do` or an `agent` step has one (`stateStepTypes`): any
+    // other's refuses it as a property it doesn't have, which check.ts
+    // names for what it is.
+    state: {
+      description: stateDescription,
+      type: "object",
+      maxProperties: formatLimits.stateKeys,
+      propertyNames: ref("stateKey"),
+      additionalProperties: ref("value"),
+    },
+    // As a step's ID, never a name an expression can't read: `state.<key>`
+    // reads every key.
+    stateKey: {
+      type: "string",
+      pattern: stateKeyPattern,
+      not: { enum: [...blockedProperties] },
+    },
     expression: {
       type: "object",
       required: ["$expr"],

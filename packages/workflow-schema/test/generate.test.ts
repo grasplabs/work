@@ -9,6 +9,8 @@ import {
   decision,
   eventWait,
   everyStep,
+  followedBy,
+  keeping,
   withDecisions,
   withEventWaits,
   withLoops,
@@ -609,6 +611,87 @@ describe("generating a workflow", () => {
         scope: ["items"],
         listen: listenFor("grasp.reply.received"),
         timeoutMs: 3 * 86_400_000,
+      },
+    });
+  });
+
+  it("seals what a call step keeps in state: each key's template and its declared schema's descriptor", () => {
+    const workflow = checked(
+      followedBy(
+        keeping(),
+        keeping({ id: "maybe", if: { $expr: "input.who === state.last" } }),
+        {
+          id: "rows",
+          type: "forEach",
+          items: { $expr: "input.rows" },
+          do: [keeping({ id: "row", state: { row: { $expr: "item" } } })],
+        }
+      )
+    );
+    const generated = generateWorkflow(workflow, "workflow");
+    const taskOf = (id: string) =>
+      generated.tasks.find((each) => each.id === id);
+    const slotOf = (pointer: string) =>
+      generated.expressions.find((each) => each.pointer === pointer)?.slot;
+    /** Key `key`'s template, held to its declared schema's descriptor. */
+    const kept = (key: string, template: unknown) => ({
+      template,
+      value: workflow.state.get(key),
+    });
+    expect({
+      remember: taskOf("remember")?.state,
+      row: { scope: taskOf("row")?.scope, state: taskOf("row")?.state },
+      // A step that keeps nothing seals no state.
+      send:
+        taskOf("send") !== undefined && !("state" in (taskOf("send") ?? {})),
+      stages: generated.expressions
+        .filter(({ stage }) => stage === "taskState")
+        .map(({ pointer, taskId, result }) => [pointer, taskId, result]),
+      // The descriptors the SDK compiled from the declared schemas.
+      kinds: Object.fromEntries(
+        [...workflow.state].map(([key, { kind }]) => [key, kind])
+      ),
+    }).toStrictEqual({
+      remember: {
+        last: kept("last", { slot: slotOf("/steps/5/state/last") }),
+        previous: kept("previous", {
+          slot: slotOf("/steps/5/state/previous"),
+        }),
+        runs: kept("runs", { slot: slotOf("/steps/5/state/runs") }),
+        kept: kept("kept", {
+          array: [
+            { literal: "kept" },
+            { slot: slotOf("/steps/5/state/kept/1") },
+          ],
+        }),
+        marked: kept("marked", { literal: true }),
+      },
+      row: {
+        scope: ["rows"],
+        state: {
+          row: kept("row", { slot: slotOf("/steps/7/do/0/state/row") }),
+        },
+      },
+      send: true,
+      stages: [
+        ["/steps/5/state/last", "remember", "json"],
+        ["/steps/5/state/previous", "remember", "json"],
+        ["/steps/5/state/runs", "remember", "json"],
+        ["/steps/5/state/kept/1", "remember", "json"],
+        ["/steps/6/state/last", "maybe", "json"],
+        ["/steps/6/state/previous", "maybe", "json"],
+        ["/steps/6/state/runs", "maybe", "json"],
+        ["/steps/6/state/kept/1", "maybe", "json"],
+        ["/steps/7/do/0/state/row", "row", "json"],
+      ],
+      kinds: {
+        last: "string",
+        previous: "string",
+        runs: "number",
+        kept: "array",
+        marked: "boolean",
+        row: "string",
+        summary: "object",
       },
     });
   });
