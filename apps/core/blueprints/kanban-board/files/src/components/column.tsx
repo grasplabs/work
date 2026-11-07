@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@grasp-os/sdk/react";
+import { GraspError, useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -19,6 +19,7 @@ import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { api } from "@server/_generated/api";
 import type { Doc } from "@server/_generated/dataModel";
 import { ArrowLeftIcon, ArrowRightIcon, XIcon } from "lucide-react";
+import { useState } from "react";
 
 type ColumnId = Doc<"cards">["column"];
 
@@ -31,15 +32,35 @@ export const columns: readonly { id: ColumnId; title: string }[] = [
 const CardItem = ({ card }: { card: Doc<"cards"> }) => {
   const move = useMutation(api.cards.move);
   const remove = useMutation(api.cards.remove);
+  const [problem, setProblem] = useState<string | null>(null);
   const at = columns.findIndex(({ id }) => id === card.column);
   const previous = columns[at - 1];
   const next = columns[at + 1];
+  // A refusal (a full column, a card someone else moved first) says why;
+  // anything else is a fault for the page's error boundary.
+  const attempt = async (change: () => Promise<unknown>) => {
+    setProblem(null);
+    try {
+      await change();
+    } catch (error) {
+      if (!(error instanceof GraspError)) {
+        throw error;
+      }
+      setProblem(error.message);
+    }
+  };
+  const ref = { id: card._id, expectedRevision: card._rev };
   const moveTo = async (column: ColumnId) =>
-    await move({ id: card._id, expectedRevision: card._rev, column });
+    await attempt(async () => await move({ ...ref, column }));
   return (
     <Item size="sm" variant="outline">
       <ItemContent>
         <ItemTitle>{card.title}</ItemTitle>
+        {problem === null ? null : (
+          <p className="text-destructive text-sm" role="alert">
+            {problem}
+          </p>
+        )}
       </ItemContent>
       <ItemActions>
         {previous === undefined ? null : (
@@ -64,9 +85,7 @@ const CardItem = ({ card }: { card: Doc<"cards"> }) => {
         )}
         <Button
           aria-label="Remove"
-          onClick={async () =>
-            await remove({ id: card._id, expectedRevision: card._rev })
-          }
+          onClick={async () => await attempt(async () => await remove(ref))}
           size="icon-sm"
           variant="ghost"
         >

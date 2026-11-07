@@ -124,6 +124,39 @@ describe("the example Apps", { timeout: 60_000 }, () => {
     });
   });
 
+  it("refuse a card into a full kanban column, added or moved there", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await exampleOf(admin, "kanban-board");
+    const cardsPerColumn = 100;
+    const add = async (title: string) =>
+      await call(admin, app, "cards.add", "mutation", { title });
+    const ids: string[] = [];
+    for (let card = 1; card <= cardsPerColumn; card += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one card after another, in order
+      ids.push(z.string().parse(valueOf(await add(`Card ${card}`))));
+    }
+    const refusedAdd = await add("One too many");
+    const [first] = ids;
+    valueOf(
+      await call(admin, app, "cards.move", "mutation", {
+        id: first,
+        expectedRevision: 1,
+        column: "doing",
+      })
+    );
+    valueOf(await add("Takes its place"));
+    const refusedMove = await call(admin, app, "cards.move", "mutation", {
+      id: first,
+      expectedRevision: 2,
+      column: "todo",
+    });
+
+    expect({
+      add: codeOf(refusedAdd),
+      move: codeOf(refusedMove),
+    }).toStrictEqual({ add: "cards.column_full", move: "cards.column_full" });
+  });
+
   it("find a CRM contact by name or company, and count its deals by stage", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await exampleOf(admin, "crm");
@@ -318,8 +351,12 @@ describe("the example Apps", { timeout: 60_000 }, () => {
           })
         )
       );
+    // A year and more back, before a gap of months with no sales, and
+    // one closed in a month still to come: neither is in the year shown.
+    await sell("Umbrella", 400, "2025-10-15T00:00:00Z");
     await sell("Acme", 1000, "2026-09-03T00:00:00Z");
     await sell("Globex", 250.25, "2026-10-01T00:00:00Z");
+    await sell("Hooli", 75, "2026-12-01T00:00:00Z");
     const removed = await sell("Initech", 99, "2026-10-31T00:00:00Z");
     valueOf(
       await call(admin, app, "sales.remove", "mutation", {
@@ -335,9 +372,13 @@ describe("the example Apps", { timeout: 60_000 }, () => {
 
     expect({
       latest: latest.items.map(({ customer }) => customer),
-      months: valueOf(await call(admin, app, "months.lastYear", "query")),
+      months: valueOf(
+        await call(admin, app, "months.lastYear", "query", {
+          through: "2026-10",
+        })
+      ),
     }).toMatchObject({
-      latest: ["Globex", "Acme"],
+      latest: ["Hooli", "Globex", "Acme", "Umbrella"],
       months: [
         {
           month: "2026-09",

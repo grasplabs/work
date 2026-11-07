@@ -35,11 +35,10 @@ const Figure = ({ label, value }: { label: string; value: string }) => (
 );
 
 const Dashboard = () => {
-  const months = useQuery(api.months.lastYear, {});
+  const through = new Date().toISOString().slice(0, 7);
+  const months = useQuery(api.months.lastYear, { through });
   const remove = useMutation(api.sales.remove);
-  const thisMonth = months?.find(
-    ({ month }) => month === new Date().toISOString().slice(0, 7)
-  );
+  const thisMonth = months?.find(({ month }) => month === through);
   const revenue = thisMonth?.revenue ?? { currency: "EUR", minorUnits: 0 };
   const sales = thisMonth?.sales ?? 0;
   return (

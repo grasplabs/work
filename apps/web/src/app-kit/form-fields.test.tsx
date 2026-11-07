@@ -15,6 +15,7 @@ import {
   SelectField,
   SubmitButton,
   SwitchField,
+  TextareaField,
   TextField,
 } from "@grasp-os/ui/form";
 import { act } from "react";
@@ -231,6 +232,31 @@ const ReviewForm = ({
   );
 };
 
+const contact = v.object({
+  name: v.string().trim().min(1),
+  company: v.string().trim(),
+  email: v.string().trim().email().optional(),
+  notes: v.string().optional(),
+});
+
+const ContactForm = ({ saved }: { saved: unknown[] }) => {
+  const form = useForm(contact, {
+    defaultValues: { name: "Ada", company: "" },
+    onSubmit: (values) => {
+      saved.push(values);
+    },
+  });
+  return (
+    <Form form={form}>
+      <TextField form={form} label="Name" name="name" />
+      <TextField form={form} label="Company" name="company" />
+      <TextField form={form} label="Email" name="email" type="email" />
+      <TextareaField form={form} label="Notes" name="notes" />
+      <SubmitButton form={form}>Save contact</SubmitButton>
+    </Form>
+  );
+};
+
 describe("the form fields", () => {
   it("say what the schema refuses once the person tries to submit, and not before", async () => {
     const saved: unknown[] = [];
@@ -387,6 +413,24 @@ describe("the form fields", () => {
     expect(saved).toStrictEqual([
       { rank: "high", reviewed: null, reviewer: grace },
     ]);
+  });
+
+  it("leave out an optional text the person typed and emptied again, and keep a required one as empty text", async () => {
+    const saved: unknown[] = [];
+    const { client } = hostOf();
+    await rendered(client, <ContactForm saved={saved} />);
+    for (const label of ["Company", "Email", "Notes"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one field after another
+      await typeInto(control(label), "typed@example.com");
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await typeInto(control(label), "");
+    }
+    await click(find("button", "Save contact"));
+    await settle();
+    expect({ email: errorOf("Email"), saved }).toStrictEqual({
+      email: "",
+      saved: [{ name: "Ada", company: "" }],
+    });
   });
 
   it("name the record a relation starts with, read by its ID", async () => {
