@@ -15,7 +15,7 @@
 export type Code =
   | { type: "Identifier"; name: string }
   | { type: "String"; value: string }
-  /** Finite and not negative: a negative number is `-` of one. */
+  /** Not negative (a negative number is `-` of one), and not NaN. */
   | { type: "Number"; value: number }
   | { type: "Boolean"; value: boolean }
   | { type: "Null" }
@@ -300,6 +300,14 @@ const printed = (node: Code, context: Context): string => {
       return quoted(node.value);
     }
     case "Number": {
+      // A literal too large for a double (`1e400`) is Infinity, written as
+      // a number too: the name `Infinity` is a callback parameter's to take.
+      if (node.value === Number.POSITIVE_INFINITY) {
+        return "1e999";
+      }
+      if (!Number.isFinite(node.value)) {
+        throw new TypeError("A printed number is a value, never NaN.");
+      }
       return String(node.value);
     }
     case "Boolean": {

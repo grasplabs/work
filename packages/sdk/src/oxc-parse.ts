@@ -121,35 +121,37 @@ export const parseExpression = (
       offset: source.search(loneSurrogate),
     };
   }
-  let text: string;
+  // The parse and the tree's decoding, which recurses as deep as the
+  // expression nests: either running out of memory or stack is a text
+  // that doesn't parse, as any parser's would be.
   try {
-    text = answer("parse_expression", language, source);
+    const text = answer("parse_expression", language, source);
+    if (text.startsWith('{"error"')) {
+      return { ok: false, ...errorOf(text) };
+    }
+    const parenthesized = new Set<object>();
+    // Bottom up: each node's children are already unwrapped. A chain ends
+    // where its parentheses close, or where an operator takes it: in
+    // either case what reads it sees where it ends without its node.
+    const { node } = z.object({ node: z.custom<Expression>(isObject) }).parse(
+      JSON.parse(text, (_key, value: unknown) => {
+        if (!isObject(value)) {
+          return value;
+        }
+        if (
+          value.type === "ParenthesizedExpression" &&
+          isObject(value.expression)
+        ) {
+          parenthesized.add(value.expression);
+          return value.expression;
+        }
+        return value.type === "ChainExpression" ? value.expression : value;
+      })
+    );
+    return { ok: true, node, parenthesized };
   } catch (error) {
     return { ok: false, message: messageOf(error), offset: 0 };
   }
-  if (text.startsWith('{"error"')) {
-    return { ok: false, ...errorOf(text) };
-  }
-  const parenthesized = new Set<object>();
-  // Bottom up: each node's children are already unwrapped. A chain ends
-  // where its parentheses close, or where an operator takes it: in
-  // either case what reads it sees where it ends without its node.
-  const { node } = z.object({ node: z.custom<Expression>(isObject) }).parse(
-    JSON.parse(text, (_key, value: unknown) => {
-      if (!isObject(value)) {
-        return value;
-      }
-      if (
-        value.type === "ParenthesizedExpression" &&
-        isObject(value.expression)
-      ) {
-        parenthesized.add(value.expression);
-        return value.expression;
-      }
-      return value.type === "ChainExpression" ? value.expression : value;
-    })
-  );
-  return { ok: true, node, parenthesized };
 };
 
 /** A comment of a program: a line or a block, its text between its markers. */

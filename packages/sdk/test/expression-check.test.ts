@@ -394,6 +394,12 @@ describe("splicing into the generated code", () => {
     expect(checked.ok && checked.code).toBe('($read(input, "a"))');
   });
 
+  it("refuses one nested too deep to read, rather than throwing", () => {
+    expect(
+      [3000, 9999].map((depth) => verdict(`${"1+".repeat(depth)}1`))
+    ).toStrictEqual(["expression.syntax", "expression.syntax"]);
+  });
+
   it("refuses a regular expression, whose work no limit of ours bounds", () => {
     expect(verdict("/(a+)+$/.test(input.name)")).toBe("expression.syntax");
   });
@@ -431,6 +437,13 @@ describe("the code generated from an expression", () => {
     );
     expect(() => checkExpression("1", { roots: ["$read"] })).toThrow(
       "plain identifier"
+    );
+  });
+
+  it("writes a number too large for a double as a number, which no parameter can shadow", () => {
+    // `Infinity` as a name would read the callback's parameter.
+    expect(generated("input.items.map((Infinity) => 1e400 > Infinity)")).toBe(
+      '($call($read(input, "items"), "map", [Infinity => (1e999 > Infinity)]))'
     );
   });
 
