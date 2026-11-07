@@ -28,7 +28,6 @@ import type { z } from "zod";
 import type { AppsRpc } from "./apps-rpc.ts";
 import type { ConnectionsRpc } from "./connections.ts";
 import type { DecisionsRpc } from "./decisions/rpc.ts";
-import type { DependenciesRpc } from "./dependencies/rpc.ts";
 import type { HeldStartsRpc } from "./held-starts-rpc.ts";
 import type { NotificationsRpc } from "./notifications.ts";
 import type { PendingActionsRpc } from "./pending-actions.ts";
@@ -59,7 +58,6 @@ export interface WaitingSources {
   pendingActions: PendingActionsRpc;
   unknownOutcomes: UnknownOutcomesRpc;
   permissions: PermissionsRpc;
-  dependencies: DependenciesRpc;
   apps: AppsRpc;
   notifications: NotificationsRpc;
   connections: ConnectionsRpc;
@@ -146,7 +144,7 @@ const requestItems = async (
   };
 };
 
-/** The latest page of the person's notifications: questions they were asked, schedules of theirs that stopped, sources connect stopped hearing for their triggers, packages revoked as malware, and what Apps told them. */
+/** The latest page of the person's notifications: questions they were asked, schedules of theirs that stopped, sources connect stopped hearing for their triggers, what core found of their approved packages, and what Apps told them. */
 const notificationItems = async (
   { notifications, connections }: WaitingSources,
   { forMe }: Reader
@@ -199,11 +197,12 @@ const notificationItems = async (
                   },
           };
         }
-        case "package_revoked": {
+        case "package_revoked":
+        case "package_advisory": {
           return {
             ...base,
-            kind: "revokedPackage",
-            id: `revokedPackage:${notification.id}`,
+            kind: "packageNotice",
+            id: `packageNotice:${notification.id}`,
             verdicts: [],
             notification,
           };
@@ -312,22 +311,6 @@ const parts: Parts = {
     };
   },
   requests: requestItems,
-  // None for anyone without `dependencies.approve`: the namespace says so.
-  packages: async ({ dependencies }) => {
-    const { requests, policyGeneration } = await dependencies.waiting();
-    return {
-      items: requests.map((request) => ({
-        kind: "packages",
-        id: `packages:${request.id}`,
-        at: request.requestedAt,
-        urgent: false,
-        waitsOn: { type: "permission", permission: "dependencies.approve" },
-        verdicts: ["approve", "reject"],
-        request,
-        policyGeneration,
-      })),
-    };
-  },
   // An archived App runs nothing: its version waits on nobody.
   versions: async ({ apps }, { forMe }) => {
     const listed = await apps.list();
@@ -546,13 +529,6 @@ export class WaitingRpc extends CoreRpcTarget implements WaitingApi {
         await (verdict.verdict === "grant"
           ? sources.permissions.grant(verdict.id, verdict.reviewed)
           : sources.permissions.revoke(verdict.id));
-        return { kind: verdict.kind };
-      }
-      case "packages": {
-        await sources.dependencies.decide(verdict.id, {
-          approved: verdict.verdict === "approve",
-          reviewed: verdict.reviewed,
-        });
         return { kind: verdict.kind };
       }
       case "workflowGoLive": {

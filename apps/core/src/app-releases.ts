@@ -1,5 +1,6 @@
 import {
   compilerVersion,
+  graphsOfModules,
   isPageFile,
   kitModules,
   serverSdkModules,
@@ -29,6 +30,7 @@ import type {
   ReleaseManifest,
 } from "@grasp-os/shared/app-releases";
 import { actorOf } from "@grasp-os/shared/audit";
+import { dependencyErrors } from "@grasp-os/shared/dependencies";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
@@ -72,6 +74,7 @@ import {
   migrationEvidence,
   requireMigrationsTarget,
 } from "./migration-transform.ts";
+import { graphApproved } from "./packages/approvals.ts";
 import { pageArtifact, versionPages } from "./pages.ts";
 import type { BuildProfile, BuiltPage, PageBuildResult } from "./pages.ts";
 import {
@@ -651,6 +654,15 @@ export const loadRelease = async (
         return loaded;
       }
     ));
+  // A release whose approved packages were revoked as malware since
+  // loads none of them: every call of it is refused until a version
+  // without them is published.
+  for (const graph of graphsOfModules(Object.keys(kept.modules))) {
+    // oxlint-disable-next-line no-await-in-loop -- one graph a release, at most
+    if (!(await graphApproved(env, graph))) {
+      throw dependencyErrors.create("dependency.revoked");
+    }
+  }
   return { ...kept, manifestHash: hash };
 };
 

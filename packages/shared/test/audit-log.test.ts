@@ -132,21 +132,24 @@ describe("audit event types", () => {
     expect(
       [
         "dependency.requested",
-        "dependency.admission_refused",
         "dependency.superseded",
+        "dependency.malware_refused",
+        "dependency.approval_refused",
+        "dependency.advisory_found",
         "dependency.built",
+        "dependency.retired",
+        "dependency.withdrawn",
+        // As older releases wrote them.
+        "dependency.admission_refused",
         "dependency.pin_dropped",
         "dependency.lock_targets_changed",
         "dependency.approved",
         "dependency.denied",
+        "dependency.revoked",
       ].map((action) => typeOf(action))
     ).toStrictEqual([
-      "action",
-      "action",
-      "action",
-      "action",
-      "action",
-      "action",
+      ...Array.from({ length: 11 }, () => "action"),
+      "decision",
       "decision",
       "decision",
     ]);

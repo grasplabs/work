@@ -1,5 +1,4 @@
 import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
-import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { Button } from "@grasp-os/ui/components/button";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -8,7 +7,6 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { KeyboardEvent } from "react";
 
 import type { PendingRequests } from "../activity/pending.tsx";
-import { PackagesCard } from "./dependency-requests.tsx";
 import { OutcomeCard } from "./outcome-card.tsx";
 import type { Pile } from "./pile-card.tsx";
 import { HeldCard, RequestCard } from "./pile-cards.tsx";
@@ -37,12 +35,6 @@ export type PileItem =
       id: string;
       request: Permission;
       pending: PendingRequests;
-    }
-  | {
-      kind: "packages";
-      id: string;
-      request: DependencyRequest;
-      policyGeneration: number;
     };
 
 // Which card is on top, and what was skipped: kept while the app is open,
@@ -166,17 +158,8 @@ const TopCard = ({ item, pile }: { item: PileItem; pile: Pile }) => {
   if (item.kind === "outcome") {
     return <OutcomeCard outcome={item.outcome} pile={pile} />;
   }
-  if (item.kind === "request") {
-    return (
-      <RequestCard pending={item.pending} pile={pile} request={item.request} />
-    );
-  }
   return (
-    <PackagesCard
-      pile={pile}
-      policyGeneration={item.policyGeneration}
-      request={item.request}
-    />
+    <RequestCard pending={item.pending} pile={pile} request={item.request} />
   );
 };
 

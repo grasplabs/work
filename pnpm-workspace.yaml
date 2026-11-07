@@ -89,8 +89,13 @@ catalog:
   # Knowledge frontmatter.
   yaml: 2.9.1
   # Bundles an App's approved npm packages in the package builder's isolate
-  # (packages/compiler/src/packages): the browser build, run on workerd.
+  # (packages/compiler/src/packages), run on workerd.
   esbuild-wasm: 0.28.2
+  # Unpacks an approved package's tarball (gzipped ustar, PAX and the ustar
+  # prefix included) and resolves a package's `exports` and `imports` with
+  # Node's conditions, in the package builder's isolate.
+  modern-tar: 0.8.6
+  resolve.exports: 2.0.4
   # The import specifiers of an App's compiled modules, which the compiler
   # points at flat names and at each page module's content-hashed address:
   # Vite's lexer.

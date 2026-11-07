@@ -34,10 +34,10 @@
  *   which YAML reads as it is, so no value can add structure.
  * - A peer met by a version nothing approved: a kit package's peers only
  *   from the kit's own graph, as the checkout met them, never from a
- *   lock's packages; a lock's package's as its lock met them, its
- *   platform peers (and the lock's `platformPeers`) only by the very
- *   versions the project installs. Every met peer is within its range; a
- *   required peer with no version, or a mismatch, refuses packaging.
+ *   lock's packages; a lock's package's required peers are among its
+ *   dependencies, exactly as its lock resolved them. Every met peer is
+ *   within its range; a required peer with no version, or a mismatch,
+ *   refuses packaging.
  * - Packaging reaches the network: it reads the checkout's lockfile and
  *   the package, nothing else.
  */
@@ -109,7 +109,7 @@ export interface LockfileInput {
   /** The App's and its workflows' locks, each with whose it is. */
   readonly locks: readonly {
     readonly owner: string;
-    readonly lock: Omit<GraspLock, "artifacts">;
+    readonly lock: GraspLock;
   }[];
 }
 
@@ -184,35 +184,17 @@ const edgesText = (edges: ReadonlyMap<string, string>): string =>
   JSON.stringify([...edges].toSorted(([a], [b]) => (a < b ? -1 : 1)));
 
 /**
- * Adds a lock's packages to `meta` and `edges`: its integrity, peers and
- * dependencies. One the checkout also pins must carry its integrity.
+ * Adds a lock's packages to `meta` and `edges`: its integrity and its
+ * dependencies, required peers among them, as the lock resolved them.
+ * One the checkout also pins must carry its integrity and edges.
  */
 const addLock = (
   { owner, lock }: LockfileInput["locks"][number],
-  { meta, edges, peersMet }: ReturnType<typeof readCheckout>,
-  fromLocks: Map<string, LockedPeers>,
-  lockMet: Map<string, Map<string, string>>
+  { meta, edges }: ReturnType<typeof readCheckout>
 ): void => {
   for (const entry of Object.values(lock.packages)) {
     const key = keyOf(entry.name, entry.version);
-    const peers = Object.entries(entry.peers);
-    // A peer the lock met within its graph is installed with it, as the
-    // lock resolved it; one the platform met is the project's own.
-    const graphPeers = peers.flatMap(([name, peer]) =>
-      peer.by === "graph" && peer.resolved !== null
-        ? [[name, peer.resolved] as const]
-        : []
-    );
-    // One package, one version: a dependency and a graph peer of the same
-    // name would be merged into one edge, the other version lost.
-    for (const [name, version] of graphPeers) {
-      const dependency = entry.dependencies[name];
-      if (dependency !== undefined && dependency !== version) {
-        refuse(
-          `${key} in ${owner}'s lock names ${name} as dependency ${dependency} and graph peer ${version}.`
-        );
-      }
-    }
+    const lockEdges = Object.entries(entry.dependencies);
     const known = meta.get(key);
     if (known !== undefined) {
       // Already pinned, by the checkout or another lock: the same tarball,
@@ -222,67 +204,20 @@ const addLock = (
         refuse(`${key} in ${owner}'s lock isn't the tarball the kit installs.`);
       }
       const own = edges.get(key)?.dependencies ?? new Map<string, string>();
-      const lockEdges = fromLocks.has(key)
-        ? [...Object.entries(entry.dependencies), ...graphPeers]
-        : Object.entries(entry.dependencies);
-      const peersAgree =
-        fromLocks.has(key) ||
-        graphPeers.every(([name, version]) => {
-          const met = [...(peersMet.get(key)?.get(name) ?? [])];
-          return met.length === 1 && met[0] === version;
-        });
-      if (!peersAgree || edgesText(new Map(lockEdges)) !== edgesText(own)) {
+      if (edgesText(new Map(lockEdges)) !== edgesText(own)) {
         refuse(
           `${key} in ${owner}'s lock depends on other versions than the project installs it with.`
         );
       }
-      // A kit package's peer a lock met in its graph: the project must
-      // meet it the same way (`kitPeer` alone could leave it unmet).
-      if (!fromLocks.has(key)) {
-        const met = lockMet.get(key) ?? new Map<string, string>();
-        for (const [name, version] of graphPeers) {
-          met.set(name, version);
-        }
-        lockMet.set(key, met);
-      }
       continue;
     }
-    fromLocks.set(key, entry.peers);
-    meta.set(key, {
-      resolution: { integrity: entry.integrity },
-      ...(peers.length === 0
-        ? {}
-        : {
-            peerDependencies: sortedRecord(
-              peers.map(([name, peer]) => [name, peer.range])
-            ),
-          }),
-      ...(peers.some(([, peer]) => peer.resolved === null)
-        ? {
-            peerDependenciesMeta: sortedRecord(
-              peers
-                .filter(([, peer]) => peer.resolved === null)
-                .map(([name]) => [name, { optional: true }])
-            ),
-          }
-        : {}),
-    });
+    meta.set(key, { resolution: { integrity: entry.integrity } });
     edges.set(key, {
-      dependencies: new Map([
-        ...Object.entries(entry.dependencies),
-        ...graphPeers,
-      ]),
+      dependencies: new Map(lockEdges),
       optionalDependencies: new Map(),
     });
-    peersMet.set(
-      key,
-      new Map(graphPeers.map(([name, version]) => [name, new Set([version])]))
-    );
   }
 };
-
-/** A locked package's peers, as its lock met them. */
-type LockedPeers = GraspLock["packages"][string]["peers"];
 
 /** Whether `version` is within `range`, prereleases included. */
 const within = (version: string, range: string): boolean =>
@@ -307,33 +242,6 @@ const reachable = (
 const isLink = (version: string): boolean => version.startsWith("link:");
 
 /**
- * Refuses a lock whose package's peer the platform met at a version the
- * project doesn't install (`kitVersions`), whatever package it is: one
- * the checkout or an earlier lock already pins too (`addLock` keeps that
- * package as it is) must still be met as this lock met it.
- */
-const checkPlatformPeers = (
-  locks: LockfileInput["locks"],
-  kitVersions: ReadonlyMap<string, string>
-): void => {
-  for (const { lock } of locks) {
-    for (const entry of Object.values(lock.packages)) {
-      for (const [name, peer] of Object.entries(entry.peers)) {
-        if (
-          peer.by === "platform" &&
-          peer.resolved !== null &&
-          kitVersions.get(name) !== peer.resolved
-        ) {
-          refuse(
-            `${keyOf(entry.name, entry.version)}'s peer ${name} was met at ${peer.resolved} by the platform, which the project doesn't install.`
-          );
-        }
-      }
-    }
-  }
-};
-
-/**
  * The project's pnpm-lock.yaml, as text: its importers as their manifests
  * name their dependencies, and every package they reach, each with its
  * integrity, its peers met by the project's one version of each.
@@ -341,10 +249,8 @@ const checkPlatformPeers = (
 export const projectLockfile = (input: LockfileInput): string => {
   const checkout = readCheckout(input.checkoutLock);
   const { meta, edges, peersMet } = checkout;
-  const fromLocks = new Map<string, LockedPeers>();
-  const lockMet = new Map<string, Map<string, string>>();
   for (const lock of input.locks) {
-    addLock(lock, checkout, fromLocks, lockMet);
+    addLock(lock, checkout);
   }
   const importers = Object.entries(input.importers);
   const registryDependencies = (importer: Importer): [string, string][] =>
@@ -356,17 +262,11 @@ export const projectLockfile = (input: LockfileInput): string => {
   const lockDirect = new Set(
     input.locks.flatMap(({ lock }) => Object.keys(lock.direct))
   );
-  // The kit's own versions, which meet its packages' peers and the
-  // platform's peers of the locks' packages: the vendored packages' and
-  // the project's own dependencies, never a lock's; and every version the
-  // root installs, which a lock's graph must not meet a peer against.
+  // The kit's own versions, which meet its packages' peers: the vendored
+  // packages' and the project's own dependencies, never a lock's.
   const kitVersions = new Map<string, string>();
-  const rootVersions = new Map<string, string>();
   for (const [dir, importer] of importers) {
     for (const [name, version] of registryDependencies(importer)) {
-      if (dir === "." || !rootVersions.has(name)) {
-        rootVersions.set(name, version);
-      }
       const kit = dir !== "." || !lockDirect.has(name);
       const before = kitVersions.get(name);
       if (kit && before !== undefined && before !== version) {
@@ -377,7 +277,6 @@ export const projectLockfile = (input: LockfileInput): string => {
       }
     }
   }
-  checkPlatformPeers(input.locks, kitVersions);
   const edgesOf = (key: string): Edges => {
     const own = edges.get(key);
     if (own === undefined || !meta.has(key)) {
@@ -414,15 +313,6 @@ export const projectLockfile = (input: LockfileInput): string => {
     const resolution = resolutionSchema.safeParse(meta.get(key)?.resolution);
     if (!resolution.success) {
       refuse(`${key} is locked by something other than its integrity.`);
-    }
-  }
-  for (const { owner, lock } of input.locks) {
-    for (const [name, version] of Object.entries(lock.platformPeers)) {
-      if (kitVersions.get(name) !== version) {
-        refuse(
-          `${owner}'s lock was resolved against ${name}@${version}, which the project doesn't install.`
-        );
-      }
     }
   }
   /**
@@ -464,50 +354,20 @@ export const projectLockfile = (input: LockfileInput): string => {
       `${of}'s peer ${name} has no one version in the kit to meet it.`
     );
   };
-  /** What meets a lock's package's peer: as its lock met it, or refused. */
-  const lockPeer = (
-    of: string,
-    name: string,
-    peer: LockedPeers[string]
-  ): string | undefined => {
-    if (peer.resolved === null) {
-      return undefined;
-    }
-    if (peer.by === "platform") {
-      if (kitVersions.get(name) !== peer.resolved) {
-        return refuse(
-          `${of}'s peer ${name} was met at ${peer.resolved} by the platform, which the project doesn't install.`
-        );
-      }
-      return peer.resolved;
-    }
-    const root = rootVersions.get(name);
-    if (peer.by !== "graph" || (root !== undefined && root !== peer.resolved)) {
-      return refuse(
-        `${of}'s peer ${name} is met at ${peer.resolved} by its lock and at ${root ?? "another version"} by the project.`
-      );
-    }
-    return peer.resolved;
-  };
+  // A lock's package carries no peers of its own: the lock resolved its
+  // required peers as dependencies, so only the kit's packages have any.
   const snapshots = sortedRecord(
     [...all].map((key) => {
       const own = edgesOf(key);
       const { peerDependencies = {}, peerDependenciesMeta = {} } =
         meta.get(key) ?? {};
-      const lockPeers = fromLocks.get(key);
       const peers: [string, string][] = [];
       for (const [name, range] of Object.entries(peerDependencies)) {
-        const lockedPeer = lockPeers?.[name];
-        const version =
-          lockedPeer === undefined
-            ? kitPeer(key, name, peerDependenciesMeta[name]?.optional === true)
-            : lockPeer(key, name, lockedPeer);
-        const lockedThere = lockMet.get(key)?.get(name);
-        if (lockedThere !== undefined && lockedThere !== version) {
-          refuse(
-            `${key}'s peer ${name} is met at ${lockedThere} by a lock and at ${version ?? "no version"} in the project.`
-          );
-        }
+        const version = kitPeer(
+          key,
+          name,
+          peerDependenciesMeta[name]?.optional === true
+        );
         if (version !== undefined) {
           if (!within(version, range)) {
             refuse(`${key}'s peer ${name}@${version} isn't within ${range}.`);

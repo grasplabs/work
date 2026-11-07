@@ -45,7 +45,7 @@ import {
   hostGeneratedFolder,
 } from "./inputs.ts";
 import type { CodeFolder } from "./inputs.ts";
-import { kitModuleName, appModuleName } from "./kit.ts";
+import { appModuleName, kitModuleName, packageModuleIn } from "./kit.ts";
 
 /**
  * The SDK modules an App's server isolate loads: the root (values, `defineApp`,
@@ -440,9 +440,17 @@ export const appCodeImport = (
       : { error: `"${specifier}" can't be imported here. ${described[kind]}.` };
   }
   const module = platformImports[kind].get(specifier);
-  return module === undefined
-    ? { error: `"${specifier}" can't be imported here. ${described[kind]}.` }
-    : { module };
+  if (module !== undefined) {
+    return { module };
+  }
+  // The npm packages the App's builder approved, bundled for its isolate.
+  const approved =
+    kind === "generated" ? undefined : packageModuleIn(files, specifier);
+  return approved === undefined
+    ? {
+        error: `"${specifier}" can't be imported here. ${described[kind]}, or an npm package the App's builder approved: ask for one (again, if it was removed) with env.build.resolveDependencies.`,
+      }
+    : { module: approved };
 };
 
 /** The data model's types, which a page imports with `import type` alone. */

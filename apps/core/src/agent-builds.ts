@@ -13,6 +13,7 @@ import { delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import type { PreviewProblem } from "@grasp-os/shared/chat";
 import type { DefinitionPlan } from "@grasp-os/shared/data-model";
+import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
@@ -61,7 +62,6 @@ import { callDraft, draftRunOf } from "./draft-runs.ts";
 import type { DraftRun } from "./draft-runs.ts";
 import { workspace } from "./durable-objects.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
-import type { Resolved } from "./packages/resolve.ts";
 import { admitPreviewCall } from "./pages-rpc.ts";
 import { requireResourceRole } from "./permission-resources.ts";
 import { requestPermission } from "./permissions.ts";
@@ -1530,15 +1530,17 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   }
 
   /**
-   * Resolves what `app`'s package.json asks for (`intent`: its
-   * dependencies, the targets they run on, the entries the App imports)
-   * into an exact graph from the npm registry, checks every package's
-   * bytes without running them, and proposes the graph as a request
-   * that waits for a person who holds `dependencies.approve`
-   * (packages/resolve.ts). The agent gets the request and the lock; no
-   * registry credentials, package manager or shell are involved.
+   * Resolves the npm packages `app` asks for (`intent`: its dependencies,
+   * the entries it imports, and why) into an exact graph from the npm
+   * registry and proposes it as a request, which waits for the App's
+   * builder to decide on a card in this chat (packages/resolve.ts). The
+   * agent gets the request, and nothing to decide it with; no registry
+   * credentials, package manager or shell are involved.
    */
-  async resolveDependencies(app: unknown, intent: unknown): Promise<Resolved> {
+  async resolveDependencies(
+    app: unknown,
+    intent: unknown
+  ): Promise<DependencyRequest> {
     return await this.#build(
       "build.resolveDependencies",
       async (by) => {
@@ -1553,9 +1555,9 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           this.#admit
         );
       },
-      (resolved) => ({
+      (request) => ({
         app: typeof app === "string" ? app : null,
-        request: resolved.request.id,
+        request: request.id,
       })
     );
   }
@@ -1998,27 +2000,30 @@ build: {
     binding: string;
   }): Promise<{ id: string; status: string }>;
   /**
-   * Resolves the App's npm packages: what its package.json asks for, into
-   * one exact graph from the npm registry, with every package's bytes
-   * checked without running them, proposed as one request. A person who was
-   * given the permission to approve dependencies approves or denies it as a
-   * whole; until then nothing may use the packages, and you can't approve it
-   * or give anyone that permission. Another request for the App replaces one
-   * still waiting. A package that needs install scripts, native code or
-   * another React is refused, with every reason.
+   * Asks for the App's npm packages: resolved into one exact graph from the
+   * npm registry and proposed as one request, which the App's builder
+   * approves or denies on a card in this chat. You can't approve it, and
+   * nothing may use the packages until they do; once approved, the App's
+   * Pages and server functions import them by name from your next write.
+   * Ask for what you need: packages add up, and what is approved stays
+   * until you take it out with \`remove\`, which the builder approves the
+   * same way. A request still waiting is replaced by your next one. Known
+   * malware is refused; lookalike names and advisories are shown to the
+   * builder.
    */
   resolveDependencies(app: string, intent: {
-    /** The revision of the source package.json was read from. */
-    sourceRevision: string;
-    /** Why the App needs them. */
+    /** Why the App needs them, for the builder deciding. */
     purpose: string;
-    targets: ("browser" | "server" | "workflow" | "computation")[];
-    /** package.json's dependencies: each name and its version range on the npm registry, one pair each. */
+    /** The packages to add: each name and its version range on the npm registry, one pair each; none when only removing. */
     dependencies: { name: string; range: string }[];
     /** What the App imports of them, each a package or one of its subpaths; each dependency's own name when left out. */
     entries?: string[];
+    /** Approved packages to take out, by name, once nothing imports them. */
+    remove?: string[];
   }): Promise<{
-    request: { id: string; status: "pending" | "approved" | "denied"; graphHash: string };
+    id: string;
+    status: "pending" | "approved" | "denied" | "revoked";
+    graphHash: string;
     /** The exact version each dependency resolved to, by name, among the rest of the lock. */
     lock: { direct: Record<string, string> };
   }>;

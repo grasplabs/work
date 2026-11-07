@@ -25,9 +25,8 @@ import type { Viewer, Waiting } from "./waiting.ts";
 // on its card is a pile of cards, gone through one at a time
 // (`todo-pile.tsx`): changes an agent wants to make, which wait for them to
 // approve or reject; changes sent for them whose answer was lost, which
-// wait for them to say whether each happened (`outcome-card.tsx`); permission requests, which wait for an admin;
-// packages proposed for an App, which wait for someone given the
-// permission to approve them. The rest is settled on its own page, and is
+// wait for them to say whether each happened (`outcome-card.tsx`); permission requests, which wait for an admin.
+// The rest is settled on its own page, and is
 // listed under the pile with the way there, not counted on it:
 // connections they can sign in to again, and what the inbox settles
 // (`in-inbox.tsx`), each a way to its item there.
@@ -101,7 +100,7 @@ const ReconnectGroup = ({
 
 /** The cards of the pile, of what was read: core's order, kind by kind. */
 const pileOf = (
-  { held, outcomes, requests, dependencies }: Waiting,
+  { held, outcomes, requests }: Waiting,
   identity: Viewer
 ): PileItem[] => [
   ...(held.state === "ready"
@@ -126,14 +125,6 @@ const pileOf = (
         id: `request:${request.id}`,
         request,
         pending: requests.data,
-      }))
-    : []),
-  ...(dependencies.state === "ready"
-    ? dependencies.data.requests.map((request): PileItem => ({
-        kind: "packages",
-        id: `packages:${request.id}`,
-        request,
-        policyGeneration: dependencies.data.policyGeneration,
       }))
     : []),
 ];
@@ -164,7 +155,6 @@ export const ToDo = ({
       ["held", waiting.held],
       ["outcomes", waiting.outcomes],
       ["requests", waiting.requests],
-      ["dependencies", waiting.dependencies],
       ["notifications", waiting.notifications],
     ] as const
   ).flatMap(([key, part]) =>

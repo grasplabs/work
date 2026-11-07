@@ -65,7 +65,6 @@ import { speechResponse } from "./onboarding/speech.ts";
 import { interviewStoryResponse } from "./onboarding/story.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import { transcriptionResponse } from "./onboarding/transcription.ts";
-import { packageArtifactResponse } from "./packages/serve.ts";
 import { pageCallRoute } from "./page-calls.ts";
 import { pageFrameResponse, pageModuleResponse } from "./page-frame.ts";
 import {
@@ -237,8 +236,8 @@ const linkResponse = async (
 };
 
 /**
- * The code pages' frames load: pages' modules and Apps' npm packages,
- * never to the product page itself (`isRefusedToProductPage`).
+ * The code pages' frames load, their modules, never to the product page
+ * itself (`isRefusedToProductPage`).
  */
 const frameCodeResponse = async (
   request: Request,
@@ -253,11 +252,7 @@ const frameCodeResponse = async (
       requestId
     );
   }
-  const pageModule = await pageModuleResponse(env, url);
-  if (pageModule !== null) {
-    return pageModule;
-  }
-  return await packageArtifactResponse(env, request);
+  return await pageModuleResponse(env, url);
 };
 
 /**
@@ -549,7 +544,7 @@ export const handleRequest = async (
     requestId
   );
   // One line per request. Only the path: query strings can carry tokens
-  // (a page module's, a package artifact's), and so can a webhook
+  // (a page module's), and so can a webhook
   // trigger's path, without it.
   log[level]("request", {
     requestId,

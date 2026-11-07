@@ -146,6 +146,16 @@ export const Route = createFileRoute("/settings")({ component: Settings });
 
 `useUser` returns who is using the Page: their name, email and roles in the App. Use it to show things, never to decide what someone may do: that belongs in a server function, with `ctx.auth.getUser()`, which a Page can't change.
 
+## npm packages
+
+A Page can use any npm package the App's builder approved. Ask for it with `env.build.resolveDependencies(app, { purpose, dependencies: [{ name: "recharts", range: "^2.15.0" }] })`: the builder approves it on a card in the chat, and from your next write on you import it by name, as anywhere else. Packages add up: what is approved stays until you take it out with `remove`, which the builder approves the same way.
+
+```text
+import { LineChart, Line } from "recharts";
+```
+
+It is bundled into the App's build and runs on the kit's React. An import of a package that isn't approved is refused when the Page compiles, saying to ask for it. A package reported as malware is refused, and one revoked later stops the App's Pages and server functions until it is removed.
+
 ## How Pages look
 
 Pages are built from `@grasp-os/ui`, the same components and theme as Grasp itself: buttons, forms, tables, cards, charts and more, each under `@grasp-os/ui/components/<name>`. Lay them out with Tailwind's layout classes and leave their look to the components; Grasp's checks refuse raw colours and restyled components, so every App looks like Grasp.

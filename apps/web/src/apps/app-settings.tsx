@@ -70,7 +70,6 @@ import { AppVersions } from "./app-versions.tsx";
 import { AppWebhooks, WebhookList } from "./app-webhooks.tsx";
 import { AppWorkflows } from "./app-workflows.tsx";
 import { SaveAsBlueprint } from "./blueprints.tsx";
-import { PackageApprovals } from "./package-approvals.tsx";
 import { ResourceBindings } from "./resource-bindings.tsx";
 import type { ResourcesPage } from "./resource-bindings.tsx";
 import type { readStoreChanges } from "./store-changes.tsx";
@@ -81,8 +80,8 @@ import type { AppRead } from "./use-app-read.ts";
 // Everything about an App besides the App itself, in one place, grouped
 // plainly, a section at a time: what it is called and where it stands
 // (General), whom it is shared with (Sharing), its versions, its
-// connections (with the workflows it binds), webhooks, the npm packages
-// approved for it, and the settings page the App
+// connections (with the workflows it binds), webhooks, and the settings
+// page the App
 // declares itself (Options). Its builders reach it beside the chat in
 // the App's workspace (app-workspace.tsx); anyone else who opens the
 // App, from the App's own bar (_shell.apps.$app_.settings.tsx). Each
@@ -96,7 +95,6 @@ const appSettingsSections = [
   "versions",
   "connections",
   "webhooks",
-  "packages",
   "options",
 ] as const;
 
@@ -117,10 +115,6 @@ const sectionLabels: Record<AppSettingsSection, MessageDescriptor> = {
     context: "an app's settings section",
   }),
   webhooks: msg({ message: "Webhooks", context: "an app's settings section" }),
-  packages: msg({
-    message: "Packages",
-    context: "an app's settings section",
-  }),
   options: msg({
     message: "Options",
     context: "the settings an app offers itself",
@@ -872,23 +866,6 @@ const Webhooks = ({
   );
 };
 
-// --- Packages ------------------------------------------------------------
-
-const readPackages = async (session: Session, app: string) =>
-  await session.dependencies.approvals({ app });
-
-/** The npm packages approved for the App, for whoever core lets read them. */
-export const AppPackages = ({ app }: { app: string }) => {
-  const read = useAppRead(app, readPackages);
-  return (
-    <Read read={read}>
-      {(listed) => <PackageApprovals key={listed.subject.id} listed={listed} />}
-    </Read>
-  );
-};
-
-const Packages = ({ app }: { app: ViewedApp }) => <AppPackages app={app.id} />;
-
 // --- Options -------------------------------------------------------------
 
 const readSurfaces = async (session: Session, app: string) =>
@@ -921,24 +898,11 @@ const Options = ({
 
 // --- The settings --------------------------------------------------------
 
-/**
- * Whether `identity` sees Packages by their role: its builders, the
- * organization's builders and its admins. Anyone else who may approve
- * packages sees it once core lists the App's packages to them.
- */
-const approvesByRole = (app: ViewedApp, identity: Identity): boolean =>
-  app.role === "builder" ||
-  canBuild(identity.role) ||
-  decidesRequests(identity);
-
-/** Nothing to read: Packages shows by role. */
-const readNoPackages = async (): Promise<null> => await Promise.resolve(null);
-
 /** The sections `identity` sees of `app`, with Options once core says it declares them. */
 const shownSections = (
   app: ViewedApp,
   identity: Identity,
-  { options, packages }: { options: boolean; packages: boolean }
+  { options }: { options: boolean }
 ): AppSettingsSection[] => {
   const builder = app.role === "builder";
   const shown: Record<AppSettingsSection, boolean> = {
@@ -948,7 +912,6 @@ const shownSections = (
     versions: builder,
     connections: canBuild(identity.role),
     webhooks: builder,
-    packages: approvesByRole(app, identity) || packages,
     options,
   };
   return appSettingsSections.filter((section) => shown[section]);
@@ -1014,9 +977,6 @@ const SectionBody = ({
   if (section === "webhooks") {
     return <Webhooks app={app} identity={identity} />;
   }
-  if (section === "packages") {
-    return <Packages app={app} />;
-  }
   return <OptionsSection app={app.id} options={options} />;
 };
 
@@ -1025,7 +985,6 @@ const sectionDescriptions = {
   versions: msg`Every version of the App, which one runs, and going back to one.`,
   connections: msg`The integrations, connections and resources the App uses, and asking for more.`,
   webhooks: msg`Where Grasp sends the App's events.`,
-  packages: msg`The npm packages approved for the App, and taking an approval back.`,
   options: msg`The settings the App offers itself.`,
 } satisfies Partial<Record<AppSettingsSection, MessageDescriptor>>;
 
@@ -1100,19 +1059,12 @@ export const AppSettings = ({
   const { t, i18n } = useLingui();
   const builds = buildsApp(app, identity);
   const surfaces = useAppRead(app.id, readSurfaces);
-  // Packages for an approver of packages who doesn't build: once core
-  // lists the packages to them.
-  const packages = useAppRead(
-    app.id,
-    approvesByRole(app, identity) ? readNoPackages : readPackages
-  );
   const sections = shownSections(app, identity, {
     options: optionsOf(surfaces) !== undefined,
-    packages: packages?.state === "ready" && packages.data !== null,
   });
-  // A section asked for by an address: there for whoever opens it, as an
-  // approver of packages who isn't one of its builders. Options waits on
-  // whether the App declares them; anything else opens General.
+  // A section asked for by an address: there for whoever opens it.
+  // Options waits on whether the App declares them; anything else opens
+  // General.
   const section = asked ?? "general";
   const title = i18n._(sectionLabels[section]);
   const description =

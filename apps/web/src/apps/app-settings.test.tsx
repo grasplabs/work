@@ -127,13 +127,6 @@ const fakeCore = (
         return [];
       },
     },
-    // Core lists the App's packages only to who may approve them.
-    dependencies: {
-      approvals: async () => {
-        await Promise.resolve();
-        throw new Error("Only package approvers read these.");
-      },
-    },
     // The App may use one HTTP connection, which no catalog entry lists.
     permissions: {
       list: async () =>
@@ -185,18 +178,16 @@ const opened = async (
   section?: AppSettingsSection,
   role: Identity["role"] = "user"
 ) => {
-  const { apps, pages, dependencies, permissions, connections } = fake;
+  const { apps, pages, permissions, connections } = fake;
   const core = {
     withSession: async <T,>(
       action: (session: {
         apps: typeof apps;
         pages: typeof pages;
-        dependencies: typeof dependencies;
         permissions: typeof permissions;
         connections: typeof connections;
       }) => Promise<T>
-    ): Promise<T> =>
-      await action({ apps, pages, dependencies, permissions, connections }),
+    ): Promise<T> => await action({ apps, pages, permissions, connections }),
   };
   const rootRoute = createRootRoute({
     loader: async () => await apps.get(),
@@ -316,11 +307,6 @@ describe(AppSettings, () => {
           to: "/apps/invoice-desk/edit?view=settings&section=webhooks",
           open: false,
         },
-        {
-          name: "Packages",
-          to: "/apps/invoice-desk/edit?view=settings&section=packages",
-          open: false,
-        },
       ],
       user: [
         {
@@ -419,7 +405,7 @@ describe(AppSettings, () => {
       sections: sections().map(({ name }) => name),
     }).toStrictEqual({
       name: "Invoices",
-      sections: ["General", "Sharing", "Versions", "Webhooks", "Packages"],
+      sections: ["General", "Sharing", "Versions", "Webhooks"],
     });
   });
 

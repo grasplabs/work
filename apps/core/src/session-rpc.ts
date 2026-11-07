@@ -10,7 +10,6 @@ import { ConnectionsRpc } from "./connections.ts";
 import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DataPolicyRpc } from "./data-policy-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
-import { DependenciesRpc } from "./dependencies/rpc.ts";
 import { HeldStartsRpc } from "./held-starts-rpc.ts";
 import { MemoryRpc } from "./knowledge/memory-rpc.ts";
 import { KnowledgeRpc } from "./knowledge/rpc.ts";
@@ -24,6 +23,7 @@ import { OnboardingRpc } from "./onboarding/rpc.ts";
 import { OrgSettingsRpc } from "./org-settings.ts";
 import { OrganizationRpc } from "./organization.ts";
 import { SessionsRpc } from "./own-sessions.ts";
+import { DependenciesRpc } from "./packages/rpc.ts";
 import { PagesRpc } from "./pages-rpc.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
@@ -140,7 +140,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
       pendingActions: this.#pendingActions,
       unknownOutcomes: this.#unknownOutcomes,
       permissions: this.#permissions,
-      dependencies: this.#dependencies,
       apps: this.#apps,
       notifications: this.#notifications,
       connections: this.#connections,

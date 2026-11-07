@@ -21,7 +21,6 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./css": "./src/packages/css.ts",
     "./inputs": "./src/inputs.ts",
     "./page-imports": "./src/page-imports.ts",
     "./oxc": "./src/oxc.ts",
@@ -42,8 +41,10 @@
     "es-module-lexer": "catalog:",
     "esbuild-wasm": "catalog:",
     "lucide-react": "catalog:",
+    "modern-tar": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "resolve.exports": "catalog:",
     "tailwindcss": "catalog:"
   },
   "devDependencies": {

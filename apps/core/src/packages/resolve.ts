@@ -1,7 +1,8 @@
-import { platformPeers, platformScope } from "@grasp-os/compiler";
+import { actorOf } from "@grasp-os/shared/audit";
 import {
   dependencyErrors,
   dependencyMaxFindings,
+  dependencyMaxPackages,
   findingGravity,
   npmRegistryOrigin,
   packageKey,
@@ -9,941 +10,282 @@ import {
 } from "@grasp-os/shared/dependencies";
 import type {
   DependencyFinding,
-  DependencyGraph,
-  DependencyPackageRef,
   DependencyRequest,
-  DependencySubject,
 } from "@grasp-os/shared/dependencies";
-import { canonicalJson } from "@grasp-os/shared/json";
-import { log } from "@grasp-os/shared/log";
 import {
   dependencyIntentSchema,
   entryPackage,
-  graspLockSchema,
-  lockGraph,
   packageErrors,
-  packageInspectionSchema,
-  packageLimitsOf,
   packageMaturityMs,
-  targetConditions,
 } from "@grasp-os/shared/packages";
 import type {
   GraspLock,
   LockedPackage,
   NpmVersion,
-  PackageInspection,
-  PackageLimits,
-  PackageTarball,
 } from "@grasp-os/shared/packages";
-import { and, desc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import rcompare from "semver/functions/rcompare";
 import satisfies from "semver/functions/satisfies";
 import validRange from "semver/ranges/valid";
-import { z } from "zod";
 
 import type { Acting } from "../auth/identity.ts";
-import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
-import { proposeResolved, refuseMalware } from "../dependencies/requests.ts";
-import type { MalwareFound } from "../dependencies/requests.ts";
-import { builtSubject } from "../dependencies/subject-builders.ts";
-import { ofSubject } from "../dependencies/subjects.ts";
-import { builderFailure, packageBuilder } from "./builder.ts";
-import type { PackageBuilderRun } from "./builder.ts";
+import { latestApprovedLock, refuseMalware } from "./approvals.ts";
 import { lookalikeFindings } from "./lookalikes.ts";
-import {
-  advisoriesAffecting,
-  malwareAdvised,
-  osvMalwareIn,
-  whenFree,
-} from "./malware.ts";
-import { verifiedTarball } from "./tarballs.ts";
+import { scanPackages, whenFree } from "./malware.ts";
+import { propose } from "./requests.ts";
+import { builtSubject } from "./subjects.ts";
 
-// Resolving what an App's package.json asks for into one exact graph, and
-// proposing it for a person's approval (dependencies/requests.ts). Every
-// byte comes from the npm registry through connect; every tarball is
-// unpacked and read in the package builder's isolate, which has no
-// network and runs nothing. Nothing resolved here is usable: the graph is
-// a pending request until a person approves it, and only then can a
-// build use it (admitDependencies). What could go wrong, and what stops
-// it:
+// Resolving what a source asks for into one exact graph, and proposing it
+// for its builder's approval (requests.ts). Every version comes from the
+// npm registry's metadata through connect, resolved with npm's own range
+// rules (semver); nothing is fetched or unpacked until an approved graph
+// is built (build.ts). What could go wrong, and what stops it:
 //
-// - Sources other than the registry: git, file, URL, alias (`npm:`),
-//   workspace and tag specs are refused, in the App's package.json and in
+// - Sources other than the registry: a range semver can't read (a
+//   repository, file, URL, alias or tag) is refused, in the source and in
 //   every package's own dependencies (`package.unsupported_source`).
-// - A brand-new release, perhaps a compromised one: a version is newly
-//   resolved to only once it has been published for three days, and only
-//   with a SHA-512 integrity. Versions already in the App's approved lock
-//   stay usable (`package.unresolvable`).
-// - A second React, UI kit or SDK: the platform's React and React DOM
-//   meet every dependency and peer on them, or the graph is refused; a
-//   package in the platform's own scope (`@grasp-os/`) is someone else's
-//   on the registry, and refused (`package.peer_conflict`).
-// - A graph too deep, too wide or too heavy: depth and package count are
-//   checked as it grows, tarball bytes as they are fetched and unpacked
-//   bytes as the builder reports them (`package.quota`).
-// - A package that needs install scripts, native code, links, files
-//   outside itself or bundled packages, or whose tarball says other
-//   dependencies than the registry's metadata: refused, every reason
-//   listed (`package.refused`).
-// - Registry credentials or a package manager reaching an agent: there is
-//   no shell here, no credentials, and the agent gets only this function's
-//   result.
+// - A brand-new release, perhaps a compromised one: a version is resolved
+//   to only once it has been published for three days, and only with a
+//   SHA-512 integrity, which every later fetch is checked against.
+// - Someone else's package in the platform's name: the SDK and UI kit are
+//   never npm packages, so one in the `@grasp-os/` scope is refused.
+// - Known malware: refused before anything is proposed, audited. Every
+//   other finding (a lookalike name, an advisory) is shown to the builder.
 
-/**
- * Most metadata requests to connect at once. A package's metadata can be
- * tens of MiB, read whole and parsed in connect's isolate before it is cut
- * down, so a resolve asks for two at a time: six at once could take more
- * than the isolate's 128 MB.
- */
+/** Most metadata reads at once: a package's metadata can be tens of MiB in connect's isolate. */
 const metadataConcurrency = 2;
 
-/** Most bytes of tarballs handed to the builder in one call. */
-const inspectBatchBytes = 8 * 1024 * 1024;
+/** The platform's own scope, never an npm package's. */
+const platformScope = "@grasp-os/";
 
-/** Most refusals one resolve reports. */
-const maxRefusals = 50;
-
-/**
- * Refusals as they are found, each once, keeping the first
- * `maxRefusals`: never every one of a large graph's.
- */
-interface Refusals {
-  add: (refusal: string) => void;
-  readonly kept: ReadonlySet<string>;
-  /** How many were found, kept or not. */
-  total: () => number;
-}
-
-const refusalCollector = (): Refusals => {
-  const kept = new Set<string>();
-  let total = 0;
-  return {
-    add: (refusal) => {
-      total += 1;
-      if (kept.size < maxRefusals) {
-        kept.add(refusal);
-      }
-    },
-    kept,
-    total: () => total,
-  };
-};
-
-/** A package resolved into the graph, while the graph is being built. */
-interface Node {
-  name: string;
-  version: string;
-  integrity: string;
-  publishedAt: string;
-  meta: NpmVersion;
-  depth: number;
-  dependencies: Map<string, string>;
-  peers: Map<string, LockedPackage["peers"][string]>;
-}
-
-/** One dependency or peer still to resolve, from the package that asks. */
+/** One edge to resolve: a package by range, for a package of the graph or the source. */
 interface Edge {
   name: string;
   range: string;
-  depth: number;
-  /** The package that asks; undefined for the App's own package.json. */
-  from: Node | undefined;
-  kind: "dependency" | "peer";
+  from: LockedPackage | undefined;
 }
 
-/** Runs `tasks` at most `limit` at a time, in order. */
-const limited = async <T>(
-  items: readonly string[],
-  limit: number,
-  task: (item: string) => Promise<T>
-): Promise<void> => {
-  const queue = [...items];
-  const worker = async (): Promise<void> => {
-    for (let item = queue.shift(); item !== undefined; item = queue.shift()) {
-      // One at a time per worker: the limit is the number of workers.
-      // oxlint-disable-next-line no-await-in-loop
-      await task(item);
-    }
-  };
-  await Promise.all(Array.from({ length: limit }, worker));
-};
-
-/** The range a dependency is asked by, or refused if it isn't one. */
-const registryRange = (name: string, range: string, from?: Node): string => {
-  if (validRange(range) === null) {
+/** The range an edge asks for, or refused if it isn't one. */
+const registryRange = (edge: Edge): Edge => {
+  if (validRange(edge.range) === null || edge.name.startsWith(platformScope)) {
     throw packageErrors.create("package.unsupported_source", {
-      package: from ? packageKey(from) : "package.json",
-      dependency: name,
-      spec: range.slice(0, 128),
+      package: edge.from ? packageKey(edge.from) : "the source",
+      dependency: edge.name,
+      spec: edge.range.slice(0, 128),
     });
   }
-  return range;
+  return edge;
 };
 
-/** A dependency's ranges without those npm leaves out as optional. */
-const requiredDependencies = (meta: {
-  dependencies: Record<string, string>;
-  optionalDependencies: Record<string, string>;
-}): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(meta.dependencies).filter(
-      ([name]) => !Object.hasOwn(meta.optionalDependencies, name)
-    )
-  );
-
-/** Why a version can't be resolved to newly, or undefined if it can. */
-const immature = (version: NpmVersion, now: number): string | undefined => {
-  if (version.integrity === null) {
-    return "has no SHA-512 integrity";
-  }
-  if (version.publishedAt === null) {
-    return "has no publication time";
-  }
-  return Date.parse(version.publishedAt) > now - packageMaturityMs
-    ? "was published less than three days ago"
-    : undefined;
-};
-
-/** What the registry says about a version, to refuse it for. */
-const metadataRefusals = (version: NpmVersion): string[] => [
-  ...(version.installScripts.length > 0
-    ? [`it has install scripts: ${version.installScripts.join(", ")}`]
-    : []),
-  ...(version.gypfile ? ["it builds native code (binding.gyp)"] : []),
-  ...(version.os.length > 0 || version.cpu.length > 0
-    ? ["it runs only on some operating systems or processors"]
-    : []),
-  ...(version.bundlesDependencies
-    ? ["it bundles packages the graph doesn't name"]
-    : []),
-];
+/** The edges `version` brings: its dependencies and required peers, as npm 7 installs them. */
+const edgesOf = (version: NpmVersion, from: LockedPackage): Edge[] =>
+  [
+    ...Object.entries(version.dependencies).filter(
+      ([name]) => !Object.hasOwn(version.optionalDependencies, name)
+    ),
+    ...Object.entries(version.peerDependencies).filter(
+      ([name]) => !version.optionalPeers.includes(name)
+    ),
+  ].map(([name, range]) => registryRange({ name, range, from }));
 
 /**
- * What a request's approver is shown about `packages` (GRA-699): each
- * named like a popular package (lookalikes.ts), and each advisory the
- * registry knows, through connect, that affects its exact version, one
- * whose range can't be read included. Gravest first, at most
- * `dependencyMaxFindings`. Fails as connect does when the advisories
- * can't be read: never none for a graph whose advisories weren't checked.
- */
-const findingsOf = async (
-  env: Env,
-  packages: readonly DependencyPackageRef[]
-): Promise<{
-  findings: DependencyFinding[];
-  total: number;
-  malware: MalwareFound[];
-}> => {
-  // Two sources, asked at once: the registry's advisories (CWE-506 marks
-  // malware there), and OSV.dev's malware reports (GRA-749), which carry
-  // GitHub's malware advisories and the OpenSSF malicious-packages data
-  // the registry's answer never does. Either failing fails the resolve.
-  const [affecting, reported] = await Promise.all([
-    advisoriesAffecting(env, packages),
-    osvMalwareIn(env, packages),
-  ]);
-  const security = affecting.map(
-    ({ advisory, package: ref }): DependencyFinding => ({
-      kind: "security",
-      package: ref,
-      severity: advisory.severity,
-      id: advisory.id,
-      summary: advisory.title,
-    })
-  );
-  const all = [...lookalikeFindings(packages), ...security];
-  return {
-    findings: all
-      .toSorted(
-        (a, b) => findingGravity[b.severity] - findingGravity[a.severity]
-      )
-      .slice(0, dependencyMaxFindings),
-    total: all.length,
-    malware: [...malwareAdvised(affecting), ...reported],
-  };
-};
-
-/** One resolve's state: the graph so far, and what it read. */
-class Resolution {
-  readonly nodes = new Map<string, Node>();
-  /** Each of package.json's dependencies the graph resolved, by name. */
-  readonly direct = new Map<string, string>();
-  /**
-   * The versions of each package the level being resolved may resolve to:
-   * those that meet a range one of its edges asks, by the ranges they were
-   * read for. Let go of once the level is resolved (`forgetLevel`), so a
-   * resolve never holds more than one level's.
-   */
-  readonly #versions = new Map<
-    string,
-    { ranges: ReadonlySet<string>; versions: Promise<NpmVersion[]> }
-  >();
-  readonly #env: Env;
-  readonly #limits: PackageLimits;
-  readonly #previous: GraspLock | undefined;
-  readonly #now = Date.now();
-
-  constructor(
-    env: Env,
-    limits: PackageLimits,
-    previous: GraspLock | undefined
-  ) {
-    this.#env = env;
-    this.#limits = limits;
-    this.#previous = previous;
-  }
-
-  /**
-   * The versions of `name` that meet any of `ranges`, from connect: the
-   * rest of its metadata is let go as soon as it is read.
-   */
-  async #meetingAny(
-    name: string,
-    ranges: ReadonlySet<string>
-  ): Promise<NpmVersion[]> {
-    const { versions } = await whenFree(
-      async () => await this.#env.CONNECT.npmMetadata(name)
-    );
-    return versions.filter((version) =>
-      [...ranges].some((range) => satisfies(version.version, range))
-    );
-  }
-
-  /**
-   * Asks connect for `name`'s metadata ahead of the level that needs it,
-   * keeping the versions that meet `ranges`. A failure is kept for the
-   * edge that needs the package to report, in order.
-   */
-  async prefetch(name: string, ranges: ReadonlySet<string>): Promise<void> {
-    const versions = this.#meetingAny(name, ranges);
-    this.#versions.set(name, { ranges, versions });
-    try {
-      await versions;
-    } catch {
-      // Whichever edge needs it says why, in order.
-    }
-  }
-
-  /** The versions of `name` that meet `range`: read ahead, or asked now. */
-  async #meeting(name: string, range: string): Promise<NpmVersion[]> {
-    const ahead = this.#versions.get(name);
-    const versions =
-      ahead?.ranges.has(range) === true
-        ? await ahead.versions
-        : await this.#meetingAny(name, new Set([range]));
-    return versions.filter((version) => satisfies(version.version, range));
-  }
-
-  /** Lets go of the versions read for the level just resolved. */
-  forgetLevel(): void {
-    this.#versions.clear();
-  }
-
-  /** The highest version of `name` in the graph that meets `range`. */
-  #inGraph(name: string, range: string): Node | undefined {
-    return [...this.nodes.values()]
-      .filter((node) => node.name === name && satisfies(node.version, range))
-      .toSorted((a, b) => rcompare(a.version, b.version))[0];
-  }
-
-  /**
-   * The version to resolve `name` to: the App's approved lock's, if it
-   * has one that meets the range; otherwise the highest that meets it and
-   * is mature.
-   */
-  async #choose(
-    name: string,
-    range: string
-  ): Promise<{ version: NpmVersion; integrity: string; publishedAt: string }> {
-    const versions = await this.#meeting(name, range);
-    const meeting = versions.toSorted((a, b) => rcompare(a.version, b.version));
-    const [locked] = Object.values(this.#previous?.packages ?? {})
-      .filter((entry) => entry.name === name && satisfies(entry.version, range))
-      .toSorted((a, b) => rcompare(a.version, b.version));
-    const kept = meeting.find(
-      (version) =>
-        version.version === locked?.version &&
-        version.integrity === locked.integrity
-    );
-    if (kept && locked) {
-      return {
-        version: kept,
-        integrity: locked.integrity,
-        publishedAt: kept.publishedAt ?? locked.publishedAt,
-      };
-    }
-    for (const version of meeting) {
-      if (
-        immature(version, this.#now) === undefined &&
-        version.integrity !== null &&
-        version.publishedAt !== null
-      ) {
-        return {
-          version,
-          integrity: version.integrity,
-          publishedAt: version.publishedAt,
-        };
-      }
-    }
-    const [newest] = meeting;
-    throw packageErrors.create("package.unresolvable", {
-      package: name,
-      range: range.slice(0, 128),
-      reason:
-        newest === undefined
-          ? "no version meets the range"
-          : `${packageKey({ name, version: newest.version })} ${immature(newest, this.#now) ?? ""}`,
-    });
-  }
-
-  /** Adds `version` of `name` to the graph, with the edges it brings. */
-  #add(
-    name: string,
-    chosen: { version: NpmVersion; integrity: string; publishedAt: string },
-    depth: number
-  ): {
-    node: Node;
-    edges: Edge[];
-  } {
-    const { version } = chosen;
-    if (this.nodes.size >= this.#limits.graphPackages) {
-      throw packageErrors.create("package.quota", {
-        quota: "graphPackages",
-        limit: this.#limits.graphPackages,
-      });
-    }
-    const node: Node = {
-      name,
-      version: version.version,
-      integrity: chosen.integrity,
-      publishedAt: chosen.publishedAt,
-      meta: version,
-      depth,
-      dependencies: new Map(),
-      peers: new Map(),
-    };
-    this.nodes.set(packageKey(node), node);
-    const required = requiredDependencies(version);
-    const edges: Edge[] = [
-      ...Object.entries(required).map(([dependency, range]) => ({
-        name: dependency,
-        range,
-        depth: depth + 1,
-        from: node,
-        kind: "dependency" as const,
-      })),
-      ...Object.entries(version.peerDependencies).map(([peer, range]) => ({
-        name: peer,
-        range,
-        depth,
-        from: node,
-        kind: "peer" as const,
-      })),
-    ];
-    return { node, edges };
-  }
-
-  /**
-   * Resolves one edge: to the platform's own package, to a version
-   * already in the graph, or to a new one. Returns the edges a new
-   * package brings.
-   */
-  async resolve(edge: Edge): Promise<Edge[]> {
-    const { name, from, kind } = edge;
-    const asking = from ? packageKey(from) : "package.json";
-    if (name.startsWith(platformScope)) {
-      throw packageErrors.create("package.peer_conflict", {
-        package: asking,
-        peer: name,
-        reason: "the platform's own scope is never an npm package",
-      });
-    }
-    const range = registryRange(name, edge.range, from);
-    const optional =
-      kind === "peer" && (from?.meta.optionalPeers.includes(name) ?? false);
-    const platform = Object.hasOwn(platformPeers, name)
-      ? platformPeers[name]
-      : undefined;
-    if (platform !== undefined) {
-      if (!satisfies(platform, range)) {
-        throw packageErrors.create("package.peer_conflict", {
-          package: asking,
-          peer: name,
-          range: range.slice(0, 128),
-          platform,
-        });
-      }
-      this.#record(edge, platform, "platform");
-      return [];
-    }
-    if (optional) {
-      // An optional peer is met only by what the graph has anyway
-      // (`completeOptionalPeers`), never added for it.
-      return [];
-    }
-    const existing = this.#inGraph(name, range);
-    if (existing) {
-      this.#record(edge, existing.version, "graph");
-      return [];
-    }
-    if (kind === "peer") {
-      // A peer is shared with whoever else uses the package, as npm
-      // resolves it: a version the graph has that doesn't meet the range
-      // is a conflict (npm's ERESOLVE), never a second copy for the peer.
-      const other = [...this.nodes.values()].find((node) => node.name === name);
-      if (other) {
-        throw packageErrors.create("package.peer_conflict", {
-          package: asking,
-          peer: name,
-          range: range.slice(0, 128),
-          graph: other.version,
-        });
-      }
-    }
-    if (edge.depth > this.#limits.graphDepth) {
-      throw packageErrors.create("package.quota", {
-        quota: "graphDepth",
-        limit: this.#limits.graphDepth,
-      });
-    }
-    const chosen = await this.#choose(name, range);
-    // Another edge of this level may have added a version that meets it.
-    const raced = this.#inGraph(name, range);
-    if (raced) {
-      this.#record(edge, raced.version, "graph");
-      return [];
-    }
-    const { node, edges } = this.#add(name, chosen, edge.depth);
-    this.#record(edge, node.version, "graph");
-    return edges;
-  }
-
-  #record(
-    { name, range, from, kind }: Edge,
-    version: string,
-    by: "platform" | "graph"
-  ): void {
-    if (from === undefined) {
-      if (by === "graph") {
-        this.direct.set(name, version);
-      }
-      return;
-    }
-    if (kind === "dependency") {
-      from.dependencies.set(name, version);
-    } else {
-      from.peers.set(name, { range, resolved: version, by });
-    }
-  }
-
-  /**
-   * Whether resolving `edge` reads its package's metadata: not for the
-   * platform's packages, an optional peer (never added), a range the
-   * graph already meets, a range that isn't one, or past the depth limit,
-   * so no lookup is made for what is skipped or refused anyway.
-   */
-  needsMetadata({ name, range, from, kind, depth }: Edge): boolean {
-    if (
-      Object.hasOwn(platformPeers, name) ||
-      name.startsWith(platformScope) ||
-      validRange(range) === null ||
-      depth > this.#limits.graphDepth
-    ) {
-      return false;
-    }
-    if (kind === "peer" && (from?.meta.optionalPeers.includes(name) ?? false)) {
-      return false;
-    }
-    return this.#inGraph(name, range) === undefined;
-  }
-
-  /** How many more packages the graph may take. */
-  room(): number {
-    return Math.max(this.#limits.graphPackages - this.nodes.size, 0);
-  }
-
-  /** Optional peers the graph happens to meet; the rest left unmet. */
-  completeOptionalPeers(): void {
-    for (const node of this.nodes.values()) {
-      for (const [peer, range] of Object.entries(node.meta.peerDependencies)) {
-        if (!node.peers.has(peer)) {
-          const met = this.#inGraph(peer, range);
-          node.peers.set(peer, {
-            range,
-            resolved: met?.version ?? null,
-            by: met ? "graph" : null,
-          });
-        }
-      }
-    }
-  }
-}
-
-/**
- * Resolves the App's direct dependencies breadth first, one level at a
- * time, in name order, so the same package.json and registry resolve to
- * the same graph.
+ * The exact graph `requested` resolves to: level by level, each edge to a
+ * version already in the graph that meets it, else to the highest mature
+ * version with an integrity.
  */
 const resolveGraph = async (
-  resolution: Resolution,
-  dependencies: Record<string, string>
-): Promise<void> => {
-  let level: Edge[] = Object.entries(dependencies)
-    .toSorted(([a], [b]) => (a < b ? -1 : 1))
-    .map(([name, range]) => ({
-      name,
-      range,
-      depth: 1,
-      from: undefined,
-      kind: "dependency" as const,
-    }));
-  while (level.length > 0) {
-    // Every package of the level is asked of connect before it is needed.
-    // Only what is resolved, and no more than the graph has room for:
-    // past that the package quota refuses before any more lookups.
-    const wanted = new Map<string, Set<string>>();
-    for (const edge of level) {
-      if (resolution.needsMetadata(edge)) {
-        const ranges = wanted.get(edge.name) ?? new Set<string>();
-        ranges.add(edge.range);
-        wanted.set(edge.name, ranges);
-      }
-    }
-    const names = [...wanted.keys()].slice(0, resolution.room());
-    // oxlint-disable-next-line no-await-in-loop
-    await limited(names, metadataConcurrency, async (name) => {
-      await resolution.prefetch(name, wanted.get(name) ?? new Set());
-    });
-    const next: Edge[] = [];
-    for (const edge of level) {
-      // In order: which version an edge gets can depend on the ones before.
-      // oxlint-disable-next-line no-await-in-loop
-      next.push(...(await resolution.resolve(edge)));
-    }
-    resolution.forgetLevel();
-    level = next.toSorted((a, b) =>
-      `${a.from ? packageKey(a.from) : ""} ${a.name}` <
-      `${b.from ? packageKey(b.from) : ""} ${b.name}`
-        ? -1
-        : 1
+  env: Env,
+  requested: Record<string, string>,
+  entries: string[]
+): Promise<GraspLock> => {
+  const mature = Date.now() - packageMaturityMs;
+  const metadata = new Map<string, Promise<NpmVersion[]>>();
+  const readVersions = async (name: string): Promise<NpmVersion[]> => {
+    const { versions } = await whenFree(
+      async () => await env.CONNECT.npmMetadata(name)
     );
-  }
-  resolution.completeOptionalPeers();
-};
-
-/** The graph a person approves, from the lock: what its hash names. */
-export const graphOfLock = (lock: GraspLock): DependencyGraph =>
-  lockGraph(lock);
-
-/** The subject's approved lock last approved, if any: what it keeps. */
-const previousLock = async (
-  env: Env,
-  subject: DependencySubject
-): Promise<GraspLock | undefined> => {
-  const row = await drizzle(env.DB)
-    .select({ lock: dependencyLocks.lock })
-    .from(dependencyRequests)
-    .innerJoin(
-      dependencyLocks,
-      and(
-        eq(dependencyLocks.subjectType, dependencyRequests.subjectType),
-        eq(dependencyLocks.subjectId, dependencyRequests.subjectId),
-        eq(dependencyLocks.graphHash, dependencyRequests.graphHash)
+    return versions;
+  };
+  const versionsOf = async (name: string): Promise<NpmVersion[]> => {
+    const read = metadata.get(name) ?? readVersions(name);
+    metadata.set(name, read);
+    return await read;
+  };
+  const direct: Record<string, string> = {};
+  const packages: Record<string, LockedPackage> = {};
+  /** The highest mature version of `name` with an integrity that meets `range`. */
+  const newest = (
+    versions: readonly NpmVersion[],
+    name: string,
+    range: string
+  ): LockedPackage & { edges: NpmVersion } => {
+    const [chosen] = versions
+      .filter(
+        (candidate) =>
+          candidate.integrity !== null &&
+          candidate.publishedAt !== null &&
+          Date.parse(candidate.publishedAt) <= mature &&
+          satisfies(candidate.version, range)
       )
-    )
-    .where(
-      and(
-        ofSubject(dependencyRequests, subject),
-        eq(dependencyRequests.status, "approved")
-      )
-    )
-    .orderBy(desc(dependencyRequests.decidedAt))
-    .limit(1)
-    .get();
-  return row ? graspLockSchema.parse(JSON.parse(row.lock)) : undefined;
-};
-
-/** The ranges two manifests state, as one comparable text. */
-const statedRanges = (meta: {
-  dependencies: Record<string, string>;
-  optionalDependencies: Record<string, string>;
-  peerDependencies: Record<string, string>;
-  optionalPeers: readonly string[];
-}): string =>
-  canonicalJson({
-    dependencies: requiredDependencies(meta),
-    optionalDependencies: meta.optionalDependencies,
-    peerDependencies: meta.peerDependencies,
-    // Which peers may be left out: a peer the registry calls optional
-    // that the tarball requires would be resolved as one it doesn't.
-    optionalPeers: meta.optionalPeers.toSorted(),
-  });
-
-/** What the builder answered, checked as any input is. */
-const inspectionsSchema = z.array(packageInspectionSchema);
-
-/**
- * Fetches every package's tarball (checked against its integrity) and
- * has the builder unpack and read them, in batches, counting bytes
- * against the graph's limits. Returns every reason a package is refused.
- */
-const inspectGraph = async (
-  env: Env,
-  nodes: readonly Node[],
-  limits: PackageLimits,
-  refusals: Refusals,
-  builder: PackageBuilderRun
-): Promise<void> => {
-  let archiveBytes = 0;
-  let extractedBytes = 0;
-  const pending = [...nodes];
-  while (pending.length > 0) {
-    const batch: PackageTarball[] = [];
-    let batchBytes = 0;
-    while (pending.length > 0 && batchBytes < inspectBatchBytes) {
-      const node = pending.shift();
-      if (node === undefined) {
-        break;
-      }
-      const request = {
-        name: node.name,
-        version: node.version,
-        integrity: node.integrity,
-      };
-      // In order: each tarball's size decides whether the batch is full.
-      // oxlint-disable-next-line no-await-in-loop
-      const tarball = await verifiedTarball(env, request);
-      // Each tarball on its own, then the graph's together.
-      if (tarball.byteLength > limits.archiveBytes) {
-        throw packageErrors.create("package.quota", {
-          quota: "archiveBytes",
-          limit: limits.archiveBytes,
-        });
-      }
-      archiveBytes += tarball.byteLength;
-      batchBytes += tarball.byteLength;
-      if (archiveBytes > limits.graphArchiveBytes) {
-        throw packageErrors.create("package.quota", {
-          quota: "graphArchiveBytes",
-          limit: limits.graphArchiveBytes,
-        });
-      }
-      batch.push({ key: packageKey(node), ...request, tarball });
-    }
-    let answer: unknown;
-    try {
-      // oxlint-disable-next-line no-await-in-loop
-      answer = await builder.inspect(limits, batch);
-    } catch (error) {
-      throw builderFailure(
-        error,
-        "unpacking the packages took more than the builder may"
-      );
-    }
-    const inspected: PackageInspection[] = inspectionsSchema.parse(answer);
-    const asked = batch.map(({ key }) => key).toSorted();
-    const answered = inspected.map(({ key }) => key).toSorted();
-    if (canonicalJson(asked) !== canonicalJson(answered)) {
-      throw new Error(
-        "The package builder didn't inspect the packages it was handed"
-      );
-    }
-    for (const inspection of inspected) {
-      // The builder's count of what it unpacked: its code is Grasp's and
-      // the count is gzip's output as it read it, so a package can't
-      // understate it; the builder's own per-package limit bounds it too.
-      extractedBytes += inspection.bytes;
-      const node = nodes.find((each) => packageKey(each) === inspection.key);
-      const reasons = [...inspection.refusals];
-      if (
-        node &&
-        inspection.manifest &&
-        statedRanges(inspection.manifest) !== statedRanges(node.meta)
-      ) {
-        reasons.push(
-          "its package.json states other dependencies than the registry's metadata"
-        );
-      }
-      for (const reason of reasons) {
-        refusals.add(`${inspection.key}: ${reason}`);
-      }
-    }
-    if (extractedBytes > limits.graphExtractedBytes) {
-      throw packageErrors.create("package.quota", {
-        quota: "graphExtractedBytes",
-        limit: limits.graphExtractedBytes,
+      .toSorted((a, b) => rcompare(a.version, b.version));
+    if (
+      chosen === undefined ||
+      chosen.integrity === null ||
+      chosen.publishedAt === null
+    ) {
+      throw packageErrors.create("package.unresolvable", {
+        package: name,
+        range: range.slice(0, 128),
       });
     }
+    return {
+      name,
+      version: chosen.version,
+      integrity: chosen.integrity,
+      license: chosen.license,
+      publishedAt: chosen.publishedAt,
+      dependencies: {},
+      edges: chosen,
+    };
+  };
+  let level = Object.entries(requested).map(([name, range]) =>
+    registryRange({ name, range, from: undefined })
+  );
+  while (level.length > 0) {
+    const names = [...new Set(level.map(({ name }) => name))];
+    // Read ahead, a few at a time.
+    for (let at = 0; at < names.length; at += metadataConcurrency) {
+      // oxlint-disable-next-line no-await-in-loop -- bounded reads
+      await Promise.all(
+        names.slice(at, at + metadataConcurrency).map(versionsOf)
+      );
+    }
+    const next: Edge[] = [];
+    for (const { name, range, from } of level) {
+      const [inGraph] = Object.values(packages)
+        .filter(
+          (entry) => entry.name === name && satisfies(entry.version, range)
+        )
+        .toSorted((a, b) => rcompare(a.version, b.version));
+      let resolved = inGraph;
+      if (resolved === undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- read ahead above
+        const { edges, ...entry } = newest(await versionsOf(name), name, range);
+        packages[packageKey(entry)] = entry;
+        if (Object.keys(packages).length > dependencyMaxPackages) {
+          throw packageErrors.create("package.quota", {
+            limit: dependencyMaxPackages,
+          });
+        }
+        next.push(...edgesOf(edges, entry));
+        resolved = entry;
+      }
+      const { version } = resolved;
+      if (from === undefined) {
+        direct[name] = version;
+      } else {
+        from.dependencies[name] = version;
+      }
+    }
+    level = next;
   }
+  return {
+    lockfileVersion: 2,
+    registry: npmRegistryOrigin,
+    requested,
+    direct,
+    entries,
+    packages,
+  };
 };
 
-/** The lock for a resolved graph. */
-const lockOf = (
-  dependencies: Record<string, string>,
-  direct: Map<string, string>,
-  nodes: readonly Node[],
-  targets: GraspLock["targets"]
-): GraspLock => ({
-  lockfileVersion: 1,
-  registry: npmRegistryOrigin,
-  requested: Object.fromEntries(
-    Object.entries(dependencies).toSorted(([a], [b]) => (a < b ? -1 : 1))
-  ),
-  direct: Object.fromEntries(
-    [...direct].toSorted(([a], [b]) => (a < b ? -1 : 1))
-  ),
-  platformPeers: { ...platformPeers },
-  targets,
-  packages: Object.fromEntries(
-    nodes
-      .toSorted((a, b) => (packageKey(a) < packageKey(b) ? -1 : 1))
-      .map((node) => [
-        packageKey(node),
-        {
-          name: node.name,
-          version: node.version,
-          integrity: node.integrity,
-          license: node.meta.license,
-          publishedAt: node.publishedAt,
-          dependencies: Object.fromEntries(
-            [...node.dependencies].toSorted(([a], [b]) => (a < b ? -1 : 1))
-          ),
-          peers: Object.fromEntries(
-            [...node.peers].toSorted(([a], [b]) => (a < b ? -1 : 1))
-          ),
-        },
-      ])
-  ),
-});
-
-/** What a resolve gives back: the request it proposed, and its lock. */
-export interface Resolved {
-  request: DependencyRequest;
-  lock: GraspLock;
-}
-
 /**
- * Resolves what an App's or a workflow's package.json asks for
- * (`intent`) into an exact graph and lock, checks every package's bytes
- * without running them, and proposes the graph for a person's approval.
- * For one of its builders, or the chat's agent acting for one; never
- * Grasp staff. A workflow's packages are for its compute modules only
- * (`computation`): the intent refuses any other target before anything
- * is fetched.
+ * Resolves what an App's or a workflow's source asks for (`input`) into
+ * an exact lock, scans it, and proposes it for a builder's approval, for
+ * one of its builders or the chat's agent acting for one; never Grasp
+ * staff.
  */
 export const resolveDependencies = async (
   env: Env,
   by: Acting,
   input: unknown,
-  /**
-   * Admits the proposal, called once the graph is fetched and checked,
-   * right before it is stored: throws to refuse it.
-   */
+  /** Admits the proposal right before it is stored: throws to refuse it. */
   admit?: () => Promise<void>
-): Promise<Resolved> => {
-  // The package builder unpacks hostile tarballs: on Cloudflare in a
-  // Dynamic Worker whose CPU the runtime bounds, on-prem on the sandbox
-  // host (builder.ts). Where neither bounds it, nothing resolves, refused
-  // before any tarball is fetched.
-  const builderOf = packageBuilder(env);
+): Promise<DependencyRequest> => {
   const intent = dependencyErrors.parse(
     "dependency.invalid",
     dependencyIntentSchema,
     input
   );
-  const asked = subjectOfRef(intent);
-  const builder = builderOf(`${asked.type}:${asked.id}`);
-  if (by.staff) {
-    throw dependencyErrors.create("dependency.forbidden");
-  }
-  await builtSubject(env, by, asked, true);
-  const limits = packageLimitsOf(env.PACKAGE_LIMITS);
-  for (const [name, range] of Object.entries(intent.dependencies)) {
-    registryRange(name, range);
-  }
-  const entries = intent.entries ?? Object.keys(intent.dependencies).toSorted();
-  const unknown = entries.filter(
-    (entry) => !Object.hasOwn(intent.dependencies, entryPackage(entry))
+  const subject = subjectOfRef(intent);
+  await builtSubject(env, by, subject, true);
+  // A request adds to what is approved, and takes out only what it names:
+  // the lock it proposes covers both.
+  const approved = await latestApprovedLock(env, subject);
+  const removed = [...new Set(intent.remove)].toSorted();
+  const kept = (name: string) => !removed.includes(name);
+  const asked = Object.fromEntries(
+    intent.dependencies.map(({ name, range }) => [name, range])
   );
-  if (unknown.length > 0) {
-    throw dependencyErrors.create("dependency.invalid", {
-      issues: unknown.map((entry) => `entries: ${entry} isn't a dependency`),
-    });
+  const issues = [
+    ...removed
+      .filter((name) => !Object.hasOwn(approved?.requested ?? {}, name))
+      .map((name) => `remove: ${name} isn't an approved package`),
+    ...(intent.entries ?? [])
+      .filter((entry) => !Object.hasOwn(asked, entryPackage(entry)))
+      .map((entry) => `entries: ${entry} isn't a dependency`),
+  ];
+  if (issues.length > 0) {
+    throw dependencyErrors.create("dependency.invalid", { issues });
   }
-  const resolution = new Resolution(
-    env,
-    limits,
-    await previousLock(env, asked)
-  );
-  await resolveGraph(resolution, intent.dependencies);
-  const nodes = [...resolution.nodes.values()];
-  if (nodes.length === 0) {
-    throw dependencyErrors.create("dependency.invalid", {
-      issues: ["dependencies: the platform provides every one of them"],
-    });
+  const requested = {
+    ...Object.fromEntries(
+      Object.entries(approved?.requested ?? {}).filter(([name]) => kept(name))
+    ),
+    ...asked,
+  };
+  const entries = [
+    ...(approved?.entries ?? []).filter((entry) => kept(entryPackage(entry))),
+    ...(intent.entries ?? Object.keys(asked)),
+  ].toSorted();
+  const lock = await resolveGraph(env, requested, [...new Set(entries)]);
+  const refs = Object.values(lock.packages);
+  // A scan that can't be read fails the resolve: never proposed as one
+  // without findings.
+  // Nothing left to scan once every package is removed.
+  const { malware, advisories } =
+    refs.length === 0
+      ? { malware: [], advisories: [] }
+      : await scanPackages(env, refs);
+  const [first, ...rest] = malware;
+  if (first !== undefined) {
+    await refuseMalware(
+      env,
+      by.actor ?? actorOf(by),
+      subject,
+      [first, ...rest],
+      "resolve"
+    );
   }
-  // What the approver is shown about the graph's packages (GRA-699), read
-  // before anything is fetched or refused: known malware is refused as
-  // such, and audited, before an install script or a tarball could refuse
-  // it as something else (every other finding warns). A resolution whose
-  // advisories can't be read fails, never stored as one without findings.
-  const { findings, total, malware } = await findingsOf(
-    env,
-    nodes
-      .map(({ name, version }) => ({ name, version }))
-      .toSorted((a, b) => (packageKey(a) < packageKey(b) ? -1 : 1))
-  );
-  const [firstMalware, ...moreMalware] = malware;
-  if (firstMalware !== undefined) {
-    await refuseMalware(env, by, asked, [firstMalware, ...moreMalware]);
-  }
-  const refusals = refusalCollector();
-  for (const node of nodes) {
-    for (const reason of metadataRefusals(node.meta)) {
-      refusals.add(`${packageKey(node)}: ${reason}`);
-    }
-  }
-  await inspectGraph(env, nodes, limits, refusals, builder);
-  if (refusals.total() > 0) {
-    log.info("packages.refused", {
-      [asked.type]: asked.id,
-      refusals: refusals.total(),
-    });
-    throw packageErrors.create("package.refused", {
-      refusals: [...refusals.kept],
-    });
-  }
-  const lock = lockOf(
-    intent.dependencies,
-    resolution.direct,
-    nodes,
-    Object.fromEntries(
-      intent.targets.map((target) => [
-        target,
-        { conditions: [...targetConditions[target]], entries },
-      ])
-    )
-  );
-  const graph = graphOfLock(lock);
-  // The lock is stored in the batch that stores the request: a request is
-  // never without the lock its graph names, nor a lock without a request.
-  // Admitted after the slow fetch and checks, right before it is stored.
+  const findings: DependencyFinding[] = [
+    ...lookalikeFindings(refs),
+    ...advisories.map(({ advisory, package: ref }) => ({
+      kind: "security" as const,
+      package: ref,
+      severity: advisory.severity,
+      id: advisory.id,
+      summary: advisory.title,
+    })),
+  ]
+    .toSorted((a, b) => findingGravity[b.severity] - findingGravity[a.severity])
+    .slice(0, dependencyMaxFindings);
   await admit?.();
-  const { request, lock: kept } = await proposeResolved(
+  return await propose(
     env,
     by,
-    {
-      [asked.type]: asked.id,
-      sourceRevision: intent.sourceRevision,
-      purpose: intent.purpose,
-      targets: intent.targets,
-      graph,
-      findings,
-      findingsTotal: total,
-      refused: [],
-    },
-    { lock, limits }
+    subject,
+    intent.purpose,
+    lock,
+    findings,
+    removed
   );
-  return { request, lock: kept };
 };

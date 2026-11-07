@@ -141,6 +141,13 @@ const staffSurfaces = (events: readonly AuditEvent[]): unknown[] =>
     .filter(({ action }) => action === "staff.accessed")
     .map(({ detail }) => detail.surface);
 
+/** A problem a page reports as engines write it: each frame names its module's whole address. */
+const problemOf = (address: string) => ({
+  kind: "error" as const,
+  message: `Failed to fetch dynamically imported module: ${address}`,
+  stack: `Error: boom\n    at Desk (${address}:3:9)`,
+});
+
 describe(
   "a page's modules on content-hashed addresses",
   { timeout: 180_000 },
@@ -542,13 +549,6 @@ describe(
       const { app, chatId, revision } = await deskDraft(builder);
       const frame = await framed(await builder.api.chats.preview(chatId, app));
       const published = await framed(await builder.api.pages.open(app));
-      const artifact = `/package-artifacts/${app}/${"c".repeat(64)}/${"d".repeat(64)}/index.js?token=${modulePartsOf(pageModuleOf(published)).token}`;
-      // As engines write them: each frame names its module's whole address.
-      const problemOf = (address: string) => ({
-        kind: "error" as const,
-        message: `Failed to fetch dynamically imported module: ${address}`,
-        stack: `Error: boom\n    at Desk (${address}:3:9)\n    at load (https://acme.test${artifact}:1:2)`,
-      });
       await builder.api.pages.report(
         app,
         { version: 1, path: "/" },

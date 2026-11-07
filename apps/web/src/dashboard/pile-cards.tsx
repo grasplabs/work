@@ -27,9 +27,8 @@ import { useCoreAction } from "../use-core-action.ts";
 import { PileCard } from "./pile-card.tsx";
 import type { Pile } from "./pile-card.tsx";
 
-// The cards of the dashboard's pile besides packages
-// (`dependency-requests.tsx`): a change an agent wants to make, held until
-// the person approves or rejects it, and a permission an App or agent
+// The cards of the dashboard's pile: a change an agent wants to make, held
+// until the person approves or rejects it, and a permission an App or agent
 // asked for, which an admin decides. Each answer goes to core with the
 // same calls the chat's held writes and the approvals always made, and the
 // pile is read again however it went: a failed answer may have changed

@@ -1,5 +1,4 @@
 import { isExpectedError } from "@grasp-os/shared/errors";
-import type { Role } from "@grasp-os/shared/roles";
 import { isolateBase } from "@grasp-os/shared/runtime";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -8,19 +7,13 @@ import {
   ExtractorUnavailableError,
   localExtractor,
 } from "../src/knowledge/extract.ts";
-import { resolveDependencies } from "../src/packages/resolve.ts";
 import { buildPages } from "../src/pages.ts";
-import {
-  sandboxCallIdHeader,
-  sandboxCpuHeader,
-} from "../src/sandbox-headers.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
-import { mockIdp } from "./idp.ts";
-import { failure, intentFor, named, plain, publish } from "./npm.ts";
-import { signedInApi, unique } from "./sign-in.ts";
+import { sandboxStopping } from "./sandbox-stopping.ts";
+import { unique } from "./sign-in.ts";
 
-// How the release's platform code (the App compiler, the package
-// builder) is judged when the sandbox stops it (src/platform-sandbox.ts),
+// How the release's platform code (the App compiler; the package
+// builder's in packages.test.ts) is judged when the sandbox stops it (src/platform-sandbox.ts),
 // from its threat model:
 // - A stop the load caused (the shared machine's processes killed, waits
 //   pushing it past its deadline) is kept as the input's own verdict: a
@@ -36,63 +29,6 @@ import { signedInApi, unique } from "./sign-in.ts";
 //   run, so a caller can't safely try again.
 // The sandbox host here is the test's own: it takes a session and stops
 // its call as its supervisor would, keeping the verdict for core to ask.
-
-const idp = mockIdp();
-
-/** How the test's sandbox host stops each call: a verdict, or no place. */
-type Stop = { verdict: string } | "busy";
-
-/** A sandbox host that stops every call as `stop` says. Counts its sessions. */
-const sandboxStopping = (stop: Stop) => {
-  let sessions = 0;
-  const verdicts = new Map<string, string>();
-  const host: Fetcher = {
-    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = new Request(input, init);
-      const { pathname } = new URL(request.url);
-      if (pathname.startsWith("/verdict/")) {
-        const verdict = verdicts.get(pathname.slice("/verdict/".length));
-        return await Promise.resolve(
-          Response.json(
-            verdict === undefined
-              ? { verdict: null, state: "ending" }
-              : { verdict, message: `Stopped (${verdict}).` }
-          )
-        );
-      }
-      if (pathname !== "/session") {
-        return await Promise.resolve(new Response("{}"));
-      }
-      if (stop === "busy") {
-        return await Promise.resolve(new Response("{}", { status: 429 }));
-      }
-      sessions += 1;
-      const id = request.headers.get(sandboxCallIdHeader) ?? "";
-      const { 0: client, 1: server } = new WebSocketPair();
-      server.accept();
-      // Its process stopped once the call arrived, as the supervisor would.
-      server.addEventListener(
-        "message",
-        () => {
-          verdicts.set(id, stop.verdict);
-          server.close(1011, "The process was stopped.");
-        },
-        { once: true }
-      );
-      return new Response(null, {
-        status: 101,
-        webSocket: client,
-        headers: {
-          [sandboxCpuHeader]: request.headers.get(sandboxCpuHeader) ?? "",
-        },
-      });
-    },
-    connect: () => {
-      throw new Error("Not a socket host");
-    },
-  };
-  return { host, sessions: () => sessions };
-};
 
 /** Core's builds cache, counting what it keeps. */
 const countingFiles = () => {
@@ -355,76 +291,6 @@ describe("a page the sandbox stops the compiler on", () => {
       started: false,
       kept: 0,
     });
-  });
-});
-
-/** A builder with a new App of theirs, and the package it asks for. */
-const builderAsking = async (role: Role = "builder") => {
-  const builder = await signedInApi(idp, role);
-  const { id: app } = await builder.api.apps.create({
-    name: `App ${unique()}`,
-  });
-  const name = named("dates");
-  await publish(plain(name, "1.0.0"));
-  return {
-    identity: await builder.api.whoami(),
-    intent: intentFor(app, { [name]: "^1.0.0" }),
-  };
-};
-
-describe("packages the sandbox stops the builder on", () => {
-  it("are refused when they stopped it themselves", async () => {
-    const { host } = sandboxStopping({ verdict: "memory" });
-    const { identity, intent } = await builderAsking();
-
-    const outcome = await failure(
-      resolveDependencies({ ...env, SANDBOX_HOST: host }, identity, intent)
-    );
-
-    expect(outcome.code).toBe("package.refused");
-  });
-
-  it("aren't refused when a crash cut the builder off: the sandbox was unavailable", async () => {
-    const { host } = sandboxStopping({ verdict: "crashed" });
-    const { identity, intent } = await builderAsking();
-
-    await expect(
-      resolveDependencies({ ...env, SANDBOX_HOST: host }, identity, intent)
-    ).rejects.toBeInstanceOf(SandboxUnavailableError);
-  });
-
-  it("are handed to the builder as values on Cloudflare, never read back through core", async () => {
-    // A builder in core's Loader whose isolate may not call back (its
-    // `subRequests: 0`, if Cloudflare counts calls to a function it was
-    // handed): reading through core fails as Cloudflare would fail it,
-    // and taking the values is stopped at the isolate's memory limit.
-    const builderIsolate = `import { WorkerEntrypoint } from "cloudflare:workers";
-export default class extends WorkerEntrypoint {
-  async inspect() { throw new Error("Worker exceeded memory limit."); }
-  async inspectRead() { throw new Error("Too many subrequests."); }
-}`;
-    const loader: WorkerLoader = {
-      get: () => {
-        throw new Error("The builder is never shared.");
-      },
-      load: () =>
-        env.LOADER.load({
-          ...isolateBase,
-          mainModule: "package-builder.js",
-          modules: { "package-builder.js": builderIsolate },
-        }),
-    };
-    const { identity, intent } = await builderAsking();
-
-    const outcome = await failure(
-      resolveDependencies(
-        { ...env, LOADER: loader, RUNTIME_PROFILE: "cloudflare" },
-        identity,
-        intent
-      )
-    );
-
-    expect(outcome.code).toBe("package.refused");
   });
 });
 

@@ -340,7 +340,7 @@ const frameEntry = async (page: Page): Promise<string> => {
     .parse(JSON.parse((await described.textContent()) ?? "")).entry;
 };
 
-test("a page imports no module but its build's: not another App's, a package's, a file's or one past its directory, however escaped", async ({
+test("a page imports no module but its build's: not another App's, a file's or one past its directory, however escaped", async ({
   pageOf,
 }) => {
   const page = await pageOf(builder);
@@ -361,7 +361,6 @@ test("a page imports no module but its build's: not another App's, a package's, 
     // The URL parser resolves `%2e%2e` before the policy matches it.
     dotSegments: `${directory}%2e%2e/${scope}/1/${file}${other.search}`,
     sharedKit: `${origin}/page-modules/kit/${file}`,
-    package: `${origin}/package-artifacts/${injecting}/${"c".repeat(64)}/${"d".repeat(64)}/index.js`,
     appFile: `${origin}${appFilesPath}/${"e".repeat(32)}/content`,
   };
   // Under its directory as the browser matches the path, another App's
@@ -394,7 +393,6 @@ test("a page imports no module but its build's: not another App's, a package's, 
     anotherApp: "blocked",
     dotSegments: "blocked",
     sharedKit: "blocked",
-    package: "blocked",
     appFile: "blocked",
     escapedSlash: "blocked",
     escapedBackslash: "blocked",

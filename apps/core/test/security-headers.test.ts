@@ -53,13 +53,13 @@ describe("security headers on the frontend", () => {
     }
   });
 
-  it("runs only the frontend's own script files: no inline script, eval, other origin or code of pages and packages", async () => {
+  it("runs only the frontend's own script files: no inline script, eval, other origin or code of pages", async () => {
     for (const response of await eachPage()) {
       const policy = policyOf(response);
       expect(policy.get("default-src")).toStrictEqual(["'self'"]);
       // The deployment's origin as people reach it, not core's address:
       // only the build's directory and the theme script, so nothing under
-      // /page-modules/ or /package-artifacts/.
+      // /page-modules/.
       expect(policy.get("script-src")).toStrictEqual([
         `${clientOrigin}/assets/`,
         `${clientOrigin}/theme.js`,
