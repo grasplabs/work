@@ -201,7 +201,8 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
         number: first?.number,
         revision: first?.revision,
         byAgent: first?.callId === testRunOpening.toolCallId,
-        previewIsDraft: firstVersionPreview.artifact === firstPreview.artifact,
+        previewIsDraft:
+          (await codeOf(firstVersionPreview)) === (await codeOf(firstPreview)),
       },
       // What the turn wrote over is no undo point: its two files, kept.
       afterFirst,
@@ -209,13 +210,17 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       cutIsDraft: cut?.revision === 4,
       numbers: versions.map(({ number }) => number),
       restoredFrom: versions.map(({ restoredFrom }) => restoredFrom),
-      restoredIsFirst: restoredPreview.artifact === firstPreview.artifact,
+      restoredIsFirst:
+        (await codeOf(restoredPreview)) === (await codeOf(firstPreview)),
       kept: versions.at(-1),
       draftAtNewest: draft?.revision === versions[0]?.revision,
       afterDiscard,
-      discardedKept: sevenVersionPreview.artifact === sevenPreview.artifact,
-      restoredSeven: restoredSeven.artifact === sevenPreview.artifact,
-      earlierHeld: firstPreviewAfter.artifact === firstPreview.artifact,
+      discardedKept:
+        (await codeOf(sevenVersionPreview)) === (await codeOf(sevenPreview)),
+      restoredSeven:
+        (await codeOf(restoredSeven)) === (await codeOf(sevenPreview)),
+      earlierHeld:
+        (await codeOf(firstPreviewAfter)) === (await codeOf(firstPreview)),
     }).toStrictEqual({
       first: { number: 1, revision: 3, byAgent: true, previewIsDraft: true },
       afterFirst: {
