@@ -148,7 +148,7 @@ export const Route = createFileRoute("/settings")({ component: Settings });
 
 ## npm packages
 
-A Page can use any npm package the App's builder approved. Ask for it with `env.build.resolveDependencies(app, { purpose, dependencies: [{ name: "recharts", range: "^2.15.0" }] })`: the builder approves it on a card in the chat, and from your next write on you import it by name, as anywhere else.
+A Page can use any npm package the App's builder approved. Ask for it with `env.build.resolveDependencies(app, { purpose, dependencies: [{ name: "recharts", range: "^2.15.0" }] })`: the builder approves it on a card in the chat, and from your next write on you import it by name, as anywhere else. Packages add up: what is approved stays until you take it out with `remove`, which the builder approves the same way.
 
 ```text
 import { LineChart, Line } from "recharts";

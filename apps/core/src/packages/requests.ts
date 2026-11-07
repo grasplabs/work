@@ -74,7 +74,7 @@ const notFound = () => dependencyErrors.create("dependency.not_found");
 
 /** `row` as the API returns it, with its subject's and the people's names. */
 const toRequest = async (env: Env, row: Row): Promise<DependencyRequest> => {
-  const { lock, findings } = snapshotOf(row);
+  const { lock, findings, removed } = snapshotOf(row);
   const people = [row.requestedBy, row.decidedBy].filter((id) => id !== null);
   const [name, named] = await Promise.all([
     subjectName(env, { type: row.subjectType, id: row.subjectId }),
@@ -97,6 +97,7 @@ const toRequest = async (env: Env, row: Row): Promise<DependencyRequest> => {
     graphHash: row.graphHash,
     lock,
     findings,
+    removed,
     requestedBy: person(row.requestedBy),
     requestedAt: row.requestedAt.toISOString(),
     ...(row.decidedBy !== null && row.decidedAt !== null
@@ -160,7 +161,9 @@ export const propose = async (
   subject: DependencySubject,
   purpose: string,
   lock: GraspLock,
-  findings: DependencyFinding[]
+  findings: DependencyFinding[],
+  /** The packages it takes out of the subject's approved set, by name. */
+  removed: string[]
 ): Promise<DependencyRequest> => {
   const graphHash = await graspLockHash(lock);
   const actor = by.actor ?? actorOf(by);
@@ -187,7 +190,7 @@ export const propose = async (
       graphHash,
       targets: "[]",
       purpose,
-      snapshot: JSON.stringify({ lock, findings }),
+      snapshot: JSON.stringify({ lock, findings, removed }),
       summary: {
         direct: Object.entries(lock.direct).map(([name, version]) =>
           packageKey({ name, version })

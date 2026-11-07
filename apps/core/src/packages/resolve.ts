@@ -28,7 +28,7 @@ import satisfies from "semver/functions/satisfies";
 import validRange from "semver/ranges/valid";
 
 import type { Acting } from "../auth/identity.ts";
-import { refuseMalware } from "./approvals.ts";
+import { latestApprovedLock, refuseMalware } from "./approvals.ts";
 import { lookalikeFindings } from "./lookalikes.ts";
 import { scanPackages, whenFree } from "./malware.ts";
 import { propose } from "./requests.ts";
@@ -218,23 +218,44 @@ export const resolveDependencies = async (
   );
   const subject = subjectOfRef(intent);
   await builtSubject(env, by, subject, true);
-  const requested = Object.fromEntries(
+  // A request adds to what is approved, and takes out only what it names:
+  // the lock it proposes covers both.
+  const approved = await latestApprovedLock(env, subject);
+  const removed = [...new Set(intent.remove)].toSorted();
+  const kept = (name: string) => !removed.includes(name);
+  const asked = Object.fromEntries(
     intent.dependencies.map(({ name, range }) => [name, range])
   );
-  const entries = intent.entries ?? Object.keys(requested).toSorted();
-  const unknown = entries.filter(
-    (entry) => !Object.hasOwn(requested, entryPackage(entry))
-  );
-  if (unknown.length > 0) {
-    throw dependencyErrors.create("dependency.invalid", {
-      issues: unknown.map((entry) => `entries: ${entry} isn't a dependency`),
-    });
+  const issues = [
+    ...removed
+      .filter((name) => !Object.hasOwn(approved?.requested ?? {}, name))
+      .map((name) => `remove: ${name} isn't an approved package`),
+    ...(intent.entries ?? [])
+      .filter((entry) => !Object.hasOwn(asked, entryPackage(entry)))
+      .map((entry) => `entries: ${entry} isn't a dependency`),
+  ];
+  if (issues.length > 0) {
+    throw dependencyErrors.create("dependency.invalid", { issues });
   }
+  const requested = {
+    ...Object.fromEntries(
+      Object.entries(approved?.requested ?? {}).filter(([name]) => kept(name))
+    ),
+    ...asked,
+  };
+  const entries = [
+    ...(approved?.entries ?? []).filter((entry) => kept(entryPackage(entry))),
+    ...(intent.entries ?? Object.keys(asked)),
+  ].toSorted();
   const lock = await resolveGraph(env, requested, [...new Set(entries)]);
   const refs = Object.values(lock.packages);
   // A scan that can't be read fails the resolve: never proposed as one
   // without findings.
-  const { malware, advisories } = await scanPackages(env, refs);
+  // Nothing left to scan once every package is removed.
+  const { malware, advisories } =
+    refs.length === 0
+      ? { malware: [], advisories: [] }
+      : await scanPackages(env, refs);
   const [first, ...rest] = malware;
   if (first !== undefined) {
     await refuseMalware(
@@ -258,5 +279,13 @@ export const resolveDependencies = async (
     .toSorted((a, b) => findingGravity[b.severity] - findingGravity[a.severity])
     .slice(0, dependencyMaxFindings);
   await admit?.();
-  return await propose(env, by, subject, intent.purpose, lock, findings);
+  return await propose(
+    env,
+    by,
+    subject,
+    intent.purpose,
+    lock,
+    findings,
+    removed
+  );
 };

@@ -10431,10 +10431,6 @@ msgstr "Quitar la blueprint {name}"
 msgid "Remove the index {indexName}"
 msgstr "Quitar el índice {indexName}"
 
-#: src/inbox/item-detail.tsx
-msgid "Remove the package"
-msgstr "Eliminar el paquete"
-
 #: src/apps/indexes-view.tsx
 msgid "Remove the search"
 msgstr "Quitar la búsqueda"
@@ -12444,6 +12440,10 @@ msgstr "Repetir el recorrido"
 #: src/workflows/definition-editor.tsx
 msgid "Take theirs"
 msgstr "Quedarme con la suya"
+
+#: src/chat/package-requests.tsx
+msgid "Takes out"
+msgstr "Quita"
 
 #: src/knowledge/purge.tsx
 msgid "Takes terms out of every version of the collection's documents, for good. You see what it would remove first."

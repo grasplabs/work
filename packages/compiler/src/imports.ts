@@ -402,7 +402,7 @@ export const importError = (
   return kit.imports.includes(specifier) ||
     packageModuleIn(files, specifier) !== undefined
     ? undefined
-    : `"${specifier}" is outside the kit and the App's approved packages. Pages can import the App's own files, ${packagesOf(kit)}, and the npm packages its builder approved: ask for one with env.build.resolveDependencies, and import it once it is approved.`;
+    : `"${specifier}" is outside the kit and the App's approved packages. Pages can import the App's own files, ${packagesOf(kit)}, and the npm packages its builder approved: ask for one (again, if it was removed) with env.build.resolveDependencies, and import it once it is approved.`;
 };
 
 /** What one compiled file imports, by flat module name. */

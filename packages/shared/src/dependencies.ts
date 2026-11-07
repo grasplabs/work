@@ -135,6 +135,8 @@ export interface DependencyRequest {
   /** The hash of `lock`, which a decision names (`graspLockHash`). */
   graphHash: string;
   lock: GraspLock;
+  /** The packages it takes out of the approved set, by name: the lock is without them. */
+  removed: string[];
   /** The gravest findings, at most {@link dependencyMaxFindings}. */
   findings: DependencyFinding[];
   requestedBy: { userId: string; name: string };

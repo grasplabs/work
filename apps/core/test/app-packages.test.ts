@@ -152,6 +152,71 @@ describe("an App's approved packages", () => {
     });
   });
 
+  it("add up: a second request adds its package to the App's, and both stay usable", async () => {
+    const [page, server] = [await chart(), await maths()];
+    const files = appFiles(page, server);
+    const fixture = await appWith(files, "Charts");
+    await approved(fixture, [page]);
+    const second = await approved(fixture, [server]);
+
+    const pages = await buildPages(env, files, fixture.app);
+    await seal(fixture);
+    await publishVersion(env, fixture.owner, fixture.app, 1);
+    const doubled = await calledAs(
+      fixture.owner,
+      fixture.app,
+      { name: "points.doubled", kind: "query" },
+      { n: 21 }
+    );
+
+    expect({
+      locked: Object.keys(second.lock.direct).toSorted(),
+      built: pages.ok,
+      doubled,
+    }).toMatchObject({
+      locked: [page, server].toSorted(),
+      built: true,
+      doubled: { ok: true, value: 42 },
+    });
+  });
+
+  it("leave only by a removal the builder approves, and a build still importing a removed one says so", async () => {
+    const [page, server] = [await chart(), await maths()];
+    const files = appFiles(page, server);
+    const fixture = await appWith(files, "Charts");
+    await approved(fixture, [page, server]);
+    const removal = await resolveDependencies(env, fixture.owner, {
+      app: fixture.app,
+      purpose: "The points are no longer doubled.",
+      dependencies: [],
+      remove: [server],
+    });
+    const before = await buildAppCode(env, files, fixture.app);
+    await decideDependency(env, fixture.owner, removal.id, {
+      approved: true,
+      graphHash: removal.graphHash,
+    });
+
+    const pages = await buildPages(env, files, fixture.app);
+    const code = await buildAppCode(env, files, fixture.app);
+
+    expect({
+      removed: removal.removed,
+      locked: Object.keys(removal.lock.direct),
+      builtBefore: before.ok,
+      pages: pages.ok,
+      code: code.ok,
+      said: saidOf(code).includes(server) && saidOf(code).includes("removed"),
+    }).toStrictEqual({
+      removed: [server],
+      locked: [page],
+      builtBefore: true,
+      pages: true,
+      code: false,
+      said: true,
+    });
+  });
+
   it("are nothing a page or server code imports until approved: refused at compile, saying to ask for it", async () => {
     const [page, server] = [await chart(), await maths()];
     const files = appFiles(page, server);

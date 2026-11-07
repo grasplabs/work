@@ -57,7 +57,7 @@ export const seedDependencyRequest = async ({
   });
   const count = Object.keys(packages).length;
   await execute(
-    `INSERT INTO dependency_requests (id, subject_type, subject_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation) VALUES (${quoted(id)}, 'app', ${quoted(app)}, '', ${quoted(graphHash)}, '[]', ${quoted(purpose)}, ${quoted(JSON.stringify({ lock, findings: [] }))}, ${quoted(JSON.stringify({ direct: [], findings: [] }))}, ${count}, ${count}, 0, 0, NULL, 'pending', ${quoted(requestedBy)}, ${quoted(via)}, ${Date.now()}, 0)`,
+    `INSERT INTO dependency_requests (id, subject_type, subject_id, source_revision, graph_hash, targets, purpose, snapshot, summary, direct, packages, findings, refused, previous, status, requested_by, requested_via, requested_at, policy_generation) VALUES (${quoted(id)}, 'app', ${quoted(app)}, '', ${quoted(graphHash)}, '[]', ${quoted(purpose)}, ${quoted(JSON.stringify({ lock, findings: [], removed: [] }))}, ${quoted(JSON.stringify({ direct: [], findings: [] }))}, ${count}, ${count}, 0, 0, NULL, 'pending', ${quoted(requestedBy)}, ${quoted(via)}, ${Date.now()}, 0)`,
     "core"
   );
   return { id, graphHash };

@@ -119,6 +119,7 @@ const PackageRequest = ({
     )
   );
   const count = Object.keys(request.lock.packages).length;
+  const removed = formatList(request.removed);
   return (
     <Card size="sm">
       <CardHeader>
@@ -136,6 +137,14 @@ const PackageRequest = ({
               </dt>
               <dd className="font-mono break-words">{direct}</dd>
             </div>
+            {request.removed.length === 0 ? null : (
+              <div className="flex flex-col">
+                <dt className="text-muted-foreground">
+                  <Trans>Takes out</Trans>
+                </dt>
+                <dd className="font-mono break-words">{removed}</dd>
+              </div>
+            )}
             <div className="flex flex-col">
               <dt className="text-muted-foreground">
                 <Trans>With what they bring</Trans>

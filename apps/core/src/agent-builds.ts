@@ -2005,17 +2005,21 @@ build: {
    * approves or denies on a card in this chat. You can't approve it, and
    * nothing may use the packages until they do; once approved, the App's
    * Pages and server functions import them by name from your next write.
-   * Another request for the App replaces one still waiting, so ask for
-   * every package the App needs at once. Known malware is refused;
-   * lookalike names and advisories are shown to the builder.
+   * Ask for what you need: packages add up, and what is approved stays
+   * until you take it out with \`remove\`, which the builder approves the
+   * same way. A request still waiting is replaced by your next one. Known
+   * malware is refused; lookalike names and advisories are shown to the
+   * builder.
    */
   resolveDependencies(app: string, intent: {
     /** Why the App needs them, for the builder deciding. */
     purpose: string;
-    /** Its dependencies: each name and its version range on the npm registry, one pair each. */
+    /** The packages to add: each name and its version range on the npm registry, one pair each; none when only removing. */
     dependencies: { name: string; range: string }[];
     /** What the App imports of them, each a package or one of its subpaths; each dependency's own name when left out. */
     entries?: string[];
+    /** Approved packages to take out, by name, once nothing imports them. */
+    remove?: string[];
   }): Promise<{
     id: string;
     status: "pending" | "approved" | "denied" | "revoked";

@@ -294,7 +294,6 @@ export const dependencyIntentSchema = z
           range: z.string().min(1).max(registryLimits.textLength),
         })
       )
-      .min(1)
       .max(dependencyMaxPackages)
       .refine(
         (pairs) => new Set(pairs.map(({ name }) => name)).size === pairs.length,
@@ -302,7 +301,17 @@ export const dependencyIntentSchema = z
       ),
     /** What the code imports of them; each dependency's own name unless given. */
     entries: z.array(packageEntrySchema).min(1).max(256).optional(),
+    /**
+     * Packages of the approved set to take out, by name. Everything else
+     * approved stays: a request adds to the set.
+     */
+    remove: z.array(packageNameSchema).max(dependencyMaxPackages).optional(),
   })
+  .refine(
+    ({ dependencies, remove }) =>
+      dependencies.length > 0 || (remove?.length ?? 0) > 0,
+    { message: "Ask for a package or remove one", path: ["dependencies"] }
+  )
   .refine(
     ({ app, workflow }) => (app === undefined) !== (workflow === undefined),
     { message: "Either an App or a workflow, not both", path: ["app"] }
@@ -340,7 +349,7 @@ export const graspLockSchema = z
     requested: z.record(packageNameSchema, z.string()),
     /** Each direct dependency's exact version. */
     direct: z.record(packageNameSchema, exactVersionSchema),
-    entries: z.array(packageEntrySchema).min(1).max(256),
+    entries: z.array(packageEntrySchema).max(256),
     packages: z.record(z.string(), lockedPackageSchema),
   })
   .superRefine(({ direct, packages }, context) => {

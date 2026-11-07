@@ -448,7 +448,7 @@ export const appCodeImport = (
     kind === "generated" ? undefined : packageModuleIn(files, specifier);
   return approved === undefined
     ? {
-        error: `"${specifier}" can't be imported here. ${described[kind]}, or an npm package the App's builder approved: ask for one with env.build.resolveDependencies.`,
+        error: `"${specifier}" can't be imported here. ${described[kind]}, or an npm package the App's builder approved: ask for one (again, if it was removed) with env.build.resolveDependencies.`,
       }
     : { module: approved };
 };

@@ -42,6 +42,8 @@ type Row = typeof dependencyRequests.$inferSelect;
 const snapshotSchema = z.object({
   lock: graspLockSchema,
   findings: z.array(z.custom<DependencyFinding>()),
+  /** The packages it takes out of the subject's approved set, by name. */
+  removed: z.array(z.string()),
 });
 
 export const snapshotOf = (row: Pick<Row, "snapshot">) =>
@@ -161,6 +163,18 @@ export const approvedLock = async (
   throw dependencyErrors.create(
     revoked ? "dependency.revoked" : "dependency.approval_required"
   );
+};
+
+/**
+ * The lock of `subject`'s latest approval in force, if any: what a new
+ * request adds to, or takes packages out of.
+ */
+export const latestApprovedLock = async (
+  env: Pick<Env, "DB">,
+  subject: DependencySubject
+): Promise<GraspLock | undefined> => {
+  const approved = await latest(env, subject, "approved");
+  return approved === undefined ? undefined : snapshotOf(approved).lock;
 };
 
 /** The graph of `subject`'s latest approval in force, if any. */
