@@ -5,13 +5,12 @@
  * with people who answer as people do (people.ts). It holds no copy of
  * him: every turn is a real turn of the local core, and every model call
  * of the lab's own (the people it plays, the judge) goes through core's
- * model gateway, never with a provider key or a subscription of its own.
- * Run it while `vp run dev` runs; it reaches only localhost, signed in as
+ * model gateway, never with a provider key of its own.
+ * Run it while `vp run lab:dev` runs; it reaches only localhost, signed in as
  * the stack's Grasp staff member through the fake IdP, as the seed does.
  *
- * It spends on the models the local core's gateway is set up with: the
- * commands that play or judge (practice, simulate, score, keep, bench, mine, write) are run by
- * hand, never by CI, whose tests use fakes.
+ * The commands that play or judge (practice, simulate, score, keep,
+ * bench, mine, write) are run by hand, never by CI, whose tests use fakes.
  *
  * Commands:
  *   keys                     checks the answer keys
@@ -35,6 +34,10 @@
  *   compare <run> <run>      two runs side by side, with the noise and a
  *                            verdict for each number
  *   results                  every run kept
+ *   standing                 the Stephen Score of this checkout's Stephen,
+ *                            from the runs kept of him: six parts out of
+ *                            10, the average, the lowest against the
+ *                            floor, the limits (--hidden, --api)
  *   mine                     cuts moments from the conversations a model
  *                            played, each with a second look (--check for
  *                            only the second look, --hidden)
@@ -46,6 +49,13 @@
  *                            often they agree: nine in ten at least
  *   report                   the page to read: where each bench stands, by
  *                            kind of moment, what went wrong, every run
+ *
+ * Its models run on a Claude subscription, through the lab's bridge:
+ * start the stack with `vp run lab:dev` instead of `vp run dev`
+ * (scripts/lab/dev.ts). Every command that reaches core first checks that
+ * its calls really arrive there, and stops when they don't. `--api` runs
+ * on the API instead, on a stack started with `vp run dev`: it spends
+ * money, so it is for the one check at the end of a climb.
  *
  * `--practice <id>` names a practice company; the newest by default. Keys
  * 03 and 06 are the hidden test set, read from `LAB_HIDDEN`, outside the
@@ -74,6 +84,7 @@ import {
   mine,
   report,
   runBenches,
+  showStanding,
   write,
 } from "./round.ts";
 import type { RoundArgs } from "./round.ts";
@@ -93,6 +104,7 @@ const { positionals, values } = parseArgs({
     parallel: { type: "string" },
     label: { type: "string" },
     hidden: { type: "boolean", default: false },
+    api: { type: "boolean", default: false },
     check: { type: "boolean", default: false },
     answers: { type: "string" },
     count: { type: "string" },
@@ -157,7 +169,7 @@ const checkKeys = (): void => {
 const startPractice = async (): Promise<void> => {
   const key = keyFor(rest[0]);
   const locale = interviewLocaleSchema.safeParse(values.locale).data ?? "en";
-  const core = await openCore();
+  const core = await openCore({ api: values.api });
   try {
     const made = await makePractice(core, key, locale, log);
     log(`\nThe practice company is ready: ${made.id}`);
@@ -179,7 +191,7 @@ const showCard = async (): Promise<void> => {
       "A hidden key has no role cards: nobody reads what its people know."
     );
   }
-  const core = await openCore();
+  const core = await openCore({ api: values.api });
   try {
     const links = await linksOf(core);
     const files = keepCards(practice, key, links);
@@ -202,7 +214,7 @@ const showCard = async (): Promise<void> => {
 const playRest = async (): Promise<void> => {
   const practice = practiceNamed(values.practice);
   const key = keyFor(practice.key);
-  const core = await openCore();
+  const core = await openCore({ api: values.api });
   try {
     const played = await simulate(core, practice, key, {
       only: values.only === undefined ? null : values.only.split(","),
@@ -224,7 +236,7 @@ const playRest = async (): Promise<void> => {
 const scoreAll = async (): Promise<void> => {
   const practice = practiceNamed(values.practice);
   const key = keyFor(practice.key);
-  const core = await openCore();
+  const core = await openCore({ api: values.api });
   try {
     await score(core, practice, key, { label: values.label, log });
     log(`Spent: ${spentLine()}`);
@@ -236,7 +248,7 @@ const scoreAll = async (): Promise<void> => {
 const keepAll = async (): Promise<void> => {
   const practice = practiceNamed(values.practice);
   const key = keyFor(practice.key);
-  const core = await openCore();
+  const core = await openCore({ api: values.api });
   try {
     const files = await keepTranscripts(core, practice, key);
     log(
@@ -258,6 +270,7 @@ const roundArgs = (): RoundArgs => ({
       ? null
       : values.only.split(",").map((each) => each.trim()),
   hidden: values.hidden,
+  api: values.api,
   interviewer: values.interviewer === "claire" ? "claire" : "stephen",
   practice: values.practice,
   check: values.check,
@@ -282,6 +295,9 @@ const commands: Readonly<Record<string, () => Promise<void> | void>> = {
   },
   results: () => {
     listResults(roundArgs());
+  },
+  standing: async () => {
+    await showStanding(roundArgs());
   },
   mine: async () => {
     await mine(roundArgs());
