@@ -60,8 +60,6 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@babel/parser": "catalog:",
-    "@babel/types": "catalog:",
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "@grasp-os/connect": "workspace:*",
@@ -72,6 +70,7 @@
     "@types/semver": "catalog:",
     "axios": "catalog:",
     "drizzle-kit": "catalog:",
+    "oxc-parser": "catalog:oxc",
     "react": "catalog:",
     "standardwebhooks": "catalog:",
     "vite-plus": "catalog:",

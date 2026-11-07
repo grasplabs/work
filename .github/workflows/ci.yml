@@ -134,14 +134,15 @@ jobs:
         run: node scripts/test-plan.ts
         env:
           GRASP_TEST_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
-      # Whether oxc.wasm's glue, its build or its pin changed against the
-      # base, as the merge commit's first parent: then the oxc-wasm job
-      # proves the pin (below). A full run (by hand, nightly) proves it too.
+      # Whether oxc.wasm's glue, its build, its pin or the committed
+      # oxc-parse.wasm changed against the base, as the merge commit's first
+      # parent: then the oxc-wasm job proves the pin and the committed module
+      # (below). A full run (by hand, nightly) proves them too.
       - id: oxc-wasm
         run: |
           if [ "$EVENT" != pull_request ] && [ "$EVENT" != merge_group ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-          elif ! git diff --quiet HEAD^1 HEAD -- packages/compiler/oxc-wasm .github/actions/oxc-wasm-build .github/workflows/build-oxc-wasm.yml; then
+          elif ! git diff --quiet HEAD^1 HEAD -- packages/compiler/oxc-wasm packages/sdk/src/oxc-parse.wasm .github/actions/oxc-wasm-build .github/workflows/build-oxc-wasm.yml; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
         env:

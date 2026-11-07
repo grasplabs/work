@@ -1,6 +1,5 @@
-import { generate } from "@babel/generator";
-import * as t from "@babel/types";
-
+import { print } from "./code-print.ts";
+import type { Code } from "./code-print.ts";
 import {
   accessOf,
   answersOf,
@@ -21,9 +20,9 @@ import type { SemanticKind, ValueDescriptor } from "./value-descriptor.ts";
 
 // The code an App's definition (definition.ts) generates: its config
 // (`grasp.config.ts`) and its schema (`server/schema.ts`), each built as
-// a syntax tree and printed by Babel's generator, so every name and value
-// is quoted as JavaScript quotes it. What is printed declares exactly
-// what the definition does (`definitionApp`), through the same builders.
+// a syntax tree and printed by code-print.ts, so every name and value is
+// quoted as JavaScript quotes it. What is printed declares exactly what
+// the definition does (`definitionApp`), through the same builders.
 
 /** What every generated file starts with. */
 const banner = (path: string): string =>
@@ -32,34 +31,74 @@ const banner = (path: string): string =>
 // changeField, renameField, setAccess, addIndex, addPermission).
 `;
 
-/** A property key: an identifier where it can be one, a string otherwise. */
-const keyOf = (name: string): t.Identifier | t.StringLiteral =>
-  t.isValidIdentifier(name) ? t.identifier(name) : t.stringLiteral(name);
+const identifier = (name: string): Code => ({ type: "Identifier", name });
+
+const string = (value: string): Code => ({ type: "String", value });
 
 /** `object.method(...args)`. */
-const call = (
-  object: t.Expression,
-  method: string,
-  args: t.Expression[] = []
-): t.CallExpression =>
-  t.callExpression(t.memberExpression(object, t.identifier(method)), args);
+const call = (object: Code, method: string, args: Code[] = []): Code => ({
+  type: "Call",
+  callee: { type: "Member", object, property: method },
+  arguments: args,
+});
 
-/** A JSON value as a literal. */
-const literal = (value: unknown): t.Expression => t.valueToNode(value);
+/** A number as a literal: a negative one as `-` of its size. */
+const number = (value: number): Code => {
+  const size: Code = { type: "Number", value: Math.abs(value) };
+  return value < 0 || Object.is(value, -0)
+    ? { type: "Unary", operator: "-", argument: size }
+    : size;
+};
 
-/** An object literal of `entries`. */
-const objectOf = (entries: [string, t.Expression][]): t.ObjectExpression =>
-  t.objectExpression(
-    entries.map(([key, value]) => t.objectProperty(keyOf(key), value))
-  );
+/** A JSON value as a literal, `__proto__` a computed key so it stays a field. */
+const literal = (value: unknown): Code => {
+  if (value === null) {
+    return { type: "Null" };
+  }
+  if (typeof value === "string") {
+    return string(value);
+  }
+  if (typeof value === "number") {
+    return number(value);
+  }
+  if (typeof value === "boolean") {
+    return { type: "Boolean", value };
+  }
+  if (Array.isArray(value)) {
+    return { type: "Array", elements: value.map((item) => literal(item)) };
+  }
+  if (typeof value === "object") {
+    return {
+      type: "Object",
+      properties: Object.entries(value).map(([key, item]) => ({
+        type: "Property",
+        key,
+        computed: key === "__proto__",
+        value: literal(item),
+      })),
+    };
+  }
+  throw new Error("A definition holds JSON values only.");
+};
 
-const v = t.identifier("v");
+/** An object literal of `entries`, each key a name where it can be one. */
+const objectOf = (entries: [string, Code][]): Code => ({
+  type: "Object",
+  properties: entries.map(([key, value]) => ({
+    type: "Property",
+    key,
+    computed: false,
+    value,
+  })),
+});
+
+const v = identifier("v");
 
 /** `made` with `descriptor`'s bounds. */
 const bounded = (
-  made: t.Expression,
+  made: Code,
   descriptor: { readonly min?: number; readonly max?: number }
-): t.Expression => {
+): Code => {
   let chained = made;
   if (descriptor.min !== undefined) {
     chained = call(chained, "min", [literal(descriptor.min)]);
@@ -71,10 +110,7 @@ const bounded = (
 };
 
 /** `made` with `descriptor`'s nullability and presence. */
-const presenced = (
-  made: t.Expression,
-  descriptor: ValueDescriptor
-): t.Expression => {
+const presenced = (made: Code, descriptor: ValueDescriptor): Code => {
   let chained = descriptor.nullable ? call(made, "nullable") : made;
   if (descriptor.presence === "optional") {
     chained = call(chained, "optional");
@@ -99,7 +135,7 @@ const isPlain = (
   isSemanticKind(descriptor.kind);
 
 /** The `v` call that declares `descriptor`'s kind, before its presence. */
-const kindOf = (descriptor: ValueDescriptor): t.Expression => {
+const kindOf = (descriptor: ValueDescriptor): Code => {
   if (isPlain(descriptor)) {
     return call(v, descriptor.kind);
   }
@@ -129,10 +165,10 @@ const kindOf = (descriptor: ValueDescriptor): t.Expression => {
     }
     case "id": {
       return call(v, "id", [
-        t.stringLiteral(descriptor.tableName),
+        string(descriptor.tableName),
         ...(descriptor.onDelete === undefined
           ? []
-          : [objectOf([["onDelete", t.stringLiteral(descriptor.onDelete)]])]),
+          : [objectOf([["onDelete", string(descriptor.onDelete)]])]),
       ]);
     }
     case "object": {
@@ -170,24 +206,24 @@ const kindOf = (descriptor: ValueDescriptor): t.Expression => {
 };
 
 /** The `v` expression that declares `descriptor`. */
-const validatorOf = (descriptor: ValueDescriptor): t.Expression =>
+const validatorOf = (descriptor: ValueDescriptor): Code =>
   presenced(kindOf(descriptor), descriptor);
 
 /** The `v` expression that declares `descriptor`, as text. */
 export const validatorSource = (descriptor: ValueDescriptor): string =>
-  generate(validatorOf(descriptor)).code;
+  print(validatorOf(descriptor));
 
 /** A map of fields, as `defineTable` and `v.object` take them. */
-const fieldsOf = (fields: readonly DefinedField[]): t.ObjectExpression =>
+const fieldsOf = (fields: readonly DefinedField[]): Code =>
   objectOf(fields.map((field) => [field.name, validatorOf(field.type)]));
 
-const permission = t.identifier("permission");
+const permission = identifier("permission");
 
 /** The `permission.*` call that declares `declared`. */
 const permissionOf = (
   declared: AnyPermission | BrowserPermission | WorkflowPermission
-): t.Expression => {
-  const alias = t.stringLiteral(declared.alias);
+): Code => {
+  const alias = string(declared.alias);
   switch (declared["~permission"]) {
     case "ai": {
       return call(permission, "ai", [
@@ -198,7 +234,7 @@ const permissionOf = (
       return call(permission, "connection", [
         alias,
         objectOf([
-          ["contract", t.stringLiteral(declared.contract)],
+          ["contract", string(declared.contract)],
           ["actions", literal(declared.actions)],
         ]),
       ]);
@@ -241,25 +277,19 @@ const permissionOf = (
 };
 
 /** `permissions.<alias>`. */
-const permissionReference = (alias: string): t.Expression =>
-  t.memberExpression(
-    t.identifier("permissions"),
-    keyOf(alias),
-    !t.isValidIdentifier(alias)
-  );
+const permissionReference = (alias: string): Code => ({
+  type: "Member",
+  object: identifier("permissions"),
+  property: alias,
+});
 
-/** A program's text: its banner, then its statements. */
-const printed = (path: string, statements: t.Statement[]): string =>
-  `${banner(path)}${generate(t.program(statements)).code}\n`;
+/** A module's text: its banner, then its statements, a line each. */
+const printed = (path: string, statements: string[]): string =>
+  `${banner(path)}${statements.join("\n")}\n`;
 
 /** `import { names } from "@grasp-os/sdk";`, the names sorted. */
-const sdkImport = (names: readonly string[]): t.ImportDeclaration =>
-  t.importDeclaration(
-    names
-      .toSorted()
-      .map((name) => t.importSpecifier(t.identifier(name), t.identifier(name))),
-    t.stringLiteral("@grasp-os/sdk")
-  );
+const sdkImport = (names: readonly string[]): string =>
+  `import { ${names.toSorted().join(", ")} } from "@grasp-os/sdk";`;
 
 /** The kinds of permission the config lists, each a list or one. */
 const permissionKinds = [
@@ -284,23 +314,24 @@ export const configSource = (definition: AppDefinition): string => {
   const declarations = definition.permissions
     .filter((data) => data["~permission"] !== peoplePermission)
     .map((data) => readPermissionDeclaration(data));
-  const byKind: [string, t.Expression][] = [];
+  const byKind: [string, Code][] = [];
   for (const [kind, listed] of permissionKinds) {
     const references = declarations
       .filter((declared) => declared["~permission"] === kind)
       .map((declared) => permissionReference(declared.alias));
     const [first] = references;
     if (first !== undefined) {
-      byKind.push([kind, listed ? t.arrayExpression(references) : first]);
+      byKind.push([
+        kind,
+        listed ? { type: "Array", elements: references } : first,
+      ]);
     }
   }
   if (people) {
-    byKind.push(["people", t.booleanLiteral(true)]);
+    byKind.push(["people", { type: "Boolean", value: true }]);
   }
   const answers = answersOf(definition);
-  const config: [string, t.Expression][] = [
-    ["name", t.stringLiteral(definition.name)],
-  ];
+  const config: [string, Code][] = [["name", string(definition.name)]];
   if (byKind.length > 0) {
     config.push(["permissions", objectOf(byKind)]);
   }
@@ -317,6 +348,14 @@ export const configSource = (definition: AppDefinition): string => {
   const validated =
     definition.preferences.length > 0 ||
     declarations.some((declared) => declared["~permission"] === "workflows");
+  const permissions = objectOf(
+    declarations.map((declared) => [declared.alias, permissionOf(declared)])
+  );
+  const app: Code = {
+    type: "Call",
+    callee: identifier("defineApp"),
+    arguments: [objectOf(config)],
+  };
   return printed(generatedFiles.config, [
     sdkImport([
       "defineApp",
@@ -325,41 +364,25 @@ export const configSource = (definition: AppDefinition): string => {
     ]),
     ...(declarations.length === 0
       ? []
-      : [
-          t.exportNamedDeclaration(
-            t.variableDeclaration("const", [
-              t.variableDeclarator(
-                t.identifier("permissions"),
-                objectOf(
-                  declarations.map((declared) => [
-                    declared.alias,
-                    permissionOf(declared),
-                  ])
-                )
-              ),
-            ])
-          ),
-        ]),
-    t.exportDefaultDeclaration(
-      t.callExpression(t.identifier("defineApp"), [objectOf(config)])
-    ),
+      : [`export const permissions = ${print(permissions)};`]),
+    `export default ${print(app)};`,
   ]);
 };
 
-const rows = t.identifier("rows");
+const rows = identifier("rows");
 
 /** `rows.*` for one rule. */
-const ruleOf = (rule: RowRule): t.Expression => {
+const ruleOf = (rule: RowRule): Code => {
   switch (rule.kind) {
     case "owner": {
       return call(rows, "owner");
     }
     case "role": {
-      return call(rows, "role", [t.stringLiteral(rule.role)]);
+      return call(rows, "role", [string(rule.role)]);
     }
     case "person":
     case "team": {
-      return call(rows, rule.kind, [t.stringLiteral(rule.field)]);
+      return call(rows, rule.kind, [string(rule.field)]);
     }
     default: {
       throw new Error("A checked rule has no other kind.");
@@ -370,13 +393,15 @@ const ruleOf = (rule: RowRule): t.Expression => {
 /** `server/schema.ts`: each table with its fields, indexes and access. */
 export const schemaSource = (definition: AppDefinition): string => {
   let ruled = false;
-  const tables = definition.tables.map((table): [string, t.Expression] => {
-    let made: t.Expression = t.callExpression(t.identifier("defineTable"), [
-      fieldsOf(table.fields),
-    ]);
+  const tables = definition.tables.map((table): [string, Code] => {
+    let made: Code = {
+      type: "Call",
+      callee: identifier("defineTable"),
+      arguments: [fieldsOf(table.fields)],
+    };
     for (const index of table.indexes) {
       made = call(made, "index", [
-        t.stringLiteral(index.name),
+        string(index.name),
         literal(indexFieldNames(table, index.fields)),
       ]);
     }
@@ -389,19 +414,19 @@ export const schemaSource = (definition: AppDefinition): string => {
       made = call(made, "sensitive");
     }
     const { rows: rules } = accessOf(table);
-    const access: [string, t.Expression][] = [
-      ["read", t.stringLiteral(table.access.read)],
-      ["write", t.stringLiteral(table.access.write)],
+    const access: [string, Code][] = [
+      ["read", string(table.access.read)],
+      ["write", string(table.access.write)],
     ];
     if (rules !== undefined) {
       ruled = true;
-      const directions: [string, t.Expression][] = [];
+      const directions: [string, Code][] = [];
       for (const direction of ["read", "write"] as const) {
         const list = rules[direction];
         if (list !== undefined) {
           directions.push([
             direction,
-            t.arrayExpression(list.map((rule) => ruleOf(rule))),
+            { type: "Array", elements: list.map((rule) => ruleOf(rule)) },
           ]);
         }
       }
@@ -410,6 +435,11 @@ export const schemaSource = (definition: AppDefinition): string => {
     return [table.name, call(made, "access", [objectOf(access)])];
   });
   const fielded = definition.tables.some((table) => table.fields.length > 0);
+  const schema: Code = {
+    type: "Call",
+    callee: identifier("defineSchema"),
+    arguments: [objectOf(tables)],
+  };
   return printed(generatedFiles.schema, [
     sdkImport([
       "defineSchema",
@@ -417,9 +447,7 @@ export const schemaSource = (definition: AppDefinition): string => {
       ...(ruled ? ["rows"] : []),
       ...(fielded ? ["v"] : []),
     ]),
-    t.exportDefaultDeclaration(
-      t.callExpression(t.identifier("defineSchema"), [objectOf(tables)])
-    ),
+    `export default ${print(schema)};`,
   ]);
 };
 

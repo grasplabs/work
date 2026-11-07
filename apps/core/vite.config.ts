@@ -8,6 +8,7 @@ import {
 import { defaultExclude, defineProject } from "vite-plus";
 import type { UserWorkspaceConfig } from "vite-plus";
 
+import { oxcParseTestConfig } from "../../packages/sdk/oxc-parse-test-config.ts";
 import { testComposioKey } from "../connect/test/provider-config.ts";
 import { digestModuleOf, testBlueprintsModule } from "./build-blueprints.ts";
 import { connectBundle } from "./test/build-connect.ts";
@@ -192,6 +193,7 @@ export const coreProject = (
           replacement: digestModuleOf(testBlueprintsModule),
         },
         { find: /^#version$/u, replacement: testVersionModule },
+        ...oxcParseTestConfig.alias,
       ],
     },
     plugins: [
@@ -200,6 +202,7 @@ export const coreProject = (
         wrangler: { configPath: "./wrangler.jsonc" },
         // Tests run fully local, including in CI without Cloudflare credentials.
         miniflare: {
+          modulesRules: oxcParseTestConfig.modulesRules,
           bindings: {
             ROUTER_SECRET: "test-router-secret",
             BETTER_AUTH_SECRET: "test-better-auth-secret-of-32-chars-or-more",

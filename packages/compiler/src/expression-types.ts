@@ -23,13 +23,13 @@
  * only a value's own data, never a function, so a method read it misses
  * reads `undefined`.
  */
-import { parseExpression } from "@babel/parser";
 import {
   allowedMethods,
   checkExpression,
   checkRoots,
 } from "@grasp-os/sdk/expression-check";
 import type { ExpressionError } from "@grasp-os/sdk/expression-check";
+import { parseProgram } from "@grasp-os/sdk/oxc-parse";
 
 import type { Diagnostic } from "./diagnostic.ts";
 import { serverTarget, typeCheckRequest } from "./type-check.ts";
@@ -121,7 +121,7 @@ const lineBreak = /\r\n?|[\n\u2028\u2029]/u;
 // oxlint-disable-next-line eslint/require-unicode-regexp -- one unit at a time, as offsets count them
 const notLineBreak = /[^\r\n\u2028\u2029]/g;
 
-/** A Babel node, as far as the walk reads one. */
+/** An ESTree node (oxc's), as far as the walk reads one. */
 type Node = Readonly<Record<string, unknown>> & { readonly type: string };
 
 const isNode = (value: unknown): value is Node =>
@@ -148,10 +148,19 @@ const walk = (
   }
 };
 
-const startOf = (node: Node): number =>
-  typeof node.start === "number" ? node.start : 0;
-const endOf = (node: Node): number =>
-  typeof node.end === "number" ? node.end : 0;
+/**
+ * A source as the program it is parsed in (`formOf`): in parentheses, so
+ * a leading `{` is an object, with a line break before the closing one,
+ * so a line comment at its end ends there. Its offsets are one past the
+ * source's.
+ */
+const asProgram = (source: string): string => `(${source}\n)`;
+
+/** Where a node of `asProgram`'s parse starts and ends, in the source. */
+const startOf = (node: Readonly<Record<string, unknown>>): number =>
+  typeof node.start === "number" ? node.start - 1 : 0;
+const endOf = (node: Readonly<Record<string, unknown>>): number =>
+  typeof node.end === "number" ? node.end - 1 : 0;
 
 /** A comparison: TypeScript reads `a < b, c > (d)` as a generic call. */
 const isComparison = (node: Node): boolean =>
@@ -170,13 +179,8 @@ const nameOf = (node: Node, property: Node, source: string): string => {
 
 /** A member read whose value is used, not called. */
 const isRead = (node: Node, parent: Node | undefined, key: string): boolean =>
-  (node.type === "MemberExpression" ||
-    node.type === "OptionalMemberExpression") &&
-  !(
-    (parent?.type === "CallExpression" ||
-      parent?.type === "OptionalCallExpression") &&
-    key === "callee"
-  );
+  node.type === "MemberExpression" &&
+  !(parent?.type === "CallExpression" && key === "callee");
 
 /** A wrapped read: where its argument starts in the form, and what it reads. */
 interface Read {
@@ -210,9 +214,11 @@ interface Insertion {
  * check), and, wrapped, every read in `$value(…)`.
  */
 const formOf = (source: string, wrapped: boolean): Form => {
-  const parsed = parseExpression(source, { sourceType: "module", plugins: [] });
+  // One expression, as `checkExpression` took it: the program's one
+  // statement, and its comments.
+  const { program, comments } = parseProgram(asProgram(source), "js");
   const insertions: Insertion[] = [];
-  walk(parsed, (node, parent, key) => {
+  walk(program, (node, parent, key) => {
     if (isComparison(node)) {
       const span = endOf(node) - startOf(node);
       insertions.push(
@@ -242,7 +248,9 @@ const formOf = (source: string, wrapped: boolean): Form => {
       a.at - b.at || Math.sign(a.span) - Math.sign(b.span) || b.span - a.span
   );
   let blanked = source;
-  for (const { start, end } of parsed.comments ?? []) {
+  for (const comment of comments) {
+    const start = startOf(comment);
+    const end = endOf(comment);
     blanked = `${blanked.slice(0, start)}${blanked.slice(start, end).replaceAll(notLineBreak, " ")}${blanked.slice(end)}`;
   }
   let code = "";
