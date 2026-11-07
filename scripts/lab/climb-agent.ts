@@ -145,6 +145,20 @@ export const unseenText = (labFolder: string): Set<string> => {
   return runs;
 };
 
+/**
+ * `unseen` without the runs his own text already holds. His lines are in
+ * the fixtures and moments too (transcripts, and moments that quote him),
+ * and a change that edits a long line of his adds that whole line again:
+ * words he already says were never copied into his text by the change.
+ */
+export const notHis = (
+  unseen: ReadonlySet<string>,
+  his: string
+): Set<string> => {
+  const own = shinglesOf(his, copiedRun);
+  return new Set([...unseen].filter((run) => !own.has(run)));
+};
+
 /** Why a change may not stand: none when it may. */
 export const checkChange = (
   changed: readonly string[],

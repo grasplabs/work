@@ -12,7 +12,7 @@ import type { ScoredRun } from "@grasp-os/shared/lab-score";
 import { standingOf } from "@grasp-os/shared/lab-score";
 import { describe, expect, it } from "vite-plus/test";
 
-import { briefText, checkChange, copiedFrom } from "./climb-agent.ts";
+import { briefText, checkChange, copiedFrom, notHis } from "./climb-agent.ts";
 import type { Brief } from "./climb-agent.ts";
 import {
   climb,
@@ -389,6 +389,23 @@ describe("the one who changes him", () => {
     expect(copiedFrom("You open it in the system.", unseen)).toBeUndefined();
     expect(
       checkChange([stephenFile], "Ask for one real case.", unseen)
+    ).toBeUndefined();
+  });
+
+  it("doesn't count as copied the words he already says, only those he didn't", () => {
+    const unseen = new Set([
+      "think of the last one you",
+      "you open the invoice in exact",
+    ]);
+    const his = 'Then one recent case: "Think of the last one you handled."';
+    const added =
+      'One recent case: "Think of the last one you handled." You open the invoice in Exact.';
+
+    expect(copiedFrom(added, notHis(unseen, his))).toBe(
+      "you open the invoice in exact"
+    );
+    expect(
+      copiedFrom('"Think of the last one you did."', notHis(unseen, his))
     ).toBeUndefined();
   });
 });

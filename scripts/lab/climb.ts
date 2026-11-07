@@ -31,6 +31,7 @@
  */
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -56,6 +57,7 @@ import { bridgeOrigin } from "./bridge.ts";
 import {
   askForChange,
   checkChange,
+  notHis,
   stephenFiles,
   unseenText,
 } from "./climb-agent.ts";
@@ -614,6 +616,10 @@ export const climbWorld = (setting: {
   seed: number;
   log: (line: string) => void;
 }): ClimbWorld => {
+  // His text as committed: a climb starts only once his files are (startClimb).
+  const his = stephenFiles
+    .map((file) => readFileSync(path.join(repoRoot, file), "utf-8"))
+    .join("\n");
   let unseen: Set<string> | undefined;
   return {
     measure: async (set, benches, label) => {
@@ -652,7 +658,7 @@ export const climbWorld = (setting: {
       return runsLabelled(set, label);
     },
     unseen: () => {
-      unseen ??= unseenText(import.meta.dirname);
+      unseen ??= notHis(unseenText(import.meta.dirname), his);
       return unseen;
     },
     casesOf: (part) => {
