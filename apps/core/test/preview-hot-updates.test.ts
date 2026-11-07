@@ -175,7 +175,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     expect({
       app: updated.app,
       revision: refresh.revision,
-      says: entry.code.includes('"Hot "'),
+      says: /["`]Hot ["`]/u.test(entry.code),
       served: entry.status,
       // The page's module changed, and the route tree, which imports it
       // at its address: the other components are where the frame loaded
@@ -191,7 +191,7 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
       opened: opened.refresh?.revision,
       second: {
         revision: refreshed(second).revision,
-        says: secondEntry.code.includes('"Again "'),
+        says: /["`]Again ["`]/u.test(secondEntry.code),
       },
     }).toStrictEqual({
       app,
