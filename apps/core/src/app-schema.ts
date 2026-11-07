@@ -102,14 +102,7 @@ export const applyVersionSchema = async (
   }
   const change = await schemaApplyOf(env, by, release, basedOn);
   const store = await openStore(env, storeId);
-  const migration = await runMigrations(
-    env,
-    store,
-    release,
-    Object.fromEntries(
-      Object.entries(change.ids).map(([name, { id }]) => [name, id])
-    )
-  );
+  const migration = await runMigrations(env, store, release, change.ids);
   return await store.applySchema({
     ...change,
     ...(migration === undefined ? {} : { migration }),

@@ -88,9 +88,11 @@ const addsNestedDefault = (
       const was = Object.hasOwn(before.fields, name)
         ? before.fields[name]
         : undefined;
-      return field.presence === "default"
-        ? was?.presence !== "default"
-        : was !== undefined && addsNestedDefault(was, field);
+      // A default of its own, new; or one deeper, defaulted or not.
+      return (
+        (field.presence === "default" && was?.presence !== "default") ||
+        (was !== undefined && addsNestedDefault(was, field))
+      );
     });
   }
   if (before.kind === "array" && after.kind === "array") {

@@ -158,8 +158,13 @@ import type {
   ReadSql,
 } from "./store-queries.ts";
 import { recordReferences } from "./store-references.ts";
-import { fieldsRead, ruleFieldsOf, ruleSql } from "./store-rules.ts";
-import type { RuleCaller } from "./store-rules.ts";
+import {
+  audienceOf,
+  fieldsRead,
+  ruleFieldsOf,
+  ruleSql,
+} from "./store-rules.ts";
+import type { Audience, RuleCaller } from "./store-rules.ts";
 import {
   dropSearches,
   installSearches,
@@ -877,6 +882,25 @@ const applyingOf = async (
   return { change, target: { manifest, schemaHash, indexes, searches } };
 };
 
+/**
+ * A table as the store holds it, for a migration of it: its fields'
+ * stored names by stable ID, and who sees each of its records now, by
+ * those names (store-rules.ts, `audienceOf`).
+ */
+export interface HeldTable {
+  readonly names: Readonly<Record<string, string>>;
+  readonly audience: Audience;
+}
+
+/** What starting a migration answers (`StoreHost.beginMigration`). */
+export interface MigrationStart {
+  readonly migrationId: string;
+  /** The schema in force, which its migrations must transform from. */
+  readonly schemaHash: string | null;
+  /** Each table the store holds, by stable ID. */
+  readonly tables: Readonly<Record<string, HeldTable>>;
+}
+
 /** A reset of the store's data (`StoreHost.resetData`). */
 export interface StoreReset {
   readonly actor: AuditActor;
@@ -1324,7 +1348,10 @@ export class StoreHost {
         .where(eq(migrationRows.migrationId, migration.id))
         .run();
     }
-    this.#rewrote(new Set([...moved, ...rewritten.keys()]));
+    // Every table moves on, not only those rewritten: a change of access
+    // or row rules, a field left out or widened, changes what a read
+    // answers too, and every live query reads again.
+    this.#rewrote(new Set([...moved, ...Object.keys(plan.catalog)]));
     return {
       schemaHash,
       changed: true,
@@ -1656,6 +1683,12 @@ export class StoreHost {
       if (!input.everything && !unreadable) {
         throw migrationErrors.create("migration.reset_refused");
       }
+      // Only over the version it was asked for as current, as a publish
+      // goes only over its base: one published meanwhile refuses it.
+      const version = applying?.change.version;
+      if (version !== undefined) {
+        this.#requireBase(version, Date.now());
+      }
       const held = this.ctx.storage.sql
         .exec<{ name: string; records: number; generation: number }>(
           `SELECT t.name AS name, count(r.record_id) AS records,
@@ -1741,16 +1774,29 @@ export class StoreHost {
    * Answers it, and the hash of the schema in force, which its
    * migrations must transform from.
    */
-  beginMigration(storeId: StoreId): {
-    migrationId: string;
-    schemaHash: string | null;
-  } {
+  beginMigration(storeId: StoreId): MigrationStart {
     return this.ctx.storage.transactionSync(() => {
       this.#bind(storeId);
       this.#db.delete(migrationRows).run();
+      const held = this.#held();
+      const heldTables: Record<string, HeldTable> = {};
+      for (const [tableId, table] of Object.entries(held?.catalog ?? {})) {
+        const declared =
+          table.kept === true ? undefined : held?.manifest.tables[table.name];
+        heldTables[tableId] = {
+          names: Object.fromEntries(
+            Object.entries(table.fields).map(([id, field]) => [id, field.name])
+          ),
+          audience:
+            declared === undefined
+              ? { owner: false, fields: [] }
+              : audienceOf(declared),
+        };
+      }
       return {
         migrationId: crypto.randomUUID(),
-        schemaHash: this.#held()?.hash ?? null,
+        schemaHash: held?.hash ?? null,
+        tables: heldTables,
       };
     });
   }

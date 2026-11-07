@@ -25,7 +25,10 @@ import type { Release } from "./app-releases.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv, SandboxedWorker } from "./sandboxed.ts";
+import type { SchemaIds } from "./schema-changes.ts";
+import type { HeldTable } from "./store-host.ts";
 import { audienceKey, audienceOf } from "./store-rules.ts";
+import type { Audience } from "./store-rules.ts";
 
 // Running an App's explicit migrations (spec 17.2): on their fixtures as
 // the release is sealed (`migrationEvidence`), and once on the store's
@@ -512,12 +515,11 @@ const failureIssues = (
 
 /**
  * Refuses a batch only a caller's bug sends: past its bounds, holding a
- * managed field, or mixing rows `table`'s access mode or row rules show
- * to different people (see the header).
+ * managed field, or mixing rows of different `audience`s (see the header).
  */
 const requireBatch = (
   managed: readonly string[],
-  table: TransformTable,
+  audience: Audience,
   rows: readonly TransformRow[]
 ): void => {
   if (
@@ -532,7 +534,6 @@ const requireBatch = (
   ) {
     throw new Error("A transform's rows hold managed fields");
   }
-  const audience = audienceOf(table);
   if (new Set(rows.map((row) => audienceKey(audience, row))).size > 1) {
     throw new Error(
       "A transform's batch mixes rows its table shows to different people"
@@ -556,7 +557,8 @@ const transformRows = async (
   release: TransformRelease,
   name: string,
   rows: readonly TransformRow[],
-  of: "records" | "fixtures"
+  of: "records" | "fixtures",
+  audience?: Audience
 ): Promise<TransformOutcome> => {
   const declared = Object.hasOwn(release.app.migrations, name)
     ? release.app.migrations[name]
@@ -570,7 +572,11 @@ const transformRows = async (
   if (target === undefined) {
     throw new Error("A migration's table isn't in its release's schema");
   }
-  requireBatch(release.app.schema.managedFields, target, rows);
+  requireBatch(
+    release.app.schema.managedFields,
+    audience ?? audienceOf(target),
+    rows
+  );
   if (rows.length === 0) {
     return { ok: true, rows: [] };
   }
@@ -670,14 +676,20 @@ const transformRows = async (
   return { ok: true, rows: transformed };
 };
 
-/** `transformRows` of `rows` that are the store's records. */
+/**
+ * `transformRows` of `rows` that are the store's records, all of one
+ * `audience`: by the names the store holds the fields under, which a
+ * rename in the same change moves (`storedAudience`); the target table's
+ * own when none is renamed.
+ */
 export const transformBatch = async (
   env: SandboxedEnv,
   release: TransformRelease,
   name: string,
-  rows: readonly TransformRow[]
+  rows: readonly TransformRow[],
+  audience?: Audience
 ): Promise<TransformOutcome> =>
-  await transformRows(env, release, name, rows, "records");
+  await transformRows(env, release, name, rows, "records", audience);
 
 /** The ID a fixture's record has as its migration runs on it. */
 const fixtureId = (index: number): string => `fixture-${index + 1}`;
@@ -909,6 +921,35 @@ export interface StagedMigration {
   readonly tables: string[];
 }
 
+/**
+ * Who sees each record of a migrated table, by the names the store holds
+ * its fields under (`held`): the target table's rule fields found by
+ * stable ID (`ids`), a field renamed in the same change under its stored
+ * name, and the rule fields of the schema in force; the owner where
+ * either reads it. So rows are grouped by who sees them now and after,
+ * whatever a rename moves.
+ */
+const storedAudience = (
+  target: TransformTable,
+  ids: SchemaIds[string],
+  held: HeldTable | undefined
+): Audience => {
+  const after = audienceOf(target);
+  const stored = after.fields.flatMap((name) => {
+    const id = Object.hasOwn(ids.fields, name) ? ids.fields[name] : undefined;
+    const was =
+      id !== undefined && held !== undefined && Object.hasOwn(held.names, id)
+        ? held.names[id]
+        : undefined;
+    // A rule field the store doesn't hold yet: absent from every record.
+    return was === undefined ? [] : [was];
+  });
+  return {
+    owner: after.owner || held?.audience.owner === true,
+    fields: [...new Set([...stored, ...(held?.audience.fields ?? [])])],
+  };
+};
+
 /** `runMigrations` for one migration (`declared`) of its table. */
 const runMigration = async (
   env: SandboxedEnv,
@@ -917,18 +958,21 @@ const runMigration = async (
   {
     declared,
     migrationId,
-    tableId,
+    ids,
+    held,
   }: {
     declared: MigrationManifest;
     migrationId: string;
-    tableId: string;
+    ids: SchemaIds[string] | undefined;
+    held: HeldTable | undefined;
   }
 ): Promise<void> => {
   const target = release.app.schema.tables[declared.table];
-  if (target === undefined) {
+  if (target === undefined || ids === undefined) {
     throw new Error("A migration's table isn't in its release's schema");
   }
-  const audience = audienceOf(target);
+  const tableId = ids.id;
+  const audience = storedAudience(target, ids, held);
   let after: string | null = null;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- one page at a time
@@ -942,7 +986,13 @@ const runMigration = async (
       audienceKey(audience, row)
     ).values()) {
       // oxlint-disable-next-line no-await-in-loop -- one audience at a time
-      const outcome = await transformBatch(env, release, declared.name, batch);
+      const outcome = await transformBatch(
+        env,
+        release,
+        declared.name,
+        batch,
+        audience
+      );
       if (!outcome.ok) {
         throw migrationErrors.create("migration.failed", {
           migration: declared.name,
@@ -985,9 +1035,9 @@ export const runMigrations = async (
   release: TransformRelease & {
     readonly manifest: Pick<Release["manifest"], "migrationEvidence">;
   },
-  tableIds: Readonly<Record<string, string>>
+  ids: SchemaIds
 ): Promise<StagedMigration | undefined> => {
-  const { migrationId, schemaHash } = await store.beginMigration();
+  const { migrationId, schemaHash, tables } = await store.beginMigration();
   const due = Object.values(release.app.migrations).filter(
     ({ fromSchema }) => fromSchema === schemaHash
   );
@@ -1004,11 +1054,18 @@ export const runMigrations = async (
   for (const declared of due) {
     // One migration, one page and one audience at a time: each call
     // into the sandbox is bounded, and a failure stops the rest.
+    const tableIds = Object.hasOwn(ids, declared.table)
+      ? ids[declared.table]
+      : undefined;
     // oxlint-disable-next-line no-await-in-loop -- see above
     await runMigration(env, store, release, {
       declared,
       migrationId,
-      tableId: tableIds[declared.table] ?? "",
+      ids: tableIds,
+      held:
+        tableIds !== undefined && Object.hasOwn(tables, tableIds.id)
+          ? tables[tableIds.id]
+          : undefined,
     });
   }
   return {

@@ -28,6 +28,7 @@ import type {
   ImportApply,
   ImportBatch,
   MigrationBatch,
+  MigrationStart,
   PreferencesReceipt,
   PreferencesWritten,
   SchemaApply,
@@ -123,10 +124,7 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /** `StoreHost.beginMigration`. */
-  beginMigration(storeId: StoreId): {
-    migrationId: string;
-    schemaHash: string | null;
-  } {
+  beginMigration(storeId: StoreId): MigrationStart {
     return this.#live().beginMigration(storeId);
   }
 

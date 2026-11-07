@@ -729,6 +729,99 @@ const schemaOf = async (files: Record<string, string>): Promise<string> =>
   );
 
 /**
+ * A Tickets App whose row rule reads each ticket's `team`, holding
+ * `tickets` as their team's members wrote them, then a version renaming
+ * `team` to `group` and making `title` a number by a migration (`handler`,
+ * TypeScript over `row`, with `prelude` as its module's state; its fixture
+ * of "abc" expects `fixtureTitle`): whether it published, and the
+ * records it left, by ID.
+ */
+const teamRenamedMigration = async (
+  tickets: readonly { id: string; team: string; title: string }[],
+  handler: string,
+  fixtureTitle: number,
+  prelude = ""
+) => {
+  const first = {
+    ...appDefinition({
+      name: "Tickets",
+      tables: {
+        tickets: {
+          fields: { title: "v.string()", team: "v.string()" },
+          access: {
+            read: "appMembers",
+            write: "appMembers",
+            rows: { read: [{ kind: "team", field: "team" }] },
+          },
+        },
+      },
+    }),
+    "server/hello.ts": emptyFiles["server/hello.ts"] ?? "",
+  };
+  const { owner, app } = await appWith(first);
+  await publishVersion(env, owner, app, 1);
+  const [own] = await defaultStores(app);
+  const store = env.DATA_STORES.getByName(own?.storeId ?? "");
+  await runInDurableObject(store, (_, state) => {
+    const [table] = state.storage.sql
+      .exec<{ id: string }>("SELECT table_id AS id FROM sdk_tables")
+      .toArray();
+    const { hash } = state.storage.sql
+      .exec<{ hash: string }>("SELECT contract_hash AS hash FROM sdk_store")
+      .one();
+    for (const { id, team, title } of tickets) {
+      state.storage.sql.exec(
+        `INSERT INTO sdk_records (table_id, record_id, owner_id, revision, created_at, updated_at, value_json, schema_hash)
+          VALUES (?, ?, ?, 1, 0, 0, ?, ?)`,
+        table?.id ?? "",
+        id,
+        owner.userId,
+        JSON.stringify({ team, title }),
+        hash
+      );
+    }
+  });
+  const renamed = definedWith(
+    first,
+    { op: "renameField", table: "tickets", field: "team", name: "group" },
+    { op: "changeField", table: "tickets", field: "title", type: "v.number()" }
+  );
+  const second = await nextVersion(owner, app, {
+    ...renamed,
+    "server/migrations/title.ts": `import { migration, v } from "@grasp-os/sdk";
+
+${prelude}
+
+export default migration({
+  name: "title",
+  table: "tickets",
+  fromSchema: ${JSON.stringify(await schemaOf(first))},
+  toSchema: ${JSON.stringify(await schemaOf(renamed))},
+  input: v.object({ title: v.string(), team: v.string() }),
+  output: v.object({ title: v.number(), group: v.string() }),
+  fixtures: [
+    { row: { title: "abc", team: "t_a" }, expect: { title: ${fixtureTitle}, group: "t_a" } },
+  ],
+  handler: ${handler},
+});
+`,
+  });
+
+  const published = await failure(
+    async () => await publishVersion(env, owner, app, second)
+  );
+  const stored = await runInDurableObject(store, (_, state) =>
+    state.storage.sql
+      .exec<{ value: string }>(
+        "SELECT value_json AS value FROM sdk_records ORDER BY record_id"
+      )
+      .toArray()
+      .map(({ value }): unknown => JSON.parse(value))
+  );
+  return { published, stored };
+};
+
+/**
  * `evolvingFiles` with an optional `category` that is a number, and a
  * migration from the schema of `from`, where it is text, that answers
  * each record's `category` as `category` (TypeScript over `row`) derives it.
@@ -1068,90 +1161,37 @@ describe(
     });
 
     it("migrates a table whose row rule's field is renamed in the same version", async () => {
-      const access = {
-        read: "appMembers",
-        write: "appMembers",
-        rows: { read: [{ kind: "team", field: "team" }] },
-      } as const;
-      const first = {
-        ...appDefinition({
-          name: "Tickets",
-          tables: {
-            tickets: {
-              fields: { title: "v.string()", team: "v.string()" },
-              access,
-            },
-          },
-        }),
-        "server/hello.ts": emptyFiles["server/hello.ts"] ?? "",
-      };
-      const { owner, app } = await appWith(first);
-      await publishVersion(env, owner, app, 1);
-      const [own] = await defaultStores(app);
-      const store = own?.storeId ?? "";
-      // A ticket of team A, as one of its members wrote it.
-      await runInDurableObject(env.DATA_STORES.getByName(store), (_, state) => {
-        const [table] = state.storage.sql
-          .exec<{ id: string }>("SELECT table_id AS id FROM sdk_tables")
-          .toArray();
-        const { hash } = state.storage.sql
-          .exec<{ hash: string }>("SELECT contract_hash AS hash FROM sdk_store")
-          .one();
-        state.storage.sql.exec(
-          `INSERT INTO sdk_records (table_id, record_id, owner_id, revision, created_at, updated_at, value_json, schema_hash)
-            VALUES (?, 'r1', ?, 1, 0, 0, ?, ?)`,
-          table?.id ?? "",
-          owner.userId,
-          JSON.stringify({ team: "t_a", title: "Launch" }),
-          hash
-        );
-      });
-      const renamed = definedWith(
-        first,
-        { op: "renameField", table: "tickets", field: "team", name: "group" },
-        {
-          op: "changeField",
-          table: "tickets",
-          field: "title",
-          type: "v.number()",
-        }
-      );
-      const second = await nextVersion(owner, app, {
-        ...renamed,
-        "server/migrations/title.ts": `import { migration, v } from "@grasp-os/sdk";
-
-export default migration({
-  name: "title",
-  table: "tickets",
-  fromSchema: ${JSON.stringify(await schemaOf(first))},
-  toSchema: ${JSON.stringify(await schemaOf(renamed))},
-  input: v.object({ title: v.string(), team: v.string() }),
-  output: v.object({ title: v.number(), group: v.string() }),
-  fixtures: [
-    { row: { title: "abc", team: "t_a" }, expect: { title: 3, group: "t_a" } },
-  ],
-  handler: (ctx, row) => ({ title: row.title.length, group: row.team }),
-});
-`,
-      });
-
-      const published = await failure(
-        async () => await publishVersion(env, owner, app, second)
-      );
-      const stored = await runInDurableObject(
-        env.DATA_STORES.getByName(store),
-        (_, state) =>
-          state.storage.sql
-            .exec<{ value: string }>(
-              "SELECT value_json AS value FROM sdk_records"
-            )
-            .toArray()
-            .map(({ value }): unknown => JSON.parse(value))
+      const outcome = await teamRenamedMigration(
+        [{ id: "r1", team: "t_a", title: "Launch" }],
+        "(ctx, row) => ({ title: row.title.length, group: row.team })",
+        3
       );
 
-      expect({ published, stored }).toStrictEqual({
+      expect(outcome).toStrictEqual({
         published: "ok",
         stored: [{ group: "t_a", title: 6 }],
+      });
+    });
+
+    it("runs a migration on each team's records apart when that team's field is renamed in the same version", async () => {
+      // Module state counts the records one call saw: across teams, a
+      // call would carry one team's into another's.
+      const outcome = await teamRenamedMigration(
+        [
+          { id: "r1", team: "t_a", title: "Launch" },
+          { id: "r2", team: "t_b", title: "Hiring" },
+        ],
+        "(ctx, row) => { seen += 1; return { title: seen, group: row.team }; }",
+        1,
+        "let seen = 0;"
+      );
+
+      expect(outcome).toStrictEqual({
+        published: "ok",
+        stored: [
+          { group: "t_a", title: 1 },
+          { group: "t_b", title: 1 },
+        ],
       });
     });
 

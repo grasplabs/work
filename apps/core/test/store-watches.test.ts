@@ -1,3 +1,5 @@
+import { defineSchema, defineTable } from "@grasp-os/sdk";
+import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
 import { querySubscriptionLimits } from "@grasp-os/shared/pages";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -5,12 +7,22 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { storeMaxWatches } from "../src/store-watches.ts";
 import {
   newStore,
+  noteFields,
   objectOf,
   storeOfNotes,
   v1,
   withCategory,
 } from "./notes-stores.ts";
 import { applied } from "./store-schemas.ts";
+
+/** The notes of v1, each read only by its owner now. */
+const ownersOnly = manifestText(
+  schemaManifest(
+    defineSchema({
+      notes: defineTable(noteFields).access({ read: "owner", write: "owner" }),
+    })
+  )
+);
 
 // The live queries a business store's object keeps (store-watches.ts),
 // through its RPC surface as core calls it: told of every write that
@@ -57,6 +69,23 @@ describe("a store's live queries", { timeout: 120_000 }, () => {
     );
 
     await store.applySchema(applied(withCategory));
+
+    await vi.waitFor(() => {
+      expect(told).toContainEqual(["notes"]);
+    });
+  });
+
+  it("tells a watch of a schema change that only changes who may read", async () => {
+    const { store } = await storeOfNotes(2);
+    const { told, watcher } = watcherOf();
+    await objectOf(store).watch(
+      store.id,
+      "ada",
+      { notes: await notesGeneration(store) },
+      watcher
+    );
+
+    await store.applySchema(applied(ownersOnly));
 
     await vi.waitFor(() => {
       expect(told).toContainEqual(["notes"]);

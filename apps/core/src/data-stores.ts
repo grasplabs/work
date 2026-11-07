@@ -37,6 +37,7 @@ import type {
   ImportBatch,
   MigrationBatch,
   MigrationRow,
+  MigrationStart,
   ReadResult,
   SchemaApply,
   StoreReset,
@@ -112,10 +113,7 @@ export interface OpenStore {
   /** Applies a version's schema to the store (`StoreHost.applySchema`). */
   applySchema: (change: SchemaApply) => Promise<AppliedSchema>;
   /** Starts staging a migration's output (`StoreHost.beginMigration`). */
-  beginMigration: () => Promise<{
-    migrationId: string;
-    schemaHash: string | null;
-  }>;
+  beginMigration: () => Promise<MigrationStart>;
   /** A page of a table's records, by its ID, for its migration (`StoreHost.migrationRows`). */
   migrationRows: (
     table: string,

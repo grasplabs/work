@@ -513,6 +513,40 @@ describe(
       ]);
     });
 
+    it("refuses a default added inside a field already defaulted, which records lack", async () => {
+      // Settings, defaulted, inside a field of its own.
+      const settings = (fields: ValueShape) =>
+        notesText({
+          title,
+          prefs: v.object({ settings: v.object(fields).default({}) }),
+        });
+      const ids = idsOf("notes", notesId, {
+        title: "field:title",
+        prefs: "field:prefs",
+      });
+      const store = await newStore();
+      const { schemaHash } = await store.applySchema(
+        change(settings({ theme: v.string().default("light") }), ids)
+      );
+      await insertAll(store, schemaHash, [
+        { title: "Launch", prefs: { settings: { theme: "dark" } } },
+      ]);
+
+      const refused = await codeOf(
+        store.applySchema(
+          change(
+            settings({
+              theme: v.string().default("light"),
+              tone: v.string().default("calm"),
+            }),
+            ids
+          )
+        )
+      );
+
+      expect(refused).toBe("migration.required");
+    });
+
     it("applies a widened field on its own", async () => {
       const { store } = await storeWith({ title: "Launch", category: "news" });
       const widened = await store.applySchema(
@@ -900,6 +934,35 @@ describe("two publishes of one store at once", { timeout: 120_000 }, () => {
 });
 
 describe("a reset of a store's data", { timeout: 120_000 }, () => {
+  it("is refused while another version's publish just applied its schema, changing nothing", async () => {
+    const { store } = await storeWith({ title: "Launch" });
+    await store.applySchema(
+      change(v1, v1Ids, { version: { app: "notes", number: 1, basedOn: null } })
+    );
+    const v2 = notesText({ title, category: v.string().optional() });
+    // Version 2 published as the reset was asked for over version 1.
+    await store.applySchema(
+      change(v2, v1Ids, { version: { app: "notes", number: 2, basedOn: 1 } })
+    );
+    const before = await heldBy(store);
+
+    const refused = await codeOf(
+      env.DATA_STORES.getByName(store.id).resetData(store.id, {
+        actor: { type: "person", userId: "ada" },
+        app: "notes",
+        everything: true,
+        apply: change(v1, v1Ids, {
+          version: { app: "notes", number: 1, basedOn: 1 },
+        }),
+      })
+    );
+
+    expect({ refused, held: await heldBy(store) }).toStrictEqual({
+      refused: "migration.busy",
+      held: before,
+    });
+  });
+
   it("changes nothing when the schema it applies to the empty store is refused", async () => {
     const { store } = await storeWith({ title: "Launch", category: "news" });
     const before = await heldBy(store);
