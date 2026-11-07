@@ -4,7 +4,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { appDefinition } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { appModulesOf, kitModulesOf, loadFrame } from "./page-frames.ts";
+import {
+  appModulesOf,
+  kitModulesOf,
+  loadFrame,
+  modulePartsOf,
+} from "./page-frames.ts";
 import type { LoadedFrame } from "./page-frames.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -163,9 +168,17 @@ describe("what an App's pages load", { timeout: 60_000 }, () => {
       // The kit's own for both, the same code under the same names: one
       // of each on a page whatever the page, none built into the App's.
       different: both.filter((name) => heavyKit[name] !== smallKit[name]),
-      // And at the same address: a browser loads it once for both.
+      // At the same content address, each in its own set's directory:
+      // a frame's policy names its set's alone (page-frame.ts).
       moved: both.filter(
-        (name) => heavy.addresses[name] !== small.addresses[name]
+        (name) =>
+          modulePartsOf(heavy.addresses[name] ?? "").hash !==
+          modulePartsOf(small.addresses[name] ?? "").hash
+      ),
+      shared: both.some(
+        (name) =>
+          modulePartsOf(heavy.addresses[name] ?? "").scope ===
+          modulePartsOf(small.addresses[name] ?? "").scope
       ),
     }).toStrictEqual({
       small: {
@@ -188,6 +201,7 @@ describe("what an App's pages load", { timeout: 60_000 }, () => {
       empty: [],
       different: [],
       moved: [],
+      shared: false,
     });
     expect(both).toStrictEqual(
       expect.arrayContaining([

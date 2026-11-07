@@ -271,3 +271,20 @@ export const kitModulesOf = ({
   Object.fromEntries(
     Object.entries(modules).filter(([name]) => !name.startsWith("app~"))
   );
+
+/**
+ * Whether `frame`'s policy lets a browser load the script at `address`,
+ * as browsers match a source (CSP3): scheme, host and port, then the
+ * path, as a prefix when the source ends in `/`, exactly otherwise,
+ * never the query. A hash source matches no address.
+ */
+export const allowsScript = (
+  frame: Pick<LoadedFrame, "policy">,
+  address: string
+): boolean => {
+  const { origin, pathname } = new URL(address);
+  const path = `${origin}${pathname}`;
+  return (frame.policy.get("script-src") ?? []).some((source) =>
+    source.endsWith("/") ? path.startsWith(source) : path === source
+  );
+};

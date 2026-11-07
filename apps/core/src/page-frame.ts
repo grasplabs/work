@@ -35,21 +35,57 @@ import { pageFramePolicy } from "./security-headers.ts";
 // its own, because a `srcdoc` or `data:` frame inherits the policy of the
 // page around it; only a document loaded over the network gets its own.
 //
-// That policy names, by hash or by exact address, every script the build
-// may run, and nothing else: this document's own two inline scripts (the
-// import map and the bootstrap below) and each module of the build at
-// `/page-modules/<scope>/<hash>.js`, where core serves exactly those
-// bytes (with its imports of the App's other modules carrying the
-// address's query, below). No
-// `'unsafe-inline'`, no `data:` or `blob:`, no eval. So code that comes
-// from anywhere but the build doesn't run, even when the build's own code
-// lets it in: HTML an App's server sends that the page renders (an
-// `onerror` attribute, a `<script>`), a module the page imports from a
-// string (`import("data:…")`), `eval` or `new Function`, a second import
-// map. The build core leased, by its hash, is then what the frame runs; a
-// change to the App's server changes data, never code. Browsers
-// match a policy's addresses on scheme, host, port and the exact path,
-// so the policy names the deployment's own origin as people reach it
+// That policy names every script the build may run, and nothing else:
+// this document's own two inline scripts (the import map and the
+// bootstrap below) by their hashes, and the build's modules by the two
+// directories core serves them from, `/page-modules/<scope>/` (the
+// App's) and `/page-modules/kit-<set>/` (the kit's), where core serves
+// exactly those bytes (with its imports of the App's other modules
+// carrying the address's query, below). No `'unsafe-inline'`, no `data:`
+// or `blob:`, no eval. So code that comes from anywhere but the build
+// doesn't run, even when the build's own code lets it in: HTML an App's
+// server sends that the page renders (an `onerror` attribute, a
+// `<script>`), a module the page imports from a string (`import("data:…")`,
+// or the address of another build's module), `eval` or `new Function`, a
+// second import map. The build core leased, by its hash, is then what the
+// frame runs; a change to the App's server changes data, never code.
+//
+// A source ending in `/` matches every path under it (CSP3), so the
+// policy stays the same few sources however many modules a build loads:
+// naming each module's address made a header of 16 KB for a page with
+// the data grid, past what proxies and Node take, and it grew with every
+// module. A directory allows exactly what an exact address would only
+// because each directory holds one build's code and nothing else, and
+// never changes. How a looser `script-src` could be abused, and what
+// closes each way:
+//
+// - Another App's build, another version's (an older one, say), or another
+//   chat's preview: each is its own scope, a hash of exactly its code (a
+//   published build's artifact) or of its chat and App (a preview's), and
+//   a module is served only with core's MAC over its scope, address and
+//   bytes (`stagedMac`), so nothing is ever served under a directory but
+//   what was staged for it. The same code is the same artifact, so a
+//   scope never holds a second build's modules.
+// - Another kit's modules, an older release's or the preview kit's: the
+//   kit's directory is `kit-` and the hash of exactly the modules this
+//   build loads (`kitScopeOf`), not every kit module ever staged.
+// - A draft's other writes, in a frame of one version of it opened
+//   read-only: the draft's writes share their preview's scope, so a frame
+//   that takes no updates is staged under a scope of its own build alone
+//   (`previewFrame`), and core frames a build in a shared scope only to
+//   take its updates.
+// - A package's files or a person's (an upload, an App's or a run's file):
+//   served on paths of their own, never under `/page-modules/`.
+// - A path that the browser matches as under a directory but core reads
+//   as another (`%2e%2e/`, `..%2F`, an escaped `\`): the URL parser makes
+//   `%2e%2e` a `..` and resolves it before the policy sees it, and core
+//   answers every other path under `/page-modules/` that isn't exactly a
+//   module's address with a 404 (`modulePath`), never another module.
+// - A redirect, which browsers match on the host alone: nothing under
+//   `/page-modules/` redirects, a 404 or 403 included.
+//
+// Browsers match a policy's addresses on scheme, host and port too, so
+// the policy names the deployment's own origin as people reach it
 // (`SIGN_IN.origin`, behind the router), not the address core is called
 // at.
 //
@@ -112,11 +148,13 @@ export interface FrameCode {
 // stays behind its server functions' own checks. The token check and the
 // cache header below are the one place that decision would go.
 //
-// Modules are kept and served by scope: the kit's (`kitScope`), shared by
-// every frame; a build's own, for a published page (its artifact, the
-// hash of exactly its code, so of one version of one App's page); and a
-// chat's preview's of an App (`previewFrame`), shared by every frame of it
-// and every write of its draft. A scope's token reads only that scope's
+// Modules are kept and served by scope: the kit's, by the set of kit
+// modules a build loads (`kitScopeOf`), shared by every build that loads
+// the same set; a build's own, for a published page (its artifact, the
+// hash of exactly its code, so of one version of one App's page) or one
+// version of a draft opened read-only; and a chat's preview's of an App
+// (`previewFrame`), shared by every frame of it that takes its draft's
+// writes, and every write. A scope's token reads only that scope's
 // modules: a module is kept under its scope with core's MAC over the
 // scope, its address and its bytes, checked on serve
 // (`pageModuleResponse`), so another scope's address, or bytes moved
@@ -221,26 +259,44 @@ export const windowedAccess = async (
 ): Promise<string> =>
   await accessToken(env, subject, windowedAccessEnd(now, windowMs));
 
-/** The scope of the kit's modules, which every frame shares. */
-const kitScope = "kit";
+/** What a kit scope starts with: never an App's, which is a bare hash. */
+const kitScopePrefix = "kit-";
 
 /**
- * Where a chat's preview of App `app` is staged: the scope its modules
- * are kept in, shared by every frame of it and every write of its draft,
- * and the artifact its frame of `artifact`, a build of the draft, is
- * staged under. The build's own artifact is a hash of its code alone,
- * the same in every chat that previews the same code: its frame here
- * names this scope, so it is this preview's only.
+ * The scope of the kit's modules of a build, `kit` (each module's
+ * address by its name): the hash of exactly that set, so its directory
+ * holds those modules and no other kit's, an older release's or the
+ * preview kit's. Every build that loads the same set shares it, and the
+ * browser's copies with it.
+ */
+const kitScopeOf = async (kit: Record<string, string>): Promise<string> =>
+  `${kitScopePrefix}${await sha256Hex(canonicalJson(["kit", kit]))}`;
+
+/**
+ * Where a chat's preview of App `app` is staged, for a frame of
+ * `artifact`, a build of the draft: the scope its modules are kept in,
+ * and the artifact its frame is staged under. One that takes the draft's
+ * writes (`updates`) keeps them in a scope shared by every such frame of
+ * it and every write; one that doesn't, a version opened read-only, in
+ * one of its own build alone, so its policy's directory holds nothing of
+ * the draft's other writes. The build's own artifact is a hash of its
+ * code alone, the same in every chat that previews the same code: its
+ * frame here names the chat, so it is this preview's only.
  */
 export const previewFrame = async (
   chatId: string,
   app: string,
-  artifact: string
+  artifact: string,
+  { updates }: { updates: boolean }
 ): Promise<{ scope: string; artifact: string }> => {
-  const scope = await sha256Hex(canonicalJson(["preview", chatId, app]));
+  const shared = await sha256Hex(canonicalJson(["preview", chatId, app]));
+  if (!updates) {
+    const own = await sha256Hex(canonicalJson([artifact, shared, "version"]));
+    return { scope: own, artifact: own };
+  }
   return {
-    scope,
-    artifact: await sha256Hex(canonicalJson([artifact, scope])),
+    scope: shared,
+    artifact: await sha256Hex(canonicalJson([artifact, shared])),
   };
 };
 
@@ -335,7 +391,7 @@ const hashPattern = /^[0-9a-f]{64}$/u;
 
 /**
  * What core keeps of a build for its frame: its modules by name, as the
- * addresses they are kept under, the kit's in `kitScope` and the App's in
+ * addresses they are kept under, the kit's in `kitScopeOf` and the App's in
  * `scope`.
  */
 const frameManifestSchema = z
@@ -465,11 +521,13 @@ const modulesPrefix = "page-modules/";
  * The format of a staged manifest (`frameManifestSchema`), in its key: a
  * manifest staged in another format is under another key, so no open
  * finds it, and the build is staged again in this one, rather than read
- * as a manifest it isn't. Raised with each change of the format: `3`
- * keeps modules by scope. What is left under an older key goes with the
- * sweep (`sweepPageFrames`), which reads the whole prefix.
+ * as a manifest it isn't. Raised with each change of the format, or of
+ * where its modules are kept: `3` keeps modules by scope, `4` the kit's
+ * by the set a build loads (`kitScopeOf`). What is left under an older
+ * key goes with the sweep (`sweepPageFrames`), which reads the whole
+ * prefix.
  */
-const frameManifestFormat = 3;
+const frameManifestFormat = 4;
 
 export const frameKey = (artifact: string): string =>
   `${framesPrefix}${artifact}.v${frameManifestFormat}.json`;
@@ -487,7 +545,7 @@ const moduleKey = (scope: string, hash: string): string =>
  * same, refused as one.
  */
 const modulePath = new RegExp(
-  `^${pageModulePath}/(?<scope>${kitScope}|[0-9a-f]{64})/(?:\\d{1,9}/)?(?<hash>[0-9a-f]{64})\\.js$`,
+  `^${pageModulePath}/(?<scope>${kitScopePrefix}[0-9a-f]{64}|[0-9a-f]{64})/(?:\\d{1,9}/)?(?<hash>[0-9a-f]{64})\\.js$`,
   "u"
 );
 
@@ -601,9 +659,10 @@ const allStaged = async (
   env: Env,
   { kit }: Pick<FrameManifest, "kit">
 ): Promise<boolean> => {
+  const scope = await kitScopeOf(kit);
   const found = await Promise.all(
     Object.values(kit).map(
-      async (hash) => await env.FILES.head(moduleKey(kitScope, hash))
+      async (hash) => await env.FILES.head(moduleKey(scope, hash))
     )
   );
   return found.every((head) => head !== null);
@@ -653,7 +712,7 @@ const servedIntegrity = async (
 /**
  * Keeps a build where its frame loads it: its App modules under `scope`
  * (its artifact, or its preview's, `previewFrame`) at their addresses,
- * the kit's under `kitScope` at theirs (`stageModules`), and the build's
+ * the kit's under `kitScopeOf` at theirs (`stageModules`), and the build's
  * manifest under its artifact, with core's MAC (checked on serve, as
  * above), each only when not kept so already (`keep`). The modules go
  * first, so a manifest is never there without
@@ -673,14 +732,17 @@ export const stageFrame = async (
     now = new Date(),
   }: { preview?: boolean; scope?: string; now?: Date } = {}
 ): Promise<void> => {
-  const kit = await Promise.all(
+  const addressed = await Promise.all(
     Object.entries(code.kit).map(async ([name, source]) => ({
       name,
-      scope: kitScope,
       hash: await kitAddress(name, source),
       bytes: encoder.encode(source),
     }))
   );
+  const kitScope = await kitScopeOf(
+    Object.fromEntries(addressed.map(({ name, hash }) => [name, hash]))
+  );
+  const kit = addressed.map((module) => ({ ...module, scope: kitScope }));
   const app = appModules(code, scope);
   await stageModules(env, [...kit, ...app], now);
   const manifest: FrameManifest = {
@@ -852,8 +914,9 @@ export const pageModuleResponse = async (
     await env.FILES.delete(key);
     return refused(404, [], "no-store");
   }
-  const served =
-    scope === kitScope ? bytes : withQuery(bytes, accessQuery(token ?? ""));
+  const served = scope.startsWith(kitScopePrefix)
+    ? bytes
+    : withQuery(bytes, accessQuery(token ?? ""));
   return new Response(served, {
     headers: {
       "content-type": "text/javascript; charset=utf-8",
@@ -1256,20 +1319,21 @@ const scriptJson = (value: unknown): string =>
 // imports from its own module address and swaps in with React Fast
 // Refresh, keeping what the page holds (@grasp-os/sdk's
 // preview-runtime.ts). Only the modules a write changed have new
-// addresses, so only they load. A frame's policy is fixed when its
-// document loads, so it can't name those addresses: a preview's frame,
-// and only one both staged as a preview's build (`preview`, under core's
+// addresses, so only they load. Every frame's policy allows its App
+// modules' directory, which takes them: a preview's frame that takes
+// updates has the preview's scope, shared by every write of its draft.
+// Only a frame both staged as a preview's build (`preview`, under core's
 // MAC) and framed with a token core made for taking updates
-// (`updatingFrameAccess`, the draft as it is now alone), allows its whole
-// module directory (`previewScripts`), the preview's scope under the
-// frame's token. A version opened read-only is the same build at times,
-// so the token decides, not the build. The ways it could fail, and what
-// closes each:
+// (`updatingFrameAccess`, the draft as it is now alone) is served with a
+// directory other than its own build's; a version opened read-only is
+// staged in a scope of its own (`previewFrame`). The ways it could fail,
+// and what closes each:
 //
-// - The production frame's policy loosens: it is built from the same
-//   list without `previewScripts`, and a preview's build has an artifact
-//   of its own profile and preview, never one a production frame is
-//   staged under (pages.ts, `previewFrame`).
+// - The production frame's directory holds more than its build: its
+//   scope is its artifact, the hash of exactly its code, and a preview's
+//   build has an artifact of its own profile and preview, never one a
+//   production frame is staged under (pages.ts, `previewFrame`). A frame
+//   whose scope isn't its own artifact runs only if it takes updates.
 // - The frame runs a module of another App, another chat, or a release
 //   revoked since: the directory is its own preview's scope, under a
 //   token for that scope alone, and core serves a module there only with
@@ -1299,7 +1363,8 @@ const hashSource = async (text: string): Promise<string> => {
  * build that hasn't expired (`frameAccess`); a build core never staged
  * (no manifest) gets a document that runs nothing. The kit's modules
  * come in its import map, by flat name, and the page's module by its
- * address, each address with a token for its scope as a segment of it.
+ * address, each address with a token for its scope in its query. Its
+ * policy names the two directories they are in, whatever their number.
  */
 export const pageFrameResponse = async (
   env: Env,
@@ -1351,8 +1416,15 @@ export const pageFrameResponse = async (
     return refused(404, [], "no-store");
   }
   const manifest = parsed.data;
+  if (manifest.scope !== artifact.data && !(manifest.preview && updating)) {
+    // Its modules sit in a scope shared with other builds (a preview's,
+    // every write of its draft): a policy naming that directory would run
+    // them too, so only a frame taking the draft's updates is served it.
+    return refused(403);
+  }
   const origin = signInConfig(env)?.origin ?? url.origin;
   const access = { now: Date.now(), preview: manifest.preview };
+  const kitScope = await kitScopeOf(manifest.kit);
   const kitQuery = accessQuery(await moduleAccess(env, kitScope, access));
   const appQuery = accessQuery(await moduleAccess(env, manifest.scope, access));
   const appIntegrity = await servedIntegrity(env, manifest, appQuery);
@@ -1365,16 +1437,13 @@ export const pageFrameResponse = async (
   }
   const kitDirectory = `${origin}${pageModulePath}/${kitScope}/`;
   const appDirectory = `${origin}${pageModulePath}/${manifest.scope}/`;
-  // Each address with its token in the query, as the browser asks for it;
-  // the policy names it by its path, which is all a policy matches.
+  // Each address with its token in the query, as the browser asks for it.
   const kit = Object.entries(manifest.kit).map(([name, hash]) => ({
     name,
-    path: `${kitDirectory}${hash}.js`,
     address: `${kitDirectory}${hash}.js${kitQuery}`,
     integrity: manifest.integrity[hash] ?? "",
   }));
   const app = Object.values(manifest.app).map((hash) => ({
-    path: `${appDirectory}${hash}.js`,
     address: `${appDirectory}${hash}.js${appQuery}`,
     integrity: appIntegrity[hash] ?? "",
   }));
@@ -1394,14 +1463,13 @@ export const pageFrameResponse = async (
     runtime: manifest.runtime,
     css: manifest.css,
   });
-  // A preview's build, framed to take its draft's updates: its whole
-  // module directory, for the modules its draft's writes add.
-  const previewScripts = manifest.preview && updating ? [appDirectory] : [];
+  // The document's own inline scripts by hash, and the build's modules by
+  // the directories that hold them and nothing else (see the top).
   const scripts = [
     await hashSource(bootstrap),
     await hashSource(importMap),
-    ...new Set([...kit, ...app].map(({ path }) => path)),
-    ...previewScripts,
+    kitDirectory,
+    appDirectory,
   ];
   // The page's language, one it speaks or English: never text of the
   // page's own in the document.

@@ -7,10 +7,15 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { sealDraftRelease } from "../src/app-releases.ts";
-import { frameKey } from "../src/page-frame.ts";
+import { frameAccess, frameKey } from "../src/page-frame.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { loadFrame, servedAll } from "./page-frames.ts";
+import {
+  allowsScript,
+  frameDocument,
+  loadFrame,
+  servedAll,
+} from "./page-frames.ts";
 import type { LoadedFrame } from "./page-frames.ts";
 import { livePushes, notesFiles, previewDraftsOf } from "./preview-drafts.ts";
 import {
@@ -284,22 +289,37 @@ export const Route = createFileRoute("/")({ component: Desk });
 `;
     await release(builder, app, { "src/routes/index.tsx": page });
     const published = await loadFrame(await builder.api.pages.open(app));
-    const { chatId } = await chatWithDraft(builder, app, {
+    const { chatId, revision, write } = await chatWithDraft(builder, app, {
       "src/routes/index.tsx": page.replace("Desk<", "Drafted<"),
     });
     const opened = await builder.api.chats.preview(chatId, app);
     const preview = await loadFrame(opened);
-    // Its first version, opened read-only: the very same build, which
-    // takes no updates, so its policy allows none.
+    // Its first version, opened read-only: the same code, which takes no
+    // updates, so it is staged apart from the draft's writes.
     const readOnlyOpened = await builder.api.chats.preview(chatId, app, 1);
     const readOnly = await loadFrame(readOnlyOpened);
-    /** Whether `frame`'s policy runs any module of its own directory. */
+    // The draft's next write, staged where the open preview loads it.
+    const next = await write(
+      { "src/routes/index.tsx": page.replace("Desk<", "Written<") },
+      revision
+    );
+    const { entry } = refreshed(
+      await builder.api.chats.previewUpdate(chatId, app, next, {})
+    );
+    const written = new URL(`${entry}.js`, preview?.page.entry).href;
+    /** Whether `frame`'s policy runs the module the write staged. */
     const takesUpdates = (frame: LoadedFrame | null): boolean =>
-      scripts(frame).includes(
-        new URL("./", frame?.page.entry ?? "https://core/").href
-      );
+      frame !== null && allowsScript(frame, written);
+    // The draft's shared scope framed with a token that takes no updates,
+    // which core never hands out: it would name every write's modules.
+    const sharedAsIs = await frameDocument({
+      artifact: opened.artifact,
+      frameToken: await frameAccess(env, opened.artifact),
+    });
     expect({
-      sameBuild: readOnlyOpened.artifact === opened.artifact,
+      sharedAsIs: sharedAsIs.status,
+      // Its own build's directory, a scope of its own.
+      readOnlyDirectory: new URL("./", readOnly?.page.entry).pathname,
       published: takesUpdates(published),
       preview: takesUpdates(preview),
       readOnly: takesUpdates(readOnly),
@@ -314,7 +334,8 @@ export const Route = createFileRoute("/")({ component: Desk });
         )
       ),
     }).toStrictEqual({
-      sameBuild: true,
+      sharedAsIs: 403,
+      readOnlyDirectory: `/page-modules/${readOnlyOpened.artifact}/`,
       published: false,
       preview: true,
       readOnly: false,
