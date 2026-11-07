@@ -146,10 +146,17 @@ const closedSchema = (schema: Json, depth: number): Json | undefined => {
     closedSchema(each, depth + 1);
   const closed: Record<string, Json> = {};
   for (const [key, value] of Object.entries(schema)) {
+    // Left out, as JSON leaves a key whose value is undefined.
+    if (value === undefined) {
+      continue;
+    }
     let served: Json | undefined = value;
     if (key === "properties" && isRecord(value)) {
       const properties: Record<string, Json> = {};
       for (const [name, property] of Object.entries(value)) {
+        if (property === undefined) {
+          continue;
+        }
         const read = deeper(property);
         if (read === undefined) {
           return undefined;

@@ -21,6 +21,9 @@ import { accepts, admissible } from "./connector-schema-check.ts";
 /** A descriptor as plain JSON, before the SDK reads and seals it. */
 type Draft = Record<string, Json>;
 
+/** A contract's JSON Schema, as it is read. */
+type Schema = Readonly<Record<string, Json | undefined>>;
+
 /** The most a schema nests here, as the SDK's descriptors do. */
 const maxDepth = 32;
 
@@ -40,7 +43,7 @@ const base = (kind: string, extra: Draft = {}): Draft => ({
 });
 
 /** A count bound of `schema` as `as`, if it is a nonnegative safe integer. */
-const countOf = (schema: Draft, key: string, as: string): Draft => {
+const countOf = (schema: Schema, key: string, as: string): Draft => {
   const value = schema[key];
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? { [as]: value }
@@ -48,7 +51,7 @@ const countOf = (schema: Draft, key: string, as: string): Draft => {
 };
 
 /** A numeric bound of `schema` as `as`, if it is a finite number. */
-const boundOf = (schema: Draft, key: string, as: string): Draft => {
+const boundOf = (schema: Schema, key: string, as: string): Draft => {
   const value = schema[key];
   return typeof value === "number" && Number.isFinite(value)
     ? { [as]: value }
@@ -75,7 +78,7 @@ const unionOf = (members: readonly Draft[]): Draft | undefined => {
 
 /** An object schema's fields, or a map's value, read. */
 const objectOf = (
-  schema: Draft,
+  schema: Schema,
   depth: number,
   read: Read
 ): Draft | undefined => {
@@ -107,7 +110,7 @@ const objectOf = (
 
 /** One `type` of `schema`, read; undefined for one that can't be. */
 const typedOf = (
-  schema: Draft,
+  schema: Schema,
   type: Json,
   depth: number,
   read: Read

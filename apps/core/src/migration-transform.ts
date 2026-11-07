@@ -11,7 +11,12 @@ import type { MigrationManifest } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { MigrationEvidence } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { canonicalJson, canonicalText, isRecord } from "@grasp-os/shared/json";
+import {
+  canonicalJson,
+  canonicalText,
+  definedFields,
+  isRecord,
+} from "@grasp-os/shared/json";
 import { jsonOf } from "@grasp-os/shared/operations";
 import { documentMaxBytes } from "@grasp-os/shared/stores";
 import type { StoreFields } from "@grasp-os/shared/stores";
@@ -351,7 +356,7 @@ const validated = (
   }
   const json = jsonOf(result.value);
   return isRecord(json)
-    ? { fields: json }
+    ? { fields: definedFields(json) }
     : { issues: ["The value isn't an object of fields"], named: [] };
 };
 

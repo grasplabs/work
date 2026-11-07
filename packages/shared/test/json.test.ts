@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { canonicalJson, valueAtPointer } from "../src/json.ts";
+import {
+  canonicalJson,
+  definedFields,
+  isRecord,
+  valueAtPointer,
+} from "../src/json.ts";
+import type { Json } from "../src/json.ts";
 
 /** `canonicalJson` of what untyped data can hold, past the `Json` type. */
 const untyped = (value: unknown): unknown =>
@@ -105,5 +111,22 @@ describe("JSON Pointers", () => {
         (pointer) => valueAtPointer(document, pointer) !== undefined
       )
     ).toStrictEqual([]);
+  });
+});
+
+describe("JSON records", () => {
+  it("tells an object from an array and null, and keeps only the keys JSON keeps", () => {
+    const record: Json = { kept: 1, missing: undefined, empty: null };
+    expect({
+      record: isRecord(record),
+      list: isRecord([1]),
+      none: isRecord(null),
+      defined: isRecord(record) ? definedFields(record) : undefined,
+    }).toStrictEqual({
+      record: true,
+      list: false,
+      none: false,
+      defined: { kept: 1, empty: null },
+    });
   });
 });

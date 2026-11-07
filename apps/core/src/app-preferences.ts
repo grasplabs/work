@@ -9,7 +9,7 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
-import { canonicalText, isRecord } from "@grasp-os/shared/json";
+import { canonicalText, definedFields, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
@@ -253,7 +253,7 @@ const chosenOf = (stored: StoredPreferences): Record<string, Json> => {
   if (!isRecord(chosen)) {
     throw dataErrors.create("data.incompatible_record");
   }
-  return chosen;
+  return definedFields(chosen);
 };
 
 /** Only the fields of `chosen` the App declares now. */
@@ -376,9 +376,7 @@ export const answerPreferences = async (
     throw dataErrors.create("data.conflict");
   }
   // Only the fields the patch names: one it leaves out stays as it was.
-  const changed = Object.fromEntries(
-    Object.entries(patch).filter(([, value]) => value !== undefined)
-  );
+  const changed = definedFields(patch);
   const before = chosenOf(stored);
   // What the person chose, with the patch, stored as that and never with
   // the defaults: a later default reaches them. Keys the App no longer
