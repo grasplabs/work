@@ -1248,7 +1248,7 @@ export class ChatHarness {
       scope,
       runs: {
         open: async (opening) =>
-          await host().openCodeRun(scope.chatId, opening),
+          await host().openCodeRun(scope.chatId, request.turnId, opening),
         // A run's lines reach the Workspace in order, all before its end:
         // what the Workspace notices of them is ordered with the run.
         close: async (runId, status) => {

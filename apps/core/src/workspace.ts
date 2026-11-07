@@ -2027,9 +2027,10 @@ export class Workspace extends DurableObject<Env> {
   /**
    * Opens a code run of the chat: its lease, and its record, as `running`
    * on this runtime. Its ID is random, and the only way its stubs reach
-   * it. Called by the chat's turn as it starts a run (`runTurn`).
+   * it. Called by the chat's turn `turnId` as it starts a run
+   * (`runTurn`): the turn's draft writes make one version (`saveDraft`).
    */
-  openCodeRun(chatId: ChatId, opening: CodeRunOpening): string {
+  openCodeRun(chatId: ChatId, turnId: string, opening: CodeRunOpening): string {
     const id = crypto.randomUUID();
     this.ctx.storage.transactionSync(() => {
       this.#db
@@ -2037,6 +2038,7 @@ export class Workspace extends DurableObject<Env> {
         .values({
           id,
           chatId,
+          turnId,
           ...opening,
           toolCallId: opening.toolCallId.slice(0, maxToolCallIdChars),
           ...codeRuntime(this.env),
@@ -4128,7 +4130,8 @@ export class Workspace extends DurableObject<Env> {
    * there was none): `false`, and nothing written, when another write
    * landed since, or the chat is gone. Refused, in the same transaction,
    * once the code run `runId` that writes it has closed. Kept as the
-   * draft's next version, too (draft-versions.ts).
+   * version of the run's turn, too (draft-versions.ts): the preview
+   * follows every write, the versions one per turn.
    */
   saveDraft(
     chatId: ChatId,
@@ -4153,14 +4156,17 @@ export class Workspace extends DurableObject<Env> {
         return false;
       }
       const updatedAt = new Date();
-      // The code step that writes it, from the run's own record: never
-      // what the run's code says.
-      const callId =
-        this.#db
-          .select({ callId: chatCodeRuns.toolCallId })
-          .from(chatCodeRuns)
-          .where(eq(chatCodeRuns.id, runId))
-          .get()?.callId ?? null;
+      // The code step and turn that write it, from the run's own record:
+      // never what the run's code says.
+      const run = this.#db
+        .select({
+          callId: chatCodeRuns.toolCallId,
+          turnId: chatCodeRuns.turnId,
+        })
+        .from(chatCodeRuns)
+        .where(eq(chatCodeRuns.id, runId))
+        .get();
+      const callId = run?.callId ?? null;
       this.#db
         .insert(chatDrafts)
         .values({
@@ -4206,7 +4212,7 @@ export class Workspace extends DurableObject<Env> {
         chatId,
         appId,
         this.draft(chatId, appId),
-        { callId },
+        { turnId: run?.turnId ?? null, callId },
         updatedAt
       );
       return true;

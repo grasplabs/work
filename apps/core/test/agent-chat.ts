@@ -221,11 +221,13 @@ export const testRunOpening = {
 };
 
 /**
- * Opens a code run of the chat outside any turn, for a test that writes
- * a draft as the chat's code would: the run every draft write is
- * admitted against.
+ * Opens a code run of the chat for a test that writes a draft as the
+ * chat's code would: the run every draft write is admitted against. In
+ * turn `turnId`, a turn of its own by default, so each such write keeps
+ * a version of its own.
  */
 export const openTestRun = async (
   stub: WorkspaceStub,
-  chatId: ChatId
-): Promise<string> => await stub.openCodeRun(chatId, testRunOpening);
+  chatId: ChatId,
+  turnId: string = crypto.randomUUID()
+): Promise<string> => await stub.openCodeRun(chatId, turnId, testRunOpening);

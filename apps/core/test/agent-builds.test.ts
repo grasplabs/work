@@ -1471,7 +1471,11 @@ export const Route = createFileRoute("/late")({ component: Page });
     const chatId = chatIdSchema.parse(chat.chat.id);
 
     const saved = await runInDurableObject(chat.stub, (instance) => {
-      const run = instance.openCodeRun(chatId, testRunOpening);
+      const run = instance.openCodeRun(
+        chatId,
+        crypto.randomUUID(),
+        testRunOpening
+      );
       return [
         instance.saveDraft(chatId, "app-1", null, { "a.md": "a" }, [], 0, run),
         // Another write read revision 0 too, and lost.
@@ -1498,7 +1502,11 @@ export const Route = createFileRoute("/late")({ component: Page });
     const chatId = chatIdSchema.parse(chat.chat.id);
 
     const saved = await runInDurableObject(chat.stub, (instance) => {
-      const run = instance.openCodeRun(chatId, testRunOpening);
+      const run = instance.openCodeRun(
+        chatId,
+        crypto.randomUUID(),
+        testRunOpening
+      );
       return [
         // A write reads revision 0; meanwhile another creates the draft and
         // writes its only change back as the base has it.
@@ -1534,7 +1542,11 @@ export const Route = createFileRoute("/late")({ component: Page });
     const chatId = chatIdSchema.parse(chat.chat.id);
 
     const saved = await runInDurableObject(chat.stub, (instance) => {
-      const run = instance.openCodeRun(chatId, testRunOpening);
+      const run = instance.openCodeRun(
+        chatId,
+        crypto.randomUUID(),
+        testRunOpening
+      );
       return [
         // A first write reads revision 0; a discard runs before it lands.
         instance.dropDraft(chatId, "app-1", { runId: run }),
@@ -1922,7 +1934,11 @@ export const titles = action({
     await grant();
     const chatId = chatIdSchema.parse(chat.chat.id);
     await runInDurableObject(chat.stub, (instance) => {
-      const run = instance.openCodeRun(chatId, testRunOpening);
+      const run = instance.openCodeRun(
+        chatId,
+        crypto.randomUUID(),
+        testRunOpening
+      );
       return instance.saveDraft(
         chatId,
         existing,
