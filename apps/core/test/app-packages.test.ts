@@ -3,12 +3,13 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { publishVersion } from "../src/app-publish.ts";
+import { commitFiles } from "../src/apps.ts";
 import { decideDependency } from "../src/packages/requests.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
 import { buildAppCode, buildPages } from "../src/pages.ts";
 import { appDefinition } from "./app-definitions.ts";
 import { named, publish, reportToOsv, rescannedUntil } from "./npm.ts";
-import { appWith, calledAs, seal } from "./sealed-apps.ts";
+import { appWith, calledAs, seal, sweptAway } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { outcome } from "./sign-in.ts";
 
@@ -294,6 +295,56 @@ export const Route = createFileRoute("/")({ component: () => <p>{String(renderTo
     expect({ first: first.ok, again }).toStrictEqual({
       first: true,
       again: "dependency.malware",
+    });
+  });
+
+  it("replaced by a later approval, are still scanned while a kept release bundles them, and withdrawn once it is swept", async () => {
+    const [page, server] = [await chart(), await maths()];
+    const files = appFiles(page, server);
+    const fixture = await appWith(files, "Charts");
+    const first = await approved(fixture, [page, server]);
+    await seal(fixture, 1);
+    await approved(fixture, [await chart()]);
+    await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      {
+        ...files,
+        "src/routes/index.tsx": `${files["src/routes/index.tsx"]}// Again.\n`,
+      },
+      "Again"
+    );
+    await seal(fixture, 2);
+    // Release 1, the one bundling the replaced graph, held past retention.
+    const hold = env.DB.prepare(
+      "INSERT INTO sdk_release_pins (app_id, version, holder_kind, holder_id, pinned_at) VALUES (?, 1, 'hold', 'test', ?)"
+    ).bind(fixture.app, Date.now());
+    await hold.run();
+    const statusOf = async () =>
+      await env.DB.prepare(
+        "SELECT status, malware_checked_at AS scanned FROM dependency_requests WHERE id = ?"
+      )
+        .bind(first.id)
+        .first<{ status: string; scanned: number | null }>();
+    const at = new Date();
+
+    await rescannedUntil(first.id, at);
+    // Another release of the App goes: release 1 still bundles the graph.
+    await sweptAway(fixture.app, 2);
+    const kept = await statusOf();
+    await env.DB.prepare("DELETE FROM sdk_release_pins WHERE app_id = ?")
+      .bind(fixture.app)
+      .run();
+    await sweptAway(fixture.app, 1);
+    const swept = await statusOf();
+
+    expect({
+      kept: { status: kept?.status, scanned: kept?.scanned === at.getTime() },
+      swept: swept?.status,
+    }).toStrictEqual({
+      kept: { status: "retired", scanned: true },
+      swept: "revoked",
     });
   });
 

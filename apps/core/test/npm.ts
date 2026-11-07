@@ -229,7 +229,8 @@ export const rescannedUntil = async (
     )
       .bind(request)
       .first<{ status: string; scanned: number | null }>();
-    if (row?.status !== "approved" || (row.scanned ?? 0) >= at.getTime()) {
+    const scanning = row?.status === "approved" || row?.status === "retired";
+    if (!scanning || (row.scanned ?? 0) >= at.getTime()) {
       return;
     }
   }

@@ -122,6 +122,43 @@ export const withdrawnWith = (
       ),
   ] as const;
 
+/**
+ * The statements that withdraw App `app`'s replaced approvals no kept
+ * release runs on any more (none of its releases bundles their graph's
+ * modules, `packageModuleName`), for the batch of release retention that
+ * deletes a release: the clock then scans only what can still run.
+ * Audited by core.
+ */
+export const unusedRetiredWithdrawn = (
+  db: DrizzleD1Database,
+  app: string,
+  at: Date
+) =>
+  [
+    db
+      .update(dependencyRequests)
+      .set({
+        status: "revoked",
+        endedAt: at,
+        endedReason: "Withdrawn: no kept release runs on it.",
+      })
+      .where(
+        and(
+          ofSubject({ type: "app", id: app }),
+          eq(dependencyRequests.status, "retired"),
+          sql`NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS kept
+            WHERE kept.app_id = ${app}
+              AND instr(kept.manifest, 'pkg~' || ${dependencyRequests.graphHash} || '~') > 0)`
+        )
+      ),
+    outboxedIfChanged(db, {
+      actor: { type: "system" },
+      action: "dependency.withdrawn",
+      target: auditTargetOf({ type: "app", id: app }),
+      detail: { app, reason: "unused" },
+    }),
+  ] as const;
+
 /** The request of `subject` in `status`, newest decision first, if any. */
 export const latest = async (
   env: Pick<Env, "DB">,
