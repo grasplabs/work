@@ -30,6 +30,7 @@ import type {
 import type {
   DataModelChange,
   DraftDataModel,
+  IndexUse,
 } from "@grasp-os/shared/data-model";
 import { authErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { chatIdSchema } from "@grasp-os/shared/ids";
@@ -96,7 +97,7 @@ import {
   windowCharger,
   withinAnswer,
 } from "./pages-rpc.ts";
-import { versionPages } from "./pages.ts";
+import { buildAppCode, buildPages, versionPages } from "./pages.ts";
 import type { BuiltPage } from "./pages.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { relayPreviewStream } from "./preview-stream-relay.ts";
@@ -718,6 +719,34 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   }
 
   /**
+   * What uses each of the draft's indexes, from what the compiler found
+   * building its server code and its pages (cached by their files, as
+   * the preview and the draft's check build them): none where a build
+   * fails, or can't run now, which the data model is shown without.
+   */
+  async #indexUses(
+    app: string,
+    files: ReadonlyMap<string, string>
+  ): Promise<IndexUse[]> {
+    const given = Object.fromEntries(files);
+    try {
+      const [code, pages] = await Promise.all([
+        buildAppCode(this.#env, given, app),
+        // Compiled for what each page calls, not type-checked: a page that
+        // calls a function reads as calling it whether or not it builds.
+        buildPages(this.#env, given, app, {
+          profile: "preview",
+          checks: false,
+        }),
+      ]);
+      return usesOf(code.ok ? (code.indexReads ?? []) : [], pages.calls ?? {});
+    } catch (error) {
+      log.warn("data_model.index_uses_failed", { app, ...errorFields(error) });
+      return [];
+    }
+  }
+
+  /**
    * The data model of the chat's draft of `app` (its definition), and
    * what publishing it does to the App's records: only while the person
    * builds the App, as for its files.
@@ -738,7 +767,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       return {
         model: dataModelOf(held.own),
         plan: definitionPlan(held.before, held.own),
-        uses: usesOf(held.files),
+        uses: await this.#indexUses(found.id, held.files),
       };
     });
   }
@@ -763,14 +792,12 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         workspaceId: personalWorkspaceId(by.userId),
         chatId: await this.#ownChat(by.userId, chatId),
       };
-      let read = new Map<string, string>();
       const defined = await defineInDraft(
         this.#env,
         scope,
         found,
         operation,
         async (draft, files, changes) => {
-          read = files;
           if (!preview) {
             await saveDraftChanges(
               this.#env,
@@ -792,7 +819,6 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
             model: dataModelOf(defined.definition),
             plan: defined.plan,
             change: defined.change,
-            uses: usesOf(read),
           }
         : defined;
     });

@@ -145,7 +145,7 @@ const shown = async (
       if (!preview) {
         held = after;
       }
-      return { ok: true, model: after, plan, change: plan, uses };
+      return { ok: true, model: after, plan, change: plan };
     },
   };
   // The live App: no version yet, so no records to read.

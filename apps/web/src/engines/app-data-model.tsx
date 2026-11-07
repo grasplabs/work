@@ -454,7 +454,12 @@ export const AppDataModel = ({
     app,
     chatId,
     onMade: (next) => {
-      setMade({ ...next, revision });
+      // What uses the indexes comes with the next read of the draft.
+      setMade({
+        ...next,
+        uses: read?.state === "ready" ? read.data.uses : (made?.uses ?? []),
+        revision,
+      });
     },
   });
   let shown: DraftDataModel | undefined;

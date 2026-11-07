@@ -26,5 +26,3 @@ export {
 } from "./definition-operations.ts";
 export type { DefinitionOperation } from "./definition-operations.ts";
 export { definitionSources, validatorSource } from "./definition-source.ts";
-export { indexUsesOf } from "./index-uses.ts";
-export type { IndexUse } from "./index-uses.ts";

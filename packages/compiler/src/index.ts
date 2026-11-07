@@ -37,6 +37,7 @@ export type {
   ExpressionTypeError,
   TypedExpression,
 } from "./expression-types.ts";
+export type { IndexRead } from "./index-uses.ts";
 export type {
   AppCodeBuild,
   CompileTarget,

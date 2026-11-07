@@ -497,7 +497,7 @@ export const useModelChanges = ({
 }: {
   app: string;
   chatId: string;
-  onMade: (made: DraftDataModel) => void;
+  onMade: (made: Omit<DraftDataModel, "uses">) => void;
 }) => {
   const action = useCoreAction();
   const [problem, setProblem] = useState<string>();
@@ -523,7 +523,7 @@ export const useModelChanges = ({
     setProblem(undefined);
     review?.settle(true);
     setReview(undefined);
-    onMade({ model: made.model, plan: made.plan, uses: made.uses });
+    onMade({ model: made.model, plan: made.plan });
     return true;
   };
   /**

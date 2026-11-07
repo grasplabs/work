@@ -1,3 +1,4 @@
+import type { IndexRead } from "@grasp-os/compiler";
 import {
   definitionManifest,
   definitionPath,
@@ -5,7 +6,6 @@ import {
   definitionText,
   emptyDefinition,
   generatedFiles,
-  indexUsesOf,
   tryReadDefinition,
   validatorSource,
 } from "@grasp-os/sdk/definition";
@@ -246,9 +246,46 @@ export const definitionPlan = (
   };
 };
 
-/** Which index each of the App's functions reads, from its files (path to text). */
-export const usesOf = (files: ReadonlyMap<string, string>): IndexUse[] =>
-  indexUsesOf(files).map((use) => ({ ...use, pages: [...use.pages] }));
+/** `src/routes/tasks.$taskId.tsx` as its route's path: `/tasks/$taskId`. */
+const routeOf = (path: string): string =>
+  `/${path
+    .slice("src/routes/".length)
+    .replace(/\.tsx?$/u, "")
+    .replaceAll(".", "/")
+    .replace(/(?:^|\/)index$/u, "")}`;
+
+/**
+ * What uses each index, from what the compiler found as it built the
+ * App's code: the indexes its functions read (`reads`, once each), and
+ * the pages, by route, whose files call each function (`calls`, by path).
+ */
+export const usesOf = (
+  reads: readonly IndexRead[],
+  calls: Readonly<Record<string, readonly string[]>>
+): IndexUse[] => {
+  const routes = Object.entries(calls).filter(
+    ([path]) => path.startsWith("src/routes/") && !path.includes("__root")
+  );
+  const seen = new Set<string>();
+  return reads.flatMap(({ table, index, query }) => {
+    const key = JSON.stringify([table, index, query]);
+    if (seen.has(key)) {
+      return [];
+    }
+    seen.add(key);
+    return [
+      {
+        table,
+        index,
+        query,
+        pages: routes
+          .filter(([, called]) => called.includes(query))
+          .map(([path]) => routeOf(path))
+          .toSorted(),
+      },
+    ];
+  });
+};
 
 /** The entries of `list` that `before` lacks. */
 const freshIn = <T>(list: readonly T[], before: readonly T[]): T[] => {

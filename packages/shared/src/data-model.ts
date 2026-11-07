@@ -166,7 +166,7 @@ export type DataModelChange =
       ok: true;
       /** What this change alone does: from the draft before it to after it. */
       change: DefinitionPlan;
-    } & DraftDataModel);
+    } & Omit<DraftDataModel, "uses">);
 
 /** A value as code writes it: JSON is a JavaScript literal. */
 const literal = (value: string): string => JSON.stringify(value);
