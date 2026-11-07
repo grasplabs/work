@@ -58,7 +58,6 @@ export default defineConfig({
       // (each built-in's own tsconfig.json).
       "apps/core/blueprints/intake/files/src/**",
       "apps/core/blueprints/workflow-map/files/src/**",
-      "apps/core/blueprints/board-page/files/src/**",
       "apps/core/blueprints/kanban-board/files/src/**",
       "apps/core/blueprints/crm/files/src/**",
       "apps/core/blueprints/approvals/files/src/**",
