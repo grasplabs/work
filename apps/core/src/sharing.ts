@@ -16,8 +16,8 @@ import type { Person } from "./project-access.ts";
 import { viaProjectSql } from "./project-sql.ts";
 
 // Sharing a resource with people and teams of the organization, the same
-// for every kind that is shared (Apps, app-members.ts; business stores,
-// data-stores.ts): who a member row is, who is still a member, whom a
+// for every kind that is shared (Apps, app-members.ts; workflows,
+// workflow-resources.ts): who a member row is, who is still a member, whom a
 // resource can be shared with, that Grasp staff never share, and what the
 // audit log records. Each kind keeps its own table of members, with a
 // `member_type` and a `member_id` column. Apps and workflows may also be

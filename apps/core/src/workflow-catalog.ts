@@ -20,7 +20,7 @@ import {
   resolveContract,
 } from "@grasp-os/workflow-schema/catalog";
 import type { CatalogContract } from "@grasp-os/workflow-schema/catalog";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -38,7 +38,7 @@ import {
 import { takesPageAnswers } from "./workflows/exact-values.ts";
 
 // The host catalog of contracts independent workflows bind besides each
-// other (platform specification 13.2): operation, connector, model,
+// other (platform specification 13.2): connector, model,
 // decision and event contracts, each a key and the SDK descriptors of
 // what a call passes and returns, or of each event type's data; a
 // connector's operation may instead carry a native connector's own JSON
@@ -438,6 +438,16 @@ export const ensureReleaseContract = async (
   }
 };
 
+/**
+ * That a catalog contract is of a kind still served: an `operation`
+ * contract (an App's store operation) left from before each App's store
+ * was its own is read as not there, and a later release removes it with
+ * its audit event.
+ */
+const servedKind = inArray(workflowCatalogContracts.kind, [
+  ...catalogBindingKinds,
+]);
+
 /** The catalog's contracts, by key, for builders. */
 export const catalogContracts = async (
   env: Env,
@@ -447,6 +457,7 @@ export const catalogContracts = async (
   const rows = await drizzle(env.DB)
     .select()
     .from(workflowCatalogContracts)
+    .where(servedKind)
     .orderBy(asc(workflowCatalogContracts.key));
   return rows.map(entryOf);
 };
@@ -469,7 +480,7 @@ export const resolveCatalogKeys = async (
     .from(workflowCatalogContracts)
     // As one bound parameter: a version names at most 64, but an App's
     // bound workflows together may name more than D1's 100.
-    .where(inList(workflowCatalogContracts.key, keys));
+    .where(and(inList(workflowCatalogContracts.key, keys), servedKind));
   for (const row of rows) {
     // oxlint-disable-next-line no-await-in-loop -- one hash per named contract
     if ((await sha256Hex(row.contract)) === row.fingerprint) {

@@ -21,19 +21,13 @@ import {
   setCurrentVersion,
 } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import {
-  createStore,
-  deleteStore,
-  openStore,
-  shareStore,
-  storeManagers,
-  unshareStore,
-} from "../src/data-stores.ts";
-import { appDefaultStores, sdkStoreOwners } from "../src/db/core/schema.ts";
+import { deleteStore, openStore } from "../src/data-stores.ts";
+import { appDefaultStores } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { abandonStoreBackfill, storeBackfill } from "../src/store-abandon.ts";
 import { appDefinition } from "./app-definitions.ts";
 import type { AppSpec } from "./app-definitions.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { commit as commitTo } from "./pending-stores.ts";
@@ -268,7 +262,7 @@ describe(
   "activating a version of spec 8's layout",
   { timeout: 120_000 },
   () => {
-    it("seals it on a default store the host creates, and its functions run", async () => {
+    it("seals it on the App's own store, which the host creates, and its functions run", async () => {
       const { owner, app } = await appWith(notesFiles());
       const activated = await activateVersion(env, owner, app, 1);
       expect(activated.currentVersion).toBe(1);
@@ -276,12 +270,6 @@ describe(
       const release = await loadRelease(env, app, 1);
       const [store] = await defaultStores(app);
       expect(release.store?.storeId).toBe(store?.storeId);
-      const [owned] = await drizzle(env.DB)
-        .select()
-        .from(sdkStoreOwners)
-        .where(eq(sdkStoreOwners.appId, app))
-        .all();
-      expect(owned?.storeId).toBe(store?.storeId);
 
       await expect(
         call(owner, release, "notes.create", { title: "Launch" })
@@ -313,7 +301,7 @@ describe(
       });
     });
 
-    it("lets another builder of the App activate on the default store the first one created", async () => {
+    it("lets another builder of the App activate on the store the first one's activation created", async () => {
       const { owner, app } = await appWith(notesFiles());
       await activateVersion(env, owner, app, 1);
       const first = await loadRelease(env, app, 1);
@@ -335,22 +323,16 @@ describe(
       ]).toStrictEqual([2, true, { ok: true, value: ["Shared"] }]);
     });
 
-    it("is refused to someone who builds no App, sealing directly onto its store", async () => {
+    it("is refused to someone who doesn't build the App, sealing it directly", async () => {
       const { owner, app } = await appWith(notesFiles());
-      await activateVersion(env, owner, app, 1);
-      const [recorded] = await defaultStores(app);
+      await commitFiles(env, owner, app, notesFiles("Notes 2"), "Second");
       const stranger = await person("builder");
       await expect(
         failure(
-          async () =>
-            await sealRelease(env, {
-              app,
-              version: 1,
-              store: storeIdSchema.parse(recorded?.storeId),
-              by: stranger,
-            })
+          async () => await sealRelease(env, { app, version: 2, by: stranger })
         )
       ).resolves.toBe("app.not_found");
+      await expect(defaultStores(app)).resolves.toHaveLength(0);
     });
 
     it("creates no store for an App without tables", async () => {
@@ -381,7 +363,7 @@ describe(
       await expect(currentOf(app)).resolves.toBeNull();
     });
 
-    it("gives two first activations at once one store, claimed once", async () => {
+    it("gives two first activations at once one store, listed and audited once", async () => {
       const { owner, app } = await appWith(notesFiles());
       const outcomes = await Promise.all([
         failure(async () => await activateVersion(env, owner, app, 1)),
@@ -390,12 +372,11 @@ describe(
       expect(outcomes).toContain("ok");
       const stores = await defaultStores(app);
       expect(stores).toHaveLength(1);
-      const claims = await drizzle(env.DB)
-        .select()
-        .from(sdkStoreOwners)
-        .where(eq(sdkStoreOwners.appId, app))
-        .all();
-      expect(claims.map(({ storeId }) => storeId)).toStrictEqual([
+      const events = await allEvents();
+      const created = events.filter(
+        (event) => event.action === "store.created" && event.detail?.app === app
+      );
+      expect(created.map((event) => event.target?.id)).toStrictEqual([
         stores[0]?.storeId,
       ]);
       await expect(storeOf(app, 1)).resolves.toMatchObject({
@@ -510,11 +491,11 @@ describe(
   }
 );
 
-/** Whom `by` sees listed as managing store `store`, by ID. */
-const managerIds = async (by: Acting, store: string): Promise<string[]> => {
-  const managers = await storeManagers(env, by, store);
-  return managers.map(({ id }) => id);
-};
+/** What deleting store `store` comes to for `by`: who manages it gets past `managedBy`. */
+const deleting = async (by: Acting, store: string): Promise<string> =>
+  await failure(async () => {
+    await deleteStore(env, by, store);
+  });
 
 /** Makes `userId` a user of the organization, a role that doesn't build. */
 const demote = async (userId: string): Promise<void> => {
@@ -523,11 +504,15 @@ const demote = async (userId: string): Promise<void> => {
     .run();
 };
 
-describe("an App's default store", { timeout: 120_000 }, () => {
+// Who manages an App's store is who builds the App, decided on each call:
+// a store is never shared on its own. Deleting it is how that shows: one
+// who manages it is refused only because a kept release binds it
+// (`data.store_bound`), anyone else as for a store that doesn't exist.
+describe("an App's store", { timeout: 120_000 }, () => {
   it("is managed by whoever builds the App, not by the builder who first activated once they leave", async () => {
     const { owner, app } = await appWith(notesFiles());
-    // A builder the App is shared with activates first, so the store is
-    // theirs as `createStore` records it.
+    // A builder the App is shared with activates first, so the store's
+    // inventory row names them as its creator.
     const first = await person("builder");
     await addMember(env, owner, app, {
       type: "person",
@@ -537,82 +522,23 @@ describe("an App's default store", { timeout: 120_000 }, () => {
     await activateVersion(env, first, app, 1);
     const [recorded] = await defaultStores(app);
     const store = recorded?.storeId ?? "";
-    const whileBuilding = await storeManagers(env, first, store);
+    const whileBuilding = await deleting(first, store);
     await removeMember(env, owner, app, { type: "person", id: first.userId });
     const admin = await person("admin");
     expect([
-      whileBuilding.map(({ id }) => id),
-      await failure(async () => await storeManagers(env, first, store)),
-      await failure(async () => {
-        await deleteStore(env, first, store);
-      }),
-      await managerIds(owner, store),
-      await managerIds(admin, store),
+      whileBuilding,
+      await deleting(first, store),
+      await deleting(owner, store),
+      await deleting(admin, store),
     ]).toStrictEqual([
-      [owner.userId, first.userId],
+      "data.store_bound",
       "data.store_unavailable",
-      "data.store_unavailable",
-      // The owner is left, as an admin sees it too.
-      [owner.userId],
-      [owner.userId],
+      "data.store_bound",
+      "data.store_bound",
     ]);
   });
 
-  it("lists as managers only who builds the App now, its owner included", async () => {
-    const { owner, app } = await appWith(notesFiles());
-    await activateVersion(env, owner, app, 1);
-    const [recorded] = await defaultStores(app);
-    const store = recorded?.storeId ?? "";
-    const capped = await person("builder");
-    const builds = await person("builder");
-    for (const member of [capped, builds]) {
-      // oxlint-disable-next-line no-await-in-loop -- shared in turn, so the order they are listed in is theirs
-      await addMember(env, owner, app, {
-        type: "person",
-        id: member.userId,
-        role: "builder",
-      });
-    }
-    const admin = await person("admin");
-    const before = await managerIds(admin, store);
-    // Their role in the organization caps their role in the App.
-    await demote(capped.userId);
-    const memberCapped = await managerIds(admin, store);
-    await demote(owner.userId);
-    expect([
-      before,
-      memberCapped,
-      await managerIds(admin, store),
-    ]).toStrictEqual([
-      [owner.userId, capped.userId, builds.userId],
-      [owner.userId, builds.userId],
-      [builds.userId],
-    ]);
-  });
-
-  it("is refused to everyone, never managed as a plain store, once its App row is gone", async () => {
-    const creator = await person("builder");
-    const store = await createStore(env, creator);
-    await drizzle(env.DB).insert(appDefaultStores).values({
-      appId: "app_00000000000000000000missing",
-      storeId: store,
-      createdAt: new Date(),
-    });
-    const admin = await person("admin");
-    expect([
-      await failure(async () => await storeManagers(env, creator, store)),
-      await failure(async () => await storeManagers(env, admin, store)),
-      await failure(async () => {
-        await deleteStore(env, creator, store);
-      }),
-    ]).toStrictEqual([
-      "data.store_unavailable",
-      "data.store_unavailable",
-      "data.store_unavailable",
-    ]);
-  });
-
-  it("is managed by none of the App's users, and shared or unshared only with the App", async () => {
+  it("is managed by none of the App's users, nor anyone outside it, nor a builder whose organization role no longer builds", async () => {
     const { owner, app } = await appWith(notesFiles());
     await activateVersion(env, owner, app, 1);
     const [recorded] = await defaultStores(app);
@@ -624,27 +550,36 @@ describe("an App's default store", { timeout: 120_000 }, () => {
       role: "user",
     });
     const outsider = await person("builder");
+    const capped = await person("builder");
+    await addMember(env, owner, app, {
+      type: "person",
+      id: capped.userId,
+      role: "builder",
+    });
+    await demote(capped.userId);
     expect([
-      await failure(async () => await storeManagers(env, reader, store)),
-      await failure(async () => {
-        await shareStore(env, owner, store, {
-          type: "person",
-          id: outsider.userId,
-        });
-      }),
-      await failure(async () => {
-        await unshareStore(env, owner, store, {
-          type: "person",
-          id: outsider.userId,
-        });
-      }),
-      await failure(async () => await storeManagers(env, outsider, store)),
+      await deleting(reader, store),
+      await deleting(outsider, store),
+      await deleting({ ...capped, role: "user" }, store),
     ]).toStrictEqual([
       "data.store_unavailable",
-      "data.store_managed_by_app",
-      "data.store_managed_by_app",
+      "data.store_unavailable",
       "data.store_unavailable",
     ]);
+  });
+
+  it("is refused to everyone once its App row is gone", async () => {
+    const creator = await person("builder");
+    const store = await storeOfNewApp(env, creator);
+    await drizzle(env.DB)
+      .update(appDefaultStores)
+      .set({ appId: "app_00000000000000000000missing" })
+      .where(eq(appDefaultStores.storeId, store));
+    const admin = await person("admin");
+    expect([
+      await deleting(creator, store),
+      await deleting(admin, store),
+    ]).toStrictEqual(["data.store_unavailable", "data.store_unavailable"]);
   });
 });
 

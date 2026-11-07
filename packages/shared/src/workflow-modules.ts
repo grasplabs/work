@@ -14,7 +14,6 @@ export const workflowModulePattern =
 /** The kinds of the workflow's own bindings an action may use. */
 export const actionUseKinds = [
   "connector",
-  "operation",
   "model",
   "knowledge",
   "template",
@@ -60,12 +59,6 @@ export const connectorUseSchema = z.strictObject({
     .min(1)
     .max(workflowModuleLimits.actionUseOperations)
     .refine((operations) => new Set(operations).size === operations.length),
-});
-
-/** An operation binding's use: an App export, one operation, nothing more. */
-export const operationUseSchema = z.strictObject({
-  alias: z.string().regex(actionUseAliasPattern),
-  kind: z.literal("operation"),
 });
 
 /**
@@ -117,7 +110,6 @@ export const templateUseSchema = z.strictObject({
 /**
  * A binding an action declares it uses, as its sealed contract holds it
  * (GRA-704): a connector's with the exact operations it calls, each once;
- * an operation binding's (an App export, one operation) with nothing more;
  * a model binding's with the shape its calls answer; a knowledge binding's
  * with the operations of its collection it calls; a template binding's
  * with nothing more; a files binding's with the operations on the run's
@@ -125,7 +117,6 @@ export const templateUseSchema = z.strictObject({
  */
 export const actionUseSchema = z.discriminatedUnion("kind", [
   connectorUseSchema,
-  operationUseSchema,
   knowledgeUseSchema,
   templateUseSchema,
   filesUseSchema,
@@ -150,7 +141,6 @@ export type SealedUse =
       readonly kind: "connector";
       readonly operations: readonly string[];
     }
-  | { readonly alias: string; readonly kind: "operation" }
   | { readonly alias: string; readonly kind: "model"; readonly output: string }
   | {
       readonly alias: string;

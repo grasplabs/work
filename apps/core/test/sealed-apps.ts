@@ -11,7 +11,7 @@ import { sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, shareStore } from "../src/data-stores.ts";
+import { appStoreFor } from "../src/data-stores.ts";
 import {
   releaseGraceMs,
   releaseRetentionMs,
@@ -20,7 +20,7 @@ import {
 import { published } from "./apps.ts";
 
 // Apps of spec 8's layout as the release tests build them: a builder's
-// App committed with given files, a store for it, and its seal.
+// App committed with given files, its store, and its seal.
 
 /** A person of the organization in `role`, as their session has them. */
 export const person = async (role: Role): Promise<Acting & Identity> => {
@@ -53,7 +53,7 @@ export interface Fixture {
   readonly store: StoreId;
 }
 
-/** A builder's App `name` with `files` as its first version, and a store for it. */
+/** A builder's App `name` with `files` as its first version, and its store. */
 export const appWith = async (
   files: Record<string, string>,
   name = "Notes",
@@ -66,29 +66,14 @@ export const appWith = async (
   // alone (app-status.ts), and these tests aren't about its status.
   await published(id);
   await commitFiles(env, owner, id, files, "First version");
-  return { owner, app: id, store: await createStore(env, owner) };
+  return { owner, app: id, store: await appStoreFor(env, owner, id) };
 };
 
-/**
- * Shares `fixture`'s store with `other`'s owner, to manage: so `other`'s
- * owner may bind it to a release too.
- */
-export const shareStoreWith = async (
-  fixture: Fixture,
-  other: Fixture
-): Promise<void> => {
-  await shareStore(env, fixture.owner, fixture.store, {
-    type: "person",
-    id: other.owner.userId,
-  });
-};
-
-/** Seals the fixture's `version`, with its store. */
+/** Seals the fixture's `version`, on its App's store. */
 export const seal = async (
-  { owner, app, store }: Fixture,
+  { owner, app }: Fixture,
   version = 1
-): Promise<Release> =>
-  await sealRelease(env, { app, version, store, by: owner });
+): Promise<Release> => await sealRelease(env, { app, version, by: owner });
 
 /** A public function of an App's release, as a page names it. */
 export interface FunctionName {

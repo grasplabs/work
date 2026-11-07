@@ -261,11 +261,6 @@ const typeRules: readonly {
   // the version its binding pins, and an admin publishing a version.
   { action: "resource.template.read", type: "read" },
   { action: "resource.template", type: "config" },
-  // A business store's public operations called by another App or a
-  // workflow (core's src/store-operations.ts): each mutation it calls,
-  // and each call refused.
-  { action: "store.operation.called", type: "action" },
-  { action: "store.operation.refused", type: "permission" },
   // A store's cascade job deleting, after their commit, the records a
   // deletion reached past one commit's bound (core's src/store-host.ts):
   // started with the commit, each batch, its end, and a job set aside

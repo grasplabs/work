@@ -93,7 +93,7 @@ const rootTypes = (
 /**
  * What `checked`'s expressions read, typed, and their sources. A `do`
  * step's output is `output(step)`'s, its call's contract's (a connector
- * operation's, a catalog operation's), when it has one; an `agent` step's
+ * operation's, an action's or a calculation's), when it has one; an `agent` step's
  * is the answer its `output` schema declares.
  */
 export const expressionTypeRequest = (

@@ -146,7 +146,6 @@ export const everyBinding = () => ({
   $schema: "https://grasp.work/schemas/grasp-workflow/1.json",
   bindings: {
     mail: { kind: "connector", contract: "composio.mail@1" },
-    lookup: { kind: "operation", contract: "crm.lookup@1" },
     total: { kind: "compute", contract: "local:code/total.ts#total" },
     note: { kind: "action", contract: "local:code/note.ts#note" },
   },
@@ -157,12 +156,6 @@ export const everyBinding = () => ({
       binding: "mail",
       operation: "mail.send",
       arguments: { to: { $expr: "input.who" }, subject: "Hi" },
-    },
-    {
-      id: "find",
-      type: "do",
-      binding: "lookup",
-      arguments: { name: { $expr: "input.who" } },
     },
     { id: "add", type: "do", binding: "total", arguments: [1, 2, 3] },
     {

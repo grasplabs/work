@@ -121,6 +121,7 @@ import {
   adoptReservations,
   publicationReservation,
   releaseBuild,
+  requireServedBindingKinds,
   storeBuild,
 } from "./workflow-builds.ts";
 import type { CompiledBuild, SealedBuild } from "./workflow-builds.ts";
@@ -1315,6 +1316,8 @@ const manifestBindingsSchema = z.object({
 const sealedBindingsOf = (
   row: typeof workflowResourceVersions.$inferSelect
 ): PinnedContract[] => {
+  // A version binding a kind no longer served never gets here: its review
+  // lists it as refused (`removedBindingKindOf`).
   const parsed = manifestBindingsSchema.safeParse(JSON.parse(row.manifest));
   if (!parsed.success) {
     throw corrupt(row.workflowResourceId, row.version);
@@ -1404,8 +1407,8 @@ const asksModelInTasks = (tasks: readonly SealedTask[]): boolean =>
  *
  * - each action that asks a model: its uses that may write;
  * - the workflow, when its build holds any model task: every write its
- *   call tasks may make, a connector task's operation, an operation task's
- *   store operation, and the writing uses of each action a task calls. Conservative:
+ *   call tasks may make, a connector task's operation and the writing uses
+ *   of each action a task calls. Conservative:
  *   any model task counts as reaching every call, whatever their order or
  *   the flow of data between them.
  *
@@ -1413,10 +1416,7 @@ const asksModelInTasks = (tasks: readonly SealedTask[]): boolean =>
  * its binding pinned states it is read-only, and only while the catalog
  * still holds that exact contract (its fingerprint the one the version
  * sealed): a binding, contract or operation that isn't there, or a
- * contract that changed, counts as a write. An operation binding's use (a
- * store operation) always counts: its contract states nothing about
- * reading.
- * So the flag shows whenever a write can't be ruled out.
+ * contract that changed, counts as a write. So the flag shows whenever a write can't be ruled out.
  */
 const steeringReview = async (
   lookup: CatalogLookup,
@@ -1460,14 +1460,8 @@ const steeringReview = async (
   };
   const steered = (
     use: WorkflowVersionAction["uses"][number]
-  ): SteeredWrite[] => {
-    if (use.kind === "operation") {
-      return [{ alias: use.alias, kind: "operation" }];
-    }
-    return use.kind === "connector"
-      ? connectorWrites(use.alias, use.operations)
-      : [];
-  };
+  ): SteeredWrite[] =>
+    use.kind === "connector" ? connectorWrites(use.alias, use.operations) : [];
   const taskWrites = (task: SealedTask): SteeredWrite[] => {
     if (task.kind !== "call") {
       return [];
@@ -1476,14 +1470,11 @@ const steeringReview = async (
     if (call.name === "grasp.connector") {
       return connectorWrites(call.binding, [call.operation]);
     }
-    if (call.name === "grasp.operation") {
-      return [{ alias: call.binding, kind: "operation" }];
-    }
     if (call.name === "grasp.action") {
       const action = actions.find(({ binding }) => binding === call.binding);
       // An action the version doesn't seal: nothing to rule out.
       return action === undefined
-        ? [{ alias: call.binding, kind: "operation" }]
+        ? [{ alias: call.binding, kind: "action" }]
         : action.uses.flatMap(steered);
     }
     // A sleep, a decision, a calculation (pure), an event and a model call
@@ -1524,6 +1515,30 @@ const versionTasksOf = async (
 };
 
 /**
+ * Why version `row` is refused as one to publish again, if it binds a kind
+ * no longer served (`requireServedBindingKinds`): a listing shows it so,
+ * where its run, start, review and export are refused.
+ */
+const removedBindingKindOf = (
+  row: typeof workflowResourceVersions.$inferSelect
+): WorkflowResourceVersion["refused"] => {
+  try {
+    requireServedBindingKinds(parsedJson(row.manifest));
+    return undefined;
+  } catch (error) {
+    if (
+      workflowResourceErrors.codeOf(error) !== "workflow.binding_kind_removed"
+    ) {
+      throw error;
+    }
+    return {
+      code: "workflow.binding_kind_removed",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
+/**
  * A version's row, as the registry answers it: only once its manifest
  * still hashes to what was sealed, since what its actions may do and its
  * build are read from it (`workflow.version_corrupt` otherwise).
@@ -1536,6 +1551,25 @@ const versionOf = async (
 ): Promise<WorkflowResourceVersion> => {
   if ((await sha256Hex(row.manifest)) !== row.manifestHash) {
     throw corrupt(row.workflowResourceId, row.version);
+  }
+  const refused = removedBindingKindOf(row);
+  if (refused !== undefined) {
+    return {
+      resourceId: row.workflowResourceId,
+      version: row.version,
+      definitionVersion: row.definitionVersion,
+      profile: row.profileVersion,
+      definitionHash: row.definitionJsonHash,
+      contractHash: row.contractHash,
+      manifestHash: row.manifestHash,
+      bindings,
+      actions: [],
+      modelSteeredWrites: [],
+      build: null,
+      refused,
+      author: row.authorId,
+      createdAt: row.createdAt.toISOString(),
+    };
   }
   const sealedBindings = sealedBindingsOf(row);
   const review = await steeringReview(
@@ -2467,7 +2501,9 @@ export const exportedWorkflowVersion = async (
     version,
     row.manifestHash
   );
-  const pinned = manifestBindingsSchema.safeParse(parsedJson(row.manifest));
+  const manifest = parsedJson(row.manifest);
+  requireServedBindingKinds(manifest);
+  const pinned = manifestBindingsSchema.safeParse(manifest);
   const packages = await exportedPackages(env, workflow.id, row.manifest);
   if (!pinned.success || packages === undefined) {
     throw corrupt(workflow.id, version);

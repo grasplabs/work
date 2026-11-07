@@ -540,7 +540,7 @@ describe("an invoice approval's decision", () => {
   it("publishes executable, against the build its run loads", async () => {
     const { version } = await approvalWorkflow();
     expect({
-      executable: version?.build.hash !== undefined,
+      executable: version?.build?.hash !== undefined,
     }).toStrictEqual({ executable: true });
   });
 

@@ -28,7 +28,7 @@ import {
   findVersion,
   setCurrentVersion,
 } from "../src/apps.ts";
-import { createStore, deleteStore, openStore } from "../src/data-stores.ts";
+import { deleteStore, openStore } from "../src/data-stores.ts";
 import {
   sdkReleaseManifests,
   sdkResourceBindings,
@@ -37,6 +37,7 @@ import { versionPageCodes } from "../src/page-references.ts";
 import { buildAppCode, buildAppTests, buildPages } from "../src/pages.ts";
 import { appDefinition, definitionOf } from "./app-definitions.ts";
 import type { AppSpec } from "./app-definitions.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { allEvents } from "./audit-events.ts";
 import {
   appWith,
@@ -44,7 +45,6 @@ import {
   failure,
   person,
   seal,
-  shareStoreWith,
   sweptAway,
 } from "./sealed-apps.ts";
 
@@ -270,7 +270,7 @@ describe("sealing a release", { timeout: 120_000 }, () => {
         targetVersion: 1,
         // A store's binding names no contract key.
         contractId: null,
-        // Nor an approval's target: the seal chose it.
+        // Unused columns, kept until a later release drops them.
         targetPath: null,
         approvalId: null,
       },
@@ -298,12 +298,10 @@ describe("sealing a release", { timeout: 120_000 }, () => {
     expect(loaded.manifestHash).toBe(sealed.manifestHash);
     expect(loaded.modules).toStrictEqual(sealed.modules);
     expect(loaded.app).toStrictEqual(sealed.app);
-    // Sealed again, even asking for another store: the release as sealed.
-    const other = await createStore(env, fixture.owner);
+    // Sealed again: the release as sealed.
     const again = await sealRelease(env, {
       app: fixture.app,
       version: 1,
-      store: other,
       by: fixture.owner,
     });
     expect([again.manifestHash, again.store?.storeId]).toStrictEqual([
@@ -855,7 +853,7 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
   it("is refused when the host's binding names another store than the manifest", async () => {
     const fixture = await appWith(notesFiles());
     await seal(fixture);
-    const other = await createStore(env, fixture.owner);
+    const other = await storeOfNewApp(env, fixture.owner);
     await drizzle(env.DB)
       .update(sdkResourceBindings)
       .set({ targetId: other })
@@ -1669,87 +1667,39 @@ export const shifting = query({
     await expect(sealedWith(changes)).resolves.toBe("version.build_failed");
   });
 
-  it("can't be bound to a store another App's releases use, and never touches its tables", async () => {
+  it("binds its own App's store alone: another App's seal, by a builder of both, never reaches it", async () => {
     const first = await appWith(notesFiles());
     await seal(first);
-    const second = await appWith(withTable("beta"));
-    // The second's owner manages the store too: only the claim refuses.
-    await shareStoreWith(first, second);
-    await expect(
-      failure(
-        async () =>
-          await sealRelease(env, {
-            app: second.app,
-            version: 1,
-            store: first.store,
-            by: second.owner,
-          })
-      )
-    ).resolves.toBe("version.store_bound_elsewhere");
+    const second = await appWith(withTable("beta"), "Beta", first.owner);
+    const sealed = await seal(second);
     const opened = await openStore(env, first.store);
-    await expect(opened.generations(["beta"])).resolves.toStrictEqual({});
+    expect({
+      bound: sealed.store?.storeId,
+      apart: second.store !== first.store,
+      // Its schema was never handed to the first App's store.
+      untouched: await opened.generations(["beta"]),
+    }).toStrictEqual({ bound: second.store, apart: true, untouched: {} });
   });
 
-  it("goes to exactly one of two Apps sealed onto a new store at once, and only its tables", async () => {
-    const alpha = await appWith(withTable("alpha"));
-    const beta = await appWith(withTable("beta"));
-    const store = await createStore(env, alpha.owner);
-    // Both owners manage the store: only the claim decides.
-    await shareStoreWith({ ...alpha, store }, beta);
-    const outcomes = await Promise.all(
-      [alpha, beta].map(
-        async (fixture) =>
-          await failure(
-            async () =>
-              await sealRelease(env, {
-                app: fixture.app,
-                version: 1,
-                store,
-                by: fixture.owner,
-              })
-          )
-      )
-    );
-    expect(outcomes.toSorted()).toStrictEqual([
-      "ok",
-      "version.store_bound_elsewhere",
-    ]);
-    const loser = outcomes[0] === "ok" ? "beta" : "alpha";
-    const opened = await openStore(env, store);
-    await expect(opened.generations([loser])).resolves.toStrictEqual({});
-  });
-
-  it("is refused a store its sealer doesn't manage, before its code is built or run, and claims nothing", async () => {
-    const first = await appWith(notesFiles());
-    // Files no other seal builds: any build of them is this seal's.
-    const second = await appWith({
-      ...withTable("beta"),
-      "server/marker.ts": `export const marker = ${JSON.stringify(crypto.randomUUID())};\n`,
-    });
+  it("is refused to someone who doesn't build the App, before a store is made or its code is built", async () => {
+    const owner = await person("builder");
+    const { id } = await createApp(env, owner, { name: "Beta" });
+    await commitFiles(env, owner, id, withTable("beta"), "First version");
+    const outsider = await person("builder");
     const before = await builds();
-    await expect(
-      failure(
-        async () =>
-          await sealRelease(env, {
-            app: second.app,
-            version: 1,
-            store: first.store,
-            by: second.owner,
-          })
-      )
-    ).resolves.toBe("data.store_unavailable");
-    const claims = await env.DB.prepare(
-      "SELECT app_id FROM sdk_store_owners WHERE store_id = ?"
-    )
-      .bind(first.store)
-      .all();
-    const opened = await openStore(env, first.store);
-    // Nothing built, so nothing inspected: the store was checked first.
-    expect([await builds(), claims.results]).toStrictEqual([before, []]);
-    // Never handed a schema: no tables were defined there either.
-    await expect(opened.generations(["beta"])).rejects.toThrow(
-      /wasn't handed/u
+    const refused = await failure(
+      async () => await sealRelease(env, { app: id, version: 1, by: outsider })
     );
+    const stores = await env.DB.prepare(
+      "SELECT store_id FROM app_default_stores WHERE app_id = ?"
+    )
+      .bind(id)
+      .all();
+    expect([refused, await builds(), stores.results]).toStrictEqual([
+      "app.not_found",
+      before,
+      [],
+    ]);
   });
 
   it("keeps its store from being deleted while any release kept binds it, and lets it go once retention removed them", async () => {
@@ -1825,42 +1775,6 @@ export const shifting = query({
     ]);
   });
 
-  it("is refused a store that doesn't exist, and to Grasp staff, claiming nothing", async () => {
-    const fixture = await appWith(notesFiles());
-    const missing = crypto.randomUUID();
-    const outcomes = [
-      await failure(
-        async () =>
-          await sealRelease(env, {
-            app: fixture.app,
-            version: 1,
-            // SAFETY: a well-formed ID the inventory doesn't list.
-            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-            store: missing as typeof fixture.store,
-            by: fixture.owner,
-          })
-      ),
-      await failure(
-        async () =>
-          await sealRelease(env, {
-            app: fixture.app,
-            version: 1,
-            store: fixture.store,
-            by: { ...fixture.owner, staff: true },
-          })
-      ),
-    ];
-    const claims = await env.DB.prepare(
-      "SELECT store_id FROM sdk_store_owners WHERE store_id IN (?, ?)"
-    )
-      .bind(missing, fixture.store)
-      .all();
-    expect([outcomes, claims.results]).toStrictEqual([
-      ["data.store_unavailable", "role.forbidden"],
-      [],
-    ]);
-  });
-
   it("seals server code that imports the App's preferences, and functions at any segment a reference doesn't answer", async () => {
     const files = notesFiles();
     const fixture = await appWith({
@@ -1897,18 +1811,31 @@ export const reach = action({
     ]);
   });
 
-  it("needs a store the host binds when it declares tables", async () => {
-    const fixture = await appWith(notesFiles());
-    await expect(
-      failure(
-        async () =>
-          await sealRelease(env, {
-            app: fixture.app,
-            version: 1,
-            by: fixture.owner,
-          })
-      )
-    ).resolves.toBe("version.store_unbound");
+  it("makes its App's one store when it first declares tables, keyed by the App and audited", async () => {
+    const owner = await person("builder");
+    const { id } = await createApp(env, owner, { name: "Notes" });
+    await commitFiles(env, owner, id, notesFiles(), "First version");
+    const first = await sealRelease(env, { app: id, version: 1, by: owner });
+    await commitFiles(env, owner, id, withTable("beta"), "Second version");
+    const second = await sealRelease(env, { app: id, version: 2, by: owner });
+    const keyed = await env.DB.prepare(
+      "SELECT store_id AS store FROM app_default_stores WHERE app_id = ?"
+    )
+      .bind(id)
+      .all<{ store: string }>();
+    const events = await allEvents();
+    const created = events.filter(
+      (event) => event.action === "store.created" && event.detail?.app === id
+    );
+    expect({
+      keyed: keyed.results.map(({ store }) => store),
+      second: second.store?.storeId,
+      created: created.map((event) => event.target?.id),
+    }).toStrictEqual({
+      keyed: [first.store?.storeId],
+      second: first.store?.storeId,
+      created: [first.store?.storeId],
+    });
   });
 
   it("is an App of spec 8's layout: a version holding the v1 server's files isn't even committed", async () => {

@@ -11,13 +11,11 @@ import {
   identifierMaxLength,
   identifierSchema,
   runIdSchema,
-  storeIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
   workspaceIdSchema,
 } from "./ids.ts";
 import type { PermissionId } from "./ids.ts";
-import { storeOperationPathPattern } from "./operation-limits.ts";
 import type { TriggerSummary } from "./workflow-triggers.ts";
 
 // Apps and agents start with nothing. Each thing they may use is one
@@ -96,7 +94,7 @@ export const codeSubjectOf = (
 
 /**
  * Who a permission is for: an App, an agent, or an independent resource
- * (platform specification 24): a workflow, a business store or a trigger,
+ * (platform specification 24): a workflow or a trigger,
  * each holding its own grants, never its owner's nor those of an App that
  * uses it. Never a person.
  */
@@ -104,10 +102,6 @@ export const permissionSubjectSchema = z.discriminatedUnion("type", [
   appSubjectSchema,
   agentSubjectSchema,
   workflowSubjectSchema,
-  z.strictObject({
-    type: z.literal("store"),
-    storeId: storeIdSchema,
-  }),
   z.strictObject({
     type: z.literal("trigger"),
     triggerId: triggerIdSchema,
@@ -152,10 +146,8 @@ const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
  * independent workflow (to follow its runs, `read`, start it, `start`,
  * or send events to its runs, `send`, which neither of the others
  * implies), an App's sealed functions, for an agent (reading with
- * `read`, writing with `write`: core's agent-apps.ts), a business store's
- * public operations (the public queries and mutations of the App that owns
- * it, each action one of them by its path: core's store-operations.ts), or
- * the platform's own statistics.
+ * `read`, writing with `write`: core's agent-apps.ts), or the platform's
+ * own statistics.
  */
 export const permissionObjectSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -172,10 +164,6 @@ export const permissionObjectSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("app"),
     appId: appIdSchema,
-  }),
-  z.strictObject({
-    type: z.literal("store"),
-    storeId: storeIdSchema,
   }),
   platformObjectSchema,
 ]);
@@ -214,10 +202,6 @@ const isActionOf = (type: PermissionObjectType, action: string): boolean => {
   // An App's functions, for an agent: those that read, or all of them.
   if (type === "app") {
     return action === "read" || action === "write";
-  }
-  // A store's public operations, each by its path, e.g. `notes.list`.
-  if (type === "store") {
-    return storeOperationPathPattern.test(action);
   }
   const actions: readonly string[] = platformActions[type];
   return actions.includes(action);
@@ -405,7 +389,7 @@ export type PermissionRequest = z.input<typeof permissionRequestSchema>;
  * whoever creates from it, where a connection is someone's or set up for
  * one App, and a workflow or exports name an App its creator may not see.
  * A collection only to read: an App never writes one (it keeps what it
- * writes in a business store), so `write` would give it nothing.
+ * writes in its own store), so `write` would give it nothing.
  */
 export const declaredPermissionSchema = z
   .strictObject({
@@ -525,7 +509,7 @@ export interface Permission {
 export interface PermissionsApi {
   /**
    * Asks for a permission for an App, an agent, or an independent
-   * workflow, store or trigger; it allows nothing until an admin grants
+   * workflow or trigger; it allows nothing until an admin grants
    * it. Admins and builders; for any but an agent, only its builders.
    */
   request: (request: PermissionRequest) => Promise<Permission>;

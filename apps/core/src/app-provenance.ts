@@ -2,7 +2,7 @@ import { collections } from "@grasp-os/brain/schema";
 import type { ConnectionOwner } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import { canBuild, isAdmin } from "@grasp-os/shared/roles";
+import { isAdmin } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import { and, eq, inArray, isNotNull, ne, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -11,11 +11,8 @@ import { z } from "zod";
 import { connectionOwnersOf } from "./connections.ts";
 import {
   apps as appsTable,
-  businessStoreMembers,
-  businessStores,
   collectionTeams,
   permissions,
-  sdkStoreOwners,
 } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { mayRead } from "./knowledge/access.ts";
@@ -26,30 +23,19 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 // anyone who couldn't read that where it comes from.
 //
 // What an App may have read: every connection it was ever granted, and
-// every collection it was ever granted to read; and, through store grants
-// on another App's store (store-operations.ts), what that App may have
-// read, and what an App holding one may have sent it, whatever the depth
-// (`reachedThroughCalls`): both ways, since a store's actions can't tell a
-// read from a write. A workflow (an independent resource) holding such a
-// store grant links the App to that workflow's own sources, and through it
-// to every other App it holds a grant on, the same way (`workflow:<id>` in
-// the graph). So does an App's grant on such a
-// workflow: following its runs (`read`) brings the workflow's output into
-// the App, and starting it (`start`) sends the App's input into the
-// workflow too, from where its store grants carry it on. A store's own
-// grants (a store as subject: connections and collections) are its
-// owner's sources, or, for a business store no App owns, the store's,
-// read by whoever holds it. Once granted counts for
-// good, revoked or not: the App may still hold what it read. A store
-// grant on a store that exists nowhere, or one whose App has no row,
-// fails closed, as an unresolved source (`app:<id>`, `store:<id>`),
-// and so does a graph past the caps below (`app:*`). A store grant on a
-// business store no App owns (`business_stores` only) is a source of its
-// own: it is read by whoever manages the store, the only access such a
-// store has (data-stores.ts): admins, its creator and the people and teams
-// it is shared with, while their role builds. Who may read
-// each: a personal connection (such as a mailbox) only its owner; a shared
-// connection everyone in the organization, who may all use it; a
+// every collection it was ever granted to read; and, through grants on
+// independent workflows, what those workflows may have read, and what
+// another App holding a grant on one sent it, whatever the depth
+// (`reachedThroughCalls`, `workflow:<id>` in the graph): following a
+// workflow's runs (`read`) brings its output into the App, and starting it
+// (`start`) sends the App's input into the workflow too, from where another
+// App following it carries it on. An App's store is its own and no grant
+// reaches another's (data-stores.ts), so stores add no edge. Once granted
+// counts for good, revoked or not: the App may still hold what it read. An
+// App the graph reaches that has no row fails closed, as an unresolved
+// source (`app:<id>`), and so does a graph past the caps below (`app:*`).
+// Who may read each: a personal connection (such as a mailbox) only its
+// owner; a shared connection everyone in the organization, who may all use it; a
 // collection whoever Knowledge lets read it now (`mayRead`, the rule of
 // knowledge/access.ts), so a collection whose access narrows reaches fewer
 // people from then on. A granted source that doesn't resolve (connect
@@ -86,7 +72,7 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 
 /** A source as the audit log and refusals name it. */
 const sourceId = (
-  type: "connection" | "collection" | "app" | "store",
+  type: "connection" | "collection" | "app",
   id: string
 ): string => `${type}:${id}`;
 
@@ -94,28 +80,12 @@ const sourceId = (
 export interface AppSources {
   connections: ConnectionOwner[];
   collections: (CollectionAccess & { id: string })[];
-  /** Business stores no App owns, which the App was granted. */
-  stores: BusinessStoreAccess[];
   /** Granted sources that don't resolve, as `sourceId` names them. */
   unresolved: string[];
 }
 
-/** Who manages a business store (data-stores.ts), and so reads it. */
-export interface BusinessStoreAccess {
-  id: string;
-  ownerId: string;
-  /** People and teams it is shared with, in role `manage`. */
-  members: { type: "person" | "team"; id: string }[];
-}
-
-/**
- * A person, as provenance decides what they read: Knowledge's access, and
- * whether their role in the organization builds, which managing a store
- * needs.
- */
-export interface Reader extends PersonAccess {
-  builds: boolean;
-}
+/** A person, as provenance decides what they read: Knowledge's access. */
+export type Reader = PersonAccess;
 
 /** A `Reader` from a role and teams, as the callers have them. */
 export const readerOf = (
@@ -126,7 +96,6 @@ export const readerOf = (
   userId,
   teamIds,
   admin: isAdmin(role),
-  builds: canBuild(role),
 });
 
 const actionsSchema = z.array(z.string());
@@ -204,15 +173,10 @@ interface Reach {
   nodes: Set<string>;
   /** Edges that don't resolve, as `sourceId` names them. */
   unresolved: Set<string>;
-  /** Business stores no App owns, which a node it holds was granted. */
-  stores: Set<string>;
 }
 
-/** A node's edges, as `edgesOf` finds them. */
-interface Edges {
-  edges: { from: string; to: string }[];
-  unowned: { holder: string; store: string; business: boolean }[];
-}
+/** A node's edges, as `edgesOf` finds them: each `from` may hold `to`'s data. */
+type Edges = { from: string; to: string }[];
 
 /**
  * What one request has queried of the graph, shared by all its walks: a
@@ -225,135 +189,47 @@ interface Walked {
 }
 
 /**
- * The edges of one level of the graph of calls between Apps, from and to
- * `frontier` (its Apps and its workflows), as `reachedThroughCalls`
- * follows them: each `from` may hold the data of `to`. And what a store
- * grant names that no App owns, by the node that holds it: a business
- * store (`business`), or a store that exists nowhere. By node of the
- * frontier: each node's are those it alone would have found.
+ * The edges of one level of the graph, from and to `frontier` (its Apps
+ * and its workflows), as `reachedThroughCalls` follows them: each `from`
+ * may hold the data of `to`. By node of the frontier: each node's are
+ * those it alone would have found.
  */
 const edgesOf = async (
   env: Env,
   frontier: { apps: AppId[]; workflows: string[] }
 ): Promise<Map<string, Edges>> => {
   const { apps: frontierApps, workflows } = frontier;
-  const db = drizzle(env.DB);
-  // An App's or a workflow's (an independent resource's) grant on a store:
-  // permissions.ts lets both name one.
-  const storeGrant = and(
-    inArray(permissions.subjectType, ["app", "workflow"]),
-    eq(permissions.objectType, "store"),
-    isNotNull(permissions.grantedAt)
-  );
-  const holds = or(
-    and(
-      eq(permissions.subjectType, "app"),
-      inList(permissions.subjectId, frontierApps)
-    ),
-    and(
-      eq(permissions.subjectType, "workflow"),
-      inList(permissions.subjectId, workflows)
-    )
-  );
-  const [consumed, served, run] = await Promise.all([
-    // Store grants ever given to a node of the frontier, with the store's
-    // owning App, if any, and whether it is a business store at all.
-    db
-      .select({
-        type: permissions.subjectType,
-        consumer: permissions.subjectId,
-        store: permissions.objectId,
-        owner: sdkStoreOwners.appId,
-        business: businessStores.id,
-      })
-      .from(permissions)
-      .leftJoin(
-        sdkStoreOwners,
-        eq(sdkStoreOwners.storeId, permissions.objectId)
-      )
-      .leftJoin(businessStores, eq(businessStores.id, permissions.objectId))
-      .where(and(storeGrant, holds)),
-    // And those on a store an App of the frontier owns.
-    db
-      .select({
-        type: permissions.subjectType,
-        consumer: permissions.subjectId,
-        owner: sdkStoreOwners.appId,
-      })
-      .from(permissions)
-      .innerJoin(
-        sdkStoreOwners,
-        eq(sdkStoreOwners.storeId, permissions.objectId)
-      )
-      .where(and(storeGrant, inList(sdkStoreOwners.appId, frontierApps))),
-    // Grants ever given to an App on an independent workflow, either end
-    // in the frontier.
-    db
-      .select({
-        app: permissions.subjectId,
-        workflow: permissions.objectId,
-        actions: permissions.actions,
-      })
-      .from(permissions)
-      .where(
-        and(
-          eq(permissions.subjectType, "app"),
-          eq(permissions.objectType, "workflow"),
-          isNotNull(permissions.grantedAt),
-          or(
-            inList(permissions.subjectId, frontierApps),
-            inList(permissions.objectId, workflows)
-          )
+  // Grants ever given to an App on an independent workflow, either end in
+  // the frontier.
+  const run = await drizzle(env.DB)
+    .select({
+      app: permissions.subjectId,
+      workflow: permissions.objectId,
+      actions: permissions.actions,
+    })
+    .from(permissions)
+    .where(
+      and(
+        eq(permissions.subjectType, "app"),
+        eq(permissions.objectType, "workflow"),
+        isNotNull(permissions.grantedAt),
+        or(
+          inList(permissions.subjectId, frontierApps),
+          inList(permissions.objectId, workflows)
         )
-      ),
-  ]);
+      )
+    );
   const found = new Map<string, Edges>(
-    [...frontierApps, ...workflows.map(workflowNode)].map((node) => [
-      node,
-      { edges: [], unowned: [] },
-    ])
+    [...frontierApps, ...workflows.map(workflowNode)].map((node) => [node, []])
   );
-  // A row is the node's whose ID matched it: an App's as the frontier
-  // names it, before `appNode`.
-  const keyOf = (type: string, id: string): string =>
-    type === "workflow" ? workflowNode(id) : id;
   const link = (
     of: string[],
     ...edges: { from: string; to: string }[]
   ): void => {
     for (const key of of) {
-      found.get(key)?.edges.push(...edges);
+      found.get(key)?.push(...edges);
     }
   };
-  const nodeOf = (type: string, id: string): string =>
-    type === "workflow" ? workflowNode(id) : appNode(id);
-  for (const { type, consumer, store, owner, business } of consumed) {
-    const holder = nodeOf(type, consumer);
-    const key = keyOf(type, consumer);
-    if (owner === null) {
-      // A business store no App owns is a source, not a node: nothing
-      // writes into it but whoever holds a grant on it, since a store grant
-      // needs a store an App owns (permissions.ts `requireStoreObject`) and
-      // sealing claims the store for its App (`claimStore`). Should
-      // anything else come to write into one, it must become a node of the
-      // graph, so that what one holder wrote reaches the others.
-      found
-        .get(key)
-        ?.unowned.push({ holder, store, business: business !== null });
-    } else {
-      const to = appNode(owner);
-      link([key], { from: holder, to }, { from: to, to: holder });
-    }
-  }
-  for (const { type, consumer, owner } of served) {
-    // Only an App's: the query reads those of the frontier's Apps.
-    if (owner === null) {
-      continue;
-    }
-    const holder = nodeOf(type, consumer);
-    const to = appNode(owner);
-    link([owner], { from: holder, to }, { from: to, to: holder });
-  }
   for (const { app, workflow, actions } of run) {
     const [from, to] = [appNode(app), workflowNode(workflow)];
     const of = [app, workflowNode(workflow)];
@@ -394,14 +270,10 @@ const edgesThrough = async (
       ),
     });
     for (const node of missing) {
-      walked.edges.set(node, found.get(node) ?? { edges: [], unowned: [] });
+      walked.edges.set(node, found.get(node) ?? []);
     }
   }
-  const of = nodes.map((node) => walked.edges.get(node));
-  return {
-    edges: of.flatMap((one) => one?.edges ?? []),
-    unowned: of.flatMap((one) => one?.unowned ?? []),
-  };
+  return nodes.flatMap((node) => walked.edges.get(node) ?? []);
 };
 
 /** What the walks again of a batch may still spend (`maxRetryLevels`). */
@@ -422,8 +294,6 @@ const walk = async (
   budget: Budget
 ): Promise<{ reach: Map<AppId, Reach>; capped: boolean }> => {
   const holds = new Map<string, Set<string>>();
-  const unresolvedAt = new Map<string, Set<string>>();
-  const businessAt = new Map<string, Set<string>>();
   const explored = new Set<string>();
   let frontier = [...new Set<string>(apps)];
   let depth = 0;
@@ -437,11 +307,11 @@ const walk = async (
       break;
     }
     // oxlint-disable-next-line no-await-in-loop -- one level at a time
-    const level = await edgesThrough(env, walked, frontier, () => {
+    const edges = await edgesThrough(env, walked, frontier, () => {
       budget.levels -= 1;
       return budget.levels >= 0;
     });
-    if (level === undefined) {
+    if (edges === undefined) {
       break;
     }
     budget.nodes -= frontier.length;
@@ -449,19 +319,11 @@ const walk = async (
     for (const node of frontier) {
       explored.add(node);
     }
-    const { edges, unowned } = level;
     const next = new Set<string>();
     for (const { from, to } of edges) {
       note(holds, from, to);
       if (!explored.has(to)) {
         next.add(to);
-      }
-    }
-    for (const { holder, store, business } of unowned) {
-      if (business) {
-        note(businessAt, holder, store);
-      } else {
-        note(unresolvedAt, holder, sourceId("store", store));
       }
     }
     frontier = [...next];
@@ -498,15 +360,8 @@ const walk = async (
         }
       }
       const unresolved = new Set<string>();
-      const stores = new Set<string>();
       const nodes = new Set<string>();
       for (const id of reached) {
-        for (const source of unresolvedAt.get(id) ?? []) {
-          unresolved.add(source);
-        }
-        for (const store of businessAt.get(id) ?? []) {
-          stores.add(store);
-        }
         const isApp = appIdSchema.safeParse(id).success;
         if (unexpanded.has(id)) {
           unresolved.add(sourceId("app", "*"));
@@ -519,19 +374,18 @@ const walk = async (
           unresolved.add(sourceId("app", id));
         }
       }
-      return [app, { nodes, unresolved, stores }];
+      return [app, { nodes, unresolved }];
     })
   );
   return { reach, capped };
 };
 
 /**
- * The nodes (Apps, and workflows holding store grants) whose data each of
- * `apps` may hold through store grants (store-operations.ts), itself
- * included, following every grant ever given (`edgesOf`), as sources are,
- * up to the caps; and what of them doesn't resolve: a store that exists
- * nowhere, an App that has no row, or an App past the caps (`app:*`). A few
- * queries a level of the graph, both directions at once.
+ * The nodes (Apps, and the workflows between them) whose data each of
+ * `apps` may hold through grants on workflows, itself included, following
+ * every grant ever given (`edgesOf`), as sources are, up to the caps; and
+ * what of them doesn't resolve: an App that has no row, or an App past the
+ * caps (`app:*`). One query a level of the graph, both directions at once.
  */
 const reachedThroughCalls = async (
   env: Env,
@@ -566,34 +420,6 @@ const reachedThroughCalls = async (
   return reach;
 };
 
-/** The business stores `ids`, with whom each is shared with to manage it. */
-const businessStoresOf = async (
-  env: Env,
-  ids: string[]
-): Promise<BusinessStoreAccess[]> => {
-  const db = drizzle(env.DB);
-  const [rows, shared] = await db.batch([
-    db
-      .select({ id: businessStores.id, ownerId: businessStores.ownerId })
-      .from(businessStores)
-      .where(inList(businessStores.id, ids)),
-    db
-      .select({
-        storeId: businessStoreMembers.storeId,
-        type: businessStoreMembers.memberType,
-        id: businessStoreMembers.memberId,
-      })
-      .from(businessStoreMembers)
-      .where(inList(businessStoreMembers.storeId, ids)),
-  ]);
-  return rows.map((row) => ({
-    ...row,
-    members: shared
-      .filter(({ storeId }) => storeId === row.id)
-      .map(({ type, id }) => ({ type, id })),
-  }));
-};
-
 /**
  * The sources each of the Apps `apps` may have read, as they are now, and
  * those of the Apps whose data they may hold through calls between Apps
@@ -615,17 +441,14 @@ export const sourcesOfApps = async (
   const allWorkflows = all.flatMap((id) =>
     id.startsWith(workflowPrefix) ? [id.slice(workflowPrefix.length)] : []
   );
-  const storeIds = [
-    ...new Set([...reach.values()].flatMap(({ stores }) => [...stores])),
-  ];
   const sourceGrant = and(
     isNotNull(permissions.grantedAt),
     inArray(permissions.objectType, ["connection", "collection"])
   );
-  const [rows, storeRows] = await Promise.all([
+  const rows =
     all.length === 0
       ? []
-      : drizzle(env.DB)
+      : await drizzle(env.DB)
           .select({
             type: permissions.subjectType,
             app: permissions.subjectId,
@@ -648,35 +471,7 @@ export const sourcesOfApps = async (
               ),
               sourceGrant
             )
-          ),
-    // A store's own grants: of the stores the Apps reached own, and of the
-    // business stores they were granted.
-    all.length === 0
-      ? []
-      : drizzle(env.DB)
-          .select({
-            store: permissions.subjectId,
-            owner: sdkStoreOwners.appId,
-            object: permissions.objectType,
-            id: permissions.objectId,
-            actions: permissions.actions,
-          })
-          .from(permissions)
-          .leftJoin(
-            sdkStoreOwners,
-            eq(sdkStoreOwners.storeId, permissions.subjectId)
-          )
-          .where(
-            and(
-              eq(permissions.subjectType, "store"),
-              or(
-                inList(sdkStoreOwners.appId, allApps),
-                inList(permissions.subjectId, storeIds)
-              ),
-              sourceGrant
-            )
-          ),
-  ]);
+          );
   const own = new Map(
     all.map((node) => [
       node,
@@ -697,25 +492,11 @@ export const sourcesOfApps = async (
     const { type, app } = row;
     add(own.get(type === "workflow" ? workflowNode(app) : appNode(app)), row);
   }
-  // A business store's own grants, by store, for whoever holds it.
-  const ofStore = new Map(
-    storeIds.map((id) => [
-      id,
-      { connected: new Set<string>(), read: new Set<string>() },
-    ])
-  );
-  for (const row of storeRows) {
-    add(
-      row.owner === null ? ofStore.get(row.store) : own.get(appNode(row.owner)),
-      row
-    );
-  }
   const granted = new Map(
     apps.map((app) => {
-      const reached = [
-        ...[...(reach.get(app)?.nodes ?? [app])].map((node) => own.get(node)),
-        ...[...(reach.get(app)?.stores ?? [])].map((id) => ofStore.get(id)),
-      ];
+      const reached = [...(reach.get(app)?.nodes ?? [app])].map((node) =>
+        own.get(node)
+      );
       return [
         app,
         {
@@ -735,20 +516,17 @@ export const sourcesOfApps = async (
   const collectionIds = [
     ...new Set([...granted.values()].flatMap(({ read }) => [...read])),
   ];
-  const [owners, readable, managed] = await Promise.all([
+  const [owners, readable] = await Promise.all([
     connectionIds.length === 0 ? [] : connectionOwnersOf(env, connectionIds),
     collectionIds.length === 0 ? [] : accessOf(env, collectionIds),
-    storeIds.length === 0 ? [] : businessStoresOf(env, storeIds),
   ]);
   const ownerOf = new Map(owners.map((owner) => [owner.id, owner]));
   const accessById = new Map(readable.map((access) => [access.id, access]));
-  const storeById = new Map(managed.map((store) => [store.id, store]));
   return new Map(
     [...granted].map(([app, { connected, read }]) => {
       const sources: AppSources = {
         connections: [],
         collections: [],
-        stores: [],
         unresolved: [...(reach.get(app)?.unresolved ?? [])],
       };
       for (const id of connected) {
@@ -767,14 +545,6 @@ export const sourcesOfApps = async (
           sources.collections.push(access);
         }
       }
-      for (const id of reach.get(app)?.stores ?? []) {
-        const store = storeById.get(id);
-        if (store === undefined) {
-          sources.unresolved.push(sourceId("store", id));
-        } else {
-          sources.stores.push(store);
-        }
-      }
       return [app, sources];
     })
   );
@@ -787,7 +557,6 @@ export const sourcesOf = async (env: Env, app: AppId): Promise<AppSources> => {
     sources.get(app) ?? {
       connections: [],
       collections: [],
-      stores: [],
       unresolved: [],
     }
   );
@@ -797,25 +566,11 @@ export const sourcesOf = async (env: Env, app: AppId): Promise<AppSources> => {
 export const hasSources = (sources: AppSources): boolean =>
   sources.connections.length > 0 ||
   sources.collections.length > 0 ||
-  sources.stores.length > 0 ||
   sources.unresolved.length > 0;
 
 /**
- * Whether `reader` manages `store`, as data-stores.ts decides it: an
- * admin, its creator, or someone it is shared with (or a team of theirs),
- * while their role in the organization builds.
- */
-const managesStore = (reader: Reader, store: BusinessStoreAccess): boolean =>
-  reader.admin ||
-  (reader.builds &&
-    (store.ownerId === reader.userId ||
-      store.members.some(({ type, id }) =>
-        type === "person" ? id === reader.userId : reader.teamIds.includes(id)
-      )));
-
-/**
  * The sources in `sources` that `reader` can't read, as
- * `connection:<id>`, `collection:<id>` and `store:<id>`; none when they
+ * `connection:<id>` and `collection:<id>`; none when they
  * may read all.
  */
 export const unreadableBy = (sources: AppSources, reader: Reader): string[] => [
@@ -826,9 +581,6 @@ export const unreadableBy = (sources: AppSources, reader: Reader): string[] => [
   ),
   ...sources.collections.flatMap((collection) =>
     mayRead(reader, collection) ? [] : [sourceId("collection", collection.id)]
-  ),
-  ...sources.stores.flatMap((store) =>
-    managesStore(reader, store) ? [] : [sourceId("store", store.id)]
   ),
   ...sources.unresolved,
 ];

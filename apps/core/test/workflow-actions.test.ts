@@ -503,9 +503,8 @@ const hearing =
     await Promise.resolve();
   };
 
-/** A shared store's refusal of a call that couldn't run now. */
-const busy = () =>
-  operationErrors.create("resource.busy", { code: "operation.sandbox_busy" });
+/** A provider's refusal of a call that couldn't run now. */
+const busy = () => operationErrors.create("resource.rate_limited");
 
 /** A binding that is down: any use of it throws. */
 const down = <T extends object>(binding: T): T =>
@@ -714,13 +713,6 @@ describe("a JSON workflow's own actions", () => {
     });
     const model = `writer-${unique()}`;
     await publishCatalogContract(env, admin, { key: model, kind: "model" });
-    // An App's export: its contract states nothing about reading only.
-    const contacts = `contacts-${unique()}`;
-    await publishCatalogContract(env, admin, {
-      key: contacts,
-      kind: "operation",
-      ...operation,
-    });
     const writer =
       'resource.model("writer", { output: v.object({ line: v.string() }) })';
     /** Publishes an action with `uses`; answers its flag, published and listed. */
@@ -745,9 +737,6 @@ describe("a JSON workflow's own actions", () => {
       const { bindings } = definition;
       if (uses.includes("writer")) {
         bindings.writer = { kind: "model", contract: model };
-      }
-      if (uses.includes("contacts")) {
-        bindings.contacts = { kind: "operation", contract: contacts };
       }
       if (!uses.includes('"mail"')) {
         delete bindings.mail;
@@ -786,9 +775,6 @@ describe("a JSON workflow's own actions", () => {
     const writesAlone = await reviewed(
       `[${connector(["mail.send", "mail.draft"])}]`
     );
-    const modelAndExport = await reviewed(
-      `[${writer}, resource.operation("contacts")]`
-    );
     // What it reads only once its contract is there, as the version
     // pinned it: a binding the version doesn't seal, a contract the catalog
     // doesn't hold, or one that isn't the contract pinned rules nothing out.
@@ -811,7 +797,6 @@ describe("a JSON workflow's own actions", () => {
       reader: await listed(modelAndWrites.id, reader),
       modelAndReads: await listed(modelAndReads.id, ada),
       writesAlone: await listed(writesAlone.id, ada),
-      modelAndExport: await listed(modelAndExport.id, ada),
       unbound: await listed(unbound.id, ada),
       uncatalogued: await listed(uncatalogued.id, ada),
     };
@@ -847,7 +832,6 @@ describe("a JSON workflow's own actions", () => {
         modelAndWrites: modelAndWrites.published,
         modelAndReads: modelAndReads.published,
         writesAlone: writesAlone.published,
-        modelAndExport: modelAndExport.published,
       },
       ...before,
       replaceRefused: replace.includes(
@@ -859,13 +843,11 @@ describe("a JSON workflow's own actions", () => {
         modelAndWrites: [[sendsAndDrafts]],
         modelAndReads: [[]],
         writesAlone: [[]],
-        modelAndExport: [[{ alias: "contacts", kind: "operation" }]],
       },
       modelAndWrites: [[sendsAndDrafts]],
       reader: [[sendsAndDrafts]],
       modelAndReads: [[]],
       writesAlone: [[]],
-      modelAndExport: [[{ alias: "contacts", kind: "operation" }]],
       unbound: [[reads]],
       uncatalogued: [[reads]],
       replaceRefused: true,
@@ -901,12 +883,6 @@ describe("a JSON workflow's own actions", () => {
     });
     const model = `writer-${unique()}`;
     await publishCatalogContract(env, admin, { key: model, kind: "model" });
-    const contacts = `contacts-${unique()}`;
-    await publishCatalogContract(env, admin, {
-      key: contacts,
-      kind: "operation",
-      ...operation,
-    });
     const ask = {
       id: "ask",
       type: "agent",
@@ -914,12 +890,6 @@ describe("a JSON workflow's own actions", () => {
       instructions: "Write a line.",
       input: { who: { $expr: "input.who" } },
       output: objectSchema({ line: { type: "string" } }),
-    };
-    const exportTask = {
-      id: "share",
-      type: "do",
-      binding: "contacts",
-      arguments: { to: { $expr: "input.who" }, subject: "Hi" },
     };
     /** Publishes `before` ahead of the action, which uses `operations` of mail. */
     const reviewed = async (
@@ -952,9 +922,6 @@ describe("a JSON workflow's own actions", () => {
       if (text.includes('"writer"')) {
         bindings.writer = { kind: "model", contract: model };
       }
-      if (text.includes('"contacts"')) {
-        bindings.contacts = { kind: "operation", contract: contacts };
-      }
       const published = await publishWorkflowVersion(env, ada, workflow.id, {
         definition: JSON.stringify(definition),
         basedOn: null,
@@ -975,7 +942,7 @@ describe("a JSON workflow's own actions", () => {
         await undo?.();
       }
       return {
-        executable: asBuilder?.build.hash !== undefined,
+        executable: asBuilder?.build?.hash !== undefined,
         published: published.modelSteeredWrites,
         builder: asBuilder?.modelSteeredWrites,
         reader: asReader?.modelSteeredWrites,
@@ -1002,8 +969,6 @@ describe("a JSON workflow's own actions", () => {
       writeAlone: await reviewed([mailTask("mail.send")], ["mail.send"]),
       // The action the workflow calls writes: its use is flagged.
       modelThenWritingAction: await reviewed([ask], ["mail.send"]),
-      // An App's export: always a write.
-      modelThenExport: await reviewed([ask, exportTask], ["mail.read"]),
       // A connector task and the action write through one alias: one
       // write, each operation once.
       modelThenBothWrite: await reviewed(
@@ -1029,7 +994,6 @@ describe("a JSON workflow's own actions", () => {
       modelThenRead: flagged([]),
       writeAlone: flagged([]),
       modelThenWritingAction: flagged([send]),
-      modelThenExport: flagged([{ alias: "contacts", kind: "operation" }]),
       buildGone: flagged([send]),
       tasksGone: "workflow.version_corrupt",
       modelThenBothWrite: flagged([
@@ -1110,10 +1074,10 @@ describe("a JSON workflow's own actions", () => {
         '[resource.connector("other", { operations: ["mail.send"] })]',
         { kind: "connector", contract: key },
       ],
-      // Uses `mail` as an operation, which the definition binds a connector.
-      ['[resource.operation("mail")]', { kind: "connector", contract: key }],
+      // Uses `mail` as a template, which the definition binds a connector.
+      ['[resource.template("mail")]', { kind: "connector", contract: key }],
       // Uses the workflow's own action: never one of its own modules.
-      ['[resource.operation("notify")]', { kind: "connector", contract: key }],
+      ['[resource.template("notify")]', { kind: "connector", contract: key }],
       // Uses `mail` as a model, which the definition binds a connector.
       [
         '[resource.model("mail", { output: v.object({ line: v.string() }) })]',

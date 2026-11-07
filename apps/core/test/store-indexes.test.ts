@@ -9,7 +9,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import {
   fieldExpression,
@@ -19,6 +19,7 @@ import {
   tableIdLiteral,
 } from "../src/store-expressions.ts";
 import type { FieldTypes } from "../src/store-expressions.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 
 // A store's declared indexes as real SQLite indexes (store-indexes.ts):
 // installed when a store is handed a schema, named by their definitions,
@@ -88,7 +89,7 @@ const notesTypes: FieldTypes = {
 };
 
 const newStore = async (): Promise<OpenStore> =>
-  await openStore(env, await createStore(env, builder));
+  await openStore(env, await storeOfNewApp(env, builder));
 
 interface IndexRow {
   name: string;

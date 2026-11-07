@@ -118,14 +118,9 @@ const invalidData: ReadonlySet<string> = new Set([
 
 /**
  * The calls whose step runs its effect once (sealed-run.ts,
- * `triedOnceCalls`): a store operation, a model request, one of the
- * workflow's own actions.
+ * `triedOnceCalls`): a model request, one of the workflow's own actions.
  */
-const onceCalls: ReadonlySet<string> = new Set([
-  "grasp.operation",
-  "grasp.model",
-  "grasp.action",
-]);
+const onceCalls: ReadonlySet<string> = new Set(["grasp.model", "grasp.action"]);
 
 /**
  * The calls whose timeout leaves their effect unknown: those that run it

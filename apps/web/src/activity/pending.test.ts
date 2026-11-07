@@ -1,8 +1,8 @@
 import {
   agentIdSchema,
   appIdSchema,
+  collectionIdSchema,
   permissionIdSchema,
-  storeIdSchema,
   triggerIdSchema,
   workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
@@ -47,10 +47,8 @@ describe("a pending request on an App", () => {
   });
 });
 
-const store = "22222222-2222-4222-8222-222222222222";
-
-/** A workflow's request for an App's store. */
-const onStore = (): Permission => ({
+/** A workflow's request to read a collection. */
+const onCollection = (): Permission => ({
   ...onApp([]),
   subject: {
     type: "workflow",
@@ -58,8 +56,13 @@ const onStore = (): Permission => ({
       "33333333-3333-4333-8333-333333333333"
     ),
   },
-  object: { type: "store", storeId: storeIdSchema.parse(store) },
-  actions: ["orders:list"],
+  object: {
+    type: "collection",
+    collectionId: collectionIdSchema.parse(
+      "22222222-2222-4222-8222-222222222222"
+    ),
+  },
+  actions: ["read"],
 });
 
 const workflow = workflowResourceIdSchema.parse(
@@ -92,7 +95,7 @@ describe("a pending request that names a workflow", () => {
   });
 
   it("names the workflow that asks", () => {
-    const asking = onStore();
+    const asking = onCollection();
     const { subject } = asking;
     const id = subject.type === "workflow" ? subject.workflowId : "";
 

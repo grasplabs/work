@@ -40,7 +40,7 @@ import { invocationFor } from "../src/app-functions.ts";
 import type { Release } from "../src/app-releases.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { callOperation } from "../src/operations.ts";
 import type { HostedApp, Runner } from "../src/operations.ts";
@@ -65,6 +65,7 @@ import {
   resourceRunFor,
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { liveStatus } from "./runs.ts";
@@ -348,7 +349,7 @@ const fixture = async () => {
     ).bind(app, bob.userId, ada.userId, Date.now()),
   ]);
   const sealed = await sealedManifest(app);
-  const storeId = await createStore(env, ada);
+  const storeId = await storeOfNewApp(env, ada);
   const store = await openStore(env, storeId);
   await store.defineTables(manifestText(manifest.schema));
   const contract = `job-events-${unique()}`;

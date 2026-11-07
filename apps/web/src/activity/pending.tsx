@@ -56,8 +56,8 @@ const workflowNamed = (
 
 /**
  * What holds a permission other than an App, for people: the agent, or an
- * independent workflow (by its name in `names`, where core gave it),
- * store or trigger, by its ID.
+ * independent workflow (by its name in `names`, where core gave it), or a
+ * trigger, by its ID.
  */
 export const holderName = (
   subject: Exclude<PermissionSubject, { type: "app" }>,
@@ -69,9 +69,6 @@ export const holderName = (
     }
     case "workflow": {
       return workflowNamed(subject.workflowId, names);
-    }
-    case "store": {
-      return i18n._(msg`Store ${ph({ store: subject.storeId })}`);
     }
     case "trigger": {
       return i18n._(msg`Trigger ${ph({ trigger: subject.triggerId })}`);
@@ -153,9 +150,6 @@ export const objectOf = (
     return i18n._(
       msg`Platform statistics. This App can read run and signal counts for every App, and may show them to anyone who uses it`
     );
-  }
-  if (object.type === "store") {
-    return i18n._(msg`Store ${ph({ store: object.storeId })}`);
   }
   return workflowNamed(object.workflowId, workflowNames);
 };

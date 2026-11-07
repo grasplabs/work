@@ -16,8 +16,9 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { accessedManifest } from "./store-schemas.ts";
 
 // Grouped aggregates and related records of a business store
@@ -64,7 +65,7 @@ interface Fixture {
 const storeWith = async (
   access: Partial<Record<string, AccessMode>> = {}
 ): Promise<Fixture> => {
-  const store = await openStore(env, await createStore(env, builder));
+  const store = await openStore(env, await storeOfNewApp(env, builder));
   const mode = (table: string, fallback: AccessMode): AccessMode =>
     access[table] ?? fallback;
   const defined = await store.defineTables(

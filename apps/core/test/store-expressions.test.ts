@@ -4,13 +4,14 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import { filterSql, rangeSql } from "../src/store-expressions.ts";
 import type {
   ComparedBase,
   FieldTypes,
   Fragment,
 } from "../src/store-expressions.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { tablesManifest } from "./store-schemas.ts";
 
 // What conditions mean, as the shared emitter writes them and the store's
@@ -52,7 +53,7 @@ const matchingIn = async (
   held: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
   ...fragments: Fragment[]
 ): Promise<string[]> => {
-  const store = await openStore(env, await createStore(env, builder));
+  const store = await openStore(env, await storeOfNewApp(env, builder));
   const { tables } = await store.defineTables(tablesManifest("notes"));
   return await runInDurableObject(
     env.DATA_STORES.getByName(store.id),

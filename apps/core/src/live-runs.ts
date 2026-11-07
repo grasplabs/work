@@ -6,9 +6,8 @@ import { inList } from "./db/d1.ts";
 
 // Which workflow runs are still live, for whatever keeps something for as
 // long as a run lives: the receipts of record saves (knowledge/
-// receipts.ts) and of business store mutations (data-store.ts), which an
-// App's run and an independent workflow's run (workflows/resource-runs.ts,
-// through a store operation) both leave.
+// receipts.ts) and of store mutations (data-store.ts), which an App's run
+// leaves.
 
 /** The runs of `runIds` that are live: started and not yet ended. */
 export const liveRuns = async (

@@ -20,9 +20,7 @@ const retries = (error: { name: string; code?: string }, of: SealedTask) =>
   retryable(failureOf({ ...error, message: "" }, of, false), of);
 
 /** A call task of `name`, a call whose effect runs once. */
-const onceTask = (
-  name: "grasp.action" | "grasp.operation" | "grasp.model"
-): SealedTask => {
+const onceTask = (name: "grasp.action" | "grasp.model"): SealedTask => {
   const base = {
     id: "charge",
     pointer: "/do/0/guard/try/0/charge",
@@ -42,21 +40,15 @@ const onceTask = (
       },
     };
   }
-  if (name === "grasp.action") {
-    return {
-      ...base,
-      call: {
-        name,
-        binding: "a",
-        module: "code/a.ts",
-        export: "a",
-        arguments: { literal: null },
-      },
-    };
-  }
   return {
     ...base,
-    call: { name, binding: "o", arguments: { literal: null } },
+    call: {
+      name,
+      binding: "a",
+      module: "code/a.ts",
+      export: "a",
+      arguments: { literal: null },
+    },
   };
 };
 
@@ -101,13 +93,12 @@ describe("a step's failure, as a catch sees it", () => {
       { name: "Error", message: "", code: "operation.deadline_exceeded" },
     ];
     expect(
-      (["grasp.action", "grasp.operation", "grasp.model"] as const).flatMap(
-        (name) =>
-          timeouts.map(
-            (error) => failureOf(error, onceTask(name), false).catchable
-          )
+      (["grasp.action", "grasp.model"] as const).flatMap((name) =>
+        timeouts.map(
+          (error) => failureOf(error, onceTask(name), false).catchable
+        )
       )
-    ).toStrictEqual([false, false, false, false, false, false]);
+    ).toStrictEqual([false, false, false, false]);
     // A connector call that ran out of time on every attempt: its send may
     // have gone out, and no attempt had connect's definite answer.
     const connector: SealedTask = {
@@ -151,7 +142,6 @@ describe("a step's failure, as a catch sees it", () => {
       data: typeOf({ name: "Error", code: "workflow.task_data_invalid" }),
       expression: typeOf({ name: "Error", code: "expression.failed" }),
       connector: typeOf({ name: "Error", code: "connect.declined" }),
-      store: typeOf({ name: "Error", code: "resource.operation_failed" }),
       unknown: typeOf({ name: "Error" }),
     }).toStrictEqual({
       timeout: {
@@ -190,7 +180,6 @@ describe("a step's failure, as a catch sees it", () => {
         detail: undefined,
         leaks: false,
       },
-      store: { type: "runtime", status: 500, detail: undefined, leaks: false },
       unknown: {
         type: "runtime",
         status: 500,
@@ -261,14 +250,6 @@ describe("a step's failure, as a catch sees it", () => {
         { name: "Error", code: "workflow.task_data_invalid" },
         task
       ),
-      busyStore: retries(
-        { name: "Error", code: "resource.busy" },
-        onceTask("grasp.operation")
-      ),
-      failedStore: retries(
-        { name: "Error", code: "resource.operation_failed" },
-        onceTask("grasp.operation")
-      ),
       modelTimedOut: retries({ name: "TimeoutError" }, onceTask("grasp.model")),
     }).toStrictEqual({
       timeout: true,
@@ -279,8 +260,6 @@ describe("a step's failure, as a catch sees it", () => {
       conflict: false,
       denied: false,
       invalid: false,
-      busyStore: true,
-      failedStore: false,
       modelTimedOut: false,
     });
   });

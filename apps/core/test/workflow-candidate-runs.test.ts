@@ -245,30 +245,25 @@ const aroundTrigger = async (
 /** A catalog contract of `kind` published by `admin`: its key. */
 const contract = async (
   admin: Identity,
-  kind: "connector" | "operation" | "model" | "knowledge" | "files"
+  kind: "connector" | "model" | "knowledge" | "files"
 ): Promise<string> => {
   const key = `${kind}-${unique()}`;
-  if (kind === "connector") {
-    await publishCatalogContract(env, admin, {
-      key,
-      kind,
-      operations: {
-        "mail.send": {
-          input: descriptor({ to: "string", subject: "string" }),
-          output: descriptor({ messageId: "string" }),
-        },
-      },
-    });
-  } else if (kind === "operation") {
-    await publishCatalogContract(env, admin, {
-      key,
-      kind,
-      input: descriptor({ who: "string" }),
-      output: descriptor({ greeting: "string" }),
-    });
-  } else {
-    await publishCatalogContract(env, admin, { key, kind });
-  }
+  await publishCatalogContract(
+    env,
+    admin,
+    kind === "connector"
+      ? {
+          key,
+          kind,
+          operations: {
+            "mail.send": {
+              input: descriptor({ to: "string", subject: "string" }),
+              output: descriptor({ messageId: "string" }),
+            },
+          },
+        }
+      : { key, kind }
+  );
   return key;
 };
 
@@ -280,14 +275,6 @@ const send = (subject = "Hello") => ({
   operation: "mail.send",
   arguments: { to: { $expr: "input.who" }, subject },
 });
-
-/** A step looking up through binding `lookup`. */
-const lookUp = {
-  id: "look",
-  type: "do",
-  binding: "lookup",
-  arguments: { who: { $expr: "input.who" } },
-};
 
 /** A step asking binding `summary` to greet. */
 const greet = {
@@ -416,7 +403,6 @@ describe("test runs of a workflow's draft", () => {
     const ada = await person("builder");
     const keys = {
       connector: await contract(admin, "connector"),
-      operation: await contract(admin, "operation"),
       model: await contract(admin, "model"),
     };
     const cases: {
@@ -440,19 +426,6 @@ describe("test runs of a workflow's draft", () => {
         alias: "mail",
         answer: { messageId: "m-1" },
         status: "m-1",
-        shaped: true,
-      },
-      {
-        kind: "operation",
-        definition: {
-          bindings: { lookup: { kind: "operation", contract: keys.operation } },
-          steps: [lookUp],
-          status: "steps.look.output.greeting",
-        },
-        modules: {},
-        alias: "lookup",
-        answer: { greeting: "Hi Ada" },
-        status: "Hi Ada",
         shaped: true,
       },
       {
@@ -624,16 +597,16 @@ describe("test runs of a workflow's draft", () => {
   it("starts no run of a version, schedule or trigger, and a draft that would start one never passes to be run", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
-    const key = await contract(admin, "operation");
+    const key = await contract(admin, "connector");
     const { workflow, revision } = await drafted(ada, {
-      bindings: { lookup: { kind: "operation", contract: key } },
-      steps: [lookUp],
-      status: "steps.look.output.greeting",
+      bindings: { mail: { kind: "connector", contract: key } },
+      steps: [send()],
+      status: "steps.send.output.messageId",
     });
     const { runId } = await startCandidateRun(env, ada, workflow.id, {
       revision,
       input: { who: "Ada" },
-      fixtures: { lookup: { output: { greeting: "Hi" } } },
+      fixtures: { mail: { output: { messageId: "Hi" } } },
     });
     const run = await ended(ada, workflow.id, runId);
     const { results: admitted } = await env.DB.prepare(

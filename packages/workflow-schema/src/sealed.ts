@@ -87,11 +87,6 @@ const ownExport = {
 /** A call task's call, as the host checks and makes it. */
 const sealedCallSchema = z.discriminatedUnion("name", [
   z.strictObject({
-    name: z.literal("grasp.operation"),
-    binding: aliasSchema,
-    arguments: templateSchema,
-  }),
-  z.strictObject({
     name: z.literal("grasp.connector"),
     binding: aliasSchema,
     operation: z.string().min(1).max(256),

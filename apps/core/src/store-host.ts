@@ -109,7 +109,6 @@ import {
   backfills,
   cascadeJobs,
   cascadeMembers,
-  commitWriters,
   fileEvents,
   files,
   importRows,
@@ -4101,7 +4100,6 @@ export class StoreHost {
       intents,
       attachable,
       result,
-      writer,
     } = dataErrors.parse("data.invalid", commitSchema, input);
     const pinned = await this.#pinned(storeId, schemaHash);
     const committed = this.ctx.storage.transactionSync((): Committed => {
@@ -4171,8 +4169,7 @@ export class StoreHost {
               job: this.#startCascadeJob(cascadeJob, {
                 receiptId: held.receiptId,
                 principal: principal.userId,
-                resourceId:
-                  writer?.resourceId ?? resourceOfScope(receipt.scope),
+                resourceId: resourceOfScope(receipt.scope),
                 runId: receipt.runId,
                 actor,
                 now,
@@ -4264,20 +4261,6 @@ export class StoreHost {
         })
         .where(eq(receipts.receiptId, held.receiptId))
         .run();
-      // A consumer's commit names it for good, past its receipt's retention.
-      if (writer !== undefined) {
-        this.#db
-          .insert(commitWriters)
-          .values({
-            commit: counted.commits,
-            receiptId: held.receiptId,
-            resourceId: writer.resourceId,
-            resourceVersion: writer.resourceVersion,
-            principal: principal.userId,
-            committedAt: now,
-          })
-          .run();
-      }
       for (const [position, intent] of intents.entries()) {
         this.#db
           .insert(outbox)

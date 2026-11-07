@@ -97,14 +97,6 @@ const summarize = {
 /** The greeting `summarize` answered, as a run's status. */
 const greeting = { $expr: "steps.summarize.output.line" };
 
-/** Saves the input's `who` through the `save` operation binding. */
-const save = {
-  id: "save",
-  type: "do",
-  binding: "save",
-  arguments: { who: { $expr: "input.who" } },
-};
-
 /** Mails the input's `who` through the `mail` connector binding. */
 const send = {
   id: "send",
@@ -288,17 +280,10 @@ const ranOnRunHost = async (
   }
 };
 
-/** A model catalog contract and a store operation's, published by `admin`. */
+/** The catalog contracts the tests' workflows bind, published by `admin`. */
 const contracts = async (admin: Identity) => {
   const model = `summary-${unique()}`;
   await publishCatalogContract(env, admin, { key: model, kind: "model" });
-  const operation = `save-${unique()}`;
-  await publishCatalogContract(env, admin, {
-    key: operation,
-    kind: "operation",
-    input: JSON.stringify(v.object({ who: v.string() }).descriptor),
-    output: JSON.stringify(v.null().descriptor),
-  });
   const mail = `mail-${unique()}`;
   await publishCatalogContract(env, admin, {
     key: mail,
@@ -319,7 +304,7 @@ const contracts = async (admin: Identity) => {
     input: JSON.stringify(v.object({ who: v.string() }).descriptor),
     response: JSON.stringify(v.null().descriptor),
   });
-  return { model, operation, mail, approval };
+  return { model, mail, approval };
 };
 
 /** A workflow of `by`'s whose draft holds `steps`, checked: its revision. */
@@ -425,8 +410,8 @@ export const list = query({
 
 /**
  * The Requests App binding a workflow of `steps` ending in `status` as
- * `followUp` (model binding `summary`, operation binding `save`,
- * connector binding `mail`), `fixture` its test's.
+ * `followUp` (model binding `summary`, connector binding `mail`),
+ * `fixture` its test's.
  */
 const requestsApp = async (
   steps: unknown[],
@@ -448,7 +433,6 @@ const requestsApp = async (
       steps,
       {
         summary: { kind: "model", contract: keys.model },
-        save: { kind: "operation", contract: keys.operation },
         mail: { kind: "connector", contract: keys.mail },
         approval: { kind: "decision", contract: keys.approval },
       },
@@ -513,25 +497,6 @@ const fixtureRunOf = async (app: string) => {
   };
 };
 
-const listedSchema = z.object({ ok: z.literal(true), value: z.unknown() });
-
-/** What the test's own store holds, as its session's user lists it. */
-const savedIn = async (
-  app: Awaited<ReturnType<typeof requestsApp>>,
-  session: { call: (name: string, request: string) => Promise<string> }
-): Promise<unknown> =>
-  listedSchema.parse(
-    JSON.parse(
-      await session.call(
-        "desk-user",
-        JSON.stringify({
-          reference: { name: "requests.list", kind: "query" },
-          input: {},
-        })
-      )
-    )
-  ).value;
-
 describe(
   "the engine a JSON workflow's run runs on",
   { timeout: 180_000 },
@@ -572,9 +537,8 @@ describe(
     });
 
     it("counts each step an App test's run completed on the run host once, by the step's ID", async () => {
-      const app = await requestsApp([summarize, save], greeting, {
+      const app = await requestsApp([summarize], greeting, {
         models: { summary: { line: "Hello from the fixture" } },
-        operations: { save: "requests.add" },
       });
       const host = fixtureHostFor(env, app.release, app.files);
       const session = await host.open("desk", `test-${unique()}`);
@@ -586,29 +550,27 @@ describe(
       const run = 0;
       const completed = await vi.waitFor(
         async () => {
-          const saved = await session.completedCount(run, "save");
-          expect(saved).toBe(1);
+          const summarized = await session.completedCount(run, "summarize");
+          expect(summarized).toBe(1);
           return {
-            save: saved,
-            summarize: await session.completedCount(run, "summarize"),
+            summarize: summarized,
             never: await session.completedCount(run, "linger"),
           };
         },
         { timeout: 60_000, interval: 200 }
       );
       await session.close();
-      expect(completed).toStrictEqual({ save: 1, summarize: 1, never: 0 });
+      expect(completed).toStrictEqual({ summarize: 1, never: 0 });
     });
 
-    it("runs an App test's run of a version generated for the run host there, its model answered by its fixture and its store call on the test's own store", async () => {
+    it("runs an App test's run of a version generated for the run host there, its model answered by its fixture", async () => {
       const provider = await fakeProvider({
         text: '{"line":"From a real model"}',
         inputTokens: 1,
         outputTokens: 1,
       });
-      const app = await requestsApp([linger, summarize, save], greeting, {
+      const app = await requestsApp([linger, summarize], greeting, {
         models: { summary: { line: "Hello from the fixture" } },
-        operations: { save: "requests.add" },
       });
       const host = fixtureHostFor(env, app.release, app.files);
       const session = await host.open("desk", `test-${unique()}`);
@@ -620,23 +582,16 @@ describe(
       const ended = await ranOnRunHost(
         await fixtureActivation(env, pin, runId)
       );
-      const saved = await savedIn(app, session);
       await session.close();
-      expect({
-        ended,
-        saved,
-        asked: provider.requests.length,
-      }).toStrictEqual({
+      expect({ ended, asked: provider.requests.length }).toStrictEqual({
         ended: { status: "Hello from the fixture" },
-        saved: ["Ada"],
         asked: 0,
       });
     });
 
-    it("sends an App test's store call once on the run host, whatever its step's attempts: an evicted activation's successor fails as tried", async () => {
-      const app = await requestsApp([linger, summarize, save], greeting, {
+    it("answers an App test's model call once on the run host, whatever its step's attempts: an evicted activation's successor fails as tried", async () => {
+      const app = await requestsApp([linger, summarize], greeting, {
         models: { summary: { line: "Hello" } },
-        operations: { save: "requests.add" },
       });
       const host = fixtureHostFor(env, app.release, app.files);
       const session = await host.open("desk", `test-${unique()}`);
@@ -647,20 +602,18 @@ describe(
       const { runId, pin } = await fixtureRunOf(app.app);
       const activation = await fixtureActivation(env, pin, runId);
       // One run's engine and memory across its activations: the first is
-      // evicted once its store call's attempt returned, nothing journaled.
+      // evicted once its model call's attempt returned, nothing journaled.
       const engine = journalingEngine();
       const memory = memoryOfTest();
-      engine.evictAfter = "save:task";
+      engine.evictAfter = "summarize:task";
       const evicted = await ranOnRunHost(activation, { engine, memory });
       engine.evictAfter = undefined;
       const resumed = await ranOnRunHost(activation, { engine, memory });
-      const saved = await savedIn(app, session);
       await session.close();
-      expect({ evicted, resumed, saved }).toStrictEqual({
+      expect({ evicted, resumed }).toStrictEqual({
         evicted: { failed: "internal.unexpected" },
-        // Not `{ status: "Hello" }`: its store call isn't sent again.
+        // Not `{ status: "Hello" }`: its model call isn't answered again.
         resumed: { failed: "operation.deadline_exceeded" },
-        saved: ["Ada"],
       });
     });
 

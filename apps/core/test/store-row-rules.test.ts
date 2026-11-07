@@ -32,7 +32,7 @@ import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { appMembers, teamMembers, teams } from "../src/db/core/schema.ts";
 import { callOperation } from "../src/operations.ts";
@@ -40,6 +40,7 @@ import type { Runner } from "../src/operations.ts";
 import type { SessionCheck } from "../src/session-check.ts";
 import { reviewVersion } from "../src/version-review.ts";
 import { appDefinition } from "./app-definitions.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { published, release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { refusalOf } from "./migrated-apps.ts";
@@ -514,7 +515,7 @@ const world = async (): Promise<World> => {
   const owner = await person("builder");
   const { id: appId } = await createApp(env, owner, { name: "Requests" });
   await published(appId);
-  const store = await openStore(env, await createStore(env, owner));
+  const store = await openStore(env, await storeOfNewApp(env, owner));
   const defined = await store.defineTables(manifestText(manifest.schema));
   const [carol, ada, bob] = await Promise.all([
     person("builder"),
@@ -1493,7 +1494,7 @@ const ticketsStore = async (
 ): Promise<{ store: OpenStore; ids: string[]; schemaHash: string }> => {
   const store = await openStore(
     env,
-    await createStore(env, await person("builder"))
+    await storeOfNewApp(env, await person("builder"))
   );
   const first = await store.defineTables(v1Text, consumer(1));
   const ids: string[] = [];
@@ -1842,7 +1843,7 @@ describe("a record's long history, read by row rules", () => {
   it("pages through every change the reader was admitted to, and none from before", async () => {
     const store = await openStore(
       env,
-      await createStore(env, await person("builder"))
+      await storeOfNewApp(env, await person("builder"))
     );
     const { schemaHash } = await store.defineTables(v1Text, consumer(1));
     const id = newRecordId();
@@ -2169,7 +2170,7 @@ describe("deleting a record a row the rules hide refers to", () => {
     );
     const store = await openStore(
       env,
-      await createStore(env, await person("builder"))
+      await storeOfNewApp(env, await person("builder"))
     );
     const { schemaHash } = await store.defineTables(text, consumer(1));
     const plan = newRecordId();

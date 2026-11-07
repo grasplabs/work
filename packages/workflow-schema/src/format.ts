@@ -150,7 +150,7 @@ export const isSensitive = (param: Param): boolean => !isPlain(param);
 
 /**
  * What a binding reaches, as the host's catalog has its contracts. A step
- * calls the first seven; `files` (the run's own files) and `brain` (one
+ * calls the first six; `files` (the run's own files) and `brain` (one
  * Brain collection) only the workflow's own actions reach, as uses they
  * declare: no step calls them itself. What an action returns is its
  * step's output, recorded as any other, so the action chooses what that
@@ -160,7 +160,6 @@ export const isSensitive = (param: Param): boolean => !isPlain(param);
  */
 export const bindingKinds = [
   "connector",
-  "operation",
   "model",
   "compute",
   "action",

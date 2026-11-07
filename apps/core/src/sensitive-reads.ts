@@ -40,8 +40,8 @@ import type { SensitiveRead, SensitiveReadsSink } from "./operations.ts";
 /** Whom a call's sensitive reads are recorded for, and what they read. */
 export interface SensitiveReadContext {
   readonly actor: AuditActor;
-  /** What was read: the App, or the store of a store operation. */
-  readonly target: { readonly type: "app" | "store"; readonly id: string };
+  /** What was read: the App, whose store it is. */
+  readonly target: { readonly type: "app"; readonly id: string };
   readonly version: number;
   /** The person the call acts for. */
   readonly principal: string;

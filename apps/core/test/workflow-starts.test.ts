@@ -13,7 +13,6 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { appFor } from "../src/apps.ts";
-import { createStore } from "../src/data-stores.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { permissionsOpenTo } from "../src/permissions-open.ts";
 import {
@@ -51,6 +50,7 @@ import type {
   StartInvoker,
 } from "../src/workflow-starts.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { allEvents } from "./audit-events.ts";
 import { greetingOf } from "./json-workflow-apps.ts";
 import { configuredLimits } from "./quota-limits.ts";
@@ -141,7 +141,7 @@ const rolesOf = (by: Person) => ({
   app: async (app: string, role: "user" | "builder") =>
     await appFor(env, by, app, role),
   resource: async (
-    ref: { type: "workflow" | "store" | "trigger"; id: string },
+    ref: { type: "workflow" | "trigger"; id: string },
     needed: "user" | "builder"
   ) => {
     await requireResourceRole(env, by, ref, needed);
@@ -1382,7 +1382,7 @@ describe("what code and triggers may learn and name", () => {
     ]).toStrictEqual([1, 1, 0]);
   });
 
-  it("lets nobody name a workflow subject they don't build, a store reach a workflow, or a trigger do more than start its workflow and hear its own connection", async () => {
+  it("lets nobody name a workflow subject they don't build, a store hold a grant, or a trigger do more than start its workflow and hear its own connection", async () => {
     const ada = await person("builder");
     const bob = await person("builder");
     const theirs = await workflowOf(ada);
@@ -1392,7 +1392,7 @@ describe("what code and triggers may learn and name", () => {
       id: bob.userId,
       role: "user",
     });
-    const store = await createStore(env, ada);
+    const store = await storeOfNewApp(env, ada);
     const trigger = await createTriggerResource(env, ada, {
       kind: "webhook",
       workflowId: theirs.id,
@@ -1422,9 +1422,17 @@ describe("what code and triggers may learn and name", () => {
         bob,
         startsOn({ type: "workflow", workflowId: theirs.id }, shared.id)
       ),
-      storeStarts: await ask(
-        ada,
-        startsOn({ type: "store", storeId: store }, shared.id)
+      // A store is no subject: it is its App's, and holds no grant.
+      storeStarts: await outcome(
+        requestPermission(
+          env,
+          ada,
+          {
+            ...startsOn({ type: "workflow", workflowId: theirs.id }, shared.id),
+            subject: { type: "store", storeId: store },
+          },
+          rolesOf(ada)
+        )
       ),
       triggerElsewhere: await ask(
         ada,

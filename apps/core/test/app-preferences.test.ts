@@ -19,7 +19,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
-import { sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
@@ -537,18 +536,8 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
     });
   });
 
-  it("give an App with preferences and no tables its store only at seal", async () => {
+  it("bind an App with preferences and no tables to its own store at seal", async () => {
     const fixture = await appWith(filesWith(declared), "Desk");
-    await expect(
-      failure(
-        async () =>
-          await sealRelease(env, {
-            app: fixture.app,
-            version: 1,
-            by: fixture.owner,
-          })
-      )
-    ).resolves.toBe("version.store_unbound");
     const release = await seal(fixture);
     expect(release.store?.storeId).toBe(fixture.store);
   });

@@ -19,9 +19,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { planIndexes } from "../src/store-indexes.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { manifestHash, memberRoles, newRecordId } from "./store-schemas.ts";
 
 // A store's data contract (spec 17.4): every schema handed to a store
@@ -84,7 +85,7 @@ const consumer = (resourceVersion: number) => ({
 });
 
 const newStore = async (): Promise<OpenStore> =>
-  await openStore(env, await createStore(env, builder));
+  await openStore(env, await storeOfNewApp(env, builder));
 
 /** Commits `writes` for Ada under a receipt of its own, pinned to `schemaHash`. */
 const commit = async (

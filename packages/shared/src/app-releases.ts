@@ -219,8 +219,6 @@ export const versionErrors = defineErrorFamily({
     "This version's registration changed between two inspections of the same code.",
   "version.store_unbound":
     "This version declares tables or preferences, but no store is bound for it.",
-  "version.store_bound_elsewhere":
-    "That store is bound to another App's releases, and serves only that App.",
   "version.seal_busy":
     "Some of this version's artifacts are being deleted. Seal it again in a moment.",
   "version.seal_conflict":

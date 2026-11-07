@@ -12,9 +12,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, openStore } from "../src/data-stores.ts";
+import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { StoreHost } from "../src/store-host.ts";
+import { storeOfNewApp } from "./app-stores.ts";
 import { accessedManifest, memberRoles, newRecordId } from "./store-schemas.ts";
 
 // Reads of a business store through core's way in and the store's Durable
@@ -92,7 +93,7 @@ interface Fixture {
 
 /** A store with the notes schema, its table read in mode `read`. */
 const storeWith = async (read: AccessMode): Promise<Fixture> => {
-  const store = await openStore(env, await createStore(env, builder));
+  const store = await openStore(env, await storeOfNewApp(env, builder));
   const { text } = notesSchema(read);
   const defined = await store.defineTables(text);
   return {
@@ -606,7 +607,7 @@ const memberNotes = (fields: Parameters<typeof defineTable>[0]): string =>
 
 describe("pinned schemas", () => {
   it("project records to the schema a consumer is pinned to", async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     const older = await store.defineTables(memberNotes({ title: v.string() }));
     const newer = await store.defineTables(
       memberNotes({ title: v.string(), body: v.string().optional() })
@@ -825,7 +826,7 @@ describe("scan and aggregate edges", () => {
 
 describe("what a read changes", () => {
   it("creates nothing in a store no schema was handed", async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     const refused = await refusal(
       valueOf(store, scopeOf("a".repeat(64)), queryRequest({}))
     );
@@ -870,7 +871,7 @@ describe("what a read changes", () => {
 
 describe("projection, at every depth", () => {
   it("leaves out nested keys the pinned schema doesn't declare", async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     const pinned = await store.defineTables(
       memberNotes({
         title: v.string(),
@@ -912,7 +913,7 @@ describe("projection, at every depth", () => {
 
 describe("projection of unions", () => {
   it("projects a union to the member the stored value fits, never a smaller one", async () => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     const pinned = await store.defineTables(
       memberNotes({
         title: v.string(),
@@ -981,7 +982,7 @@ describe("projection of unions of every kind", () => {
     shape: ValueShape[string],
     ...stored: StoreFields[string][]
   ): Promise<unknown> => {
-    const store = await openStore(env, await createStore(env, builder));
+    const store = await openStore(env, await storeOfNewApp(env, builder));
     const pinned = await store.defineTables(
       memberNotes({ title: v.string(), shape })
     );

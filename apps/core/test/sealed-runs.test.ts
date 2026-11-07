@@ -17,6 +17,11 @@ import { z } from "zod";
 
 import { revokeWorkflowBinding } from "../src/workflow-bindings.ts";
 import { generatedModule } from "../src/workflow-builds.ts";
+import {
+  exportedWorkflowVersion,
+  publishWorkflowVersion,
+  workflowVersions,
+} from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
 import { runObjectOf } from "../src/workflows/engine.ts";
 import { cpuLimitKill } from "../src/workflows/host.ts";
@@ -108,6 +113,61 @@ import { unique } from "./sign-in.ts";
 // And the calls the isolate filled in as sealed go out: a connector's, its
 // sensitive value put in by the host, audited with the arguments it sent,
 // and a model's.
+/**
+ * A sealed workflow whose version 1 is as one published before: its
+ * manifest as `change` makes it, under the hash every pin reads it by.
+ */
+const publishedBefore = async (change: (manifest: string) => string) => {
+  const old = await sealedWorkflow();
+  const row = await env.DB.prepare(
+    "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+  )
+    .bind(old.workflow.id)
+    .first<{ manifest: string }>();
+  const manifest = change(row?.manifest ?? "");
+  await env.DB.batch([
+    env.DB.prepare("DROP TRIGGER workflow_resource_versions_immutable_update"),
+    env.DB.prepare(
+      "UPDATE workflow_resource_versions SET manifest = ?, manifest_hash = ? WHERE workflow_resource_id = ? AND version = 1"
+    ).bind(manifest, await sha256Hex(manifest), old.workflow.id),
+    env.DB.prepare(
+      "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
+    ),
+  ]);
+  return old;
+};
+
+/** The code a start of version 1 of `old`'s workflow is refused with. */
+const startOfFirst = async (old: Sealed): Promise<unknown> =>
+  await codeOf(
+    async () =>
+      await startWorkflow(
+        serving,
+        { type: "person", person: old.by },
+        old.workflow.id,
+        { version: 1, input: { who: "Ada" }, key: unique() }
+      )
+  );
+
+/** A manifest that also binds an App's store operation, as workflows could before. */
+const withOperationBinding = (manifest: string): string => {
+  const parsed = z
+    .looseObject({ bindings: z.array(z.json()) })
+    .parse(JSON.parse(manifest));
+  return JSON.stringify({
+    ...parsed,
+    bindings: [
+      ...parsed.bindings,
+      {
+        alias: "save",
+        kind: "operation",
+        contractId: "requests.add",
+        fingerprint: "0".repeat(64),
+      },
+    ],
+  });
+};
+
 describe("a sealed build's run on the run host", () => {
   let sealed: Sealed;
 
@@ -556,38 +616,66 @@ return { before, after: await late };
     });
   });
 
-  it("refuses a version an earlier platform release built as one to publish again, not as one changed", async () => {
-    const old = await sealedWorkflow();
-    const row = await env.DB.prepare(
-      "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
-    )
-      .bind(old.workflow.id)
-      .first<{ manifest: string }>();
-    // As a version published while builds named a protocol: its manifest,
-    // and the hash every pin reads it by, with one.
-    const manifest = (row?.manifest ?? "").replace(
-      '"build":{',
-      '"build":{"protocol":9,'
+  it("refuses a version an earlier platform release built, or binding a kind no longer served, as one to publish again, not as one changed", async () => {
+    // As a version published while builds named a protocol.
+    const earlier = await publishedBefore((manifest) =>
+      manifest.replace('"build":{', '"build":{"protocol":9,')
     );
-    await env.DB.batch([
-      env.DB.prepare(
-        "DROP TRIGGER workflow_resource_versions_immutable_update"
+    await expect(startOfFirst(earlier)).resolves.toBe(
+      "workflow.format_unsupported"
+    );
+    const operation = await publishedBefore(withOperationBinding);
+    const { workflow, by } = operation;
+    // A new version beside it, published as any is.
+    const first = await env.DB.prepare(
+      "SELECT definition FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    )
+      .bind(workflow.id)
+      .first<{ definition: string }>();
+    const definition = z
+      .looseObject({ output: z.looseObject({ value: z.json() }) })
+      .parse(JSON.parse(first?.definition ?? "{}"));
+    await publishWorkflowVersion(env, by, workflow.id, {
+      definition: JSON.stringify({
+        ...definition,
+        output: { ...definition.output, value: { status: "done again" } },
+      }),
+      basedOn: 1,
+    });
+    const listed = await workflowVersions(env, by, workflow.id);
+    expect({
+      start: await startOfFirst(operation),
+      exported: await codeOf(
+        async () => await exportedWorkflowVersion(env, by, workflow.id, 1)
       ),
-      env.DB.prepare(
-        "UPDATE workflow_resource_versions SET manifest = ?, manifest_hash = ? WHERE workflow_resource_id = ? AND version = 1"
-      ).bind(manifest, await sha256Hex(manifest), old.workflow.id),
-      env.DB.prepare(
-        "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
-      ),
-    ]);
-    await expect(
-      startWorkflow(
-        serving,
-        { type: "person", person: old.by },
-        old.workflow.id,
-        { version: 1, input: { who: "Ada" }, key: unique() }
-      )
-    ).rejects.toMatchObject({ code: "workflow.format_unsupported" });
+      // Listed beside the new one, refused, never failing the listing.
+      listed: listed.map(({ version, refused, build, actions }) => ({
+        version,
+        refused: refused?.code,
+        told: refused?.message.includes("publish the workflow again"),
+        built: build !== null,
+        actions: actions.length,
+      })),
+    }).toStrictEqual({
+      start: "workflow.binding_kind_removed",
+      exported: "workflow.binding_kind_removed",
+      listed: [
+        {
+          version: 2,
+          refused: undefined,
+          told: undefined,
+          built: true,
+          actions: 0,
+        },
+        {
+          version: 1,
+          refused: "workflow.binding_kind_removed",
+          told: true,
+          built: false,
+          actions: 0,
+        },
+      ],
+    });
   });
 });
 
