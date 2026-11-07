@@ -6,8 +6,9 @@ import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
-import { appFor, setCurrentVersion } from "../src/apps.ts";
+import { appFor } from "../src/apps.ts";
 import { createCollection } from "../src/knowledge/collection-rules.ts";
 import { saveDocument } from "../src/knowledge/person-writes.ts";
 import {
@@ -137,7 +138,7 @@ const skillText = (name: string, manifest: string): string =>
 const skillsApp = async () => {
   const fixture = await appWith(skillsFiles(), "How");
   const release = await seal(fixture);
-  await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+  await publishVersion(env, fixture.owner, fixture.app, 1);
   const sealed: Sealed = { ...fixture, release };
   const admin = await person("admin");
   const team = crypto.randomUUID();

@@ -7,7 +7,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { activateVersion } from "../src/app-activation.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
@@ -248,7 +248,7 @@ const activated = async (
   app: string
 ): Promise<unknown> => {
   try {
-    await activateVersion(env, by, app, 1);
+    await publishVersion(env, by, app, 1);
     return "current";
   } catch (error) {
     if (!isExpectedError(error)) {

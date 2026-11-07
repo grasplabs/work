@@ -54,8 +54,8 @@ import type { ReleaseAction } from "./release-controls.tsx";
 // which one runs and which is up for review, and, for its builders, making
 // one current: the one up for review, or an earlier one to roll back to
 // (`apps.versions.setCurrent`, over the version current as shown, so a
-// change made meanwhile is refused rather than undone). Core makes it
-// current only through a candidate it verified, and, for anyone but an
+// change made meanwhile is refused rather than undone). Core publishes it
+// first if it isn't yet (built, sealed and tested), and, for anyone but an
 // admin, asks again for the App's permissions to connections, workflows
 // and other Apps, which allow nothing until an admin grants them again;
 // the dialog says so. A version's actions are a menu, so revoking a

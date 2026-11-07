@@ -249,6 +249,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.run_mail_stamp_refusals": noPerson,
   "core.screen_policies": noPerson,
   "core.sdk_artifact_candidates": noPerson,
+  "core.sdk_artifact_refs": noPerson,
+  "core.sdk_artifacts": noPerson,
   "core.sdk_release_artifacts": noPerson,
   "core.sdk_release_manifests": noPerson,
   "core.sdk_release_pins": noPerson,

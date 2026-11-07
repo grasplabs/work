@@ -39,6 +39,7 @@ import { answeringProvider, connectModels } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
 import { engineOfTest } from "./run-host.ts";
 import { admittedFreely } from "./runs.ts";
+import { artifactKey } from "./sealed-apps.ts";
 import {
   activationOf,
   allowedModel,
@@ -602,7 +603,7 @@ return { before, after: await late };
       );
     // Its generated module swapped in storage for code of the attacker's.
     await env.FILES.put(
-      `release-artifacts/${artifact?.sha256 ?? ""}`,
+      await artifactKey(artifact?.sha256 ?? ""),
       moduleOf(send('return await env.mail.call("mail.send", {});'))
     );
     const { runId } = await startWorkflow(

@@ -5,12 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { indexApps } from "../src/knowledge/apps-collection.ts";
-import {
-  grantReviewed,
-  release,
-  requestGranted,
-  verifiedCandidate,
-} from "./apps.ts";
+import { grantReviewed, release, requestGranted } from "./apps.ts";
 import { actingFor, envOf, knowledgeIn } from "./contexts.ts";
 import { mockIdp } from "./idp.ts";
 import {
@@ -812,7 +807,13 @@ describe("read-only", setUpTime, () => {
 
     // An App whose current version can't be read can't be checked: the
     // purge is refused rather than trusted.
-    await verifiedCandidate(appId, 999);
+    // A version whose tree was never stored, published as making it
+    // current requires.
+    await env.DB.prepare(
+      "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, status) VALUES (?, 999, 'missing', 0, 'test', '', 0, 'published')"
+    )
+      .bind(appId)
+      .run();
     await env.DB.prepare("UPDATE apps SET current_version = ? WHERE id = ?")
       .bind(999, appId)
       .run();

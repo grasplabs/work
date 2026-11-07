@@ -1138,8 +1138,8 @@ const symbolicTree = "symbolic()";
  * `@server/_generated/internal` before the App's references exist (spec
  * 8): the registration is what says which paths there are, so its code
  * gets symbolic references, which grant nothing and resolve only against
- * that registration. Sealing then generates the real modules and inspects
- * again with them; nothing symbolic survives into a release.
+ * that registration. Sealing then generates the real modules and builds
+ * the code again with them; nothing symbolic survives into a release.
  *
  * Typed `any`, they also stand in for the real modules in a draft's type
  * check while its server code doesn't register (core's save-builds.ts):

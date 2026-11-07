@@ -10,7 +10,8 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { publishVersion } from "../src/app-publish.ts";
+import { commitFiles } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { appDefinition } from "./app-definitions.ts";
@@ -854,7 +855,7 @@ const sharedV1 = notesDefinition(
 const sharedNext = async () => {
   const fixture = await appWith(ownedV1);
   const first = await seal(fixture);
-  await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+  await publishVersion(env, fixture.owner, fixture.app, 1);
   const store = await openStore(env, fixture.store);
   const owned = first.manifest.schemaHash;
   await insert(store, owned, { title: "Ada's" }, "ada");
@@ -986,7 +987,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
     }, makingCurrent);
     const refused = await failure(
       async () =>
-        await setCurrentVersion(
+        await publishVersion(
           { ...env, DB: racing },
           fixture.owner,
           fixture.app,
@@ -1016,7 +1017,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
   it("applies the rules of the version made current once D1 committed it, by the store's alarm when core stopped right after", async () => {
     const { fixture, store, owned, shared } = await sharedNext();
     const stopping = stoppingAfter(makingCurrent);
-    await setCurrentVersion(
+    await publishVersion(
       { ...env, DB: stopping },
       fixture.owner,
       fixture.app,
@@ -1071,15 +1072,10 @@ describe("making the release current", { timeout: 180_000 }, () => {
     let loser = "";
     const racing = racingDb(async () => {
       loser = await failure(
-        async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+        async () => await publishVersion(env, fixture.owner, fixture.app, 3)
       );
     }, makingCurrent);
-    await setCurrentVersion(
-      { ...env, DB: racing },
-      fixture.owner,
-      fixture.app,
-      2
-    );
+    await publishVersion({ ...env, DB: racing }, fixture.owner, fixture.app, 2);
     const winner = {
       current: await currentOf(fixture.app),
       writes: await codeOf(
@@ -1106,7 +1102,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       "ada"
     );
     const retried = await failure(
-      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+      async () => await publishVersion(env, fixture.owner, fixture.app, 3)
     );
 
     expect({
@@ -1142,7 +1138,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       { id: crypto.randomUUID(), kind: "app" }
     );
     const held = await failure(
-      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+      async () => await publishVersion(env, fixture.owner, fixture.app, 3)
     );
     // The store's alarm, once it is due: version 1 is current, not 2.
     await runInDurableObject(object, (_instance, state) => {
@@ -1150,7 +1146,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
     });
     await runDurableObjectAlarm(object);
     const released = await failure(
-      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+      async () => await publishVersion(env, fixture.owner, fixture.app, 3)
     );
 
     expect({
@@ -1174,11 +1170,11 @@ describe("making the release current", { timeout: 180_000 }, () => {
     // after its dry run: making version 3 current is refused.
     await insert(store, owned, { title: "x".repeat(150) }, "ada");
     const refused = await failure(
-      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+      async () => await publishVersion(env, fixture.owner, fixture.app, 3)
     );
     // Another version, made current at once.
     const other = await failure(
-      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 2)
+      async () => await publishVersion(env, fixture.owner, fixture.app, 2)
     );
 
     expect({
@@ -1209,12 +1205,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
     const racing = racingDb(async () => {
       meanwhile = await failure(async () => await seal(fixture, 3));
     }, makingCurrent);
-    await setCurrentVersion(
-      { ...env, DB: racing },
-      fixture.owner,
-      fixture.app,
-      2
-    );
+    await publishVersion({ ...env, DB: racing }, fixture.owner, fixture.app, 2);
     const applied = await titles(store, owned, "grace");
     // Sealed again once version 2's rules are in force.
     const sealedAgain = await failure(async () => await seal(fixture, 3));
@@ -1231,7 +1222,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
     // version 3 narrows the titles.
     const fixture = await appWith(sharedV1);
     const first = await seal(fixture);
-    await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+    await publishVersion(env, fixture.owner, fixture.app, 1);
     const store = await openStore(env, fixture.store);
     const shared = first.manifest.schemaHash;
     await insert(store, shared, { title: "Ada's" }, "ada");
@@ -1264,13 +1255,13 @@ describe("making the release current", { timeout: 180_000 }, () => {
       await winner;
     });
     let loser: Promise<string> = Promise.resolve("");
-    winner = setCurrentVersion(
+    winner = publishVersion(
       {
         ...env,
         DB: racingDb(async () => {
           loser = failure(
             async () =>
-              await setCurrentVersion(
+              await publishVersion(
                 { ...env, DB: loserDb },
                 fixture.owner,
                 fixture.app,
@@ -1309,7 +1300,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- one App after the other
       const first = await seal(fixture);
       // oxlint-disable-next-line no-await-in-loop -- one App after the other
-      await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+      await publishVersion(env, fixture.owner, fixture.app, 1);
       // oxlint-disable-next-line no-await-in-loop -- one App after the other
       const store = await openStore(env, fixture.store);
       const owned = first.manifest.schemaHash;
@@ -1332,7 +1323,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
       const second = await seal(fixture, 2);
       // oxlint-disable-next-line no-await-in-loop -- one App after the other
       const made = await failure(
-        async () => await setCurrentVersion(env, fixture.owner, fixture.app, 2)
+        async () => await publishVersion(env, fixture.owner, fixture.app, 2)
       );
       const shared = second.manifest.schemaHash;
       // oxlint-disable-next-line no-await-in-loop -- one App after the other
@@ -1371,7 +1362,7 @@ describe("making the release current", { timeout: 180_000 }, () => {
   it("applies the rules as the version is made current", async () => {
     const { fixture, store, owned, shared } = await sharedNext();
     const before = await notesGeneration(store);
-    await setCurrentVersion(env, fixture.owner, fixture.app, 2);
+    await publishVersion(env, fixture.owner, fixture.app, 2);
 
     expect({
       first: await titles(store, owned, "grace"),

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { activateVersion } from "../../src/app-activation.ts";
+import { publishVersion } from "../../src/app-publish.ts";
 import { loadRelease, sealRelease } from "../../src/app-releases.ts";
 import type { Release } from "../../src/app-releases.ts";
 import {
@@ -9,12 +9,7 @@ import {
   fixtureHostFor,
   suiteCapability,
 } from "../../src/app-tests.ts";
-import {
-  commitFiles,
-  createApp,
-  findApp,
-  setCurrentVersion,
-} from "../../src/apps.ts";
+import { commitFiles, createApp, findApp } from "../../src/apps.ts";
 import { platformPlaceWaitMs } from "../../src/platform-sandbox.ts";
 import {
   sandboxOwnerHeader,
@@ -79,7 +74,7 @@ const notesRelease = async (): Promise<Release> => {
   const owner = await person("builder");
   const { id } = await createApp(env, owner, { name: "Notes" });
   await commitFiles(env, owner, id, appFiles, "First version");
-  await activateVersion(env, owner, id, 1);
+  await publishVersion(env, owner, id, 1);
   return await loadRelease(env, id, 1);
 };
 
@@ -225,7 +220,7 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
     };
     const activating = (async (): Promise<unknown> => {
       try {
-        await setCurrentVersion(
+        await publishVersion(
           envWith({ SANDBOX_HOST: watching }),
           built.owner,
           built.app,

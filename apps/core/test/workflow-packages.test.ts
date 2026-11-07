@@ -714,7 +714,7 @@ describe("a workflow's modules importing approved packages", () => {
       ({ path }) => path === `compute/${packageModuleName(pkg)}`
     );
     await env.FILES.put(
-      artifactKey(sealed?.sha256 ?? ""),
+      await artifactKey(sealed?.sha256 ?? ""),
       "export const double = (value) => value * 3;"
     );
 

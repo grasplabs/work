@@ -2,8 +2,8 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { activateVersion } from "../src/app-activation.ts";
 import { addMember } from "../src/app-members.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import { changeStatus } from "../src/app-status.ts";
 import { bindWorkflowToApp } from "../src/app-workflow-bindings.ts";
 import {
@@ -523,7 +523,7 @@ describe("an App's status", () => {
     const versions = await builder.api.apps.versions.list(app);
     await restore();
     const madeCurrent = await outcome(
-      activateVersion(
+      publishVersion(
         {
           ...env,
           DB: racingDb(archive, /update "apps" set "current_version"/iu),

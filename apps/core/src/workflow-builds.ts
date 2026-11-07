@@ -33,18 +33,18 @@ import type {
   SealedTable,
   SealedTask,
 } from "@grasp-os/workflow-schema/sealed";
-import { and, eq, sql } from "drizzle-orm";
-import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { artifactKey, reserveArtifacts } from "./app-releases.ts";
-import {
-  sdkReleaseArtifacts,
-  workflowResourceVersions,
-} from "./db/core/schema.ts";
+import { workflowResourceVersions } from "./db/core/schema.ts";
 import { buildGeneratedWorkflow, withinBuildWait } from "./pages.ts";
-import { releaseReservations } from "./release-retention.ts";
+import {
+  artifactKey,
+  generationsOf,
+  releaseSeal,
+  storeArtifacts,
+} from "./sealed-artifacts.ts";
 import { sealedUse } from "./workflow-modules.ts";
 import type { ComputeContract, CompiledModules } from "./workflow-modules.ts";
 import { manifestPackagesSchema } from "./workflows/package-seal.ts";
@@ -57,8 +57,8 @@ import { manifestPackagesSchema } from "./workflows/package-seal.ts";
 // version: the original JSON, the generated code, the compiled module, the
 // expression table it names its expressions from, a source map and the SDK
 // modules it was compiled against, each a content-addressed artifact
-// (`release-artifacts/<sha256>`, as an App release's) named by the
-// version's manifest. A run loads exactly those bytes, every hash checked;
+// (sealed-artifacts.ts, as an App release's) named by the version's
+// manifest. A run loads exactly those bytes, every hash checked;
 // nothing is generated or compiled when a run starts or resumes.
 //
 // Threat model, and how each is closed:
@@ -83,11 +83,11 @@ import { manifestPackagesSchema } from "./workflows/package-seal.ts";
 //   loads only as the generator writes it (@grasp-os/workflow-schema's
 //   sealed.ts, `sealedTableSchema`); anything else is
 //   `workflow.version_corrupt`.
-// - Bytes a sealed version names deleted by retention. They are reserved
-//   for the version (`sdk_release_artifacts`) before they are stored, the
-//   version row is written only while every reservation stands, and the
-//   retention sweep never takes a reservation of a workflow version
-//   (release-retention.ts): versions are never deleted.
+// - Bytes a sealed version names deleted. Its seal references every
+//   artifact it names before uploading them, the version row is written
+//   only while every reference stands, versions are never deleted, and an
+//   artifact is collected only once nothing references it
+//   (sealed-artifacts.ts).
 // - Injection through the definition into code, and code reaching past
 //   the SDK: closed by the generator (literals only, expressions printed
 //   from their checked syntax tree) and the compiler (generated code may
@@ -348,95 +348,24 @@ export const compileWorkflow = async (
 };
 
 /**
- * Stores `compiled`'s bytes for version `version` of workflow `id`:
- * reserved for it first (release-retention.ts), so no sweep deletes what it
- * names, then each under its hash. Before the version's row is written,
- * which requires every reservation to stand.
+ * References and stores `compiled`'s bytes for seal `seal`, before the row
+ * that names the seal is written.
  */
 export const storeBuild = async (
   env: Env,
-  key: { id: string; version: number },
+  seal: string,
   compiled: CompiledBuild
 ): Promise<void> => {
-  await reserveArtifacts(
-    env,
-    { app: key.id, version: key.version },
-    compiled.build.artifacts.map(({ sha256 }) => sha256)
-  );
-  // Every upload settled before any failure is thrown: a caller that then
-  // gives the reservations back must never race an upload still running,
-  // which would store bytes no reservation tracks.
-  const stored = await Promise.allSettled(
-    [...compiled.bytes].map(async ([sha256, bytes]) => {
-      await env.FILES.put(artifactKey(sha256), bytes, { sha256 });
-    })
-  );
-  const failed = stored.find((result) => result.status === "rejected");
-  if (failed !== undefined) {
-    throw failed.reason;
-  }
+  await storeArtifacts(env, seal, compiled.bytes);
 };
 
 /**
- * Whose reservations one publication of workflow `workflowId` makes: its
- * own, never another's, so publications of the same version at once never
- * give back what another still needs (`releaseBuild`). The version's row
- * adopts them as it is written (`adoptReservations`); one that never is
- * gives them back, and the sweep takes any a stopped publication left once
- * its grace is over (release-retention.ts: neither a release nor a version
- * keeps them).
+ * Gives back what `storeBuild` referenced for seal `seal` once its row wasn't
+ * written (another publication won the number, the workflow went, or
+ * storing failed), or went (a test run swept).
  */
-export const publicationReservation = (workflowId: string): string =>
-  `${workflowId}~publication~${crypto.randomUUID()}`;
-
-/**
- * The statements that hand publication `owner`'s reservations for version
- * `version` to workflow `workflowId`'s version, in the batch that writes
- * its row: what the version names stays reserved as long as it is.
- */
-export const adoptReservations = (
-  db: DrizzleD1Database,
-  owner: string,
-  workflowId: string,
-  version: number
-) => {
-  const reserved = sdkReleaseArtifacts;
-  const own = and(eq(reserved.appId, owner), eq(reserved.version, version));
-  return [
-    db
-      .insert(reserved)
-      .select(
-        db
-          .select({
-            sha256: reserved.sha256,
-            appId: sql<string>`${workflowId}`.as("app_id"),
-            version: reserved.version,
-            reservedAt: reserved.reservedAt,
-          })
-          .from(reserved)
-          .where(own)
-      )
-      .onConflictDoNothing(),
-    db.delete(reserved).where(own),
-  ] as const;
-};
-
-/**
- * Gives back what `storeBuild` reserved for publication `owner` (key.id)
- * of version `version` once its row wasn't written (another publication
- * won the number, the workflow went, or storing failed): all of its own
- * reservations, and only those, so another publication's, and what a
- * saved version adopted, stay.
- */
-export const releaseBuild = async (
-  env: Env,
-  key: { id: string; version: number }
-): Promise<void> => {
-  const reserved = sdkReleaseArtifacts;
-  await releaseReservations(
-    env,
-    sql`${reserved.appId} = ${key.id} AND ${reserved.version} = ${key.version}`
-  );
+export const releaseBuild = async (env: Env, seal: string): Promise<void> => {
+  await releaseSeal(env, seal);
 };
 
 /** What a version's answer says of its build (`WorkflowVersionBuild`). */
@@ -579,6 +508,16 @@ const computeFileSchema = z.strictObject({
     ),
 });
 
+/**
+ * Refuses a build published before seals (`seal` null): of another
+ * format, to publish again.
+ */
+const requireSeal = (seal: string | null): void => {
+  if (seal === null) {
+    throw workflowResourceErrors.create("workflow.format_unsupported");
+  }
+};
+
 const corrupt = (id: string, version: number, what: string): Error => {
   log.error("workflow.build_corrupt", { workflow: id, version, what });
   return workflowResourceErrors.create("workflow.version_corrupt");
@@ -587,9 +526,14 @@ const corrupt = (id: string, version: number, what: string): Error => {
 /** The text of artifact `entry`, checked against its hash and size. */
 const artifactText = async (
   env: Env,
+  generations: ReadonlyMap<string, string>,
   entry: ReleaseArtifact
 ): Promise<string | undefined> => {
-  const object = await env.FILES.get(artifactKey(entry.sha256));
+  const generation = generations.get(entry.sha256);
+  if (generation === undefined) {
+    return undefined;
+  }
+  const object = await env.FILES.get(artifactKey(entry.sha256, generation));
   const bytes = object === null ? undefined : await object.arrayBuffer();
   if (
     bytes === undefined ||
@@ -697,13 +641,15 @@ export const reviewedTasksOf = async (
   id: string,
   version: number,
   manifest: string,
-  manifestHash: string
+  manifestHash: string,
+  seal: string | null
 ): Promise<readonly SealedTask[]> => {
   const kept =
     verified.get(manifestHash)?.tasks ?? reviewedTasks.get(manifestHash);
   if (kept !== undefined) {
     return kept;
   }
+  requireSeal(seal);
   let build: SealedBuild;
   try {
     build = buildOf(manifest);
@@ -714,7 +660,14 @@ export const reviewedTasksOf = async (
     throw corrupt(id, version, "build");
   }
   const entry = build.artifacts.find(({ path }) => path === tasksArtifact);
-  const text = entry === undefined ? undefined : await artifactText(env, entry);
+  const text =
+    entry === undefined
+      ? undefined
+      : await artifactText(
+          env,
+          await generationsOf(env, [entry.sha256]),
+          entry
+        );
   let tasks: readonly SealedTask[] | undefined;
   try {
     tasks =
@@ -779,6 +732,10 @@ const verifiedBuild = async (
   if ((await identityOf(build)) !== build.hash) {
     throw corrupt(id, version, "identity");
   }
+  const generations = await generationsOf(
+    env,
+    build.artifacts.map(({ sha256 }) => sha256)
+  );
   const modules: Record<string, string> = {};
   const sdk: Record<string, string> = {};
   const computeModules: Record<string, string> = {};
@@ -790,7 +747,7 @@ const verifiedBuild = async (
     // One after the other: a build has a few dozen, and a failure stops
     // the rest.
     // oxlint-disable-next-line no-await-in-loop -- see above
-    const text = await artifactText(env, entry);
+    const text = await artifactText(env, generations, entry);
     if (text === undefined) {
       throw corrupt(id, version, entry.path);
     }
@@ -870,13 +827,14 @@ const loadSealedBuild = async (
   env: Env,
   id: string,
   version: number,
-  row: { manifest: string; manifestHash: string },
+  row: { manifest: string; manifestHash: string; seal: string | null },
   pinned: string | undefined
 ): Promise<LoadedBuild> => {
   const hash = await sha256Hex(row.manifest);
   if (hash !== row.manifestHash || (pinned !== undefined && pinned !== hash)) {
     throw corrupt(id, version, "manifest");
   }
+  requireSeal(row.seal);
   const kept = verified.get(hash);
   if (kept !== undefined) {
     return kept;
@@ -935,6 +893,7 @@ export const loadWorkflowBuild = async (
     .select({
       manifest: workflowResourceVersions.manifest,
       manifestHash: workflowResourceVersions.manifestHash,
+      seal: workflowResourceVersions.sealId,
     })
     .from(workflowResourceVersions)
     .where(
@@ -960,8 +919,8 @@ export const loadWorkflowBuild = async (
 export const loadCandidateBuild = async (
   env: Env,
   id: string,
-  row: { manifest: string; manifestHash: string },
+  row: { manifest: string; manifestHash: string; reservation: string },
   pinned: string
 ): Promise<LoadedBuild> =>
   // Version 0: no version's, for what a corrupt build's report names.
-  await loadSealedBuild(env, id, 0, row, pinned);
+  await loadSealedBuild(env, id, 0, { ...row, seal: row.reservation }, pinned);

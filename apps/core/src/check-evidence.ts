@@ -16,8 +16,8 @@ import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
 //
 // What it protects, and what it doesn't: every field a load compares is
 // either the manifest's own or recomputed from artifacts the manifest's
-// hash already verified, and the two inspection hashes can't be
-// recomputed at all. So its integrity rests on the manifest hash in D1,
+// hash already verified, and the inspection's hash can't be recomputed at
+// all. So its integrity rests on the manifest hash in D1,
 // like the rest of the release: someone who can write both D1 and R2
 // can forge evidence as they can forge the release. The anchor outside
 // that storage is the audit chain: the seal's `app.release.sealed` entry
@@ -60,25 +60,24 @@ export type CheckedRelease = Pick<
 
 /** What the host's checks read and made, as a seal or a load has it. */
 export interface CheckObservations {
-  /** The registration both inspections read. */
+  /** The registration the inspection read. */
   readonly manifest: AppManifest;
   /** The modules the type check passed, by flat name. */
   readonly modules: Readonly<Record<string, string>>;
-  /** The SDK modules both inspections ran with, by name. */
+  /** The SDK modules the inspection ran with, by name. */
   readonly sdk: Readonly<Record<string, string>>;
 }
 
-/** The SHA-256s of each inspection's text, as the sandbox answered it. */
-export interface InspectionHashes {
-  readonly symbolicInspection: string;
-  readonly finalInspection: string;
+/** The SHA-256 of the inspection's text, as the sandbox answered it. */
+export interface InspectionHash {
+  readonly inspection: string;
 }
 
 /** The evidence of checking `release`: its identities, and the hashes of what was observed. */
 const evidenceOf = async (
   release: CheckedRelease,
   observed: CheckObservations,
-  inspections: InspectionHashes
+  observedInspection: InspectionHash
 ): Promise<CheckEvidence> =>
   checkEvidenceSchema.parse({
     formatVersion: releaseFormatVersion,
@@ -98,8 +97,7 @@ const evidenceOf = async (
       uiVersion: release.uiVersion,
     },
     observed: {
-      symbolicInspection: inspections.symbolicInspection,
-      finalInspection: inspections.finalInspection,
+      inspection: observedInspection.inspection,
       manifest: await sha256Hex(canonicalText(observed.manifest)),
       checkedModules: await sha256Hex(canonicalJson({ ...observed.modules })),
       sdkModules: await sha256Hex(canonicalJson({ ...observed.sdk })),
@@ -109,18 +107,17 @@ const evidenceOf = async (
 
 /**
  * The evidence a seal records of checking `release`, from what its checks
- * read and made and the texts its inspections answered, as the canonical
+ * read and made and the text its inspection answered, as the canonical
  * text it seals.
  */
 export const checkEvidenceText = async (
   release: CheckedRelease,
   observed: CheckObservations,
-  texts: { readonly symbolic: string; readonly final: string }
+  inspection: string
 ): Promise<string> =>
   canonicalText(
     await evidenceOf(release, observed, {
-      symbolicInspection: await sha256Hex(texts.symbolic),
-      finalInspection: await sha256Hex(texts.final),
+      inspection: await sha256Hex(inspection),
     })
   );
 

@@ -178,59 +178,45 @@ export const racingDb = (
 };
 
 /**
- * Statements leaving a verified candidate (src/app-candidates.ts) for
- * `version` of `app`, with its report, as making it current requires
- * (migration 0126): for tests that make a version current by hand, as
- * another writer would, to race or bypass the real path. Each move is one
- * the triggers allow.
+ * Core's database, but a batch holding a statement `writes` matches commits
+ * and then fails, once, as a batch whose answer was lost does.
  */
-export const verifiedCandidateStatements = (
-  db: D1Database,
-  app: string,
-  version: number
-): D1PreparedStatement[] => {
-  const id = crypto.randomUUID();
-  const hash = "0".repeat(64);
-  // Based on whatever is current when the batch runs, as the trigger
-  // requires; an open candidate already holding that key steps aside, as
-  // a newer candidate would supersede it.
-  const base = "(SELECT coalesce(current_version, 0) FROM apps WHERE id = ?)";
-  return [
-    db
-      .prepare(
-        `UPDATE app_candidates SET state = 'superseded'
-         WHERE app_id = ? AND version = ? AND based_on = ${base}
-           AND state IN ('frozen', 'checking', 'building', 'verifying', 'verified')`
-      )
-      .bind(app, version, app),
-    db
-      .prepare(
-        `INSERT INTO app_candidates (id, app_id, version, source_tree, based_on, state, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, 'test', ${base}, 'frozen', 'test', 0, 0)`
-      )
-      .bind(id, app, version, app),
-    ...["checking", "building", "verifying"].map((state) =>
-      db
-        .prepare("UPDATE app_candidates SET state = ? WHERE id = ?")
-        .bind(state, id)
-    ),
-    db
-      .prepare(
-        "INSERT INTO app_candidate_reports (candidate_id, report, hash, created_at) VALUES (?, '{}', ?, 0)"
-      )
-      .bind(id, hash),
-    db
-      .prepare(
-        "UPDATE app_candidates SET state = 'verified', report_hash = ? WHERE id = ?"
-      )
-      .bind(hash, id),
-  ];
+export const lostAnswerDb = (writes: RegExp): D1Database => {
+  const real = env.DB;
+  let writing = false;
+  let lost = false;
+  return {
+    prepare: (query) => {
+      writing ||= writes.test(query);
+      return real.prepare(query);
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      const results = await real.batch<T>(statements);
+      if (writing && !lost) {
+        lost = true;
+        throw new Error("D1 lost the batch's answer");
+      }
+      return results;
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
 };
 
-/** Leaves a verified candidate for `version` of `app` (`verifiedCandidateStatements`). */
-export const verifiedCandidate = async (
+/**
+ * Marks `version` of `app` published (src/app-publish.ts), as making it
+ * current requires: for tests that make a version current by hand, as
+ * another writer would, to race or bypass the real path.
+ */
+export const markPublished = async (
   app: string,
   version: number
 ): Promise<void> => {
-  await env.DB.batch(verifiedCandidateStatements(env.DB, app, version));
+  await env.DB.prepare(
+    "UPDATE app_versions SET status = 'published' WHERE app_id = ? AND version = ?"
+  )
+    .bind(app, version)
+    .run();
 };

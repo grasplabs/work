@@ -1,6 +1,5 @@
 import { appWebhookEvents } from "@grasp-os/shared/app-webhooks";
 import type { AppWebhookEvent } from "@grasp-os/shared/app-webhooks";
-import { candidateStates } from "@grasp-os/shared/apps";
 import type { AgentProposer } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { DependencySummary } from "@grasp-os/shared/dependencies";
@@ -974,7 +973,8 @@ export const appOrigins = sqliteTable("app_origins", {
 });
 
 /**
- * Every committed version of an App, never changed or deleted. `tree` is
+ * Every committed version of an App, never deleted, and never changed but
+ * its publishing `status`. `tree` is
  * the SHA-256 of the version's files, which are stored under it in R2
  * (`src/apps.ts`). Versions count up from 1 per App, and the primary key
  * makes two commits of the same version conflict instead of both landing.
@@ -1031,18 +1031,30 @@ export const appVersions = sqliteTable(
      * previous release writes gets none.
      */
     proposedBy: text("proposed_by", { mode: "json" }).$type<AgentProposer>(),
+    /**
+     * Where publishing left the version (src/app-publish.ts): `published`
+     * once it was built, sealed and its tests passed, `failed` when its
+     * last publish was refused, null for one never published. With
+     * `published_manifest_hash`, the only columns of a version that change.
+     */
+    status: text({ enum: ["published", "failed"] }),
+    /**
+     * The hash of the sealed manifest its publish tested: the version
+     * counts as published only while a release with this hash is stored
+     * (src/apps.ts, `publishedSql`), so one deleted, by whatever release of
+     * core, or sealed again, is published again. Null for a version not of
+     * spec 8's layout, which has no release.
+     */
+    publishedManifestHash: text("published_manifest_hash"),
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
 );
 
 /**
- * Candidates: one frozen version of an App on its way to being made
- * current (spec 22.1, src/app-candidates.ts). A candidate pins the
- * version, its source tree and the version it expects to replace
- * (`based_on`, 0 for an App with none current), and moves forward
- * through its states only (`candidateStates`), each move a compare and
- * set on its state and, while it runs, on the lease of whoever runs it.
- * Triggers keep what it pins and the moves it may make (migration 0126).
+ * Unused: candidates were replaced by one publish (src/app-publish.ts) and
+ * a version's `status`. Kept, unread and unwritten, while a release that
+ * still writes it may serve or be rolled back to (expand, then contract);
+ * dropped in a later release, with its reports and triggers.
  */
 export const appCandidates = sqliteTable(
   "app_candidates",
@@ -1056,7 +1068,7 @@ export const appCandidates = sqliteTable(
     basedOn: integer("based_on").notNull(),
     /** The candidate this one repairs, if it does. */
     previousCandidate: text("previous_candidate"),
-    state: text({ enum: candidateStates }).notNull(),
+    state: text().notNull(),
     /** How many runs claimed it, the one running included. */
     attempt: integer().notNull().default(0),
     /** Whose run holds it, and until when; null while none does. */
@@ -1083,11 +1095,7 @@ export const appCandidates = sqliteTable(
   ]
 );
 
-/**
- * A verified candidate's report (spec 22.2, step 11): canonical text
- * holding only identities and hashes core itself computed, stored once
- * with its SHA-256. Never updated or deleted (migration 0126).
- */
+/** Unused, as `app_candidates` is: dropped with it in a later release. */
 export const appCandidateReports = sqliteTable("app_candidate_reports", {
   candidateId: text("candidate_id")
     .primaryKey()
@@ -1116,14 +1124,13 @@ export const sdkReleaseManifests = sqliteTable(
     manifest: text().notNull(),
     sealedAt: timestamp("sealed_at").notNull(),
     /**
-     * When the retention sweep last saw the version current or pending
-     * (src/release-retention.ts): it is kept at least 90 days after that.
-     * Null for one never seen so; its seal starts its retention then.
+     * Unused since retention keeps the last versions rather than 90 days
+     * (src/release-retention.ts): dropped in a later release.
      */
     lastCurrentAt: timestamp("last_current_at"),
     /**
-     * When the sweep first found nothing that keeps it: deleted once that
-     * has held for a day and still holds. Null while something keeps it.
+     * Unused since the sweep deletes a release in the one statement that
+     * checks nothing keeps it: dropped in a later release.
      */
     unreferencedSince: timestamp("unreferenced_since"),
     /**
@@ -1131,20 +1138,51 @@ export const sdkReleaseManifests = sqliteTable(
      * its bytes stay for audit and recovery, under the same retention.
      */
     revokedAt: timestamp("revoked_at"),
+    /**
+     * The seal whose references (`sdk_artifact_refs`) keep its artifacts
+     * (src/sealed-artifacts.ts). Null for a release sealed before seals,
+     * which this release refuses as of another format.
+     */
+    sealId: text("seal_id"),
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
 );
 
 /**
- * Which sealed releases name which artifact, by its SHA-256 (src/app-
- * releases.ts, src/release-retention.ts): a seal reserves its artifacts
- * here before it stores their bytes, and an artifact's bytes are deleted
- * only once no row names it, under a deletion mark
- * (`sdk_artifact_deletions`) a seal can't reserve past. A reservation of
- * a seal that never finished is swept with its release's grace. `app_id`
- * is the release's resource: an App, or an independent workflow whose
- * version's build is sealed (src/workflow-builds.ts), whose reservations
- * stay as long as its version, for good.
+ * The artifacts seals name (src/sealed-artifacts.ts): one live row per
+ * SHA-256, with the random generation made as the row was, its bytes at
+ * `artifacts/<sha256>/<generation>`. Deleted only in the statement that
+ * finds no reference to it; a row made again gets a new generation.
+ */
+export const sdkArtifacts = sqliteTable("sdk_artifacts", {
+  sha256: text().primaryKey(),
+  generation: text().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * Which seal references which artifact (src/sealed-artifacts.ts): `seal`
+ * is the random ID the row naming the seal keeps (a release's or a
+ * workflow version's `seal_id`, a test run's `reservation`).
+ */
+export const sdkArtifactRefs = sqliteTable(
+  "sdk_artifact_refs",
+  {
+    seal: text().notNull(),
+    sha256: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.seal, table.sha256] }),
+    index("sdk_artifact_refs_sha256").on(table.sha256),
+  ]
+);
+
+/**
+ * Unused since artifacts are rows with a generation each
+ * (`sdk_artifacts`): kept while a release that writes it may serve or be
+ * rolled back to, and dropped in a later release, with the
+ * `release-artifacts/` objects it counted.
  */
 export const sdkReleaseArtifacts = sqliteTable(
   "sdk_release_artifacts",
@@ -1161,12 +1199,9 @@ export const sdkReleaseArtifacts = sqliteTable(
 );
 
 /**
- * An artifact's bytes being deleted: marked when no release named it, so
- * no seal reserves it again until the bytes are gone and the mark is
- * removed. Only its owner finishes a mark, before its deadline (15
- * minutes after it was placed), and removes it only once the bytes are
- * deleted; a mark an hour old is taken over by whoever finds it
- * (src/release-retention.ts).
+ * Unused since an artifact's bytes go once nothing references them
+ * (`sdk_release_artifacts`), with no deletion marks: dropped in a later
+ * release.
  */
 export const sdkArtifactDeletions = sqliteTable("sdk_artifact_deletions", {
   sha256: text().primaryKey(),
@@ -1174,21 +1209,16 @@ export const sdkArtifactDeletions = sqliteTable("sdk_artifact_deletions", {
   startedAt: timestamp("started_at").notNull(),
 });
 
-/**
- * Bytes whose last reservation went: queued in the statement that removes
- * the reservation, and dequeued only once the bytes are dealt with
- * (deleted, reserved again, or another deleter's), so no bytes are ever
- * left without a reservation or a queue entry (src/release-retention.ts).
- */
+/** Unused, as `sdk_release_artifacts` is: dropped with it in a later release. */
 export const sdkArtifactCandidates = sqliteTable("sdk_artifact_candidates", {
   sha256: text().primaryKey(),
   queuedAt: timestamp("queued_at").notNull(),
 });
 
 /**
- * The manifest hash of each sealed release the retention sweep deleted:
- * sealing that App version again must make the same manifest, so a
- * version's number never comes to name other code.
+ * Unused since a version whose release was deleted is published again,
+ * tests and all, before it runs (src/app-publish.ts): dropped in a later
+ * release.
  */
 export const sdkReleaseTombstones = sqliteTable(
   "sdk_release_tombstones",
@@ -3589,6 +3619,12 @@ export const workflowResourceVersions = sqliteTable(
     manifestHash: text("manifest_hash").notNull(),
     authorId: text("author_id").notNull(),
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * The seal whose references (`sdk_artifact_refs`) keep its build's
+     * artifacts (src/sealed-artifacts.ts). Null for a version published
+     * before seals, which this release refuses, to publish again.
+     */
+    sealId: text("seal_id"),
   },
   (table) => [
     primaryKey({ columns: [table.workflowResourceId, table.version] }),
@@ -4726,7 +4762,8 @@ export const appWorkflowBindings = sqliteTable(
  * (workflows/candidate-runs.ts, GRA-815): each of the exact checkpoint
  * revision it names, compiled when it started into a build of its own,
  * pinned by the manifest's hash (`manifest`, `manifest_hash`), whose
- * artifacts are reserved under `reservation` for as long as the row is.
+ * artifacts the seal `reservation` names references
+ * (src/sealed-artifacts.ts) while the row is.
  * Its input and parameters are frozen as it started (`input`, `params`:
  * the start's own values or the defaults, never the workflow's set ones),
  * and every named call it makes is answered from `fixtures`, never sent

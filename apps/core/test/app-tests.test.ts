@@ -7,17 +7,12 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { activateVersion } from "../src/app-activation.ts";
 import { callAppFunction } from "../src/app-functions.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { sweepTestFixtures } from "../src/app-tests.ts";
-import {
-  commitFiles,
-  createApp,
-  findApp,
-  setCurrentVersion,
-} from "../src/apps.ts";
+import { commitFiles, createApp, findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import {
   discardFixtureStore,
@@ -244,7 +239,7 @@ const refusal = async (
   on: Env = env
 ): Promise<{ code: unknown; failures: unknown }> => {
   try {
-    await activateVersion(on, owner, app, 1);
+    await publishVersion(on, owner, app, 1);
   } catch (error) {
     if (!isExpectedError(error)) {
       throw error;
@@ -289,7 +284,7 @@ describe("an App's tests", { timeout: 180_000 }, () => {
       ...appFiles,
       "tests/notes.test.ts": passingSuite,
     });
-    await activateVersion(env, built.owner, built.app, 1);
+    await publishVersion(env, built.owner, built.app, 1);
     await expect(findApp(env, built.app)).resolves.toMatchObject({
       currentVersion: 1,
     });
@@ -368,7 +363,7 @@ export default appTest({
 });
 `,
     });
-    await activateVersion(env, built.owner, built.app, 1);
+    await publishVersion(env, built.owner, built.app, 1);
     await expect(findApp(env, built.app)).resolves.toMatchObject({
       currentVersion: 1,
     });
@@ -511,7 +506,7 @@ export default appTest({
       },
     });
     const started = Date.now();
-    await activateVersion(
+    await publishVersion(
       envWith({ DATA_STORES: stalling, APP_TEST_LIMITS_MS: "///1000" }),
       built.owner,
       built.app,
@@ -598,7 +593,7 @@ export default appTest({
     // Sealed where App code may run; made current where it may not.
     await sealRelease(env, { app: built.app, version: 1, by: built.owner });
     await expect(
-      setCurrentVersion(unbounded, built.owner, built.app, 1)
+      publishVersion(unbounded, built.owner, built.app, 1)
     ).rejects.toMatchObject({ code: "version.tests_unavailable" });
   });
 
@@ -615,7 +610,7 @@ export default appTest({
       "tests/lib/owner.ts": "export const ownerName = 'note-owner';\n",
     });
     await expect(
-      setCurrentVersion(unbounded, helpers.owner, helpers.app, 1)
+      publishVersion(unbounded, helpers.owner, helpers.app, 1)
     ).resolves.toMatchObject({ currentVersion: 1 });
 
     const stray = await sealedWith({
@@ -623,7 +618,7 @@ export default appTest({
       "tests/notes.spec.js": "export default {};\n",
     });
     await expect(
-      setCurrentVersion(unbounded, stray.owner, stray.app, 1)
+      publishVersion(unbounded, stray.owner, stray.app, 1)
     ).rejects.toMatchObject({
       code: "version.tests_failed",
       details: {
@@ -639,11 +634,11 @@ export default appTest({
       ...appFiles,
       "tests/notes.test.ts": passingSuite,
     });
-    await activateVersion(env, built.owner, built.app, 1);
+    await publishVersion(env, built.owner, built.app, 1);
     // Where the tests can't run at all, the current version is still
     // made current again: nothing ran them.
     await expect(
-      setCurrentVersion(unbounded, built.owner, built.app, 1)
+      publishVersion(unbounded, built.owner, built.app, 1)
     ).resolves.toMatchObject({ currentVersion: 1 });
   });
 });
@@ -651,7 +646,7 @@ export default appTest({
 /** A sealed App's release, for fixture stores with its schema. */
 const sealed = async (): Promise<{ built: Built; release: Release }> => {
   const built = await appWith(appFiles);
-  await activateVersion(env, built.owner, built.app, 1);
+  await publishVersion(env, built.owner, built.app, 1);
   return { built, release: await loadRelease(env, built.app, 1) };
 };
 

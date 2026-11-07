@@ -7,7 +7,7 @@ import type {
   VersionReview,
 } from "@grasp-os/shared/apps";
 
-import { activateVersion } from "./app-activation.ts";
+import { publishVersion } from "./app-publish.ts";
 import {
   diffVersions,
   getVersion,
@@ -73,8 +73,8 @@ export class AppVersionsRpc extends CoreRpcTarget implements AppVersionsApi {
   }
 
   /**
-   * Makes a version current through a verified candidate, over `expected`
-   * when given (app-activation.ts, app-candidates.ts), then indexes the App into the Apps collection
+   * Publishes a version and makes it current, over `expected` when given
+   * (app-publish.ts), then indexes the App into the Apps collection
    * (knowledge/apps-collection.ts): its entry holds the new version once
    * this returns, unless indexing failed or raced another; the clock
    * trigger then heals it within 15 minutes.
@@ -85,7 +85,7 @@ export class AppVersionsRpc extends CoreRpcTarget implements AppVersionsApi {
     expected?: number | null
   ): Promise<App> {
     return await withPerson(this.#check, async (by) => {
-      const current = await activateVersion(
+      const current = await publishVersion(
         this.#env,
         by,
         app,

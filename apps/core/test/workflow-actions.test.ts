@@ -294,7 +294,7 @@ const lose =
       build.artifacts
         .filter(({ path }) => which(path))
         .map(async ({ sha256 }) => {
-          const key = artifactKey(sha256);
+          const key = await artifactKey(sha256);
           const stored = await env.FILES.get(key);
           const bytes = await stored?.arrayBuffer();
           await env.FILES.delete(key);

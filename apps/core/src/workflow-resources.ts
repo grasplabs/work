@@ -101,6 +101,7 @@ import { failUnless, lockGuardFailed } from "./packages/locks.ts";
 import { checkWorkflowExpressions, withinBuildWait } from "./pages.ts";
 import { namedProjectsFor, requireStillBuilt } from "./project-access.ts";
 import { projectStillBuiltSql } from "./project-sql.ts";
+import { newSeal, sealReferencedSql } from "./sealed-artifacts.ts";
 import {
   ceilingOf,
   memberEntry,
@@ -118,8 +119,6 @@ import {
   compileWorkflow,
   loadWorkflowBuild,
   reviewedTasksOf,
-  adoptReservations,
-  publicationReservation,
   releaseBuild,
   requireServedBindingKinds,
   storeBuild,
@@ -1510,7 +1509,8 @@ const versionTasksOf = async (
     row.workflowResourceId,
     row.version,
     row.manifest,
-    row.manifestHash
+    row.manifestHash,
+    row.sealId
   );
 };
 
@@ -1844,14 +1844,14 @@ const writeVersion = async (
   );
   const createdAt = new Date();
   const db = drizzle(env.DB);
-  // This publication's own reservations: another publishing the same
-  // version at once keeps its own, so neither gives back the other's.
-  const owner = publicationReservation(workflow.id);
+  // This publication's own seal: another publishing the same version at
+  // once has its own, so neither gives back the other's references.
+  const seal = newSeal();
   try {
-    // Its build's bytes, reserved for this publication and stored, before
-    // the row that names them; inside the cleanup, so a store that fails
-    // halfway gives its reservations back too.
-    await storeBuild(env, { id: owner, version }, compiled);
+    // Its build's bytes, referenced by its seal and stored, before the row
+    // that names them; inside the cleanup, so a store that fails halfway
+    // gives its references back too.
+    await storeBuild(env, seal, compiled);
     // After the slow work (compiling, storing the build), right before the
     // row lands: refused, it gives its reservations back as below.
     await admit?.();
@@ -1874,17 +1874,13 @@ const writeVersion = async (
         contract: contractText,
         contractHash,
         manifest,
-        // The hash only while every artifact its build names is reserved for
-        // this publication: otherwise NULL, which the column refuses, and
-        // the whole publication with it. So no sweep deletes bytes a version
-        // names (release-retention.ts).
-        manifestHash: sql`(SELECT ${manifestHash} WHERE NOT EXISTS (
-        SELECT 1 FROM json_each(${manifest}, '$.build.artifacts') AS named
-        WHERE NOT EXISTS (SELECT 1 FROM sdk_release_artifacts AS reserved
-          WHERE reserved.app_id = ${owner} AND reserved.version = ${version}
-            AND reserved.sha256 = json_extract(named.value, '$.sha256'))))`,
+        // The hash only while its seal references every artifact its build
+        // names: otherwise NULL, which the column refuses, and the whole
+        // publication with it (sealed-artifacts.ts).
+        manifestHash: sql`(SELECT ${manifestHash} WHERE ${sealReferencedSql(seal, manifest, "$.build.artifacts")})`,
         authorId: by.userId,
         createdAt,
+        sealId: seal,
       }),
       // Only while the graph it seals is still approved (not retired, not
       // revoked) as it lands: what was admitted when it was sealed may have
@@ -1899,8 +1895,6 @@ const writeVersion = async (
               packagesHoldSql(workflow.id, packages.graphHash, ["approved"])
             ),
           ]),
-      // The version's from now on, as long as it is.
-      ...adoptReservations(db, owner, workflow.id, version),
       db
         .update(workflowResources)
         .set({ currentVersion: version })
@@ -1932,10 +1926,10 @@ const writeVersion = async (
       ),
     ]);
   } catch (error) {
-    // Not written: what this publication reserved goes back, and only
-    // that: another's, and a saved version's, stay.
+    // Not written: this publication's references go back, and only those:
+    // another's, and a saved version's, stay.
     try {
-      await releaseBuild(env, { id: owner, version });
+      await releaseBuild(env, seal);
     } catch (releaseError) {
       log.warn("workflow.build_release_failed", errorFields(releaseError));
     }
@@ -2138,9 +2132,9 @@ const publish = async (
     });
   } catch (error) {
     if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
-      // A reservation of its build went before the row could name it,
-      // which only a publication stalled past the sweep's grace sees:
-      // publishing again reserves afresh.
+      // A reference of its build went before the row could name it, which
+      // only a publication stalled past a day sees: publishing again
+      // references afresh.
       throw workflowResourceErrors.create("workflow.version_conflict");
     }
     const moved = notNullFailed(

@@ -11,8 +11,9 @@ import { z } from "zod";
 
 import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
 import type { FunctionAnswer } from "../src/app-functions.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { commitFiles } from "../src/apps.ts";
 import {
   appMembers,
   sdkReleaseManifests,
@@ -22,7 +23,13 @@ import { deliveryOf, standingOf } from "../src/page-delivery.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { appDefinition } from "./app-definitions.ts";
 import { deepFiles, fieldDepth } from "./deep-records.ts";
-import { appWith, artifactKey, person, seal } from "./sealed-apps.ts";
+import {
+  appWith,
+  artifactKey,
+  putArtifact,
+  person,
+  seal,
+} from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
 // An App's functions run from its sealed release, each invocation in an
@@ -312,7 +319,7 @@ const sealedNotes = async (
 ): Promise<Sealed> => {
   const fixture = await appWith(files);
   const release = await seal(fixture);
-  await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+  await publishVersion(env, fixture.owner, fixture.app, 1);
   return { ...fixture, release };
 };
 
@@ -771,7 +778,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
     );
     await commitFiles(env, notes.owner, notes.app, files, "Tag");
     await seal(notes, 2);
-    await setCurrentVersion(env, notes.owner, notes.app, 2);
+    await publishVersion(env, notes.owner, notes.app, 2);
     const again = await save();
     const page = valueOf(
       await call(notes, notes.owner, "notes.list", { pagination: {} })
@@ -810,7 +817,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
       );
     await commitFiles(env, notes.owner, notes.app, files, "Rename");
     await seal(notes, 2);
-    await setCurrentVersion(env, notes.owner, notes.app, 2);
+    await publishVersion(env, notes.owner, notes.app, 2);
     const fromPage = async (
       reference: ReturnType<typeof referenceTo>,
       input: unknown
@@ -1314,7 +1321,7 @@ describe("a call past its deadline", { timeout: 120_000 }, () => {
 
 /** The text of the stored artifact with SHA-256 `sha256`, as a load decodes it. */
 const storedText = async (sha256: string): Promise<string> => {
-  const stored = await env.FILES.get(artifactKey(sha256));
+  const stored = await env.FILES.get(await artifactKey(sha256));
   const bytes = (await stored?.arrayBuffer()) ?? new ArrayBuffer(0);
   return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
     bytes
@@ -1344,7 +1351,7 @@ const rewriteSdk = async (
   }
   const text = change(await storedText(entry.sha256));
   const sha256 = await sha256Hex(text);
-  await env.FILES.put(artifactKey(sha256), text);
+  await putArtifact(sha256, text);
   const artifacts = sealed.artifacts.map((artifact) =>
     artifact.path === path
       ? { path, sha256, bytes: new TextEncoder().encode(text).byteLength }
@@ -1371,7 +1378,7 @@ const rewriteSdk = async (
     },
   });
   const evidenceHash = await sha256Hex(evidenceText);
-  await env.FILES.put(artifactKey(evidenceHash), evidenceText);
+  await putArtifact(evidenceHash, evidenceText);
 
   const manifest = canonicalJson({
     ...sealed,
@@ -1461,14 +1468,14 @@ describe("a release changed since it was sealed", { timeout: 120_000 }, () => {
     const entry = notes.release.manifest.artifacts.find(
       ({ path }) => path === "modules/app~server~notes.js"
     );
-    const stored = await env.FILES.get(artifactKey(entry?.sha256 ?? ""));
+    const stored = await env.FILES.get(await artifactKey(entry?.sha256 ?? ""));
     const code = (await stored?.text()) ?? "";
     const forged = code.replace("maintenance", "maintenancf");
     expect([forged.length, forged === code]).toStrictEqual([
       code.length,
       false,
     ]);
-    await env.FILES.put(artifactKey(entry?.sha256 ?? ""), forged);
+    await putArtifact(entry?.sha256 ?? "", forged);
     expect(codeOf(await call(notes, notes.owner, "notes.bump", {}))).toBe(
       "version.artifact_corrupt"
     );

@@ -14,13 +14,13 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
-import { artifactKey } from "../src/app-releases.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
 import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
-import { appFor, setCurrentVersion, versionFiles } from "../src/apps.ts";
+import { appFor, versionFiles } from "../src/apps.ts";
 import { boundWorkflowsOf } from "../src/bound-workflows.ts";
 import { decisionOutcome } from "../src/decisions/decisions.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
@@ -55,7 +55,13 @@ import {
   stopped as stopRun,
   whileEngineRefuses,
 } from "./runs.ts";
-import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
+import {
+  artifactKey,
+  appWith,
+  person,
+  queryReference,
+  seal,
+} from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 
@@ -272,7 +278,9 @@ const sealedText = async (release: Release, path: string): Promise<string> => {
     (artifact) => artifact.path === path
   );
   const object =
-    entry === undefined ? null : await env.FILES.get(artifactKey(entry.sha256));
+    entry === undefined
+      ? null
+      : await env.FILES.get(await artifactKey(entry.sha256));
   if (object === null) {
     throw new Error(`The release has no ${path}`);
   }
@@ -439,7 +447,7 @@ const answerOf = (result: OperationResult): unknown =>
 const decisionInbox = async (looped = false) => {
   const { fixture, workflowId, binding } = await boundApp(looped);
   const release = await seal(fixture);
-  await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+  await publishVersion(env, fixture.owner, fixture.app, 1);
   const [reviewer, starter, outsider] = await Promise.all([
     person("admin"),
     person("admin"),
@@ -1391,7 +1399,7 @@ describe(
         reviewed: { version: 1 },
       });
       const release = await seal(fixture);
-      await setCurrentVersion(env, owner, app, 1);
+      await publishVersion(env, owner, app, 1);
       const asked = await requestPermission(
         env,
         owner,

@@ -537,9 +537,6 @@ export const Route = createFileRoute("/archive")({ component: Page });
 
     const [created] = events;
     const target = { type: "app", id: created?.target?.id };
-    const candidate = events.find(
-      ({ action }) => action === "app.candidate.frozen"
-    )?.detail?.candidate;
     expect(
       events.map(({ actor: by, action, target: on, detail }) => ({
         by,
@@ -571,29 +568,6 @@ export const Route = createFileRoute("/archive")({ component: Page });
         on: target,
         detail: { version: 1 },
       },
-      // Frozen as a candidate, and moved through each stage to verified
-      // (app-candidates.ts).
-      {
-        by: actor,
-        action: "app.candidate.frozen",
-        on: target,
-        detail: { candidate, version: 1, tree, basedOn: 0 },
-      },
-      {
-        by: actor,
-        action: "app.candidate.claimed",
-        on: target,
-        detail: { candidate, version: 1, at: "frozen" },
-      },
-      ...[
-        ["frozen", "checking"],
-        ["checking", "building"],
-      ].map(([from, to]) => ({
-        by: actor,
-        action: "app.candidate.moved",
-        on: target,
-        detail: { candidate, version: 1, attempt: 1, from, to },
-      })),
       // Its server code, the config and schema its definition generates,
       // sealed as it builds.
       {
@@ -608,24 +582,22 @@ export const Route = createFileRoute("/archive")({ component: Page });
           verificationReportHash: aHash,
         },
       },
-      ...[
-        ["building", "verifying"],
-        ["verifying", "verified"],
-      ].map(([from, to]) => ({
+      // Published: sealed, its tests run (it has none), and marked
+      // (app-publish.ts).
+      {
         by: actor,
-        action: "app.candidate.moved",
+        action: "app.version.published",
         on: target,
-        detail: { candidate, version: 1, attempt: 1, from, to },
-      })),
+        detail: { version: 1, manifestHash: aHash },
+      },
       {
         by: actor,
         action: "app.version.current",
         on: target,
-        // What it replaced, and the candidate it was verified as.
+        // What it replaced.
         detail: {
           version: 1,
           previous: null,
-          candidate,
         },
       },
     ]);

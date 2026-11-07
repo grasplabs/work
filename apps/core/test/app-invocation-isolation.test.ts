@@ -6,8 +6,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { callAppFunction } from "../src/app-functions.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
-import { setCurrentVersion } from "../src/apps.ts";
 import { appMembers } from "../src/db/core/schema.ts";
 import { release as released } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
@@ -40,7 +40,7 @@ type Caller = Fixture["owner"];
 const sealedApp = async (): Promise<Sealed & { other: Caller }> => {
   const fixture = await appWith(isolationFiles);
   const release = await seal(fixture);
-  await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+  await publishVersion(env, fixture.owner, fixture.app, 1);
   const other = await person("user");
   await drizzle(env.DB).insert(appMembers).values({
     appId: fixture.app,

@@ -1562,6 +1562,13 @@
       "when": 1793994271557,
       "tag": "0222_drop_app_calls",
       "breakpoints": true
+    },
+    {
+      "idx": 223,
+      "version": "6",
+      "when": 1794048854805,
+      "tag": "0223_version_publish_status",
+      "breakpoints": true
     }
   ]
 }

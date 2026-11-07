@@ -19,8 +19,9 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
+import { publishVersion } from "../src/app-publish.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { commitFiles } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { appMembers } from "../src/db/core/schema.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
@@ -95,7 +96,7 @@ const sealedDesk = async (
 ): Promise<Sealed> => {
   const fixture = await appWith(files, "Desk", by);
   const release = await seal(fixture);
-  await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+  await publishVersion(env, fixture.owner, fixture.app, 1);
   return { ...fixture, release };
 };
 
@@ -524,7 +525,7 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
       "Page size"
     );
     const second = { ...desk, release: await seal(desk, 2) };
-    await setCurrentVersion(env, desk.owner, desk.app, 2);
+    await publishVersion(env, desk.owner, desk.app, 2);
     expect(
       codeOf(await update(second, desk.owner, 0, { compact: true }, key))
     ).toBe("submission.key_conflict");
@@ -555,7 +556,7 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
         `v${version}`
       );
       const release = await seal(desk, version);
-      await setCurrentVersion(env, desk.owner, desk.app, version);
+      await publishVersion(env, desk.owner, desk.app, version);
       return { ...desk, release };
     };
     // Version 2 adds a field and changes a default the person never chose:
@@ -584,18 +585,18 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
     });
     // Back on version 2 before they write again, the page size they chose
     // is there again: reading rewrote nothing.
-    await setCurrentVersion(env, desk.owner, desk.app, 2);
+    await publishVersion(env, desk.owner, desk.app, 2);
     expect(valueOf(await get(second, desk.owner))).toMatchObject({
       pageSize: 50,
       _rev: 2,
     });
     // A write on version 3 drops what it no longer declares, so the
     // document never grows with what earlier versions declared.
-    await setCurrentVersion(env, desk.owner, desk.app, 3);
+    await publishVersion(env, desk.owner, desk.app, 3);
     expect(
       valueOf(await update(third, desk.owner, 2, { compact: false }))
     ).toStrictEqual({ compact: false, theme: "light", _rev: 3 });
-    await setCurrentVersion(env, desk.owner, desk.app, 2);
+    await publishVersion(env, desk.owner, desk.app, 2);
     expect(valueOf(await get(second, desk.owner))).toStrictEqual({
       compact: false,
       theme: "dark",

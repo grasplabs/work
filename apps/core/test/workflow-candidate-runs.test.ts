@@ -13,7 +13,7 @@ import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { queueOrphanedReservations } from "../src/release-retention.ts";
+import { sweepReleases } from "../src/release-retention.ts";
 import { publishCatalogContract } from "../src/workflow-catalog.ts";
 import { editWorkflowDraft, workflowDraft } from "../src/workflow-drafts.ts";
 import { setWorkflowParams } from "../src/workflow-params.ts";
@@ -1196,7 +1196,7 @@ describe("test runs of a workflow's draft", () => {
     });
   });
 
-  it("is kept only for a week, then goes with its engine record and its build's reservation", async () => {
+  it("is kept only for a week, then goes with its engine record and its build's references", async () => {
     const ada = await person("builder");
     const { workflow, revision } = await drafted(ada, {
       steps: [],
@@ -1208,27 +1208,31 @@ describe("test runs of a workflow's draft", () => {
     });
     await ended(ada, workflow.id, runId);
     const weekMs = 7 * 24 * 60 * 60 * 1000;
-    const reserved = async () =>
+    const seal = await env.DB.prepare(
+      "SELECT reservation FROM workflow_candidate_runs WHERE id = ?"
+    )
+      .bind(runId)
+      .first<{ reservation: string }>();
+    const references = async () =>
       await countOf(
-        "SELECT COUNT(*) AS n FROM sdk_release_artifacts WHERE app_id = ?",
-        `${workflow.id}~candidate~${runId}`
+        "SELECT COUNT(*) AS n FROM sdk_artifact_refs WHERE seal = ?",
+        seal?.reservation ?? ""
       );
-    // A week less a minute: kept, and so is its build's reservation, past
-    // any grace of the release sweep.
+    // A week less a minute: kept, and so are its build's references, past
+    // the release sweep's.
     await sweepCandidateRuns(env, later(weekMs - 60_000));
-    await queueOrphanedReservations(env, later(weekMs - 60_000));
+    await sweepReleases(env, later(weekMs - 60_000));
     const keptEarly = await outcome(
       candidateRunFor(env, ada, workflow.id, runId)
     );
-    const reservedEarly = await reserved();
+    const reservedEarly = await references();
     await sweepCandidateRuns(env, later(weekMs + 60_000));
-    await queueOrphanedReservations(env, later(weekMs + 60_000));
     expect({
       keptEarly,
       reservedEarly: reservedEarly > 0,
       afterWeek: await outcome(candidateRunFor(env, ada, workflow.id, runId)),
       engine: await runEngine(env).status(runId),
-      reservedAfter: await reserved(),
+      reservedAfter: await references(),
     }).toStrictEqual({
       keptEarly: "ok",
       reservedEarly: true,

@@ -13,10 +13,11 @@ import { commitFiles, createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { appStoreFor } from "../src/data-stores.ts";
 import {
-  releaseGraceMs,
-  releaseRetentionMs,
+  keptReleases,
+  sealGraceMs,
   sweepReleases,
 } from "../src/release-retention.ts";
+import { artifactKey as keyOf } from "../src/sealed-artifacts.ts";
 import { published } from "./apps.ts";
 
 // Apps of spec 8's layout as the release tests build them: a builder's
@@ -118,34 +119,88 @@ export const failure = async (
   return "ok";
 };
 
-/** Where an artifact's bytes are kept. */
-export const artifactKey = (sha256: string): string =>
-  `release-artifacts/${sha256}`;
+/** Where the artifact `sha256`'s bytes are kept: under its live generation. */
+export const artifactKey = async (sha256: string): Promise<string> => {
+  const row = await env.DB.prepare(
+    "SELECT generation FROM sdk_artifacts WHERE sha256 = ?"
+  )
+    .bind(sha256)
+    .first<{ generation: string }>();
+  return keyOf(sha256, row?.generation ?? "none");
+};
+
+/**
+ * Stores `body` as the artifact `sha256`, under its live generation or a
+ * new one referenced by a seal of its own, whatever its bytes hash to: for
+ * tests that forge or swap artifacts.
+ */
+export const putArtifact = async (
+  sha256: string,
+  body: string | Uint8Array
+): Promise<void> => {
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO sdk_artifacts (sha256, generation, created_at) VALUES (?, lower(hex(randomblob(16))), ?) ON CONFLICT (sha256) DO NOTHING"
+    ).bind(sha256, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO sdk_artifact_refs (seal, sha256, created_at) VALUES (?, ?, ?)"
+    ).bind(crypto.randomUUID(), sha256, Date.now()),
+  ]);
+  await env.FILES.put(await artifactKey(sha256), body);
+};
+
+/** The first version of the stand-in releases `newerReleases` writes. */
+const newerFrom = 1_000_000;
+
+/**
+ * Writes `keptReleases` stand-in releases of App `app`, newer than any it
+ * has, so retention keeps none of its own for being among its latest; and
+ * a function that removes them again.
+ */
+export const newerReleases = async (
+  app: AppId
+): Promise<() => Promise<void>> => {
+  await env.DB.batch(
+    Array.from({ length: keptReleases }, (_, index) =>
+      env.DB.prepare(
+        "INSERT INTO sdk_release_manifests (app_id, version, manifest_hash, manifest, sealed_at) VALUES (?, ?, 'stand-in', '{}', ?)"
+      ).bind(app, newerFrom + index, Date.now())
+    )
+  );
+  return async () => {
+    await env.DB.prepare(
+      "DELETE FROM sdk_release_manifests WHERE app_id = ? AND version >= ?"
+    )
+      .bind(app, newerFrom)
+      .run();
+  };
+};
 
 /**
  * Lets retention delete App `app`'s release `version`, kept by nothing
- * but its 90 days: sweeps past them and the grace, as often as it takes,
- * since one sweep deletes a bounded batch of the releases due.
+ * but being among its latest and its seal's grace: sweeps past the grace
+ * with newer stand-in releases in place (`newerReleases`), as often as it
+ * takes, since one sweep deletes a bounded batch of the releases due.
  */
 export const sweptAway = async (app: AppId, version: number): Promise<void> => {
-  const now = Date.now();
-  await sweepReleases(env, new Date(now + releaseRetentionMs + 60_000));
-  for (let sweep = 0; sweep < 50; sweep += 1) {
-    // One sweep after the other: each sees what the one before left.
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    const kept = await env.DB.prepare(
-      "SELECT 1 FROM sdk_release_manifests WHERE app_id = ? AND version = ?"
-    )
-      .bind(app, version)
-      .first();
-    if (kept === null) {
-      return;
+  const removeNewer = await newerReleases(app);
+  try {
+    for (let sweep = 0; sweep < 50; sweep += 1) {
+      // One sweep after the other: each sees what the one before left.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await sweepReleases(env, new Date(Date.now() + sealGraceMs + 60_000));
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const kept = await env.DB.prepare(
+        "SELECT 1 FROM sdk_release_manifests WHERE app_id = ? AND version = ?"
+      )
+        .bind(app, version)
+        .first();
+      if (kept === null) {
+        return;
+      }
     }
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    await sweepReleases(
-      env,
-      new Date(now + releaseRetentionMs + releaseGraceMs + 120_000)
-    );
+  } finally {
+    await removeNewer();
   }
   throw new Error(`Retention kept version ${version} of App ${app}`);
 };
