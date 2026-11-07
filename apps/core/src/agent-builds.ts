@@ -1744,8 +1744,10 @@ const buildDeclaration = `/**
  * the file's path is the API (\`server/tasks.ts\`'s \`list\` is
  * \`api.tasks.list\`), and nothing lists them. They import their builders
  * from \`@server/_generated/server\`; pages call them through
- * \`@server/_generated/api\`. A query or mutation that needs fewer tables
- * than their access gives narrows them: \`tables: { notes: { read: true } }\`.
+ * \`@server/_generated/api\`, and take the tables' types with
+ * \`import type { Doc, Id } from "@server/_generated/dataModel"\`.
+ * A query or mutation that needs fewer tables than their access gives
+ * narrows them: \`tables: { notes: { read: true } }\`.
  * An App holds no workflows,
  * and a write under \`workflows/\` is refused: for something that runs on
  * its own or takes steps, build an independent workflow with

@@ -502,11 +502,18 @@ const buildCss = async (
 
 /**
  * What a page's type check resolves an App file's imports to by name:
- * the kit's modules, its icons, and the JSX runtime the compile names.
- * Nothing else of the kit, however a file names it (type-check.ts).
+ * the kit's modules, its icons, the JSX runtime the compile names, and
+ * the database's types the data model names (`pageDataModel`). Nothing
+ * else of the kit, however a file names it (type-check.ts); a page's own
+ * import of the database's types is refused at its compile (imports.ts).
  */
 const pagesTarget = pageTarget(
-  new Set([...kit.imports, "lucide-react", "react/jsx-runtime"])
+  new Set([
+    ...kit.imports,
+    "lucide-react",
+    "react/jsx-runtime",
+    "@grasp-os/sdk/database",
+  ])
 );
 
 /** `record`'s own entry for `key`, never one it inherits. */

@@ -1,5 +1,7 @@
-# Blume's generated project, and the API reference, generated from the
-# SDK on every build (build.ts).
+# Blume's generated project, the API reference, generated from the SDK,
+# and the example Apps' pages, from core's blueprints, on every build
+# (build.ts).
 .blume/
 content/reference/
+content/examples/
 .examples/

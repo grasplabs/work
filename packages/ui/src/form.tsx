@@ -321,6 +321,15 @@ interface Control {
   handleBlur: () => void;
 }
 
+/**
+ * What a text field holds as the person types `text`: left out once they
+ * empty a field the schema lets them leave out, so an optional value that
+ * must be well formed (an email) never goes as empty text; the text
+ * otherwise, empty or not.
+ */
+const typedText = (control: Control, text: string): string | undefined =>
+  text === "" && control.descriptor?.presence === "optional" ? undefined : text;
+
 /** What every field takes. */
 interface FieldProps<Values, Name> {
   /** The form the field belongs to, passed so its name is typed. */
@@ -504,7 +513,7 @@ const TextField = <Values,>({
         name={control.name}
         onBlur={control.handleBlur}
         onChange={(event) => {
-          control.handleChange(event.target.value);
+          control.handleChange(typedText(control, event.target.value));
         }}
         type={type}
         value={textOf(control.value)}
@@ -538,7 +547,7 @@ const TextareaField = <Values,>({
         name={control.name}
         onBlur={control.handleBlur}
         onChange={(event) => {
-          control.handleChange(event.target.value);
+          control.handleChange(typedText(control, event.target.value));
         }}
         value={textOf(control.value)}
       />

@@ -1,0 +1,4 @@
+{
+  "name": "Sales dashboard",
+  "description": "Records sales and shows them back: this month's revenue and number of sales, revenue by month over the last year, and the latest sales. Monthly totals are kept as each sale is recorded, so the dashboard reads a dozen records however many sales there are."
+}

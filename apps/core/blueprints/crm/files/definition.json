@@ -1,0 +1,136 @@
+{
+  "name": "CRM",
+  "permissions": [],
+  "preferences": [],
+  "tables": [
+    {
+      "id": "54a0d2af-cd08-4451-b7c4-f0c3105fbf68",
+      "name": "contacts",
+      "fields": [
+        {
+          "id": "f3efcd67-7eb0-4a60-8653-086ee59a422f",
+          "name": "name",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "string",
+            "trim": true,
+            "email": false,
+            "min": 1,
+            "max": 200
+          }
+        },
+        {
+          "id": "37e020ad-909c-4d6b-aae5-32c441fd861b",
+          "name": "company",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "default",
+            "defaultValue": "",
+            "kind": "string",
+            "trim": true,
+            "email": false,
+            "max": 200
+          }
+        },
+        {
+          "id": "a5fe1566-701c-4935-bcc0-8240f0cb40b2",
+          "name": "email",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": true,
+            "presence": "default",
+            "defaultValue": null,
+            "kind": "string",
+            "trim": true,
+            "email": true,
+            "max": 320
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "name": "by_name",
+          "fields": ["f3efcd67-7eb0-4a60-8653-086ee59a422f"]
+        }
+      ],
+      "access": {
+        "read": "appMembers",
+        "write": "appMembers"
+      },
+      "searchIndex": [
+        "f3efcd67-7eb0-4a60-8653-086ee59a422f",
+        "37e020ad-909c-4d6b-aae5-32c441fd861b"
+      ]
+    },
+    {
+      "id": "fe9c2990-303f-42af-b949-e81d990b2f34",
+      "name": "deals",
+      "fields": [
+        {
+          "id": "40d78702-1ff6-4089-af16-4f075db794f4",
+          "name": "contact",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "id",
+            "tableName": "contacts"
+          }
+        },
+        {
+          "id": "07d8eb37-6d5d-4a95-80d6-d9a789dae1b4",
+          "name": "title",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "string",
+            "trim": true,
+            "email": false,
+            "min": 1,
+            "max": 200
+          }
+        },
+        {
+          "id": "47610297-7044-4198-869d-019eab4c8597",
+          "name": "value",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "money"
+          }
+        },
+        {
+          "id": "72fed577-b858-4945-9e0c-c84d28c20b06",
+          "name": "stage",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "enum",
+            "values": ["lead", "qualified", "proposal", "won", "lost"]
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "name": "by_contact",
+          "fields": ["40d78702-1ff6-4089-af16-4f075db794f4", "_createdAt"]
+        },
+        {
+          "name": "by_stage",
+          "fields": ["72fed577-b858-4945-9e0c-c84d28c20b06"]
+        }
+      ],
+      "access": {
+        "read": "appMembers",
+        "write": "appMembers"
+      }
+    }
+  ],
+  "answers": []
+}

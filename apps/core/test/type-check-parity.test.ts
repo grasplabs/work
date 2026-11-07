@@ -70,7 +70,9 @@ const typeDiagnostics = (
     )
     .toSorted();
 
-const blueprints = ["intake", "workflow-map"];
+/** The release's built-ins, the example Apps among them: not the tests' own. */
+const { blueprints: builtins } = await loadBuiltinRelease();
+const blueprints = builtins.map(({ id }) => id).filter((id) => id !== "hello");
 
 /** Mistakes in a page's files, each a component of its own. */
 const pageMistakes: Record<string, string> = {

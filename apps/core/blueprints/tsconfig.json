@@ -11,5 +11,12 @@
   "include": ["*/files/src"],
   // Spec 8's layout: its pages import the `@server/_generated/api` the host generates,
   // which nothing here maps; the page build checks them with it.
-  "exclude": ["intake/files", "workflow-map/files"]
+  "exclude": [
+    "intake/files",
+    "workflow-map/files",
+    "kanban-board/files",
+    "crm/files",
+    "approvals/files",
+    "dashboard/files"
+  ]
 }

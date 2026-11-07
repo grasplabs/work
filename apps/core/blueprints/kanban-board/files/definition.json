@@ -1,0 +1,63 @@
+{
+  "name": "Kanban board",
+  "permissions": [],
+  "preferences": [],
+  "tables": [
+    {
+      "id": "975fa56d-a2e7-47ff-ad82-d925db1cab4e",
+      "name": "cards",
+      "fields": [
+        {
+          "id": "d7e55de0-3cb0-4040-91eb-86dc12709db1",
+          "name": "title",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "string",
+            "trim": true,
+            "email": false,
+            "min": 1,
+            "max": 200
+          }
+        },
+        {
+          "id": "8f41f30c-8bde-4e21-9cd9-60718072f901",
+          "name": "column",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "enum",
+            "values": ["todo", "doing", "done"]
+          }
+        },
+        {
+          "id": "f121e58e-df9c-4ad9-9faf-a8c2d7978443",
+          "name": "rank",
+          "type": {
+            "descriptorVersion": 1,
+            "nullable": false,
+            "presence": "required",
+            "kind": "number",
+            "integer": false
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "name": "by_column",
+          "fields": [
+            "8f41f30c-8bde-4e21-9cd9-60718072f901",
+            "f121e58e-df9c-4ad9-9faf-a8c2d7978443"
+          ]
+        }
+      ],
+      "access": {
+        "read": "appMembers",
+        "write": "appMembers"
+      }
+    }
+  ],
+  "answers": []
+}

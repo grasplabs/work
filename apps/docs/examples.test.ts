@@ -10,6 +10,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 
 import { buildFiles, routeTreePath } from "@grasp-os/compiler/inputs";
+import { pageServerImports } from "@grasp-os/compiler/page-imports";
 import { routeTree } from "@grasp-os/compiler/route-tree";
 import {
   dataModelSource,
@@ -33,8 +34,11 @@ import { examplesDir } from "./vite.config.ts";
 // generates `server/_generated/` for it as the host does (inspecting
 // the App's registration for its references), and its pages' route tree
 // as the compiler does, and TypeScript 7 (tsgo) type-checks the whole App
-// against the SDK. A guide whose example no
-// longer compiles fails here, in the pull request that broke it.
+// against the SDK. Its pages' imports are held to what a pages build
+// refuses them for (the App's server code, the platform's own modules),
+// so a guide never shows an import the build turns down. A guide whose
+// example no longer compiles fails here, in the pull request that broke
+// it.
 //
 // Pages build on the App of "An App's project" (guides/project.md): their
 // blocks replace its files of the same name and add their own, so a guide
@@ -51,12 +55,15 @@ const otherLanguages: ReadonlySet<string> = new Set(["text", "sh", "json"]);
 /** A page's App: its files' text, by path. */
 type Files = Record<string, string>;
 
-/** Every guide under `content`, by its path there; never the reference. */
+/**
+ * Every guide under `content`, by its path there; never the reference
+ * nor the example Apps, generated from what core's tests build.
+ */
 const pages = (dir = content): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      return entry.name === "reference" ? [] : pages(full);
+      return ["reference", "examples"].includes(entry.name) ? [] : pages(full);
     }
     return /\.mdx?$/u.test(entry.name) ? [path.relative(content, full)] : [];
   });
@@ -257,6 +264,16 @@ const typeErrors = async (page: string, files: Files): Promise<string> => {
   return typeCheck(dir);
 };
 
+/** What a pages build refuses of the imports of `files`' front end, as `file:line message`. */
+const importRefusals = (files: Files): string[] =>
+  Object.entries(files)
+    .filter(([file]) => file.startsWith("src/"))
+    .flatMap(([file, source]) =>
+      pageServerImports(file, source).map(
+        ({ line, message }) => `${file}:${line ?? 0} ${message}`
+      )
+    );
+
 const base = filesOf(basePage);
 
 /** The pages with code: the base, and each that shows a file of its own. */
@@ -265,9 +282,26 @@ const withCode = pages().filter(
 );
 
 describe("the guides' code", () => {
-  it.each(withCode)("type-checks in %s", async (page) => {
-    const files = page === basePage ? base : { ...base, ...filesOf(page) };
-    await expect(typeErrors(page, files)).resolves.toBe("");
+  it.each(withCode)(
+    "type-checks in %s, importing only what a page build allows",
+    async (page) => {
+      const files = page === basePage ? base : { ...base, ...filesOf(page) };
+      expect(importRefusals(files)).toStrictEqual([]);
+      await expect(typeErrors(page, files)).resolves.toBe("");
+    }
+  );
+
+  it("refuses a page's import the build refuses", () => {
+    expect(
+      importRefusals({
+        "src/routes/index.tsx":
+          'import { query } from "@server/_generated/server";\n\nexport const used = query;\n',
+      })
+    ).toStrictEqual([
+      expect.stringContaining(
+        'src/routes/index.tsx:1 "@server/_generated/server" is the App\'s server code'
+      ),
+    ]);
   });
 
   it("answers the type errors tsgo finds", () => {
