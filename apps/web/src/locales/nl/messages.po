@@ -11340,6 +11340,10 @@ msgid "Sam can change a record in {table} as one of these: {who}."
 msgstr "Sam kan een record in {table} wijzigen als een van deze: {who}."
 
 #: src/engines/access-view.tsx
+msgid "Sam can change a record in {table} only as one of these: {who}; and also one of these: {also}."
+msgstr "Sam kan een record in {table} alleen wijzigen als een van deze: {who}; en ook als een van deze: {also}."
+
+#: src/engines/access-view.tsx
 msgid "Sam can change only the records in {table} that Sam added."
 msgstr "Sam kan alleen de records in {table} wijzigen die Sam heeft toegevoegd."
 
@@ -11376,8 +11380,8 @@ msgid "Sam sees the records in {table} only as one of the App's builders."
 msgstr "Sam ziet de records in {table} alleen als een van de bouwers van de App."
 
 #: src/engines/access-view.tsx
-msgid "Sam, like everyone who uses the App, can change any record in {table} Sam sees."
-msgstr "Sam kan, net als iedereen die de App gebruikt, elk record in {table} wijzigen dat Sam ziet."
+msgid "Sam, like everyone who uses the App, can change any record in {table}."
+msgstr "Sam kan, net als iedereen die de App gebruikt, elk record in {table} wijzigen."
 
 #: src/engines/access-view.tsx
 msgid "Sam, like everyone who uses the App, sees every record in {table}."

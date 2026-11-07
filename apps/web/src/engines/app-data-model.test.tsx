@@ -824,7 +824,11 @@ describe("an App's data model, changed in its workspace", () => {
           access: {
             read: "appMembers",
             write: "appMembers",
-            rows: { read: [{ kind: "person", field: "owner" }] },
+            // Who changes narrows with who sees.
+            rows: {
+              read: [{ kind: "person", field: "owner" }],
+              write: [{ kind: "person", field: "owner" }],
+            },
           },
         },
       ],
