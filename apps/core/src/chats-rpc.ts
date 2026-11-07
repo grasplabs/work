@@ -61,6 +61,7 @@ import {
   dataModelOf,
   definitionPlan,
   operationDetail,
+  usesOf,
 } from "./app-definition.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
 import {
@@ -737,6 +738,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       return {
         model: dataModelOf(held.own),
         plan: definitionPlan(held.before, held.own),
+        uses: usesOf(held.files),
       };
     });
   }
@@ -761,12 +763,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         workspaceId: personalWorkspaceId(by.userId),
         chatId: await this.#ownChat(by.userId, chatId),
       };
+      let read = new Map<string, string>();
       const defined = await defineInDraft(
         this.#env,
         scope,
         found,
         operation,
         async (draft, files, changes) => {
+          read = files;
           if (!preview) {
             await saveDraftChanges(
               this.#env,
@@ -788,6 +792,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
             model: dataModelOf(defined.definition),
             plan: defined.plan,
             change: defined.change,
+            uses: usesOf(read),
           }
         : defined;
     });

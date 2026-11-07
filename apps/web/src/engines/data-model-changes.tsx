@@ -2,6 +2,7 @@ import type { DefinitionOperation } from "@grasp-os/sdk/definition";
 import type {
   DataModel,
   DataModelChange,
+  DraftDataModel,
   DataModelField,
   DefinitionPlan,
   PlanField,
@@ -496,7 +497,7 @@ export const useModelChanges = ({
 }: {
   app: string;
   chatId: string;
-  onMade: (model: DataModel, plan: DefinitionPlan) => void;
+  onMade: (made: DraftDataModel) => void;
 }) => {
   const action = useCoreAction();
   const [problem, setProblem] = useState<string>();
@@ -522,7 +523,7 @@ export const useModelChanges = ({
     setProblem(undefined);
     review?.settle(true);
     setReview(undefined);
-    onMade(made.model, made.plan);
+    onMade({ model: made.model, plan: made.plan, uses: made.uses });
     return true;
   };
   /**

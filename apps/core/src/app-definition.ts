@@ -5,6 +5,7 @@ import {
   definitionText,
   emptyDefinition,
   generatedFiles,
+  indexUsesOf,
   tryReadDefinition,
   validatorSource,
 } from "@grasp-os/sdk/definition";
@@ -25,6 +26,7 @@ import type {
   DataModelTable,
   DefinitionPlan,
   FieldType,
+  IndexUse,
   PlanField,
 } from "@grasp-os/shared/data-model";
 import { z } from "zod";
@@ -243,6 +245,10 @@ export const definitionPlan = (
         })),
   };
 };
+
+/** Which index each of the App's functions reads, from its files (path to text). */
+export const usesOf = (files: ReadonlyMap<string, string>): IndexUse[] =>
+  indexUsesOf(files).map((use) => ({ ...use, pages: [...use.pages] }));
 
 /** The entries of `list` that `before` lacks. */
 const freshIn = <T>(list: readonly T[], before: readonly T[]): T[] => {

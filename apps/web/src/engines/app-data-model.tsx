@@ -5,6 +5,7 @@ import type {
   DataModelTable,
   DefinitionPlan,
   DraftDataModel,
+  IndexUse,
   PlanField,
 } from "@grasp-os/shared/data-model";
 import { Badge } from "@grasp-os/ui/components/badge";
@@ -51,7 +52,6 @@ import {
   SheetContent,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from "@grasp-os/ui/components/sheet";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import {
@@ -71,19 +71,19 @@ import {
   TrashIcon,
 } from "lucide-react";
 import { useState } from "react";
-import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatCompact } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
+import { AccessView } from "./access-view.tsx";
 import { TableRecords } from "./app-data.tsx";
 import { PlanList, planLines, useModelChanges } from "./data-model-changes.tsx";
 import type { ModelChange, ModelOperation } from "./data-model-changes.tsx";
-import { AccessPanel, IndexesPanel } from "./data-model-settings.tsx";
 import { FieldsView } from "./field-editor.tsx";
 import { KindIcon } from "./field-kinds.tsx";
 import { identifierOf } from "./identifier.ts";
+import { IndexesView } from "./indexes-view.tsx";
 import { readTables, useAppRead } from "./use-app-read.ts";
 import { useCoreRead } from "./use-core-read.ts";
 
@@ -101,37 +101,6 @@ import { useCoreRead } from "./use-core-read.ts";
 // (data-model-changes.tsx). While the chat's agent works on the App, the
 // model is read only: two writers would only refuse each other.
 
-/** One of a table's quieter views, in a sheet from the bar: its access, or its indexes. */
-const SideView = ({
-  label,
-  icon,
-  children,
-}: {
-  label: string;
-  icon: ReactNode;
-  children: ReactNode;
-}) => {
-  const { t } = useLingui();
-  return (
-    <Sheet>
-      <SheetTrigger
-        render={
-          <Button aria-label={label} size="sm" title={label} variant="ghost" />
-        }
-      >
-        {icon}
-        <span className="max-md:sr-only">{label}</span>
-      </SheetTrigger>
-      <SheetContent closeLabel={t`Close`} side="right">
-        <SheetHeader>
-          <SheetTitle>{label}</SheetTitle>
-        </SheetHeader>
-        <div className="overflow-y-auto px-4 pb-4">{children}</div>
-      </SheetContent>
-    </Sheet>
-  );
-};
-
 /**
  * The live App's tables, by name, and its version: where records are
  * read. Read again as the page is (an import, Reload), so counts follow.
@@ -141,12 +110,18 @@ const useLiveTables = (app: string) => {
   return live?.state === "ready" ? live.data : undefined;
 };
 
+/** What a table's bar shows: its records, fields, access or indexes. */
+const showings = ["records", "fields", "access", "indexes"] as const;
+
+type Showing = (typeof showings)[number];
+
 /** The table open: its fields as the grid's columns, its records as rows. */
 const TableView = ({
   app,
   live,
   table,
   tables,
+  uses,
   disabled,
   onChange,
 }: {
@@ -155,11 +130,12 @@ const TableView = ({
   live: AppDataTables | undefined;
   table: DataModelTable;
   tables: string[];
+  uses: IndexUse[];
   disabled: boolean;
   onChange: (change: ModelChange) => Promise<boolean>;
 }) => {
   const { t } = useLingui();
-  const [showing, setShowing] = useState<"records" | "fields">("records");
+  const [showing, setShowing] = useState<Showing>("records");
   const { name } = table;
   return (
     <TableRecords
@@ -177,14 +153,34 @@ const TableView = ({
         ),
       }))}
       instead={
-        showing === "fields" ? (
-          <FieldsView
-            disabled={disabled}
-            onChange={onChange}
-            table={table}
-            tables={tables}
-          />
-        ) : undefined
+        {
+          records: undefined,
+          fields: (
+            <FieldsView
+              disabled={disabled}
+              onChange={onChange}
+              table={table}
+              tables={tables}
+            />
+          ),
+          access: (
+            <AccessView
+              disabled={disabled}
+              // Its answers start again from the table as it now is.
+              key={JSON.stringify([table.access, table.sensitive])}
+              onChange={onChange}
+              table={table}
+            />
+          ),
+          indexes: (
+            <IndexesView
+              disabled={disabled}
+              onChange={onChange}
+              table={table}
+              uses={uses}
+            />
+          ),
+        }[showing]
       }
       // The live App's records of this table, once the App has it.
       key={`${table.id}/${live?.version ?? ""}`}
@@ -195,7 +191,9 @@ const TableView = ({
           <ToggleGroup
             aria-label={t`Show`}
             onValueChange={(chosen: unknown[]) => {
-              setShowing(chosen[0] === "fields" ? "fields" : "records");
+              setShowing(
+                showings.find((each) => each === chosen[0]) ?? "records"
+              );
             }}
             size="sm"
             spacing={0}
@@ -210,25 +208,15 @@ const TableView = ({
               <Columns3Icon data-icon="inline-start" />
               <Trans context="a table's fields">Fields</Trans>
             </ToggleGroupItem>
+            <ToggleGroupItem value="access">
+              <ShieldIcon data-icon="inline-start" />
+              <Trans context="who reaches a table's records">Access</Trans>
+            </ToggleGroupItem>
+            <ToggleGroupItem value="indexes">
+              <ListOrderedIcon data-icon="inline-start" />
+              <Trans context="a table's indexes">Indexes</Trans>
+            </ToggleGroupItem>
           </ToggleGroup>
-          <SideView icon={<ShieldIcon />} label={t`Access`}>
-            <AccessPanel
-              disabled={disabled}
-              // Its form starts again from the table as it now is.
-              key={JSON.stringify([table.access, table.sensitive])}
-              onChange={(operation) => {
-                void onChange(operation);
-              }}
-              table={table}
-            />
-          </SideView>
-          <SideView icon={<ListOrderedIcon />} label={t`Indexes`}>
-            <IndexesPanel
-              disabled={disabled}
-              onChange={onChange}
-              table={table}
-            />
-          </SideView>
           <DropdownMenu>
             <DropdownMenuTrigger
               disabled={disabled}
@@ -465,8 +453,8 @@ export const AppDataModel = ({
   const changes = useModelChanges({
     app,
     chatId,
-    onMade: (model, plan) => {
-      setMade({ model, plan, revision });
+    onMade: (next) => {
+      setMade({ ...next, revision });
     },
   });
   let shown: DraftDataModel | undefined;
@@ -594,6 +582,7 @@ export const AppDataModel = ({
             onChange={change}
             table={table}
             tables={tables}
+            uses={shown.uses}
           />
         )}
       </section>

@@ -141,6 +141,18 @@ export interface DefinitionPlan {
 export interface DraftDataModel {
   model: DataModel;
   plan: DefinitionPlan;
+  /** Which index each of the App's functions reads, from its code. */
+  uses: IndexUse[];
+}
+
+/** An index a function of the App's reads: by name, or the table's search (`index` null). */
+export interface IndexUse {
+  table: string;
+  index: string | null;
+  /** The function, as pages call it: `deals.list`. */
+  query: string;
+  /** The routes of the pages that call it: `/pipeline`. */
+  pages: string[];
 }
 
 /**

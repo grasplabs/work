@@ -3,6 +3,7 @@ import type {
   DataModel,
   DataModelChange,
   DataModelField,
+  IndexUse,
   DefinitionPlan,
 } from "@grasp-os/shared/data-model";
 import { i18n } from "@lingui/core";
@@ -114,14 +115,14 @@ const settled = async (): Promise<void> => {
 const shown = async (
   model: DataModel,
   answer: Answer,
-  { running = false }: { running?: boolean } = {}
+  { running = false, uses = [] }: { running?: boolean; uses?: IndexUse[] } = {}
 ) => {
   const sent: Sent[] = [];
   let held = model;
   const chats = {
     dataModel: async () => {
       await Promise.resolve();
-      return { model: held, plan: nothingPlanned };
+      return { model: held, plan: nothingPlanned, uses };
     },
     defineDraft: async (
       _chatId: string,
@@ -144,7 +145,7 @@ const shown = async (
       if (!preview) {
         held = after;
       }
-      return { ok: true, model: after, plan, change: plan };
+      return { ok: true, model: after, plan, change: plan, uses };
     },
   };
   // The live App: no version yet, so no records to read.
@@ -217,11 +218,12 @@ const button = (name: string) =>
 const labelled = (label: string) =>
   [...document.querySelectorAll(`[aria-label="${label}"]`)].at(-1);
 
-/** The control the label `label` is for. */
-const labelledBy = (label: string) => {
-  const named = [...document.querySelectorAll("label")].findLast(
-    (each) => each.textContent.trim() === label
-  );
+/** The control the label `label` is for: the last one, or the `first`. */
+const labelledBy = (label: string, which: "first" | "last" = "last") => {
+  const labels = [...document.querySelectorAll("label")];
+  const matches = (each: HTMLLabelElement) => each.textContent.trim() === label;
+  const named =
+    which === "first" ? labels.find(matches) : labels.findLast(matches);
   return named?.htmlFor === undefined || named.htmlFor === ""
     ? undefined
     : document.querySelector(`[id="${named.htmlFor}"]`);
@@ -778,6 +780,111 @@ describe("an App's data model, changed in its workspace", () => {
       renamed: ["title", "state"],
       asked: true,
       kept: "priority",
+    });
+  });
+
+  it("answers who can see a table's records, says what that means, and saves exactly that access", async () => {
+    const owner: DataModelField = {
+      id: "id-owner",
+      name: "owner",
+      type: { kind: "person" },
+      required: false,
+      code: "v.person()",
+    };
+    const sent = await shown(
+      withField(notesModel(), owner),
+      (operation, model) => {
+        if (operation.op === "setAccess") {
+          return { ok: true, model, plan: nothingPlanned };
+        }
+        throw new Error(`Not asked for: ${operation.op}`);
+      }
+    );
+
+    await press(button("Access"));
+    // Who can see them, the first question; who can change them follows.
+    await press(labelledBy("The person in owner", "first"));
+    const said = document.body.textContent.includes(
+      "Sam sees only the records in notes whose owner is Sam."
+    );
+    await press(button("Save access"));
+    await press(button("Make the change"));
+
+    expect({
+      said,
+      made: sent
+        .filter(({ preview }) => !preview)
+        .map(({ operation }) => operation),
+    }).toStrictEqual({
+      said: true,
+      made: [
+        {
+          op: "setAccess",
+          table: "notes",
+          access: {
+            read: "appMembers",
+            write: "appMembers",
+            rows: { read: [{ kind: "person", field: "owner" }] },
+          },
+        },
+      ],
+    });
+  });
+
+  it("shows what uses each index and what a query lacks, and adds one named from its field", async () => {
+    const model = notesModel();
+    const indexed: DataModel = {
+      ...model,
+      tables: model.tables.map((table) => ({
+        ...table,
+        indexes: [{ name: "by_status", fields: ["status"] }],
+      })),
+    };
+    const sent = await shown(
+      indexed,
+      (operation, held) => {
+        if (operation.op === "addIndex") {
+          return { ok: true, model: held, plan: nothingPlanned };
+        }
+        throw new Error(`Not asked for: ${operation.op}`);
+      },
+      {
+        uses: [
+          {
+            table: "notes",
+            index: "by_status",
+            query: "notes.byStatus",
+            pages: ["/board"],
+          },
+          {
+            table: "notes",
+            index: "by_title",
+            query: "notes.byTitle",
+            pages: [],
+          },
+        ],
+      }
+    );
+
+    await press(button("Indexes"));
+    const shownText = document.body.textContent;
+    await choose("Field", "title");
+    await press(button("Add index"));
+
+    expect({
+      usedBy: shownText.includes("Used by notes.byStatus (on /board)"),
+      missing: shownText.includes(
+        "notes.byTitle reads the index by_title, which this table doesn’t have."
+      ),
+      made: sent
+        .filter(({ preview }) => !preview)
+        .map(({ operation }) => operation),
+    }).toStrictEqual({
+      usedBy: true,
+      missing: true,
+      made: [
+        { op: "addIndex", table: "notes", name: "by_title", fields: ["title"] },
+      ],
     });
   });
 

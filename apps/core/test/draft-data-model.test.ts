@@ -301,6 +301,8 @@ describe(
         planKept: renamedAndRetyped.ok && renamedAndRetyped.plan.keptFields,
         changeKept: renamedAndRetyped.ok && renamedAndRetyped.change.keptFields,
         halfRefused: halfRefused.ok,
+        // What reads the table's index, from the App's code.
+        uses: model.uses,
         fields: model.model.tables[0]?.fields.map(({ name, type }) => ({
           name,
           kind: type.kind,
@@ -310,6 +312,14 @@ describe(
         planKept: [{ table: "notes", field: "body" }],
         changeKept: [],
         halfRefused: false,
+        uses: [
+          {
+            table: "notes",
+            index: "by_updated",
+            query: "notes.list",
+            pages: ["/"],
+          },
+        ],
         fields: [
           { name: "title", kind: "text" },
           { name: "rank", kind: "number" },

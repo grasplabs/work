@@ -980,6 +980,18 @@ msgstr "{place} sur {count}"
 msgid "{position} of {count}"
 msgstr "{position} sur {count}"
 
+#: src/engines/indexes-view.tsx
+msgid "{query} (on {routes})"
+msgstr "{query} (sur {routes})"
+
+#: src/engines/indexes-view.tsx
+msgid "{query} reads the index {index}, which this table doesn’t have."
+msgstr "{query} lit l’index {index}, que cette table n’a pas."
+
+#: src/engines/indexes-view.tsx
+msgid "{query} searches this table, which has no search."
+msgstr "{query} cherche dans cette table, qui n’a pas de recherche."
+
 #: src/interview/closed.tsx
 msgid "{rating} of 5"
 msgstr "{rating} sur 5"
@@ -1794,8 +1806,13 @@ msgid "Accepted"
 msgstr "Accepté"
 
 #: src/engines/app-data-model.tsx
+msgctxt "who reaches a table's records"
 msgid "Access"
 msgstr "Accès"
+
+#: src/engines/access-view.tsx
+msgid "Access to {name}"
+msgstr "Accès à {name}"
 
 #: src/connections/revocations-by-hand.tsx
 msgid "Access to remove by hand"
@@ -1878,6 +1895,7 @@ msgstr "Activité : tout voir dans Traces"
 msgid "Actor ID"
 msgstr "ID de l’acteur"
 
+#: src/engines/indexes-view.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/team-members-dialog.tsx
@@ -1929,13 +1947,13 @@ msgstr "Ajouter un widget"
 msgid "Add an HTTP connection"
 msgstr "Ajouter une connexion HTTP"
 
+#: src/engines/indexes-view.tsx
+msgid "Add an index"
+msgstr "Ajouter un index"
+
 #: src/engines/app-integrations.tsx
 msgid "Add an integration"
 msgstr "Ajouter une intégration"
-
-#: src/engines/data-model-settings.tsx
-msgid "Add an order"
-msgstr "Ajouter un ordre"
 
 #: src/settings/package-approvers.tsx
 msgid "Add approver"
@@ -1953,7 +1971,7 @@ msgstr "Ajouter le champ"
 msgid "Add HTTP connection"
 msgstr "Ajouter une connexion HTTP"
 
-#: src/engines/data-model-settings.tsx
+#: src/engines/indexes-view.tsx
 msgid "Add index"
 msgstr "Ajouter l’index"
 
@@ -1969,7 +1987,7 @@ msgstr "Ajoutez-en une pour que les factures soient payées dès leur arrivée."
 msgid "Add option"
 msgstr "Ajouter une option"
 
-#: src/engines/data-model-settings.tsx
+#: src/engines/indexes-view.tsx
 msgid "Add search"
 msgstr "Ajouter la recherche"
 
@@ -2341,6 +2359,14 @@ msgstr "Une expérience"
 #: src/engines/app-webhooks.tsx
 msgid "An https address on the public internet, with no user name, password or IP address in it."
 msgstr "Une adresse https sur l'internet public, sans nom d'utilisateur, mot de passe ni adresse IP."
+
+#: src/engines/indexes-view.tsx
+msgid "An index keeps records in order of a field, so queries that sort or filter by it stay fast. Search finds records by their words."
+msgstr "Un index garde les enregistrements dans l’ordre d’un champ, pour que les requêtes qui trient ou filtrent par ce champ restent rapides. La recherche trouve les enregistrements par leurs mots."
+
+#: src/engines/indexes-view.tsx
+msgid "An index, to sort and filter by a field"
+msgstr "Un index, pour trier et filtrer par un champ"
 
 #: src/onboarding/setup-steps.tsx
 msgid "An old format: save it as PDF or a newer file"
@@ -2739,6 +2765,10 @@ msgstr "Comme action, définissez le seuil de probabilité de spam (SCL) sur « 
 #: src/dashboard/report.ts
 msgid "As of {date}."
 msgstr "Au {date}."
+
+#: src/engines/access-view.tsx
+msgid "As the App's code sets it"
+msgstr "Comme le code de l’App le définit"
 
 #: src/settings/ai-providers.tsx
 msgid "As your endpoint names it, such as llama-3.3-70b."
@@ -5150,10 +5180,6 @@ msgstr "Chaque lundi matin, pour vous"
 msgid "Every other app Grasp can connect to."
 msgstr "Toutes les autres apps que Grasp peut connecter."
 
-#: src/engines/data-model-settings.tsx
-msgid "Every record, for the App's builders"
-msgstr "Tous les enregistrements, pour les créateurs de l’App"
-
 #: src/engines/app-data.tsx
 msgid "Every row is checked first. If one is wrong, nothing is added."
 msgstr "Chaque ligne est d'abord vérifiée. Si l'une est incorrecte, rien n'est ajouté."
@@ -5220,11 +5246,12 @@ msgid "Everyone it is shared with, and their agents, read it as accepted. Yours 
 msgstr "Tous ceux avec qui il est partagé, et leurs agents, le lisent comme accepté. Le vôtre reste tel quel."
 
 #: src/chat/builds.tsx
+#: src/engines/access-view.tsx
 msgid "everyone who uses the App"
 msgstr "toutes les personnes qui utilisent l’App"
 
+#: src/engines/access-view.tsx
 #: src/engines/app-data-model.tsx
-#: src/engines/data-model-settings.tsx
 msgid "Everyone who uses the App"
 msgstr "Tous ceux qui utilisent l’App"
 
@@ -5410,6 +5437,10 @@ msgstr "Moins de cinq personnes : ce n’est pas affiché à part."
 msgid "Fewest characters"
 msgstr "Nombre minimal de caractères"
 
+#: src/engines/indexes-view.tsx
+msgid "Field"
+msgstr "Champ"
+
 #: src/engines/app-data.tsx
 msgid "Field for {column}"
 msgstr "Champ pour {column}"
@@ -5426,6 +5457,10 @@ msgstr "Champs"
 msgctxt "a table's fields"
 msgid "Fields"
 msgstr "Champs"
+
+#: src/engines/indexes-view.tsx
+msgid "Fields to search"
+msgstr "Champs à rechercher"
 
 #: src/labels.ts
 msgid "File"
@@ -6487,10 +6522,6 @@ msgstr "Dans {name}, créez un utilisateur de service qui peut lire les données
 msgid "In one chat only, for {requester}"
 msgstr "Dans une seule conversation, pour {requester}"
 
-#: src/engines/data-model-settings.tsx
-msgid "In order of {order}"
-msgstr "Dans l’ordre de {order}"
-
 #: src/settings/erasures.tsx
 msgid "In progress"
 msgstr "En cours"
@@ -6536,11 +6567,12 @@ msgstr "Dans votre boîte de réception"
 msgid "Inbox"
 msgstr "Boîte de réception"
 
-#: src/engines/data-model-settings.tsx
-msgid "Index name"
-msgstr "Nom de l’index"
+#: src/engines/indexes-view.tsx
+msgid "Indexes"
+msgstr "Index"
 
 #: src/engines/app-data-model.tsx
+msgctxt "a table's indexes"
 msgid "Indexes"
 msgstr "Index"
 
@@ -6932,10 +6964,6 @@ msgstr "Sa version actuelle n’a aucun paramètre."
 #: src/engines/app-settings.tsx
 msgid "Its definition to keep or move, and a blueprint others can start from."
 msgstr "Sa définition à conserver ou à déplacer, et un modèle dont d'autres peuvent partir."
-
-#: src/engines/data-model-settings.tsx
-msgid "Its history keeps no values, and every read is recorded. A table stays sensitive once it is."
-msgstr "Son historique ne garde aucune valeur, et chaque lecture est enregistrée. Une table reste sensible une fois qu’elle l’est."
 
 #: src/settings/ai-providers.tsx
 msgid "Its key is deleted, and calls stop using it at once. Models of this provider are no longer used, even as a fallback."
@@ -8365,6 +8393,10 @@ msgstr "Aucune autorisation."
 msgid "No projects yet"
 msgstr "Aucun projet pour l’instant"
 
+#: src/engines/indexes-view.tsx
+msgid "No query uses it yet"
+msgstr "Aucune requête ne l’utilise encore"
+
 #: src/engines/store-change-errors.ts
 msgid "No record is to blame, so an admin can only abandon the change, in the App's settings."
 msgstr "Aucun enregistrement n'est en cause, un admin ne peut donc qu'abandonner la modification, dans les réglages de l'App."
@@ -8481,7 +8513,7 @@ msgstr "Pas encore de workflows"
 msgid "No: its hash or its link to the event before it doesn't match."
 msgstr "Non : son hachage ou son lien avec l’événement précédent ne correspond pas."
 
-#: src/engines/data-model-settings.tsx
+#: src/engines/access-view.tsx
 msgid "Nobody"
 msgstr "Personne"
 
@@ -8504,6 +8536,10 @@ msgstr "Personne de ce nom"
 #: src/workflows/delete-workflow.tsx
 msgid "Nobody can open or start it again. Its versions are kept but never served. This can't be undone."
 msgstr "Personne ne pourra plus l’ouvrir ni le démarrer. Ses versions sont conservées mais jamais servies. C’est irréversible."
+
+#: src/engines/access-view.tsx
+msgid "Nobody changes the records in {table}, Sam included."
+msgstr "Personne ne modifie les enregistrements de {table}, pas même Sam."
 
 #: src/people/people-teams-picker.tsx
 #: src/projects/project-people.tsx
@@ -8549,6 +8585,10 @@ msgstr "Personne n’a lu ni modifié {doc} dans {where} {days, plural, one {ces
 #: src/dashboard/signals.tsx
 msgid "Nobody reads it"
 msgstr "Personne ne le lit"
+
+#: src/engines/access-view.tsx
+msgid "Nobody sees the records in {table}, Sam included."
+msgstr "Personne ne voit les enregistrements de {table}, pas même Sam."
 
 #: src/settings/erasures.tsx
 msgid "Nobody was removed."
@@ -9175,8 +9215,8 @@ msgstr "Seules les personnes autorisées à approuver des paquets voient ce qui 
 msgid "Only someone signed in to the workspace opens it."
 msgstr "Seule une personne connectée à l'espace de travail l'ouvre."
 
+#: src/engines/access-view.tsx
 #: src/engines/app-data-model.tsx
-#: src/engines/data-model-settings.tsx
 msgid "Only the App's builders"
 msgstr "Seulement les créateurs de l’App"
 
@@ -9201,9 +9241,12 @@ msgid "Only the person it ran for and the organization's admins see what it retu
 msgstr "Seuls la personne pour qui elle a tourné et les administrateurs de l’organisation voient ce qu’elle a renvoyé ou pourquoi elle a échoué."
 
 #: src/engines/app-data-model.tsx
-#: src/engines/data-model-settings.tsx
 msgid "Only the person who added each record"
 msgstr "Seulement la personne qui a ajouté chaque enregistrement"
+
+#: src/engines/access-view.tsx
+msgid "Only the person who added the record"
+msgstr "Seulement la personne qui a ajouté l’enregistrement"
 
 #: src/onboarding/review-parts.tsx
 msgid "Only the second way"
@@ -9458,10 +9501,6 @@ msgstr "ou choisissez-les sur votre ordinateur"
 #: src/interview/closed.tsx
 msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
 msgstr "Ou retirez-vous : rien de ce que vous avez dit n’est utilisé à partir de maintenant, et vous pouvez toujours le lire ici."
-
-#: src/engines/data-model-settings.tsx
-msgid "Order by"
-msgstr "Trier par"
 
 #: src/connections/http-connections.tsx
 msgid "Origin"
@@ -10395,6 +10434,10 @@ msgstr "Enregistrement"
 msgid "Record {id}"
 msgstr "Enregistrement {id}"
 
+#: src/engines/access-view.tsx
+msgid "Record every time someone looks at these records, and keep no past values"
+msgstr "Enregistrer chaque consultation de ces enregistrements, et ne garder aucune ancienne valeur"
+
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Record-to-Report"
@@ -10614,7 +10657,7 @@ msgstr "Supprimer la table"
 msgid "Remove the blueprint {name}"
 msgstr "Supprimer la blueprint {name}"
 
-#: src/engines/data-model-settings.tsx
+#: src/engines/indexes-view.tsx
 msgid "Remove the index {indexName}"
 msgstr "Supprimer l’index {indexName}"
 
@@ -10622,7 +10665,7 @@ msgstr "Supprimer l’index {indexName}"
 msgid "Remove the package"
 msgstr "Supprimer le paquet"
 
-#: src/engines/data-model-settings.tsx
+#: src/engines/indexes-view.tsx
 msgid "Remove the search"
 msgstr "Supprimer la recherche"
 
@@ -11292,6 +11335,54 @@ msgstr "Indiqué comme arrivé : {who}."
 msgid "sales-pipeline"
 msgstr "pipeline-commercial"
 
+#: src/engines/access-view.tsx
+msgid "Sam can change a record in {table} as one of these: {who}."
+msgstr "Sam peut modifier un enregistrement de {table} en tant que l’un de ceux-ci : {who}."
+
+#: src/engines/access-view.tsx
+msgid "Sam can change only the records in {table} that Sam added."
+msgstr "Sam ne peut modifier que les enregistrements de {table} que Sam a ajoutés."
+
+#: src/engines/access-view.tsx
+msgid "Sam can change only the records in {table} whose {field} is one of Sam's teams."
+msgstr "Sam ne peut modifier que les enregistrements de {table} dont {field} est l’une des équipes de Sam."
+
+#: src/engines/access-view.tsx
+msgid "Sam can change only the records in {table} whose {field} is Sam."
+msgstr "Sam ne peut modifier que les enregistrements de {table} dont {field} est Sam."
+
+#: src/engines/access-view.tsx
+msgid "Sam can change the records in {table} only as one of the App's builders."
+msgstr "Sam ne peut modifier les enregistrements de {table} qu’en tant que créateur de l’App."
+
+#: src/engines/access-view.tsx
+msgid "Sam sees a record in {table} as one of these: {who}."
+msgstr "Sam voit un enregistrement de {table} en tant que l’un de ceux-ci : {who}."
+
+#: src/engines/access-view.tsx
+msgid "Sam sees only the records in {table} that Sam added."
+msgstr "Sam ne voit que les enregistrements de {table} que Sam a ajoutés."
+
+#: src/engines/access-view.tsx
+msgid "Sam sees only the records in {table} whose {field} is one of Sam's teams."
+msgstr "Sam ne voit que les enregistrements de {table} dont {field} est l’une des équipes de Sam."
+
+#: src/engines/access-view.tsx
+msgid "Sam sees only the records in {table} whose {field} is Sam."
+msgstr "Sam ne voit que les enregistrements de {table} dont {field} est Sam."
+
+#: src/engines/access-view.tsx
+msgid "Sam sees the records in {table} only as one of the App's builders."
+msgstr "Sam ne voit les enregistrements de {table} qu’en tant que créateur de l’App."
+
+#: src/engines/access-view.tsx
+msgid "Sam, like everyone who uses the App, can change any record in {table} Sam sees."
+msgstr "Sam, comme tous ceux qui utilisent l’App, peut modifier tout enregistrement de {table} que Sam voit."
+
+#: src/engines/access-view.tsx
+msgid "Sam, like everyone who uses the App, sees every record in {table}."
+msgstr "Sam, comme tous ceux qui utilisent l’App, voit tous les enregistrements de {table}."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Same version, different contents: {changed}"
 msgstr "Même version, contenu différent : {changed}"
@@ -11309,7 +11400,7 @@ msgstr "Enregistrer"
 msgid "Save {name} as a blueprint"
 msgstr "Enregistrer {name} comme blueprint"
 
-#: src/engines/data-model-settings.tsx
+#: src/engines/access-view.tsx
 msgid "Save access"
 msgstr "Enregistrer l’accès"
 
@@ -11423,7 +11514,6 @@ msgid "Schedule trigger"
 msgstr "Déclencheur planifié"
 
 #: src/engines/apps-overview.tsx
-#: src/engines/data-model-settings.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Search"
 msgstr "Rechercher"
@@ -11439,6 +11529,10 @@ msgstr "Rechercher par nom ou type"
 #: src/chat/chat-window.tsx
 msgid "Search chats"
 msgstr "Rechercher dans les chats"
+
+#: src/engines/indexes-view.tsx
+msgid "Search in {searched}"
+msgstr "Recherche dans {searched}"
 
 #: src/engines/app-integrations.tsx
 #: src/routes/_shell.integrations.index.tsx
@@ -11486,6 +11580,10 @@ msgstr "Chercher dans la transcription"
 #: src/chat/chat-window.tsx
 msgid "Search your chats, and open one."
 msgstr "Recherchez dans vos chats et ouvrez-en un."
+
+#: src/engines/indexes-view.tsx
+msgid "Search, to find records by the words in them"
+msgstr "Une recherche, pour trouver des enregistrements par leurs mots"
 
 #: src/settings/audit-archive.tsx
 msgid "Searched above. After this, events move to the archive."
@@ -11636,7 +11734,6 @@ msgstr "Les expéditeurs doivent signer avec le nouveau secret, que vous ne voye
 msgid "Senders sign every delivery with it, so Grasp can tell a call is theirs."
 msgstr "Les expéditeurs signent chaque livraison avec, pour que Grasp sache que l'appel vient d'eux."
 
-#: src/engines/data-model-settings.tsx
 #: src/knowledge/collection-markers.tsx
 #: src/knowledge/new-collection.tsx
 #: src/workflows/resource-params.tsx
@@ -12971,6 +13068,7 @@ msgid "The App's actions reach a model, an integration, knowledge or a template 
 msgstr "Les actions de l’application n'atteignent un modèle, une intégration, des connaissances ou un modèle de contenu que par une liaison qu'approuve un admin de votre organisation."
 
 #: src/chat/builds.tsx
+#: src/engines/access-view.tsx
 msgid "the App's builders"
 msgstr "les builders de l’App"
 
@@ -13062,6 +13160,10 @@ msgstr "Le catalogue des intégrations n’a pas pu être lu : cette page ne mon
 #: src/engines/store-changes.tsx
 msgid "The change to the store {name} was abandoned"
 msgstr "La modification du magasin {name} a été abandonnée"
+
+#: src/engines/indexes-view.tsx
+msgid "The chat adds indexes as it writes the App’s queries."
+msgstr "Le chat ajoute des index en écrivant les requêtes de l’App."
 
 #: src/workflows/business-process.tsx
 msgid "The checks, reviews and records the regulator expects from you."
@@ -13315,8 +13417,17 @@ msgid "The people and teams who approve or deny the npm packages Apps and workfl
 msgstr "Les personnes et les équipes qui approuvent ou refusent les paquets npm demandés par les applications et les workflows. Aucun rôle ne l'inclut, pas même administrateur : ajoutez-vous pour approuver des paquets."
 
 #: src/chat/builds.tsx
+#: src/engines/access-view.tsx
 msgid "the person in {field}"
 msgstr "la personne dans {field}"
+
+#: src/engines/access-view.tsx
+msgid "The person in {field}"
+msgstr "La personne dans {field}"
+
+#: src/engines/access-view.tsx
+msgid "the person who added it"
+msgstr "la personne qui l’a ajouté"
 
 #: src/engines/resource-bindings.tsx
 msgid "The platform's statistics"
@@ -13353,18 +13464,6 @@ msgstr "Le plus rapide est de connecter votre compte {signIn}. Je ne verrai que 
 #: src/onboarding/setup-steps.tsx
 msgid "The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
 msgstr "Le plus rapide est de connecter votre compte Microsoft ou Google. Je ne verrai que les noms, les équipes et les rôles. Vos e-mails, discussions et agendas restent fermés."
-
-#: src/engines/data-model-settings.tsx
-msgid "The records they added"
-msgstr "Les enregistrements qu’ils ont ajoutés"
-
-#: src/engines/data-model-settings.tsx
-msgid "The records where {name} is their team"
-msgstr "Les enregistrements où {name} est leur équipe"
-
-#: src/engines/data-model-settings.tsx
-msgid "The records where {name} is them"
-msgstr "Les enregistrements où {name} les désigne"
 
 #: src/dashboard/report.ts
 msgid "The report as it stands today"
@@ -13462,6 +13561,14 @@ msgstr "Le magasin garde ses tables telles quelles et accepte à nouveau des mod
 #: src/settings/teams.tsx
 msgid "The team couldn't be created. Try again."
 msgstr "Impossible de créer l’équipe. Réessayez."
+
+#: src/engines/access-view.tsx
+msgid "the team in {field}"
+msgstr "l’équipe dans {field}"
+
+#: src/engines/access-view.tsx
+msgid "The team in {field}"
+msgstr "L’équipe dans {field}"
 
 #: src/settings/ai-providers.tsx
 msgid "The test didn't work. {model} didn't answer: {why}"
@@ -14455,6 +14562,10 @@ msgstr "A utilisé une fonction d’une application en tant que visiteur"
 msgid "Used by"
 msgstr "Utilisé par"
 
+#: src/engines/indexes-view.tsx
+msgid "Used by {queries}"
+msgstr "Utilisé par {queries}"
+
 #: src/labels.ts
 msgid "User"
 msgstr "Utilisateur"
@@ -15298,11 +15409,11 @@ msgstr "Si ça se passe autrement"
 msgid "When it holds"
 msgstr "Quand c’est le cas"
 
-#: src/engines/data-model-settings.tsx
+#: src/engines/indexes-view.tsx
 msgid "When it last changed"
 msgstr "Quand il a été modifié pour la dernière fois"
 
-#: src/engines/data-model-settings.tsx
+#: src/engines/indexes-view.tsx
 msgid "When it was added"
 msgstr "Quand il a été ajouté"
 
@@ -15461,17 +15572,17 @@ msgstr "Qui approuve les paquets"
 msgid "Who can answer"
 msgstr "Qui peut répondre"
 
-#: src/engines/data-model-settings.tsx
-msgid "Who can change these records"
-msgstr "Qui peut modifier ces enregistrements"
+#: src/engines/access-view.tsx
+msgid "Who can change them?"
+msgstr "Qui peut les modifier ?"
 
 #: src/engines/app-data-model.tsx
 msgid "Who can see and change its records"
 msgstr "Qui peut voir et modifier ses enregistrements"
 
-#: src/engines/data-model-settings.tsx
-msgid "Who can see these records"
-msgstr "Qui peut voir ces enregistrements"
+#: src/engines/access-view.tsx
+msgid "Who can see records in {name}?"
+msgstr "Qui peut voir les enregistrements de {name} ?"
 
 #: src/settings/stephen-card.tsx
 msgid "Who can talk to him"
