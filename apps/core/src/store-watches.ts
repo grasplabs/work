@@ -5,7 +5,7 @@ import { querySubscriptionLimits, pageErrors } from "@grasp-os/shared/pages";
 // (data-store.ts): each one core is keeping fresh for a page
 // (query-subscriptions.ts), by the tables its last read read and the
 // generation it read each at. Every write that moves a table's generation
-// (a commit, a migration or backfill batch) is told here once its
+// (a commit, a schema change that rewrote records) is told here once its
 // transaction is over (store-host.ts, `onTablesMoved`), and every watch
 // that read one of those tables at an older generation is told; core
 // reads that query again. Threat model, and how each is closed:

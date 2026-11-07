@@ -1,16 +1,21 @@
 import { canonicalText } from "@grasp-os/shared/json";
 
 import type { SchemaManifest } from "./schema-manifest.ts";
-import type { SchemaAnswer } from "./schema-plan.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { FrozenJson } from "./value-descriptor.ts";
 
-// An App's answers (`app({ answers })`, schema-plan.ts `SchemaAnswer`): a
-// value for the records that lack one field a change requires, as a
-// backfill's default is one, never written over a value they hold.
-// Anything that reshapes what a record holds is an explicit migration in
-// code. Checked here as the App declares them and as its manifest is read
-// back.
+// An App's answers (`app({ answers })`): a value for the records that lack
+// one field its schema requires, filled in as the version is published,
+// never written over a value they hold. Anything that reshapes what a
+// record holds is an explicit migration in code. Checked here as the App
+// declares them and as its manifest is read back.
+
+/** An App's value for the records that lack `field` of `table`. */
+export interface SchemaAnswer {
+  readonly table: string;
+  readonly field: string;
+  readonly value: FrozenJson;
+}
 
 /** The most answers an App declares. */
 export const appMaxSchemaAnswers = 64;

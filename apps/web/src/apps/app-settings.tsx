@@ -58,6 +58,7 @@ import { AppIntegrations } from "./app-integrations.tsx";
 import { AppLinkDialog, linkAddress } from "./app-own-link.tsx";
 import { AppOwner } from "./app-owner.tsx";
 import { RemoveApp } from "./app-remove.tsx";
+import { ResetAppData, ResetLegacyData } from "./app-reset.tsx";
 import { buildsApp } from "./app-role.ts";
 import { AppMembers, readMembers } from "./app-sharing.tsx";
 import {
@@ -72,8 +73,6 @@ import { AppWorkflows } from "./app-workflows.tsx";
 import { SaveAsBlueprint } from "./blueprints.tsx";
 import { ResourceBindings } from "./resource-bindings.tsx";
 import type { ResourcesPage } from "./resource-bindings.tsx";
-import type { readStoreChanges } from "./store-changes.tsx";
-import { StoreChanges } from "./store-changes.tsx";
 import { useAppRead } from "./use-app-read.ts";
 import type { AppRead } from "./use-app-read.ts";
 
@@ -420,6 +419,24 @@ const ForBuilders = ({
           </div>
         </SettingsBody>
       </SettingsSection>
+      {app.status === "archived" || identity.staff ? null : (
+        <SettingsSection
+          description={
+            isAdmin(identity.role)
+              ? t`Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records.`
+              : t`An App whose data was stored before this version of Grasp can’t read it any more: reset it, then publish again. Any other App’s data only an admin resets.`
+          }
+          title={t`Its data`}
+        >
+          <SettingsBody>
+            {isAdmin(identity.role) ? (
+              <ResetAppData app={app} />
+            ) : (
+              <ResetLegacyData app={app} />
+            )}
+          </SettingsBody>
+        </SettingsSection>
+      )}
       <SettingsSection
         description={t`An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}
         title={t`Putting it away`}
@@ -642,31 +659,26 @@ const General = ({
   app,
   identity,
   builds,
-  changes,
 }: {
   app: ViewedApp;
   identity: Identity;
   builds: boolean;
-  changes: StoreChangesRead;
 }) => {
   const read = useAppRead(
     app.id,
     isAdmin(identity.role) ? readGeneralAsAdmin : readGeneralAsMember
   );
   return (
-    <>
-      <StoreChanges changes={changes} app={app} />
-      <Read read={read}>
-        {(loaded) => (
-          <GeneralForm
-            app={app}
-            builds={builds}
-            identity={identity}
-            read={loaded}
-          />
-        )}
-      </Read>
-    </>
+    <Read read={read}>
+      {(loaded) => (
+        <GeneralForm
+          app={app}
+          builds={builds}
+          identity={identity}
+          read={loaded}
+        />
+      )}
+    </Read>
   );
 };
 
@@ -946,9 +958,7 @@ const SectionBody = ({
   identity,
   builds,
   options,
-  changes,
 }: {
-  changes: StoreChangesRead;
   section: AppSettingsSection;
   app: ViewedApp;
   identity: Identity;
@@ -956,14 +966,7 @@ const SectionBody = ({
   options: Loaded<SurfaceSummary[]> | undefined;
 }) => {
   if (section === "general") {
-    return (
-      <General
-        app={app}
-        builds={builds}
-        changes={changes}
-        identity={identity}
-      />
-    );
+    return <General app={app} builds={builds} identity={identity} />;
   }
   if (section === "sharing") {
     return <Sharing app={app} identity={identity} />;
@@ -987,12 +990,6 @@ const sectionDescriptions = {
   webhooks: msg`Where Grasp sends the App's events.`,
   options: msg`The settings the App offers itself.`,
 } satisfies Partial<Record<AppSettingsSection, MessageDescriptor>>;
-
-/**
- * The read of the App's stores' changes, started by the route's loader:
- * for the organization's own admins alone, who may abandon one.
- */
-export type StoreChangesRead = ReturnType<typeof readStoreChanges>;
 
 /** A section's link in the list: the workspace's or the settings page's. */
 const SectionLink = ({
@@ -1048,13 +1045,11 @@ export const AppSettings = ({
   identity,
   section: asked,
   within,
-  storeChanges,
 }: {
   app: ViewedApp;
   identity: Identity;
   section: AppSettingsSection | undefined;
   within: "workspace" | "page";
-  storeChanges: StoreChangesRead;
 }) => {
   const { t, i18n } = useLingui();
   const builds = buildsApp(app, identity);
@@ -1094,7 +1089,6 @@ export const AppSettings = ({
           <SectionBody
             app={app}
             builds={builds}
-            changes={storeChanges}
             identity={identity}
             key={`${app.id}/${section}`}
             options={surfaces}

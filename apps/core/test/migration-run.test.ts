@@ -10,8 +10,8 @@ import {
   outputMismatch,
   threwOnRecord,
   transformBatchMaxRows,
-} from "../src/migration-transform.ts";
-import type { TransformRow } from "../src/migration-transform.ts";
+} from "../src/migration-run.ts";
+import type { TransformRow } from "../src/migration-run.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
 import { reviewVersion } from "../src/version-review.ts";
 import { appDefinition } from "./app-definitions.ts";
@@ -872,28 +872,6 @@ describe("transforming a table with row rules", { timeout: 120_000 }, () => {
     });
   });
 
-  it.each([
-    ["hands-to-me", "employee"],
-    ["moves-team", "team"],
-  ] as const)(
-    "refuses an output that changes a field a row rule reads: %s",
-    async (name, field) => {
-      const outcome = await runSalaries(name, [
-        salary("s1", "u_bob", "t_a", 90_000),
-      ]);
-      expect(outcome).toStrictEqual({
-        ok: false,
-        failure: {
-          id: "s1",
-          reason: "rule_changed",
-          issues: [
-            `${field}: A migration doesn't change a field a row rule reads; a write changes who sees a record`,
-          ],
-        },
-      });
-    }
-  );
-
   it("shows nothing App code can influence of a failure on a record its table hides: not what it threw, in its handler or after, a stack it forged, a key it wrote or an input it refused", async () => {
     const record = [salary("s1", "u_bob", "t_a", 91_234)];
     const thrown = await runSalaries("throws-amount", record);
@@ -976,7 +954,7 @@ describe("transforming a table with row rules", { timeout: 120_000 }, () => {
     expect(issues).toStrictEqual([expect.stringMatching(/^amount: ./u)]);
   });
 
-  it("runs fixtures of different people a batch each as the release is sealed, and records a rule field's change as their failure", async () => {
+  it("runs fixtures of different people a batch each as the release is sealed", async () => {
     const { release } = await sealedSalaries();
     const evidence = new Map(
       release.manifest.migrationEvidence.map((found) => [
@@ -984,10 +962,7 @@ describe("transforming a table with row rules", { timeout: 120_000 }, () => {
         found,
       ])
     );
-    expect({
-      carries: evidence.get("carries-amount")?.failure ?? null,
-      hands: evidence.get("hands-to-me")?.failure?.reason,
-    }).toStrictEqual({ carries: null, hands: "rule_changed" });
+    expect(evidence.get("carries-amount")?.failure ?? null).toBeNull();
   });
 });
 

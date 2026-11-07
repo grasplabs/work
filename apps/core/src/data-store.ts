@@ -1,4 +1,3 @@
-import type { SchemaAnswer } from "@grasp-os/sdk/host";
 import type { UploadState } from "@grasp-os/shared/app-files";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { StoreId } from "@grasp-os/shared/ids";
@@ -8,11 +7,8 @@ import type { ReadRequest } from "@grasp-os/shared/store-reads";
 import type {
   ClaimInput,
   Commit,
-  DefinedTables,
-  SchemaConsumer,
   StagedWrites,
   StoredRecord,
-  StoreMigration,
 } from "@grasp-os/shared/stores";
 import { dataErrors } from "@grasp-os/shared/stores";
 import { DurableObject } from "cloudflare:workers";
@@ -25,24 +21,20 @@ import type {
   FileReader,
   Publishable,
 } from "./file-host.ts";
-import type { OwedRules } from "./store-backfill.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { StoreHost } from "./store-host.ts";
 import type {
-  PreferencesReceipt,
-  PreferencesWritten,
-  StoredPreferences,
-  BackfillAbandon,
-  BackfillAbandonment,
+  AppliedSchema,
   ImportApply,
   ImportBatch,
-  BackfillOutcome,
-  BackfillRestart,
-  BackfillStatus,
-  BackfillStep,
-  SchemaStatus,
+  MigrationBatch,
+  MigrationStart,
+  PreferencesReceipt,
+  PreferencesWritten,
+  SchemaApply,
+  StoredPreferences,
+  StoreReset,
   TableFacts,
-  TransformedBatch,
 } from "./store-host.ts";
 import { storeOutboxConsumers } from "./store-outbox-consumers.ts";
 import { StoreWatches } from "./store-watches.ts";
@@ -111,127 +103,45 @@ export class DataStore extends DurableObject<Env> {
     return this.#host;
   }
 
-  /** `StoreHost.defineTables`. */
-  async defineTables(
+  /** `StoreHost.applySchema`; its fills' events handed to core. */
+  async applySchema(
     storeId: StoreId,
-    manifest: string,
-    consumer?: SchemaConsumer,
-    declared?: StoreMigration[],
-    answers?: SchemaAnswer[]
-  ): Promise<DefinedTables> {
-    return await this.#live().defineTables(
-      storeId,
-      manifest,
-      consumer,
-      declared,
-      answers
-    );
+    change: SchemaApply
+  ): Promise<AppliedSchema> {
+    const applied = await this.#live().applySchema(storeId, change);
+    await this.#afterFiles();
+    return applied;
+  }
+
+  /** `StoreHost.resetData`; its events handed to core. */
+  async resetData(
+    storeId: StoreId,
+    reset: StoreReset
+  ): Promise<AppliedSchema | null> {
+    const applied = await this.#live().resetData(storeId, reset);
+    await this.#afterFiles();
+    return applied;
+  }
+
+  /** `StoreHost.beginMigration`. */
+  beginMigration(storeId: StoreId): MigrationStart {
+    return this.#live().beginMigration(storeId);
   }
 
   /**
-   * `StoreHost.fillMissing`: one batch of the pending target's backfill,
-   * as JSON text (a migration's batch carries records, which RPC types
-   * can't carry deeply), read back with `backfillBatchSchema`.
+   * `StoreHost.migrationRows`, as JSON text: RPC types can't carry
+   * documents, which are JSON anyway.
    */
-  fillMissing(storeId: StoreId, step: BackfillStep): string {
-    return JSON.stringify(this.#live().fillMissing(storeId, step));
+  migrationRows(storeId: StoreId, table: string, after: string | null): string {
+    return JSON.stringify(this.#live().migrationRows(storeId, table, after));
   }
 
-  /**
-   * `StoreHost.commitTransformed`: a migration's batch, transformed, as
-   * JSON text (`TransformedBatch`).
-   */
-  commitTransformed(storeId: StoreId, batch: string): BackfillOutcome {
+  /** `StoreHost.stageMigration`, its batch as JSON text (`MigrationBatch`). */
+  stageMigration(storeId: StoreId, batch: string): void {
     const parsed: unknown = JSON.parse(batch);
     // SAFETY: the host parses it with its schema before anything reads it.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return this.#live().commitTransformed(storeId, parsed as TransformedBatch);
-  }
-
-  /** `StoreHost.restartBackfill`. */
-  async restartBackfill(
-    storeId: StoreId,
-    restart: BackfillRestart
-  ): Promise<number> {
-    return await this.#live().restartBackfill(storeId, restart);
-  }
-
-  /** `StoreHost.backfillStatus`. */
-  backfillStatus(storeId: StoreId): BackfillStatus | null {
-    return this.#live().backfillStatus(storeId);
-  }
-
-  /** `StoreHost.retryBackfill`. */
-  async retryBackfill(
-    storeId: StoreId,
-    target: string
-  ): Promise<BackfillStatus | null> {
-    return await this.#live().retryBackfill(storeId, target);
-  }
-
-  /** `StoreHost.activateReady`. */
-  async activateReady(
-    storeId: StoreId,
-    schemaHash: string,
-    consumer: SchemaConsumer,
-    owed?: OwedRules
-  ): Promise<SchemaStatus> {
-    return await this.#live().activateReady(
-      storeId,
-      schemaHash,
-      consumer,
-      owed
-    );
-  }
-
-  /** `StoreHost.applyRules`. */
-  async applyRules(
-    storeId: StoreId,
-    schemaHash: string,
-    owedId: string
-  ): Promise<boolean> {
-    return await this.#live().applyRules(storeId, schemaHash, owedId);
-  }
-
-  /** `StoreHost.settleRules`. */
-  settleRules(storeId: StoreId, owedIds: readonly string[]): void {
-    this.#live().settleRules(storeId, owedIds);
-  }
-
-  /** `StoreHost.schemaStatus`. */
-  schemaStatus(
-    storeId: StoreId,
-    schemaHash: string,
-    consumer?: SchemaConsumer
-  ): SchemaStatus {
-    return this.#live().schemaStatus(storeId, schemaHash, consumer);
-  }
-
-  /** `StoreHost.compatibleVersions`. */
-  compatibleVersions(
-    storeId: StoreId,
-    resourceId: string,
-    candidates: readonly { resourceVersion: number; schemaHash: string }[]
-  ): number[] {
-    return this.#live().compatibleVersions(storeId, resourceId, candidates);
-  }
-
-  /** `StoreHost.abandonBackfill`. */
-  async abandonBackfill(
-    storeId: StoreId,
-    abandon: BackfillAbandon,
-    actor: AuditActor
-  ): Promise<BackfillAbandonment> {
-    return await this.#live().abandonBackfill(storeId, abandon, actor);
-  }
-
-  /** `StoreHost.markAbandonmentAudited`. */
-  markAbandonmentAudited(
-    storeId: StoreId,
-    target: string,
-    attempt: number
-  ): void {
-    this.#live().markAbandonmentAudited(storeId, target, attempt);
+    this.#live().stageMigration(storeId, parsed as MigrationBatch);
   }
 
   /** `StoreHost.get`. */
@@ -343,7 +253,7 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /**
-   * After a file's change that may have recorded audit events: the alarm
+   * After a change that may have recorded audit events: the alarm
    * set for what is due, and the events handed to core now, as far as
    * they go (the alarm hands over whatever this doesn't).
    */

@@ -98,16 +98,16 @@ import type { PhysicalSearch } from "./store-search.ts";
 // - A condition drops a record through SQL NULL: conditions are emitted
 //   two-valued (store-expressions.ts), so `NOT` keeps records whose field
 //   is null or left out, and comparisons never reach them.
-// - A pinned consumer reads fields its schema doesn't know, or misses one
-//   it relies on: documents are projected to the pinned table's fields
-//   (spec 32.7), and every record holds each field its store's contract
-//   gives a default (the store fills it in on every write, and fills in
-//   records written before the field existed before the contract takes
-//   it, store-host.ts `fillMissing`), so a read shows what is stored and
-//   never makes a default up.
+// - A consumer reads fields its schema doesn't know, or misses one it
+//   relies on: documents are projected to the table's fields (spec 32.7),
+//   and every record holds each field its schema gives a default (a write
+//   is validated with it filled in, and a schema that adds one fills it in
+//   on the records already there as it is applied, store-host.ts
+//   `applySchema`), so a read shows what is stored and never makes a
+//   default up.
 // - A caller reads a schema the store doesn't hold, or claims a role: the
-//   schema hash and roles are core's (`ReadScope`), and an unknown hash is
-//   refused (`data.unknown_schema`).
+//   schema hash and roles are core's (`ReadScope`), and any hash but the
+//   store's schema in force is refused (`migration.not_current`).
 //
 // What this module trusts, and who answers for it:
 //
@@ -347,19 +347,30 @@ const validators = new WeakMap<
   ReturnType<typeof schemaFromDescriptor>
 >();
 
-/** Whether `value` is valid under `descriptor`, as the SDK checks it. */
-export const validates = (
+/**
+ * `value` as `descriptor` takes it, as the SDK checks it, its nested
+ * defaults filled in as a write stores it; undefined when it doesn't fit.
+ */
+export const fitted = (
   descriptor: ValueDescriptor,
   value: unknown
-): boolean => {
+): { readonly value: unknown } | undefined => {
   let schema = validators.get(descriptor);
   if (schema === undefined) {
     schema = schemaFromDescriptor(JSON.stringify(descriptor));
     validators.set(descriptor, schema);
   }
   const checked = schema["~standard"].validate(value);
-  return !(checked instanceof Promise) && checked.issues === undefined;
+  return checked instanceof Promise || checked.issues !== undefined
+    ? undefined
+    : { value: checked.value };
 };
+
+/** Whether `value` is valid under `descriptor`, as the SDK checks it. */
+export const validates = (
+  descriptor: ValueDescriptor,
+  value: unknown
+): boolean => fitted(descriptor, value) !== undefined;
 
 /** The keys each object-valued semantic kind holds (spec 32.1). */
 const semanticKeys: Readonly<
@@ -382,8 +393,8 @@ type Projection = (value: unknown, descriptor: ValueDescriptor) => unknown;
  * projected (a key declared without a descriptor, as a semantic kind's
  * are, kept as stored). A key the value lacks stays missing, defaulted or
  * not: a default is filled in when a value is written (input validation,
- * and the store's fill-missing rule for fields added later,
- * store-fills.ts), never made up while reading (spec 17.1).
+ * and the store, for fields a published schema added,
+ * store-host.ts `applySchema`), never made up while reading (spec 17.1).
  */
 const projectedObject = (
   value: unknown,

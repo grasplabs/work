@@ -32,6 +32,7 @@
 // only inside a JSON path literal; a table ID is the host's own UUID.
 // Values are always bound parameters.
 
+import { stableIdPattern } from "@grasp-os/shared/store-limits";
 import type {
   FilterCondition,
   FilterNode,
@@ -118,18 +119,15 @@ export const textExpression = (column: string, field: string): string => {
   return `(CASE json_type(${column}, '$.${field}') WHEN 'text' THEN json_extract(${column}, '$.${field}') END)`;
 };
 
-/** A host-minted table ID: a UUID, as `crypto.randomUUID` makes them. */
-const tableIdPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
-
 /**
  * A table ID as a SQL literal, for a partial index's WHERE and the query
  * that must match it (SQLite proves a partial index usable from literals,
- * not parameters). Throws for anything but a host-minted UUID.
+ * not parameters). Throws for anything but a stable ID's characters
+ * (`stableIdPattern`), which hold no quote.
  */
 export const tableIdLiteral = (tableId: string): string => {
-  if (!tableIdPattern.test(tableId)) {
-    throw new Error("A table ID isn't one the host minted");
+  if (!stableIdPattern.test(tableId)) {
+    throw new Error("A table ID isn't a stable ID");
   }
   return `'${tableId}'`;
 };

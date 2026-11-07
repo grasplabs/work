@@ -9,8 +9,7 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 // (apps/core/src/store-host.ts, `definePreferences`).
 //
 // A store's preferences contract is every preference any version sealed
-// on it declared, by name, with its descriptor: the union, as its schema
-// contract is for tables (schema-plan.ts). People's stored preferences
+// on it declared, by name, with its descriptor: the union. People's stored preferences
 // hold only what they chose, never a default (app-preferences.ts), so a
 // change is safe when every value the contract allows still fits:
 //

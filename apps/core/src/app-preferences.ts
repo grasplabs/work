@@ -332,7 +332,7 @@ export const answerPreferences = async (
   );
   await caller.gate();
   const { storeId, stub } = storeOf(env, caller);
-  // With the release's preferences, which the store's contract takes in
+  // With the release's preferences, which the store's preferences take in
   // the same transaction, or refuses (store-host.ts, `readPreferences`).
   const stored = await stub.readPreferences(
     storeId,

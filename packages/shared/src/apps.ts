@@ -897,6 +897,22 @@ export interface AppsApi {
    */
   archive: (app: string) => Promise<App>;
   /**
+   * Resets the data of an App stored before schemas were applied by
+   * stable ID (`migration.metadata_missing`), for its builders, never
+   * Grasp staff: refused for any other (`migration.reset_refused`). Its
+   * current version's schema is applied to the empty store. Audited as
+   * `store.reset`.
+   */
+  resetLegacyData: (app: string) => Promise<void>;
+  /**
+   * Resets every record of an App for good, for the organization's
+   * admins, never Grasp staff nor builders, confirmed by the App's `name`
+   * as it is now (`app.reset_name_mismatch`). Its current version's
+   * schema is applied to the empty store in the same transaction.
+   * Audited as `store.reset`, with how many records each table held.
+   */
+  resetData: (app: string, name: string) => Promise<void>;
+  /**
    * Restores an archived App, for its builders, as a draft: refused with
    * `app.stops_pending` while runs it started are still being stopped.
    */
@@ -964,6 +980,10 @@ export const appErrors = defineErrorFamily({
     "A link is lower-case letters and digits with single dashes between them, at most 48, and none the workspace already has a page at.",
   "app.archived": "The App is archived. A builder can restore it.",
   "app.remove_unarchived": "Archive the App before removing it.",
+  "app.publish_unfinished":
+    "This version's data model reached the App's data, but the version couldn't be made current, and the current version's data model can't be put back. Publish this version again to finish it.",
+  "app.reset_name_mismatch":
+    "Type the App's name exactly as it is to reset its data.",
   "app.remove_forbidden":
     "Only the App's owner or an admin of the organization removes it.",
   "app.stops_pending":
@@ -978,7 +998,7 @@ export const appErrors = defineErrorFamily({
   "app.no_workflows":
     "An App holds no workflows of its own, nor code under workflows/. Build an independent workflow with env.workflowBuild, add it to the App's permissions with addPermission (permission.workflow) and bind it to the App under that alias.",
   "app.generated_file":
-    "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code Grasp generates from it: change them with the definition tools (addTable, addField, changeField, renameField, setAccess, addIndex, addPermission and their remove counterparts, and the preference tools), never by writing them.",
+    "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code Grasp generates from it: change them with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission and their remove counterparts, and the preference tools), never by writing them.",
   "app.definition_invalid":
     "The App's definition.json, from which its grasp.config.ts and server/schema.ts are generated, is missing or isn't valid.",
   "app.chat_has_app":

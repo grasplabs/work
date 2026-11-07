@@ -204,7 +204,6 @@ const opened = async (
         app={loaded}
         identity={identityOf(role)}
         section={section}
-        storeChanges={undefined}
         within={within}
       />
     );

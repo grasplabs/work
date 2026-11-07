@@ -9,7 +9,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { sealRelease } from "./app-releases.ts";
+import { sealedEvidence, sealRelease } from "./app-releases.ts";
 import { requireAppTestsPass } from "./app-tests.ts";
 import {
   changeEntry,
@@ -22,16 +22,17 @@ import {
 } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { appVersions } from "./db/core/schema.ts";
-import { requireMigrationEvidence } from "./migration-evidence.ts";
+import { requireMigrationEvidence } from "./migration-run.ts";
 
 // Publishing a version of an App (spec 8, 16, 22): one function, run by
 // one of the App's builders as themselves. It builds and seals the
-// version's release on the App's default store, which applies its schema
-// to the store as a seal does (app-releases.ts), checks its migrations
-// passed on their fixtures, runs its App tests on fixture stores
-// (app-tests.ts), marks the version `published`, and makes it current
-// (`makeCurrent`), each step audited. A version published already is only
-// made current: a rollback runs no tests again.
+// version's release, bound to the App's store (app-releases.ts), checks
+// its migrations passed on their fixtures, runs its App tests on fixture
+// stores (app-tests.ts), marks the version `published`, and makes it
+// current (`makeCurrent`), which applies its schema to the store, its
+// migrations with it, in one transaction (app-schema.ts), each step
+// audited. A version published already is only made current: a rollback
+// runs no tests again, and its schema is applied as any other.
 //
 // Threat model: no path makes code current that didn't pass. How each way
 // it could fail is closed:
@@ -43,8 +44,9 @@ import { requireMigrationEvidence } from "./migration-evidence.ts";
 //   does it. A version committed or made current meanwhile is a change the
 //   publish never saw.
 // - The build or a test fails: sealing refuses code that doesn't build,
-//   type-check, inspect or migrate, and a failing test refuses the
-//   version, before it is marked. Making a version current requires it
+//   type-check or inspect, and a failing test or migration fixture
+//   refuses the version, before it is marked and before its store
+//   changes. Making a version current requires it
 //   `published`, in the statement that does it.
 // - Two publishes at once: sealing a version twice finds one release
 //   (a second manifest is refused, `version.seal_conflict`); marking it
@@ -150,7 +152,7 @@ const publish = async (
   try {
     const files = await versionFiles(env, app, version);
     const manifestHash = await sealed(env, by, app, version);
-    await requireMigrationEvidence(env, app, version);
+    requireMigrationEvidence((await sealedEvidence(env, app, version)) ?? []);
     await requireAppTestsPass(env, app, version, files);
     const [marked] = await auditedBatch(env, db, [
       db

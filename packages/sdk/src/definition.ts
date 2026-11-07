@@ -1,3 +1,4 @@
+import { stableIdPattern } from "@grasp-os/shared/store-limits";
 import { z } from "zod";
 
 import {
@@ -119,7 +120,7 @@ export const definitionMaxBytes = 1024 * 1024;
 export const peoplePermission = "people";
 
 /** An ID: what a definition names a table or field by, forever. */
-const idSchema = z.string().min(1).max(64);
+const idSchema = z.string().regex(stableIdPattern);
 
 const ruleSchema = z.union([
   z.strictObject({ kind: z.literal("owner") }),
@@ -375,7 +376,7 @@ export const definitionApp = (
 
 /**
  * The manifest of what a definition declares, with no functions: what its
- * schema plans compare (schema-plan.ts). Throws the builders' errors for
+ * schema plans compare (core's schema-changes.ts). Throws the builders' errors for
  * a definition that isn't coherent.
  */
 export const definitionManifest = (definition: AppDefinition): AppManifest =>

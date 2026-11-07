@@ -78,7 +78,6 @@ export const migrationFixtureReasons = [
   "too_large",
   "invalid_answer",
   "unexpected_output",
-  "rule_changed",
 ] as const;
 
 /**
@@ -91,7 +90,7 @@ export const migrationFixtureReasons = [
  * failure names the fixture (by its index in the migration's `fixtures`,
  * or null when none is to blame) and why; fixtures are the App's own
  * data, never real records. Only a migration whose fixtures all passed
- * runs on records or is made current (apps/core/src/migration-evidence.ts).
+ * runs on records or is made current (apps/core/src/migration-run.ts).
  */
 export const migrationEvidenceSchema = z
   .strictObject({

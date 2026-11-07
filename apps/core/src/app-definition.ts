@@ -17,7 +17,7 @@ import type {
   DefinitionOperation,
   ValueDescriptor,
 } from "@grasp-os/sdk/definition";
-import { planSchemaChange } from "@grasp-os/sdk/host";
+import type { SchemaManifest } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import type {
   DataModel,
@@ -30,6 +30,9 @@ import type {
   PlanField,
 } from "@grasp-os/shared/data-model";
 import { z } from "zod";
+
+import { catalogOf, planSchemaChange } from "./schema-changes.ts";
+import type { SchemaIds } from "./schema-changes.ts";
 
 // An App's definition among its files (@grasp-os/sdk's definition.ts):
 // `definition.json`, what the App is, and the config and schema generated
@@ -84,46 +87,18 @@ export const definitionChanges = (
 });
 
 /**
- * Why `definition` renames a field one of the App's versions has (`held`:
- * the current one, and the commit a change starts from, which may have
- * run and been rolled back from), or undefined. Such a field may hold
- * values in the App's records, which stay under its old name until a
- * rename can carry them by its stable ID (GRA-1602): only a field the
- * change itself added renames.
- */
-export const renameRefusal = (
-  definition: AppDefinition,
-  held: readonly (AppDefinition | null)[]
-): string | undefined => {
-  for (const version of held) {
-    for (const table of version?.tables ?? []) {
-      const now = definition.tables.find(({ id }) => id === table.id);
-      for (const field of table.fields) {
-        const renamed = now?.fields.find(({ id }) => id === field.id);
-        if (renamed !== undefined && renamed.name !== field.name) {
-          return `\`${table.name}.${field.name}\` is in a version of the App, and its records may hold values under that name, which a rename doesn't carry yet. Only a field this draft added renames. Keep its name, or add a field with the new name and copy the values with a migration in server/migrations/.`;
-        }
-      }
-    }
-  }
-  return undefined;
-};
-
-/**
  * `files` with their config and schema as their definition generates
  * them, changed in place. Files with no definition yet, the first of the
  * App named `name` (one of pages alone too), get an empty one. Refused
  * (`app.definition_invalid`) when they hold a config or a schema but no
- * definition, a definition that isn't one, have lost the one they had
- * (`had`), or rename a field a version of the App has (`held`, see
- * `renameRefusal`): every write of a definition comes through here, the
- * definition tools' and a commit's alike.
+ * definition, a definition that isn't one, or have lost the one they had
+ * (`had`): every write of a definition comes through here, the definition
+ * tools' and a commit's alike.
  */
 export const withDefinitionCode = (
   files: Map<string, string>,
   name: string,
-  had: boolean,
-  held: readonly (AppDefinition | null)[] = []
+  had: boolean
 ): void => {
   const text = files.get(definitionPath);
   if (text === undefined) {
@@ -148,10 +123,6 @@ export const withDefinitionCode = (
     throw appErrors.create("app.definition_invalid", {
       issues: [read.problem],
     });
-  }
-  const renamed = renameRefusal(read.definition, held);
-  if (renamed !== undefined) {
-    throw appErrors.create("app.definition_invalid", { issues: [renamed] });
   }
   for (const [path, source] of Object.entries(
     definitionSources(read.definition)
@@ -180,69 +151,102 @@ export const definitionRefusal = (error: unknown): string | undefined => {
     : appErrors.create("app.definition_invalid").message;
 };
 
-/** The definition `files` hold, or null for none or one that doesn't read. */
-export const heldDefinition = (
-  files: ReadonlyMap<string, string>
-): AppDefinition | null => {
-  const text = files.get(definitionPath);
-  if (text === undefined) {
-    return null;
-  }
-  const read = tryReadDefinition(text);
-  return "definition" in read ? read.definition : null;
-};
-
 /** Where each of `list`'s fields is, as a plan names it. */
 const fieldsOf = (list: readonly PlanField[]): PlanField[] =>
   list.map(({ table, field }) => ({ table, field }));
 
+/** The stable IDs `definition` gives its tables and fields, by name. */
+const idsOf = (definition: AppDefinition): SchemaIds =>
+  Object.fromEntries(
+    definition.tables.map((table) => [
+      table.name,
+      {
+        id: table.id,
+        fields: Object.fromEntries(
+          table.fields.map((field) => [field.name, field.id])
+        ),
+      },
+    ])
+  );
+
 /**
- * The plan of the change from `before`, the definition the draft is over
- * (null for an App with none), to `after` (`DefinitionPlan`): what is
- * applied as it is, and what every record is checked for as the version
- * is made current, which a record that doesn't fit stops until the field
- * has an `answer`.
+ * The stable IDs of `schema`'s tables and fields, from the definition
+ * `files` hold (schema-changes.ts): what its store matches them by.
+ * `app.definition_invalid` when the definition doesn't name every one:
+ * the schema is generated from it, so only files changed by hand miss one.
+ */
+export const schemaIdsOf = (
+  files: Readonly<Record<string, string>>,
+  schema: SchemaManifest
+): SchemaIds => {
+  const text = files[definitionPath];
+  const read = text === undefined ? undefined : tryReadDefinition(text);
+  const ids =
+    read !== undefined && "definition" in read ? idsOf(read.definition) : {};
+  const missing = Object.entries(schema.tables).flatMap(([name, table]) =>
+    ids[name] === undefined
+      ? [name]
+      : Object.keys(table.fields)
+          .filter((field) => ids[name]?.fields[field] === undefined)
+          .map((field) => `${name}.${field}`)
+  );
+  if (missing.length > 0) {
+    throw appErrors.create("app.definition_invalid", {
+      issues: [
+        `${definitionPath} gives no ID to ${missing.slice(0, 10).join(", ")}, which ${generatedFiles.schema} declares.`,
+      ],
+    });
+  }
+  return ids;
+};
+
+/**
+ * What publishing `after` does to the App's records over `before`, the
+ * definition the draft is over (null for an App with none), as the store
+ * plans it (schema-changes.ts) from what that version holds
+ * (`DefinitionPlan`): what applies on its own, which records need a value
+ * (`checks`, until the field has an `answer`), and what needs a
+ * migration in code.
  */
 export const definitionPlan = (
   before: AppDefinition | null,
   after: AppDefinition
 ): DefinitionPlan => {
   const target = definitionManifest(after);
-  const sensitiveBefore = new Set(
-    (before?.tables ?? []).flatMap((table) =>
-      table.sensitive === true ? [table.id] : []
-    )
-  );
+  const held =
+    before === null
+      ? null
+      : {
+          manifest: definitionManifest(before).schema,
+          catalog: catalogOf({
+            manifest: definitionManifest(before).schema,
+            ids: idsOf(before),
+          }),
+        };
   const plan = planSchemaChange(
-    before === null ? null : definitionManifest(before).schema,
-    target.schema,
+    held,
+    { manifest: target.schema, ids: idsOf(after) },
     { answers: target.answers ?? [] }
   );
   return {
-    accepted: plan.accepted,
+    accepted: plan.refused.length === 0,
     addedTables: [...plan.addedTables],
     addedFields: fieldsOf(plan.addedFields),
     widenedFields: fieldsOf(plan.widenedFields),
     checks: plan.checks.map(({ table, field, answer }) => ({
       table,
       field,
-      answer: answer?.value ?? null,
+      answer,
     })),
-    keptTables: [...plan.retainedTables],
-    keptFields: fieldsOf(plan.retainedFields),
-    accessChanges: [...plan.ruleChanges],
-    sensitiveTables: after.tables.flatMap((table) =>
-      table.sensitive === true && !sensitiveBefore.has(table.id)
-        ? [table.name]
-        : []
-    ),
-    refused: plan.accepted
-      ? []
-      : plan.refused.map(({ table, field, reason }) => ({
-          table,
-          ...(field === undefined ? {} : { field }),
-          reason,
-        })),
+    keptTables: [...plan.keptTables],
+    keptFields: fieldsOf(plan.keptFields),
+    accessChanges: [...plan.accessChanges],
+    sensitiveTables: [...plan.sensitiveTables],
+    refused: plan.refused.map(({ table, field, reason }) => ({
+      table,
+      ...(field === undefined ? {} : { field }),
+      reason,
+    })),
   };
 };
 
@@ -509,6 +513,7 @@ export const definitionOperationSchema: z.ZodType<DefinitionOperation> =
       field: text,
       name: text,
     }),
+    z.strictObject({ op: z.literal("renameTable"), table: text, name: text }),
     z.strictObject({
       op: z.literal("setAccess"),
       table: text,

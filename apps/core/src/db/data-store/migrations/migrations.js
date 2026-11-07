@@ -24,6 +24,7 @@ import m0021 from './0021_schema_answers.sql';
 import m0022 from './0022_rules_owed.sql';
 import m0023 from './0023_work_audience.sql';
 import m0024 from './0024_receipt_seeds.sql';
+import m0025 from './0025_schema_at_publish.sql';
 
   export default {
     journal,
@@ -52,7 +53,8 @@ m0020,
 m0021,
 m0022,
 m0023,
-m0024
+m0024,
+m0025
     }
   }
   

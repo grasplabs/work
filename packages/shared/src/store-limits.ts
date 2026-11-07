@@ -12,6 +12,13 @@
  */
 export const storeNamePattern = /^[A-Za-z][A-Za-z0-9_]*$/u;
 
+/**
+ * A stable ID an App's definition gives a table or field, which never
+ * changes: letters, digits and `:._-` only (Grasp's tools make UUIDs), as
+ * a store writes a table's ID into SQL as a literal (partial indexes).
+ */
+export const stableIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$/u;
+
 /** The longest table, field or index name. */
 export const storeNameMaxLength = 64;
 

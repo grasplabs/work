@@ -1,4 +1,3 @@
-import type { SchemaAnswer } from "@grasp-os/sdk/host";
 import type { RecordChangePage } from "@grasp-os/shared/app-data";
 import type { App } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
@@ -15,11 +14,8 @@ import type {
   Claimed,
   Commit,
   Committed,
-  DefinedTables,
-  SchemaConsumer,
   StagedWrites,
   StoredRecord,
-  StoreMigration,
 } from "@grasp-os/shared/stores";
 import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -33,14 +29,18 @@ import { appDefaultStores, apps, businessStores } from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import type { FileReader } from "./file-host.ts";
 import { requireNotStaff } from "./sharing.ts";
-import type { OwedRules } from "./store-backfill.ts";
 import { recordStoreDeleted, storeClosingMs } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import type {
+  AppliedSchema,
   ImportApply,
   ImportBatch,
+  MigrationBatch,
+  MigrationRow,
+  MigrationStart,
   ReadResult,
-  SchemaStatus,
+  SchemaApply,
+  StoreReset,
   TableFacts,
 } from "./store-host.ts";
 
@@ -74,7 +74,7 @@ import type {
 //   client's data is destroyed is the client's decision.
 // - A removed App's store stuck: a removed App has no builders, so the
 //   organization's own admins (never Grasp staff) read, change and delete
-//   it (`managedBy`, `requireStoreChangeable`), so its records are never
+//   it (`managedBy`), so its records are never
 //   stuck (erasure, GRA-335).
 // - A store is deleted while something still relies on it: the store's
 //   own object refuses (`data.store_in_use`) while any receipt not yet
@@ -110,27 +110,17 @@ import type {
 /** A store, as core uses it: its ID bound to every call. */
 export interface OpenStore {
   id: StoreId;
-  /**
-   * A schema applied to the store, from its manifest's text, for its
-   * consumer when named (`StoreHost.defineTables`).
-   */
-  defineTables: (
-    manifest: string,
-    consumer?: SchemaConsumer,
-    migrations?: StoreMigration[],
-    answers?: SchemaAnswer[]
-  ) => Promise<DefinedTables>;
-  /**
-   * Applies the change schema `schemaHash` makes, for `consumer`, when it
-   * waits to be made current (`StoreHost.activateReady`), its rules owed
-   * under `owed` until core's database committed the version; answers its
-   * status after.
-   */
-  activate: (
-    schemaHash: string,
-    consumer: SchemaConsumer,
-    owed?: OwedRules
-  ) => Promise<SchemaStatus>;
+  /** Applies a version's schema to the store (`StoreHost.applySchema`). */
+  applySchema: (change: SchemaApply) => Promise<AppliedSchema>;
+  /** Starts staging a migration's output (`StoreHost.beginMigration`). */
+  beginMigration: () => Promise<MigrationStart>;
+  /** A page of a table's records, by its ID, for its migration (`StoreHost.migrationRows`). */
+  migrationRows: (
+    table: string,
+    after: string | null
+  ) => Promise<MigrationRow[]>;
+  /** Stages a batch of a migration's output (`StoreHost.stageMigration`). */
+  stageMigration: (batch: MigrationBatch) => Promise<void>;
   get: (table: string, id: string) => Promise<StoredRecord | null>;
   claim: (claim: Omit<ClaimInput, "storeId">) => Promise<Claimed>;
   commit: (commit: Omit<Commit, "storeId">) => Promise<Committed>;
@@ -205,6 +195,15 @@ const historyOf = (answered: string): RecordChangePage => {
   return page as RecordChangePage;
 };
 
+/** A page of a migration's rows, as JSON text over RPC (data-store.ts). */
+const migrationRowsOf = (answered: string): MigrationRow[] => {
+  const rows: unknown = JSON.parse(answered);
+  // SAFETY: the store's host read them (`StoreHost.migrationRows`), each
+  // record's fields with its own schema, which JSON carries unchanged.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return rows as MigrationRow[];
+};
+
 const readResultOf = (answered: string): ReadResult => {
   const { value, generations, sensitive } = readResultSchema.parse(
     JSON.parse(answered)
@@ -249,6 +248,15 @@ const recordedStoreOf = async (
         store: storeIdSchema.parse(row.store),
         live: row.listed !== null && row.deletedAt === null,
       };
+};
+
+/** App `app`'s store, if it has one that lives; null otherwise. */
+export const liveStoreOf = async (
+  env: Env,
+  app: AppId
+): Promise<StoreId | null> => {
+  const recorded = await recordedStoreOf(env, app);
+  return recorded?.live === true ? recorded.store : null;
 };
 
 /**
@@ -304,6 +312,32 @@ export const appStoreFor = async (
     throw new Error("The App's store wasn't recorded");
   }
   return recorded.store;
+};
+
+/**
+ * Resets the data of App `app`'s store for `by` (`StoreHost.resetData`,
+ * audited in the store's own transaction), applying `apply` to the empty
+ * store in the same one: its store, if it has one that lives, or null.
+ * Its caller decides who may.
+ */
+export const resetAppStore = async (
+  env: Env,
+  by: Acting,
+  app: AppId,
+  reset: Pick<StoreReset, "everything" | "apply">
+): Promise<StoreId | null> => {
+  const store = await liveStoreOf(env, app);
+  if (store === null) {
+    return null;
+  }
+  await inJurisdiction(env, env.DATA_STORES)
+    .getByName(store)
+    .resetData(store, {
+      ...reset,
+      actor: by.actor ?? actorOf(by),
+      app,
+    });
+  return store;
 };
 
 /** The App a store serves: whose roles decide who manages it. */
@@ -532,24 +566,6 @@ export const deleteStore = async (
   await recordStoreDeleted(env, store, mark);
 };
 
-/**
- * Refuses a change to store `id` while its App is archived
- * (`app.archived`): read-only, as the App is, until a builder restores it
- * (app-status.ts). For changes made by admins without a role check of
- * their own on the App (backfills). A removed App's store isn't refused:
- * nobody can restore the App, and its admins manage the store from then
- * on (`managedBy`).
- */
-export const requireStoreChangeable = async (
-  env: Env,
-  id: StoreId
-): Promise<void> => {
-  const app = await storeApp(env, id);
-  if (app !== undefined && !app.removed) {
-    requireNotArchived(app);
-  }
-};
-
 /** Store `storeId`'s object, as core calls it, its ID bound to every call. */
 const storeClient = (
   env: Pick<Env, "DATA_STORES" | "DURABLE_OBJECT_JURISDICTION">,
@@ -558,10 +574,13 @@ const storeClient = (
   const stub = inJurisdiction(env, env.DATA_STORES).getByName(storeId);
   return {
     id: storeId,
-    defineTables: async (manifest, consumer, migrations, answers) =>
-      await stub.defineTables(storeId, manifest, consumer, migrations, answers),
-    activate: async (schemaHash, consumer, owed) =>
-      await stub.activateReady(storeId, schemaHash, consumer, owed),
+    applySchema: async (change) => await stub.applySchema(storeId, change),
+    beginMigration: async () => await stub.beginMigration(storeId),
+    migrationRows: async (table, after) =>
+      migrationRowsOf(await stub.migrationRows(storeId, table, after)),
+    stageMigration: async (batch) => {
+      await stub.stageMigration(storeId, JSON.stringify(batch));
+    },
     get: async (table, recordId) => await stub.get(storeId, table, recordId),
     claim: async (claim) => claimedOf(await stub.claim({ ...claim, storeId })),
     commit: async (commit) =>

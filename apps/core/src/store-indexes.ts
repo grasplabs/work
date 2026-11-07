@@ -20,17 +20,16 @@ import {
 //
 // An index is named by the hash of its definition (the expressions'
 // version, the table, the owner prefix and the fields, in order), never
-// by its author's name: a changed definition is a new index beside the
-// old, so a consumer pinned to an older schema keeps reading through its
-// own. Nothing here drops an index; contracting them is schema
-// activation's (GRA-1480), under its retention gates.
+// by its author's name: a changed definition is a new index, and the one
+// the schema in force no longer declares is dropped as the schema is
+// applied (`dropIndexes`), in the same transaction.
 //
 // Installing is idempotent and checks what SQLite actually holds: an
 // index that exists under its name with any other definition is refused,
-// never trusted. A store holds at most `storeMaxIndexes` of them, retained
-// ones included, because every write to `sdk_records` evaluates every
-// partial index's WHERE and opens each index, so a write's cost grows with
-// the store's total; the refusal comes before any is created.
+// never trusted. A store holds at most `storeMaxIndexes` of them, because
+// every write to `sdk_records` evaluates every partial index's WHERE and
+// opens each index, so a write's cost grows with the store's total; the
+// refusal comes before any is created.
 //
 // Reads without an index use the two fixed default-order indexes of the
 // host's layout (db/data-store/schema.ts), which serve every table.
@@ -112,6 +111,27 @@ export const planIndexes = async (
     plan.set(table, indexes);
   }
   return plan;
+};
+
+/** Drops every declared index `sql` holds that `plan` doesn't. */
+export const dropIndexes = (
+  sql: SqlStorage,
+  plan: ReadonlyMap<string, ReadonlyMap<string, PhysicalIndex>>
+): void => {
+  const kept = new Set(
+    [...plan.values()].flatMap((indexes) =>
+      [...indexes.values()].map(({ name }) => name)
+    )
+  );
+  for (const { name } of sql
+    .exec<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'sdk\\_ix\\_%' ESCAPE '\\'"
+    )
+    .toArray()) {
+    if (!kept.has(name)) {
+      sql.exec(`DROP INDEX "${name}"`);
+    }
+  }
 };
 
 /**

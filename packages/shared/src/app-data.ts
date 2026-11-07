@@ -19,18 +19,12 @@ export type RecordChangeOp = (typeof recordChangeOps)[number];
 /**
  * What made a change: a commit of the App's (or a consumer's) mutation, a
  * cascade of a deletion (in that commit or after it, as the store's
- * cascade job), an import of a table's CSV, or a schema change the store
- * applied as a release was made current, giving records a default or a
- * value they lacked (core's store-schema-changes.ts).
- * A migration's transform keeps no change: it never moves a field a row
- * rule reads.
+ * cascade job), or an import of a table's CSV. A schema applied as a
+ * version is published keeps no change per record: a field it fills in
+ * is one audit event (`app.data.filled`, core's store-host.ts), and a
+ * migration's transform never moves a field a row rule reads.
  */
-export const recordChangeSources = [
-  "commit",
-  "cascade",
-  "import",
-  "schema_change",
-] as const;
+export const recordChangeSources = ["commit", "cascade", "import"] as const;
 export type RecordChangeSource = (typeof recordChangeSources)[number];
 
 /**

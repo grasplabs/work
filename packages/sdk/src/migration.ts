@@ -388,7 +388,7 @@ export const promiseMessage =
 /**
  * The SDK's own messages a handler's failure may carry as the runner
  * refuses it: fixed texts that hold nothing of a row, so the host may show
- * them for any table (apps/core/src/migration-transform.ts).
+ * them for any table (apps/core/src/migration-run.ts).
  */
 export const migrationPlatformMessages: readonly string[] = [
   impureMessage("randomness"),

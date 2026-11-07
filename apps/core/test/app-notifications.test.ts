@@ -43,6 +43,7 @@ import type { HostedApp, Invocation } from "../src/operations.ts";
 import { storeOfNewApp } from "./app-stores.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { applied } from "./store-schemas.ts";
 
 // Apps telling people (app-notifications.ts): an action's
 // `ctx.notifyPeople` and a mutation's `ctx.afterCommit.notifyPeople`, through the real operation host,
@@ -218,7 +219,7 @@ const fixture = async (): Promise<Fixture> => {
     .run();
   const storeId = await storeOfNewApp(env, ada);
   const store = await openStore(env, storeId);
-  await store.defineTables(manifestText(manifest.schema));
+  await store.applySchema(applied(manifestText(manifest.schema)));
   return {
     ada,
     bob,
