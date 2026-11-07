@@ -11,13 +11,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -34,7 +28,7 @@ import type { RawMail } from "../packages/shared/src/mail-ingress.ts";
 import { routerSecretHeader } from "../packages/shared/src/router.ts";
 import { writeAssetsService } from "./workerd-assets.ts";
 import { d1DatabasesOf, writeD1Service } from "./workerd-d1.ts";
-import { checkMinified } from "./workerd-minified-checks.ts";
+import { bundledModules, checkMinified } from "./workerd-minified-checks.ts";
 import { writeR2Service } from "./workerd-r2.ts";
 import { nativeWorkerd, startSandboxSupervisor } from "./workerd-sandbox.ts";
 import type { SandboxSupervisor } from "./workerd-sandbox.ts";
@@ -83,15 +77,11 @@ const freePort = async (): Promise<number> => {
 };
 const PORT = await freePort();
 
-// Durable Object migrations and the Grasp skills are bundled next to
-// index.js as text modules.
-const textModule = /(?:\.sql|SKILL\.md)$/u;
-const files = readdirSync(out);
+// Durable Object migrations, the Grasp skills and oxc-parse.wasm are
+// bundled next to index.js (`bundledModules`).
 const modules = [
   `(name = "index.js", esModule = embed "index.js")`,
-  ...files
-    .filter((file) => textModule.test(file))
-    .map((file) => `(name = "${file}", text = embed "${file}")`),
+  ...bundledModules(out),
 ];
 checkMinified(out);
 
