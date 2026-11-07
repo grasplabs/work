@@ -140,7 +140,7 @@ describe("the App compiler on-prem", () => {
       connect: host.connect.bind(host),
     };
     // Three pages of this test's own, each larger than a batch sized to
-    // 10 ms of CPU time, and the root route the build gives them: a batch
+    // 1 ms of CPU time (200 characters), and the root route the build gives them: a batch
     // each, then the build, then its one type check, in a session of its
     // own.
     const tag = crypto.randomUUID();
@@ -163,7 +163,7 @@ export const Route = createFileRoute("/${name}")({ component: Page });
     );
 
     const built = await buildPages(
-      { ...onPrem, SANDBOX_HOST: counting, BUILD_BATCH_CPU_MS: "10" },
+      { ...onPrem, SANDBOX_HOST: counting, BUILD_BATCH_CPU_MS: "1" },
       files,
       "app-test"
     );

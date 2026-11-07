@@ -407,7 +407,8 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
     // would be this one.
     const other = await published({
       ...files,
-      "src/routes/index.tsx": `${files["src/routes/index.tsx"] ?? ""}// Another\n`,
+      // Other code: a comment alone compiles to the same build.
+      "src/routes/index.tsx": `${files["src/routes/index.tsx"] ?? ""}export const another = "build";\n`,
     });
     const desk = await builder.api.pages.open(app);
     const inbox = await other.builder.api.pages.open(other.app);
