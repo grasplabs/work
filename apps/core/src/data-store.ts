@@ -636,23 +636,24 @@ export class DataStore extends DurableObject<Env> {
     if (found.fixture !== 1) {
       throw new Error("Only a fixture store core recorded is discarded.");
     }
-    await this.ctx.storage.deleteAll();
-    this.ctx.storage.kv.put(discardedKey, true);
-    await this.ctx.storage.deleteAlarm();
-    // Its live queries too: nothing is written to it again, so they would
-    // only hold their watchers (a test's) until the object is evicted.
-    this.#watches.clear();
+    await this.#discard();
   }
 
   /**
-   * Keeps this object as a builder's throwaway preview store
-   * (draft-runs.ts) until `until`, when it empties itself unless held
-   * again: whatever someone typed into a preview goes once nobody uses it,
-   * with no record or sweep of core's to keep up. Only for a store the
-   * inventory doesn't list, whatever asks: a business store is never
-   * emptied this way.
+   * Empties everything the object holds, and its alarm, and marks it
+   * discarded, so it refuses every call after (`#live`) and wakes to
+   * nothing. Its live queries too: nothing is written to it again, so they
+   * would only hold their watchers until the object is evicted.
    */
-  async holdThrowaway(storeId: StoreId, until: number): Promise<void> {
+  async #discard(): Promise<void> {
+    await this.ctx.storage.deleteAll();
+    this.ctx.storage.kv.put(discardedKey, true);
+    await this.ctx.storage.deleteAlarm();
+    this.#watches.clear();
+  }
+
+  /** Refuses unless `storeId` is this object's and no listed store. */
+  async #requireThrowaway(storeId: StoreId): Promise<void> {
     if (this.ctx.id.name !== undefined && this.ctx.id.name !== storeId) {
       throw new Error("That isn't this object's store.");
     }
@@ -664,10 +665,34 @@ export class DataStore extends DurableObject<Env> {
     if (listed !== null) {
       throw new Error("A listed store is never a throwaway one.");
     }
+  }
+
+  /**
+   * Keeps this object as a builder's throwaway preview store
+   * (draft-runs.ts) until `until`, when it empties itself unless held
+   * again: whatever someone typed into a preview goes once nobody uses it,
+   * with no record or sweep of core's to keep up. Only for a store the
+   * inventory doesn't list, whatever asks: a business store is never
+   * emptied this way. Never for one emptied for good (`emptyThrowaway`):
+   * a call that held it before then, still under way, can't bring it back.
+   */
+  async holdThrowaway(storeId: StoreId, until: number): Promise<void> {
+    await this.#requireThrowaway(storeId);
+    this.#live();
     this.ctx.storage.kv.put(throwawayKey, until);
     await this.#throwawayAlarm(until);
   }
 
+  /**
+   * Empties this throwaway store for good, at once: its chat was deleted,
+   * its draft dropped, or its person removed or erased. It refuses every
+   * call after, one under way included, and is never held again; a
+   * preview that runs on afterwards gets a store of a new name.
+   */
+  async emptyThrowaway(storeId: StoreId): Promise<void> {
+    await this.#requireThrowaway(storeId);
+    await this.#discard();
+  }
   /** Brings the alarm forward to `until`, when the throwaway store empties. */
   async #throwawayAlarm(until: number): Promise<void> {
     const alarm = await this.ctx.storage.getAlarm();

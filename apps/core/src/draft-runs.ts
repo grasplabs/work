@@ -42,7 +42,7 @@ import { loadDraftRelease, sealDraftRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { draftFiles, editableApp } from "./apps.ts";
 import { memberRole } from "./auth/identity.ts";
-import { openThrowawayStore } from "./data-stores.ts";
+import { holdThrowawayStore, throwawayStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { workspace } from "./durable-objects.ts";
 import { callOperation } from "./operations.ts";
@@ -90,8 +90,11 @@ import type { Draft } from "./workspace.ts";
 //   makes) and loaded back through `loadRelease`'s own checks; this isolate
 //   keeps it by the hash of exactly the files the seal reads (`sealed`).
 // - What someone typed into a preview stays: its store empties itself a
-//   day after its last use (`throwawayStoreMs`), whatever became of its
-//   chat; a new schema gets a new, empty store.
+//   day after its last use (`throwawayStoreMs`), and at once, for good,
+//   when the draft is dropped, the chat deleted or its person removed or
+//   erased (`DataStore.emptyThrowaway`), which refuses every call after,
+//   one under way included; the preview then names a new store
+//   (`DraftRun.seed`). A new schema gets a new, empty store too.
 // - One preview's data reaches another's: a store per person, chat, App and
 //   schema, shared with nothing.
 
@@ -107,6 +110,12 @@ export interface DraftRun {
    * check reads: one that changes nothing previews the App's latest version.
    */
   readonly own: boolean;
+  /**
+   * What its throwaway store is named by besides who, which chat and App
+   * and which schema: new once the preview's data is dropped
+   * (`Workspace.previewRun`).
+   */
+  readonly seed: string;
   readonly release: Release;
 }
 
@@ -206,7 +215,7 @@ export const draftRunOf = async (
 ): Promise<DraftRun> => {
   await editableApp(env, by, app);
   const workspaceId = personalWorkspaceId(by.userId);
-  const draft = await workspace(env, workspaceId).previewDraft(
+  const { draft, seed } = await workspace(env, workspaceId).previewRun(
     chatId,
     by.userId,
     app
@@ -218,6 +227,7 @@ export const draftRunOf = async (
     workspaceId,
     revision: draft.revision,
     own: Object.keys(draft.changes).length > 0,
+    seed,
     release: await sealed(env, app, (draft.base ?? 0) + 1, files),
   };
 };
@@ -266,16 +276,23 @@ const draftStore = async (
   }
   const id = storeIdSchema.parse(
     `throwaway-${await sha256Hex(
-      canonicalJson([userId, run.chatId, run.app, release.manifest.schemaHash])
+      canonicalJson([
+        userId,
+        run.chatId,
+        run.app,
+        run.seed,
+        release.manifest.schemaHash,
+      ])
     )}`
   );
+  const store = throwawayStore(env, id);
   const now = Date.now();
-  const store = await openThrowawayStore(env, id, now + throwawayStoreMs);
   if (now - (heldStores.get(id) ?? 0) < holdAgainMs) {
     return store;
   }
-  // Kept with the chat, so deleting it or erasing its person empties the
-  // store at once.
+  // Kept with the chat before it is first touched, so dropping the draft,
+  // deleting the chat or removing or erasing its person empties it at
+  // once; one emptied so refuses this hold, and every call after.
   await workspace(env, run.workspaceId).keepPreviewStore(
     run.chatId,
     userId,
@@ -283,6 +300,7 @@ const draftStore = async (
     id,
     run.revision
   );
+  await holdThrowawayStore(env, id, now + throwawayStoreMs);
   const consumer = {
     resourceId: run.app,
     resourceVersion: release.manifest.resourceVersion,

@@ -274,7 +274,7 @@ test("a version up for review shows its changes in the workspace's Code view, on
   }
 });
 
-test("an App's own chat writes its page and server code, and its workspace previews it, taking each write in place, and saying a problem is being fixed while the server code doesn't build", async ({
+test("an App's own chat writes its page and server code, and its workspace previews it, taking each write in place, its page's even while the server code doesn't build", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("chatPreview");
@@ -363,19 +363,18 @@ test("an App's own chat writes its page and server code, and its workspace previ
     await frame.getByRole("button", { name: "Add another" }).click();
     await expect(frame.getByRole("status")).toHaveText("2 counted anew");
 
-    // Server code that doesn't build, with a write of the page, whose
-    // references it can't have then: the frame keeps the page it shows,
-    // and says the problem is being fixed.
+    // Server code that doesn't build, with a write of the page: the page
+    // still takes the write, built against the references the draft last
+    // generated, its calls answering the server code's error, while the
+    // problem is being fixed.
     await askOnceIdle(chat, "Take more.");
     await expect(chat.getByText("It takes more.")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(preview.getByText("Fixing a problem…")).toBeVisible({
+    await expect(frame.getByRole("button", { name: "Add more" })).toBeVisible({
       timeout: 10_000,
     });
-    await expect(
-      frame.getByRole("button", { name: "Add another" })
-    ).toBeVisible();
+    await expect(preview.getByText("Fixing a problem…")).toBeVisible();
 
     // Once it builds, the frame takes it as any write.
     await askOnceIdle(chat, "Fix the count.");

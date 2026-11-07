@@ -597,6 +597,21 @@ const traceKeyPrefix = "trace:";
 const runningKeyPrefix = "running:";
 
 /**
+ * The seed the throwaway stores of a chat's preview of an App are named by
+ * (`Workspace.previewRun`), until its data is dropped.
+ */
+const previewSeedKey = (chatId: ChatId, appId: string): string =>
+  `preview-seed:${chatId}:${appId}`;
+
+/**
+ * The references a chat's draft of an App last generated, for its pages
+ * to build against while its server code doesn't
+ * (`Workspace.keepPreviewReferences`).
+ */
+const previewReferencesKey = (chatId: ChatId, appId: string): string =>
+  `preview-references:${chatId}:${appId}`;
+
+/**
  * What of a chat's `ChatSession` its messages were kept of, as
  * `copied:<chat>`: the last entry, and the last answer kept with it. That
  * object copies at least once, so a copy it sends again after a restart
@@ -3556,7 +3571,6 @@ export class Workspace extends DurableObject<Env> {
       for (const { appId } of previewed) {
         this.#dropPreview(id, appId);
       }
-      this.ctx.waitUntil(this.#emptyPreviewStores(id));
       this.#stopped.delete(id);
       this.#provenanceVersions.delete(id);
       this.#heldVersions.delete(id);
@@ -4189,15 +4203,76 @@ export class Workspace extends DurableObject<Env> {
     this.#deliverAudit();
   }
 
-  /** Forgets what the chat's preview of App `appId` reported. */
+  /**
+   * Forgets what the chat's preview of App `appId` reported, and what its
+   * page last built against, and empties its throwaway stores: the draft
+   * was dropped, restored or the chat deleted, so what someone typed into
+   * the preview goes with it. Its next call runs on a store of a new name
+   * (`previewRun`), never one emptied here.
+   */
   #dropPreview(chatId: ChatId, appId: string): void {
     this.#previewReports.drop(chatId, appId);
+    this.ctx.storage.kv.delete(previewSeedKey(chatId, appId));
+    this.ctx.storage.kv.delete(previewReferencesKey(chatId, appId));
+    this.ctx.waitUntil(this.#emptyPreviewStores(chatId, appId));
+  }
+
+  /**
+   * What `personId`'s own chat's preview of App `appId` runs on now
+   * (`previewDraft`), and the seed its throwaway store is named by
+   * (draft-runs.ts): the same until the preview's data is dropped
+   * (`#dropPreview`), then a new one, so no call ever finds a store emptied
+   * for good again.
+   */
+  async previewRun(
+    chatId: unknown,
+    personId: string,
+    appId: string
+  ): Promise<{ draft: Draft; seed: string }> {
+    const draft = await this.previewDraft(chatId, personId, appId);
+    const { id } = this.#ownChat(chatId, personId);
+    const key = previewSeedKey(id, appId);
+    const kept = this.ctx.storage.kv.get<string>(key);
+    if (kept !== undefined) {
+      return { draft, seed: kept };
+    }
+    const seed = crypto.randomUUID();
+    this.ctx.storage.kv.put(key, seed);
+    return { draft, seed };
+  }
+
+  /**
+   * Keeps `references`, the `@server/_generated/api` references the draft
+   * of App `appId` in `personId`'s own chat last generated, for its pages
+   * to build against while its server code doesn't (chats-rpc.ts).
+   */
+  keepPreviewReferences(
+    chatId: unknown,
+    personId: string,
+    appId: string,
+    references: string | null
+  ): void {
+    const { id } = this.#ownChat(chatId, personId);
+    this.ctx.storage.kv.put(previewReferencesKey(id, appId), references);
+  }
+
+  /** The references `keepPreviewReferences` kept last, if any. */
+  previewReferencesKept(
+    chatId: unknown,
+    personId: string,
+    appId: string
+  ): string | null | undefined {
+    const { id } = this.#ownChat(chatId, personId);
+    return this.ctx.storage.kv.get<string | null>(
+      previewReferencesKey(id, appId)
+    );
   }
 
   /**
    * Keeps that `storeId` is the throwaway store of `personId`'s own chat's
-   * preview of App `appId` (draft-runs.ts), so deleting the chat or
-   * erasing them empties it at once, rather than a day after its last use.
+   * preview of App `appId` (draft-runs.ts), so dropping the draft, deleting
+   * the chat or removing or erasing them empties it at once, rather than a
+   * day after its last use.
    */
   keepPreviewStore(
     chatId: unknown,
@@ -4223,23 +4298,31 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
-   * Empties the throwaway stores of the chat `chatId`'s previews, or of
-   * every chat's, and forgets them: each empties itself at its alarm,
-   * which this brings to now (`DataStore.holdThrowaway`).
+   * Empties for good the throwaway stores of the chat `chatId`'s previews
+   * of App `appId`, or of every chat's, and forgets each once it is
+   * (`DataStore.emptyThrowaway`): a call still under way on one is refused.
    */
-  async #emptyPreviewStores(chatId?: ChatId): Promise<void> {
-    const where =
-      chatId === undefined ? undefined : eq(previewStores.chatId, chatId);
+  async #emptyPreviewStores(chatId?: ChatId, appId?: string): Promise<void> {
     const stores = this.#db
       .select({ storeId: previewStores.storeId })
       .from(previewStores)
-      .where(where)
+      .where(
+        chatId === undefined || appId === undefined
+          ? undefined
+          : and(
+              eq(previewStores.chatId, chatId),
+              eq(previewStores.appId, appId)
+            )
+      )
       .all();
     for (const { storeId } of stores) {
       // oxlint-disable-next-line no-await-in-loop -- one store at a time
       await emptyThrowawayStore(this.env, storeIdSchema.parse(storeId));
+      this.#db
+        .delete(previewStores)
+        .where(eq(previewStores.storeId, storeId))
+        .run();
     }
-    this.#db.delete(previewStores).where(where).run();
   }
 
   /**

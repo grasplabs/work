@@ -53,7 +53,7 @@ const files: Record<string, string> = {
     },
   }),
   "server/notes.ts": `import { v } from "@grasp-os/sdk";
-import { mutation, query } from "@server/_generated/server";
+import { action, mutation, query } from "@server/_generated/server";
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
@@ -65,6 +65,20 @@ export const titles = query({
   args: {},
   returns: v.array(v.string()),
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).map((note) => note.title),
+});
+
+/** Writes a note once a wait is over, telling how far it got. */
+export const slow = action({
+  args: { title: v.string(), pauseMs: v.number().integer().min(0) },
+  returns: v.string(),
+  stream: v.object({ step: v.number() }),
+  uses: [create],
+  handler: async (ctx, args) => {
+    await ctx.emit({ step: 1 });
+    await new Promise((resolve) => setTimeout(resolve, args.pauseMs));
+    await ctx.runMutation(create, { title: args.title });
+    return args.title;
+  },
 });
 `,
 
@@ -528,6 +542,35 @@ const previewed = async (served: Served) => {
   };
 };
 
+/** The frames a streaming call answered, one JSON line each. */
+const framesOf = async (response: Response): Promise<unknown[]> => {
+  expect(response.status).toBe(200);
+  const text = await response.text();
+  return text
+    .trim()
+    .split("\n")
+    .map((line): unknown => JSON.parse(line));
+};
+
+/** The result the last of `frames` carries. */
+const resultOfLast = (frames: unknown[]): unknown => {
+  const last = frames.at(-1);
+  return typeof last === "object" && last !== null
+    ? Reflect.get(last, "result")
+    : undefined;
+};
+
+/** The error code a refused result carries. */
+const errorCodeOf = (result: unknown): unknown => {
+  const error: unknown =
+    typeof result === "object" && result !== null
+      ? Reflect.get(result, "error")
+      : undefined;
+  return typeof error === "object" && error !== null
+    ? Reflect.get(error, "code")
+    : undefined;
+};
+
 /** `lease` with the chat it names swapped for `chatId`, its MAC kept. */
 const withChat = (lease: string, chatId: string): string => {
   const [artifact, , mac] = lease.split(".");
@@ -658,6 +701,86 @@ describe(
       }).toStrictEqual({
         named: { status: 401, code: "auth.principal_changed" },
         user: { status: 403, code: "role.forbidden" },
+      });
+    });
+
+    it("streams, attaches to and cancels a draft's action on its own invocation, apart from the release's, and refuses another person's", async () => {
+      const served = await servedApp();
+      const { colleague, own } = await previewed(served);
+      const as = served.builder;
+      const slow = (title: string, pauseMs: number, key: string): string =>
+        requestFor(served, "notes.slow", { title, pauseMs }, key);
+      const draft = { as, lease: own.lease };
+      const release = { as, lease: served.lease };
+      const done = crypto.randomUUID();
+      const streamed = await framesOf(
+        await post(`${served.app}/stream`, slow("Streamed", 0, done), draft)
+      );
+      const attached = await framesOf(
+        await post(`${served.app}/attach`, slow("Streamed", 0, done), draft)
+      );
+      // The release's page has no run under that key: a draft's runs apart.
+      const releaseAttached = await framesOf(
+        await post(`${served.app}/attach`, slow("Streamed", 0, done), release)
+      );
+      const neverStarted = await framesOf(
+        await post(
+          `${served.app}/attach`,
+          slow("Never", 0, crypto.randomUUID()),
+          draft
+        )
+      );
+      // A long run, cancelled while it waits.
+      const waiting = crypto.randomUUID();
+      const started = post(
+        `${served.app}/stream`,
+        slow("Cancelled", 5000, waiting),
+        draft
+      );
+      await vi.waitFor(
+        async () => {
+          const cancelled = await post(
+            `${served.app}/cancel`,
+            slow("Cancelled", 5000, waiting),
+            draft
+          );
+          await expect(cancelled.json()).resolves.toStrictEqual({
+            requested: true,
+          });
+        },
+        { timeout: 10_000, interval: 100 }
+      );
+      const startedResponse = await started;
+      await startedResponse.body?.cancel();
+      const refused = await refusalOf(
+        await post(
+          `${served.app}/stream`,
+          slow("Theirs", 0, crypto.randomUUID()),
+          {
+            as: colleague,
+            lease: own.lease,
+          }
+        )
+      );
+
+      expect({
+        streamed: resultOfLast(streamed),
+        attached: resultOfLast(attached),
+        releaseAttached: errorCodeOf(resultOfLast(releaseAttached)),
+        neverStarted: errorCodeOf(resultOfLast(neverStarted)),
+        refused,
+        draftTitles: await resultOf(
+          await post(served.app, requestFor(served, "notes.titles", {}), draft)
+        ),
+        realTitles: await titlesOf(served),
+      }).toStrictEqual({
+        streamed: { ok: true, value: "Streamed" },
+        attached: { ok: true, value: "Streamed" },
+        releaseAttached: "submission.expired",
+        neverStarted: "submission.expired",
+        refused: { status: 403, code: "page.unreviewed" },
+        draftTitles: { ok: true, value: ["Streamed"] },
+        realTitles: { ok: true, value: [] },
       });
     });
 

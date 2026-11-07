@@ -1380,6 +1380,42 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
     });
   });
 
+  it("tells no form a builder's preview of a draft sends, keyed or streamed", async () => {
+    const open = await openNotes();
+    const url = receiver();
+    await open.builder.api.apps.webhooks.add(open.app, {
+      url,
+      events: ["form_sent"],
+    });
+    const { id } = await open.builder.api.chats.forApp(open.app);
+    const preview = await open.builder.api.chats.preview(id, open.app);
+    const drafted = { builder: open.builder, lease: preview.lease ?? "" };
+    const added = await sentOnly(
+      open,
+      "notes.add",
+      { title: "Drafted" },
+      "draft-a",
+      drafted
+    );
+    const streamedOut = await streamed(
+      { ...open, lease: drafted.lease },
+      "stream",
+      "notes.write",
+      { title: "Streamed" },
+      "draft-b"
+    );
+    // The App's own page's form is told: the webhook hears forms at all.
+    await sent(open, "notes.add", { title: "Real" }, "real-a");
+    await reachedEventually(url, 1);
+    await drainWebhookDeliveries(env);
+
+    expect({
+      added: okOf(added),
+      streamed: okOf(streamedOut),
+      reached: await countAt(url),
+    }).toStrictEqual({ added: true, streamed: true, reached: 1 });
+  });
+
   it("keeps a succeeded action's form untold with its receipt while it can't be told, and tells it on the next try", async () => {
     const open = await openNotes();
     const url = receiver();

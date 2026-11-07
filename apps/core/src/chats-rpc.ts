@@ -174,15 +174,25 @@ const refreshOf = (
  */
 interface Previewed {
   files: Map<string, string>;
-  /** The references its pages import (`draftReferences`). */
-  references: () => Promise<string | null>;
+  references: () => Promise<PreviewReferences>;
   revision: number;
   shows?: number;
 }
 
 /**
+ * The references a preview's pages import (`draftReferences`), and
+ * whether they are the last ones its draft generated in place of those of
+ * server code that doesn't build now (`serverUnbuilt`), so a write of its
+ * pages still reaches the frame, whose calls answer why.
+ */
+interface PreviewReferences {
+  references: string | null;
+  serverUnbuilt: boolean;
+}
+
+/**
  * A preview's pages, built (`ChatsRpc.#previewBuild`), and whether its
- * server code doesn't build now, which its calls are refused for.
+ * server code doesn't build now, which its calls answer.
  */
 type PreviewPage = BuiltPage & { serverUnbuilt: boolean };
 
@@ -867,7 +877,10 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       const draft = await chats.draftVersion(chat, by.userId, id, version);
       return {
         files: await draftFiles(this.#env, id, draft),
-        references: async () => await draftReferences(this.#env, id, draft),
+        references: async () => ({
+          references: await draftReferences(this.#env, id, draft),
+          serverUnbuilt: false,
+        }),
         // A version opened read-only names no revision a draft is at, and
         // gets no lease: nothing it calls runs, even when it is the draft
         // as it is now.
@@ -881,8 +894,22 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         : undefined;
     return {
       files: await draftFiles(this.#env, id, draft),
-      // Of the very build its files are of.
-      references: async () => await draftReferences(this.#env, id, draft),
+      // Of the very build its files are of, or the last that built.
+      references: async () => {
+        try {
+          const references = await draftReferences(this.#env, id, draft);
+          await chats.keepPreviewReferences(chat, by.userId, id, references);
+          return { references, serverUnbuilt: false };
+        } catch (error) {
+          const kept = buildFailed(error)
+            ? await chats.previewReferencesKept(chat, by.userId, id)
+            : undefined;
+          if (kept === undefined) {
+            throw error;
+          }
+          return { references: kept, serverUnbuilt: true };
+        }
+      },
       revision: draft.revision,
       ...(shows === undefined ? {} : { shows }),
     };
@@ -892,8 +919,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    * The bundle of `chatId`'s preview of App `id`, built from its draft
    * now, or from its draft's `version` (`#previewed`). The draft now with
    * changes that leave it no page that builds opens on the App's latest
-   * version instead, as a draft that changes nothing would show it, its
-   * calls on that version's own server code, said to be a `fallback`: its
+   * version instead, as a draft that changes nothing would show it, said
+   * to be a `fallback`, its calls on the draft as it is, as any preview's: its
    * frame takes the draft's next write that builds, as any frame does. So
    * nothing is shown in place of the App while a version of it builds.
    */
@@ -974,14 +1001,17 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
    */
   async #previewBuild(
     files: Map<string, string>,
-    references: () => Promise<string | null>,
+    references: () => Promise<PreviewReferences>,
     id: AppId
   ): Promise<PreviewPage> {
     const source = Object.fromEntries(files);
     // Its server code read whatever its pages import: whether it builds
     // is said even of pages that call none of it.
     const reading = isAppLayout(source) ? references() : undefined;
-    let read: { references: string | null } | { failed: unknown } | undefined;
+    let read:
+      | { references: PreviewReferences }
+      | { failed: unknown }
+      | undefined;
     if (reading !== undefined) {
       try {
         read = { references: await reading };
@@ -993,7 +1023,7 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     const withReferences = await withReferencesText(source, async () => {
       needed = true;
       const got = await reading;
-      return got ?? undefined;
+      return got?.references ?? undefined;
     });
     // Its pages import references that couldn't be had: why (its server
     // code doesn't build, say) is what to tell, never that the App has no
@@ -1002,7 +1032,10 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
       throw read.failed;
     }
     const serverUnbuilt =
-      read !== undefined && "failed" in read && buildFailed(read.failed);
+      read !== undefined &&
+      ("failed" in read
+        ? buildFailed(read.failed)
+        : read.references.serverUnbuilt);
     const built = await versionPages(
       this.#env,
       withReferences,

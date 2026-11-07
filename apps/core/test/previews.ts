@@ -19,7 +19,7 @@ import { z } from "zod";
 import { sealDraftRelease } from "../src/app-releases.ts";
 import { draftFiles } from "../src/apps.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
-import { workspace } from "../src/durable-objects.ts";
+import { inJurisdiction, workspace } from "../src/durable-objects.ts";
 import type { Draft } from "../src/workspace.ts";
 import { openTestRun } from "./agent-chat.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -256,4 +256,15 @@ export const previewStores = async (
         app
       )
       .toArray()
+  );
+
+/**
+ * Whether throwaway store `id` was emptied for good: its object discarded,
+ * so it refuses every call (`DataStore.emptyThrowaway`).
+ */
+export const storeEmptied = async (id: string): Promise<boolean> =>
+  await runInDurableObject(
+    inJurisdiction(env, env.DATA_STORES).getByName(id),
+    (_instance, state) =>
+      state.storage.kv.get("grasp_fixture_discarded") === true
   );
