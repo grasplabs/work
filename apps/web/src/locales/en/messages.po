@@ -14281,6 +14281,7 @@ msgstr "Try"
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
 #: src/engines/app-chat.tsx
+#: src/engines/app-data.tsx
 #: src/engines/app-owner.tsx
 #: src/engines/app-settings.tsx
 #: src/frame/page-states.tsx

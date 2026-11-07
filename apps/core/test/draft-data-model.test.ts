@@ -78,6 +78,7 @@ describe(
         file: "v.file().optional()",
         price: "v.money().optional()",
         tags: "v.array(v.string())",
+        score: "v.number().nullable().default(0)",
       };
 
       const added = await chats.defineDraft(chatId, app, {
@@ -102,6 +103,12 @@ describe(
           required,
           code,
         })),
+        // What a change of its options keeps: null, and its default.
+        kept: tasks?.fields.flatMap(({ name, nullable, defaultCode }) =>
+          nullable || defaultCode !== null
+            ? [{ name, nullable, defaultCode }]
+            : []
+        ),
         added: model.plan.addedTables,
         schema: files["server/schema.ts"]?.includes("tasks: defineTable"),
         audited: audited.map(({ actor, detail }) => ({
@@ -178,6 +185,16 @@ describe(
             required: true,
             code: "v.array(v.string())",
           },
+          {
+            name: "score",
+            type: { kind: "number", integer: false, min: null, max: null },
+            required: true,
+            code: "v.number().nullable()",
+          },
+        ],
+        kept: [
+          { name: "done", nullable: false, defaultCode: ".default(false)" },
+          { name: "score", nullable: true, defaultCode: ".default(0)" },
         ],
         added: ["tasks"],
         schema: true,

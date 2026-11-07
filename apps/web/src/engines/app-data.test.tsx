@@ -63,6 +63,9 @@ const tables: Record<string, AppDataTable[]> = {
   second: [tableOf("bare", []), tableOf("notes", ["title"])],
 };
 
+/** Whether the next read of a second page fails, once. */
+let failSecondPage = false;
+
 /** The page, opened on App `first`, with a button opening `second`. */
 const shown = async () => {
   const apps = {
@@ -75,6 +78,10 @@ const shown = async () => {
         cursor: string | null
       ) => {
         await Promise.resolve();
+        if (failSecondPage && cursor === "page-2") {
+          failSecondPage = false;
+          throw new Error("The records couldn't be read.");
+        }
         if (app === "first" && table === "notes" && cursor === null) {
           return { records: [recordOf(app, table)], cursor: "page-2" };
         }
@@ -239,6 +246,27 @@ describe("an App's data page", () => {
       second: document.body.textContent.includes("first's second notes"),
       rows: document.querySelectorAll('[role="table"] [role="row"]').length,
     }).toStrictEqual({ first: true, second: true, rows: 3 });
+  });
+
+  it("reads a page that failed to load again on Try again, and goes on from it", async () => {
+    failSecondPage = true;
+    await shown();
+    await settled();
+    await settled();
+    const failed = {
+      said: document.body.textContent.includes("Try again"),
+      second: document.body.textContent.includes("first's second notes"),
+    };
+    await press("Try again");
+    await settled();
+
+    expect({
+      failed,
+      second: document.body.textContent.includes("first's second notes"),
+    }).toStrictEqual({
+      failed: { said: true, second: false },
+      second: true,
+    });
   });
 
   it("opens a record by its ID, in a table that declares no fields", async () => {

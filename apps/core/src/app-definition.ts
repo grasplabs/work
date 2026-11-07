@@ -387,13 +387,21 @@ const modelFieldOf = ({ id, name, type }: DefinedField): DataModelField => {
   // Its code with no presence: `required` says that, and a change of it
   // adds `.optional()` or doesn't (`fieldCode`).
   const { defaultValue: _default, ...declared } = type;
+  const code = validatorSource({ ...declared, presence: "required" });
+  // Its default as code says it: what the whole of it adds to its code.
+  const whole = validatorSource(type);
   return {
     id,
     name,
     type: fieldTypeOf(type),
     // A default fills every record that leaves it out, so none goes without.
     required: type.presence !== "optional",
-    code: validatorSource({ ...declared, presence: "required" }),
+    code,
+    nullable: type.nullable,
+    defaultCode:
+      type.presence === "default" && whole.startsWith(code)
+        ? whole.slice(code.length)
+        : null,
   };
 };
 

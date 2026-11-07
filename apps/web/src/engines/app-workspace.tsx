@@ -896,7 +896,12 @@ const DataArea = ({
   modelChat === undefined ? (
     <LiveData app={app} />
   ) : (
-    <AppDataModel app={app} {...modelChat} />
+    <AppDataModel
+      app={app}
+      // Each chat's own model: what one chat made never shows in another's.
+      key={modelChat.chatId}
+      {...modelChat}
+    />
   );
 
 /** What the main area holds besides the preview, which stays (hidden) so it doesn't load again. */

@@ -41,6 +41,8 @@ const deals = (
       type: { kind: "text", trim: false, min: null, max: null },
       required: true,
       code: "v.string()",
+      nullable: false,
+      defaultCode: null,
     },
     {
       id: "f2",
@@ -48,6 +50,8 @@ const deals = (
       type: { kind: "person" },
       required: false,
       code: "v.person()",
+      nullable: false,
+      defaultCode: null,
     },
   ],
   indexes: [],

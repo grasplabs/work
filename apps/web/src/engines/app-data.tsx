@@ -596,10 +596,13 @@ const RecordNotes = ({
   stale,
   missing,
   failure,
+  onRetry,
 }: {
   stale: boolean;
   missing: boolean;
   failure: string | undefined;
+  /** Reads again what failed to load; none for a failure nothing reads again. */
+  onRetry?: () => void;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
@@ -622,13 +625,18 @@ const RecordNotes = ({
         </div>
       ) : null}
       {missing || failure !== undefined ? (
-        <div className="border-b px-3 py-2">
+        <div className="flex items-center gap-2 border-b px-3 py-2">
           {missing ? (
             <p className="text-muted-foreground text-sm">
               <Trans>No record of this table has that ID.</Trans>
             </p>
           ) : null}
           <ErrorText>{failure}</ErrorText>
+          {failure === undefined || onRetry === undefined ? null : (
+            <Button onClick={onRetry} size="sm" variant="outline">
+              <Trans>Try again</Trans>
+            </Button>
+          )}
         </div>
       ) : null}
     </>
@@ -682,6 +690,10 @@ const useRecordPages = (
     // The table's count, or, once the last page came, the records read.
     total:
       live?.table.records ?? (cursor === null ? records?.length : undefined),
+    /** Reads again the page that failed: the first, or the one after the last read. */
+    retry: () => {
+      void load(records === undefined ? null : cursor);
+    },
     handleEnd: () => {
       if (cursor !== null && idle) {
         void load(cursor);
@@ -870,6 +882,7 @@ export const TableRecords = ({
       {instead === undefined ? (
         <RecordNotes
           failure={pages.failure ?? action.failure}
+          {...(pages.failure === undefined ? {} : { onRetry: pages.retry })}
           missing={missing}
           stale={stale}
         />

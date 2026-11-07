@@ -165,15 +165,26 @@ const codeOf = (
     return undefined;
   }
   const required = draft.required || fillsItself(type);
+  // A field keeps what its editor doesn't say while it stays its kind:
+  // whether it holds null, and its default while it stays required (a
+  // yes or no's own default is its type's).
+  const sameKind = field !== undefined && field.type.kind === type.kind;
+  const nullable = sameKind && field.nullable ? ".nullable()" : "";
+  const defaulted =
+    sameKind && required && type.kind !== "boolean"
+      ? (field.defaultCode ?? "")
+      : "";
   const kept =
     field !== undefined &&
     JSON.stringify(type) === JSON.stringify(field.type) &&
     type.kind !== "boolean";
   if (kept) {
-    return fieldCode(field.code, required);
+    return fieldCode(`${field.code}${defaulted}`, required);
   }
   const code = fieldKindCode(type) ?? field?.code;
-  return code === undefined ? undefined : fieldCode(code, required);
+  return code === undefined
+    ? undefined
+    : fieldCode(`${code}${nullable}${defaulted}`, required);
 };
 
 /** The operations that make `field` (none for a new one) what `draft` says. */

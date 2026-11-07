@@ -53,6 +53,8 @@ const text = (name: string, required = false): DataModelField => ({
   type: { kind: "text", trim: false, min: null, max: null },
   required,
   code: "v.string()",
+  nullable: false,
+  defaultCode: null,
 });
 
 /** The notes table: a required title, and an optional status. */
@@ -520,6 +522,8 @@ describe("an App's data model, changed in its workspace", () => {
           type: { kind: "choice", values: ["open", "done"] },
           required: true,
           code: 'v.enum(["open", "done"])',
+          nullable: false,
+          defaultCode: null,
         };
         return {
           ok: true,
@@ -790,6 +794,8 @@ describe("an App's data model, changed in its workspace", () => {
       type: { kind: "person" },
       required: false,
       code: "v.person()",
+      nullable: false,
+      defaultCode: null,
     };
     const sent = await shown(
       withField(notesModel(), owner),
@@ -888,6 +894,63 @@ describe("an App's data model, changed in its workspace", () => {
       missing: true,
       made: [
         { op: "addIndex", table: "notes", name: "by_title", fields: ["title"] },
+      ],
+    });
+  });
+
+  it("keeps a field's default and null as its options change, and asks no value for an optional field", async () => {
+    const model = notesModel();
+    const score: DataModelField = {
+      id: "id-score",
+      name: "score",
+      type: { kind: "number", integer: false, min: null, max: null },
+      required: true,
+      code: "v.number().nullable()",
+      nullable: true,
+      defaultCode: ".default(0)",
+    };
+    const sent = await shown(withField(model, score), (operation, held) => {
+      if (operation.op === "changeField") {
+        return {
+          ok: true,
+          model: held,
+          // The notes it checks have no answer: an optional field needs none.
+          plan: {
+            ...nothingPlanned,
+            checks:
+              operation.field === "status"
+                ? [{ table: "notes", field: "status", answer: null }]
+                : [],
+          },
+        };
+      }
+      throw new Error(`Not asked for: ${operation.op}`);
+    });
+
+    await showFields();
+    await openField("score");
+    await type("Highest", "10");
+    await press(button("Save"));
+    await press(button("Make the change"));
+    await openField("status");
+    await type("Most characters", "100");
+    await press(button("Save"));
+    const blocked = button("Make the change")?.hasAttribute("disabled");
+    await press(button("Make the change"));
+
+    expect({
+      blocked,
+      made: sent
+        .filter(({ preview }) => !preview)
+        .flatMap(({ operation }) => operationsIn(operation))
+        .map((operation) =>
+          operation.op === "changeField" ? operation.type : operation.op
+        ),
+    }).toStrictEqual({
+      blocked: false,
+      made: [
+        "v.number().max(10).nullable().default(0)",
+        "v.string().max(100).optional()",
       ],
     });
   });

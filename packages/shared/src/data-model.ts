@@ -67,6 +67,13 @@ export interface DataModelField {
    * change of `required` keeps, so no constraint of code's is lost.
    */
   code: string;
+  /** Whether it holds null too (`.nullable()`), which `code` says. */
+  nullable: boolean;
+  /**
+   * What a record that leaves it out gets, as code says it
+   * (`.default(0)`); null for none. A change of its kind's options keeps it.
+   */
+  defaultCode: string | null;
 }
 
 /** A row rule, its field by name. */

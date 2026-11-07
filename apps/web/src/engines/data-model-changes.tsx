@@ -549,10 +549,13 @@ export const useModelChanges = ({
       ({ table, field, answer }) =>
         answer === null && table === target?.table && field === target.field
     );
-    const asks =
+    // A value is asked only for a field every record must hold: records
+    // that leave an optional one out, or no longer fit it, keep without.
+    const field =
       unanswered && target !== undefined
         ? fieldIn(previewed.model, target)
         : undefined;
+    const asks = field?.required === true ? field : undefined;
     if (asks === undefined && !operations.some(({ op }) => reviewed.has(op))) {
       return await apply(change);
     }

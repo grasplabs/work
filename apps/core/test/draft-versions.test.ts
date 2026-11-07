@@ -144,7 +144,11 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       changes: Record<string, string>
     ): Promise<void> => {
       const run = await openTestRun(stub, chatId, turnId);
-      if (!(await stub.saveDraft(chatId, app, 1, changes, [], revision, run))) {
+      if (
+        !(await stub.saveDraft(chatId, app, 1, changes, [], revision, {
+          runId: run,
+        }))
+      ) {
         throw new Error("The draft wasn't written");
       }
       revision += 1;
@@ -268,7 +272,7 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
         { "src/routes/index.tsx": desk(marker) },
         [],
         at,
-        run
+        { runId: run }
       );
     }
     const versions = await builder.api.chats.draftVersions(chatId, app);
