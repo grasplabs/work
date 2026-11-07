@@ -3,9 +3,9 @@
  * (src/rpc-param-names.gen.ts), by its class, then the method: what a
  * staff member's view is audited by (src/staff-audit.ts, `namedBy`), which
  * reads an ID only from a parameter named as one. Read from their source
- * with Babel's parser, as the minified bundle renames every parameter, so
- * the function's own source can't say them at run time. Core's `typegen`
- * runs it, and CI refuses the file when it is stale.
+ * with oxc's parser (oxc-parser), as the minified bundle renames every
+ * parameter, so the function's own source can't say them at run time.
+ * Core's `typegen` runs it, and CI refuses the file when it is stale.
  *
  * A target is a class that extends `CoreRpcTarget` (src/rpc-target.ts), or
  * a class that extends one. Its methods are the ones its prototype holds,
@@ -18,9 +18,14 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { parse } from "@babel/parser";
-import { traverseFast } from "@babel/types";
-import type { Node } from "@babel/types";
+import { parseSync, Visitor } from "oxc-parser";
+import type {
+  BindingPattern,
+  Class,
+  ClassElement,
+  MethodDefinition,
+  ParamPattern,
+} from "oxc-parser";
 
 const source = path.join(import.meta.dirname, "src");
 const generatedFile = path.join(source, "rpc-param-names.gen.ts");
@@ -50,7 +55,7 @@ const sourceFiles = (): string[] =>
     .toSorted();
 
 /** A parameter's name: its identifier, or `input` for one destructured. */
-const paramName = (param: Node): string => {
+const paramName = (param: ParamPattern | BindingPattern): string => {
   if (param.type === "Identifier") {
     return param.name;
   }
@@ -63,20 +68,33 @@ const paramName = (param: Node): string => {
   return "input";
 };
 
+/** The name of a method's key: an identifier or a string, never computed or private. */
+const keyName = (member: MethodDefinition): string | undefined => {
+  const { key } = member;
+  if (key.type === "Identifier") {
+    return key.name;
+  }
+  return key.type === "Literal" && typeof key.value === "string"
+    ? key.value
+    : undefined;
+};
+
 /** The prototype methods `body` declares, each with its parameters' names. */
-const methodsOf = (body: readonly Node[]): Map<string, string[]> => {
+const methodsOf = (body: readonly ClassElement[]): Map<string, string[]> => {
   const methods = new Map<string, string[]>();
   for (const member of body) {
+    // A method with a body: not an overload's signature, which has none.
     if (
-      member.type === "ClassMethod" &&
+      member.type === "MethodDefinition" &&
       member.kind === "method" &&
       !member.static &&
       !member.computed &&
-      (member.key.type === "Identifier" || member.key.type === "StringLiteral")
+      member.value.type !== "TSEmptyBodyFunctionExpression"
     ) {
-      const name =
-        member.key.type === "Identifier" ? member.key.name : member.key.value;
-      methods.set(name, member.params.map(paramName));
+      const name = keyName(member);
+      if (name !== undefined) {
+        methods.set(name, member.value.params.map(paramName));
+      }
     }
   }
   return methods;
@@ -84,17 +102,14 @@ const methodsOf = (body: readonly Node[]): Map<string, string[]> => {
 
 /** Every named class `file` declares, at any depth. */
 const classesIn = (file: string): Map<string, DeclaredClass> => {
-  const ast = parse(readFileSync(file, "utf-8"), {
-    sourceType: "module",
-    plugins: ["typescript"],
-  });
+  const { program, errors } = parseSync(file, readFileSync(file, "utf-8"));
+  const [error] = errors;
+  if (error !== undefined) {
+    throw new Error(`${file} doesn't parse: ${error.message}`);
+  }
   const found = new Map<string, DeclaredClass>();
-  traverseFast(ast.program, (node) => {
-    if (
-      (node.type === "ClassDeclaration" || node.type === "ClassExpression") &&
-      node.id !== null &&
-      node.id !== undefined
-    ) {
+  const declared = (node: Class): void => {
+    if (node.id !== null) {
       found.set(node.id.name, {
         file,
         extendsName:
@@ -102,7 +117,11 @@ const classesIn = (file: string): Map<string, DeclaredClass> => {
         methods: methodsOf(node.body.body),
       });
     }
-  });
+  };
+  new Visitor({
+    ClassDeclaration: declared,
+    ClassExpression: declared,
+  }).visit(program);
   return found;
 };
 

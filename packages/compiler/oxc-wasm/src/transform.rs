@@ -27,7 +27,7 @@ use oxc::{
 use oxc_react_compiler::{CompileResult, CompilerTarget, PanicThreshold, PluginOptions};
 use serde::{Deserialize, Serialize};
 
-use crate::places;
+use crate::tools::places;
 
 /// How a file is transformed, as src/oxc.ts asks.
 #[derive(Deserialize)]

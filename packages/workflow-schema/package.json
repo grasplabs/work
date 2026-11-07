@@ -22,8 +22,6 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@babel/parser": "catalog:",
-    "@babel/types": "catalog:",
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "catalog:"
   }

@@ -3,5 +3,7 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["*.ts", "scripts"]
+  // The SDK's loader of oxc-parse.wasm in Node.js too, which the SDK's
+  // own tsconfig.json checks without Node's types.
+  "include": ["*.ts", "scripts", "packages/sdk/src/oxc-parse-module.node.ts"]
 }

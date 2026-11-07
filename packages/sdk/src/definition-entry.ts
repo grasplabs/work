@@ -1,7 +1,7 @@
 // `@grasp-os/sdk/definition`: an App's definition (definition.ts), read,
 // changed by its operations, and the config and schema generated from it.
 // Only Grasp writes one: core's definition tools and builds, and the seed.
-// Apart from `host`, as Babel parses and prints it, which nothing a page
+// Apart from `host`, as oxc parses it (oxc-parse.ts), which nothing a page
 // or the sandbox loads needs.
 export {
   definitionManifest,

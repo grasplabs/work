@@ -1,14 +1,20 @@
-import { parseExpression } from "@babel/parser";
-import type { Node } from "@babel/types";
+import type {
+  CallExpression,
+  Expression,
+  ObjectExpression,
+} from "@oxc-project/types";
 
+import { literalKey, literalValue } from "./expression-lowering.ts";
+import { parseExpression } from "./oxc-parse.ts";
 import { unsafeKeys } from "./value-descriptor.ts";
 
 // What a definition tool is handed for a type or a permission: the
 // expression an author would write in code, `v.string().max(200)` or
 // `permission.connection("mail", { … })`, which the generated files show
-// back. It is read with Babel's parser and evaluated over the SDK's own
-// builders, which check it exactly as they check code, so a type the
-// tools take is one code could declare, and nothing else.
+// back. It is read with oxc's parser (oxc-parse.ts), as TypeScript, and
+// evaluated over the SDK's own builders, which check it exactly as they
+// check code, so a type the tools take is one code could declare, and
+// nothing else.
 //
 // Only what such an expression holds is evaluated: calls of a builder's
 // own methods (never a prototype's), and literals, arrays and objects as
@@ -28,32 +34,28 @@ const refuse = (message: string): never => {
   throw new ExpressionError(message);
 };
 
+/** Why an expression of anything but what is evaluated is refused. */
+const notCode =
+  "Write it as code would: a builder's calls, with literals, arrays and objects as their arguments.";
+
 /** The longest expression read, in characters. */
 export const expressionMaxLength = 20_000;
 
-/** The name of a non-computed key or member, if it has one. */
-const keyName = (node: Node): string | undefined => {
-  if (node.type === "Identifier") {
-    return node.name;
-  }
-  if (node.type === "StringLiteral") {
-    return node.value;
-  }
-  return node.type === "NumericLiteral" ? String(node.value) : undefined;
-};
-
 /** An object literal's value, its keys defined, never assigned. */
 const objectOf = (
-  node: Extract<Node, { type: "ObjectExpression" }>,
+  node: ObjectExpression,
   roots: Readonly<Record<string, unknown>>
 ): Record<string, unknown> => {
   const object: Record<string, unknown> = {};
   for (const property of node.properties) {
     const key =
-      property.type === "ObjectProperty" && !property.computed
-        ? keyName(property.key)
+      property.type === "Property" &&
+      property.kind === "init" &&
+      !property.method &&
+      !property.computed
+        ? literalKey(property.key)
         : undefined;
-    if (property.type !== "ObjectProperty" || key === undefined) {
+    if (property.type !== "Property" || key === undefined) {
       return refuse("An object here holds plain `key: value` entries only.");
     }
     if (unsafeKeys.has(key)) {
@@ -73,19 +75,44 @@ const objectOf = (
   return object;
 };
 
+/** Whether `node` is a chain of reads and calls with a `?.` in it. */
+const isOptionalChain = (node: Expression): boolean => {
+  let link = node;
+  for (;;) {
+    if (link.type === "MemberExpression") {
+      if (link.optional) {
+        return true;
+      }
+      link = link.object;
+    } else if (link.type === "CallExpression") {
+      if (link.optional) {
+        return true;
+      }
+      link = link.callee;
+    } else {
+      return false;
+    }
+  }
+};
+
 /** A call of a builder's own method, with its arguments evaluated. */
 const callOf = (
-  node: Extract<Node, { type: "CallExpression" }>,
+  node: CallExpression,
   roots: Readonly<Record<string, unknown>>
 ): unknown => {
+  // A builder's method is always there: `?.` is no code a type is written in.
+  if (isOptionalChain(node)) {
+    return refuse(notCode);
+  }
   const { callee } = node;
-  const name =
-    callee.type === "MemberExpression" && !callee.computed
-      ? keyName(callee.property)
-      : undefined;
-  if (callee.type !== "MemberExpression" || name === undefined) {
+  if (
+    callee.type !== "MemberExpression" ||
+    callee.computed ||
+    callee.property.type !== "Identifier"
+  ) {
     return refuse("Only a builder's methods are called here, as `v.string()`.");
   }
+  const { name } = callee.property;
   // oxlint-disable-next-line no-use-before-define -- the evaluator is recursive
   const target = evaluate(callee.object, roots);
   const method: unknown =
@@ -107,18 +134,14 @@ const callOf = (
 
 /** What `node` evaluates to over `roots` (see the header). */
 const evaluate = (
-  node: Node,
+  node: Expression,
   roots: Readonly<Record<string, unknown>>
 ): unknown => {
   // oxlint-disable-next-line typescript/switch-exhaustiveness-check -- every other node is refused
   switch (node.type) {
-    case "StringLiteral":
-    case "NumericLiteral":
-    case "BooleanLiteral": {
-      return node.value;
-    }
-    case "NullLiteral": {
-      return null;
+    case "Literal": {
+      const value = literalValue(node);
+      return value === undefined ? refuse(notCode) : value;
     }
     case "TemplateLiteral": {
       if (node.expressions.length > 0) {
@@ -160,9 +183,7 @@ const evaluate = (
       return callOf(node, roots);
     }
     default: {
-      return refuse(
-        "Write it as code would: a builder's calls, with literals, arrays and objects as their arguments."
-      );
+      return refuse(notCode);
     }
   }
 };
@@ -181,13 +202,9 @@ export const evaluateExpression = (
       `An expression is text of at most ${expressionMaxLength} characters.`
     );
   }
-  let node: Node;
-  try {
-    node = parseExpression(source, { plugins: ["typescript"] });
-  } catch (error) {
-    return refuse(
-      `That isn't one expression: ${error instanceof Error ? error.message : String(error)}`
-    );
+  const parsed = parseExpression(source, "ts");
+  if (!parsed.ok) {
+    return refuse(`That isn't one expression: ${parsed.message}`);
   }
-  return evaluate(node, roots);
+  return evaluate(parsed.node, roots);
 };

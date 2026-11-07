@@ -1,7 +1,8 @@
 # Builds oxc.wasm from the checkout (packages/compiler/oxc-wasm/build.sh)
 # into $RUNNER_TEMP/oxc.wasm, and compares it with the release pin.json
 # names when that exists: the build is reproducible, so a release that
-# isn't this build's bytes fails it. With `check`, as CI's check of a pull
+# isn't this build's bytes fails it. The parser build it makes beside it
+# must be the committed packages/sdk/src/oxc-parse.wasm, always. With `check`, as CI's check of a pull
 # request that changes the glue: the release must exist, and its digest,
 # pin.json's sha256 and this build must be one, so a pin is proven before
 # it merges, whoever published it. Needs no token beyond the job's
@@ -65,10 +66,22 @@ runs:
           echo "sha256=${digest#sha256:}" >> "$GITHUB_OUTPUT"
         fi
     - shell: bash
-      run: packages/compiler/oxc-wasm/build.sh "$RUNNER_TEMP/oxc.wasm"
+      run: packages/compiler/oxc-wasm/build.sh "$RUNNER_TEMP/oxc.wasm" "$RUNNER_TEMP/oxc-parse.wasm"
     - id: built
       shell: bash
       run: echo "sha256=$(sha256sum "$RUNNER_TEMP/oxc.wasm" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+    # The parser build is committed (packages/sdk/src/oxc-parse.wasm), not
+    # released: this build of the same glue must be it, byte for byte.
+    - shell: bash
+      run: |
+        set -euo pipefail
+        committed=$(sha256sum packages/sdk/src/oxc-parse.wasm | cut -d ' ' -f 1)
+        built=$(sha256sum "$RUNNER_TEMP/oxc-parse.wasm" | cut -d ' ' -f 1)
+        if [ "$committed" != "$built" ]; then
+          echo "::error::packages/sdk/src/oxc-parse.wasm has SHA-256 $committed, but this build of its glue has $built: commit the build (packages/compiler/oxc-wasm/build.sh)"
+          exit 1
+        fi
+        echo "packages/sdk/src/oxc-parse.wasm is this build, byte for byte: SHA-256 \`$built\`." >> "$GITHUB_STEP_SUMMARY"
     - shell: bash
       env:
         CHECK: ${{ inputs.check }}
