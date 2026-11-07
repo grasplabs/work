@@ -531,6 +531,35 @@ export const Tone = ({ on }: { on: boolean }) => (
     ]);
   });
 
+  it("reports a thousand unknown classes within a build's time, suggesting for the first few", async () => {
+    const classes = Array.from(
+      { length: 1000 },
+      (_, index) => `zz-unknown-${index}`
+    );
+    const started = performance.now();
+    const checked = await classChecks(
+      app({
+        "src/components/many.tsx": `export const Many = () => <p className="${classes.join(" ")}">Many</p>;\n`,
+      })
+    );
+    const ms = performance.now() - started;
+
+    expect({
+      ok: checked.ok,
+      unknown: checked.diagnostics.filter(
+        ({ rule }) => rule === "design/no-unknown-classes"
+      ).length,
+      // Each look for the nearest reads every class Tailwind knows: a
+      // build looks for 20 at most.
+      lookedFor:
+        checked.diagnostics.filter(({ message }) =>
+          message.includes("Fix the spelling")
+        ).length >= 980,
+      // A thousand looks took minutes; the call's CPU time stopped it.
+      fast: ms < 30_000,
+    }).toStrictEqual({ ok: false, unknown: 1000, lookedFor: true, fast: true });
+  });
+
   it("fails a raw colour and an arbitrary value, naming the theme's colours and the scale", async () => {
     const checked = await classChecks(
       app(

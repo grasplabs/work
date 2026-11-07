@@ -467,7 +467,7 @@ const variantsOf = (name: string): [string, string] => {
 };
 
 /** The known class nearest `name`, close enough to be a slip, if there is one. */
-const nearest = (design: DesignSystem, name: string): string | undefined => {
+const nearestOf = (design: DesignSystem, name: string): string | undefined => {
   const [variants, utility] = variantsOf(name);
   let best: string | undefined;
   let bestDistance = Math.max(2, Math.floor(utility.length / 4)) + 1;
@@ -482,6 +482,41 @@ const nearest = (design: DesignSystem, name: string): string | undefined => {
     }
   }
   return best === undefined ? undefined : `${variants}${best}`;
+};
+
+/**
+ * How many unknown classes one build looks for the nearest known class
+ * of: each look reads every class Tailwind knows (some 23,000), so past
+ * these the rest are refused without a suggestion, and a page of many
+ * stays within the call's CPU time.
+ */
+const suggestedPerBuild = 20;
+
+/** The nearest known class of each unknown one looked for, kept for the isolate's later builds. */
+const suggestions = new Map<string, string | undefined>();
+
+/**
+ * The nearest known class of `name` (`nearestOf`), kept by name; none once
+ * `looked` (this build's names looked for) holds `suggestedPerBuild`.
+ */
+const nearest = (
+  design: DesignSystem,
+  name: string,
+  looked: Set<string>
+): string | undefined => {
+  if (suggestions.has(name)) {
+    return suggestions.get(name);
+  }
+  if (looked.size >= suggestedPerBuild) {
+    return undefined;
+  }
+  looked.add(name);
+  const found = nearestOf(design, name);
+  if (suggestions.size > 50_000) {
+    suggestions.clear();
+  }
+  suggestions.set(name, found);
+  return found;
 };
 
 /** How many of the theme's colours a message lists before a count. */
@@ -535,7 +570,8 @@ const problemsOf = (
   file: string,
   site: ClassSite,
   reading: Reading,
-  design: DesignSystem
+  design: DesignSystem,
+  looked: Set<string>
 ): Diagnostic[] => {
   const at = { file, line: site.line, column: site.column };
   const error = (rule: string, message: string, fix?: string): Diagnostic => ({
@@ -547,7 +583,7 @@ const problemsOf = (
   });
   const { name } = site;
   if (!reading.known) {
-    const suggestion = nearest(design, name);
+    const suggestion = nearest(design, name, looked);
     return [
       suggestion === undefined
         ? error(
@@ -600,16 +636,19 @@ const problemsOf = (
 /**
  * What the classes `sites` holds (one file's, `file`) break, each where
  * it is: read by Tailwind against the kit's theme, once per class.
+ * `looked` is the unknown classes this build looked for the nearest known
+ * class of (`suggestedPerBuild`), one set for all its files.
  */
 export const classProblems = async (
   file: string,
-  sites: readonly ClassSite[]
+  sites: readonly ClassSite[],
+  looked: Set<string>
 ): Promise<Diagnostic[]> => {
   if (sites.length === 0) {
     return [];
   }
   const design = await kitDesignSystem();
   return sites.flatMap((site) =>
-    problemsOf(file, site, readingOf(design, site.name), design)
+    problemsOf(file, site, readingOf(design, site.name), design, looked)
   );
 };
