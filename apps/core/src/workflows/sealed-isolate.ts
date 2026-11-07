@@ -679,7 +679,7 @@ export const loadSealedIsolate = <Attempt extends object = AttemptHost>(
           // Past its budget the isolate's call is dropped: it can't be
           // killed, and every step call it makes after is refused.
           return await Promise.race([
-            entrypoint.run(new BoundedRunHost(host, clock), start),
+            entrypoint.run(new BoundedRunHost(host, clock, over), start),
             clock.spent,
           ]);
         } finally {

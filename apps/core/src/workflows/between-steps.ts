@@ -182,10 +182,24 @@ export const betweenSteps = (budgetMs: number): BetweenSteps => {
   };
 };
 
+/** What a step call answers once its activation is over (`BoundedRunHost`). */
+const activationOver: Settled<never> = {
+  ok: false,
+  error: { name: "Error", message: "The run's activation is over." },
+};
+
 /**
  * `host` as a run's isolate calls it, each step call held to the
  * activation's clock of its time between steps (between-steps.ts): out,
  * its call stops the clock; once the budget is spent, none starts.
+ *
+ * With `over` (the activation's, sealed-isolate.ts), every call still out
+ * once the activation is over, and every call after, answers that it is
+ * over: a wait suspends the run by never settling its call, which would
+ * leave the isolate's request, and the isolate with it, open for as long
+ * as the process lives. Answered, the code ends and the isolate goes,
+ * as the session ends on-prem. Nothing of it acts: the activation's
+ * result was taken, and the host refuses its calls.
  */
 export class BoundedRunHost<Attempt extends object>
   extends RpcTarget
@@ -193,11 +207,38 @@ export class BoundedRunHost<Attempt extends object>
 {
   readonly #host: IsolateHostCalls<Attempt>;
   readonly #clock: BetweenSteps;
+  readonly #over: AbortSignal | undefined;
 
-  constructor(host: IsolateHostCalls<Attempt>, clock: BetweenSteps) {
+  constructor(
+    host: IsolateHostCalls<Attempt>,
+    clock: BetweenSteps,
+    over?: AbortSignal
+  ) {
     super();
     this.#host = host;
     this.#clock = clock;
+    this.#over = over;
+  }
+
+  /** `call` within the clock, answered as over once the activation is. */
+  async #bounded<T>(call: () => Promise<Settled<T>>): Promise<Settled<T>> {
+    const over = this.#over;
+    if (over === undefined) {
+      return await this.#clock.around(call);
+    }
+    if (over.aborted) {
+      return activationOver;
+    }
+    const ended = Promise.withResolvers<Settled<T>>();
+    const end = (): void => {
+      ended.resolve(activationOver);
+    };
+    over.addEventListener("abort", end, { once: true });
+    try {
+      return await Promise.race([this.#clock.around(call), ended.promise]);
+    } finally {
+      over.removeEventListener("abort", end);
+    }
   }
 
   async do(
@@ -206,7 +247,7 @@ export class BoundedRunHost<Attempt extends object>
     fn: (attempt: Attempt) => Promise<unknown>,
     retry?: (error: Json) => Promise<unknown>
   ): Promise<Settled<unknown>> {
-    return await this.#clock.around(
+    return await this.#bounded(
       async () => await this.#host.do(name, options, fn, retry)
     );
   }
@@ -223,13 +264,13 @@ export class BoundedRunHost<Attempt extends object>
         error: { name: "Error", message: "This run has no catches." },
       };
     }
-    return await this.#clock.around(
+    return await this.#bounded(
       async () => await caught.call(this.#host, name, options, fn)
     );
   }
 
   async sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
-    return await this.#clock.around(
+    return await this.#bounded(
       async () => await this.#host.sleep(name, duration)
     );
   }
@@ -242,7 +283,7 @@ export class BoundedRunHost<Attempt extends object>
         error: { name: "Error", message: "This run has no sleep until." },
       };
     }
-    return await this.#clock.around(
+    return await this.#bounded(
       async () => await sleepUntil.call(this.#host, name, until)
     );
   }
@@ -255,16 +296,14 @@ export class BoundedRunHost<Attempt extends object>
         error: { name: "Error", message: "This run has no listen tasks." },
       };
     }
-    return await this.#clock.around(
-      async () => await listen.call(this.#host, name)
-    );
+    return await this.#bounded(async () => await listen.call(this.#host, name));
   }
 
   async waitForDecision(
     name: unknown,
     options: unknown
   ): Promise<Settled<unknown>> {
-    return await this.#clock.around(
+    return await this.#bounded(
       async () => await this.#host.waitForDecision(name, options)
     );
   }

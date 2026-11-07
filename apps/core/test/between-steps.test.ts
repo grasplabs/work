@@ -7,7 +7,10 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { betweenSteps } from "../src/workflows/between-steps.ts";
+import {
+  BoundedRunHost,
+  betweenSteps,
+} from "../src/workflows/between-steps.ts";
 
 // The clock of a run's time between steps (between-steps.ts), as pure
 // logic: the clock and its timer are faked, so a step call can land after
@@ -94,5 +97,53 @@ describe("a run's clock of its time between steps", () => {
       call: await clock.around(async () => await Promise.resolve("ran")),
       over: clock.over.aborted,
     }).toStrictEqual({ call: "ran", over: false });
+  });
+});
+
+// A wait suspends a run's activation by never settling its call on the
+// host. Once the activation is over, the isolate's call must end anyway,
+// or its isolate stays open for as long as the process runs, one more for
+// each wait: plain workerd ran out of memory that way.
+describe("a run's step calls once its activation is over", () => {
+  it("answers the call a wait suspended, and every call after, as over, never reaching the host again", async () => {
+    let reached = 0;
+    const suspended = async (): Promise<never> => {
+      reached += 1;
+      return await Promise.withResolvers<never>().promise;
+    };
+    const host = {
+      do: suspended,
+      sleep: suspended,
+      waitForDecision: suspended,
+    };
+    const activation = new AbortController();
+    const bounded = new BoundedRunHost(
+      host,
+      betweenSteps(budgetMs),
+      activation.signal
+    );
+    const waiting = bounded.sleep("pause", "1 hour");
+    const before = await settledOf(waiting);
+    activation.abort();
+    const over = {
+      ok: false,
+      error: { name: "Error", message: "The run's activation is over." },
+    };
+
+    expect({
+      before,
+      waiting: await waiting,
+      after: await bounded.do(
+        "send",
+        {},
+        async () => await Promise.resolve(null)
+      ),
+      reached,
+    }).toStrictEqual({
+      before: "pending",
+      waiting: over,
+      after: over,
+      reached: 1,
+    });
   });
 });
