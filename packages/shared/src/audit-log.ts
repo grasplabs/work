@@ -164,6 +164,9 @@ const typeRules: readonly {
   // is no longer recorded, but past records stay decisions.
   { action: "app.artifact.refused", type: "action" },
   { action: "app.artifact", type: "decision" },
+  // Events already in the log from the removed portable host; nothing writes them now.
+  { action: "app.token.issued", type: "permission" },
+  { action: "app.portable.called", type: "action" },
   // An App's webhooks (core's src/app-webhooks.ts): an admin letting its
   // data go to one's URL, a delivery given up, and connect sending one
   // (`webhook.call`); adding and removing one are the App's configuration.

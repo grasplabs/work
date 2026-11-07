@@ -6,6 +6,14 @@ const typeOf = (action: string, detail = {}) =>
   auditEventTypeOf({ action, detail });
 
 describe("audit event types", () => {
+  it("still files the removed portable host's past events: a token issued as granted access, its calls as actions", () => {
+    expect(
+      ["app.token.issued", "app.portable.called"].map((action) =>
+        typeOf(action)
+      )
+    ).toStrictEqual(["permission", "action"]);
+  });
+
   it("files the log's own events by what they do", () => {
     expect(
       ["audit.searched", "audit.exported", "audit.verified"].map((action) =>
