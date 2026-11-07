@@ -1705,9 +1705,7 @@ const buildDeclaration = `/**
  * an App an hour, a title of 120 characters and a body of 1000. A
  * mutation's \`ctx.notify(event, ...)\` is a workflow run's event, not
  * this. A visitor's call can't tell anyone. For the rest, read Grasp's
- * reference (\`readFile\` without \`app\`): the SDK's sources, which
- * every write type-checks against (\`@grasp-os/sdk/src/server.ts\`), and a
- * complete App (\`blueprints/board-page/\`).
+ * docs (\`searchDocs\`, \`readDocs\`).
  *
  * An outside API is reached only as an HTTP connection an admin approved
  * (\`env.connections.available()\`, \`forAppsOnly\`: one origin, the paths

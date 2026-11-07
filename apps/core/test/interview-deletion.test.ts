@@ -10,7 +10,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { onboardingStore } from "../src/onboarding/store.ts";
+import { Onboarding, onboardingStore } from "../src/onboarding/store.ts";
 import { platformAi } from "../src/platform-ai.ts";
 import { keepLine, keptLine, sweepSpokenLines } from "../src/speech-cache.ts";
 import type { SpokenKey } from "../src/speech-cache.ts";
@@ -1238,6 +1238,11 @@ describe(
 );
 
 describe("the alarm, while something else fails", { timeout: 180_000 }, () => {
+  // The test runs the alarm itself: withdrawing sets the store's own half
+  // a second on, and on a slow runner it took the records out before the
+  // test looked whether they were still there.
+  beforeEach(holdAlarm);
+
   it("still takes what rests on a withdrawn interview out of the brain first, and sets itself again (T5)", async () => {
     const ids = await team();
     const said = sentinels();
@@ -1267,7 +1272,8 @@ describe("the alarm, while something else fails", { timeout: 180_000 }, () => {
           .mockRejectedValue(new Error("Releasing failed."));
         let threw = false;
         try {
-          await instance.alarm();
+          // The store's alarm as it runs, while its timer's stays held.
+          await Onboarding.prototype.alarm.call(instance);
         } catch {
           threw = true;
         } finally {

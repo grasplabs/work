@@ -9892,6 +9892,10 @@ msgstr "Lesen"
 msgid "Read {path}"
 msgstr "{path} gelesen"
 
+#: src/chat/thread.tsx
+msgid "Read {path} in the docs"
+msgstr "{path} in der Doku gelesen"
+
 #: src/activity/audit-words.ts
 msgid "Read a knowledge document"
 msgstr "Ein Wissensdokument gelesen"
@@ -9985,6 +9989,10 @@ msgstr "Lese {name}"
 #: src/chat/thread.tsx
 msgid "Reading {path}"
 msgstr "{path} wird gelesen"
+
+#: src/chat/thread.tsx
+msgid "Reading {path} in the docs"
+msgstr "{path} in der Doku wird gelesen"
 
 #: src/interview/words.ts
 msgid "Reading it back"
@@ -11101,10 +11109,6 @@ msgstr "Durchsuchen Sie Ihre Chats und öffnen Sie einen."
 msgid "Searched above. After this, events move to the archive."
 msgstr "Oben durchsucht. Danach wandern Ereignisse ins Archiv."
 
-#: src/chat/thread.tsx
-msgid "Searched Grasp's reference for {text}"
-msgstr "In der Referenz von Grasp nach {text} gesucht"
-
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
 msgstr "Im Wissen gesucht"
@@ -11122,8 +11126,8 @@ msgid "Searched the brain for {query}"
 msgstr "Im Gehirn nach {query} gesucht"
 
 #: src/chat/thread.tsx
-msgid "Searching Grasp's reference for {text}"
-msgstr "Suche nach {text} in der Referenz von Grasp"
+msgid "Searched the docs for {query}"
+msgstr "In der Doku nach {query} gesucht"
 
 #: src/chat/thread.tsx
 msgid "Searching the App's files for {text}"
@@ -11132,6 +11136,10 @@ msgstr "Suche nach {text} in den Dateien der App"
 #: src/chat/thread.tsx
 msgid "Searching the brain for {query}"
 msgstr "Suche nach {query} im Gehirn"
+
+#: src/chat/thread.tsx
+msgid "Searching the docs for {query}"
+msgstr "Suche nach {query} in der Doku"
 
 #: src/connections/http-connections.tsx
 #: src/shown-once.tsx

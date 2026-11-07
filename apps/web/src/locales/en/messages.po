@@ -9892,6 +9892,10 @@ msgstr "Read"
 msgid "Read {path}"
 msgstr "Read {path}"
 
+#: src/chat/thread.tsx
+msgid "Read {path} in the docs"
+msgstr "Read {path} in the docs"
+
 #: src/activity/audit-words.ts
 msgid "Read a knowledge document"
 msgstr "Read a knowledge document"
@@ -9985,6 +9989,10 @@ msgstr "Reading {name}"
 #: src/chat/thread.tsx
 msgid "Reading {path}"
 msgstr "Reading {path}"
+
+#: src/chat/thread.tsx
+msgid "Reading {path} in the docs"
+msgstr "Reading {path} in the docs"
 
 #: src/interview/words.ts
 msgid "Reading it back"
@@ -11101,10 +11109,6 @@ msgstr "Search your chats, and open one."
 msgid "Searched above. After this, events move to the archive."
 msgstr "Searched above. After this, events move to the archive."
 
-#: src/chat/thread.tsx
-msgid "Searched Grasp's reference for {text}"
-msgstr "Searched Grasp's reference for {text}"
-
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
 msgstr "Searched knowledge"
@@ -11122,8 +11126,8 @@ msgid "Searched the brain for {query}"
 msgstr "Searched the brain for {query}"
 
 #: src/chat/thread.tsx
-msgid "Searching Grasp's reference for {text}"
-msgstr "Searching Grasp's reference for {text}"
+msgid "Searched the docs for {query}"
+msgstr "Searched the docs for {query}"
 
 #: src/chat/thread.tsx
 msgid "Searching the App's files for {text}"
@@ -11132,6 +11136,10 @@ msgstr "Searching the App's files for {text}"
 #: src/chat/thread.tsx
 msgid "Searching the brain for {query}"
 msgstr "Searching the brain for {query}"
+
+#: src/chat/thread.tsx
+msgid "Searching the docs for {query}"
+msgstr "Searching the docs for {query}"
 
 #: src/connections/http-connections.tsx
 #: src/shown-once.tsx

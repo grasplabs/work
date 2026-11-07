@@ -74,6 +74,7 @@ import {
   permissionErrors,
 } from "@grasp-os/shared/permissions";
 import { redact } from "@grasp-os/shared/redact";
+import { canBuild } from "@grasp-os/shared/roles";
 import { customWidgetsMax } from "@grasp-os/shared/widgets";
 import type { CustomWidgetId, WidgetSpec } from "@grasp-os/shared/widgets";
 import { DurableObject } from "cloudflare:workers";
@@ -2009,7 +2010,18 @@ export class Workspace extends DurableObject<Env> {
     const channel = via === "web" ? undefined : await channelText();
     // An App's own chat: the App its builds change.
     const app = this.chatApp(work.chatId);
-    return { memory, skills, channel, ...(app === null ? {} : { app }) };
+    // Only who builds reads Grasp's docs, in their own chat: thousands of
+    // tokens in every request, of no use to anyone else. Building, an App
+    // included, needs a role that builds (app-access.ts).
+    const role = await memberRole(this.env.DB, scope.personId);
+    const builds = !shared && role !== undefined && canBuild(role);
+    return {
+      memory,
+      skills,
+      channel,
+      builds,
+      ...(app === null ? {} : { app }),
+    };
   }
 
   /**

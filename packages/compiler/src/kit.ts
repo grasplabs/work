@@ -78,12 +78,6 @@ export const compilerAssets = {
   oxcWasm: "oxc.wasm",
   /** esbuild's WebAssembly, which the package builder runs. */
   esbuildWasm: "esbuild.wasm",
-  /**
-   * The SDK's and the UI kit's sources, of which the type check's chunks
-   * are made (`types`), by `referencePath`: what a chat's agent reads to
-   * write App code that checks (`referenceFiles`).
-   */
-  reference: "reference.json",
   /** The type checker's module (src/checker.ts). */
   checker: "checker.js",
   /**
@@ -95,30 +89,6 @@ export const compilerAssets = {
   /** tsrs's WebAssembly, the type checker's (`@tsrs/wasm`). */
   tsrsWasm: "tsrs.wasm",
 } as const;
-
-/** The packages of the kit's sources the agent's reference holds. */
-const referencePackages = [
-  "/node_modules/@grasp-os/sdk/src/",
-  "/node_modules/@grasp-os/ui/src/",
-];
-
-/**
- * The SDK's and the UI kit's sources among the kit's (build.ts
- * `collectTypes`), by their path in the agent's reference:
- * `@grasp-os/sdk/src/app.ts` for `/node_modules/@grasp-os/sdk/src/app.ts`.
- * The very text the check's type chunks are made of, in the same build,
- * so the reference can't drift from the check.
- */
-export const referenceOf = (
-  types: Readonly<Record<string, string>>
-): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(types)
-      .filter(([path]) =>
-        referencePackages.some((folder) => path.startsWith(folder))
-      )
-      .map(([path, text]) => [path.slice("/node_modules/".length), text])
-  );
 
 /**
  * The lock a build of the compiler into the assets directory `assets`

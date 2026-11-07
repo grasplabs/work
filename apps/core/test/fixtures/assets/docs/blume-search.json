@@ -1,0 +1,46 @@
+[
+  {
+    "breadcrumb": [],
+    "content": "Grasp runs Apps and workflows in its own deployment.",
+    "contentType": "doc",
+    "description": "Build Apps and workflows that run inside your company's Grasp.",
+    "locale": "",
+    "route": "/",
+    "section": "Docs",
+    "title": "Introduction",
+    "version": ""
+  },
+  {
+    "breadcrumb": ["Guides"],
+    "content": "A Page reads with useQuery.",
+    "contentType": "doc",
+    "description": "React components people open in Grasp.",
+    "locale": "",
+    "route": "/guides/pages",
+    "section": "Guides",
+    "title": "Pages",
+    "version": ""
+  },
+  {
+    "breadcrumb": ["Guides"],
+    "content": "A page the index lists whose Markdown the build never wrote.",
+    "contentType": "doc",
+    "description": "",
+    "locale": "",
+    "route": "/guides/unwritten",
+    "section": "Guides",
+    "title": "Unwritten",
+    "version": ""
+  },
+  {
+    "breadcrumb": ["Reference"],
+    "content": "Functions query Declares a query: a server function that reads.",
+    "contentType": "doc",
+    "description": "",
+    "locale": "",
+    "route": "/reference/server",
+    "section": "Reference",
+    "title": "@grasp-os/sdk/server",
+    "version": ""
+  }
+]

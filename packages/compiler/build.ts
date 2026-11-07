@@ -64,7 +64,6 @@ import {
   kitStylesheet,
   previewRefresh,
   previewRuntime,
-  referenceOf,
   routerSpecifier,
   pageRuntime,
   pageSdk,
@@ -800,8 +799,7 @@ const kitPathOf = (real: string): string | undefined => {
  * App code may import, with the options the isolate checks with, and
  * every file it reads is kept. Packages are flattened into
  * `/node_modules/<name>`, the platform's own as their sources: what the
- * agent's reference holds, and what the type chunks are made of
- * (`typeChunks`). Two versions of one package would clash, and fail the
+ * type chunks are made of (`typeChunks`). Two versions of one package would clash, and fail the
  * build. TypeScript's own libs are tsrs's, never read from disk.
  */
 const collectTypes = (specifiers: string[]): Record<string, string> => {
@@ -1886,8 +1884,6 @@ const buildAppCompiler = async (
   };
   const kitJson = JSON.stringify(kit);
   const typesJson = JSON.stringify(await typeChunks(typeSources, typed));
-  // The sources the type chunks are made of, which the agent reads.
-  const referenceJson = JSON.stringify(referenceOf(typeSources));
   const compiler = await buildCompiler();
   const ultracite = await buildUltracite(designKit);
   const packageBuilder = await buildPackageBuilder();
@@ -1918,13 +1914,10 @@ const buildAppCompiler = async (
   );
   const serverSdkModules = modulesOf(await buildSdkModules(serverSdkImports));
   // Everything a build depends on: the compiler, what it knows of the kit,
-  // and the kit's and the SDK's modules the App's modules import; and the
-  // agent's reference, which a change to the sources' comments alone
-  // changes.
+  // and the kit's and the SDK's modules the App's modules import.
   const version = createHash("sha256")
     .update(compiler)
     .update(kitJson)
-    .update(referenceJson)
     .update(kitModules.version)
     .update(kitPreviewModules.version)
     .update(workflowSdkModules.version)
@@ -1949,7 +1942,6 @@ const buildAppCompiler = async (
     [compilerAssets.serverSdkModules]: JSON.stringify(serverSdkModules),
     [compilerAssets.packageBuilder]: packageBuilder,
     [compilerAssets.esbuildWasm]: esbuildWasm,
-    [compilerAssets.reference]: referenceJson,
     [compilerAssets.checker]: checker,
     [compilerAssets.types]: typesJson,
     [compilerAssets.tsrsWasm]: tsrsWasm,

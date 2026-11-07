@@ -15,11 +15,9 @@ import { signedInApi, unique } from "./sign-in.ts";
 
 // An App's own chat building the App from nothing, as a model that knows
 // only what the chat gives it would: it reads how an App is written in
-// Grasp's reference (the SDK's sources the check type-checks against, and
-// a built-in blueprint as a working example), defines the board's table
-// with the definition tools, writes its code, and repairs it by what the
+// the release's docs (agent-docs.test.ts), defines the board's table with
+// the definition tools, writes its code, and repairs it by what the
 // tools, the check and a call of the draft say. What could go wrong: the
-// reference isn't there to read, so the model guesses the shapes; the
 // generated config is written by hand, past the definition; a tool, a
 // check or a call answers only that something failed, never where or
 // why; and an App that should pass never gets a draft with its page.
@@ -187,7 +185,7 @@ const returned = (text: string | undefined): unknown =>
   z.unknown().parse(JSON.parse(text?.replace("Returned:\n", "") ?? "null"));
 
 describe("an App's chat building its App", { timeout: 180_000 }, () => {
-  it("reads the SDK and a working App, defines the board's table with the tools, hears exactly what a guess got wrong, and drafts a board that passes", async () => {
+  it("reads the docs, defines the board's table with the tools, hears exactly what a guess got wrong, and drafts a board that passes", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await builder.api.apps.create({ name: `Board ${unique()}` });
     const code = {
@@ -197,12 +195,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
     };
     const { stub } = await personalChatsOf(
       builder.userId,
-      toolStep("readFile", {
-        path: "@grasp-os/sdk/src/server.ts",
-        toLine: 400,
-      }),
-      toolStep("readFile", { path: "blueprints/board-page/definition.json" }),
-      toolStep("readFile", { path: "@grasp-os/sdk/src/nothing.ts" }),
+      toolStep("readDocs", { path: "/reference/server" }),
       toolStep("writeFile", {
         app: app.id,
         files: { "grasp.config.ts": handwritten },
@@ -235,17 +228,14 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       model,
     });
 
-    const [sdk, blueprint, missing, handwrittenConfig, guess, added, indexed] =
-      await toolResults(stub, chat.id);
+    const [docs, handwrittenConfig, guess, added, indexed] = await toolResults(
+      stub,
+      chat.id
+    );
     const [typed, fixed] = await codeResults(stub, chat.id);
     const drafts = await builder.api.chats.drafts(chat.id);
     expect({
-      sdk: sdk?.text.includes("export type FunctionKind"),
-      blueprint: blueprint?.text.includes('"name": "snapshots"'),
-      missing: {
-        isError: missing?.isError,
-        start: missing?.text.includes("blueprints/board-page/definition.json"),
-      },
+      docs: docs?.text.includes("# @grasp-os/sdk/server"),
       // The generated config is never written by hand: the refusal names
       // the tools.
       handwritten: {
@@ -261,9 +251,7 @@ describe("an App's chat building its App", { timeout: 180_000 }, () => {
       added: added?.text.includes('"addedTables":["cards"]'),
       indexed: indexed?.text.includes('"ok":true'),
     }).toStrictEqual({
-      sdk: true,
-      blueprint: true,
-      missing: { isError: true, start: true },
+      docs: true,
       handwritten: { isError: true, tools: true },
       guess: { ok: true, says: true },
       added: true,

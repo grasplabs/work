@@ -106,6 +106,9 @@ catalogs:
     '@modelcontextprotocol/sdk':
       specifier: 1.32.2
       version: 1.32.2
+    '@orama/orama':
+      specifier: 3.1.18
+      version: 3.1.18
     '@pierre/diffs':
       specifier: 1.6.2
       version: 1.6.2
@@ -679,6 +682,9 @@ importers:
       '@grasp-os/workflow-schema':
         specifier: workspace:*
         version: link:../../packages/workflow-schema
+      '@orama/orama':
+        specifier: 'catalog:'
+        version: 3.1.18
       better-auth:
         specifier: 'catalog:'
         version: 1.7.14(@opentelemetry/api@1.9.1)(@tanstack/react-start@1.169.4(@voidzero-dev/vite-plus-core@0.3.3(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1))(esbuild@0.28.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@10.2.2))(drizzle-kit@0.31.11)(drizzle-orm@0.45.3(@cloudflare/workers-types@5.20261023.1)(@opentelemetry/api@1.9.1)(kysely@0.29.6))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.11)
@@ -785,6 +791,9 @@ importers:
       '@grasp-os/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
+      '@grasp-os/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@grasp-os/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -818,6 +827,12 @@ importers:
       typescript:
         specifier: catalog:typescript6
         version: 6.0.3
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.1
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
 
   apps/gateway:
     dependencies:

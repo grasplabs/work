@@ -8,6 +8,7 @@ import type { CatalogSkill } from "@grasp-os/shared/knowledge";
 import type { Memory } from "@grasp-os/shared/memory";
 import { z } from "zod";
 
+import { docsSection } from "./agent-docs.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { withoutLinks } from "./channels/stephen-rules.ts";
 import type { ChannelText } from "./channels/stephen-rules.ts";
@@ -59,7 +60,7 @@ Building in Grasp:
 - Loading a page changes nothing: anyone the App is shared with can open any of its routes, with any search parameters, from a link someone else wrote, so a route never writes, sends or starts anything as it loads (in its component, an effect or a loader); it does so only when the person acts on the page.
 - Pages never run in the background: anything that runs on a schedule, on an event or for a long time is a workflow, built with \`env.workflowBuild\`: edit its draft until it has no problems, test-run it with an answer for every call, publish it, bind the version to the App, and test it from the App with \`workflowTest\`. Follow runs with \`env.workflows\`.
 - A chat started beside a new workflow names it in its first message, with its ID; the workflow's page draws its draft's latest revision that passes, and the person tells you how the work runs today. Ask about it step by step (who does what, in which app, how often), and edit that workflow's draft with \`env.workflowBuild\` as each step becomes clear, fixing its problems, so the drawing grows as you talk. Give it a short title in people's words (\`document.title\`), which the page heads it with. Publish only when the person asks.
-- How to write an App is in \`env.build\`'s declaration (\`readApi\`) and in Grasp's reference, which \`readFile\` and \`searchFiles\` read when you leave out \`app\`: the SDK's sources, exactly what every write type-checks against (\`@grasp-os/sdk/src/server.ts\`: what a query, mutation and action take), and complete Apps that pass every check (\`blueprints/board-page/\`: definition.json, the grasp.config.ts and server/schema.ts generated from it, server/, src/). Read both before you write an App's server code, and follow them: never guess a shape. The brain holds none of it: never search the brain for Grasp's code.
+- How to write an App and a workflow is in Grasp's docs, and what each of \`env.build\`'s calls takes in its declaration (\`readApi\`). Read them before you write, and follow them: never guess a shape.
 - To build or change an App, change its definition with the definition tools and write its other files into this chat's draft (\`writeFile\`, \`editFile\`): each change answers with what fails in the whole App. Fix those errors and write again until there are none, without asking the person about each error. If the same error comes back three times, stop and tell the person in plain words what you're stuck on. Then propose it (proposing refuses while any error remains), and ask for the permissions it and its workflows need. An App's files go live only when a builder of the App makes them current in Grasp, but binding a published workflow version to an App takes effect at once, so bind only what the person asked for. No permission holds, nor any call a workflow makes outside itself, until an admin grants or approves it: say so.`;
 
 /**
@@ -269,10 +270,16 @@ export interface TurnContext {
   channel?: ChannelText;
   /** The App the chat is its own chat of (`ChatsApi.forApp`); none for any other chat. */
   app?: string;
+  /**
+   * Whether the person builds Apps or workflows, in their own chat: only
+   * then does the agent read Grasp's docs (agent-docs.ts).
+   */
+  builds?: boolean;
 }
 
 /** The sections of the system prompt, in the order they first come. */
 export const sectionNames = [
+  "docs",
   "apis",
   "memory",
   "skills",
@@ -309,6 +316,7 @@ export const sectionsOf = (
   apis: readonly AgentApi[],
   context: TurnContext
 ): Sections => ({
+  docs: context.builds === true ? docsSection : null,
   apis: apisSection(apis),
   memory: memorySection(context.memory),
   skills: skillsSection(context.skills),

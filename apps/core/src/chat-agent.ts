@@ -27,6 +27,7 @@ import type {
 import { agentErrors } from "@grasp-os/shared/agent";
 import { z } from "zod";
 
+import { readDocs, searchDocs } from "./agent-docs.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { dedicatedTools, durableTool } from "./agent-tools.ts";
 import {
@@ -83,7 +84,7 @@ export interface ChatAgent {
   scope: Omit<AgentScope, "runId">;
   runs: CodeRuns;
   loader: WorkerLoader;
-  /** Core's static assets, where Grasp's reference is (build-reference.ts). */
+  /** Core's static assets, where the release's docs are (agent-docs.ts). */
   assets: Fetcher;
   /** Where code runs on-prem, or nowhere but `loader` (`sessionHost`). */
   sandbox?: () => Fetcher | undefined;
@@ -595,8 +596,8 @@ const guarded = async (
 /**
  * A chat's agent for one turn, as a pi-durable extension: the instructions
  * and the chat's sections (each tagged by itself, as the model has always
- * read them), `executeCode` in our locked isolate, `readApi`, the
- * dedicated tools the chat's APIs allow, the thinking tool where it may,
+ * read them), `executeCode` in our locked isolate, `readApi`, the docs'
+ * tools in a chat that builds, the dedicated tools the chat's APIs allow, the thinking tool where it may,
  * `askQuestions` in Grasp's own chat only, and the guards before every
  * request and compaction.
  */
@@ -606,7 +607,10 @@ export const chatAgent = (agent: ChatAgent): Extension => {
   const tools: AgentTool[] = [
     executeCode(agent),
     readApi(apis),
-    ...dedicatedTools({ apis, scope, runs, assets }, agent.history),
+    ...(agent.context.builds === true
+      ? [searchDocs(assets), readDocs(assets)]
+      : []),
+    ...dedicatedTools({ apis, scope, runs }, agent.history),
     ...(agent.thinking === undefined ? [] : [agent.thinking]),
     // A chat app's chat asks in words: the questions take the composer's
     // place, which only Grasp's own chat has.
