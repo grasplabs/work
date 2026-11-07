@@ -112,7 +112,7 @@ export interface Board {
   goals: Promise<Loaded<GoalProgress[]>>;
   workflows: Promise<Loaded<WorkflowSummary[]>>;
   /** The Apps the person can open. */
-  engines: Promise<Loaded<App[]>>;
+  apps: Promise<Loaded<App[]>>;
   runs: Promise<Loaded<RunActivity>>;
   signals: Promise<Loaded<Signals>>;
   /** What the models cost this month: admins only, the only ones offered its widget. */
@@ -305,7 +305,7 @@ const WorkflowsWidget = ({ rows }: { rows: WorkflowSummary[] }) => {
 };
 
 /** Each App the person can open, opening it. */
-const EnginesWidget = ({ apps }: { apps: App[] }) => {
+const AppsWidget = ({ apps }: { apps: App[] }) => {
   const { t } = useLingui();
   const title = t`Apps`;
   if (apps.length === 0) {
@@ -359,7 +359,7 @@ const widgetTitles: Record<StandardWidgetId, MessageDescriptor> = {
   }),
   goals: msg({ message: "Board goals", context: "dashboard widget" }),
   workflows: msg`Workflows`,
-  engines: msg`Apps`,
+  apps: msg`Apps`,
   runs: msg`Runs this week`,
   signals: msg`Could be better`,
   spend: msg({ message: "AI spend this month", context: "dashboard widget" }),
@@ -402,11 +402,11 @@ const widgetBlocks: Record<
       }
     </Await>
   ),
-  engines: (board, title) => (
-    <Await fallback={<WidgetLoading title={title} />} promise={board.engines}>
+  apps: (board, title) => (
+    <Await fallback={<WidgetLoading title={title} />} promise={board.apps}>
       {(loaded) =>
         loaded.state === "ready" ? (
-          <EnginesWidget apps={loaded.data} />
+          <AppsWidget apps={loaded.data} />
         ) : (
           <NotRead loaded={loaded} title={title} />
         )

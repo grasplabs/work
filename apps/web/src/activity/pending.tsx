@@ -120,17 +120,15 @@ export const objectOf = (
     // An agent's permission on an App's functions, by action as core
     // checks it (agent-apps.ts): `read` calls its queries, `write` its
     // mutations and actions, and neither allows the other's.
-    const engine = appName(directory, object.appId);
+    const app = appName(directory, object.appId);
     const reads = actions.includes("read");
     const writes = actions.includes("write");
     if (reads && writes) {
-      return i18n._(
-        msg`Queries, mutations and actions of ${ph({ app: engine })}`
-      );
+      return i18n._(msg`Queries, mutations and actions of ${ph({ app })}`);
     }
     return writes
-      ? i18n._(msg`Mutations and actions of ${ph({ app: engine })}`)
-      : i18n._(msg`Queries of ${ph({ app: engine })}`);
+      ? i18n._(msg`Mutations and actions of ${ph({ app })}`)
+      : i18n._(msg`Queries of ${ph({ app })}`);
   }
   if (object.type === "platform" && actions.includes("guests")) {
     // Consent in plain words: who reaches what, and at whose cost.

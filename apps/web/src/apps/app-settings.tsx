@@ -661,7 +661,7 @@ const General = ({
   );
   return (
     <>
-      <StoreChanges changes={changes} engine={app} />
+      <StoreChanges changes={changes} app={app} />
       <Read read={read}>
         {(loaded) => (
           <GeneralForm

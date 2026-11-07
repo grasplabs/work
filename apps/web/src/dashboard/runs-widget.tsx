@@ -352,7 +352,7 @@ const RunsInFull = ({ activity }: { activity: RunActivity }) => (
 );
 
 /**
- * The runs of the engines the person can open, this week: the share
+ * The runs of the Apps the person can open, this week: the share
  * that needed nobody and a column for each day, or a quiet line before
  * any ran. It opens in full once any ran in the month.
  */

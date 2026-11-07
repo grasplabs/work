@@ -3,14 +3,14 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { LayoutGridIcon, Maximize2Icon } from "lucide-react";
 
-import { AppPage } from "../engines/app-page.tsx";
+import { AppPage } from "../apps/app-page.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { pageHref, useAppAddress } from "../pages/app-address.ts";
 import { PageFrame } from "../pages/page-frame.tsx";
 
-// The live App (engines/app-page.tsx), as its people use it: its current
+// The live App (apps/app-page.tsx), as its people use it: its current
 // version. Its pages run as one single page app in the frame under its
 // bar, routed by the App's own router; where it is goes in the address
 // (pages/app-address.ts): its `/` here, every other route under

@@ -3,8 +3,8 @@
  * prototype's demo company, Noordkade Finance (scripts/seed/company.ts),
  * so every page has something to show and shows what the prototype does:
  * the company's name, people in teams and roles, the onboarding's roster and plan, the
- * prototype's domains with the workflows core can run, 30 days of their
- * runs and apps over them (scripts/seed/pages.ts), Knowledge, and
+ * prototype's Apps with the workflows core can run, 30 days of their
+ * runs and pages over them (scripts/seed/pages.ts), Knowledge, and
  * chats. Run it while `vp run dev` runs.
  *
  * Everything goes through core's API as the person who would do it, signed
@@ -16,7 +16,7 @@
  * It only ever reaches localhost, and stops unless core there signs people
  * in through the fake IdP, which only a local stack does
  * (scripts/seed/local.ts). It can run again: it adds what is missing and
- * leaves the rest, and gives a domain runs only while it has none. To
+ * leaves the rest, and gives an App runs only while it has none. To
  * start over, stop `vp run dev`, delete `apps/core/.wrangler/state`, and
  * start it again.
  */
@@ -28,13 +28,13 @@ import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
-import { engineFiles } from "./seed/apps.ts";
+import { appFiles } from "./seed/app-files.ts";
+import { apps, decisionResponse } from "./seed/apps.ts";
+import type { AppSeed, WorkflowSeed } from "./seed/apps.ts";
 import { chats, writeTranscript } from "./seed/chats.ts";
 import { companyName, people, roster, teamNames } from "./seed/company.ts";
 import type { Person, PersonKey, TeamName } from "./seed/company.ts";
 import { definitionText } from "./seed/definitions.ts";
-import { decisionResponse, engines } from "./seed/engines.ts";
-import type { EngineSeed, WorkflowSeed } from "./seed/engines.ts";
 import { collections } from "./seed/knowledge.ts";
 import type { CollectionSeed } from "./seed/knowledge.ts";
 import {
@@ -45,7 +45,7 @@ import {
   signInAs,
 } from "./seed/local.ts";
 import type { Session } from "./seed/local.ts";
-import { enginePages } from "./seed/pages.ts";
+import { appPages } from "./seed/pages.ts";
 import { seedRuns } from "./seed/runs.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -244,12 +244,12 @@ const seedCollection = async (
 };
 
 /**
- * Brings an engine seeded before it had its apps, or with older ones, to
+ * Brings an App seeded before it had its pages, or with older ones, to
  * the seed's pages, as its next version made current. Only the seed's
  * own change is made current: a later version that holds exactly the
  * current one plus the seed's pages (a seed stopped before making it
  * current) is reused; one with anyone else's changes is left alone, and
- * so is the engine, as committing over it would release them.
+ * so is the App, as committing over it would release them.
  */
 const upgradePages = async (
   owner: Session,
@@ -272,7 +272,7 @@ const upgradePages = async (
     const paths = new Set([...Object.keys(later), ...Object.keys(upgraded)]);
     if ([...paths].some((path) => later[path] !== upgraded[path])) {
       console.warn(
-        `${app.name} has a version that isn't current, with changes of its own: its apps are left as they are.`
+        `${app.name} has a version that isn't current, with changes of its own: its pages are left as they are.`
       );
       return;
     }
@@ -282,7 +282,7 @@ const upgradePages = async (
   const { version } = await owner.api.apps.files.commit(
     app.id,
     changed,
-    "Add the engine's apps"
+    "Add the App's pages"
   );
   await adminSession.api.apps.versions.setCurrent(app.id, version);
 };
@@ -292,22 +292,22 @@ const isTaken = (error: unknown): boolean =>
   workflowResourceErrors.codeOf(error) === "workflow.name_taken";
 
 /**
- * An engine's workflow, as an independent workflow of its owner's: its
+ * An App's workflow, as an independent workflow of its owner's: its
  * version 1 published from the seed's definition and modules; for one
  * that asks a decision, its decision contract published by an admin, its
  * binding approved for the team that answers it, and its person parameter
- * set to that team; shared with the engine's teams. Returns its ID.
+ * set to that team; shared with the App's teams. Returns its ID.
  * Found by name when seeded before: left as it is once it has a version,
  * and set up from its publication on when a seed stopped before that.
  */
 const seedWorkflow = async (
   workflow: WorkflowSeed,
-  engine: EngineSeed,
+  appSeed: AppSeed,
   sessions: ReadonlyMap<PersonKey, Session>,
   teams: ReadonlyMap<TeamName, string>
 ): Promise<string> => {
   const adminSession = sessionFor(sessions, admin.key);
-  const owner = sessionFor(sessions, workflow.owner ?? engine.owner);
+  const owner = sessionFor(sessions, workflow.owner ?? appSeed.owner);
   const resources = owner.api.workflowResources;
   const listed = await adminSession.api.workflowResources.list();
   const found = listed.find(({ name }) => name === workflow.id);
@@ -365,7 +365,7 @@ const seedWorkflow = async (
       expectedRevision: revision,
     });
   }
-  for (const { team, role } of engine.teams) {
+  for (const { team, role } of appSeed.teams) {
     const id = teams.get(team);
     if (id !== undefined) {
       // oxlint-disable-next-line no-await-in-loop -- one change at a time
@@ -383,12 +383,12 @@ const startBindingOf = (alias: string): string =>
 
 /**
  * The App's permission to start each of its workflows from its pages,
- * asked by the engine's owner and granted by an admin, where it has none;
+ * asked by the App's owner and granted by an admin, where it has none;
  * one still requested (a seed stopped before granting it) is granted
  * now. One someone revoked is left revoked: that was their decision.
  */
 const seedStartPermissions = async (
-  engine: EngineSeed,
+  appSeed: AppSeed,
   app: string,
   workflowIds: ReadonlyMap<string, string>,
   sessions: ReadonlyMap<PersonKey, Session>
@@ -399,7 +399,7 @@ const seedStartPermissions = async (
     appId: app,
   });
   const { currentVersion } = await adminSession.api.apps.get(app);
-  for (const { alias } of engine.workflows) {
+  for (const { alias } of appSeed.workflows) {
     const workflowId = workflowIds.get(alias);
     const binding = startBindingOf(alias);
     const had = held.find(({ binding: name }) => name === binding);
@@ -414,7 +414,7 @@ const seedStartPermissions = async (
       // oxlint-disable-next-line no-await-in-loop -- one request at a time
       const requested = await sessionFor(
         sessions,
-        engine.owner
+        appSeed.owner
       ).api.permissions.request({
         subject: { type: "app", appId: app },
         object: { type: "workflow", workflowId },
@@ -429,13 +429,13 @@ const seedStartPermissions = async (
 };
 
 /**
- * An engine: created by its owner with its workflows and apps, its version
+ * An App: created by its owner with its workflows and pages, its version
  * made current by an admin,
  * shared with its teams, its workflows' owners and deciders set, and,
  * while it has none, its runs. Returns its ID, and how many runs it got.
  */
-const seedEngine = async (
-  seed: EngineSeed,
+const seedApp = async (
+  seed: AppSeed,
   sessions: ReadonlyMap<PersonKey, Session>,
   teams: ReadonlyMap<TeamName, string>
 ): Promise<{ id: string; runs: number }> => {
@@ -459,9 +459,9 @@ const seedEngine = async (
   if (app.process === null) {
     await owner.api.apps.update(app.id, { process: seed.process });
   }
-  // The domain's one page, the App's `/`.
+  // Its one page, the App's `/`.
   const pages = Object.fromEntries(
-    Object.values(enginePages[seed.name] ?? {}).map((code) => [
+    Object.values(appPages[seed.name] ?? {}).map((code) => [
       "src/routes/index.tsx",
       code,
     ])
@@ -488,20 +488,18 @@ const seedEngine = async (
     }
     const { version } = await owner.api.apps.files.commit(
       app.id,
-      engineFiles(seed, pages),
-      "Release the engine's workflows and apps"
+      appFiles(seed, pages),
+      "Release the App's workflows and pages"
     );
     // An admin makes it current, which approves its code, once its
     // workflow tests pass.
     await adminSession.api.apps.versions.setCurrent(app.id, version);
   } else if (Object.keys(pages).length > 0) {
-    // Its pages need the engine's own App files and workflow bindings:
+    // Its pages need the App's own files and workflow bindings:
     // one seeded before them keeps the pages it has (nothing has
     // shipped, so no seed migrates it; reset local data to seed it anew).
     const files = await owner.api.apps.files.read(app.id, app.currentVersion);
-    if (
-      files["grasp.config.ts"] === engineFiles(seed, pages)["grasp.config.ts"]
-    ) {
+    if (files["grasp.config.ts"] === appFiles(seed, pages)["grasp.config.ts"]) {
       await upgradePages(owner, adminSession, app, pages);
     } else {
       console.warn(
@@ -536,7 +534,7 @@ const seedEngine = async (
   }
   const runs = await seedRuns({
     workflowIds,
-    engine: seed.name,
+    app: seed.name,
     workflows: seed.workflows,
     sessions,
     db: core,
@@ -545,38 +543,38 @@ const seedEngine = async (
 };
 
 /**
- * Engines' access to Knowledge: one an admin granted, and one still
+ * Apps' access to Knowledge: one an admin granted, and one still
  * waiting for an admin, so the dashboard has a request to show.
  */
 const seedPermissions = async (
   sessions: ReadonlyMap<PersonKey, Session>,
-  engineIds: ReadonlyMap<string, string>,
+  appIds: ReadonlyMap<string, string>,
   collectionIds: ReadonlyMap<string, string>
 ): Promise<void> => {
   const adminSession = sessionFor(sessions, admin.key);
   const wanted = [
     {
-      engine: "Issue-to-Resolution",
+      app: "Issue-to-Resolution",
       by: "lisa",
       collection: "Procedures",
       binding: "PROCEDURES",
       grant: true,
     },
     {
-      engine: "Purchase-to-Pay",
+      app: "Purchase-to-Pay",
       by: "eva",
       collection: "Finance",
       binding: "HANDBOOK",
       grant: false,
     },
   ] as const;
-  for (const { engine, by, collection, binding, grant } of wanted) {
-    const appId = engineIds.get(engine);
+  for (const { app, by, collection, binding, grant } of wanted) {
+    const appId = appIds.get(app);
     const collectionId = collectionIds.get(collection);
     if (appId === undefined || collectionId === undefined) {
       continue;
     }
-    // oxlint-disable-next-line no-await-in-loop -- one engine at a time
+    // oxlint-disable-next-line no-await-in-loop -- one App at a time
     const held = await adminSession.api.permissions.list({
       type: "app",
       appId,
@@ -730,20 +728,20 @@ const main = async (): Promise<void> => {
     }
     console.info(`${collections.length} Knowledge collections`);
 
-    const engineIds = new Map<string, string>();
-    for (const seed of engines) {
-      // oxlint-disable-next-line no-await-in-loop -- one engine at a time
-      const { id, runs } = await seedEngine(seed, sessions, teams);
-      engineIds.set(seed.name, id);
+    const appIds = new Map<string, string>();
+    for (const seed of apps) {
+      // oxlint-disable-next-line no-await-in-loop -- one App at a time
+      const { id, runs } = await seedApp(seed, sessions, teams);
+      appIds.set(seed.name, id);
       let ran = `${runs} runs over the last 30 days`;
       if (seed.workflows.length === 0) {
         ran = "no workflows yet";
       } else if (runs === 0) {
         ran = "has its runs already";
       }
-      console.info(`Domain ${seed.name}: ${ran}`);
+      console.info(`App ${seed.name}: ${ran}`);
     }
-    await seedPermissions(sessions, engineIds, collectionIds);
+    await seedPermissions(sessions, appIds, collectionIds);
 
     const created = await seedChats(sessions);
     console.info(`${created} new chats`);

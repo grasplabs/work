@@ -40,7 +40,7 @@ import { WidgetBlock } from "./widget-block.tsx";
 // review. Each in plain words, with the counts core gives (never a score
 // or a ranking), linking to what it is about, and "Ask Grasp" where a chat
 // can help: asking the agent to fix a run that failed. Admins see every
-// improvement signal, an engine's builders that engine's, and a
+// improvement signal, an App's builders that App's, and a
 // collection's owners its Knowledge signals; someone with none to see has
 // no widget. On the dashboard's widget board, its block counts the
 // signals by kind, and its full view lists every one.
@@ -49,8 +49,8 @@ import { WidgetBlock } from "./widget-block.tsx";
 export interface Signals {
   improvement: ImprovementSignals | undefined;
   knowledge: KnowledgeSignals | undefined;
-  /** Engine names by ID. */
-  engines: ReadonlyMap<string, string>;
+  /** App names by ID. */
+  appNames: ReadonlyMap<string, string>;
 }
 
 /** Each kind of signal's mark and name, as its rows and the block's counts show them. */
@@ -108,13 +108,13 @@ const SignalRow = ({
   );
 };
 
-/** The workflow a signal is about, linking to it; its engine without one; an independent workflow by name. */
+/** The workflow a signal is about, linking to it; its App without one; an independent workflow by name. */
 const About = ({
   signal,
-  engines,
+  appNames,
 }: {
   signal: ImprovementSignal;
-  engines: ReadonlyMap<string, string>;
+  appNames: ReadonlyMap<string, string>;
 }) => {
   const { t } = useLingui();
   const { app, workflow } = signal;
@@ -122,10 +122,10 @@ const About = ({
     // An independent workflow's, by its name: it has no App to go to.
     return <span>{workflow ?? t`your organization`}</span>;
   }
-  const engine = engines.get(app) ?? app;
+  const name = appNames.get(app) ?? app;
   return workflow === null ? (
     <Link className="underline" params={{ app }} to="/apps/$app">
-      {engine}
+      {name}
     </Link>
   ) : (
     <span>{workflow}</span>
@@ -134,13 +134,13 @@ const About = ({
 
 const ImprovementRow = ({
   signal,
-  engines,
+  appNames,
 }: {
   signal: ImprovementSignal;
-  engines: ReadonlyMap<string, string>;
+  appNames: ReadonlyMap<string, string>;
 }) => {
   const { t, i18n } = useLingui();
-  const about = <About engines={engines} signal={signal} />;
+  const about = <About appNames={appNames} signal={signal} />;
   const days = signalWindowDays;
   const step = signal.subject ?? "–";
   if (signal.kind === "waiting_for_person") {
@@ -318,7 +318,7 @@ const SignalList = ({ signals }: { signals: Signals }) => {
       <ul aria-label={t`Could be better`} className="-mt-px">
         {signals.improvement?.signals.map((signal) => (
           <ImprovementRow
-            engines={signals.engines}
+            appNames={signals.appNames}
             key={`${signal.kind}:${signal.app ?? ""}:${signal.workflow ?? ""}:${signal.subject ?? ""}`}
             signal={signal}
           />

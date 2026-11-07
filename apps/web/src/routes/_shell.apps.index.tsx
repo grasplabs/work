@@ -2,13 +2,13 @@ import { canBuild } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { AppsOverview } from "../engines/apps-overview.tsx";
+import { AppsOverview } from "../apps/apps-overview.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { noneIfRefused } from "../workflows/reads.ts";
 
-// The Apps page (engines/apps-overview.tsx): the Apps the person can open,
+// The Apps page (apps/apps-overview.tsx): the Apps the person can open,
 // one read (`apps.overview`) that has each App with what its current
 // version holds.
 

@@ -34,7 +34,7 @@ import { ErrorText } from "../error-text.tsx";
 import { formatDateTime, formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 
-// The npm packages approved for an engine, and taking an approval back
+// The npm packages approved for an App, and taking an approval back
 // (spec 19.3.1): retiring it, so nothing new is built with the packages
 // while what was built keeps working, or revoking it, so nothing of them
 // runs any more. Core decides who may (those it lets approve packages,
@@ -70,7 +70,7 @@ const PackagesOf = ({ request }: { request: DependencyRequest }) => {
 
 /**
  * Asks the person to confirm ending an approval, with what it touches as
- * core read it and why, which the audit trail and the engine's builders
+ * core read it and why, which the audit trail and the App's builders
  * are told. Ends it on exactly the impact shown.
  */
 const EndDialog = ({
@@ -95,7 +95,7 @@ const EndDialog = ({
   const busy = calling || settling;
   const [reason, setReason] = useState("");
   const reasonId = useId();
-  const engine = request.subject.name;
+  const subjectName = request.subject.name;
   // What it ends, as core counted it: retiring, the approvals in force
   // still approved; revoking, retired ones too. Named in the decision by
   // their digest, so core ends exactly these or nothing.
@@ -148,8 +148,8 @@ const EndDialog = ({
         <header className="flex flex-col gap-1 pr-8">
           <DialogTitle>
             {ending === "retire"
-              ? t`Retire the packages for ${ph({ app: engine })}?`
-              : t`Revoke the packages for ${ph({ app: engine })}?`}
+              ? t`Retire the packages for ${ph({ app: subjectName })}?`
+              : t`Revoke the packages for ${ph({ app: subjectName })}?`}
           </DialogTitle>
           <DialogDescription>
             <PackagesOf request={request} />
@@ -235,7 +235,7 @@ const ApprovalRow = ({
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  const engine = request.subject.name;
+  const subjectName = request.subject.name;
   const targets = formatList(
     request.targets.map((target) => i18n._(targetNames[target]))
   );
@@ -292,7 +292,7 @@ const ApprovalRow = ({
             <div className="flex gap-2">
               {request.status === "approved" ? (
                 <Button
-                  aria-label={t`Retire the packages for ${ph({ app: engine })}`}
+                  aria-label={t`Retire the packages for ${ph({ app: subjectName })}`}
                   disabled={busy}
                   onClick={() => {
                     void ask("retire");
@@ -304,7 +304,7 @@ const ApprovalRow = ({
                 </Button>
               ) : null}
               <Button
-                aria-label={t`Revoke the packages for ${ph({ app: engine })}`}
+                aria-label={t`Revoke the packages for ${ph({ app: subjectName })}`}
                 disabled={busy}
                 onClick={() => {
                   void ask("revoke");
@@ -371,7 +371,7 @@ const ApprovalsTable = ({
 };
 
 /**
- * An engine's approved packages, newest first, with ending each for who
+ * An App's approved packages, newest first, with ending each for who
  * may. Read again here once someone ends one, whatever the outcome, so an
  * open dialog keeps why it failed while the list shows how things stand;
  * and taken from the page's own read whenever that comes again.

@@ -27,7 +27,7 @@ import {
 // Settings › AI providers, so the page only shows them and points there:
 // its own admins get the link, anyone else (Grasp staff, who read but
 // never change whose key pays) who to ask; core checks the role. Beside
-// them, the one limit every run has, and what each engine's model binding
+// them, the one limit every run has, and what each App's model binding
 // spent this month. What all calls spent is AI spend's
 // (`_shell.settings.spend.tsx`). Nothing here limits spend: the
 // organization pays its providers on its own keys.
@@ -75,7 +75,7 @@ const RunRequests = () => (
   </p>
 );
 
-/** Each engine's model binding, and what it spent this month. */
+/** Each App's model binding, and what it spent this month. */
 const BindingSpend = ({
   bindings,
 }: {
@@ -155,7 +155,7 @@ const BindingSpend = ({
 };
 
 /** What each App's model spent: shown whether or not models are chosen. */
-const EngineSpend = ({ settings }: { settings: ModelSettings }) => {
+const AppSpend = ({ settings }: { settings: ModelSettings }) => {
   const { t } = useLingui();
   return (
     <Section
@@ -212,7 +212,7 @@ const Settings = ({
             <WhereToChange canChange={canChange} />
           </p>
         </Section>
-        <EngineSpend settings={settings} />
+        <AppSpend settings={settings} />
       </>
     );
   }
@@ -234,7 +234,7 @@ const Settings = ({
       <Section title={t`Limits`}>
         <RunRequests />
       </Section>
-      <EngineSpend settings={settings} />
+      <AppSpend settings={settings} />
     </>
   );
 };

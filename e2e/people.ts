@@ -353,17 +353,17 @@ const cast = {
   dashboardLayout: { user: "user" },
   inbox: { admin: "admin", builder: "builder", approver: "user", user: "user" },
   dependencyApproval: { admin: "admin", builder: "builder", approver: "user" },
-  enginePackages: { admin: "admin", builder: "builder", approver: "user" },
-  enginePackagesTab: { admin: "admin", builder: "builder", approver: "user" },
-  enginePackagesBuilder: {
+  appPackages: { admin: "admin", builder: "builder", approver: "user" },
+  appPackagesTab: { admin: "admin", builder: "builder", approver: "user" },
+  appPackagesBuilder: {
     admin: "admin",
     builder: "builder",
     approver: "builder",
   },
-  enginePackagesBusy: { admin: "admin", builder: "builder", approver: "user" },
-  enginePackagesStale: { admin: "admin", builder: "builder", approver: "user" },
-  enginePackagesFresh: { admin: "admin", builder: "builder", approver: "user" },
-  enginePackagesRefresh: {
+  appPackagesBusy: { admin: "admin", builder: "builder", approver: "user" },
+  appPackagesStale: { admin: "admin", builder: "builder", approver: "user" },
+  appPackagesFresh: { admin: "admin", builder: "builder", approver: "user" },
+  appPackagesRefresh: {
     admin: "admin",
     builder: "builder",
     approver: "user",

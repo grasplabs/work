@@ -455,7 +455,7 @@ describe("Apps and workflows", () => {
     const app = crypto.randomUUID();
     await env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Engine', '', ?, ?)"
+        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'App', '', ?, ?)"
       ).bind(app, bob.userId, Date.now()),
       env.DB.prepare(
         "INSERT INTO app_members (app_id, member_type, member_id, role, added_by, added_at) VALUES (?, 'person', ?, 'builder', ?, ?)"
@@ -1032,7 +1032,7 @@ describe("releasing a deleted workflow's name", () => {
     await publish(ada, workflow.id, definitionOf());
     const app = crypto.randomUUID();
     await env.DB.prepare(
-      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Engine', '', ?, ?)"
+      "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'App', '', ?, ?)"
     )
       .bind(app, ada.userId, Date.now())
       .run();
@@ -1151,7 +1151,7 @@ describe("releasing a deleted workflow's name", () => {
       await publish(ada, workflow.id, definitionOf());
       const app = crypto.randomUUID();
       await env.DB.prepare(
-        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'Engine', '', ?, ?)"
+        "INSERT INTO apps (id, name, description, owner_id, created_at) VALUES (?, 'App', '', ?, ?)"
       )
         .bind(app, ada.userId, Date.now())
         .run();

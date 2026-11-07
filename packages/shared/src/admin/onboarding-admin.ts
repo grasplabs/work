@@ -383,7 +383,7 @@ export const PLATFORM_PARTS = [
   "chat",
   "dashboard",
   "brain",
-  "engines",
+  "apps",
   "workflows",
   "integrations",
   "inbox",

@@ -663,7 +663,7 @@ const RequestItem = ({
   );
 };
 
-/** Packages for an engine: approving waits until the whole graph was shown, and names it. */
+/** Packages for an App: approving waits until the whole graph was shown, and names it. */
 const PackagesItem = ({
   frame,
   source,
@@ -677,7 +677,7 @@ const PackagesItem = ({
   const { busy, failure, run } = useCoreAction();
   const [review, setReview] = useState<DependencyReview>();
   const hintId = useId();
-  const engine = request.subject.name;
+  const subjectName = request.subject.name;
   const who = frame.item.context;
   // Read again once it is decided. A refused decision stays, with why:
   // reading again would take the item, and the reason, away.
@@ -700,7 +700,7 @@ const PackagesItem = ({
       acts={[
         {
           label: t`Approve`,
-          name: t`Approve the packages for ${ph({ app: engine })}`,
+          name: t`Approve the packages for ${ph({ app: subjectName })}`,
           disabled: review === undefined,
           describedBy: review === undefined ? hintId : undefined,
           onPress: async () => {
@@ -709,7 +709,7 @@ const PackagesItem = ({
         },
         {
           label: t`Reject`,
-          name: t`Reject the packages for ${ph({ app: engine })}`,
+          name: t`Reject the packages for ${ph({ app: subjectName })}`,
           onPress: async () => {
             await decide(false, t`Rejected: ${who}.`);
           },

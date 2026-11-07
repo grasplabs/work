@@ -4,14 +4,14 @@ import { canBuild } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { Await, createFileRoute } from "@tanstack/react-router";
 
+import { StartFromBlueprint } from "../apps/blueprints.tsx";
+import { NewApp } from "../apps/new-app.tsx";
 import { readPeople } from "../directory.ts";
-import { StartFromBlueprint } from "../engines/blueprints.tsx";
-import { NewApp } from "../engines/new-app.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
-// A new App, from New App on the Apps page (engines/new-app.tsx): the box
+// A new App, from New App on the Apps page (apps/new-app.tsx): the box
 // to say what to build, which makes the App and opens its workspace with
 // the chat building it, and, for someone who builds, the blueprints to
 // start from instead.

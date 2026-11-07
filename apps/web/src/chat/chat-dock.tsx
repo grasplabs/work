@@ -614,7 +614,7 @@ export const ChatDock = () => {
   // again when it did. Chat is the chat at full size: it shows no dock, nor
   // reads its models. Nor does an App: the live App is its people's alone,
   // and its workspace docks the chat that builds it
-  // (engines/app-workspace.tsx). Nor does Grasp staff's session, which
+  // (apps/app-workspace.tsx). Nor does Grasp staff's session, which
   // reaches the onboarding alone: core refuses it chats.
   const shown =
     identity.onboardingOnly !== true &&

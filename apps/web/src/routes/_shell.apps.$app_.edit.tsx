@@ -2,16 +2,16 @@ import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 import { LayoutGridIcon } from "lucide-react";
 
-import { buildsApp } from "../engines/app-role.ts";
-import { settingsSectionOf } from "../engines/app-settings.tsx";
-import type { AppSettingsSection } from "../engines/app-settings.tsx";
-import { AppWorkspace } from "../engines/app-workspace.tsx";
-import type { WorkspaceView } from "../engines/app-workspace.tsx";
-import { readStoreChanges } from "../engines/store-changes.tsx";
+import { buildsApp } from "../apps/app-role.ts";
+import { settingsSectionOf } from "../apps/app-settings.tsx";
+import type { AppSettingsSection } from "../apps/app-settings.tsx";
+import { AppWorkspace } from "../apps/app-workspace.tsx";
+import type { WorkspaceView } from "../apps/app-workspace.tsx";
+import { readStoreChanges } from "../apps/store-changes.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { loadFromCore, orNull } from "../load-from-core.tsx";
 
-// An App's workspace (engines/app-workspace.tsx), where its builders build
+// An App's workspace (apps/app-workspace.tsx), where its builders build
 // it with the chat beside a preview of its draft, apart from the live App
 // (_shell.apps.$app.tsx). Full height, under no page header of its own:
 // its bar is the App's.

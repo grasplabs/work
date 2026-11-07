@@ -27,7 +27,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { PileCard } from "./pile-card.tsx";
 import type { Pile } from "./pile-card.tsx";
 
-// npm packages proposed for an engine, waiting on someone who was given
+// npm packages proposed for an App, waiting on someone who was given
 // the permission to approve them, on the dashboard's pile: each request
 // with who asks, why, where the packages would run and what core's
 // resolver found of them, the whole graph on asking, and the decision.
@@ -260,7 +260,7 @@ export const PackagesDetails = ({
   onShow: () => void;
 }) => {
   const { t } = useLingui();
-  const engine = request.subject.name;
+  const subjectName = request.subject.name;
   const requester = request.requestedBy.name;
   const targets = formatList(
     request.targets.map((target) => i18n._(targetNames[target]))
@@ -357,7 +357,7 @@ export const PackagesDetails = ({
       {review === undefined ? (
         <div className="flex flex-col items-start gap-1">
           <Button
-            aria-label={t`Show the packages for ${ph({ app: engine })}`}
+            aria-label={t`Show the packages for ${ph({ app: subjectName })}`}
             disabled={busy}
             onClick={onShow}
             variant="outline"
@@ -398,9 +398,9 @@ export const PackagesCard = ({
   const { t } = useLingui();
   // An App or a workflow, in one queue: what the packages are for says
   // which, and only an App has a page to go to.
-  const engine = request.subject.name;
+  const subjectName = request.subject.name;
   const kind = request.subject.type === "workflow" ? t`Workflow` : t`App`;
-  const who = t`Packages for ${ph({ app: engine })}`;
+  const who = t`Packages for ${ph({ app: subjectName })}`;
   // Read again once it is decided. A refused decision stays, with why:
   // reading again would take the card, and the reason, away.
   const decide = async (approved: boolean, said: string): Promise<void> => {
@@ -457,8 +457,8 @@ export const PackagesCard = ({
       }
       no={{
         label: t`Reject`,
-        name: t`Reject the packages for ${ph({ app: engine })}`,
-        does: t`${ph({ app: engine })} doesn't get these packages.`,
+        name: t`Reject the packages for ${ph({ app: subjectName })}`,
+        does: t`${ph({ app: subjectName })} doesn't get these packages.`,
         onPress: async () => {
           await decide(false, t`Rejected: ${who}.`);
         },
@@ -466,8 +466,8 @@ export const PackagesCard = ({
       pile={pile}
       yes={{
         label: t`Approve`,
-        name: t`Approve the packages for ${ph({ app: engine })}`,
-        does: t`${ph({ app: engine })} may use exactly these packages from now on.`,
+        name: t`Approve the packages for ${ph({ app: subjectName })}`,
+        does: t`${ph({ app: subjectName })} may use exactly these packages from now on.`,
         disabled: review === undefined,
         describedBy: review === undefined ? hintId : undefined,
         onPress: async () => {

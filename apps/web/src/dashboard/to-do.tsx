@@ -26,7 +26,7 @@ import type { Viewer, Waiting } from "./waiting.ts";
 // (`todo-pile.tsx`): changes an agent wants to make, which wait for them to
 // approve or reject; changes sent for them whose answer was lost, which
 // wait for them to say whether each happened (`outcome-card.tsx`); permission requests, which wait for an admin;
-// packages proposed for an engine, which wait for someone given the
+// packages proposed for an App, which wait for someone given the
 // permission to approve them. The rest is settled on its own page, and is
 // listed under the pile with the way there, not counted on it:
 // connections they can sign in to again, and what the inbox settles

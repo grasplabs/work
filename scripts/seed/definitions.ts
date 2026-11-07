@@ -1,7 +1,7 @@
 /**
  * The pieces the seed's workflows are made of, as core publishes them:
  * independent grasp-workflow/1 documents and their compute modules,
- * which each domain App binds under an alias. A definition is written
+ * which each App binds under an alias. A definition is written
  * here as data and sent as JSON text.
  */
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";

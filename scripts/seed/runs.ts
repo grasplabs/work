@@ -10,8 +10,8 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { z } from "zod";
 
+import type { Answer, Draw, RunPlan, WorkflowSeed } from "./apps.ts";
 import type { PersonKey } from "./company.ts";
-import type { Answer, Draw, RunPlan, WorkflowSeed } from "./engines.ts";
 import type { Session } from "./local.ts";
 
 const minuteMs = 60_000;
@@ -288,18 +288,18 @@ const backdate = (
 
 /**
  * Starts every workflow's runs (each workflow by its alias in
- * `workflowIds`), of the engine `engine`, answers the decisions the plans
+ * `workflowIds`), of the App `app`, answers the decisions the plans
  * answer, and moves them all back in time. Returns how many it started.
  */
 export const seedRuns = async ({
   workflowIds,
-  engine,
+  app,
   workflows,
   sessions,
   db,
 }: {
   workflowIds: ReadonlyMap<string, string>;
-  engine: string;
+  app: string;
   workflows: readonly WorkflowSeed[];
   sessions: ReadonlyMap<PersonKey, Session>;
   db: DatabaseSync;
@@ -314,7 +314,7 @@ export const seedRuns = async ({
   const now = Date.now();
   const planned = workflows.flatMap((workflow) => {
     // By name, not ID: the same runs on every new stack.
-    const draw = drawFor(`${engine}:${workflow.id}`);
+    const draw = drawFor(`${app}:${workflow.id}`);
     const plans = workflow.runs(draw);
     const times = startTimes(workflow, plans, draw, now);
     return plans.map((plan, index) => {

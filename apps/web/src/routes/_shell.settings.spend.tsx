@@ -69,8 +69,8 @@ const workflowName = (of: SpendingWorkflow, i18n: I18n): string => {
   if (of.appId === null) {
     return workflow;
   }
-  const engine = of.appName ?? of.appId;
-  return i18n._(msg`${workflow} in ${ph({ app: engine })}`);
+  const app = of.appName ?? of.appId;
+  return i18n._(msg`${workflow} in ${ph({ app })}`);
 };
 
 /** The workflows whose model calls cost most this month, with their runs started this month. */

@@ -222,7 +222,7 @@ const request = (version: unknown = 1, who: unknown = "Ada") => ({
 const appOwnedBy = async (owner: Person): Promise<string> => {
   const id = crypto.randomUUID();
   await env.DB.prepare(
-    "INSERT INTO apps (id, name, description, owner_id, status, created_at) VALUES (?, 'Engine', '', ?, 'published', ?)"
+    "INSERT INTO apps (id, name, description, owner_id, status, created_at) VALUES (?, 'App', '', ?, 'published', ?)"
   )
     .bind(id, owner.userId, Date.now())
     .run();

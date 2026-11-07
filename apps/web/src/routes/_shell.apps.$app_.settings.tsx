@@ -4,15 +4,15 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, createFileRoute } from "@tanstack/react-router";
 import { LayoutGridIcon } from "lucide-react";
 
-import { AppSettings, settingsSectionOf } from "../engines/app-settings.tsx";
-import type { AppSettingsSection } from "../engines/app-settings.tsx";
-import { PackageApprovals } from "../engines/package-approvals.tsx";
-import { readStoreChanges } from "../engines/store-changes.tsx";
+import { AppSettings, settingsSectionOf } from "../apps/app-settings.tsx";
+import type { AppSettingsSection } from "../apps/app-settings.tsx";
+import { PackageApprovals } from "../apps/package-approvals.tsx";
+import { readStoreChanges } from "../apps/store-changes.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 
-// An App's settings (engines/app-settings.tsx), for everyone who opens the
+// An App's settings (apps/app-settings.tsx), for everyone who opens the
 // App, each section as they may see it, from "…" on the App's bar; its
 // builders have the same beside the chat in its workspace. The inbox and
 // the admin's pages link here for what is decided about an App: its

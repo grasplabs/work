@@ -44,7 +44,7 @@ export const standardWidgetIds = [
   "return",
   "goals",
   "workflows",
-  "engines",
+  "apps",
   "runs",
   "signals",
   "spend",
@@ -120,7 +120,7 @@ export interface BoardReport {
   idleWorkflows: BoardReportPart<number>;
   /**
    * How many signals of each kind there are: every one for admins, an
-   * engine's for its builders, their own collections' for owners. Null for
+   * App's for its builders, their own collections' for owners. Null for
    * someone who reads none, so the report leaves the section out.
    */
   better: BoardReportPart<SignalCount[] | null>;

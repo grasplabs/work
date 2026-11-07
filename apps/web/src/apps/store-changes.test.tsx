@@ -27,7 +27,7 @@ import {
 } from "./store-changes.tsx";
 import type { Outcome } from "./store-changes.tsx";
 
-// What an admin reads of a store's pending change on the engine page,
+// What an admin reads of a store's pending change on the App page,
 // from what it renders, and what each refusal of abandoning it, or of
 // making a version current, says; what confirming it sends core, and
 // whom the page reads it for. Opening the confirmation, and where focus
@@ -44,7 +44,7 @@ const textOf = (element: ReactElement): string =>
 const markupOf = (element: ReactElement): string =>
   renderToStaticMarkup(<I18nProvider i18n={i18n}>{element}</I18nProvider>);
 
-const engine: App = {
+const app: App = {
   id: appIdSchema.parse("0b9f3c1e-4a51-4d1e-9c3a-2f6d8e7a1b40"),
   name: "Notes",
   description: "",
@@ -333,7 +333,7 @@ describe("whom the page reads a store's changes for", () => {
         { role: "member", staff: false },
       ].map(async (viewer) => {
         const { asked, core } = countingCore();
-        const read = readStoreChanges(core, viewer, engine.id);
+        const read = readStoreChanges(core, viewer, app.id);
         await read;
         return { read: read !== undefined, asked: asked.count };
       })
@@ -448,7 +448,7 @@ describe("confirming an abandonment", () => {
       scanned: 40,
       filled: 39,
       failure: { reason: "stalled" },
-      releases: [{ app: engine.id, version: 3 }],
+      releases: [{ app: app.id, version: 3 }],
       reserved: [{ table: "notes", field: "category" }],
       abandonedAt: "2026-10-13T12:00:00.000Z",
     };
@@ -477,14 +477,14 @@ describe("an abandoned change", () => {
       filled: 39,
       failure: { reason: "stalled" },
       releases: [
-        { app: engine.id, version: 3 },
+        { app: app.id, version: 3 },
         { app: "crm", version: 5 },
       ],
       reserved: [{ table: "notes", field: "category" }],
       abandonedAt: "2026-10-13T12:00:00.000Z",
     };
     const text = textOf(
-      <Abandoned abandoned={abandoned} engine={engine} name="crm" />
+      <Abandoned abandoned={abandoned} app={app} name="crm" />
     );
     expect(text).toContain(
       "These releases can never be made current: Notes, version 3 and App crm, version 5."
@@ -534,7 +534,7 @@ const backfillFailed = (failure: AppStoreBackfill["backfill"]["failure"]) =>
   });
 
 describe("why a version wasn't made current", () => {
-  it("explains a store's failed change by its reason, and points to the engine's page", () => {
+  it("explains a store's failed change by its reason, and points to the App's page", () => {
     const record = { table: "notes", field: "category", id: "rec_42" };
     expect({
       invalid: makeCurrentFailure(

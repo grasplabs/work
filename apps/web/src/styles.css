@@ -1259,7 +1259,7 @@
 }
 
 /*
- * An App's Code view (engines/code-view.tsx): @pierre/diffs draws each
+ * An App's Code view (apps/code-view.tsx): @pierre/diffs draws each
  * file and diff in a shadow root, coloured by its custom properties, which
  * reach in from here. Its theme ("grasp", a theme of CSS variables) names
  * every colour a variable, each set to the theme's token, so the view

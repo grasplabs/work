@@ -313,7 +313,7 @@ const sessionShape = {
       z.strictObject({ platform: z.literal("brain_upkeep") }),
       /**
        * Core's own making of a person's dashboard widget
-       * (dashboard-widgets.ts): it carries the names of their engines and
+       * (dashboard-widgets.ts): it carries the names of their Apps and
        * workflows, and is made for them, counted as theirs, by the trigger that names them. Only core's own code
        * makes such a call.
        */
