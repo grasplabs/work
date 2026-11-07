@@ -39,11 +39,21 @@ const bundling = z
   })
   .parse(parseJsonc(readFileSync(coreWranglerConfig, "utf-8")));
 
-/** Core's text modules in `dir`, as capnp module entries: its migrations and skills. */
-const textModules = (dir: string): string[] =>
-  readdirSync(dir)
-    .filter((file) => /(?:\.sql|SKILL\.md)$/u.test(file))
-    .map((file) => `(name = "${file}", text = embed "${file}")`);
+/**
+ * The modules Wrangler writes beside a bundle's index.js in `dir`, as
+ * capnp module entries: text (its migrations and skills) and WebAssembly
+ * (oxc-parse.wasm, by the name Wrangler gives it), as Wrangler's rules
+ * bundle them.
+ */
+export const bundledModules = (dir: string): string[] =>
+  readdirSync(dir).flatMap((file) => {
+    if (/(?:\.sql|SKILL\.md)$/u.test(file)) {
+      return [`(name = "${file}", text = embed "${file}")`];
+    }
+    return file.endsWith(".wasm")
+      ? [`(name = "${file}", wasm = embed "${file}")`]
+      : [];
+  });
 
 /** A capnp worker of `modules`, the first its main, on core's date and flags. */
 const worker = (modules: readonly string[]): string => `(
@@ -117,12 +127,12 @@ const config :Workerd.Config = (
 const names :Workerd.Worker = ${worker([
       `(name = "names.test.js", esModule = embed "names.test.js")`,
       `(name = "index.js", esModule = embed "index.js")`,
-      ...textModules(out),
+      ...bundledModules(out),
     ])};
 
 const staffAudit :Workerd.Worker = ${worker([
       `(name = "index.js", esModule = embed "staff-audit-check/bundle/minified-staff-audit.js")`,
-      ...textModules(auditDir).map((entry) =>
+      ...bundledModules(auditDir).map((entry) =>
         entry.replace(/embed "/u, 'embed "staff-audit-check/bundle/')
       ),
     ])};

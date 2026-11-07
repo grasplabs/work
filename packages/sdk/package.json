@@ -7,6 +7,13 @@
   "sideEffects": [
     "./src/preview-refresh.ts"
   ],
+  "imports": {
+    "#oxc-parse": {
+      "types": "./src/oxc-parse-module.ts",
+      "workerd": "./src/oxc-parse-module.ts",
+      "node": "./src/oxc-parse-module.node.ts"
+    }
+  },
   "exports": {
     ".": "./src/index.ts",
     "./host": "./src/host.ts",
@@ -16,6 +23,7 @@
     "./runner": "./src/runner.ts",
     "./workflow": "./src/workflow.ts",
     "./expression-check": "./src/expression-check.ts",
+    "./oxc-parse": "./src/oxc-parse.ts",
     "./compute": "./src/compute.ts",
     "./action": "./src/action.ts",
     "./brain": "./src/brain.ts",
@@ -30,12 +38,10 @@
     "./preview-runtime": "./src/preview-runtime.ts"
   },
   "dependencies": {
-    "@babel/generator": "catalog:",
-    "@babel/parser": "catalog:",
-    "@babel/types": "catalog:",
     "@grasp-os/brain": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@noble/ciphers": "catalog:",
+    "@oxc-project/types": "catalog:",
     "@standard-schema/spec": "catalog:",
     "@tanstack/react-form": "catalog:",
     "@tanstack/react-router": "catalog:",
@@ -45,7 +51,6 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",
-    "@types/babel__generator": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "react": "catalog:",

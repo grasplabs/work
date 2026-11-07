@@ -1,10 +1,20 @@
-import { parseExpression } from "@babel/parser";
-import type { Node } from "@babel/types";
-import { messageOf } from "@grasp-os/shared/errors";
+import type {
+  Argument,
+  ArrowFunctionExpression,
+  CallExpression,
+  Expression,
+  ObjectPropertyKind,
+} from "@oxc-project/types";
 
-import { literalKey, lowerExpression } from "./expression-lowering.ts";
-import type { ExpressionRead } from "./expression-lowering.ts";
+import { isIdentifier } from "./code-print.ts";
+import {
+  literalKey,
+  literalValue,
+  lowerExpression,
+} from "./expression-lowering.ts";
+import type { ExpressionNode, ExpressionRead } from "./expression-lowering.ts";
 import { allowedMethods, callbackMethods } from "./expression-runtime.ts";
+import { parseExpression } from "./oxc-parse.ts";
 
 export { runtimeNames } from "./expression-lowering.ts";
 export type { ExpressionRead } from "./expression-lowering.ts";
@@ -23,12 +33,12 @@ export { allowedMethods } from "./expression-runtime.ts";
  *
  * Two lines of defence:
  *
- * 1. The check. An expression is parsed by Babel, as JavaScript in a
- *    module, and its syntax tree held to an allowlist: reads of the
- *    workflow's own values (`roots`) and of callback parameters,
- *    literals, operators, and calls of the allowed methods by name.
- *    Everything else is refused, with a position and a fix, and a syntax
- *    added to JavaScript later is refused until it is allowed here.
+ * 1. The check. An expression is parsed by oxc (oxc-parse.ts), as
+ *    JavaScript in a module, and its syntax tree held to an allowlist:
+ *    reads of the workflow's own values (`roots`) and of callback
+ *    parameters, literals, operators, and calls of the allowed methods by
+ *    name. Everything else is refused, with a position and a fix, and a
+ *    syntax added to JavaScript later is refused until it is allowed here.
  * 2. The code. What runs is printed from the checked tree (`Lowering`),
  *    with every member read and method call through the guards of
  *    expression-runtime.ts, which give only own data and call only the
@@ -150,27 +160,35 @@ const fixes: Record<ExpressionErrorCode, string> = {
     "Use arithmetic, comparison, logical or conditional operators; read fields with ?. instead of `in`.",
 };
 
+/** JavaScript's line terminators, as oxc and TypeScript count lines. */
+const lineBreak = /\r\n?|[\n\u2028\u2029]/gu;
+
+/** A problem at `offset` of `source`, with its line and column there. */
 const located = (
+  source: string,
   code: ExpressionErrorCode,
   message: string,
-  offset: number,
-  line: number,
-  column: number
-): ExpressionError => ({
-  code,
-  message,
-  fix: fixes[code],
-  offset,
-  line,
-  column,
-});
+  offset: number
+): ExpressionError => {
+  const before = source.slice(0, offset).split(lineBreak);
+  return {
+    code,
+    message,
+    fix: fixes[code],
+    offset,
+    line: before.length,
+    column: (before.at(-1)?.length ?? 0) + 1,
+  };
+};
 
 /**
  * A callback as `callbackMethods` take it: `(a, b) => expression`. Its
  * parameters' names don't start with `$`, which the generated code's own
  * names do (`runtimeNames`), so none can shadow them.
  */
-const isCallbackArrow = (node: Node): boolean =>
+const isCallbackArrow = (
+  node: Argument
+): node is ArrowFunctionExpression & { body: Expression } =>
   node.type === "ArrowFunctionExpression" &&
   !node.async &&
   node.body.type !== "BlockStatement" &&
@@ -178,41 +196,58 @@ const isCallbackArrow = (node: Node): boolean =>
     (param) => param.type === "Identifier" && !param.name.startsWith("$")
   );
 
+/** A node's type as an error names it: a regular expression's and a BigInt's by kind. */
+const typeName = (node: ExpressionNode): string => {
+  if (node.type === "Literal" && "regex" in node) {
+    return "RegExpLiteral";
+  }
+  if (node.type === "Literal" && "bigint" in node) {
+    return "BigIntLiteral";
+  }
+  if (node.type === "ImportExpression") {
+    return "Import";
+  }
+  // An entry refused is a getter, a setter or a method: not a field.
+  return node.type === "Property" ? "ObjectMethod" : node.type;
+};
+
 class Checker {
   readonly errors: ExpressionError[] = [];
+
+  private readonly source: string;
 
   /** The roots, as a global's error names them. */
   private readonly rootList: string;
 
-  constructor(roots: ReadonlySet<string>) {
+  /** The nodes that stood in parentheses (oxc-parse.ts). */
+  private readonly parenthesized: ReadonlySet<object>;
+
+  constructor(
+    source: string,
+    roots: ReadonlySet<string>,
+    parenthesized: ReadonlySet<object>
+  ) {
+    this.source = source;
     this.rootList = [...roots].join(", ");
+    this.parenthesized = parenthesized;
   }
 
   private fail(
-    node: Pick<Node, "start" | "loc">,
+    node: { start: number },
     code: ExpressionErrorCode,
     message: string
   ): void {
-    const start = node.loc?.start;
-    this.errors.push(
-      located(
-        code,
-        message,
-        node.start ?? 0,
-        start?.line ?? 1,
-        (start?.column ?? 0) + 1
-      )
-    );
+    this.errors.push(located(this.source, code, message, node.start));
   }
 
-  private property(node: Node, name: string): void {
+  private property(node: ExpressionNode, name: string): void {
     if (blocked.has(name)) {
       this.fail(node, "expression.property", `\`${name}\` can't be read.`);
     }
   }
 
   /** A member's key: a name, or a literal in brackets, never computed. */
-  private key(node: Node, computed: boolean): void {
+  private key(node: ExpressionNode, computed: boolean): void {
     const name = literalKey(node);
     if (name === undefined || (computed && node.type === "Identifier")) {
       this.fail(
@@ -225,14 +260,10 @@ class Checker {
     this.property(node, name);
   }
 
-  private call(
-    node: Node & { callee: Node; arguments: Node[] },
-    scope: ReadonlySet<string>
-  ): void {
+  private call(node: CallExpression, scope: ReadonlySet<string>): void {
     const { callee } = node;
     if (
-      (callee.type !== "MemberExpression" &&
-        callee.type !== "OptionalMemberExpression") ||
+      callee.type !== "MemberExpression" ||
       callee.computed ||
       callee.property.type !== "Identifier"
     ) {
@@ -252,7 +283,7 @@ class Checker {
     this.visit(callee.object, scope);
     // `(a?.map)(f)` calls what the parentheses give, `undefined` included:
     // a method is called directly.
-    if (callee.extra?.parenthesized === true) {
+    if (this.parenthesized.has(callee)) {
       this.fail(
         callee,
         "expression.syntax",
@@ -260,7 +291,7 @@ class Checker {
       );
       return;
     }
-    if (node.type === "OptionalCallExpression" && node.optional) {
+    if (node.optional) {
       this.fail(
         node,
         "expression.syntax",
@@ -282,15 +313,13 @@ class Checker {
         );
         return;
       }
-      if (callback.type === "ArrowFunctionExpression") {
-        const inner = new Set(scope);
-        for (const param of callback.params) {
-          if (param.type === "Identifier") {
-            inner.add(param.name);
-          }
+      const inner = new Set(scope);
+      for (const param of callback.params) {
+        if (param.type === "Identifier") {
+          inner.add(param.name);
         }
-        this.visit(callback.body, inner);
       }
+      this.visit(callback.body, inner);
       return;
     }
     if (!allowedMethods.has(method)) {
@@ -305,7 +334,7 @@ class Checker {
   }
 
   /** A call's arguments, each a value: no spread into a call. */
-  private values(nodes: readonly Node[], scope: ReadonlySet<string>): void {
+  private values(nodes: readonly Argument[], scope: ReadonlySet<string>): void {
     for (const node of nodes) {
       if (node.type === "SpreadElement") {
         this.fail(node, "expression.syntax", "A call takes no spread.");
@@ -315,10 +344,45 @@ class Checker {
     }
   }
 
+  /** An object literal's entry: a field, or a spread. */
+  private entry(
+    property: ObjectPropertyKind,
+    scope: ReadonlySet<string>
+  ): void {
+    // Copies a JSON value's own fields into a new literal: no getter of
+    // its own runs, as JSON holds none.
+    if (property.type === "SpreadElement") {
+      this.visit(property.argument, scope);
+      return;
+    }
+    if (property.kind !== "init" || property.method) {
+      this.refuse(property);
+      return;
+    }
+    if (property.computed) {
+      this.key(property.key, true);
+    } else {
+      const name = literalKey(property.key);
+      if (name !== undefined) {
+        this.property(property.key, name);
+      }
+    }
+    this.visit(property.value, scope);
+  }
+
+  /** A node of a type the subset doesn't have. */
+  private refuse(node: ExpressionNode): void {
+    this.fail(
+      node,
+      "expression.syntax",
+      `${typeName(node)} is not part of what an expression can be.`
+    );
+  }
+
   // One case per node type the subset allows; anything else is refused,
   // so the list is the subset. Its length is the subset's, not complexity.
   // oxlint-disable-next-line eslint/complexity -- see above
-  visit(node: Node, scope: ReadonlySet<string>): void {
+  visit(node: Expression, scope: ReadonlySet<string>): void {
     // Not exhaustive on purpose: `default` refuses every other node type.
     // oxlint-disable-next-line typescript/switch-exhaustiveness-check -- see above
     switch (node.type) {
@@ -334,10 +398,10 @@ class Checker {
         }
         break;
       }
-      case "StringLiteral":
-      case "NumericLiteral":
-      case "BooleanLiteral":
-      case "NullLiteral": {
+      case "Literal": {
+        if (literalValue(node) === undefined) {
+          this.refuse(node);
+        }
         break;
       }
       case "TemplateLiteral": {
@@ -346,17 +410,19 @@ class Checker {
         }
         break;
       }
-      case "MemberExpression":
-      case "OptionalMemberExpression": {
+      case "MemberExpression": {
         this.visit(node.object, scope);
         // A field named like a method (`at`, `map`) is data, and `$read`
         // reads it. A method read without a call is no own data field,
         // so `$read` never gives the function.
-        this.key(node.property, node.computed);
+        if (node.property.type === "PrivateIdentifier") {
+          this.refuse(node.property);
+        } else {
+          this.key(node.property, node.computed);
+        }
         break;
       }
-      case "CallExpression":
-      case "OptionalCallExpression": {
+      case "CallExpression": {
         this.call(node, scope);
         break;
       }
@@ -364,6 +430,10 @@ class Checker {
         for (const element of node.elements) {
           if (element === null) {
             this.fail(node, "expression.syntax", "An array has no holes.");
+          } else if (element.type === "SpreadElement") {
+            // Copies a JSON value's own items: no iterator of its own
+            // runs, as JSON holds none.
+            this.visit(element.argument, scope);
           } else {
             this.visit(element, scope);
           }
@@ -372,26 +442,8 @@ class Checker {
       }
       case "ObjectExpression": {
         for (const property of node.properties) {
-          if (property.type === "ObjectProperty") {
-            if (property.computed) {
-              this.key(property.key, true);
-            } else {
-              const name = literalKey(property.key);
-              if (name !== undefined) {
-                this.property(property.key, name);
-              }
-            }
-            this.visit(property.value, scope);
-          } else {
-            this.visit(property, scope);
-          }
+          this.entry(property, scope);
         }
-        break;
-      }
-      // Copies a JSON value's own fields or items into a new literal: no
-      // getter or iterator of its own runs, as JSON holds none.
-      case "SpreadElement": {
-        this.visit(node.argument, scope);
         break;
       }
       case "UnaryExpression": {
@@ -407,6 +459,10 @@ class Checker {
         break;
       }
       case "BinaryExpression": {
+        if (node.left.type === "PrivateIdentifier") {
+          this.refuse(node.left);
+          return;
+        }
         if (!binaryOperators.has(node.operator)) {
           this.fail(
             node,
@@ -439,37 +495,11 @@ class Checker {
         break;
       }
       default: {
-        this.fail(
-          node,
-          "expression.syntax",
-          `${node.type} is not part of what an expression can be.`
-        );
+        this.refuse(node);
       }
     }
   }
 }
-
-/** JavaScript's line terminators, as Babel and TypeScript count lines. */
-const lineBreak = /\r\n?|[\n\u2028\u2029]/gu;
-
-/** Babel's syntax error, at the offset it gives (`pos`). */
-const syntaxError = (source: string, error: unknown): ExpressionError => {
-  const offset =
-    typeof error === "object" &&
-    error !== null &&
-    "pos" in error &&
-    typeof error.pos === "number"
-      ? error.pos
-      : 0;
-  const before = source.slice(0, offset).split(lineBreak);
-  return located(
-    "expression.syntax",
-    `The expression doesn't parse: ${messageOf(error)}`,
-    offset,
-    before.length,
-    (before.at(-1)?.length ?? 0) + 1
-  );
-};
 
 /**
  * A root's name: ASCII, unescaped, so it reads the same wherever it's
@@ -477,22 +507,12 @@ const syntaxError = (source: string, error: unknown): ExpressionError => {
  */
 const plainName = /^[A-Za-z_][\w$]*$/u;
 
-/** Whether `name` binds as a parameter: no reserved word, by Babel. */
-const isBindable = (name: string): boolean => {
-  try {
-    const parsed = parseExpression(`(${name}) => 0`, {
-      sourceType: "module",
-      plugins: [],
-    });
-    return (
-      parsed.type === "ArrowFunctionExpression" &&
-      parsed.params[0]?.type === "Identifier" &&
-      parsed.params[0].name === name
-    );
-  } catch {
-    return false;
-  }
-};
+/**
+ * Whether `name` binds as a parameter in a module: no reserved word, nor
+ * `eval` or `arguments`, which strict code binds to nothing.
+ */
+const isBindable = (name: string): boolean =>
+  isIdentifier(name) && name !== "eval" && name !== "arguments";
 
 const defaultRoots = new Set<string>(expressionRoots);
 
@@ -536,22 +556,30 @@ export const checkExpression = (
   options: CheckOptions = {}
 ): CheckedExpression => {
   const roots = checkRoots(options.roots);
-  let parsed: ReturnType<typeof parseExpression>;
-  try {
-    // As a module, as the generated code is one: strict, no HTML comments.
-    // No plugins: TypeScript's syntax and JSX are refused.
-    parsed = parseExpression(source, { sourceType: "module", plugins: [] });
-  } catch (error) {
-    return { ok: false, errors: [syntaxError(source, error)] };
+  // As a module, as the generated code is one: strict, no HTML comments.
+  // JavaScript: TypeScript's syntax and JSX are refused.
+  const parsed = parseExpression(source, "js");
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      errors: [
+        located(
+          source,
+          "expression.syntax",
+          `The expression doesn't parse: ${parsed.message}`,
+          parsed.offset
+        ),
+      ],
+    };
   }
-  const checker = new Checker(roots);
-  checker.visit(parsed, roots);
+  const checker = new Checker(source, roots, parsed.parenthesized);
+  checker.visit(parsed.node, roots);
   if (checker.errors.length > 0) {
     return { ok: false, errors: checker.errors };
   }
   return {
     ok: true,
     source,
-    ...lowerExpression(parsed, roots),
+    ...lowerExpression(parsed.node, roots, parsed.parenthesized),
   };
 };

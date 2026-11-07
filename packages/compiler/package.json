@@ -32,7 +32,6 @@
     "build": "node build.ts"
   },
   "dependencies": {
-    "@babel/parser": "catalog:",
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",

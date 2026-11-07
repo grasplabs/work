@@ -112,6 +112,16 @@ describe("operations", () => {
         },
         /isn't known/u,
       ],
+      // Nested too deep to read, under the length an expression may be.
+      [
+        {
+          op: "addField",
+          table: "tasks",
+          name: "x",
+          type: `${"1+".repeat(3000)}1`,
+        },
+        /isn't one expression/u,
+      ],
       [
         {
           op: "addField",

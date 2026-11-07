@@ -1,13 +1,15 @@
 # oxc's transform with its React Compiler, for the isolate that compiles
 # App code, oxlint's linter and oxfmt's formatter, for the isolate that
 # lints and formats it, and oxc's parser, for what reads App code's
-# syntax (route-tree.ts, stand-ins.ts, classes.ts): one threadless
-# wasm32-wasip1 module (src/oxc.ts).
+# syntax (route-tree.ts, stand-ins.ts, classes.ts) and for workflow
+# expressions (packages/sdk/src/oxc-parse.ts). Two threadless modules
+# (build.sh): oxc.wasm, with the `tools` feature, for the compiler's
+# isolates (src/oxc.ts); oxc-parse.wasm, the parser alone, for core.
 # Built inside oxc's own workspace at the commit pin.json names (build.sh),
 # so every dependency is the version that oxlint and oxfmt release ship.
 #
 # Delete this folder once oxc publishes threadless WebAssembly builds of
-# its linter, formatter and React transform that start small.
+# its linter, formatter, React transform and parser that start small.
 [package]
 name = "grasp_oxc_wasm"
 version = "0.0.0"
@@ -18,18 +20,25 @@ publish = false
 crate-type = ["cdylib"]
 path = "src/lib.rs"
 
+[features]
+default = ["tools"]
+tools = [
+  "oxc/codegen",
+  "oxc/transformer",
+  "dep:oxc_formatter",
+  "dep:oxc_formatter_core",
+  "dep:oxc_linter",
+  "dep:oxc_react_compiler",
+  "dep:rustc-hash",
+]
+
 [dependencies]
-oxc = { workspace = true, features = [
-  "ast_visit",
-  "codegen",
-  "semantic",
-  "serialize",
-  "transformer",
-] }
-oxc_formatter = { workspace = true }
-oxc_formatter_core = { workspace = true }
-oxc_linter = { workspace = true }
-oxc_react_compiler = { workspace = true }
-rustc-hash = { workspace = true }
+oxc = { workspace = true, features = ["ast_visit", "semantic", "serialize"] }
+oxc_estree = { workspace = true, features = ["serialize"] }
+oxc_formatter = { workspace = true, optional = true }
+oxc_formatter_core = { workspace = true, optional = true }
+oxc_linter = { workspace = true, optional = true }
+oxc_react_compiler = { workspace = true, optional = true }
+rustc-hash = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

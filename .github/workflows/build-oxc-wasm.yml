@@ -4,7 +4,8 @@
 # commit and the hash of the glue (glue.ts), so a change to either is a
 # release of another name. Installs, CI and release builds download it by
 # that name and check the SHA-256 pin.json pins (wasm.ts), and never build
-# it.
+# it. The parser build beside it, oxc-parse.wasm, is committed instead
+# (packages/sdk/src), and each run checks it is this build too.
 #
 # Run by hand on the branch that changes the glue (`gh workflow run
 # build-oxc-wasm.yml --ref <branch>`), as its pull request needs the
@@ -30,6 +31,7 @@ on:
     branches: [main]
     paths:
       - packages/compiler/oxc-wasm/**
+      - packages/sdk/src/oxc-parse.wasm
       - .github/actions/oxc-wasm-build/**
       - .github/workflows/build-oxc-wasm.yml
   workflow_dispatch:
@@ -65,6 +67,14 @@ jobs:
         with:
           name: oxc-wasm
           path: ${{ runner.temp }}/oxc.wasm
+          if-no-files-found: error
+          retention-days: 7
+      # The parser build too, so a committed oxc-parse.wasm that isn't this
+      # build's bytes can be replaced with them.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oxc-parse-wasm
+          path: ${{ runner.temp }}/oxc-parse.wasm
           if-no-files-found: error
           retention-days: 7
 

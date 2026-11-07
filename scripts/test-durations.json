@@ -25,7 +25,7 @@
   "@grasp-os/compiler build-rebuilds.test.ts": 185.7,
   "@grasp-os/compiler build-releases.test.ts": 105.4,
   "@grasp-os/compiler build-stale-locks.test.ts": 91.3,
-  "@grasp-os/compiler src/expression-bundle.test.ts": 1.8,
+  "@grasp-os/compiler src/expression-node.test.ts": 1.8,
   "@grasp-os/compiler src/expression-runtime.test.ts": 0,
   "@grasp-os/compiler src/increments.test.ts": 0,
   "@grasp-os/compiler src/inputs.test.ts": 0,

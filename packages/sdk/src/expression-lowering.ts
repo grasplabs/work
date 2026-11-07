@@ -1,19 +1,46 @@
-import { generate } from "@babel/generator";
-import * as t from "@babel/types";
-import type { Node } from "@babel/types";
+import type {
+  Argument,
+  ArrayExpressionElement,
+  Expression,
+  ObjectPropertyKind,
+  PropertyKey,
+} from "@oxc-project/types";
+
+import { print } from "./code-print.ts";
+import type { Code, Property, Spread } from "./code-print.ts";
+
+/** A node of a parsed expression, or of what its nodes hold. */
+export type ExpressionNode =
+  | Expression
+  | PropertyKey
+  | Argument
+  | ObjectPropertyKind;
+
+/** A literal's value: a string, number, boolean or null; undefined for anything else. */
+export const literalValue = (
+  node: ExpressionNode
+): string | number | boolean | null | undefined => {
+  if (node.type !== "Literal" || "regex" in node || "bigint" in node) {
+    return undefined;
+  }
+  const { value } = node;
+  return typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === null
+    ? value
+    : undefined;
+};
 
 /** A property's name as JavaScript reads it, when written as a literal. */
-export const literalKey = (node: Node): string | undefined => {
+export const literalKey = (node: ExpressionNode): string | undefined => {
   if (node.type === "Identifier") {
     return node.name;
   }
-  if (node.type === "StringLiteral") {
-    return node.value;
-  }
-  if (node.type === "NumericLiteral") {
-    return String(node.value);
-  }
-  return undefined;
+  const value = literalValue(node);
+  return typeof value === "string" || typeof value === "number"
+    ? String(value)
+    : undefined;
 };
 
 /**
@@ -21,19 +48,12 @@ export const literalKey = (node: Node): string | undefined => {
  * reads `a < b, c > (d)` as a generic call with type arguments `b, c`, but
  * no type argument list closes across a `)`.
  */
-const isComparison = (node: Node): boolean =>
+const isComparison = (node: Expression): boolean =>
   node.type === "BinaryExpression" &&
   (node.operator === "<" ||
     node.operator === ">" ||
     node.operator === "<=" ||
     node.operator === ">=");
-
-const nonNull = <T>(value: T | null): T => {
-  if (value === null) {
-    throw new Error("A checked array has no holes.");
-  }
-  return value;
-};
 
 /**
  * The names the generated code calls its guards by: a generated module
@@ -51,14 +71,11 @@ export const runtimeNames = {
 /** A link of a member chain: `.key`, `[0]` or `.method(…)`, after `?.` or not. */
 type Link =
   | { kind: "member"; key: string | number; optional: boolean }
-  | { kind: "call"; method: string; args: Node[]; optional: boolean };
+  | { kind: "call"; method: string; args: Argument[]; optional: boolean };
 
 /** Whether `node` is a chain of reads and calls. */
-const isChain = (node: Node): boolean =>
-  node.type === "MemberExpression" ||
-  node.type === "OptionalMemberExpression" ||
-  node.type === "CallExpression" ||
-  node.type === "OptionalCallExpression";
+const isChain = (node: Expression): boolean =>
+  node.type === "MemberExpression" || node.type === "CallExpression";
 
 /** The keys `links` read before their first call. */
 const pathOf = (links: readonly Link[]): (string | number)[] => {
@@ -72,9 +89,10 @@ const pathOf = (links: readonly Link[]): (string | number)[] => {
   return path;
 };
 
-const keyOf = (node: Node): string | number => {
-  if (node.type === "NumericLiteral") {
-    return node.value;
+const keyOf = (node: ExpressionNode): string | number => {
+  const value = literalValue(node);
+  if (typeof value === "number") {
+    return value;
   }
   const name = literalKey(node);
   if (name === undefined) {
@@ -83,63 +101,14 @@ const keyOf = (node: Node): string | number => {
   return name;
 };
 
-/**
- * The base of the chain `node` and its links, from the base out. With
- * `parentheses`, a chain in parentheses is a base of its own: `(a?.b).c`
- * reads `.c` of what `a?.b` gives, `undefined` included, and throws
- * there.
- */
-const linksOf = (
-  node: Node,
-  parentheses: boolean
-): { base: Node; links: Link[] } => {
-  const links: Link[] = [];
-  let base = node;
-  for (;;) {
-    if (parentheses && base !== node && base.extra?.parenthesized === true) {
-      break;
-    }
-    if (
-      base.type === "MemberExpression" ||
-      base.type === "OptionalMemberExpression"
-    ) {
-      links.unshift({
-        kind: "member",
-        key: keyOf(base.property),
-        optional: base.type === "OptionalMemberExpression" && base.optional,
-      });
-      base = base.object;
-    } else if (
-      (base.type === "CallExpression" ||
-        base.type === "OptionalCallExpression") &&
-      (base.callee.type === "MemberExpression" ||
-        base.callee.type === "OptionalMemberExpression") &&
-      base.callee.property.type === "Identifier"
-    ) {
-      links.unshift({
-        kind: "call",
-        method: base.callee.property.name,
-        args: base.arguments,
-        optional:
-          base.callee.type === "OptionalMemberExpression" &&
-          base.callee.optional,
-      });
-      base = base.callee.object;
-    } else {
-      return { base, links };
-    }
-  }
-  return { base, links };
-};
+const identifier = (name: string): Code => ({ type: "Identifier", name });
 
-/**
- * A checked syntax tree as the code that runs, printed from the tree
- * itself (`@babel/generator`), never from the source: what runs is what
- * was checked. Every member read goes through `$read` and every call
- * through `$call` (expression-runtime.ts), a `?.` through `$opt`; every
- * comparison is in parentheses (`isComparison`); and every object key is
- * a computed string, so `__proto__` is an own field, never the prototype.
- */
+const call = (callee: string, args: Code[]): Code => ({
+  type: "Call",
+  callee: identifier(callee),
+  arguments: args,
+});
+
 /**
  * A read of one of the roots: `steps.extract.output.total` is root
  * `steps` and path `["extract", "output", "total"]`, up to its first
@@ -151,6 +120,14 @@ export interface ExpressionRead {
   readonly path: readonly (string | number)[];
 }
 
+/**
+ * A checked syntax tree as the code that runs, printed from the tree
+ * itself (code-print.ts), never from the source: what runs is what was
+ * checked. Every member read goes through `$read` and every call through
+ * `$call` (expression-runtime.ts), a `?.` through `$opt`; every
+ * comparison is in parentheses (`isComparison`); and every object key is
+ * a computed string, so `__proto__` is an own field, never the prototype.
+ */
 class Lowering {
   /** The parameters `$opt`'s callbacks take: `$0`, `$1`, … */
   private next = 0;
@@ -165,11 +142,15 @@ class Lowering {
 
   private readonly roots: ReadonlySet<string>;
 
+  /** The nodes that stood in parentheses (oxc-parse.ts). */
+  private readonly parenthesized: ReadonlySet<object>;
+
   /** The callback parameters in scope, which a root's name may shadow. */
   private readonly bound: string[] = [];
 
-  constructor(roots: ReadonlySet<string>) {
+  constructor(roots: ReadonlySet<string>, parenthesized: ReadonlySet<object>) {
     this.roots = roots;
+    this.parenthesized = parenthesized;
   }
 
   /** Records a read of `name` with `path`, if `name` is a root there. */
@@ -179,66 +160,76 @@ class Lowering {
     }
   }
 
+  /** An item of an array literal: a value, or one spread. */
+  private element(element: ArrayExpressionElement): Code | Spread {
+    if (element === null) {
+      throw new Error("A checked array has no holes.");
+    }
+    return element.type === "SpreadElement"
+      ? { type: "Spread", argument: this.expression(element.argument) }
+      : this.expression(element);
+  }
+
+  /** An entry of an object literal: a field under a computed string key, or one spread. */
+  private property(property: ObjectPropertyKind): Property | Spread {
+    if (property.type === "SpreadElement") {
+      return { type: "Spread", argument: this.expression(property.argument) };
+    }
+    return {
+      type: "Property",
+      key: String(keyOf(property.key)),
+      computed: true,
+      value: this.expression(property.value),
+    };
+  }
+
   /** An array or object literal, its values lowered. */
-  private literal(node: Node): t.Expression {
+  private literal(node: Expression): Code {
     if (node.type === "ArrayExpression") {
-      return t.arrayExpression(
-        node.elements.map((element) =>
-          element?.type === "SpreadElement"
-            ? t.spreadElement(this.expression(element.argument))
-            : this.expression(nonNull(element))
-        )
-      );
+      return {
+        type: "Array",
+        elements: node.elements.map((element) => this.element(element)),
+      };
     }
     if (node.type !== "ObjectExpression") {
       throw new Error(`A literal is no ${node.type}.`);
     }
-    return t.objectExpression(
-      node.properties.map((property) => {
-        if (property.type === "SpreadElement") {
-          return t.spreadElement(this.expression(property.argument));
-        }
-        if (property.type !== "ObjectProperty") {
-          throw new Error("A checked object literal has only fields.");
-        }
-        return t.objectProperty(
-          t.stringLiteral(String(keyOf(property.key))),
-          this.expression(property.value),
-          true
-        );
-      })
-    );
+    return {
+      type: "Object",
+      properties: node.properties.map((property) => this.property(property)),
+    };
   }
 
-  expression(node: Node): t.Expression {
+  expression(node: Expression): Code {
+    const value = literalValue(node);
+    if (node.type === "Literal") {
+      if (value === undefined) {
+        throw new Error("A checked expression has no such literal.");
+      }
+      if (typeof value === "string") {
+        return { type: "String", value };
+      }
+      if (typeof value === "number") {
+        return { type: "Number", value };
+      }
+      return typeof value === "boolean"
+        ? { type: "Boolean", value }
+        : { type: "Null" };
+    }
     // oxlint-disable-next-line typescript/switch-exhaustiveness-check -- the checker allows no other
     switch (node.type) {
       case "Identifier": {
         this.read(node.name, []);
-        return t.identifier(node.name);
-      }
-      case "StringLiteral": {
-        return t.stringLiteral(node.value);
-      }
-      case "NumericLiteral": {
-        return t.numericLiteral(node.value);
-      }
-      case "BooleanLiteral": {
-        return t.booleanLiteral(node.value);
-      }
-      case "NullLiteral": {
-        return t.nullLiteral();
+        return identifier(node.name);
       }
       case "TemplateLiteral": {
-        return t.templateLiteral(
-          node.quasis.map((quasi) =>
-            t.templateElement(
-              { raw: quasi.value.raw, cooked: quasi.value.cooked },
-              quasi.tail
-            )
+        return {
+          type: "Template",
+          quasis: node.quasis.map((quasi) => quasi.value.raw),
+          expressions: node.expressions.map((expression) =>
+            this.expression(expression)
           ),
-          node.expressions.map((expression) => this.expression(expression))
-        );
+        };
       }
       case "ArrayExpression":
       case "ObjectExpression": {
@@ -249,37 +240,44 @@ class Lowering {
         return literal;
       }
       case "UnaryExpression": {
-        return t.unaryExpression(node.operator, this.expression(node.argument));
+        return {
+          type: "Unary",
+          operator: node.operator,
+          argument: this.expression(node.argument),
+        };
       }
       case "BinaryExpression": {
-        if (node.left.type === "PrivateName") {
+        if (node.left.type === "PrivateIdentifier") {
           throw new Error("A checked expression has no private names.");
         }
-        const binary = t.binaryExpression(
-          node.operator,
-          this.expression(node.left),
-          this.expression(node.right)
-        );
-        return isComparison(node) ? t.parenthesizedExpression(binary) : binary;
+        const binary: Code = {
+          type: "Binary",
+          operator: node.operator,
+          left: this.expression(node.left),
+          right: this.expression(node.right),
+        };
+        return isComparison(node)
+          ? { type: "Parenthesized", expression: binary }
+          : binary;
       }
       case "LogicalExpression": {
-        return t.logicalExpression(
-          node.operator,
-          this.expression(node.left),
-          this.expression(node.right)
-        );
+        return {
+          type: "Logical",
+          operator: node.operator,
+          left: this.expression(node.left),
+          right: this.expression(node.right),
+        };
       }
       case "ConditionalExpression": {
-        return t.conditionalExpression(
-          this.expression(node.test),
-          this.expression(node.consequent),
-          this.expression(node.alternate)
-        );
+        return {
+          type: "Conditional",
+          test: this.expression(node.test),
+          consequent: this.expression(node.consequent),
+          alternate: this.expression(node.alternate),
+        };
       }
       case "MemberExpression":
-      case "OptionalMemberExpression":
-      case "CallExpression":
-      case "OptionalCallExpression": {
+      case "CallExpression": {
         return this.chain(node);
       }
       default: {
@@ -288,18 +286,60 @@ class Lowering {
     }
   }
 
+  /**
+   * The base of the chain `node` and its links, from the base out. With
+   * `parentheses`, a chain in parentheses is a base of its own: `(a?.b).c`
+   * reads `.c` of what `a?.b` gives, `undefined` included, and throws
+   * there.
+   */
+  private linksOf(
+    node: Expression,
+    parentheses: boolean
+  ): { base: Expression; links: Link[] } {
+    const links: Link[] = [];
+    let base = node;
+    for (;;) {
+      if (parentheses && base !== node && this.parenthesized.has(base)) {
+        return { base, links };
+      }
+      if (base.type === "MemberExpression") {
+        links.unshift({
+          kind: "member",
+          key: keyOf(base.property),
+          optional: base.optional,
+        });
+        base = base.object;
+      } else if (
+        base.type === "CallExpression" &&
+        base.callee.type === "MemberExpression" &&
+        !base.callee.computed &&
+        base.callee.property.type === "Identifier"
+      ) {
+        links.unshift({
+          kind: "call",
+          method: base.callee.property.name,
+          args: base.arguments,
+          optional: base.callee.optional,
+        });
+        base = base.callee.object;
+      } else {
+        return { base, links };
+      }
+    }
+  }
+
   /** A chain of reads and calls, from its base out, `?.` links and all. */
-  private chain(node: Node, read = true): t.Expression {
+  private chain(node: Expression, read = true): Code {
     // What it reads is the whole chain's, parentheses or not:
     // `(steps.fetch).output` reads `steps.fetch.output`. A chain in
     // parentheses is evaluated as one of its own all the same, below.
-    const whole = linksOf(node, false);
+    const whole = this.linksOf(node, false);
     if (read && whole.base.type === "Identifier") {
       this.read(whole.base.name, pathOf(whole.links));
     }
-    const { base, links } = linksOf(node, true);
+    const { base, links } = this.linksOf(node, true);
     if (base.type === "Identifier") {
-      return this.links(t.identifier(base.name), links, 0);
+      return this.links(identifier(base.name), links, 0);
     }
     // Its reads are the outer chain's, recorded above.
     const inner = isChain(base)
@@ -314,44 +354,51 @@ class Lowering {
    * short-circuit does: `$opt(value, ($0) => rest)`.
    */
   private links(
-    value: t.Expression,
+    value: Code,
     links: readonly Link[],
     from: number,
     entered = false
-  ): t.Expression {
+  ): Code {
     const link = links[from];
     if (link === undefined) {
       return value;
     }
     if (link.optional && !entered) {
-      const parameter = t.identifier(`$${this.next}`);
+      const parameter = `$${this.next}`;
       this.next += 1;
-      return t.callExpression(t.identifier(runtimeNames.optional), [
+      return call(runtimeNames.optional, [
         value,
-        t.arrowFunctionExpression(
-          [parameter],
-          this.links(parameter, links, from, true)
-        ),
+        {
+          type: "Arrow",
+          params: [parameter],
+          body: this.links(identifier(parameter), links, from, true),
+        },
       ]);
     }
     const applied =
       link.kind === "member"
-        ? t.callExpression(t.identifier(runtimeNames.read), [
+        ? call(runtimeNames.read, [
             value,
             typeof link.key === "number"
-              ? t.numericLiteral(link.key)
-              : t.stringLiteral(link.key),
+              ? { type: "Number", value: link.key }
+              : { type: "String", value: link.key },
           ])
-        : t.callExpression(t.identifier(runtimeNames.call), [
+        : call(runtimeNames.call, [
             value,
-            t.stringLiteral(link.method),
-            t.arrayExpression(link.args.map((arg) => this.argument(arg))),
+            { type: "String", value: link.method },
+            {
+              type: "Array",
+              elements: link.args.map((arg) => this.argument(arg)),
+            },
           ]);
     return this.links(applied, links, from + 1);
   }
 
   /** A call's argument: a value, or the callback arrow written there. */
-  private argument(node: Node): t.Expression {
+  private argument(node: Argument): Code {
+    if (node.type === "SpreadElement") {
+      throw new Error("A checked call takes no spread.");
+    }
     if (node.type !== "ArrowFunctionExpression") {
       return this.expression(node);
     }
@@ -361,13 +408,13 @@ class Lowering {
       }
       return param.name;
     });
+    if (node.body.type === "BlockStatement") {
+      throw new Error("A checked callback has an expression for its body.");
+    }
     this.bound.push(...params);
     const body = this.expression(node.body);
     this.bound.splice(this.bound.length - params.length);
-    return t.arrowFunctionExpression(
-      params.map((name) => t.identifier(name)),
-      body
-    );
+    return { type: "Arrow", params, body };
   }
 }
 
@@ -378,13 +425,14 @@ class Lowering {
  * one in another, as deep as what it writes is at least.
  */
 export const lowerExpression = (
-  checked: Node,
-  roots: ReadonlySet<string>
+  checked: Expression,
+  roots: ReadonlySet<string>,
+  parenthesized: ReadonlySet<object>
 ): { code: string; reads: ExpressionRead[]; literalDepth: number } => {
-  const lowering = new Lowering(roots);
+  const lowering = new Lowering(roots, parenthesized);
   const lowered = lowering.expression(checked);
   return {
-    code: `(${generate(lowered, { comments: false }).code})`,
+    code: `(${print(lowered)})`,
     reads: lowering.reads,
     literalDepth: lowering.deepest,
   };

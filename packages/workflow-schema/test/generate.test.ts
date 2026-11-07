@@ -1,5 +1,4 @@
-import { parse } from "@babel/parser";
-import type { ParserOptions } from "@babel/parser";
+import { parseProgram } from "@grasp-os/sdk/oxc-parse";
 import { describe, expect, it } from "vite-plus/test";
 
 import { generateWorkflow } from "../src/generate.ts";
@@ -22,11 +21,8 @@ import {
 // the workflow SDK and has no loop, and the sealed table holds every call
 // as the document has it.
 
-/** How a generated module is parsed: TypeScript, as a module. */
-const asModule = {
-  sourceType: "module",
-  plugins: ["typescript"],
-} satisfies ParserOptions;
+/** A generated module, parsed as TypeScript by oxc. */
+const parse = (source: string) => parseProgram(source, "ts");
 
 /** What task `id` of `generated` seals as `part`, if it has one. */
 const sealedOf = (generated: Generation, id: string, part: string): unknown => {
@@ -63,7 +59,7 @@ const namesIn = (source: string): Set<string> => {
       }
     }
   };
-  visit(parse(source, asModule).program);
+  visit(parse(source).program);
   return names;
 };
 
@@ -87,7 +83,7 @@ const nodeTypesIn = (source: string): Set<string> => {
       visit(value);
     }
   };
-  visit(parse(source, asModule).program);
+  visit(parse(source).program);
   return types;
 };
 
@@ -202,7 +198,7 @@ const betweenSteps = (
       }
     }
   };
-  visit(parse(source, asModule).program, 0);
+  visit(parse(source).program, 0);
   return { guards, conditions };
 };
 
@@ -241,7 +237,7 @@ describe("generating a workflow", () => {
     expect({
       pwned: names.has("pwned"),
       // The only comment is the fixed header.
-      comments: parse(generated.source, asModule).comments?.length,
+      comments: parse(generated.source).comments.length,
       sealed: sealedOf(generated, "send", "call"),
     }).toStrictEqual({
       pwned: false,
@@ -259,7 +255,7 @@ describe("generating a workflow", () => {
 
   it("makes no name of an ID, imports only the workflow SDK, and loops only as a forEach", () => {
     const generated = generateWorkflow(checked(withLoops()), "workflow");
-    const { body } = parse(generated.source, asModule).program;
+    const { body } = parse(generated.source).program;
     const imports = body.flatMap((statement) =>
       statement.type === "ImportDeclaration" ? [statement.source.value] : []
     );

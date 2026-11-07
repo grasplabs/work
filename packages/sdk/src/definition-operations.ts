@@ -1,6 +1,5 @@
-import { isValidIdentifier } from "@babel/types";
-
 import { AppDefinitionError } from "./app.ts";
+import { isIdentifier } from "./code-print.ts";
 import {
   evaluateExpression,
   ExpressionError,
@@ -238,7 +237,7 @@ const permissionFrom = (
       "A permission is a `permission.*(…)` declaration, or `people`."
     );
   }
-  if (!isValidIdentifier(declared.alias)) {
+  if (!isIdentifier(declared.alias)) {
     return refuse(
       `\`${declared.alias}\` can't be a permission's alias: it is a word JavaScript keeps.`
     );
