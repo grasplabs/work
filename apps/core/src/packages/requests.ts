@@ -537,6 +537,6 @@ export const decideDependency = async (
     await requireDecider(env, by, row);
     throw dependencyErrors.create("dependency.stale");
   }
-  await tellChats(env, row, status);
+  await tellChats(env, decided, status);
   return await toRequest(env, decided);
 };

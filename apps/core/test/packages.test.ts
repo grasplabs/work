@@ -22,6 +22,7 @@ import {
   shareWorkflowResource,
   unshareWorkflowResource,
 } from "../src/workflow-resources.ts";
+import { personalChatsOf, says } from "./agent-chat.ts";
 import {
   advise,
   daysAgo,
@@ -135,12 +136,16 @@ const approvedPackage = async (name: string, entries?: string[]) => {
 };
 
 /** The chat's agent, acting for `by` in their chat `chatId`. */
-const agentFor = (by: Acting, chatId: string): Acting => {
+const agentFor = (
+  by: Acting,
+  chatId: string,
+  workspaceId = `workspace-${unique()}`
+): Acting => {
   const via: AgentProposer = {
     type: "agent",
     agentId: "agent-1",
     onBehalfOf: by.userId,
-    workspaceId: `workspace-${unique()}`,
+    workspaceId,
     chatId,
   };
   return {
@@ -285,30 +290,78 @@ describe("deciding packages", () => {
     });
   });
 
-  it("shows a request on the card of every chat whose agent asked for it", async () => {
+  it("shows a request on the card of every chat whose agent asked for it, one that asked as it was decided too, and tells each the decision", async () => {
     const name = await published();
     const { builder, workflow } = await workflowOfBuilder();
-    const [first, second] = [
-      chatIdSchema.parse(crypto.randomUUID()),
-      chatIdSchema.parse(crypto.randomUUID()),
-    ];
-    const request = await asked(agentFor(builder, first), workflow, {
-      [name]: "1",
-    });
-    const again = await asked(agentFor(builder, second), workflow, {
-      [name]: "1",
+    // Two real chats of the builder's, each with its agent asking.
+    const chats = await personalChatsOf(
+      builder.userId,
+      says("Going on."),
+      says("Going on here too.")
+    );
+    const chatIn = async () => {
+      const { chat, ask } = await chats.newChat();
+      return { id: chat.id, ask, agent: agentFor(builder, chat.id, chats.id) };
+    };
+    const [first, second] = [await chatIn(), await chatIn()];
+    const request = await asked(first.agent, workflow, { [name]: "1" });
+    // The second chat asks for the same graph while the approval is being
+    // checked for malware: after the request was read, before it lands.
+    let again: DependencyRequest | undefined;
+    let shownBefore: string[] = [];
+    const connect = new Proxy(env.CONNECT, {
+      get: (target, key): unknown =>
+        key === "npmAdvisories"
+          ? async (
+              ...args: Parameters<typeof target.npmAdvisories>
+            ): Promise<NpmAdvisories> => {
+              again ??= await asked(second.agent, workflow, { [name]: "1" });
+              const shown = await chatPackageRequests(
+                env,
+                builder.userId,
+                second.id
+              );
+              shownBefore = shown.map(({ id }) => id);
+              const advisories: NpmAdvisories = await target.npmAdvisories(
+                ...args
+              );
+              return advisories;
+            }
+          : Reflect.get(target, key),
     });
 
-    const shownIn = async (chatId: typeof first) => {
-      const shown = await chatPackageRequests(env, builder.userId, chatId);
-      return shown.map(({ id }) => id);
-    };
+    await decideDependency({ ...env, CONNECT: connect }, builder, request.id, {
+      approved: true,
+      graphHash: request.graphHash,
+    });
+    // Each agent reads what it was told with its next request.
+    await first.ask("Carry on in the first chat.");
+    await second.ask("Carry on in the second chat.");
+    const told = (question: string) =>
+      chats.provider.requests
+        .map(({ body }) => JSON.stringify(body))
+        .some(
+          (body) =>
+            body.includes(question) &&
+            body.includes("The npm packages you asked for were approved")
+        );
+    const cards = async (chatId: typeof first.id) =>
+      await chatPackageRequests(env, builder.userId, chatId);
 
     expect({
-      same: again.id === request.id,
-      first: await shownIn(first),
-      second: await shownIn(second),
-    }).toStrictEqual({ same: true, first: [request.id], second: [request.id] });
+      same: again?.id === request.id,
+      shownBefore,
+      told: [
+        told("Carry on in the first chat."),
+        told("Carry on in the second chat."),
+      ],
+      cards: [await cards(first.id), await cards(second.id)],
+    }).toStrictEqual({
+      same: true,
+      shownBefore: [request.id],
+      told: [true, true],
+      cards: [[], []],
+    });
   });
 
   it("takes no decision from a builder whose role was taken away while it was checked for malware", async () => {
