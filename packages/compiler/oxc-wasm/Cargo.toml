@@ -1,14 +1,13 @@
-# oxlint's linter and oxfmt's formatter as one threadless wasm32-wasip1
-# module, for the isolate that lints and formats App code (src/oxc.ts),
-# and oxc's parser with its ESTree tokens, for the lint isolate's ESLint
-# lints (src/eslint-parser.ts).
+# oxc's transform with its React Compiler, for the isolate that compiles
+# App code, oxlint's linter and oxfmt's formatter, for the isolate that
+# lints and formats it, and oxc's parser, for what reads App code's
+# syntax (route-tree.ts, stand-ins.ts, classes.ts): one threadless
+# wasm32-wasip1 module (src/oxc.ts).
 # Built inside oxc's own workspace at the commit pin.json names (build.sh),
 # so every dependency is the version that oxlint and oxfmt release ship.
 #
-# Delete this folder once oxc publishes a threadless WebAssembly build of
-# its linter and formatter, and its parser's (`oxc-parser/workerd`, today
-# without tokens and asking for 61 MiB of memory at its start) gives
-# ESLint's tokens in 32-bit memory and starts small.
+# Delete this folder once oxc publishes threadless WebAssembly builds of
+# its linter, formatter and React transform that start small.
 [package]
 name = "grasp_oxc_wasm"
 version = "0.0.0"
@@ -20,11 +19,17 @@ crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
-oxc = { workspace = true, features = ["ast_visit", "semantic", "serialize"] }
-oxc_estree_tokens = { workspace = true }
+oxc = { workspace = true, features = [
+  "ast_visit",
+  "codegen",
+  "semantic",
+  "serialize",
+  "transformer",
+] }
 oxc_formatter = { workspace = true }
 oxc_formatter_core = { workspace = true }
 oxc_linter = { workspace = true }
+oxc_react_compiler = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

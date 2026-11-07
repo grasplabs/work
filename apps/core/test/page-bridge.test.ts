@@ -555,7 +555,8 @@ export const Route = createFileRoute("/")({ component: Plain });
     const { id: otherApp } = await builder.api.apps.create({ name: "Other" });
     await release(builder, otherApp, {
       ...sampleFiles,
-      "src/routes/index.tsx": `${pageCode}// another build\n`,
+      // Another build: other code (a comment alone compiles to the same).
+      "src/routes/index.tsx": `${pageCode}export const another = "build";\n`,
     });
     const other = await builder.api.pages.open(otherApp);
 
@@ -677,7 +678,9 @@ export const Route = createFileRoute("/")({ component: Plain });
       "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
 
 function Notes() {
-  return <p className="p-2 [--probe:'</script>'] text-sm">Notes</p>;
+  // A class is read wherever the source holds it, so the CSS has the
+  // rule, though the class checks refuse it in a className.
+  return <p className="p-2 text-sm" title=" [--probe:'</script>'] ">Notes</p>;
 }
 export const Route = createFileRoute("/")({ component: Notes });
 `,

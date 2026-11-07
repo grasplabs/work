@@ -110,15 +110,15 @@ describe("a chat's preview of its draft", { timeout: 60_000 }, () => {
           Object.hasOwn(preview.modules, name)
         ),
         development: found(preview, [developmentMarker]),
-        // Still through the React Compiler, which resets a component's
-        // memo cache when its source changes.
+        // Still through the React Compiler: React's development build
+        // empties a component's memo cache when Fast Refresh swaps it.
         compiled: entryOf(preview).includes(
           kitModuleName("react/compiler-runtime")
         ),
         // By its file and its name, never a revision or a hash.
         family: entryOf(preview).includes('"src/routes/index.tsx "+id'),
-        registered: entryOf(preview).includes(',"Small")'),
-        signed: entryOf(preview).includes('(Small,"useState{'),
+        registered: /,["`]Small["`]\)/u.test(entryOf(preview)),
+        signed: /\(Small,["`]useState\{/u.test(entryOf(preview)),
         modules: appModulesOf(preview),
       },
       sameArtifact: preview.page.artifact === published.page.artifact,

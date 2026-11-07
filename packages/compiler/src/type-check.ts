@@ -41,7 +41,7 @@ export const compilerOptions = {
   // ultracite-rules.ts and ultracite-plugins.ts), which keeps a draft from
   // being proposed. As a type error, one unused import mid-edit would stop
   // the build and the preview.
-  // Babel compiles each file on its own.
+  // oxc compiles each file on its own.
   isolatedModules: true,
   allowImportingTsExtensions: true,
   noEmit: true,

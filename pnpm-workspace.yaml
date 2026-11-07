@@ -91,9 +91,13 @@ catalog:
   # Bundles an App's approved npm packages in the package builder's isolate
   # (packages/compiler/src/packages): the browser build, run on workerd.
   esbuild-wasm: 0.28.2
-  # The import specifiers of an App's compiled page modules, which the
-  # compiler points at each module's content-hashed address: Vite's lexer.
+  # The import specifiers of an App's compiled modules, which the compiler
+  # points at flat names and at each page module's content-hashed address:
+  # Vite's lexer.
   es-module-lexer: 3.0.4
+  # Where in an App's server code its module threw, read back through the
+  # module's source map (core's app-inspection.ts).
+  "@jridgewell/trace-mapping": 0.3.31
   # Text of uploaded files, extracted in core: PDF, Word and Excel.
   fflate: 0.8.3
   unpdf: 1.8.1
@@ -150,7 +154,6 @@ catalog:
   "@babel/generator": 7.29.8
   "@types/babel__generator": 7.27.0
   "@babel/parser": 7.29.9
-  "@babel/standalone": 7.29.9
   "@babel/types": 7.29.8
   "@base-ui/react": 1.8.0
   "@fontsource-variable/geist": 5.2.8
@@ -195,11 +198,6 @@ catalog:
   seroval: 1.7.5
   "@types/react": 19.3.0
   "@types/react-dom": 19.3.0
-  # The design-system lint's parser in the page compiler's isolate, with
-  # oxc's (oxc.wasm): typescript-eslint's scope analysis and visitor keys,
-  # which need no TypeScript (packages/compiler/src/eslint-parser.ts).
-  "@typescript-eslint/scope-manager": 8.72.1
-  "@typescript-eslint/visitor-keys": 8.72.1
   "@vitejs/plugin-react": 6.1.1
   babel-plugin-react-compiler: 1.0.0
   class-variance-authority: 0.7.1
@@ -256,6 +254,10 @@ catalogs:
   # the default: the repo lints and formats itself with Vite+'s, which its
   # Ultracite resolves as its peers, and a default entry would take over.
   oxc:
+    # The parser an exported App's check reads its files with
+    # (packages/compiler/src/standalone-check.ts): the release of the oxc
+    # commit pin.json names, as oxc.wasm parses them.
+    oxc-parser: 0.156.0
     oxfmt: 0.75.0
     oxlint: 1.90.0
   # The admin deploys with Cloudflare's cf CLI, whose Vite builds need the
@@ -293,8 +295,8 @@ peerDependencyRules:
     vite: "*"
     # @shadcn/lint's optional parser, which pnpm installs beside it: it
     # reads components with oxc-parser, which it prefers, so this one never
-    # runs (packages/compiler/src/eslint-parser.ts); it resolves on the
-    # repo's TypeScript 7 only because it is installed.
+    # runs; it resolves on the repo's TypeScript 7 only because it is
+    # installed.
     "@typescript-eslint/parser>typescript": "7"
     "@typescript-eslint/project-service>typescript": "7"
     "@typescript-eslint/tsconfig-utils>typescript": "7"

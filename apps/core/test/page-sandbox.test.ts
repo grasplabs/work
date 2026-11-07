@@ -41,15 +41,23 @@ const summaries = async (files: Record<string, string>) => {
 // What App code may try, to reach beyond the kit or to wear the compiler out.
 describe("page sandbox", { timeout: 60_000 }, () => {
   it("refuses a JSX runtime from outside the kit", async () => {
+    // A pragma the transform reads only where a file starts.
+    const pragma = (source: string): Record<string, string> =>
+      Object.fromEntries(
+        Object.entries(page("")).map(([path, code]) => [
+          path,
+          `${source}\n${code}`,
+        ])
+      );
     await expect(
-      summaries(page("/** @jsxImportSource evil */"))
+      summaries(pragma("/** @jsxImportSource evil */"))
     ).resolves.toStrictEqual([
       expect.stringContaining(
         'src/routes/index.tsx:undefined imports: "evil/jsx-runtime" is outside the kit'
       ),
     ]);
     await expect(
-      summaries(page("/** @jsxImportSource https://evil.example */"))
+      summaries(pragma("/** @jsxImportSource https://evil.example */"))
     ).resolves.toStrictEqual([
       expect.stringContaining(
         '"https://evil.example/jsx-runtime" is outside the kit'
@@ -67,6 +75,41 @@ describe("page sandbox", { timeout: 60_000 }, () => {
     ).resolves.toStrictEqual([
       'src/routes/index.tsx:1 imports: "toString", "constructor" is not a lucide-react icon.',
     ]);
+  });
+
+  it.each([
+    [
+      "a re-export under a string name that would write an import",
+      'export { InboxIcon as "y}from\\"./a.js\\";import\\"https://evil.example/x.js\\";export{default as z" } from "lucide-react";',
+    ],
+    [
+      "a re-export under a string name with braces, a newline and a comment",
+      'export { InboxIcon as "}\\n/* x */ import \\"evil\\"; export {" } from "lucide-react";',
+    ],
+    [
+      "a re-export of a string name",
+      'export { "InboxIcon" as Inbox } from "lucide-react";',
+    ],
+    [
+      "an import of a string name",
+      'import { "InboxIcon" as Inbox } from "lucide-react";\nvoid Inbox;',
+    ],
+    [
+      "an import of a string name with quotes and a semicolon",
+      'import { "InboxIcon\\";import \\"evil" as Inbox } from "lucide-react";\nvoid Inbox;',
+    ],
+  ])("refuses icons under %s, writing nothing of it", async (_case, code) => {
+    const built = await buildPages(env, page(code), "app-test");
+    const written = built.ok ? Object.values(built.modules).join("\n") : "";
+    expect({
+      ok: built.ok,
+      evil: written.includes("evil"),
+      refused: built.ok
+        ? []
+        : built.diagnostics
+            .filter(({ severity }) => severity === "error")
+            .map(({ rule }) => rule),
+    }).toStrictEqual({ ok: false, evil: false, refused: ["imports"] });
   });
 
   it("says import() belongs at the top of the file", async () => {
@@ -257,12 +300,12 @@ describe(
         anew,
         anewRead: read.slice(before).toSorted(),
       }).toStrictEqual({
-        together: ["compiler.js", "kit.json"],
+        together: ["compiler.js", "kit.json", "oxc.wasm"],
         checks: ["checked", "checked", "checked"],
         warm: "checked",
         warmRead: [],
         anew: "checked",
-        anewRead: ["compiler.js", "kit.json"],
+        anewRead: ["compiler.js", "kit.json", "oxc.wasm"],
       });
     });
 
@@ -297,9 +340,15 @@ describe(
         ultracite.lint({ "src/components/one.ts": "export const one = 1;\n" }),
       ]);
 
-      const lintFiles = new Set(["ultracite.js", "oxc.wasm"]);
-      const lint = reads.filter(({ file }) => lintFiles.has(file));
-      const compilerReads = reads.filter(({ file }) => !lintFiles.has(file));
+      // Each isolate reads oxc.wasm beside its own module, in its turn.
+      const during = (file: string) => (read: (typeof reads)[number]) =>
+        reads.some(
+          (one) => one.file === file && read.from < one.to && one.from < read.to
+        );
+      const lint = reads.filter(
+        (read) => read.file === "ultracite.js" || during("ultracite.js")(read)
+      );
+      const compilerReads = reads.filter((read) => !lint.includes(read));
       const overlap = lint.some((one) =>
         compilerReads.some(({ from, to }) => one.from < to && from < one.to)
       );
@@ -309,7 +358,13 @@ describe(
         overlap,
       }).toStrictEqual({
         answers: ["checked", { "src/components/one.ts": [] }],
-        files: ["compiler.js", "kit.json", "oxc.wasm", "ultracite.js"],
+        files: [
+          "compiler.js",
+          "kit.json",
+          "oxc.wasm",
+          "oxc.wasm",
+          "ultracite.js",
+        ],
         overlap: false,
       });
     });

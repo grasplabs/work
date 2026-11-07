@@ -5,9 +5,6 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "imports": {
-    "#design-kit": {
-      "types": "./src/design-kit.d.ts"
-    },
     "#kit": {
       "types": "./src/kit-module.d.ts"
     },
@@ -27,6 +24,8 @@
     "./css": "./src/packages/css.ts",
     "./inputs": "./src/inputs.ts",
     "./page-imports": "./src/page-imports.ts",
+    "./oxc": "./src/oxc.ts",
+    "./oxc-wasm": "./oxc-wasm/wasm.ts",
     "./route-tree": "./src/route-tree.ts"
   },
   "scripts": {
@@ -34,25 +33,18 @@
   },
   "dependencies": {
     "@babel/parser": "catalog:",
-    "@babel/standalone": "catalog:",
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/ui": "workspace:*",
-    "@shadcn/lint": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@tanstack/router-generator": "catalog:",
     "@tsrs/wasm": "catalog:",
     "@tybys/wasm-util": "catalog:",
-    "@typescript-eslint/scope-manager": "catalog:",
-    "@typescript-eslint/visitor-keys": "catalog:",
-    "babel-plugin-react-compiler": "catalog:",
     "es-module-lexer": "catalog:",
     "esbuild-wasm": "catalog:",
-    "eslint": "catalog:",
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "react-refresh": "catalog:",
     "tailwindcss": "catalog:"
   },
   "devDependencies": {
@@ -61,6 +53,7 @@
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "oxc-parser": "catalog:oxc",
     "oxfmt": "catalog:oxc",
     "oxlint": "catalog:oxc",
     "rolldown": "catalog:",

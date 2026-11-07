@@ -10,6 +10,8 @@ import { createRequire } from "node:module";
 import path from "node:path";
 
 import { buildFiles, routeTreePath } from "@grasp-os/compiler/inputs";
+import { startOxc } from "@grasp-os/compiler/oxc";
+import { oxcWasmModule } from "@grasp-os/compiler/oxc-wasm";
 import { pageServerImports } from "@grasp-os/compiler/page-imports";
 import { routeTree } from "@grasp-os/compiler/route-tree";
 import {
@@ -43,6 +45,10 @@ import { examplesDir } from "./vite.config.ts";
 // Pages build on the App of "An App's project" (guides/project.md): their
 // blocks replace its files of the same name and add their own, so a guide
 // shows only what it changes.
+
+// The route tree reads the pages' syntax with oxc, as the compiler's
+// isolate does.
+startOxc(await oxcWasmModule());
 
 const content = path.join(import.meta.dirname, "content");
 const basePage = "guides/project.md";

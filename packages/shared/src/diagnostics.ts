@@ -12,7 +12,7 @@ export const diagnosticCategories = [
   "compile",
   /** A type error (TypeScript's `TS####`). */
   "types",
-  /** The design system's lint (`shadcn/…`). */
+  /** The design system's checks and the pages' lint (`design/…`, `react/…`). */
   "design-system",
   /** Ultracite's rules: the code's quality and style (`lint`). */
   "code",
