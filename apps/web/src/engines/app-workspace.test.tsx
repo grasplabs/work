@@ -28,7 +28,7 @@ import { RpcTarget } from "capnweb";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { activeChat, appSlot, setActiveChat } from "../chat/active-chat.ts";
 import { socketsTo } from "../pages/test-socket.ts";
@@ -449,6 +449,13 @@ const deskOfVersion1: PreviewBundle = {
 };
 
 describe(AppWorkspace, () => {
+  // The chat's thread loads on its own (chat-dock.tsx, `lazy`), the first
+  // time with its Markdown and highlighting: loaded once here, so what a
+  // test waits for in it never races that first load on a busy machine.
+  beforeAll(async () => {
+    await import("../chat/thread.tsx");
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
     act(() => {
