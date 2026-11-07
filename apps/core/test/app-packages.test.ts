@@ -94,6 +94,20 @@ export const Route = createFileRoute("/")({ component: () => <Bars /> });
 `,
 });
 
+/** An App whose pages alone import `page`: its server code imports none. */
+const pageOnlyFiles = (page: string): Record<string, string> => ({
+  ...appFiles(page, page),
+  "server/points.ts": `import { v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
+
+export const doubled = query({
+  args: { n: v.number() },
+  returns: v.number(),
+  handler: async (_ctx, args) => args.n * 2,
+});
+`,
+});
+
 /** `packages` asked for App `fixture` by its builder, and approved by them. */
 const approved = async (
   { owner, app }: Fixture,
@@ -298,11 +312,11 @@ export const Route = createFileRoute("/")({ component: () => <p>{String(renderTo
     });
   });
 
-  it("replaced by a later approval, are still scanned while a kept release bundles them, and withdrawn once it is swept", async () => {
-    const [page, server] = [await chart(), await maths()];
-    const files = appFiles(page, server);
+  it("replaced by a later approval, are still scanned while a kept release bundles them in its pages, and withdrawn once it is swept", async () => {
+    const page = await chart();
+    const files = pageOnlyFiles(page);
     const fixture = await appWith(files, "Charts");
-    const first = await approved(fixture, [page, server]);
+    const first = await approved(fixture, [page]);
     await seal(fixture, 1);
     await approved(fixture, [await chart()]);
     await commitFiles(
@@ -346,6 +360,34 @@ export const Route = createFileRoute("/")({ component: () => <p>{String(renderTo
       kept: { status: "retired", scanned: true },
       swept: "revoked",
     });
+  });
+
+  it("are imported by the App's own tests, which pass as it is published", async () => {
+    const [page, server] = [await chart(), await maths()];
+    const files = {
+      ...appFiles(page, server),
+      "tests/fixtures/people.json": JSON.stringify({
+        principals: { reader: { role: "user" } },
+      }),
+      "tests/maths.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
+import { double } from ${JSON.stringify(server)};
+
+export default appTest({
+  fixtures: "people",
+  tests: {
+    "doubles": async (t) => {
+      t.equal(double(2), 4);
+    },
+  },
+});
+`,
+    };
+    const fixture = await appWith(files, "Charts");
+    await approved(fixture, [page, server]);
+
+    const published = await publishVersion(env, fixture.owner, fixture.app, 1);
+
+    expect(published.currentVersion).toBe(1);
   });
 
   it("are no longer loaded, built or served once revoked as malware", async () => {

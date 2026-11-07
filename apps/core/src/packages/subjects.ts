@@ -9,10 +9,12 @@ import type {
 } from "@grasp-os/shared/dependencies";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { eq, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { appFor, editableApp } from "../apps.ts";
 import type { Acting } from "../auth/identity.ts";
+import { activeMember } from "../auth/membership-sql.ts";
 import {
   appMembers,
   apps,
@@ -21,6 +23,7 @@ import {
   workflowResourceMembers,
   workflowResources,
 } from "../db/core/schema.ts";
+import { rowsOf } from "../sharing.ts";
 import { requireWorkflowRole } from "../workflow-resources.ts";
 
 // Whose packages a request is (an App, or an independent workflow), and
@@ -68,6 +71,26 @@ export const builtSubject = async (
     "builder"
   );
   return { type: "workflow", id, name };
+};
+
+/**
+ * That `by` builds `subject` as the statement runs, as SQL: an active
+ * admin of the organization, or an active member whose role builds and
+ * who owns it or with whom it is shared as a builder (as a person, a team
+ * or a project), as `builtSubject` decides it. What a decision's write
+ * requires, so a role taken away while it waited decides nothing.
+ */
+export const buildsNowSql = (subject: DependencySubject, by: Acting): SQL => {
+  const owned =
+    subject.type === "app"
+      ? sql`EXISTS (SELECT 1 FROM ${apps} WHERE ${apps.id} = ${subject.id} AND ${apps.ownerId} = ${by.userId} AND ${apps.removedAt} IS NULL)`
+      : sql`EXISTS (SELECT 1 FROM ${workflowResources} WHERE ${workflowResources.id} = ${subject.id} AND ${workflowResources.ownerId} = ${by.userId} AND ${workflowResources.deletedAt} IS NULL)`;
+  const shared =
+    subject.type === "app"
+      ? sql`EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${subject.id} AND ${appMembers.role} = 'builder' AND ${rowsOf(appMembers, by)})`
+      : sql`EXISTS (SELECT 1 FROM ${workflowResourceMembers} WHERE ${workflowResourceMembers.workflowResourceId} = ${subject.id} AND ${workflowResourceMembers.role} = 'builder' AND ${rowsOf(workflowResourceMembers, by)})`;
+  return sql`(${activeMember(by.userId, ["admin"])}
+    OR (${activeMember(by.userId, ["builder", "admin"])} AND (${owned} OR ${shared})))`;
 };
 
 /**

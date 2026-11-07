@@ -124,8 +124,9 @@ export const withdrawnWith = (
 
 /**
  * The statements that withdraw App `app`'s replaced approvals no kept
- * release runs on any more (none of its releases bundles their graph's
- * modules, `packageModuleName`), for the batch of release retention that
+ * release runs on any more (none of its releases records their graph,
+ * in its server modules or its pages: `package_graphs`; one sealed before
+ * that was recorded keeps every graph), for the batch of release retention that
  * deletes a release: the clock then scans only what can still run.
  * Audited by core.
  */
@@ -148,7 +149,9 @@ export const unusedRetiredWithdrawn = (
           eq(dependencyRequests.status, "retired"),
           sql`NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS kept
             WHERE kept.app_id = ${app}
-              AND instr(kept.manifest, 'pkg~' || ${dependencyRequests.graphHash} || '~') > 0)`
+              AND (kept.package_graphs IS NULL
+                OR EXISTS (SELECT 1 FROM json_each(kept.package_graphs) AS graph
+                  WHERE graph.value = ${dependencyRequests.graphHash})))`
         )
       ),
     outboxedIfChanged(db, {

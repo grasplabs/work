@@ -1576,6 +1576,13 @@
       "when": 1794064659243,
       "tag": "0224_package_advisories",
       "breakpoints": true
+    },
+    {
+      "idx": 225,
+      "version": "6",
+      "when": 1794079177120,
+      "tag": "0225_package_graphs_and_chats",
+      "breakpoints": true
     }
   ]
 }

@@ -163,7 +163,7 @@ export const newerReleases = async (
   await env.DB.batch(
     Array.from({ length: keptReleases }, (_, index) =>
       env.DB.prepare(
-        "INSERT INTO sdk_release_manifests (app_id, version, manifest_hash, manifest, sealed_at) VALUES (?, ?, 'stand-in', '{}', ?)"
+        "INSERT INTO sdk_release_manifests (app_id, version, manifest_hash, manifest, sealed_at, package_graphs) VALUES (?, ?, 'stand-in', '{}', ?, '[]')"
       ).bind(app, newerFrom + index, Date.now())
     )
   );

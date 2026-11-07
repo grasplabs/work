@@ -2,6 +2,7 @@ import type { AgentProposer } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import { chatIdSchema } from "@grasp-os/shared/ids";
+import type { NpmAdvisories } from "@grasp-os/shared/packages";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -18,6 +19,8 @@ import { SandboxUnavailableError } from "../src/sandboxed.ts";
 import {
   createWorkflowResource,
   deleteWorkflowResource,
+  shareWorkflowResource,
+  unshareWorkflowResource,
 } from "../src/workflow-resources.ts";
 import {
   advise,
@@ -280,6 +283,73 @@ describe("deciding packages", () => {
       byBuilder: "ok",
       left: [],
     });
+  });
+
+  it("shows a request on the card of every chat whose agent asked for it", async () => {
+    const name = await published();
+    const { builder, workflow } = await workflowOfBuilder();
+    const [first, second] = [
+      chatIdSchema.parse(crypto.randomUUID()),
+      chatIdSchema.parse(crypto.randomUUID()),
+    ];
+    const request = await asked(agentFor(builder, first), workflow, {
+      [name]: "1",
+    });
+    const again = await asked(agentFor(builder, second), workflow, {
+      [name]: "1",
+    });
+
+    const shownIn = async (chatId: typeof first) => {
+      const shown = await chatPackageRequests(env, builder.userId, chatId);
+      return shown.map(({ id }) => id);
+    };
+
+    expect({
+      same: again.id === request.id,
+      first: await shownIn(first),
+      second: await shownIn(second),
+    }).toStrictEqual({ same: true, first: [request.id], second: [request.id] });
+  });
+
+  it("takes no decision from a builder whose role was taken away while it was checked for malware", async () => {
+    const name = await published();
+    const { builder: owner, workflow } = await workflowOfBuilder();
+    const other = await person("builder");
+    await shareWorkflowResource(env, owner, workflow, {
+      type: "person",
+      id: other.userId,
+      role: "builder",
+    });
+    const request = await asked(owner, workflow, { [name]: "1" });
+    // Unshared as the malware sources are asked, before the decision lands.
+    const connect = new Proxy(env.CONNECT, {
+      get: (target, key): unknown =>
+        key === "npmAdvisories"
+          ? async (
+              ...args: Parameters<typeof target.npmAdvisories>
+            ): Promise<NpmAdvisories> => {
+              await unshareWorkflowResource(env, owner, workflow, {
+                type: "person",
+                id: other.userId,
+              });
+              const advisories: NpmAdvisories = await target.npmAdvisories(
+                ...args
+              );
+              return advisories;
+            }
+          : Reflect.get(target, key),
+    });
+
+    const decision = await outcome(
+      decideDependency({ ...env, CONNECT: connect }, other, request.id, {
+        approved: true,
+        graphHash: request.graphHash,
+      })
+    );
+
+    expect({ decision, still: await pendingOf(owner, workflow) }).toStrictEqual(
+      { decision: "dependency.not_found", still: request.id }
+    );
   });
 
   it("takes a decision only from a builder of the request's own workflow, never Grasp staff", async () => {
@@ -617,6 +687,28 @@ describe("building approved packages", () => {
         ],
       },
     });
+  });
+
+  it("builds a package that branches on NODE_ENV for production, with no process left to read", async () => {
+    const name = named("modes");
+    await publish({
+      ...plain(name, "1.0.0"),
+      files: {
+        "index.js":
+          'export const mode = process.env.NODE_ENV === "production" ? "production" : "development";',
+      },
+    });
+    const { builder, workflow, request } = await approvedPackage(name);
+
+    const { modules } = await buildPackages(
+      env,
+      actorOf(builder),
+      { type: "workflow", id: workflow },
+      request.graphHash,
+      "worker"
+    );
+
+    expect(modules[name]?.includes("process")).toBeFalsy();
   });
 
   it("refuses packages that stopped the builder themselves, and says the sandbox was unavailable when a crash cut it off", async () => {

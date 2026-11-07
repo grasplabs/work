@@ -658,7 +658,7 @@ export const buildAppTests = async (
     env,
     "app-tests",
     appFiles,
-    appTestFiles,
+    await withPackages(env, whose, "worker", appTestFiles),
     whose
   );
 

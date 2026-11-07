@@ -1143,6 +1143,13 @@ export const sdkReleaseManifests = sqliteTable(
      * which this release refuses as of another format.
      */
     sealId: text("seal_id"),
+    /**
+     * The hashes of the approved package graphs the release bundles, in
+     * its server modules and its pages alike: what keeps a replaced
+     * approval in force (packages/approvals.ts). Null for a release sealed
+     * before it was recorded, taken as keeping every graph of its App.
+     */
+    packageGraphs: text("package_graphs", { mode: "json" }).$type<string[]>(),
   },
   (table) => [primaryKey({ columns: [table.appId, table.version] })]
 );
@@ -2596,6 +2603,14 @@ export const dependencyRequests = sqliteTable(
     requestedVia: text("requested_via", {
       mode: "json",
     }).$type<AgentProposer>(),
+    /**
+     * Every chat whose agent asked for it, the first included: each shows
+     * its card and is told the decision. Null for a request asked before
+     * it was recorded, whose one chat is `requested_via`'s.
+     */
+    requestedIn: text("requested_in", {
+      mode: "json",
+    }).$type<AgentProposer[]>(),
     requestedAt: timestamp("requested_at").notNull(),
     /** The policy generation it was asked under. */
     policyGeneration: integer("policy_generation").notNull(),

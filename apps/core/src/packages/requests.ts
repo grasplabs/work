@@ -1,4 +1,5 @@
 import { appErrors } from "@grasp-os/shared/apps";
+import type { AgentProposer } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import {
@@ -40,7 +41,12 @@ import {
 } from "./approvals.ts";
 import { knownMalwareIn } from "./malware.ts";
 import type { MalwareFound } from "./malware.ts";
-import { builtSubject, subjectName, subjectOfInput } from "./subjects.ts";
+import {
+  buildsNowSql,
+  builtSubject,
+  subjectName,
+  subjectOfInput,
+} from "./subjects.ts";
 
 // npm packages asked for an App or a workflow, its builder's decision on
 // them, and the one check that says whether a graph may be used. Nothing
@@ -124,32 +130,73 @@ const toRequest = async (env: Env, row: Row): Promise<DependencyRequest> => {
   };
 };
 
+/** Every chat whose agent asked for `row`. */
+const chatsOf = (
+  row: Pick<Row, "requestedVia" | "requestedIn">
+): AgentProposer[] =>
+  row.requestedIn ?? (row.requestedVia === null ? [] : [row.requestedVia]);
+
 /**
- * Tells the chat whose agent asked for a request that something about it
- * changed: the page shows the card at once, mid-turn too, and with
- * `decided` the agent is told how it was decided. A failure is logged:
+ * Tells `chats`, whose agents asked for a request, that something about
+ * it changed: each page shows the card at once, mid-turn too, and with
+ * `decided` each agent is told how it was decided. A failure is logged:
  * what changed stands.
  */
-const tellChat = async (
+const tellChats = async (
   env: Env,
-  row: Pick<Row, "requestedVia" | "requestedBy">,
-  decided?: "approved" | "denied"
+  row: Pick<Row, "requestedVia" | "requestedIn">,
+  decided?: "approved" | "denied",
+  chats: readonly AgentProposer[] = chatsOf(row)
 ): Promise<void> => {
-  const via = row.requestedVia;
-  if (via === null) {
-    return;
+  await Promise.all(
+    chats.map(async (via) => {
+      try {
+        const chat = workspace(env, workspaceIdSchema.parse(via.workspaceId));
+        await (decided === undefined
+          ? chat.heldChanged(chatIdSchema.parse(via.chatId))
+          : chat.packagesDecided(via.chatId, via.onBehalfOf, decided));
+      } catch (error) {
+        log.warn("dependencies.chat_unreached", {
+          chatId: via.chatId,
+          ...errorFields(error),
+        });
+      }
+    })
+  );
+};
+
+/**
+ * Adds the chat `by` asks from to those of `waiting`, the same request
+ * already waiting, and shows it its card: every chat that asked is told.
+ */
+const alsoAskedFrom = async (
+  env: Env,
+  by: Acting,
+  waiting: Row
+): Promise<Row> => {
+  const { via } = by;
+  if (
+    via === undefined ||
+    chatsOf(waiting).some(({ chatId }) => chatId === via.chatId)
+  ) {
+    return waiting;
   }
-  try {
-    const chat = workspace(env, workspaceIdSchema.parse(via.workspaceId));
-    await (decided === undefined
-      ? chat.heldChanged(chatIdSchema.parse(via.chatId))
-      : chat.packagesDecided(via.chatId, row.requestedBy, decided));
-  } catch (error) {
-    log.warn("dependencies.chat_unreached", {
-      chatId: via.chatId,
-      ...errorFields(error),
-    });
+  const requestedIn = [...chatsOf(waiting), via];
+  const [updated] = await drizzle(env.DB)
+    .update(dependencyRequests)
+    .set({ requestedIn })
+    .where(
+      and(
+        eq(dependencyRequests.id, waiting.id),
+        eq(dependencyRequests.status, "pending")
+      )
+    )
+    .returning();
+  if (updated === undefined) {
+    return waiting;
   }
+  await tellChats(env, updated, undefined, [via]);
+  return updated;
 };
 
 /**
@@ -184,7 +231,7 @@ export const propose = async (
     }
     if (waiting?.graphHash === graphHash) {
       // oxlint-disable-next-line no-await-in-loop -- answers, ending the loop
-      return await toRequest(env, waiting);
+      return await toRequest(env, await alsoAskedFrom(env, by, waiting));
     }
     const row: Row = {
       id: crypto.randomUUID(),
@@ -209,6 +256,7 @@ export const propose = async (
       status: "pending",
       requestedBy: by.userId,
       requestedVia: by.via ?? null,
+      requestedIn: by.via === undefined ? null : [by.via],
       requestedAt: new Date(),
       policyGeneration: 0,
       decidedBy: null,
@@ -263,7 +311,7 @@ export const propose = async (
         : error;
     }
     // oxlint-disable-next-line no-await-in-loop -- once, after it landed
-    await tellChat(env, row);
+    await tellChats(env, row);
     // oxlint-disable-next-line no-await-in-loop -- once, after it landed
     return await toRequest(env, row);
   }
@@ -302,8 +350,9 @@ export const chatPackageRequests = async (
     .where(
       and(
         eq(dependencyRequests.status, "pending"),
-        eq(dependencyRequests.requestedBy, userId),
-        sql`json_extract(${dependencyRequests.requestedVia}, '$.chatId') = ${chatId}`
+        sql`EXISTS (SELECT 1 FROM json_each(coalesce(${dependencyRequests.requestedIn}, json_array(json(${dependencyRequests.requestedVia})))) AS asked
+          WHERE json_extract(asked.value, '$.chatId') = ${chatId}
+            AND json_extract(asked.value, '$.onBehalfOf') = ${userId})`
       )
     )
     .orderBy(dependencyRequests.requestedAt);
@@ -442,7 +491,10 @@ export const decideDependency = async (
         and(
           eq(dependencyRequests.id, row.id),
           eq(dependencyRequests.status, "pending"),
-          eq(dependencyRequests.graphHash, graphHash)
+          eq(dependencyRequests.graphHash, graphHash),
+          // Still a builder, read here: the malware check above can take a
+          // while, and a role taken away meanwhile decides nothing.
+          buildsNowSql(subject, by)
         )
       )
       .returning(),
@@ -481,8 +533,10 @@ export const decideDependency = async (
         ]),
   ]);
   if (!decided) {
+    // No longer theirs to decide, or decided meanwhile.
+    await requireDecider(env, by, row);
     throw dependencyErrors.create("dependency.stale");
   }
-  await tellChat(env, row, status);
+  await tellChats(env, row, status);
   return await toRequest(env, decided);
 };

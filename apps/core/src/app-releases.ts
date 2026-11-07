@@ -1445,6 +1445,12 @@ export const sealRelease = async (
       db.insert(sdkReleaseManifests).values({
         appId: app,
         version,
+        // Every approved graph it bundles, its pages' too: what keeps a
+        // replaced approval in force (packages/approvals.ts).
+        packageGraphs: graphsOfModules([
+          ...Object.keys(final),
+          ...Object.keys(pages?.code.modules ?? {}),
+        ]),
         // The hash only while the seal references every artifact the
         // manifest names: otherwise NULL, which the column refuses, and
         // the whole seal with it.

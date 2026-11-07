@@ -429,6 +429,9 @@ export const buildLock = async (
         platform: "neutral",
         write: false,
         logLevel: "silent",
+        // Packages branch on it for their production build; neither a page
+        // nor an isolate has a `process` to read it from.
+        define: { "process.env.NODE_ENV": '"production"' },
         plugins: [lockPlugin(lock, packages, target)],
       });
       modules[entry] = result.outputFiles[0]?.text ?? "";
