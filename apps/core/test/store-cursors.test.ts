@@ -3,7 +3,7 @@ import { databaseReader } from "@grasp-os/sdk/database";
 import type { PaginationResult } from "@grasp-os/sdk/database";
 import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
 import type { AccessMode } from "@grasp-os/sdk/host";
-import { fromBase64Url } from "@grasp-os/shared/encoding";
+import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import {
   cursorMaxLength,
   queryMaxScannedEntries,
@@ -14,12 +14,11 @@ import type { StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore, deleteStore, openStore } from "../src/data-stores.ts";
+import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import { cursorKeysOf, openCursor, sealCursor } from "../src/store-cursors.ts";
-import type { CursorBinding } from "../src/store-cursors.ts";
 import { StoreHost } from "../src/store-host.ts";
 import type { AnchorValue } from "../src/store-queries.ts";
 import { accessedManifest } from "./store-schemas.ts";
@@ -29,8 +28,9 @@ import { accessedManifest } from "./store-schemas.ts";
 // Durable Object, built by `ctx.db` as App code builds them. The cases
 // follow the cursor's threat model: pages that add up to the whole, along
 // any index and order, whatever is left out or null; deep pages that cost
-// what they read; and cursors that no one can forge, edit, carry to
-// another query, caller or store, or keep past their version.
+// what they read; cursors that hold only what the page answered, are
+// refused for another query and expire with their generation; and forged
+// or carried cursors that still read only what their reader may.
 
 /** What a read answered, without the generations it depended on. */
 const valueOf = async (
@@ -374,21 +374,25 @@ const fieldOf = (answer: unknown, field: string): unknown =>
     ? Object.getOwnPropertyDescriptor(answer, field)?.value
     : undefined;
 
-/**
- * `part` spelled another way that decodes to the same bytes: its last
- * character's unused low bits set (a 43-character tag leaves two).
- */
-const respelled = (part: string): string => {
-  const alphabet =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-  const last = alphabet.indexOf(part.at(-1) ?? "A");
-  const other = last % 2 === 0 ? last + 1 : last - 1;
-  return `${part.slice(0, -1)}${alphabet[other] ?? "A"}`;
+/** The record IDs a page answered, or what it was refused with. */
+const pageIds = (answer: unknown): unknown => {
+  const items = fieldOf(answer, "items");
+  return Array.isArray(items)
+    ? items.map((item: unknown) => fieldOf(item, "_id"))
+    : answer;
 };
 
-/** `part` with its last character changed. */
-const flip = (part: string): string =>
-  `${part.slice(0, -1)}${part.endsWith("A") ? "B" : "A"}`;
+/** What `cursor` holds, as anyone holding it can read it. */
+const decoded = (cursor: string): Record<string, unknown> =>
+  z
+    .record(z.string(), z.unknown())
+    .parse(JSON.parse(new TextDecoder().decode(fromBase64Url(cursor))));
+
+/** `cursor` with `changes` to what it holds, as a caller could make it. */
+const edited = (cursor: string, changes: Record<string, unknown>): string =>
+  toBase64Url(
+    new TextEncoder().encode(JSON.stringify({ ...decoded(cursor), ...changes }))
+  );
 
 /** A page request by `index` in `order`, as the store reads it. */
 const pageQuery = (index: string | null, order: "asc" | "desc") => ({
@@ -401,35 +405,26 @@ const pageQuery = (index: string | null, order: "asc" | "desc") => ({
   terminal: { kind: "paginate" as const, pageSize: 2, cursor: null },
 });
 
-/** The length of the cursor an anchor of a `length`-character label seals to. */
+/** The length of the cursor an anchor of a `length`-character label makes. */
 const cursorLength = (length: number): number => {
   const plain = JSON.stringify({
+    query: "0".repeat(16),
+    generation: "0".repeat(16),
     id: "n-ada-00000",
     values: [["x".repeat(length)]],
   }).length;
-  // IV, ciphertext and GCM tag, unpadded base64url, and 90 around them.
-  return 90 + Math.ceil((4 * (12 + plain + 16)) / 3);
+  // Unpadded base64url.
+  return Math.ceil((4 * plain) / 3);
 };
+
+const shortHash = /^[0-9a-f]{16}$/u;
 
 /** The record IDs of `notes`, sorted: for pages whose order ties. */
 const sortedIds = (notes: readonly { _id: string }[]): string[] =>
   idsOf(notes).toSorted();
 
-/** The text of every part of `cursor`, decoded, as anyone holding it could. */
-const readable = (cursor: string): string =>
-  cursor
-    .split(".")
-    .map((part) => {
-      try {
-        return new TextDecoder().decode(fromBase64Url(part));
-      } catch {
-        return part;
-      }
-    })
-    .join(" ");
-
 describe("cursors", () => {
-  it("are opaque: neither record IDs nor values can be read from them", async () => {
+  it("hold only the last record's ID and order values, which the page answered", async () => {
     const fixture = await storeWith("appMembers");
     await insertNotes(fixture, ranked);
     const db = dbOf(fixture, scopeOf(fixture.schemaHash));
@@ -437,22 +432,22 @@ describe("cursors", () => {
       .query("notes")
       .withIndex("by_title")
       .paginate({ pageSize: 3, cursor: null });
-    const cursor = page.nextCursor ?? "";
-    const text = `${cursor} ${readable(cursor)}`;
+    const last = page.items.at(-1);
+    const { query, generation, ...anchor } = decoded(page.nextCursor ?? "");
     expect({
-      fits: cursor.length <= cursorMaxLength,
-      leaks: page.items.some(
-        ({ _id, title }) => text.includes(_id) || text.includes(`"${title}"`)
+      anchor,
+      hashes: [query, generation].every(
+        (hash) => typeof hash === "string" && shortHash.test(hash)
       ),
-      prefix: text.includes("n-ada"),
-    }).toStrictEqual({ fits: true, leaks: false, prefix: false });
+    }).toStrictEqual({
+      anchor: { id: last?._id, values: [[last?.title]] },
+      hashes: true,
+    });
   });
 
-  it("are refused when forged, edited, or carried to another query or caller, and expire with their generation", async () => {
+  it("are refused when malformed or carried to another query, and expire with their generation", async () => {
     const fixture = await storeWith("owner");
-    const other = await storeWith("owner");
     await insertNotes(fixture, ranked);
-    await insertNotes(fixture, ranked, "grace");
     // Another schema of the same store, one optional field more: another
     // generation of its tables.
     const later = await fixture.store.defineTables(
@@ -484,162 +479,102 @@ describe("cursors", () => {
       .withIndex("by_title")
       .paginate({ pageSize: 2, cursor: null });
     const cursor = first.nextCursor ?? "";
-    const [version, sealed = "", tag = "", stable = ""] = cursor.split(".");
-    const same = await pageAfter(fixture, scope, {}, cursor);
+    const after = async (
+      changes: Record<string, unknown>,
+      text: string,
+      readScope = scope
+    ): Promise<unknown> =>
+      pageIds(await outcome(pageAfter(fixture, readScope, changes, text)));
     expect({
-      same: (() => {
-        const items = fieldOf(same, "items");
-        return Array.isArray(items)
-          ? items.map((item: unknown) => fieldOf(item, "_id"))
-          : same;
-      })(),
-      forged: await outcome(
-        pageAfter(
-          fixture,
-          scope,
-          {},
-          `1.e30.${"A".repeat(43)}.${"A".repeat(43)}`
-        )
+      same: await after({}, cursor),
+      notBase64: await after({}, "not a cursor!"),
+      notJson: await after({}, toBase64Url(new TextEncoder().encode("{"))),
+      empty: await after({}, toBase64Url(new TextEncoder().encode("{}"))),
+      extraKey: await after({}, edited(cursor, { owner: "grace" })),
+      badValue: await after({}, edited(cursor, { values: [[{ a: 1 }]] })),
+      editedQuery: await after({}, edited(cursor, { query: "0".repeat(16) })),
+      editedGeneration: await after(
+        {},
+        edited(cursor, { generation: "0".repeat(16) })
       ),
-      editedSeal: await outcome(
-        pageAfter(
-          fixture,
-          scope,
-          {},
-          `${version}.${flip(sealed)}.${tag}.${stable}`
-        )
+      otherOrder: await after({ order: "desc" }, cursor),
+      otherIndex: await after({ index: "by_done_rank" }, cursor),
+      otherRange: await after(
+        { range: [{ field: "title", op: "gt", value: "a" }] },
+        cursor
       ),
-      editedTag: await outcome(
-        pageAfter(
-          fixture,
-          scope,
-          {},
-          `${version}.${sealed}.${flip(tag)}.${stable}`
-        )
+      otherTable: await after({ table: "people", index: null }, cursor),
+      otherFilter: await after(
+        { filter: { field: "title", op: "neq", value: "x" } },
+        cursor
       ),
-      editedStable: await outcome(
-        pageAfter(
-          fixture,
-          scope,
-          {},
-          `${version}.${sealed}.${tag}.${flip(stable)}`
-        )
+      otherVersion: await after(
+        {},
+        cursor,
+        scopeOf(fixture.schemaHash, {
+          consumer: { resourceId: "notes-app", resourceVersion: 2 },
+        })
       ),
-      stableSpelling: await outcome(
-        pageAfter(
-          fixture,
-          scope,
-          {},
-          `${version}.${sealed}.${tag}.${respelled(stable)}`
-        )
-      ),
-      editedTags: await outcome(
-        pageAfter(
-          fixture,
-          scope,
-          {},
-          `${version}.${sealed}.${flip(tag)}.${flip(stable)}`
-        )
-      ),
-      otherSpelling: await outcome(
-        pageAfter(fixture, scope, {}, `0${version}.${sealed}.${tag}.${stable}`)
-      ),
-      laterFormat: await outcome(
-        pageAfter(fixture, scope, {}, `2.${sealed}.${tag}.${stable}`)
-      ),
-      otherOrder: await outcome(
-        pageAfter(fixture, scope, { order: "desc" }, cursor)
-      ),
-      otherIndex: await outcome(
-        pageAfter(fixture, scope, { index: "by_done_rank" }, cursor)
-      ),
-      otherRange: await outcome(
-        pageAfter(
-          fixture,
-          scope,
-          { range: [{ field: "title", op: "gt", value: "a" }] },
-          cursor
-        )
-      ),
-      otherTable: await outcome(
-        pageAfter(fixture, scope, { table: "people", index: null }, cursor)
-      ),
-      otherFilter: await outcome(
-        pageAfter(
-          fixture,
-          scope,
-          { filter: { field: "title", op: "neq", value: "x" } },
-          cursor
-        )
-      ),
-      otherPerson: await outcome(
-        pageAfter(
-          fixture,
-          scopeOf(fixture.schemaHash, { principal: "grace" }),
-          {},
-          cursor
-        )
-      ),
-      otherRole: await outcome(
-        pageAfter(
-          fixture,
-          scopeOf(fixture.schemaHash, { appBuilder: true }),
-          {},
-          cursor
-        )
-      ),
-      otherApp: await outcome(
-        pageAfter(
-          fixture,
-          scopeOf(fixture.schemaHash, {
-            consumer: { resourceId: "other-app", resourceVersion: 1 },
-          }),
-          {},
-          cursor
-        )
-      ),
-      otherStore: await outcome(
-        pageAfter(other, scopeOf(other.schemaHash), {}, cursor)
-      ),
-      otherVersion: await outcome(
-        pageAfter(
-          fixture,
-          scopeOf(fixture.schemaHash, {
-            consumer: { resourceId: "notes-app", resourceVersion: 2 },
-          }),
-          {},
-          cursor
-        )
-      ),
-      otherSchema: await outcome(
-        pageAfter(fixture, scopeOf(later.schemaHash), {}, cursor)
-      ),
+      otherSchema: await after({}, cursor, scopeOf(later.schemaHash)),
     }).toStrictEqual({
       same: ["n-ada-00002", "n-ada-00003"],
-      forged: "data.invalid_cursor",
-      editedSeal: "data.invalid_cursor",
-      // Its stable tag still verifies: its holder learns nothing new.
-      editedTag: "data.cursor_expired",
-      editedTags: "data.invalid_cursor",
-      // Both tags must verify: an edited or respelled stable tag alone is
-      // refused too.
-      editedStable: "data.invalid_cursor",
-      stableSpelling: "data.invalid_cursor",
-      otherSpelling: "data.invalid_cursor",
-      // Another format version can't be told apart from a forgery: no tag
-      // of this store covers it.
-      laterFormat: "data.invalid_cursor",
+      notBase64: "data.invalid_cursor",
+      notJson: "data.invalid_cursor",
+      empty: "data.invalid_cursor",
+      extraKey: "data.invalid_cursor",
+      badValue: "data.invalid_cursor",
+      editedQuery: "data.invalid_cursor",
+      // Its holder only makes it expire sooner.
+      editedGeneration: "data.cursor_expired",
       otherOrder: "data.invalid_cursor",
       otherIndex: "data.invalid_cursor",
       otherRange: "data.invalid_cursor",
       otherTable: "data.invalid_cursor",
       otherFilter: "data.invalid_cursor",
-      otherPerson: "data.invalid_cursor",
-      otherRole: "data.invalid_cursor",
-      otherApp: "data.invalid_cursor",
-      otherStore: "data.invalid_cursor",
       otherVersion: "data.cursor_expired",
       otherSchema: "data.cursor_expired",
+    });
+  });
+
+  it("forged or carried to another person, read only the reader's own records", async () => {
+    const fixture = await storeWith("owner");
+    await insertNotes(fixture, ranked);
+    await insertNotes(fixture, ranked, "grace");
+    const ada = scopeOf(fixture.schemaHash);
+    const grace = scopeOf(fixture.schemaHash, { principal: "grace" });
+    const first = await dbOf(fixture, ada)
+      .query("notes")
+      .withIndex("by_title")
+      .paginate({ pageSize: 2, cursor: null });
+    const cursor = first.nextCursor ?? "";
+    const after = async (text: string, readScope = ada): Promise<unknown> =>
+      pageIds(await outcome(pageAfter(fixture, readScope, {}, text)));
+    expect({
+      // Grace pages on from where Ada's page ended, through her own.
+      carried: await after(cursor, grace),
+      // An anchor of the caller's choosing seeks there, and no further
+      // than an index range of their own would.
+      fromStart: await after(edited(cursor, { values: [[""]] })),
+      pastEnd: await after(edited(cursor, { values: [["z"]] })),
+      // An ID alone is looked up under the caller's access: another
+      // person's record is as missing as one that never was.
+      othersRecord: await after(
+        edited(cursor, { id: "n-grace-00001", values: undefined })
+      ),
+      missingRecord: await after(
+        edited(cursor, { id: "n-ada-99999", values: undefined })
+      ),
+      ownRecord: await after(
+        edited(cursor, { id: "n-ada-00001", values: undefined })
+      ),
+    }).toStrictEqual({
+      // After Ada's "b": Grace's "b" sorts after it by ID.
+      carried: ["n-grace-00001", "n-grace-00002"],
+      fromStart: ["n-ada-00000", "n-ada-00001"],
+      pastEnd: [],
+      othersRecord: "data.cursor_expired",
+      missingRecord: "data.cursor_expired",
+      ownRecord: ["n-ada-00002", "n-ada-00003"],
     });
   });
 
@@ -817,7 +752,7 @@ describe("seeks", () => {
         next: idsOf(second.items),
       };
     }
-    // Past the longest, the cursor seals the ID alone: far shorter.
+    // Past the longest, the cursor holds the ID alone: far shorter.
     expect({
       longest: results.longest,
       pastNext: results.past?.next,
@@ -911,89 +846,5 @@ describe("seeks", () => {
       "n-ada-00004",
       "n-ada-00005",
     ]);
-  });
-});
-
-describe("a query's cursor", () => {
-  it("opens only for the teams and the kind of read it was sealed for", async () => {
-    const binding: CursorBinding = {
-      storeId: "store-1",
-      schemaHash: "a".repeat(64),
-      consumer: { resourceId: "notes-app", resourceVersion: 1 },
-      principal: "ada",
-      appMember: true,
-      appBuilder: false,
-      teams: ["sales", "support"],
-      table: "notes",
-      index: "by_title",
-      range: [],
-      filter: null,
-      order: "asc",
-      search: null,
-      searchGeneration: null,
-    };
-    const keys = await cursorKeysOf("11".repeat(32));
-    const issued = await sealCursor(keys, binding, {
-      id: "n-1",
-      values: [["t1"]],
-    });
-    const opened = async (
-      changes: Partial<CursorBinding>
-    ): Promise<unknown> => {
-      try {
-        return await openCursor(keys, { ...binding, ...changes }, issued);
-      } catch (error) {
-        const code: unknown =
-          error instanceof Error ? Reflect.get(error, "code") : error;
-        return code;
-      }
-    };
-    expect({
-      // The same teams in another order are the same teams.
-      same: await opened({ teams: ["support", "sales"] }),
-      teamLeft: await opened({ teams: ["support"] }),
-      teamJoined: await opened({ teams: ["sales", "support", "board"] }),
-      // A search's binding is another, which no query's cursor opens.
-      search: await opened({ search: "t1" }),
-    }).toStrictEqual({
-      same: { id: "n-1", values: [["t1"]] },
-      teamLeft: "data.invalid_cursor",
-      teamJoined: "data.invalid_cursor",
-      search: "data.invalid_cursor",
-    });
-  });
-});
-
-describe("a deleted store's cursor key", () => {
-  it("goes with the store's purge, so nothing it sealed can be opened again", async () => {
-    const fixture = await storeWith("appMembers");
-    await insertNotes(fixture, ranked);
-    const page = await dbOf(fixture, scopeOf(fixture.schemaHash))
-      .query("notes")
-      .paginate({ pageSize: 2, cursor: null });
-    const keyOf = async (): Promise<unknown> =>
-      await runInDurableObject(
-        env.DATA_STORES.getByName(fixture.store.id),
-        (_instance, state) =>
-          state.storage.sql
-            .exec<{ key: string | null }>(
-              "SELECT cursor_key AS key FROM sdk_store"
-            )
-            .one().key
-      );
-    const minted = await keyOf();
-    await deleteStore(env, builder, fixture.store.id);
-    // Its alarm, run here rather than waited for (its own may have run).
-    await runInDurableObject(
-      env.DATA_STORES.getByName(fixture.store.id),
-      async (_instance, state) => {
-        await new StoreHost(state, env).runAlarm({});
-      }
-    );
-    expect({
-      cursor: typeof page.nextCursor,
-      minted: typeof minted,
-      afterPurge: await keyOf(),
-    }).toStrictEqual({ cursor: "string", minted: "string", afterPurge: null });
   });
 });

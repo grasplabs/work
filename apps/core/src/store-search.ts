@@ -67,7 +67,7 @@ import type { Fragment } from "./store-expressions.ts";
 //   query does. Accepted residual: its relevance (BM25) still weighs
 //   words by how often they stand in the whole index, rows the caller
 //   can't see included, as it does across owners. No score leaves the
-//   store but sealed in a cursor (store-cursors.ts), yet the order of the
+//   store, not even in a cursor (store-cursors.ts), yet the order of the
 //   rows they can see moves with it: someone who plants rows of their own
 //   holding chosen words, and searches for two of them, can tell from
 //   which ranks first whether rows they can't see hold a word often. It

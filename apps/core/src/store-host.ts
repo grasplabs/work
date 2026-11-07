@@ -29,7 +29,7 @@ import {
   auditProvenanceMaxItems,
 } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
-import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { identifierSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
@@ -156,8 +156,8 @@ import {
   recordChangesIn,
 } from "./store-changes.ts";
 import type { ChangeInput } from "./store-changes.ts";
-import { cursorKeysOf, openCursor, sealCursor } from "./store-cursors.ts";
-import type { CursorBinding, CursorKeys } from "./store-cursors.ts";
+import { decodeCursor, encodeCursor } from "./store-cursors.ts";
+import type { CursorBinding } from "./store-cursors.ts";
 import { inventoriedDeleted, recordStoreDeleted } from "./store-deletion.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import type { Fragment } from "./store-expressions.ts";
@@ -1570,8 +1570,6 @@ export class StoreHost {
   onTablesMoved: ((tables: Record<string, number>) => void) | undefined;
   /** Tables moved since `onTablesMoved` was last told, by ID. */
   readonly #movedIds = new Set<string>();
-  /** The store's cursor keys, once derived (`#cursorKeys`). */
-  #keys: CursorKeys | undefined;
   /** Each schema read so far, by hash (`#pinned`). */
   readonly #schemas = new Map<string, PinnedSchema>();
   /**
@@ -3386,10 +3384,10 @@ export class StoreHost {
 
   /**
    * One page of `query` for `reader` (store-cursors.ts has its threat
-   * model): its cursor opened first, against what this request and scope
-   * bind it to, under this store's key; the page read in one transaction;
-   * and the next page's cursor sealed for the same binding, when more
-   * follow.
+   * model): its cursor decoded first, against this request's query and
+   * generation; the page read in one transaction, under the reader's
+   * access whatever the cursor holds; and the next page's cursor, when
+   * more follow.
    */
   async #page(
     storeId: StoreId,
@@ -3402,44 +3400,20 @@ export class StoreHost {
     if (terminal.kind !== "paginate") {
       throw new Error("Not a page");
     }
-    const keys = await this.#cursorKeys(storeId);
-    // A search's cursor holds its table's generation (store-cursors.ts):
-    // one from before a write to it is expired, never sought on scores
-    // that moved.
-    const searchGenerationOf = (
-      generations: Record<string, number>
-    ): number | null =>
-      query.search === undefined ? null : (generations[query.table] ?? 0);
-    const opened = searchGenerationOf(
-      this.#generationsOf(pinned, [query.table])
-    );
-    // The teams, only when a `team` rule of the table reads them: a page
-    // read under other teams sees other rows then, and nothing else a
-    // cursor anchors depends on them (related records are read again
-    // under the reader's teams on every page).
-    const readsTeams = (
-      pinned.manifest.tables[query.table]?.rules?.read ?? []
-    ).some(({ kind }) => kind === "team");
     const binding: CursorBinding = {
-      storeId,
-      schemaHash: reader.schemaHash,
-      consumer: reader.consumer,
-      principal: reader.principal,
-      appMember: reader.appMember,
-      appBuilder: reader.appBuilder,
-      teams: readsTeams ? (reader.teams ?? []) : [],
       table: query.table,
       index: query.index,
       range: query.range,
       filter: query.filter,
       order: query.order,
       search: query.search ?? null,
-      searchGeneration: opened,
+      schemaHash: reader.schemaHash,
+      resourceVersion: reader.consumer.resourceVersion,
     };
     const anchor =
       terminal.cursor === null
         ? null
-        : await openCursor(keys, binding, terminal.cursor);
+        : await decodeCursor(binding, terminal.cursor);
     const {
       value: read,
       generations,
@@ -3453,48 +3427,15 @@ export class StoreHost {
       (statements) =>
         indexRequired(() => readPage(statements, pinned, reader, query, anchor))
     );
-    const searchGeneration = searchGenerationOf(generations);
-    // A write landed while the cursor was opened: the page read sought on
-    // scores that moved.
-    if (anchor !== null && searchGeneration !== opened) {
-      throw dataErrors.create("data.cursor_expired");
-    }
     const value: PageAnswer =
       read.hasMore && read.last !== undefined
         ? {
             items: read.items,
-            nextCursor: await sealCursor(
-              keys,
-              { ...binding, searchGeneration },
-              read.last
-            ),
+            nextCursor: await encodeCursor(binding, read.last),
             hasMore: true,
           }
         : { items: read.items, nextCursor: null, hasMore: false };
     return { value, generations, sensitive };
-  }
-
-  /**
-   * The keys this store seals and tags its cursors with, derived from one
-   * random key kept in its own SQLite: minted by the store's first page,
-   * cleared when the store is purged, derived once per object.
-   */
-  async #cursorKeys(storeId: StoreId): Promise<CursorKeys> {
-    if (this.#keys !== undefined) {
-      return this.#keys;
-    }
-    const hex = this.ctx.storage.transactionSync(() => {
-      this.#bind(storeId, false);
-      const row = this.#db.select({ key: store.cursorKey }).from(store).get();
-      if (row?.key !== null && row?.key !== undefined) {
-        return row.key;
-      }
-      const made = toHex(crypto.getRandomValues(new Uint8Array(32)));
-      this.#db.update(store).set({ cursorKey: made }).run();
-      return made;
-    });
-    this.#keys = await cursorKeysOf(hex);
-    return this.#keys;
   }
 
   /**
@@ -8552,9 +8493,6 @@ export class StoreHost {
       }
       this.#db.update(store).set({ inventoriedAt: Date.now() }).run();
     }
-    // The cursor key goes with what it sealed: nothing is left to page.
-    this.#db.update(store).set({ cursorKey: null }).run();
-    this.#keys = undefined;
     // Its files' bytes before their rows: a purge stopped between them
     // finds the bytes gone and the rows still there, never the reverse.
     if (this.#db.select({ id: files.fileId }).from(files).get() !== undefined) {

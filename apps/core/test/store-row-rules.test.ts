@@ -8,6 +8,7 @@ import {
 } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
+import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -23,6 +24,7 @@ import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { operationRoles } from "../src/app-access.ts";
 import { AppDataRpc } from "../src/app-data.ts";
@@ -347,15 +349,17 @@ const removeTicket = mutation({
 });
 
 const pageFrom = query({
-  args: { cursor: v.string().nullable() },
+  args: { cursor: v.string().nullable(), search: v.string().optional() },
   returns: v.object({
     titles: v.array(v.string()),
     next: v.string().nullable(),
   }),
-  handler: async (ctx, { cursor }) => {
-    const read: TitlePage = await ctx.db
-      .query("requests")
-      .paginate({ pageSize: 1, cursor });
+  handler: async (ctx, { cursor, search }) => {
+    const read: TitlePage = await (
+      search === undefined
+        ? ctx.db.query("requests")
+        : ctx.db.search("requests", search)
+    ).paginate({ pageSize: 1, cursor });
     return {
       titles: read.items.map(({ title }) => title),
       next: read.nextCursor,
@@ -577,6 +581,12 @@ const call = async (
 /** What a call answered, or the code it was refused with. */
 const outcome = (result: OperationResult): unknown =>
   result.ok ? result.value : result.error.code;
+
+/** Field `field` of `value`, or undefined. */
+const fieldOf = (value: unknown, field: string): unknown =>
+  typeof value === "object" && value !== null
+    ? Reflect.get(value, field)
+    : undefined;
 
 /** A refusal as its caller sees it, but for the record it names. */
 const refusal = (result: OperationResult): unknown => {
@@ -973,21 +983,81 @@ describe("writing a table whose read rules are its write rules", () => {
   });
 });
 
+/** `of.ada`'s page from `cursor` (its titles and next cursor), or its refusal. */
+const adaPage = async (
+  of: World,
+  cursor: unknown,
+  search?: string
+): Promise<unknown> =>
+  outcome(
+    await call(of, of.ada, "pageFrom", {
+      cursor,
+      ...(search === undefined ? {} : { search }),
+    })
+  );
+
+/** The next cursor of `page`, which must have one. */
+const nextOf = (page: unknown): string => {
+  const next = fieldOf(page, "next");
+  if (typeof next !== "string") {
+    throw new TypeError("No next page");
+  }
+  return next;
+};
+
+/** `cursor` ending at record `id`, by its ID alone, as a caller could make it. */
+const forgedAt = (cursor: string, id: string): string => {
+  const held = z
+    .record(z.string(), z.unknown())
+    .parse(JSON.parse(new TextDecoder().decode(fromBase64Url(cursor))));
+  return toBase64Url(
+    new TextEncoder().encode(JSON.stringify({ ...held, id, values: undefined }))
+  );
+};
+
+describe("a forged cursor", () => {
+  it("ends at no row the rules keep from its reader, in a query or a search", async () => {
+    const of = await world();
+    const ids = await filled(of);
+    const hidden = idIn(ids, "board alpha");
+    const queried = nextOf(await adaPage(of, null));
+    const searched = nextOf(await adaPage(of, null, "alpha"));
+    // As missing as a row that never was: never a page after it, nor its
+    // relevance to seek by.
+    expect({
+      query: await adaPage(of, forgedAt(queried, hidden)),
+      search: await adaPage(of, forgedAt(searched, hidden), "alpha"),
+    }).toStrictEqual({
+      query: "data.cursor_expired",
+      search: "data.cursor_expired",
+    });
+  });
+});
+
 describe("a person's teams changing", () => {
-  it("expires a page's cursor read under the teams they had", async () => {
+  it("pages on under the teams they have now", async () => {
     const of = await world();
     await filled(of);
-    const first = await call(of, of.ada, "pageFrom", { cursor: null });
-    if (
-      !(first.ok && typeof first.value === "object" && first.value !== null)
-    ) {
-      throw new Error("No first page");
-    }
-    const cursor: unknown = Reflect.get(first.value, "next");
+    const first = await adaPage(of, null);
     await joinTeam(of.support, of.ada);
-    expect(outcome(await call(of, of.ada, "pageFrom", { cursor }))).toBe(
-      "data.invalid_cursor"
-    );
+    const rest: unknown[] = [];
+    let next: unknown = nextOf(first);
+    while (typeof next === "string") {
+      // One page after the other.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const page = await adaPage(of, next);
+      rest.push(fieldOf(page, "titles"));
+      next = fieldOf(page, "next");
+    }
+    expect({ first: fieldOf(first, "titles"), rest }).toStrictEqual({
+      first: ["sales lead alpha"],
+      // Support's ticket too, now Ada is in support.
+      rest: [
+        ["sales follow up alpha"],
+        ["support ticket alpha"],
+        ["handed to ada alpha"],
+      ],
+    });
   });
 
   it("runs a mutation again under the teams they have when one changes between its reads and its commit", async () => {

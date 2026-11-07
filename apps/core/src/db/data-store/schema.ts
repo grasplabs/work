@@ -49,8 +49,9 @@ export const store = sqliteTable(
      */
     inventoriedAt: integer("inventoried_at"),
     /**
-     * The key the store signs its page cursors with (store-cursors.ts):
-     * 32 random bytes in hex, made on first use, never leaving the store.
+     * Unused since cursors became plain keyset cursors (store-cursors.ts).
+     * Kept for one release so a rolled-back core, which still signs its
+     * cursors with it, keeps paging; dropped in the release after.
      */
     cursorKey: text("cursor_key"),
     /**

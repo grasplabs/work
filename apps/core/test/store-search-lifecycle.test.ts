@@ -3,6 +3,7 @@ import type { SchemaDefinition } from "@grasp-os/sdk";
 import { databaseReader } from "@grasp-os/sdk/database";
 import type { PaginationResult } from "@grasp-os/sdk/database";
 import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
+import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
@@ -26,8 +27,8 @@ import {
 } from "./store-schemas.ts";
 
 // A search index through the life of its store (store-search.ts): a
-// search's pages expire with any write to its table, rather than seek on
-// relevance that moved; a record's old text leaves the store's pages in
+// search's pages go on after a write to its table from their record's
+// relevance as it is now, and expire when that record goes; a record's old text leaves the store's pages in
 // the same write as its change or deletion; a cascade and a migration's
 // rewrite reach the
 // index as any write does; and a deleted store's purge drops the index
@@ -158,7 +159,7 @@ const outcome = async (read: Promise<unknown>): Promise<unknown> => {
 };
 
 describe("a search's pages", () => {
-  it("expire with a write to the table, and start again whole", async () => {
+  it("go on after a write to the table, and expire when the record they end at goes", async () => {
     const store = await newStore();
     const { schemaHash } = await store.defineTables(v1);
     await insert(store, schemaHash, "alpha one", "alpha two", "alpha three");
@@ -173,41 +174,117 @@ describe("a search's pages", () => {
     const first = await db
       .search("notes", "alpha")
       .paginate({ pageSize: 2, cursor: null });
-    // A write that matches nothing still moves every record's relevance.
+    // A write that matches nothing still moves every record's relevance:
+    // the next page starts after the last record's relevance as it is now.
+    // These titles are alike in length, so their order holds.
     await insert(store, schemaHash, "beta");
-    const second = await outcome(
-      db
-        .search("notes", "alpha")
-        .paginate({ pageSize: 2, cursor: first.nextCursor })
-    );
-    const again: string[] = [];
-    let cursor: string | null = null;
-    do {
+    const titles = first.items.map((note) => note.title);
+    let cursor = first.nextCursor;
+    while (cursor !== null) {
       // One page after the other.
       // oxlint-disable-next-line no-await-in-loop -- see above
-      const page: PaginationResult<{ title: string }> = await db
+      const page: PaginationResult<{ _id: string; title: string }> = await db
         .search("notes", "alpha")
-        .paginate({
-          pageSize: 2,
-          cursor,
-        });
-      again.push(...page.items.map((note) => note.title));
+        .paginate({ pageSize: 2, cursor });
+      titles.push(...page.items.map((note) => note.title));
       ({ nextCursor: cursor } = page);
-    } while (cursor !== null);
+    }
+    // The record a cursor ends at goes: it no longer applies.
+    const again = await db
+      .search("notes", "alpha")
+      .paginate({ pageSize: 2, cursor: null });
+    const last = again.items.at(-1);
+    await commit(store, schemaHash, [
+      {
+        op: "delete",
+        table: "notes",
+        id: last?._id ?? "",
+        expectedRevision: last?._rev ?? 1,
+      },
+    ]);
     expect({
-      first: first.items.length,
-      second,
-      again: again.toSorted(),
+      titles: titles.toSorted(),
+      gone: await outcome(
+        db
+          .search("notes", "alpha")
+          .paginate({ pageSize: 2, cursor: again.nextCursor })
+      ),
     }).toStrictEqual({
-      first: 2,
-      second: "data.cursor_expired",
-      again: [
+      titles: [
         "alpha five",
         "alpha four",
         "alpha one",
         "alpha three",
         "alpha two",
       ],
+      gone: "data.cursor_expired",
+    });
+  });
+
+  it("hold no relevance, and start after their record's, read again under the reader's access", async () => {
+    const store = await newStore();
+    const notes = defineSchema({
+      notes: defineTable({ title }).searchIndex(["title"]),
+    });
+    const { schemaHash } = await store.defineTables(
+      manifestText(
+        accessedManifest(notes, {
+          tables: { notes: { read: "owner", write: "owner" } },
+        })
+      )
+    );
+    await insert(store, schemaHash, "alpha one", "alpha two", "alpha three");
+    const {
+      inserted: [graces = ""],
+    } = await commit(
+      store,
+      schemaHash,
+      [
+        {
+          op: "insert",
+          table: "notes",
+          id: newRecordId(),
+          fields: { title: "alpha grace" },
+        },
+      ],
+      "grace"
+    );
+    const db = databaseReader(notes, async (request) => {
+      const { value } = await store.read(scopeOf(schemaHash), request);
+      return value;
+    });
+    const search = async (cursor: string | null) =>
+      await db.search("notes", "alpha").paginate({ pageSize: 2, cursor });
+    const first = await search(null);
+    const cursor = first.nextCursor ?? "";
+    const held: unknown = JSON.parse(
+      new TextDecoder().decode(fromBase64Url(cursor))
+    );
+    /** The cursor at record `id`, as a caller could make it. */
+    const at = (id: string): string =>
+      toBase64Url(
+        new TextEncoder().encode(
+          JSON.stringify({
+            ...(typeof held === "object" ? held : {}),
+            id,
+          })
+        )
+      );
+    const second = await search(cursor);
+    expect({
+      // The last record's ID and the hashes: nothing ranked it.
+      held: Object.keys(held ?? {}).toSorted(),
+      pages: [...first.items, ...second.items]
+        .map((note) => note.title)
+        .toSorted(),
+      // Another person's record is as missing as one that never was.
+      othersRecord: await outcome(search(at(graces))),
+      missingRecord: await outcome(search(at(newRecordId()))),
+    }).toStrictEqual({
+      held: ["generation", "id", "query"],
+      pages: ["alpha one", "alpha three", "alpha two"],
+      othersRecord: "data.cursor_expired",
+      missingRecord: "data.cursor_expired",
     });
   });
 });

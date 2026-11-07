@@ -851,7 +851,7 @@ export type AnchorValue = [] | [null] | [string | number];
 /**
  * Where a page ends, for the next to start after: the last record's ID
  * and, when they fit in a cursor, its order fields' values. Without them,
- * the next page looks the record up again.
+ * the next page looks the record up again; a search's never has them.
  */
 export interface Anchor {
   readonly id: string;
@@ -862,7 +862,7 @@ export interface Anchor {
 export interface PageRead {
   readonly items: ReadDocument[];
   readonly hasMore: boolean;
-  readonly last: Required<Anchor> | undefined;
+  readonly last: Anchor | undefined;
 }
 
 /** An order field's value as SQLite read it, as an anchor holds it. */
@@ -1273,10 +1273,11 @@ const requireRecordTerminal = (query: QueryRequest): void => {
 // joined to the records themselves under the caller's access and filter.
 // What the index matches is counted first, within the scan bound, so no
 // search ranks more than that; then every record read counts against it
-// as any query's does. A page's cursor anchors at its last record's
-// relevance and ID; relevance moves as the table changes, so a record
-// changed between pages may move past or into a later page, as a page of
-// any query may.
+// as any query's does. A page's cursor anchors at its last record's ID,
+// and the next page starts after that record's relevance, read again
+// (`searchSeekOf`) as it is now: relevance moves as the table changes, so
+// a record changed between pages may move past or into a later page, as
+// a page of any query may.
 
 /** The search index `query` reads, or `data.invalid_query`. */
 const searchOf = (
@@ -1302,13 +1303,35 @@ interface SearchSeek {
   readonly id: string;
 }
 
-/** A search's anchor as a seek, or `data.cursor_expired`. */
-const searchSeekOf = (anchor: Anchor | null): SearchSeek | undefined => {
+/**
+ * A search's anchor as a seek: its record's relevance read again, under
+ * the caller's access, since a relevance weighs rows they can't see and
+ * so never leaves the store in a cursor (store-cursors.ts).
+ * `data.cursor_expired` when the record is gone, no longer matches, or
+ * isn't the caller's to read, alike.
+ */
+const searchSeekOf = (
+  sql: RecordSql,
+  scope: ReadScope,
+  table: ReadTable,
+  search: PhysicalSearch,
+  match: string,
+  anchor: Anchor | null
+): SearchSeek | undefined => {
   if (anchor === null) {
     return undefined;
   }
-  const [value] = anchor.values ?? [];
-  const [score] = value ?? [];
+  const scoped = scopeClause(table, scope);
+  const [row] = sql
+    .exec(
+      `SELECT hit.score AS score FROM (SELECT rowid AS doc, bm25(${search.name}) AS score FROM ${search.name} WHERE ${search.name} MATCH ?) AS hit JOIN sdk_search_docs ON sdk_search_docs.doc = hit.doc JOIN sdk_records ON sdk_records.table_id = sdk_search_docs.doc_table AND sdk_records.record_id = sdk_search_docs.doc_record WHERE sdk_records.table_id = ? AND record_id = ?${scoped.sql}`,
+      match,
+      table.tableId,
+      anchor.id,
+      ...scoped.params
+    )
+    .toArray();
+  const score = row?.score;
   if (typeof score !== "number") {
     throw dataErrors.create("data.cursor_expired");
   }
@@ -1340,7 +1363,6 @@ const searchPlan = (
     "value_json",
     "length(CAST(value_json AS BLOB)) AS bytes",
     ...(filter === null ? [] : [`${filter.sql} AS matched`]),
-    "hit.score AS o0",
   ];
   const scoped = scopeTerms(table, scope);
   const where = [
@@ -1377,7 +1399,6 @@ const searchMatches = (
   scan: Scan
 ): Iterator<Match> => {
   const search = searchOf(pinned, table, query);
-  const seek = searchSeekOf(anchor);
   const terms = searchTerms(query.search ?? "");
   if (terms.length === 0) {
     return [][Symbol.iterator]();
@@ -1399,6 +1420,14 @@ const searchMatches = (
           sql: scoped.map((term) => `(${term.sql})`).join(" AND "),
           params: scoped.flatMap(({ params }) => params),
         }
+  );
+  const seek = searchSeekOf(
+    sql.on(table.name),
+    scope,
+    table,
+    search,
+    match,
+    anchor
   );
   return matchesOf(
     sql,
@@ -1657,7 +1686,7 @@ export const readPage = (
   const table = readableTable(pinned, scope, query.table);
   const scan: Scan = { entries: 0, bytes: 0 };
   const found: Match[] = [];
-  let anchorFields: number;
+  let anchorFields: number | undefined;
   if (query.search === undefined) {
     anchorFields = accessOf(pinned, table, query).orderFields.length - 1;
     for (const plan of pagePlans(
@@ -1678,7 +1707,8 @@ export const readPage = (
       }
     }
   } else {
-    anchorFields = 1;
+    // A search's anchor is its record's ID alone (`searchSeekOf`).
+    anchorFields = undefined;
     const matches = searchMatches(
       sql,
       pinned,
@@ -1711,9 +1741,15 @@ export const readPage = (
         ? undefined
         : {
             id: lastMatch.row.record_id,
-            values: Array.from({ length: anchorFields }, (_field, position) =>
-              anchorValueOf(lastMatch.row[`o${position}`])
-            ),
+            ...(anchorFields === undefined
+              ? {}
+              : {
+                  values: Array.from(
+                    { length: anchorFields },
+                    (_field, position) =>
+                      anchorValueOf(lastMatch.row[`o${position}`])
+                  ),
+                }),
           },
   };
 };

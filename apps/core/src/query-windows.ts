@@ -37,9 +37,9 @@ import type {
 //   those, so every page saw the store as it is then. A window that isn't
 //   one state is read again, `windowMaxReads` times at most, then refused
 //   as `query.concurrent_change` (retryable), never answered torn or in
-//   part. A cursor of core's own refused between pages (the person's
-//   roles changed meanwhile, so the scope it was sealed for did) is a
-//   torn read too. The store can't hold one state across the pages: each
+//   part. A cursor of core's own refused between pages (the App's
+//   version or its schema moved meanwhile, or a search's anchor record
+//   went) is a torn read too. The store can't hold one state across the pages: each
 //   is a sandboxed run of App code, and holding the store's writes for it
 //   would let one person's list stall every writer of the App. So a list
 //   on a table written faster than its window reads settles as that
@@ -48,11 +48,10 @@ import type {
 //   on its budget.
 // - A cursor forged, edited or replayed, across people, Apps or queries:
 //   a window's cursors never leave core, so a live list has none to
-//   forge; each is the store's own sealed statement, bound to the person,
-//   their roles, the App, its version and the query (store-cursors.ts),
-//   opened by the store before the next page is read. A page's own
-//   foreground page reads (`client.query` with `pagination`) carry a
-//   cursor the store checks the same way.
+//   forge. A page's own foreground page reads (`client.query` with
+//   `pagination`) carry a plain keyset cursor (store-cursors.ts): it only
+//   says where a page starts, and every page is read under the person's
+//   own access whatever it holds.
 // - A window reaches records the person can't read: every page runs as
 //   the caller's invocation, the person's own, through the App's role
 //   check and the table's access, exactly as a call of the query would;
@@ -99,7 +98,7 @@ export const windowPages = (extent: number): number =>
  */
 const windowMaxPages = liveWindowMaxItems / 10;
 
-/** The codes of a cursor the store refused: core's own, sealed for another scope. */
+/** The codes of a cursor the store refused: core's own, from before a change. */
 const cursorRefusals: ReadonlySet<string> = new Set([
   "data.invalid_cursor",
   "data.cursor_expired",
