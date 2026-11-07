@@ -274,7 +274,7 @@ test("a version up for review shows its changes in the workspace's Code view, on
   }
 });
 
-test("an App's own chat writes its page and server code, and its workspace previews it, taking each write in place, its page's even while the server code doesn't build", async ({
+test("an App's own chat writes its page and server code, and its workspace previews it, taking each write in place, and saying a problem is being fixed while the server code doesn't build", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("chatPreview");
@@ -351,39 +351,41 @@ test("an App's own chat writes its page and server code, and its workspace previ
     }).toStrictEqual({ count: "1 in the preview", sameDocument: true });
 
     // The agent writes its server code alone: the frame takes it in
-    // place, its live count read again on the new code, on a store of
-    // that code's own.
+    // place, its live count read again on the new code, on the preview's
+    // store, kept while the schema is the same.
     await askOnceIdle(chat, "Count anew.");
     await expect(chat.getByText("It counts anew.")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(frame.getByRole("status")).toHaveText("0 counted anew", {
+    await expect(frame.getByRole("status")).toHaveText("1 counted anew", {
       timeout: 10_000,
     });
     await frame.getByRole("button", { name: "Add another" }).click();
-    await expect(frame.getByRole("status")).toHaveText("1 counted anew");
+    await expect(frame.getByRole("status")).toHaveText("2 counted anew");
 
-    // Server code that doesn't build, with a write of the page: the
-    // page shows on the server code that last built, its data kept,
-    // while the problem is being fixed.
+    // Server code that doesn't build, with a write of the page, whose
+    // references it can't have then: the frame keeps the page it shows,
+    // and says the problem is being fixed.
     await askOnceIdle(chat, "Take more.");
     await expect(chat.getByText("It takes more.")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(frame.getByRole("button", { name: "Add more" })).toBeVisible({
+    await expect(preview.getByText("Fixing a problem…")).toBeVisible({
       timeout: 10_000,
     });
-    await expect(preview.getByText("Fixing a problem…")).toBeVisible();
-    await expect(frame.getByRole("status")).toHaveText("1 counted anew");
+    await expect(
+      frame.getByRole("button", { name: "Add another" })
+    ).toBeVisible();
 
     // Once it builds, the frame takes it as any write.
     await askOnceIdle(chat, "Fix the count.");
     await expect(chat.getByText("The count is fixed.")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(frame.getByRole("status")).toHaveText("0 fixed", {
+    await expect(frame.getByRole("status")).toHaveText("2 fixed", {
       timeout: 10_000,
     });
+    await expect(frame.getByRole("button", { name: "Add more" })).toBeVisible();
     await expect(preview.getByText("Fixing a problem…")).toHaveCount(0);
     const stillSameDocument: unknown = await pageFrame?.evaluate((): unknown =>
       Reflect.get(globalThis, "stillThisDocument")
@@ -501,10 +503,10 @@ test("a preview opened on a draft that doesn't build shows the App's latest vers
       chat.getByText("The tally's page doesn't build yet.")
     ).toBeVisible({ timeout: 30_000 });
 
-    // Opened afresh on it: the App's latest version, on its own server
-    // code, and a word that the problem is being fixed.
+    // Opened afresh on it: the App's latest version's page, its calls on
+    // the draft as it is, and a word that the problem is being fixed.
     await page.reload();
-    await expect(frame.getByRole("status")).toHaveText("0 in the App", {
+    await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
       timeout: 30_000,
     });
     await expect(preview.getByText("Fixing a problem…")).toBeVisible();
