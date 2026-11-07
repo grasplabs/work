@@ -365,18 +365,20 @@ test("an App's own chat writes its page and server code, and its workspace previ
 
     // Server code that doesn't build, with a write of the page: the page
     // still takes the write, built against the references the draft last
-    // generated, its calls answering the server code's error, while the
+    // generated, and its calls show the server code's error, while the
     // problem is being fixed.
     await askOnceIdle(chat, "Take more.");
     await expect(chat.getByText("It takes more.")).toBeVisible({
       timeout: 30_000,
     });
-    await expect(frame.getByRole("button", { name: "Add more" })).toBeVisible({
-      timeout: 10_000,
-    });
+    await expect(frame.getByRole("alert")).toContainText(
+      "server code doesn't build",
+      { timeout: 10_000 }
+    );
     await expect(preview.getByText("Fixing a problem…")).toBeVisible();
 
-    // Once it builds, the frame takes it as any write.
+    // Once it builds, the frame takes it: started afresh, as the error the
+    // page showed can't be taken back in place, its data kept.
     await askOnceIdle(chat, "Fix the count.");
     await expect(chat.getByText("The count is fixed.")).toBeVisible({
       timeout: 30_000,
@@ -386,10 +388,6 @@ test("an App's own chat writes its page and server code, and its workspace previ
     });
     await expect(frame.getByRole("button", { name: "Add more" })).toBeVisible();
     await expect(preview.getByText("Fixing a problem…")).toHaveCount(0);
-    const stillSameDocument: unknown = await pageFrame?.evaluate((): unknown =>
-      Reflect.get(globalThis, "stillThisDocument")
-    );
-    expect(stillSameDocument).toBe(true);
 
     // The Code view shows the draft the preview does, before anything is
     // published: the App's project as the agent wrote it, its last write

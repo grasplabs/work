@@ -321,7 +321,15 @@ export class PreviewUpdates {
     this.#troubled = false;
     let answer = await this.#load(update);
     this.#trying = undefined;
-    if (answer === "broken") {
+    if (answer === "broken" && update.serverUnbuilt === true) {
+      // Its pages render; what broke is its calls, answering that the
+      // server code doesn't build, which the page shows as its own error
+      // while the problem is being fixed. Rolling the pages back would
+      // only hide the write. Once the server code builds again, the error
+      // the page shows can't be taken back in place: the frame starts
+      // afresh on that write.
+      answer = "applied";
+    } else if (answer === "broken") {
       // What rendered last, back, keeping what the page holds.
       answer =
         this.#fits(this.#applied) &&
