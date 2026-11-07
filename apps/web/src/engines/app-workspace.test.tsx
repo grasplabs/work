@@ -127,7 +127,7 @@ const fakeApps = (
   };
   return {
     calls,
-    /** A build job proposed version `version`: it waits for review. */
+    /** The chat's draft was proposed as version `version`: it waits for review. */
     proposed: (version: number) => {
       app = { ...app, pendingVersion: version };
     },
@@ -715,7 +715,7 @@ describe(AppWorkspace, () => {
     }).toStrictEqual({ hidden: false, step: true, answered: false });
   });
 
-  it("offers a version a build job proposed after the turn, once the chat's drafts change", async () => {
+  it("offers a version proposed outside a turn, once the chat's drafts change", async () => {
     const fake = fakeApps("published");
     let send: ((update: ChatUpdate) => void) | undefined;
     // A chat of this test's own: the tab keeps one watch per chat.
@@ -731,7 +731,7 @@ describe(AppWorkspace, () => {
     await settled();
     const before = says("Publish version 2");
 
-    // The job proposed its draft as version 2: core drops the draft.
+    // Its person proposed the draft as version 2: core drops the draft.
     fake.proposed(2);
     await act(async () => {
       send?.({

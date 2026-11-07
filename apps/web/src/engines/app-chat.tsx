@@ -243,6 +243,7 @@ export const AppChat = ({
             }}
             output={view.output}
             partial={view.partial}
+            checking={view.checking}
             running={view.running}
             tools={view.tools}
           >

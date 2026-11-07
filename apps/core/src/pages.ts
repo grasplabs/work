@@ -4,7 +4,6 @@ import {
   appTestFiles,
   isPageFile,
   buildFiles,
-  compilerVersion,
   kitModuleName,
   kitModules,
   kitPreviewModules,
@@ -13,12 +12,9 @@ import {
   limitErrors,
   computeModuleErrors,
   computePackagesFile,
-  moduleRecordOf,
   expressionTypeCheck,
   generatedWorkflowErrors,
   pageIncrementKeys,
-  pageRefusals,
-  pageSources,
   withTypeCheck,
 } from "@grasp-os/compiler";
 import type {
@@ -31,7 +27,6 @@ import type {
   ExpressionScopeTypes,
   ExpressionTypeCheck,
   IncrementalBuild,
-  Increments,
   GeneratedWorkflowBuild,
   TypedExpression,
   PageBuild,
@@ -41,30 +36,22 @@ import type {
 import { diagnosticCategory } from "@grasp-os/shared/diagnostics";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
-import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
-import { errorFields, log } from "@grasp-os/shared/log";
+import { canonicalJson } from "@grasp-os/shared/json";
+import { log } from "@grasp-os/shared/log";
 import { pageErrors } from "@grasp-os/shared/pages";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import { z } from "zod";
 
-import { batchesOf, callSplitting } from "./batches.ts";
 import {
-  forgetReceipts,
-  keySchema,
-  lastUsedOf,
-  refreshKept,
-  sweepReceipts,
+  buildCachePrefix,
+  cacheKeyOf,
+  inOrder,
+  keepModules,
+  readModules,
   throughCache,
-  usedNow,
 } from "./build-cache.ts";
-import type { Built, CacheEnv } from "./build-cache.ts";
-import {
-  incrementPrefixes,
-  keepIncrements,
-  readIncrements,
-} from "./module-cache.ts";
-import type { IncrementKeys } from "./module-cache.ts";
+import type { CacheEnv, CacheOutcome } from "./build-cache.ts";
 import type { FrameCode } from "./page-frame.ts";
 import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
 import type { PlatformEnv, PlatformRunner } from "./platform-sandbox.ts";
@@ -102,27 +89,8 @@ export const withinBuildWait = async <T>(
     scheduler.wait(buildWaitOf(env)).then(() => "late" as const),
   ]);
 
-/** A hash of an App's files, whatever order they come in. */
-const hashOf = async (files: Record<string, string>): Promise<string> =>
-  await sha256Hex(
-    JSON.stringify(
-      Object.entries(files).toSorted(([a], [b]) => (a < b ? -1 : 1))
-    )
-  );
-
 /** An App's files at one version, by path. */
 type AppFiles = Record<string, string>;
-
-/**
- * What a build is: the compiler that builds it (a release with a new
- * compiler or kit builds every App again) and a hash of the files it
- * reads. Nothing else goes into a build, so the same files build the same
- * whichever App or version they are in: an App made from a blueprint, or
- * a version that changed only its pages, takes the workflow build it
- * already has.
- */
-export const buildKey = async (files: AppFiles): Promise<string> =>
-  `${compilerVersion}/${await hashOf(files)}`;
 
 /** What a build of `kind` takes, as its errors past it. */
 const limitsOf = (kind: string): ((files: AppFiles) => Diagnostic[]) => {
@@ -150,16 +118,8 @@ interface FailedBuild {
   diagnostics: Diagnostic[];
 }
 
-/** What building reads from core's env. */
-export type BuildEnv = PlatformEnv &
-  CacheEnv &
-  Pick<Env, "BUILD_BATCH_CPU_MS"> & {
-    /** Where builds are cached: core's R2 bucket, in the EU. */
-    FILES: Pick<R2Bucket, "get" | "put">;
-  };
-
-/** How much longer than a build may take a build's lease is held. */
-export const leaseSlackMs = 30_000;
+/** What building reads from core's env: the sandbox, and the cache (in R2, in the EU). */
+export type BuildEnv = PlatformEnv & CacheEnv;
 
 /**
  * Which build profile a build is for (spec 19.2.1): `production`, what a
@@ -174,13 +134,10 @@ export type BuildProfile = "preview" | "production";
 export interface BuildOptions {
   /** Its profile: `production` unless a chat's draft asks. */
   readonly profile?: BuildProfile;
-  /** Given up on: no compile starts, and it throws its reason. */
-  readonly signal?: AbortSignal;
   /**
-   * False for a preview's frame alone: its pages are built without the
-   * type check (the compiler's `preview-frame`), which would hold up what
-   * the person sees and gate nothing it runs. The agent's check of the
-   * draft builds them with it.
+   * False for what a preview's frame and a draft's write build: pages
+   * without the type check (the compiler's `preview-frame`), which runs
+   * as an agent's turn would answer, and at publish (agent-builds.ts).
    */
   readonly checks?: boolean;
 }
@@ -244,13 +201,10 @@ const isBuildShaped = (value: unknown): boolean =>
  * once the compiler has answered, never inside its call, and put
  * together with the build as the build would have (`withTypeCheck`). A
  * build that waits on no check (one that failed before it) is as it came.
- * The build's lease is renewed as the check starts (`renew`): the check is
- * a call of its own, on-prem with its own wait for a place.
  */
 const withItsCheck = async (
   runner: PlatformRunner,
-  answer: unknown,
-  renew: () => Promise<void>
+  answer: unknown
 ): Promise<unknown> => {
   if (
     typeof answer !== "object" ||
@@ -267,7 +221,6 @@ const withItsCheck = async (
   if (unchecked.typeCheck === undefined) {
     return unchecked.built;
   }
-  await renew();
   const diagnostics = await runner.run("type-checker", "check", [
     unchecked.typeCheck.request,
   ]);
@@ -284,12 +237,10 @@ const withItsCheck = async (
 /**
  * A build of `files` by the compiler, wherever the runner runs it, and
  * whether to cache it: the compiler's answer, or a failed build when it
- * was stopped at a bound (a type built to recurse, say). A stop the files
- * reach whatever the load (CPU time, memory, an answer too large) is
- * cached as the failed build it is, so an App whose page holds the
- * checker can't make the compiler run on every view, on Cloudflare or
- * on-prem. A stop the load can cause (the wall-clock deadline, a process
- * killed) isn't: the next view builds again.
+ * was stopped at a bound (CPU time, memory, a deadline). A stop is never
+ * cached: it says the limit was reached this time, not that these files
+ * fail, so the next build tries again rather than serve the stop until the
+ * files change.
  *
  * Code the host generated (a JSON workflow's module) is never stopped by
  * its author: the generator, not a builder, writes its types, so no stop
@@ -302,16 +253,12 @@ const compiled = async (
   kind: BuildKind,
   files: AppFiles,
   profile: BuildProfile,
-  /** Renews the build's lease, as its type check starts. */
-  renew: () => Promise<void>,
   /** The compiler call, when not the kind's own: what it answers as the build. */
   call: () => Promise<unknown> = async () => {
     const [method, target] = compilerCallOf(kind, profile);
     const answer = await runner.run("compiler", method, [target, files]);
     // Inspection checks no types: its build is as it came.
-    return method === "build"
-      ? await withItsCheck(runner, answer, renew)
-      : answer;
+    return method === "build" ? await withItsCheck(runner, answer) : answer;
   }
 ): Promise<{ built: unknown; cache: boolean }> => {
   try {
@@ -334,32 +281,25 @@ const compiled = async (
         {
           rule: "compile",
           severity: "error",
-          message: `The compiler was stopped before it finished: ${error.message} Simplify the ${kind === "compute" ? "modules'" : "App's"} types (a type that recurses without end holds the type checker).`,
+          message: `The compiler was stopped before it finished: ${error.message} It tries again at the next build; should it stop again, simplify the ${kind === "compute" ? "modules'" : "App's"} types (a type that recurses without end holds the type checker).`,
         },
       ],
     };
-    return { built: failed, cache: error.own };
+    return { built: failed, cache: false };
   }
 };
 
 const day = 24 * 60 * 60 * 1000;
 
 /**
- * How long a cached build is kept after it was last used: the clock's
- * sweep deletes what is older (`sweepBuilds`). A build is the compiler's
- * output for files core keeps, under its version, so one swept is built
+ * How long a cache entry is kept after it was last written: the clock's sweep
+ * deletes what is older (`sweepBuilds`). An entry is the toolchain's
+ * output for files core keeps, under its version, so one swept is made
  * again, the same, the next time it is asked for: what runs never rests
- * on the cache. Builds of an older compiler are never asked for again,
- * and go once their time is up.
+ * on the cache. A release misses every entry of the one before, which go
+ * once their time is up.
  */
 export const buildKeepMs = 30 * day;
-
-/**
- * How old a cached build may be and still be served as it is: past this,
- * serving it writes it again (`cachedBuild`), so one in use never reaches
- * `buildKeepMs`.
- */
-export const buildRefreshMs = buildKeepMs / 2;
 
 /** Whether `value` is what the compiler's `buildIncrementally` answers, its build aside. */
 const incrementalShaped = (
@@ -376,216 +316,55 @@ const incrementalShaped = (
   value.metrics !== null;
 
 /**
- * The CPU time, in ms, Babel with the React Compiler takes for one
- * character of page source on Cloudflare, at most: measured on a laptop
- * (2026-11-04) at 5–9 µs (a 60-page App's 820,000 characters in 4.2–6.9
- * s), and Cloudflare runs 2–5× slower than a laptop.
- */
-const transformCpuMsPerCharacter = 0.045;
-
-/**
- * The CPU time on Cloudflare a batch of transforms is sized to: a few
- * seconds, so a first build answers in steps and a stop costs little, far
- * below a call's ceiling (`compilerTaskCpuMs`, 60 s), which only stops
- * failures and leaves room for a cold isolate's start (loading Babel, the
- * React Compiler and the kit) and a machine slower than measured.
- */
-const batchCpuMs = 4000;
-
-/**
- * The most characters of source one batch of transforms takes
- * (`transformInBatches`): about 89,000 (`batchCpuMs`), or fewer where
- * tests size batches to less CPU time (`BUILD_BATCH_CPU_MS`). One file
- * larger than that (up to the 200,000 a file may have) is a batch of its
- * own, still well within a call's CPU time.
- */
-const batchCharacters = (env: BuildEnv): number => {
-  const set = Number(env.BUILD_BATCH_CPU_MS);
-  const cpuMs =
-    Number.isInteger(set) && set > 0 && set < batchCpuMs ? set : batchCpuMs;
-  return Math.floor(cpuMs / transformCpuMsPerCharacter);
-};
-
-/**
- * Transforms what a pages build of `files` (`target`) would and `reuse`
- * lacks, a batch at a time, before the build: the whole of a large App's
- * first build (after a release, every App's) is many times one call's CPU
- * time, and the runtime stops a call past it. Each batch is one compiler
- * call, handed only its own sources, sized well within a call's CPU time
- * (`batchCharacters`); what each made is kept at once (module-cache.ts),
- * so a build stopped part way resumes where it stopped. A batch stopped at
- * a bound is split and each half tried again; one file stopped alone is
- * left to the build, which says why. Nothing when all that's missing fits
- * in one batch, the build transforms it itself; nor when the build is
- * refused before anything compiles (`pageRefusals`). The build's lease is
- * renewed as each batch starts (`renew`). What the batches made, by key,
- * for the build to reuse, and how many calls they took.
- */
-const transformInBatches = async (
-  env: BuildEnv,
-  runner: PlatformRunner,
-  {
-    files,
-    target,
-    keys,
-    reuse,
-    leaseMs,
-    renew,
-  }: {
-    files: AppFiles;
-    target: string;
-    keys: IncrementKeys;
-    reuse: Increments;
-    leaseMs: number;
-    renew: () => Promise<void>;
-  }
-): Promise<{ made: Increments["modules"]; calls: number }> => {
-  const made: Increments["modules"] = {};
-  let calls = 0;
-  const app = buildFiles(files);
-  // Refused in milliseconds by the build itself: no batch is spent first.
-  if (pageRefusals(app).length > 0) {
-    return { made, calls };
-  }
-  const { sources, known, typeFiles } = pageSources(app);
-  const missing = sources.filter(
-    ([path]) => !Object.hasOwn(reuse.modules, keys.modules[path] ?? "")
-  );
-  const characters = batchCharacters(env);
-  if (
-    missing.reduce((sum, [, source]) => sum + source.length, 0) <= characters
-  ) {
-    return { made, calls };
-  }
-  const pathOf = new Map(
-    Object.entries(keys.modules).map(([path, key]) => [key, path])
-  );
-  const transform = async (batch: Record<string, string>): Promise<void> => {
-    // The build holds its lease while its batches run, each a lease's
-    // time from its start: one that died gives it up as one call would.
-    await renew();
-    calls += 1;
-    // Once: a stop splits the batch (`callSplitting`), which is its retry,
-    // and nothing of a stopped batch is kept as failed.
-    const answer: unknown = await runner.run(
-      "compiler",
-      "transform",
-      [target, batch, { known, typeFiles }],
-      { once: true }
-    );
-    const fresh: Increments = { modules: {} };
-    for (const [key, value] of Object.entries(
-      typeof answer === "object" && answer !== null ? answer : {}
-    )) {
-      const record = moduleRecordOf(value, pathOf.get(key) ?? "");
-      if (record !== undefined) {
-        fresh.modules[key] = record;
-      }
-    }
-    await keepIncrements(env, keys, fresh, leaseMs);
-    Object.assign(made, fresh.modules);
-  };
-  for (const batch of batchesOf(missing, { characters })) {
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- one call at a time, each within its CPU time
-      await callSplitting(batch, transform);
-    } catch (error) {
-      // The load's stop (a deadline, a crash), which `callSplitting` never
-      // splits: what is left goes to the build, as a file stopped alone does.
-      if (error instanceof PlatformBoundError) {
-        break;
-      }
-      throw error;
-    }
-  }
-  return { made, calls };
-};
-
-/**
- * A pages build of `files` (spec 19.2, GRA-958), reusing what earlier
- * builds kept of each file (module-cache.ts): the compiler checks each
- * against the key it works out itself, and redoes the rest with every
- * gate; what it made now is kept for the next. A first build of a large
- * App transforms its files in batches first (`transformInBatches`). Its
- * metrics: putting it together from what was kept, the batches, the
- * compiler's run, and how much of each part was done now or reused.
+ * A pages build of `files` (spec 19.2, GRA-958), as Vite's dev server
+ * compiles a module the first time it is asked for and serves it from
+ * its cache after: it reuses each module's transform earlier builds kept
+ * (build-cache.ts), which the compiler checks against the key it works
+ * out itself, and transforms the rest in the same call, with every gate;
+ * what it made now is kept for the next. A first build after a release
+ * transforms the whole App in one call: an App at its limits (a million
+ * characters) takes 4.6–9.5 s and 64–72 MB of heap on a laptop (GRA-1633),
+ * well within the call's CPU time (`compilerTaskCpuMs`, 60 s) and the
+ * isolate's 128 MB. Its metrics: putting it together from what was kept,
+ * the compiler's run, and how many modules were done now or reused.
  */
 const compiledIncrementally = async (
   env: BuildEnv,
   runner: PlatformRunner,
   files: AppFiles,
-  {
-    profile,
-    checks,
-    leaseMs,
-    renew,
-  }: {
-    profile: BuildProfile;
-    checks: boolean;
-    leaseMs: number;
-    /** Renews the build's lease: as each batch starts, before the build's own call, and before its check. */
-    renew: () => Promise<void>;
-  }
+  { profile, checks }: { profile: BuildProfile; checks: boolean }
 ): Promise<{ built: unknown; cache: boolean }> => {
-  const preview = profile === "preview";
   const [, target] = compilerCallOf("page", profile, checks);
   const started = Date.now();
-  // Hashed once: every read and write of its records uses them.
-  const keys = await pageIncrementKeys(files, preview);
-  const earlier = await readIncrements(env, keys, buildRefreshMs);
+  // Hashed once: every read and write of its modules uses them.
+  const keys = await pageIncrementKeys(files, profile === "preview");
+  const reuse = await readModules(env, keys);
   const read = Date.now();
-  const batched = await transformInBatches(env, runner, {
-    files,
-    target,
-    keys,
-    reuse: earlier,
-    leaseMs,
-    renew,
-  });
-  const reuse: Increments = {
-    modules: { ...earlier.modules, ...batched.made },
-  };
-  if (batched.calls > 0) {
-    // A lease's time for the build's own call, after its batches.
-    await renew();
-  }
-  const transformed = Date.now();
   let answer: unknown;
-  const result = await compiled(
-    runner,
-    "page",
-    files,
-    profile,
-    renew,
-    async () => {
-      answer = await runner.run("compiler", "buildIncrementally", [
-        target,
-        files,
-        reuse,
-      ]);
-      if (!incrementalShaped(answer)) {
-        throw new TypeError(
-          "The compiler answered something else than an incremental build."
-        );
-      }
-      return await withItsCheck(runner, answer.built, renew);
+  const result = await compiled(runner, "page", files, profile, async () => {
+    answer = await runner.run("compiler", "buildIncrementally", [
+      target,
+      files,
+      reuse,
+    ]);
+    if (!incrementalShaped(answer)) {
+      throw new TypeError(
+        "The compiler answered something else than an incremental build."
+      );
     }
-  );
+    return await withItsCheck(runner, answer.built);
+  });
   const ran = Date.now();
   const kept = incrementalShaped(answer)
-    ? await keepIncrements(env, keys, answer.fresh, leaseMs)
+    ? await keepModules(env, keys, answer.fresh)
     : 0;
   log.info("build.compile", {
     kind: "page",
     profile,
     // Putting the build together: what was kept read, and kept now.
     assemblyMs: read - started + (Date.now() - ran),
-    // The batches' transforms, their calls, and the modules they made.
-    batchMs: transformed - read,
-    batchCalls: batched.calls,
-    batched: Object.keys(batched.made).length,
     // The compiler's run: transforms, checks and the CSS.
-    executionMs: ran - transformed,
+    executionMs: ran - read,
     ...(incrementalShaped(answer)
       ? (answer.metrics satisfies BuildMetrics)
       : {}),
@@ -594,236 +373,108 @@ const compiledIncrementally = async (
   return result;
 };
 
-/** Where the builds' sweep left off: which kind, and R2's cursor in it. */
-const buildSweepKey = "builds-sweep.json";
+/** Where the cache's sweep left off: R2's cursor. */
+const buildSweepKey = "build-cache-sweep.json";
 
-/** The most objects one run of the builds' sweep reads. */
+/** The most entries one run of the sweep reads. */
 const buildSweepBatch = 500;
 
-/** The prefix inspected manifests are cached under (app-inspection.ts). */
-export const inspectionsPrefix = "inspections/";
-
-/** The prefix a JSON workflow's expression checks are cached under (`checkWorkflowExpressions`). */
-const expressionChecksPrefix = "expression-checks/";
-
-/**
- * The prefix each kind of build is cached under, inspected manifests, what
- * pages builds keep of each file (module-cache.ts), and the bad bytes
- * kept for operators (build-cache.ts), which all go after the same time.
- */
-const buildPrefixes = [
-  ...Object.keys(compilerCalls).map((kind) => `${kind}-builds/`),
-  inspectionsPrefix,
-  ...Object.values(incrementPrefixes),
-  "build-quarantine/",
-  // Each file's type check, which pages builds kept until the check
-  // moved to an isolate of its own (GRA-1562): nothing writes it now, so
-  // the sweep empties it within `buildKeepMs` of the release that stopped
-  // writing it. Remove once every deployment has run that release for 30
-  // days (expand, then contract).
-  "screen-checks/",
-  // A sweep's state is the index of the prefix it is in: a new prefix
-  // goes last, so no sweep part way through one resumes in another.
-  expressionChecksPrefix,
-  // The generated module's builds, under the build kind's name before it
-  // was `generated-workflow`: nothing writes it now. Remove with
-  // `screen-checks/`, for the same reason.
-  "open-workflow-builds/",
-  // Pages' builds and the modules they keep, under their names before
-  // screens were pages (GRA-1532): nothing writes them now. Remove with
-  // `screen-checks/`, for the same reason.
-  "screen-builds/",
-  "screen-modules/",
-];
-
-const buildSweepSchema = z.object({
-  prefix: z
-    .int()
-    .min(0)
-    .max(buildPrefixes.length - 1),
+/** Where the sweep left off in the cache: only ever under its prefix. */
+const buildSweepSchema = z.strictObject({
+  prefix: z.literal(buildCachePrefix),
   cursor: z.string().optional(),
 });
 
 /**
- * Deletes cached builds last used more than `buildKeepMs` before `now`,
+ * Deletes cache entries written more than `buildKeepMs` before `now`,
  * from the clock: in code, not a bucket rule, so it runs wherever core
- * does. One page of one kind's prefix a run, at most `buildSweepBatch`
- * objects, from where the last run stopped; once a kind is done, the next
- * run starts the next. A build is never last used after it was uploaded,
- * so only those uploaded that long ago are read again, just before they
- * go: one used since the listing is kept. R2 deletes take no condition,
- * so one used between that read and the delete is still lost, and built
- * again the next time it is asked for.
+ * does. An entry in use is written again as it is read, once a week at
+ * most (build-cache.ts), so only those nothing read go. One page of the
+ * cache a run, at most `buildSweepBatch` entries, from where the last run
+ * stopped.
  */
 export const sweepBuilds = async (env: Env, now: Date): Promise<void> => {
   const stored = await env.FILES.get(buildSweepKey);
   const parsed = buildSweepSchema.safeParse(
     stored === null ? undefined : await stored.json()
   );
-  const state = parsed.success ? parsed.data : { prefix: 0 };
-  const prefix = buildPrefixes[state.prefix] ?? "page-builds/";
+  // A state of another prefix (an earlier sweep's) starts at the top.
+  const cursor = parsed.success ? parsed.data.cursor : undefined;
   const listed = await env.FILES.list({
-    prefix,
+    prefix: buildCachePrefix,
     limit: buildSweepBatch,
-    ...(state.cursor === undefined ? {} : { cursor: state.cursor }),
+    ...(cursor === undefined ? {} : { cursor }),
   });
-  const unused = (object: R2Object): boolean =>
-    now.getTime() - lastUsedOf(object) > buildKeepMs;
-  const candidates = listed.objects.filter(
-    ({ uploaded }) => now.getTime() - uploaded.getTime() > buildKeepMs
-  );
-  const stillUnused = await Promise.all(
-    candidates.map(async ({ key }) => {
-      const head = await env.FILES.head(key);
-      return head !== null && unused(head) ? [key] : [];
+  const old = listed.objects
+    .filter(({ uploaded }) => now.getTime() - uploaded.getTime() > buildKeepMs)
+    .map(({ key }) => key);
+  if (old.length > 0) {
+    await env.FILES.delete(old);
+  }
+  await env.FILES.put(
+    buildSweepKey,
+    JSON.stringify({
+      prefix: buildCachePrefix,
+      ...(listed.truncated ? { cursor: listed.cursor } : {}),
     })
   );
-  const keys = stillUnused.flat();
-  if (keys.length > 0) {
-    await env.FILES.delete(keys);
-    await forgetReceipts(env, keys);
-  }
-  const next = listed.truncated
-    ? { prefix: state.prefix, cursor: listed.cursor }
-    : { prefix: (state.prefix + 1) % buildPrefixes.length };
-  await env.FILES.put(buildSweepKey, JSON.stringify(next));
-  await sweepReceipts(env, now);
 };
-
-/**
- * `cacheKey`'s answer through the verified cache (build-cache.ts): kept
- * with when it was last used, and a hit older than `buildRefreshMs`
- * written again, so one in use never reaches the sweep's limit
- * (`sweepBuilds`). Builds and inspected manifests are kept alike.
- */
-export const throughKeptCache = async (
-  env: CacheEnv,
-  cacheKey: string,
-  leaseMs: number,
-  build: (renew: () => Promise<void>) => Promise<Built>,
-  signal?: AbortSignal
-): Promise<CachedAnswer> => {
-  const answer = await throughCache(
-    env,
-    cacheKey,
-    leaseMs,
-    build,
-    usedNow,
-    signal
-  );
-  const { text, object, objectKey } = answer;
-  if (
-    object !== undefined &&
-    objectKey !== undefined &&
-    Date.now() - lastUsedOf(object) > buildRefreshMs
-  ) {
-    try {
-      // The same bytes, while its receipt still names them.
-      await refreshKept(env, cacheKey, objectKey, text, usedNow());
-    } catch (error) {
-      // Served all the same: a refresh that failed is tried again at its
-      // next use, well before the sweep's limit.
-      log.warn("build.refresh_failed", errorFields(error));
-    }
-  }
-  return answer;
-};
-
-/**
- * The builds running now in this isolate, by whose build and its cache
- * key: a build
- * asked for while the same one runs waits for it rather than start the
- * compiler again, so views of one App's page take one place in the
- * sandbox, not one each. A build whose request was cancelled never
- * settles, so it is waited for only as long as a build may take
- * (`sharedRun`).
- */
-const buildsRunning = new Map<string, SharedRun<CachedAnswer>>();
 
 /** What a build through the cache answered, as the requests sharing it get it. */
 type CachedAnswer = Awaited<ReturnType<typeof throughCache>>;
 
 /**
- * A shared build's starter gave up on it before it compiled: those who
- * shared it, still waiting, start their own.
+ * The builds running now in this isolate, by whose build and its cache
+ * key: a build asked for while the same one runs waits for it rather
+ * than start the compiler again, so views of one App's page take one
+ * place in the sandbox, not one each. A build whose request was cancelled
+ * never settles, so it is waited for only as long as a build may take
+ * (`sharedRun`).
  */
-class StarterGaveUpError extends Error {
-  override name = "StarterGaveUpError";
-}
+const buildsRunning = new Map<string, SharedRun<CachedAnswer>>();
 
 /**
- * `key`'s build through the cache, shared by every request of this
- * isolate that asks for it while it runs: the lease holder's answer,
- * cacheable or not (a quarantined key, a stop the load caused), goes to
- * them all, so concurrent views of one page compile once. A request
- * given up on stops; one that shared another's build that was given up on
- * before it compiled starts its own.
+ * The entry `cacheKey` names through the cache, made by `make`, shared by
+ * every request of this isolate that asks for it while it is made, for
+ * as long as `makeMs` (the calls it makes) may take.
  */
 const sharedThroughCache = async (
-  key: string,
-  abandonAfterMs: number,
-  run: (signal?: AbortSignal) => Promise<CachedAnswer>,
-  signal?: AbortSignal
-): Promise<CachedAnswer> => {
-  for (let tries = 0; ; tries += 1) {
-    signal?.throwIfAborted();
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- once more only if its starter gave up
-      return await sharedRun(
-        buildsRunning,
-        key,
-        abandonAfterMs,
-        async () => {
-          try {
-            return await run(signal);
-          } catch (error) {
-            if (signal?.aborted === true) {
-              throw new StarterGaveUpError("Its starter gave up on the build", {
-                cause: error,
-              });
-            }
-            throw error;
-          }
-        },
-        signal
-      );
-    } catch (error) {
-      if (!(error instanceof StarterGaveUpError)) {
-        throw error;
-      }
-      // Ours given up on: why it was.
-      if (signal?.aborted === true) {
-        throw error.cause;
-      }
-      if (tries >= 2) {
-        throw error;
-      }
-    }
-  }
-};
+  env: CacheEnv,
+  /** Whose it is: another App asking for the same entry makes its own. */
+  whose: string,
+  cacheKey: string,
+  makeMs: number,
+  make: () => Promise<{ text: string; cache: boolean }>
+): Promise<CachedAnswer> =>
+  await sharedRun(
+    buildsRunning,
+    `${whose}\n${cacheKey}`,
+    makeMs,
+    async () => await throughCache(env, cacheKey, make)
+  );
+
+/** How long the compiler's and the type checker's calls may take, one after the other. */
+const buildMs = (runner: PlatformRunner): number =>
+  runner.callMs("compiler") + runner.callMs("type-checker");
 
 /**
  * A build of the files `select` picks, the only ones it reads: limited
- * first, so the limits bound the hashing and sending too. From R2 (in the
- * EU), or built by the compiler and stored there. A failed build is
- * cached too, where the files alone failed it (`compiled`): the same
- * files fail the same way with the same compiler, so an App that doesn't
- * build can't start the compiler on every request. A build that throws
- * isn't cached. A cached build is served only as its trusted receipt
- * says it was built, and builds of the same files run once in any
- * isolate, under the key's lease (build-cache.ts); two requests in one
- * isolate also share one compile (`buildsRunning`). A cached build is kept `buildKeepMs` past
- * its last use (`sweepBuilds`): one read older than `buildRefreshMs` is
- * written again, so a build in use is never as old as the sweep's limit.
+ * first, so the limits bound the hashing and sending too. From the cache
+ * (build-cache.ts), or built by the compiler and kept there. A failed
+ * build is kept too, where the files alone failed it (`compiled`): the
+ * same files fail the same way with the same compiler, so an App that
+ * doesn't build can't start the compiler on every request. A build that
+ * throws isn't kept. Two requests in one isolate share one compile
+ * (`buildsRunning`).
  */
 const cachedBuild = async <Build>(
   env: BuildEnv,
   kind: BuildKind,
   appFiles: AppFiles,
   select: (files: AppFiles) => AppFiles,
-  /** Whose build it is: the App's, or an independent workflow's, ID. */
+  /** Whose build it is: the App's ID, or an independent workflow's. */
   whose: string,
-  { profile = "production", signal, checks = true }: BuildOptions = {}
+  { profile = "production", checks = true }: BuildOptions = {}
 ): Promise<Build | FailedBuild> => {
   const files = select(appFiles);
   const tooMuch = limitsOf(kind)(files);
@@ -838,59 +489,45 @@ const cachedBuild = async <Build>(
   // to serve.
   const runner = platformRunner(env, whose);
   // Under the call the build is, as well as its kind: a change to which
-  // compiler call a kind makes (`compilerCalls`) builds again, rather than
-  // serving what the old call built for as long as it is kept. Under its
+  // compiler call a kind makes (`compilerCalls`) builds again. Under its
   // profile too: a preview's build is never served as production's.
   const [callMethod, callTarget] = compilerCallOf(kind, profile, checks);
-  const cacheKey = `${kind}-builds/${callMethod}.${callTarget}/${keySchema}/${profile}/${await buildKey(files)}.json`;
+  const cacheKey = await cacheKeyOf(`${kind}-build`, [
+    callMethod,
+    callTarget,
+    profile,
+    inOrder(files),
+  ]);
   const isBuild = (value: unknown): value is Build | FailedBuild =>
     isBuildShaped(value);
   const started = Date.now();
-  // Renewed as each call starts (`renew`): long enough for the longest,
-  // the compiler's or the type checker's.
-  const leaseMs =
-    Math.max(runner.callMs("compiler"), runner.callMs("type-checker")) +
-    leaseSlackMs;
   const { text, outcome } = await sharedThroughCache(
+    env,
     // One sub-owner's: another App building the same files builds them in
     // its own part of the builder's share, never on this one's (or with
     // its refusal). The cache itself is by content alone.
-    `${whose}\n${cacheKey}`,
-    // Waited on as long as a lease, and the wait for one, may take.
-    leaseMs * 2,
-    async (given) =>
-      await throughKeptCache(
-        env,
-        cacheKey,
-        // Held as long as a build may take, and a little more.
-        leaseMs,
-        async (renew) => {
-          const answer =
-            kind === "page"
-              ? await compiledIncrementally(env, runner, files, {
-                  profile,
-                  checks,
-                  leaseMs,
-                  renew,
-                })
-              : await compiled(runner, kind, files, profile, renew);
-          if (!isBuild(answer.built)) {
-            throw new TypeError(
-              "The compiler answered something else than a build."
-            );
-          }
-          return { text: JSON.stringify(answer.built), cache: answer.cache };
-        },
-        given
-      ),
-    signal
+    whose,
+    cacheKey,
+    buildMs(runner),
+    async () => {
+      const answer =
+        kind === "page"
+          ? await compiledIncrementally(env, runner, files, { profile, checks })
+          : await compiled(runner, kind, files, profile);
+      if (!isBuild(answer.built)) {
+        throw new TypeError(
+          "The compiler answered something else than a build."
+        );
+      }
+      return { text: JSON.stringify(answer.built), cache: answer.cache };
+    }
   );
   // Assembly, transforms and execution are the compiler's own; this is
   // the cache's part: how a build came about, and how long it took.
   log.info("build.cache", {
     kind,
     profile,
-    outcome,
+    outcome: outcome satisfies CacheOutcome,
     ms: Date.now() - started,
   });
   const built: unknown = JSON.parse(text);
@@ -1042,49 +679,38 @@ export const checkWorkflowExpressions = async (
   const runner = platformRunner(env, whose);
   // The whole request, its compiler options too, which are core's
   // (expression-types.ts lives in core's bundle, not the compiler's).
-  const cacheKey = `${expressionChecksPrefix}${keySchema}/${compilerVersion}/${await sha256Hex(canonicalText(request))}.json`;
-  const leaseMs = runner.callMs("type-checker") + leaseSlackMs;
+  const cacheKey = await cacheKeyOf("expression-check", [request]);
   const { text } = await sharedThroughCache(
-    `${whose}\n${cacheKey}`,
-    leaseMs * 2,
-    async (given) =>
-      await throughKeptCache(
-        env,
-        cacheKey,
-        leaseMs,
-        async () => {
-          const diagnostics = await runner.run("type-checker", "check", [
-            request,
-          ]);
-          if (!Array.isArray(diagnostics)) {
-            throw new TypeError(
-              "The type checker answered something else than diagnostics."
-            );
-          }
-          // A check that couldn't run (tsrs failed, its answer unread) is
-          // no verdict on the expressions: thrown, never cached, for the
-          // publication to be tried again (workflow-resources.ts).
-          const stop: unknown = diagnostics.find(
-            (diagnostic: unknown) =>
-              typeof diagnostic === "object" &&
-              diagnostic !== null &&
-              "rule" in diagnostic &&
-              diagnostic.rule === "check"
-          );
-          if (stop !== undefined) {
-            throw new Error(
-              "The type checker couldn't check the expressions.",
-              {
-                cause: stop,
-              }
-            );
-          }
-          return { text: JSON.stringify(diagnostics), cache: true };
-        },
-        given
-      )
+    env,
+    whose,
+    cacheKey,
+    runner.callMs("type-checker"),
+    async () => {
+      const diagnostics = await runner.run("type-checker", "check", [request]);
+      if (!Array.isArray(diagnostics)) {
+        throw new TypeError(
+          "The type checker answered something else than diagnostics."
+        );
+      }
+      // A check that couldn't run (tsrs failed, its answer unread) is no
+      // verdict on the expressions: thrown, never cached, for the
+      // publication to be tried again (workflow-resources.ts).
+      const stop: unknown = diagnostics.find(
+        (diagnostic: unknown) =>
+          typeof diagnostic === "object" &&
+          diagnostic !== null &&
+          "rule" in diagnostic &&
+          diagnostic.rule === "check"
+      );
+      if (stop !== undefined) {
+        throw new Error("The type checker couldn't check the expressions.", {
+          cause: stop,
+        });
+      }
+      return { text: JSON.stringify(diagnostics), cache: true };
+    }
   );
-  // SAFETY: the checker's answer, as core stored it under its receipt.
+  // SAFETY: the checker's answer, as core kept it under its MAC.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   return checked(JSON.parse(text) as Diagnostic[]);
 };

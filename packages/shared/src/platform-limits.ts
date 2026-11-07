@@ -47,8 +47,8 @@ export const platformLimits = {
   serverInvocationWallMs: 60 * second,
   /**
    * One compiler task's CPU time: a ceiling that only stops a failure,
-   * never what a build is sized to (core's pages.ts sizes a first build's
-   * batches to a few seconds each). The risk it takes: App code built to
+   * never what a build is sized to (a first build of an App at its limits
+   * takes a few seconds: core's pages.ts). The risk it takes: App code built to
    * hold the type checker (a type that recurses without end) now burns up
    * to this much CPU per call before it is stopped. Still bounded, and
    * billed per CPU millisecond.

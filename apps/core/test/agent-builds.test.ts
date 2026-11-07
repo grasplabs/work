@@ -19,6 +19,7 @@ import {
   toolResults,
   toolStep,
   transcript,
+  turnChecks,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { appDefinition, definedWith, redefined } from "./app-definitions.ts";
@@ -78,6 +79,9 @@ const fixed = restyled.replace(
   '<Button className="rounded-full">',
   '<Button variant="outline">'
 );
+
+/** The page with a parenthesis left open: it doesn't compile. */
+const unclosed = fixed.replace("const Desk = () => (", "const Desk = () => ((");
 
 /** A workflow a builder wrote, with its tests. */
 const intake = {
@@ -367,18 +371,20 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     expect(steps).toHaveLength(2);
   });
 
-  it("answers every write with what fails, however often the same error comes back, and never locks the agent out", async () => {
+  it("answers every write with what doesn't compile, however often the same error comes back, and never locks the agent out", async () => {
     const { chat, grant } = await setUp([
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         const errors = [];
         for (let attempt = 0; attempt < 8; attempt += 1) {
-          const written = await env.build.write(app.id, { "src/routes/index.tsx": ${JSON.stringify(restyled)} + "// " + attempt + "\\n" });
+          const written = await env.build.write(app.id, { "src/routes/index.tsx": ${JSON.stringify(unclosed)} + "// " + attempt + "\\n" });
           errors.push(written.errors);
         }
         return errors;
       };`),
-      says("The button is still restyled: I'm stuck on it."),
+      says("The page still doesn't compile."),
+      // What the turn's check found, the same.
+      says("I'm stuck on it."),
       codeStep(`export default async (self, env) => {
         ${findApp}
         const written = await env.build.write(app.id, ${JSON.stringify({ "src/routes/index.tsx": fixed })});
@@ -399,7 +405,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
     expect(returned(results[1]?.text)).toStrictEqual({ errors: 0, version: 1 });
   });
 
-  it("answers a write tool with a type error and a lint error together, by file", async () => {
+  it("checks the turn's drafts once it answers, a type error and a lint error together, by file, and the agent goes on in the same turn", async () => {
     const mistyped = restyled
       .replace(
         "const Desk = () => (",
@@ -411,20 +417,122 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         app,
         files: { "src/routes/index.tsx": mistyped },
       }),
+      says("The desk is written."),
       says("Two things fail."),
     ]);
 
-    await chat.ask("Add a desk page to the Ledger");
+    const answered = await chat.ask("Add a desk page to the Ledger");
 
     const [written] = await toolResults(chat.stub, chat.chat.id);
     expect(written?.isError).toBeFalsy();
-    expect(returned(written?.text)).toMatchObject({
-      errors: 2,
-      diagnostics: [
-        { file: "src/routes/index.tsx", line: 4, rule: "TS2322" },
-        { file: "src/routes/index.tsx", line: 9, rule: "shadcn/no-restyle" },
+    // It compiles: the write says nothing fails.
+    expect(returned(written?.text)).toMatchObject({ errors: 0, leftOut: 0 });
+    expect({
+      checks: turnChecks(chat.provider),
+      answer: answered.answer,
+    }).toMatchObject({
+      checks: [
+        [
+          {
+            errors: 2,
+            diagnostics: [
+              { file: "src/routes/index.tsx", line: 4, rule: "TS2322" },
+              {
+                file: "src/routes/index.tsx",
+                line: 9,
+                rule: "shadcn/no-restyle",
+              },
+            ],
+            leftOut: 0,
+          },
+        ],
       ],
-      leftOut: 0,
+      answer: "Two things fail.",
+    });
+  });
+
+  it("checks the turn's drafts again each time it would answer having written, until they pass", async () => {
+    const mistyped = fixed.replace(
+      "const Desk = () => (",
+      'const count: number = "seven";\n\nconst Desk = () => ('
+    );
+    const { chat } = await setUp((app) => [
+      toolStep("writeFile", {
+        app,
+        files: { "src/routes/index.tsx": mistyped },
+      }),
+      says("The desk is written."),
+      // The first check fails: the agent fixes it, in the same turn.
+      toolStep("writeFile", {
+        app,
+        files: { "src/routes/index.tsx": fixed },
+      }),
+      says("Fixed the count."),
+      says("Never asked: the second check passes."),
+    ]);
+
+    const answered = await chat.ask("Add a desk page to the Ledger");
+
+    expect({
+      answer: answered.answer,
+      outcome: answered.outcome,
+      // One check failed, then one passed, telling the agent nothing.
+      checks: turnChecks(chat.provider),
+      requests: chat.provider.requests.length,
+    }).toMatchObject({
+      answer: "Fixed the count.",
+      outcome: "answered",
+      checks: [
+        [
+          {
+            // The mistyped count, which nothing reads either.
+            errors: 2,
+            diagnostics: [
+              { file: "src/routes/index.tsx", rule: "TS2322" },
+              { file: "src/routes/index.tsx", rule: "no-unused-vars" },
+            ],
+          },
+        ],
+      ],
+      requests: 4,
+    });
+  });
+
+  it("ends a turn that never fixes its drafts after three checks, telling it what failed twice", async () => {
+    // A count that is never a number, written anew each time.
+    const mistyped = (attempt: number) =>
+      fixed.replace(
+        "const Desk = () => (",
+        `const count: number = "seven";\n\nconst Desk = () => (\n  // ${attempt}`
+      );
+    const writeAttempt = (app: string, attempt: number) =>
+      toolStep("writeFile", {
+        app,
+        files: { "src/routes/index.tsx": mistyped(attempt) },
+      });
+    const { chat } = await setUp((app) => [
+      writeAttempt(app, 1),
+      says("The desk is written."),
+      writeAttempt(app, 2),
+      says("Fixed, I think."),
+      writeAttempt(app, 3),
+      says("Still broken."),
+      says("Never asked: a third failed check ends the turn."),
+    ]);
+
+    const answered = await chat.ask("Add a desk page to the Ledger");
+
+    expect({
+      answer: answered.answer,
+      outcome: answered.outcome,
+      // Two notices, after the first and second checks; the third ends it.
+      notices: turnChecks(chat.provider).length,
+      requests: chat.provider.requests.length,
+    }).toStrictEqual({
+      answer: "Still broken.",
+      outcome: "answered",
+      notices: 2,
+      requests: 6,
     });
   });
 
@@ -438,18 +546,21 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         ${defineNotes}
-        const written = await env.build.write(app.id, ${JSON.stringify({ ...notesCode, "server/notes.ts": throwing })});
+        await env.build.write(app.id, ${JSON.stringify({ ...notesCode, "server/notes.ts": throwing })});
         const proposal = await env.build.propose(app.id, "Notes");
+        const errorsOf = ({ check }) => [check.pages, check.server].flatMap(({ diagnostics }) => diagnostics).filter(({ severity }) => severity === "error");
         // Then an operations file that doesn't parse, the throw gone.
-        const unparsed = await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": `${operations}\nexport const broken = query({ args: {` })});
+        await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": `${operations}\nexport const broken = query({ args: {` })});
+        const unparsed = errorsOf(await env.build.propose(app.id, "Notes"));
         return {
-          errors: written.errors,
-          diagnostics: written.diagnostics.map(({ file, line, rule, severity, message }) => ({ file, line, rule, severity, says: message.includes("No notes today") })),
+          errors: errorsOf(proposal).length,
+          diagnostics: errorsOf(proposal).map(({ file, line, rule, severity, message }) => ({ file, line, rule, severity, says: message.includes("No notes today") })),
           version: proposal.version,
-          unparsed: { errors: unparsed.errors, files: [...new Set(unparsed.diagnostics.map(({ file }) => file))] },
+          unparsed: { errors: unparsed.length, files: [...new Set(unparsed.map(({ file }) => file))] },
         };
       };`),
       says("The registration throws."),
+      says("It still doesn't parse."),
     ]);
     await grant();
 
@@ -1144,11 +1255,16 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       }),
       toolStep("readFile", { app, path: "src/components/total.ts" }),
       says("Written."),
+      says("The comparison is loose."),
     ]);
 
     await chat.ask("Add a total");
 
-    const [written, read] = await toolResults(chat.stub, chat.chat.id);
+    const [, read] = await toolResults(chat.stub, chat.chat.id);
+    // The turn's one check, of its one draft.
+    const [[found]] = z
+      .tuple([z.tuple([z.unknown()])])
+      .parse(turnChecks(chat.provider));
     const { diagnostics } = z
       .object({
         diagnostics: z.array(
@@ -1159,7 +1275,7 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
           })
         ),
       })
-      .parse(returned(written?.text));
+      .parse(found);
     expect({
       written: diagnostics
         .filter(({ file }) => file === "src/components/total.ts")
@@ -1719,7 +1835,7 @@ export const Route = createFileRoute("/late")({ component: Page });
         const value: unknown = Reflect.get(target, property);
         if (property === "get" && typeof value === "function") {
           return async (key: string, ...rest: unknown[]): Promise<unknown> => {
-            if (key.includes("-builds/")) {
+            if (key.startsWith("build-cache/")) {
               await held.promise;
             }
             return await Reflect.apply(value, target, [key, ...rest]);
@@ -1744,7 +1860,7 @@ export const Route = createFileRoute("/late")({ component: Page });
     const late =
       "The build didn't finish in time. It runs again when this is first used.";
     expect(returned(result?.text)).toStrictEqual({
-      written: { errors: 0, notChecked: { pages: late, server: late } },
+      written: { errors: 0, notChecked: { pages: late } },
       proposal: {
         version: null,
         passed: false,
@@ -1823,16 +1939,19 @@ export const titles = action({
       codeStep(`export default async (self, env) => {
         const app = await env.build.create({ name: ${JSON.stringify(appName)} });
         ${defineNotes}
-        // What each write says of the server code (its pages apart).
-        const server = (written) => ({ errors: written.errors, diagnostics: written.diagnostics.filter(({ file }) => !file?.startsWith("pages/")).map(({ file, rule }) => ({ file, rule })) });
-        const wrongCall = server(await env.build.write(app.id, ${JSON.stringify({ ...sound, "server/notes.ts": wrongCall })}));
-        const sound = server(await env.build.write(app.id, ${JSON.stringify(sound)}));
-        const mistyped = server(await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": mistyped })}));
+        // What proposing says of the server code (its pages apart).
+        const server = ({ check }) => ({ errors: check.server.diagnostics.filter(({ severity }) => severity === "error").length, diagnostics: check.server.diagnostics.map(({ file, rule }) => ({ file, rule })) });
+        await env.build.write(app.id, ${JSON.stringify({ ...sound, "server/notes.ts": wrongCall })});
+        const wrongCall = server(await env.build.propose(app.id, "Notes"));
+        await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": mistyped })});
         const proposal = await env.build.propose(app.id, "Notes");
-        const leftover = server(await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": operations, "app/server.ts": "export const leftover = 1;\n", "app/exports.json": "{}" })}));
-        return { wrongCall, sound, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover };
+        const mistyped = server(proposal);
+        await env.build.write(app.id, ${JSON.stringify({ "server/notes.ts": operations, "app/server.ts": "export const leftover = 1;\n", "app/exports.json": "{}" })});
+        const leftover = server(await env.build.propose(app.id, "Notes"));
+        return { wrongCall, mistyped, proposed: { version: proposal.version, passed: proposal.check.passed, server: proposal.check.server.status }, leftover };
       };`),
       says("Checked."),
+      says("The leftovers fail."),
     ]);
     await grant();
 
@@ -1844,7 +1963,6 @@ export const titles = action({
         errors: 1,
         diagnostics: [{ file: "server/notes.ts", rule: "TS2339" }],
       },
-      sound: { errors: 0, diagnostics: [] },
       mistyped: {
         errors: 1,
         diagnostics: [{ file: "server/notes.ts", rule: "TS2322" }],
@@ -1882,7 +2000,8 @@ export const titles = action({
         const proposed = await env.build.propose(app.id, "Notes");
         const statuses = ({ check }) => ({ passed: check.passed, pages: check.pages.status, server: check.server.status, lint: check.lint.status });
         return {
-          written: { errors: written.errors, diagnostics: written.diagnostics.map(({ file, rule, severity }) => ({ file, rule, severity })) },
+          written: written.errors,
+          lint: refused.check.lint.diagnostics.map(({ file, rule, severity }) => ({ file, rule, severity })),
           called,
           refused: { version: refused.version, ...statuses(refused) },
           fixed: fixed.errors,
@@ -1897,21 +2016,20 @@ export const titles = action({
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
     expect(returned(result?.text)).toStrictEqual({
-      written: {
-        errors: 2,
-        diagnostics: [
-          {
-            file: "server/notes.ts",
-            rule: "no-unused-vars",
-            severity: "error",
-          },
-          {
-            file: "src/routes/index.tsx",
-            rule: "no-unused-vars",
-            severity: "error",
-          },
-        ],
-      },
+      // It compiles: the write says nothing fails.
+      written: 0,
+      lint: [
+        {
+          file: "server/notes.ts",
+          rule: "no-unused-vars",
+          severity: "error",
+        },
+        {
+          file: "src/routes/index.tsx",
+          rule: "no-unused-vars",
+          severity: "error",
+        },
+      ],
       called: { ok: true, answer: "hi" },
       refused: {
         version: null,

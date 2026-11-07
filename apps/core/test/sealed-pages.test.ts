@@ -58,30 +58,36 @@ export const Route = createFileRoute("/inbox")({ component: Inbox });
 `,
 };
 
-/** Where the pages' builds are cached in R2. */
-const buildCache = "page-builds/";
+/** Whether `key` is a page's cached build. */
+const isPageBuild = (key: string): boolean =>
+  key.startsWith("build-cache/") && key.includes("/page-build/");
 
 /** Deletes every cached page build, so a build would have to start again. */
 const clearBuildCache = async (): Promise<void> => {
   let cursor: string | undefined;
   do {
     // oxlint-disable-next-line no-await-in-loop -- one page after another
-    const page = await env.FILES.list({ prefix: buildCache, cursor });
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    await env.FILES.delete(page.objects.map(({ key }) => key));
+    const page = await env.FILES.list({ prefix: "build-cache/", cursor });
+    const builds = page.objects
+      .map(({ key }) => key)
+      .filter((key) => isPageBuild(key));
+    if (builds.length > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await env.FILES.delete(builds);
+    }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor !== undefined);
 };
 
 /** How many page builds the cache holds. */
 const cachedBuilds = async (): Promise<number> => {
-  const page = await env.FILES.list({ prefix: buildCache });
-  return page.objects.length;
+  const page = await env.FILES.list({ prefix: "build-cache/" });
+  return page.objects.filter(({ key }) => isPageBuild(key)).length;
 };
 
 /** Whether `key` is a page's or the server code's cached build. */
 const isCachedBuild = (key: string): boolean =>
-  /^[a-z-]+-builds\//u.test(key) && !key.startsWith("package-");
+  key.startsWith("build-cache/") && /\/[a-z-]+-build\//u.test(key);
 
 /**
  * Rewrites every entry cached in R2 that `isEntry` picks and holds `word`,
@@ -496,7 +502,7 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
     const saved = await versionFiles(env, id, version);
     await versionManifest(env, id, version, saved);
     const rewrote = await poisonCache("Sealed pages", (key) =>
-      key.startsWith("inspections/")
+      key.includes("/inspection/")
     );
 
     // What core only holds is asked first, before an inspection again

@@ -11,8 +11,7 @@ import {
 import { appModuleName } from "./kit.ts";
 
 // What refuses a build before anything compiles: checks of paths alone,
-// light enough for core to run before it starts a large App's first build
-// in batches (core's pages.ts), as the compiler runs them first.
+// which the compiler runs first.
 
 /** Where in a file a diagnostic points. */
 export interface Location {

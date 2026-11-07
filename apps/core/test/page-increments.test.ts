@@ -1,15 +1,15 @@
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { keepUnderLease } from "../src/build-cache.ts";
+import { buildCachePrefix } from "../src/build-cache.ts";
 import { buildPages } from "../src/pages.ts";
 
-// What a pages build reuses of earlier ones (GRA-958, module-cache.ts
-// and the compiler's increments.ts): each module's transform, kept as
-// whole builds are; the type check reads every file each build. From its
+// What a pages build reuses of earlier ones (GRA-958, build-cache.ts and
+// the compiler's increments.ts): each module's transform, kept as whole
+// builds are; the type check reads every file each build. From its
 // threat model: a build that reuses what doesn't stand for its files (a
-// stale transform, a file whose import changed shape passed), a record no receipt
-// vouches for or one kept under another file's key, a preview's
+// stale transform, a file whose import changed shape passed), a record
+// core didn't keep or one kept under another file's key, a preview's
 // transform served to production, and an incremental build that differs
 // from one from nothing.
 
@@ -62,41 +62,63 @@ const metricsOf = async (build: () => Promise<unknown>) => {
   }
 };
 
-/** Deletes every object under `prefix`: what a build kept is gone, its receipts left naming nothing. */
-const forgetAll = async (prefix: string): Promise<void> => {
+/** Every entry of the cache, by key, with its text. */
+const entries = async (): Promise<Map<string, string>> => {
+  const found = new Map<string, string>();
   let cursor: string | undefined;
   do {
     // oxlint-disable-next-line no-await-in-loop -- one page after another
-    const listed = await env.FILES.list({ prefix, cursor });
-    // oxlint-disable-next-line no-await-in-loop -- one page after another
-    await env.FILES.delete(listed.objects.map(({ key }) => key));
+    const listed = await env.FILES.list({ prefix: buildCachePrefix, cursor });
+    for (const { key } of listed.objects) {
+      // oxlint-disable-next-line no-await-in-loop -- read in turn
+      const object = await env.FILES.get(key);
+      // oxlint-disable-next-line no-await-in-loop -- read in turn
+      found.set(key, (await object?.text()) ?? "");
+    }
     cursor = listed.truncated ? listed.cursor : undefined;
   } while (cursor !== undefined);
+  return found;
+};
+
+/** An entry's text, parsed as an object: none for text that isn't JSON (forged here). */
+const fieldsOf = (text: string): Record<string, unknown> => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return {};
+  }
+  return typeof parsed === "object" && parsed !== null
+    ? Object.fromEntries(Object.entries(parsed))
+    : {};
+};
+
+/** Deletes the cache's whole builds (each says whether it is `ok`), or every entry. */
+const forget = async (what: "builds" | "all"): Promise<void> => {
+  const keys = [...(await entries())]
+    .filter(([, text]) => what === "all" || "ok" in fieldsOf(text))
+    .map(([key]) => key);
+  if (keys.length > 0) {
+    await env.FILES.delete(keys);
+  }
 };
 
 /** A build of `files` from nothing: no whole build, no part of one kept. */
 const fromNothing = async (files: Record<string, string>) => {
-  await Promise.all(["page-builds/", "page-modules/"].map(forgetAll));
+  await forget("all");
   return await buildPages(env, files, "app-test");
 };
 
-/** The receipted key and object of the module record of `path`'s transform, as this test (`tag`) made it. */
-const moduleRecordKeys = async (path: string, tag: string) => {
-  const rows = await env.DB.prepare(
-    "SELECT key, object_key AS objectKey FROM build_receipts WHERE key LIKE 'page-modules/%' AND object_key IS NOT NULL"
-  ).all<{ key: string; objectKey: string }>();
-  const found = [];
-  for (const row of rows.results) {
-    // oxlint-disable-next-line no-await-in-loop -- few rows, read in turn
-    const object = await env.FILES.get(row.objectKey);
-    // oxlint-disable-next-line no-await-in-loop -- few rows, read in turn
-    const text = await object?.text();
-    if (text?.includes(`"path":"${path}"`) === true && text.includes(tag)) {
-      found.push({ ...row, text });
-    }
-  }
-  return found;
-};
+/** The key and text of the module record of `path`'s transform, as this test (`tag`) made it. */
+const moduleRecordKeys = async (path: string, tag: string) =>
+  [...(await entries())]
+    .filter(
+      ([, text]) =>
+        fieldsOf(text).path === path &&
+        "code" in fieldsOf(text) &&
+        text.includes(tag)
+    )
+    .map(([key, text]) => ({ key, text }));
 
 describe("a pages build reusing earlier ones", () => {
   afterEach(() => {
@@ -153,7 +175,7 @@ describe("a pages build reusing earlier ones", () => {
     ).toStrictEqual(["src/routes/index.tsx TS2741"]);
   });
 
-  it("transforms again a module whose kept record no receipt vouches for, or that another file's key holds", async () => {
+  it("transforms again a module whose kept record core didn't keep, or that another file's key holds", async () => {
     const tag = crypto.randomUUID();
     const files = appFiles("New", tag);
     await buildPages(env, files, "app-test");
@@ -162,20 +184,21 @@ describe("a pages build reusing earlier ones", () => {
     if (desk === undefined || card === undefined) {
       throw new Error("The build kept no transform of its files");
     }
-    // Bytes rewritten under the page's record: its receipt says otherwise.
+    // Bytes rewritten under the page's record, its MAC kept.
+    const deskEntry = await env.FILES.get(desk.key);
     await env.FILES.put(
-      desk.objectKey,
+      desk.key,
       desk.text.replace(
         /"code":"[^"]*"/u,
         `"code":"export default () => 'forged';"`
-      )
+      ),
+      { customMetadata: deskEntry?.customMetadata }
     );
-    // The card's key, receipted, holding the page's record.
-    await env.DB.prepare("DELETE FROM build_receipts WHERE key = ?")
-      .bind(card.key)
-      .run();
-    await keepUnderLease(env, card.key, desk.text, 60_000);
-    await forgetAll("page-builds/");
+    // The card's key holding the page's record, with the MAC core kept it with.
+    await env.FILES.put(card.key, desk.text, {
+      customMetadata: deskEntry?.customMetadata,
+    });
+    await forget("builds");
     let built: Awaited<ReturnType<typeof buildPages>> | undefined;
     const metrics = await metricsOf(async () => {
       built = await buildPages(env, files, "app-test");

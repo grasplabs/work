@@ -147,11 +147,6 @@ interface __BaseEnv_Env {
   /** Tests only: a shorter bound on one build of a save (src/save-builds.ts). */
   BUILD_WAIT_MS?: string;
   /**
-   * Tests only: a smaller CPU time to size a first pages build's batches
-   * to (src/pages.ts, `batchCpuMs`), never larger.
-   */
-  BUILD_BATCH_CPU_MS?: string;
-  /**
    * Tests only: a shorter bound on one load of a release, before it is
    * taken for abandoned (src/app-releases.ts).
    */

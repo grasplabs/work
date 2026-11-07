@@ -82,7 +82,6 @@ import {
   limitErrors,
   computeModuleErrors,
   generatedWorkflowErrors,
-  isPageFile,
   routeTreePath,
 } from "./inputs.ts";
 import {
@@ -736,55 +735,6 @@ export const buildPagesIncrementally = async (
     },
     typeCheck
   );
-};
-
-/**
- * Transforms part of a pages build's sources (`batch`), in a build whose
- * modules are `known` and whose types may name `typeFiles`: each as
- * `buildPagesIncrementally` would, under the key it would work out for
- * it, so the build reuses it. What a first build of a large App does a
- * part at a time, each part one call within a call's CPU time (core's
- * pages.ts). Only `known` sources are transformed, whatever else is
- * passed. A file that doesn't compile is left out: the build compiles it
- * again and says why, with every gate.
- *
- * Its pages compile as the generator corrects them, as the build's do:
- * the correction of a route file is a function of its path and source,
- * so the batch's own routes give each the one the whole App's would. A
- * page the generator gave nothing for (it doesn't parse, or the batch's
- * routes didn't generate) is left to the build too.
- */
-const transformPages = async (
-  batch: Record<string, string>,
-  { known, typeFiles }: { known: string[]; typeFiles: string[] },
-  preview: boolean
-): Promise<Record<string, ModuleRecord>> => {
-  const sets = { known: new Set(known), typeFiles: new Set(typeFiles) };
-  const flags = { unparsed: new Set<string>(), untyped: new Set<string>() };
-  const { routes } = await routeTree(buildFiles(batch));
-  const records = await Promise.all(
-    Object.entries(batch)
-      .filter(([path]) => sets.known.has(path))
-      .map(async ([path, source]) => {
-        const compiled = isPageFile(path) ? routes[path] : source;
-        if (compiled === undefined) {
-          return [];
-        }
-        const result = transformSource(path, compiled, sets, flags, preview);
-        if (!("record" in result)) {
-          return [];
-        }
-        const key = await moduleKey({
-          path,
-          source,
-          known,
-          typeFiles,
-          preview,
-        });
-        return [[key, result.record] as const];
-      })
-  );
-  return Object.fromEntries(records.flat());
 };
 
 /** Builds an App's pages with nothing reused (`buildPagesIncrementally`). */
@@ -1499,25 +1449,6 @@ export default class AppCompiler extends WorkerEntrypoint {
       ...incrementalTargets[known],
       reuse: incrementsOf(reuse),
     });
-  }
-
-  /**
-   * Transforms part of a pages build's sources (`target`: `pages`, or
-   * a preview's) as `buildIncrementally` would (`transformPages`): the
-   * records it makes, by key, for core to keep and the build to reuse.
-   */
-  async transform(
-    target: IncrementalTarget,
-    batch: Record<string, string>,
-    paths: { known: string[]; typeFiles: string[] }
-  ): Promise<Record<string, ModuleRecord>> {
-    assertNoBindings(this.env, this.ctx.props, "The App compiler");
-    const known = knownTarget(incrementalTargets, target, "transform");
-    return await transformPages(
-      batch,
-      paths,
-      incrementalTargets[known].preview
-    );
   }
 
   /**

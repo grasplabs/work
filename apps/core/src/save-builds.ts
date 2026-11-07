@@ -23,17 +23,11 @@ import { z } from "zod";
 import { definitionFiles } from "./app-definition.ts";
 import { batchesOf, callSplitting, ultraciteBatch } from "./batches.ts";
 import { boundWorkflowsOf } from "./bound-workflows.ts";
+import { keepLints, readLints } from "./build-cache.ts";
 import { inspectDraft, withDraftReferences } from "./draft-references.ts";
 import type { DraftInspection } from "./draft-references.ts";
 import { hostModules } from "./host-modules.ts";
-import { keepLints, readLints } from "./module-cache.ts";
-import {
-  buildRefreshMs,
-  buildPages,
-  checkAppCode,
-  leaseSlackMs,
-  withinBuildWait,
-} from "./pages.ts";
+import { buildPages, checkAppCode, withinBuildWait } from "./pages.ts";
 import type { BuildProfile } from "./pages.ts";
 import { platformRunner } from "./platform-sandbox.ts";
 
@@ -109,8 +103,7 @@ const savedBuild = async (
     diagnostics?: Diagnostic[];
     standIn?: true;
   }>,
-  env: Env,
-  signal?: AbortSignal
+  env: Env
 ): Promise<SavedBuild> => {
   try {
     if (Object.keys(select(files)).length === 0) {
@@ -136,10 +129,6 @@ const savedBuild = async (
     }
     return { status: built.ok ? "ok" : "failed", diagnostics };
   } catch (error) {
-    // Given up on, not failed: whoever gave up on it hears why.
-    if (signal?.aborted === true) {
-      throw signal.reason;
-    }
     log.warn("app.save_build_failed", {
       appId: app,
       version,
@@ -160,36 +149,31 @@ const savedBuild = async (
  * Builds a saved version's pages into the build cache (pages.ts), so
  * the version opens without building. Answers once done with how it
  * went, for whoever saved (an agent repairs what failed); none takes
- * longer than the build wait (`buildWaitMs` in pages.ts). Never throws, unless `signal` gave up on it: a build is never a reason
- * for a save to fail.
+ * longer than the build wait (`buildWaitMs` in pages.ts). Never throws: a
+ * build is never a reason for a save to fail.
  */
 export const buildOnSave = async (
   env: Env,
   source: SavedSource,
   {
     profile,
-    signal,
+    checks = true,
     inspection,
   }: {
     /** `preview` for a chat's draft, `production` for a saved version. */
     readonly profile: BuildProfile;
+    /** False for a draft's write: its pages without the type check (pages.ts). */
+    readonly checks?: boolean;
     /**
      * The inspection of its server code the references its pages import
      * are generated from (`inspectDraft`), when its caller shares one with
      * the server check: its own otherwise.
      */
     readonly inspection?: () => Promise<DraftInspection>;
-    /**
-     * Aborted once the build is no one's (a build job's lease lost): no
-     * build starts the compiler after, and it throws its reason, rather
-     * than report the builds it gave up as errors. A compile already
-     * running goes on (pages.ts, `cachedBuild`).
-     */
-    readonly signal?: AbortSignal;
   }
 ): Promise<SavedBuilds> => {
   const { files } = source;
-  const options = { profile, signal };
+  const options = { profile, checks };
   const pages = await savedBuild(
     "pages",
     source,
@@ -208,8 +192,7 @@ export const buildOnSave = async (
       const built = await buildPages(env, withReferences, source.app, options);
       return standIn ? { ...built, standIn: true as const } : built;
     },
-    env,
-    signal
+    env
   );
   return { pages };
 };
@@ -269,14 +252,13 @@ const inspectionProblem = (
 const checkedDraftCode = async (
   env: Env,
   { app, version, files }: Pick<SavedSource, "app" | "version" | "files">,
-  inspection: () => Promise<DraftInspection>,
-  signal?: AbortSignal
+  inspection: () => Promise<DraftInspection>
 ): Promise<{ ok: boolean; diagnostics?: Diagnostic[] }> => {
   // Whatever the draft holds under `.grasp/` is the host's to generate.
   const code = Object.fromEntries(
     Object.entries(files).filter(([path]) => !isGeneratedPath(path))
   );
-  const options = { profile: "preview", signal } as const;
+  const options = { profile: "preview" } as const;
   const inspected = await inspection();
   if ("failed" in inspected) {
     const { failed: error } = inspected;
@@ -319,19 +301,15 @@ const checkedDraftCode = async (
  * sandbox to say what they are, none of its operations (server code with
  * no app.ts and schema.ts fails there, saying so). Failed too when it
  * holds files under `app/`, which no commit takes (`app.v1_server`), each
- * named; `none` when it has no server code. Never throws, unless `signal`
- * gave up on it, as `buildOnSave`. `inspection` is the one its caller
- * shares with the pages' build (`inspectDraft`), its own otherwise.
+ * named; `none` when it has no server code. Never throws, as
+ * `buildOnSave`. `inspection` is the one its caller shares with the
+ * pages' build (`inspectDraft`), its own otherwise.
  */
 export const draftServerBuild = async (
   env: Env,
   source: Pick<SavedSource, "app" | "version" | "files">,
-  signal?: AbortSignal,
   inspection: () => Promise<DraftInspection> = async () =>
-    await inspectDraft(env, source.app, source.files, {
-      profile: "preview",
-      signal,
-    })
+    await inspectDraft(env, source.app, source.files, { profile: "preview" })
 ): Promise<SavedBuild> => {
   const { files } = source;
   const leftovers = Object.keys(files)
@@ -350,9 +328,8 @@ export const draftServerBuild = async (
     "server",
     source,
     appCodeFiles,
-    async () => await checkedDraftCode(env, source, inspection, signal),
-    env,
-    signal
+    async () => await checkedDraftCode(env, source, inspection),
+    env
   );
 };
 
@@ -401,18 +378,16 @@ const unlinted = (file: string): Diagnostic => ({
  * What Ultracite's rules say of a draft's TypeScript (Ultracite's
  * `lint`): a build of its own, in an isolate of its own, so it runs beside
  * the others rather than after them. Each file's result is kept under the
- * key of its content (module-cache.ts), so a write lints only the files
+ * key of its content (build-cache.ts), so a check lints only the files
  * that changed. The files it lacks go a batch at a time (`ultraciteBatch`),
  * each batch's results kept as it answers, so a lint stopped part way
  * resumes where it stopped; a batch stopped at a bound is split
  * (`callSplitting`). Failed while any of its errors is left; its warnings
- * stay warnings. Never throws, unless `signal` gave up on it, as
- * `buildOnSave`.
+ * stay warnings. Never throws, as `buildOnSave`.
  */
 export const draftLintBuild = async (
   env: Env,
-  source: Pick<SavedSource, "app" | "version" | "files">,
-  signal?: AbortSignal
+  source: Pick<SavedSource, "app" | "version" | "files">
 ): Promise<SavedBuild> => {
   const built = await savedBuild(
     "lint",
@@ -426,7 +401,7 @@ export const draftLintBuild = async (
         Object.entries(files).filter(([path]) => isDesignLinted(path))
       );
       const designContext = await designContextKey(app);
-      const kept = await readLints(env, files, designContext, buildRefreshMs);
+      const kept = await readLints(env, files, designContext);
       const missing = Object.fromEntries(
         Object.entries(files).filter(([path]) => !Object.hasOwn(kept, path))
       );
@@ -438,13 +413,7 @@ export const draftLintBuild = async (
           const found = lintedSchema.parse(
             await runner.run("ultracite", "lint", [part, app], { once: true })
           );
-          await keepLints(
-            env,
-            part,
-            designContext,
-            found,
-            runner.callMs("ultracite") + leaseSlackMs
-          );
+          await keepLints(env, part, designContext, found);
           Object.assign(linted, found);
         });
         // A stop of the load's (a deadline, a crash) is thrown, not split:
@@ -461,8 +430,7 @@ export const draftLintBuild = async (
         diagnostics,
       };
     },
-    env,
-    signal
+    env
   );
   return {
     ...built,

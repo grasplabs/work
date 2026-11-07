@@ -9,9 +9,9 @@
  * - `tidy`, on every write, before it is saved: every fix oxlint counts as
  *   safe (`oxlint --fix`), then oxfmt, so the agent never spends a turn on
  *   formatting or on what fixes itself.
- * - `lintCode`, in what every write and check reports: every rule, no
- *   fixes, a file at a time (core keeps each file's result:
- *   module-cache.ts).
+ * - `lintCode`, in what each turn's check and each proposal reports:
+ *   every rule, no fixes, a file at a time (core keeps each file's
+ *   result: build-cache.ts).
  *
  * A file oxc.wasm can't take (nested too deep, or too large for its
  * memory) fails alone: the others in its call, and every other App's,

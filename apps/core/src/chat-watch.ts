@@ -25,6 +25,8 @@ export interface ChatState {
   drafts: number;
   /** Changes whenever the chat's provenance does. */
   provenanceVersion: number;
+  /** Whether its turn checks the drafts it wrote now. */
+  checking: boolean;
 }
 
 /** A text the watcher has, and the one there is now: what it gains. */
@@ -162,6 +164,7 @@ export class ChatWatch {
       held,
       drafts,
       provenanceVersion,
+      checking,
     } = this.#state();
     const tools = this.#unsentTools.splice(0);
     const update: ChatUpdate = {
@@ -173,6 +176,7 @@ export class ChatWatch {
       stopped,
       held,
       drafts,
+      checking,
       ...(provenanceVersion === this.#provenanceSent
         ? {}
         : { provenance: this.#provenance() }),

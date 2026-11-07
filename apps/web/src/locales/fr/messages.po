@@ -3716,6 +3716,11 @@ msgstr "Vérifié jusqu’à l’entrée {through}…"
 msgid "Checking it against your numbers…"
 msgstr "Vérification avec vos chiffres…"
 
+#. Grasp checks the App it changed (its types, lint and preview) before its turn ends.
+#: src/chat/thread.tsx
+msgid "Checking the App…"
+msgstr "Vérification de l’App…"
+
 #: src/workflows/definition-editor.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Checking…"

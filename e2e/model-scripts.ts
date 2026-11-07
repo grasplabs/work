@@ -193,6 +193,9 @@ export const modelScripts = {
           "src/routes/index.tsx": tallyPage("Add more"),
         }),
       says("It takes more."),
+      // Told by the turn's check that its server code doesn't build, it
+      // answers without fixing it: the draft stays so until asked.
+      says("Its server code doesn't build yet: I'll fix it next."),
       (said) =>
         writesTally(said, "fix-server", "Fixing the count.", {
           "server/tally.ts": tallyServer("fixed"),
@@ -275,6 +278,9 @@ export const Route = createFileRoute("/")({ component: Tally });
           },
         }),
       says("The tally's page doesn't build yet."),
+      // Told by the turn's check that its page doesn't build, it answers
+      // without fixing it: the draft stays broken until asked.
+      says("I'll fix the page when you ask."),
       (said) =>
         calls("fixestly1", "writeFile", {
           app: readIn(said, ownApp),

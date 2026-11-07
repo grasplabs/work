@@ -538,11 +538,6 @@ export const auditedCall = async <T>(
   env: Env,
   scope: AgentScope,
   call: AgentCall & {
-    /**
-     * Whether the chat shows it (`recordToolCall`): a call its code made,
-     * not work done for it later (a build job).
-     */
-    shown?: boolean;
     detailOf?: (result: T) => Record<string, AuditDetailValue>;
     /**
      * How a call that answered ended, when its answer says it was refused
@@ -554,16 +549,15 @@ export const auditedCall = async <T>(
   },
   run: () => Promise<T>
 ): Promise<T> => {
-  const { detailOf, endedOf, shown = true, ...recorded } = call;
-  const audit = shown ? auditToolCall : auditAgentCall;
+  const { detailOf, endedOf, ...recorded } = call;
   let result: T;
   try {
     result = await run();
   } catch (error) {
-    await audit(env, scope, recorded, endedBy(error));
+    await auditToolCall(env, scope, recorded, endedBy(error));
     throw error;
   }
-  await audit(
+  await auditToolCall(
     env,
     scope,
     {

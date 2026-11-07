@@ -26,9 +26,10 @@ import { signedInApi, unique } from "./sign-in.ts";
 //   pushing it past its deadline) is kept as the input's own verdict: a
 //   page pinned as "the compiler was stopped" until the next release, or
 //   packages refused, that a free machine would have built.
-// - A stop the input reaches whatever the load (its CPU time, its memory,
-//   an answer too large) isn't kept, and every view of a page that holds
-//   the type checker runs the compiler again, at its CPU bound each time.
+// - A stop at a limit (CPU time, memory, an answer too large) kept as the
+//   files' own failure, so they never build again until they change,
+//   though the limit was reached only this once. A stop is never kept: the
+//   next build tries again.
 // - The same page is judged one way on Cloudflare (the runtime stops a
 //   Loader isolate) and another on-prem (the supervisor's verdict).
 // - Builds that find no place in the sandbox are reported as having maybe
@@ -232,7 +233,7 @@ export const Route = createFileRoute("/")({ component: Desk });
 });
 
 describe("a page the sandbox stops the compiler on", () => {
-  it("is kept as failed when the page stopped it itself, and never compiled again", async () => {
+  it("is reported, never kept, when it reached a limit, and compiled again at the next build", async () => {
     for (const verdict of ["cpu", "memory", "refused"]) {
       const { host, sessions } = sandboxStopping({ verdict });
       const { files, kept } = countingFiles();
@@ -252,8 +253,8 @@ describe("a page the sandbox stops the compiler on", () => {
       }).toStrictEqual({
         verdict,
         ended: [stoppedOnce, stoppedOnce],
-        sessions: 1,
-        kept: 1,
+        sessions: 2,
+        kept: 0,
       });
     }
   });
@@ -284,7 +285,7 @@ describe("a page the sandbox stops the compiler on", () => {
     }
   });
 
-  it("is kept as failed on Cloudflare only once a fresh isolate of its own stopped it too", async () => {
+  it("is reported on Cloudflare once a fresh isolate of its own stopped it too, never kept", async () => {
     const { loader, compiles } = compilers({
       shared: throwing("Worker exceeded memory limit."),
       fresh: throwing("Worker exceeded CPU time limit."),
@@ -295,8 +296,8 @@ describe("a page the sandbox stops the compiler on", () => {
 
     expect({ ended, compiles: compiles(), kept: kept() }).toStrictEqual({
       ended: [stoppedOnce, stoppedOnce],
-      compiles: { shared: 1, fresh: 1 },
-      kept: 1,
+      compiles: { shared: 2, fresh: 2 },
+      kept: 0,
     });
   });
 

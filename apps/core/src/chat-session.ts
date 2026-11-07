@@ -115,13 +115,6 @@ export class ChatSession extends DurableObject<Env> {
     return await this.#work(async (harness) => await harness.run(request));
   }
 
-  /** Tells turn `turnId` `text` for it to answer, once a `key`. */
-  async notify(turnId: string, key: string, text: string): Promise<void> {
-    await this.#work(async (harness) => {
-      await harness.notify(turnId, key, text);
-    });
-  }
-
   /** Tells the chat's agent `text` for its turn under way or its next. */
   async note(text: string): Promise<void> {
     await this.#work(async (harness) => {

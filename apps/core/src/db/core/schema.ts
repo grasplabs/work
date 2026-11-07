@@ -1935,6 +1935,10 @@ export const runLineageAttempts = sqliteTable(
  * of the step that took it. One row per lease a job's step took, by the
  * job's own sequence (`seq`): its step, the round it waited and the
  * engine's attempt.
+ *
+ * Unused since build jobs went (GRA-1633): nothing reads or writes it.
+ * Kept so a rollback to the release before still has it; a later
+ * release drops it (expand, then contract).
  */
 export const buildLeases = sqliteTable(
   "build_leases",
@@ -2787,6 +2791,10 @@ export const packageCleanups = sqliteTable(
  * once, and its integrity failures: past a few, the key is quarantined
  * (`quarantined_at`) and nothing is served from or written to the cache
  * for it.
+ *
+ * Unused since build jobs went (GRA-1633): nothing reads or writes it.
+ * Kept so a rollback to the release before still has it; a later
+ * release drops it (expand, then contract).
  */
 export const buildReceipts = sqliteTable("build_receipts", {
   key: text().primaryKey(),

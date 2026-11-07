@@ -138,10 +138,10 @@ const artifactAt = (release: Release, path: string) => {
   return entry;
 };
 
-/** How many builds of an App's server code R2 holds. */
+/** How many builds of an App's server code the build cache holds. */
 const builds = async (): Promise<number> => {
-  const listed = await env.FILES.list({ prefix: "app-builds/" });
-  return listed.objects.length;
+  const listed = await env.FILES.list({ prefix: "build-cache/" });
+  return listed.objects.filter(({ key }) => key.includes("/app-build/")).length;
 };
 
 describe("sealing a release", { timeout: 120_000 }, () => {

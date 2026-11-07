@@ -129,7 +129,7 @@ export type DraftInspection =
  * Inspects the server code of `files` once (`filesManifest`, without
  * whatever they hold under `.grasp/`, which is the host's to generate).
  * A draft's pages and its server check read the same inspection
- * (agent-builds.ts, `draftBuilds`), so they can never disagree on whether
+ * (agent-builds.ts, `checkFiles`), so they can never disagree on whether
  * the server code registered: a sandbox ending one of two inspections
  * would otherwise check the pages against stand-ins while the server
  * passed. Throws what isn't an expected error.
@@ -172,11 +172,7 @@ export const withDraftReferences = async (
   app: AppId,
   version: number,
   files: Record<string, string>,
-  /**
-   * Its build profile (`preview` for a chat's draft), and when it is given
-   * up on (a build job's lease lost): generating them starts no compile
-   * nor inspection, and it throws its reason.
-   */
+  /** Its build profile: `preview` for a chat's draft. */
   options?: BuildOptions,
   inspection: () => Promise<DraftInspection> = async () =>
     await inspectDraft(env, app, files, options)

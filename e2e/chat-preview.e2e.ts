@@ -25,6 +25,20 @@ import { tallyFiles } from "./tally-app.ts";
  * count. Its first open builds it, which on a loaded machine takes longer
  * than the default 5 seconds.
  */
+/**
+ * Asks `text` in `chat` once its last turn has ended: a turn goes on past
+ * its answer while its drafts are checked (core's agent-builds.ts,
+ * `turnCheck`), and the chat takes no question meanwhile.
+ */
+const askOnceIdle = async (chat: Locator, text: string): Promise<void> => {
+  await expect(
+    chat.getByRole("button", { name: "Send", exact: true })
+  ).toBeVisible({ timeout: 30_000 });
+  const ask = chat.getByRole("textbox", { name: "Ask for a change" });
+  await ask.fill(text);
+  await ask.press("Enter");
+};
+
 const openTally = async (page: Page, app: string): Promise<FrameLocator> => {
   await page.goto(`/apps/${app}/full`);
   const appPage = page.frameLocator('iframe[title="App"]');
@@ -284,8 +298,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
     const { opener } = modelScripts.buildsTally;
     const chat = page.getByRole("region", { name: "Chat" });
     const ask = chat.getByRole("textbox", { name: "Ask for a change" });
-    await ask.fill(opener);
-    await ask.press("Enter");
+    await askOnceIdle(chat, opener);
     await expect(chat.getByText("The tally is in the preview.")).toBeVisible({
       timeout: 30_000,
     });
@@ -312,6 +325,9 @@ test("an App's own chat writes its page and server code, and its workspace previ
     await pageFrame?.evaluate(() => {
       Reflect.set(globalThis, "stillThisDocument", true);
     });
+    await expect(
+      chat.getByRole("button", { name: "Send", exact: true })
+    ).toBeVisible({ timeout: 30_000 });
     await ask.fill("Rename the button.");
     const asked = Date.now();
     await ask.press("Enter");
@@ -337,8 +353,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
     // The agent writes its server code alone: the frame takes it in
     // place, its live count read again on the new code, on a store of
     // that code's own.
-    await ask.fill("Count anew.");
-    await ask.press("Enter");
+    await askOnceIdle(chat, "Count anew.");
     await expect(chat.getByText("It counts anew.")).toBeVisible({
       timeout: 30_000,
     });
@@ -351,8 +366,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
     // Server code that doesn't build, with a write of the page: the
     // page shows on the server code that last built, its data kept,
     // while the problem is being fixed.
-    await ask.fill("Take more.");
-    await ask.press("Enter");
+    await askOnceIdle(chat, "Take more.");
     await expect(chat.getByText("It takes more.")).toBeVisible({
       timeout: 30_000,
     });
@@ -363,8 +377,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
     await expect(frame.getByRole("status")).toHaveText("1 counted anew");
 
     // Once it builds, the frame takes it as any write.
-    await ask.fill("Fix the count.");
-    await ask.press("Enter");
+    await askOnceIdle(chat, "Fix the count.");
     await expect(chat.getByText("The count is fixed.")).toBeVisible({
       timeout: 30_000,
     });
@@ -449,9 +462,7 @@ test("an App's workspace previews the App before its chat changes anything, then
     // Asked for one: the same preview shows it.
     const { opener } = modelScripts.buildsTally;
     const chat = page.getByRole("region", { name: "Chat" });
-    const ask = chat.getByRole("textbox", { name: "Ask for a change" });
-    await ask.fill(opener);
-    await ask.press("Enter");
+    await askOnceIdle(chat, opener);
     await expect(chat.getByText("The tally is in the preview.")).toBeVisible({
       timeout: 30_000,
     });
@@ -485,9 +496,7 @@ test("a preview opened on a draft that doesn't build shows the App's latest vers
 
     const { opener } = modelScripts.fixesBrokenTally;
     const chat = page.getByRole("region", { name: "Chat" });
-    const ask = chat.getByRole("textbox", { name: "Ask for a change" });
-    await ask.fill(opener);
-    await ask.press("Enter");
+    await askOnceIdle(chat, opener);
     await expect(
       chat.getByText("The tally's page doesn't build yet.")
     ).toBeVisible({ timeout: 30_000 });
@@ -500,8 +509,7 @@ test("a preview opened on a draft that doesn't build shows the App's latest vers
     });
     await expect(preview.getByText("Fixing a problem…")).toBeVisible();
 
-    await ask.fill("Fix the page.");
-    await ask.press("Enter");
+    await askOnceIdle(chat, "Fix the page.");
     await expect(chat.getByText("The tally works now.")).toBeVisible({
       timeout: 30_000,
     });
@@ -528,9 +536,7 @@ test("a preview whose first page doesn't build shows it once the agent's next wr
 
     const { opener } = modelScripts.fixesBrokenTally;
     const chat = page.getByRole("region", { name: "Chat" });
-    const ask = chat.getByRole("textbox", { name: "Ask for a change" });
-    await ask.fill(opener);
-    await ask.press("Enter");
+    await askOnceIdle(chat, opener);
     await expect(
       chat.getByText("The tally's page doesn't build yet.")
     ).toBeVisible({ timeout: 30_000 });
@@ -542,8 +548,7 @@ test("a preview whose first page doesn't build shows it once the agent's next wr
     ).toBeVisible({ timeout: 30_000 });
 
     // The next write fixes it: the preview starts afresh and shows it.
-    await ask.fill("Fix the page.");
-    await ask.press("Enter");
+    await askOnceIdle(chat, "Fix the page.");
     await expect(chat.getByText("The tally works now.")).toBeVisible({
       timeout: 30_000,
     });

@@ -11,10 +11,9 @@ import { pageReferences } from "./kit.ts";
 
 // What a pages build keeps of each of its files, so the next build of
 // files that changed only in part reuses it (spec 19.2, GRA-958): each
-// module's transform. Core keeps them as it
-// keeps whole builds, served only as the build that made them wrote them
-// (core's build-cache.ts, module-cache.ts), and hands them to the next
-// build; the compiler uses one only under the key it works out itself
+// module's transform. Core keeps them in its one cache, as it keeps whole
+// builds, served only under core's MAC (core's build-cache.ts), and hands
+// them to the next build; the compiler uses one only under the key it works out itself
 // from what the record stands for, and checks everything else again.
 //
 // - A module's transform (Babel's React Compiler, types stripped, imports

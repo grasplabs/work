@@ -123,54 +123,6 @@ describe("a build task's CPU on-prem", () => {
 });
 
 describe("the App compiler on-prem", () => {
-  it("builds a large App's first build in batches, each a session of its own", async () => {
-    const host = env.SANDBOX_HOST;
-    if (host === undefined) {
-      throw new Error("The on-prem project binds SANDBOX_HOST.");
-    }
-    let sessions = 0;
-    const counting: Fetcher = {
-      ...host,
-      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (new Request(input, init).headers.has(sandboxCpuHeader)) {
-          sessions += 1;
-        }
-        return await host.fetch(input, init);
-      },
-      connect: host.connect.bind(host),
-    };
-    // Three pages of this test's own, each larger than a batch sized to
-    // 10 ms of CPU time, and the root route the build gives them: a batch
-    // each, then the build, then its one type check, in a session of its
-    // own.
-    const tag = crypto.randomUUID();
-    const files = Object.fromEntries(
-      ["one", "two", "three"].map((name) => [
-        `src/routes/${name}.tsx`,
-        `import { createFileRoute } from "@tanstack/react-router";
-
-// ${tag}
-function Page() {
-  return (
-    <main>
-${Array.from({ length: 8 }, (_, line) => `      <p>${name} ${tag} ${line}</p>`).join("\n")}
-    </main>
-  );
-}
-export const Route = createFileRoute("/${name}")({ component: Page });
-`,
-      ])
-    );
-
-    const built = await buildPages(
-      { ...onPrem, SANDBOX_HOST: counting, BUILD_BATCH_CPU_MS: "10" },
-      files,
-      "app-test"
-    );
-
-    expect({ ok: built.ok, sessions }).toStrictEqual({ ok: true, sessions: 6 });
-  });
-
   it("builds an App's pages on the sandbox host, not in core", async () => {
     const built = await buildPages(onPrem, page(""), "app-test");
 
@@ -215,17 +167,18 @@ export const Route = createFileRoute("/${name}")({ component: Page });
     expect(took).toBeLessThan(DEADLINE_MS + 5000);
   });
 
-  it("runs the compiler once for a page it was stopped on for its own sake, however often it's viewed", async () => {
-    // Every build kept: one per time a build ran to an end it keeps. The
-    // compiler's transforms are kept besides (module-cache.ts): it ends,
-    // and the type checker is what the types stop.
+  it("keeps no build of a page the compiler was stopped on at a limit, so the next view tries again", async () => {
+    // Every whole build kept. The compiler's transforms are kept besides
+    // (build-cache.ts): it ends, and the type checker is what the types
+    // stop.
     let kept = 0;
     const counting = {
       ...onPrem,
       FILES: {
         get: env.FILES.get.bind(env.FILES),
         put: async (...args: Parameters<R2Bucket["put"]>) => {
-          if (args[0].startsWith("page-builds/")) {
+          // A whole build says whether it is `ok`; a transform doesn't.
+          if (typeof args[1] === "string" && args[1].startsWith('{"ok":')) {
             kept += 1;
           }
           return await env.FILES.put(...args);
@@ -237,9 +190,7 @@ export const Route = createFileRoute("/${name}")({ component: Page });
     const views = await Promise.all(
       [1, 2, 3].map(async () => await buildPages(counting, files, "app-test"))
     );
-    const started = Date.now();
     const later = await buildPages(counting, files, "app-test");
-    const tookLater = Date.now() - started;
 
     expect(
       [...views, later].map((built) =>
@@ -251,9 +202,7 @@ export const Route = createFileRoute("/${name}")({ component: Page });
         () => "The compiler was stopped before it finished:"
       )
     );
-    expect(kept).toBe(1);
-    // Read from the cache: the compiler didn't run again.
-    expect(tookLater).toBeLessThan(1000);
+    expect(kept).toBe(0);
   }, 120_000);
 
   it("reads the compiler's code from core's assets once, however many builds it runs", async () => {
