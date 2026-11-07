@@ -57,8 +57,6 @@ export const sayMax = 560;
 export const questionWordsMax = 15;
 /** The most bytes one turn's request may carry. */
 export const interviewTurnMaxBytes = 768 * 1024;
-/** The longest wait for his voice a page reports, in ms. */
-export const answerWaitMaxMs = 60_000;
 
 /**
  * What the page sends for one turn. Who they are, their team, their lead
@@ -93,14 +91,6 @@ export const interviewTurnRequestSchema = z.strictObject({
   reading: z.array(interviewFactSchema.shape.id).max(12).optional(),
   /** They agreed to the read-back before and are back to add something. */
   adding: z.boolean().default(false),
-  /**
-   * How long they waited for his voice the answer before, in ms, as a page
-   * of the release before measured it. Taken and not kept: nothing reads
-   * it, and pages no longer send it. Accepted while pages loaded before
-   * this release still send it (the request is strict), until a later
-   * release drops it.
-   */
-  waited: z.int().min(0).max(answerWaitMaxMs).optional(),
 });
 export type InterviewTurnRequest = z.output<typeof interviewTurnRequestSchema>;
 

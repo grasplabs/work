@@ -225,6 +225,13 @@
       "when": 1793723019733,
       "tag": "0031_remarkable_korath",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1794053952015,
+      "tag": "0032_silky_leper_queen",
+      "breakpoints": true
     }
   ]
 }
