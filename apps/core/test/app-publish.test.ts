@@ -339,7 +339,7 @@ export const hello = query({
     const own = first.manifest.artifacts.find(
       ({ path, sha256 }) => path.startsWith("modules/") && !shared.has(sha256)
     );
-    const key = artifactKey(own?.sha256 ?? "");
+    const key = await artifactKey(own?.sha256 ?? "");
     const stored = await env.FILES.get(key);
     // The isolate's cache of verified releases is warm from the load above.
     await env.FILES.put(key, `${(await stored?.text()) ?? ""} `);
@@ -349,6 +349,69 @@ export const hello = query({
       ),
       current: await currentOf(app),
     }).toStrictEqual({ refused: "version.artifact_corrupt", current: 2 });
+  });
+
+  it("counts a version published only while the release it tested is stored, whoever deleted it", async () => {
+    const { owner, app } = await appWith(helloFiles("one"));
+    await committed(owner, app, helloFiles("two"));
+    await publishVersion(env, owner, app, 1);
+    await publishVersion(env, owner, app, 2);
+    // Deleted as an earlier release of core's sweep deletes it: the
+    // version's own columns untouched.
+    await env.DB.prepare(
+      "DELETE FROM sdk_release_manifests WHERE app_id = ? AND version = 1"
+    )
+      .bind(app)
+      .run();
+    const status = await statusOf(app, 1);
+    const byHand = await refusedByHand(app, 1);
+    const back = await publishVersion(env, owner, app, 1);
+    expect({
+      status,
+      byHand,
+      current: back.currentVersion,
+      published: await audited(app, "app.version.published"),
+    }).toStrictEqual({
+      status: "published",
+      byHand: true,
+      current: 1,
+      // Sealed anew and tested again before it ran.
+      published: [
+        ["app.version.published", 1],
+        ["app.version.published", 2],
+        ["app.version.published", 1],
+      ],
+    });
+  });
+
+  it("records a failure no code names as an unexpected one, and leaves the current version", async () => {
+    const { owner, app } = await appWith(helloFiles("one"));
+    await publishVersion(env, owner, app, 1);
+    const next = await committed(owner, app, helloFiles("two"));
+    const put = env.FILES.put.bind(env.FILES);
+    Reflect.set(env.FILES, "put", async () => {
+      await Promise.resolve();
+      throw new Error("R2 is unavailable");
+    });
+    let refused: string;
+    try {
+      refused = await failure(
+        async () => await publishVersion(env, owner, app, next)
+      );
+    } finally {
+      Reflect.set(env.FILES, "put", put);
+    }
+    expect({
+      refused,
+      current: await currentOf(app),
+      status: await statusOf(app, next),
+      failed: await audited(app, "app.version.publish_failed"),
+    }).toStrictEqual({
+      refused: "Error: R2 is unavailable",
+      current: 1,
+      status: "failed",
+      failed: [["app.version.publish_failed", 2, "internal.unexpected"]],
+    });
   });
 
   it("is refused, writing nothing, to someone who no longer builds the App", async () => {

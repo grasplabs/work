@@ -1,21 +1,19 @@
 import { serverModuleSource } from "@grasp-os/sdk/host";
-import { sha256Hex } from "@grasp-os/shared/encoding";
+import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { callAppFunction, invocationFor } from "../src/app-functions.ts";
 import { publishVersion } from "../src/app-publish.ts";
-import { loadRelease } from "../src/app-releases.ts";
+import { loadRelease, readBackRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles } from "../src/apps.ts";
+import { commitFiles, isPublished } from "../src/apps.ts";
 import { callOperation } from "../src/operations.ts";
 import type { Runner } from "../src/operations.ts";
 import {
-  candidatePage,
   leaseRelease,
   pinRelease,
   placeHold,
-  queueOrphanedReservations,
   releaseHold,
   revokeRelease,
   sealGraceMs,
@@ -23,6 +21,12 @@ import {
   unpinRelease,
 } from "../src/release-retention.ts";
 import { hostedRelease } from "../src/release-runner.ts";
+import {
+  collectArtifacts,
+  collectBatch,
+  storeArtifacts,
+  unnamedSealMs,
+} from "../src/sealed-artifacts.ts";
 import { appDefinition } from "./app-definitions.ts";
 import { allEvents } from "./audit-events.ts";
 import {
@@ -100,7 +104,9 @@ const stored = async (release: Release, path: string): Promise<boolean> => {
   const entry = release.manifest.artifacts.find(
     (artifact) => artifact.path === path
   );
-  return (await env.FILES.head(artifactKey(entry?.sha256 ?? ""))) !== null;
+  return (
+    (await env.FILES.head(await artifactKey(entry?.sha256 ?? ""))) !== null
+  );
 };
 
 /** Sweeps at each of `times`, in turn. */
@@ -121,17 +127,6 @@ const loadedHash = async (app: Fixture["app"], version: number) => {
 /** `start`, `ms` later. */
 const after = (start: Date, ms: number): Date => new Date(start.getTime() + ms);
 
-/** Queues `hashes` for the sweep, as removing their last reference does. */
-const queueForSweep = async (...hashes: string[]): Promise<void> => {
-  await env.DB.batch(
-    hashes.map((sha256) =>
-      env.DB.prepare(
-        "INSERT INTO sdk_artifact_candidates (sha256, queued_at) VALUES (?, ?)"
-      ).bind(sha256, Date.now())
-    )
-  );
-};
-
 describe("retention", { timeout: 120_000 }, () => {
   it("keeps the current version however old it is", async () => {
     const start = new Date();
@@ -143,7 +138,7 @@ describe("retention", { timeout: 120_000 }, () => {
     expect(loaded.manifestHash).toBe(second.manifestHash);
   });
 
-  it("keeps a version among the App's latest and for a day after its seal, then deletes it, only its own bytes, and unpublishes it", async () => {
+  it("keeps a version among the App's latest and for a day after its seal, then deletes it, only its own bytes, and its version counts as unpublished", async () => {
     const start = new Date();
     const { app, first, second } = await twoVersions(start);
     // One of the App's latest releases, however old: kept.
@@ -156,11 +151,6 @@ describe("retention", { timeout: 120_000 }, () => {
     // A day after its seal: deleted.
     await sweepsAt(after(start, sealGraceMs + day));
     await removeNewer();
-    const status = await env.DB.prepare(
-      "SELECT status FROM app_versions WHERE app_id = ? AND version = 1"
-    )
-      .bind(app)
-      .first<{ status: string | null }>();
     // Its own bytes are gone; the bytes the current version shares with it
     // stay, and the current version loads whole.
     expect({
@@ -168,13 +158,13 @@ describe("retention", { timeout: 120_000 }, () => {
       own: await stored(first, "modules/app~server~notes.js"),
       shared: await stored(first, "server/_generated/server.ts"),
       second: await loadedHash(app, 2),
-      status: status?.status,
+      published: await isPublished(env, app, 1),
     }).toStrictEqual({
       first: "version.not_sealed",
       own: false,
       shared: true,
       second: second.manifestHash,
-      status: null,
+      published: false,
     });
   });
 
@@ -305,35 +295,143 @@ describe("retention", { timeout: 120_000 }, () => {
   });
 });
 
+/** The seal App `app`'s release `version` names. */
+const sealOf = async (app: string, version: number): Promise<string> => {
+  const row = await env.DB.prepare(
+    "SELECT seal_id AS seal FROM sdk_release_manifests WHERE app_id = ? AND version = ?"
+  )
+    .bind(app, version)
+    .first<{ seal: string }>();
+  return row?.seal ?? "";
+};
+
+/** Whether the artifact `sha256` has its live row and its bytes. */
+const kept = async (sha256: string): Promise<boolean> =>
+  (await env.FILES.head(await artifactKey(sha256))) !== null;
+
 describe("shared bytes", { timeout: 120_000 }, () => {
   it("are referenced for every artifact a release names, its sealed SDK included", async () => {
     const fixture = await appWith(files("one"));
     const release = await seal(fixture);
     const rows = await env.DB.prepare(
-      "SELECT sha256 FROM sdk_release_artifacts WHERE app_id = ? AND version = 1"
+      "SELECT sha256 FROM sdk_artifact_refs WHERE seal = ?"
     )
-      .bind(fixture.app)
+      .bind(await sealOf(fixture.app, 1))
       .all<{ sha256: string }>();
-    const reserved = new Set(rows.results.map(({ sha256 }) => sha256));
+    const referenced = new Set(rows.results.map(({ sha256 }) => sha256));
     const named = release.manifest.artifacts;
     expect([
       named.some((artifact) => artifact.path.startsWith("sdk/")),
-      named.filter((artifact) => !reserved.has(artifact.sha256)),
+      named.filter((artifact) => !referenced.has(artifact.sha256)),
     ]).toStrictEqual([true, []]);
   });
 
-  it("are never deleted while a release references them", async () => {
+  it("are never collected while a release references them", async () => {
     const start = new Date();
     const { app, second } = await twoVersions(start);
     const entry = second.manifest.artifacts.find(
       ({ path }) => path === "server/_generated/server.ts"
     );
-    await queueForSweep(entry?.sha256 ?? "");
-    await sweepsAt(new Date());
+    await collectArtifacts(env, [entry?.sha256 ?? ""]);
     await expect(
       stored(second, "server/_generated/server.ts")
     ).resolves.toBeTruthy();
     await expect(loadedHash(app, 2)).resolves.toBe(second.manifestHash);
+  });
+
+  it("collected while another seal takes them are never lost to the release it seals", async () => {
+    // Another App's release went: none of its references are left, so
+    // every artifact it named that nothing else names is collectable,
+    // the SDK modules a new seal shares with it among them.
+    const other = await appWith(files("other"));
+    const gone = await seal(other);
+    await env.DB.prepare("DELETE FROM sdk_artifact_refs WHERE seal = ?")
+      .bind(await sealOf(other.app, 1))
+      .run();
+    const hashes = gone.manifest.artifacts.map(({ sha256 }) => sha256);
+    const fixture = await appWith(files("one"));
+    const state = { sealing: true };
+    const collecting = async (): Promise<number> => {
+      let sweeps = 0;
+      while (state.sealing) {
+        // oxlint-disable-next-line no-await-in-loop -- sweep after sweep
+        await collectArtifacts(env, hashes);
+        sweeps += 1;
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await scheduler.wait(1);
+      }
+      return sweeps;
+    };
+    const publishing = async () => {
+      try {
+        return await publishVersion(env, fixture.owner, fixture.app, 1);
+      } finally {
+        state.sealing = false;
+      }
+    };
+    const [made, sweeps] = await Promise.all([publishing(), collecting()]);
+    const release = await readBackRelease(env, fixture.app, 1);
+    expect({
+      current: made.currentVersion,
+      sweeps: sweeps > 0,
+      readBack: release.manifestHash,
+    }).toStrictEqual({
+      current: 1,
+      sweeps: true,
+      readBack: release.manifestHash,
+    });
+  });
+
+  it("are referenced and their rows taken or made in one batch, however many a seal names", async () => {
+    const artifacts = await Promise.all(
+      Array.from({ length: 300 }, async (_, index) => {
+        const bytes = new TextEncoder().encode(`artifact ${index}`);
+        return [await sha256HexOfBytes(bytes), bytes] as const;
+      })
+    );
+    const id = crypto.randomUUID();
+    let batches = 0;
+    let runs = 0;
+    const real = env.DB;
+    const counted: D1Database = {
+      prepare: (query) => {
+        const statement = real.prepare(query);
+        return Object.assign(statement, {
+          run: async () => {
+            runs += 1;
+            return await real.prepare(query).run();
+          },
+        });
+      },
+      batch: async <T>(statements: D1PreparedStatement[]) => {
+        batches += 1;
+        return await real.batch<T>(statements);
+      },
+      exec: async (query) => await real.exec(query),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await real.dump(),
+      withSession: (constraint) => real.withSession(constraint),
+    };
+    await storeArtifacts({ ...env, DB: counted }, id, artifacts);
+    const references = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM sdk_artifact_refs WHERE seal = ?"
+    )
+      .bind(id)
+      .first<{ n: number }>();
+    const uploaded = await Promise.all(
+      artifacts.map(async ([sha256]) => await kept(sha256))
+    );
+    expect({
+      batches,
+      runs,
+      references: references?.n,
+      uploaded: uploaded.every(Boolean),
+    }).toStrictEqual({
+      batches: 1,
+      runs: 0,
+      references: 300,
+      uploaded: true,
+    });
   });
 
   it("a seal named and lost the reference of keep it from sealing", async () => {
@@ -345,9 +443,9 @@ describe("shared bytes", { timeout: 120_000 }, () => {
       ...args: Parameters<typeof put>
     ): ReturnType<typeof put> => {
       await env.DB.prepare(
-        "DELETE FROM sdk_release_artifacts WHERE sha256 = ? AND app_id = ?"
+        "DELETE FROM sdk_artifact_refs WHERE sha256 = ? AND seal NOT IN (SELECT seal_id FROM sdk_release_manifests WHERE seal_id IS NOT NULL)"
       )
-        .bind(sha256, fixture.app)
+        .bind(sha256)
         .run();
       return await put(...args);
     };
@@ -364,199 +462,53 @@ describe("shared bytes", { timeout: 120_000 }, () => {
     ).resolves.toBe("version.not_sealed");
   });
 
-  it("a sealed release lost the references of are referenced again by sealing it again", async () => {
-    const fixture = await appWith(files("one"));
-    const release = await seal(fixture);
-    await env.DB.prepare(
-      "DELETE FROM sdk_release_artifacts WHERE app_id = ? AND version = 1"
-    )
-      .bind(fixture.app)
-      .run();
-    const again = await seal(fixture);
-    const rows = await env.DB.prepare(
-      "SELECT sha256 FROM sdk_release_artifacts WHERE app_id = ? AND version = 1"
-    )
-      .bind(fixture.app)
-      .all<{ sha256: string }>();
-    const reserved = new Set(rows.results.map(({ sha256 }) => sha256));
-    expect([
-      again.manifestHash,
-      release.manifest.artifacts.filter(
-        (artifact) => !reserved.has(artifact.sha256)
-      ),
-    ]).toStrictEqual([release.manifestHash, []]);
-  });
-
-  it("a seal references again are referenced anew, so a sweep can't take them mid-seal", async () => {
-    const fixture = await appWith(files("one"));
-    // A seal of this version failed a long time ago, after referencing.
-    const sha256 = await sha256Hex(serverModuleSource);
-    await env.DB.prepare(
-      "INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at) VALUES (?, ?, 1, ?)"
-    )
-      .bind(sha256, fixture.app, Date.now() - 30 * day)
-      .run();
-    const before = Date.now();
-    await seal(fixture);
-    const row = await env.DB.prepare(
-      "SELECT reserved_at AS reservedAt FROM sdk_release_artifacts WHERE sha256 = ? AND app_id = ?"
-    )
-      .bind(sha256, fixture.app)
-      .first<{ reservedAt: number }>();
-    expect(row?.reservedAt).toBeGreaterThanOrEqual(before);
-  });
-
-  it("a seal never finished referenced are swept a day later", async () => {
+  it("a seal never finished referenced are swept a day later, with their bytes", async () => {
     const start = new Date();
-    const orphan = "f".repeat(64);
-    await env.FILES.put(artifactKey(orphan), "left behind");
-    await env.DB.prepare(
-      "INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at) VALUES (?, 'app_gone', 1, ?)"
-    )
-      .bind(orphan, start.getTime())
-      .run();
-    await sweepsAt(after(start, sealGraceMs - 60_000));
-    await expect(env.FILES.head(artifactKey(orphan))).resolves.not.toBeNull();
-    await sweepsAt(after(start, sealGraceMs + 60_000));
-    await expect(env.FILES.head(artifactKey(orphan))).resolves.toBeNull();
-  });
-});
-
-describe("bytes left without a reference", { timeout: 120_000 }, () => {
-  it("one of which fails to delete leave the others deleted, and it queued", async () => {
-    const hashes = await Promise.all(
-      [1, 2, 3].map(async () => await sha256Hex(crypto.randomUUID()))
+    const bytes = new TextEncoder().encode(
+      `left behind ${crypto.randomUUID()}`
     );
-    await Promise.all(
-      hashes.map(async (sha256) => {
-        await env.FILES.put(artifactKey(sha256), "unreserved");
+    const sha256 = await sha256HexOfBytes(bytes);
+    await storeArtifacts(env, crypto.randomUUID(), [[sha256, bytes]]);
+    await env.DB.prepare(
+      "UPDATE sdk_artifact_refs SET created_at = ? WHERE sha256 = ?"
+    )
+      .bind(start.getTime(), sha256)
+      .run();
+    await sweepsAt(after(start, unnamedSealMs - 60_000));
+    const early = await kept(sha256);
+    const key = await artifactKey(sha256);
+    await sweepsAt(after(start, unnamedSealMs + 60_000));
+    expect({
+      early,
+      row: await env.DB.prepare("SELECT 1 FROM sdk_artifacts WHERE sha256 = ?")
+        .bind(sha256)
+        .first(),
+      bytes: await env.FILES.head(key),
+    }).toStrictEqual({ early: true, row: null, bytes: null });
+  });
+
+  it("nothing references are collected in batches past one statement's, keys and all", async () => {
+    const artifacts = await Promise.all(
+      Array.from({ length: collectBatch + 20 }, async (_, index) => {
+        const bytes = new TextEncoder().encode(
+          `unreferenced ${index} ${crypto.randomUUID()}`
+        );
+        return [await sha256HexOfBytes(bytes), bytes] as const;
       })
     );
-    const failing = artifactKey(hashes[1] ?? "");
-    const remove = env.FILES.delete.bind(env.FILES);
-    const failingOne = async (
-      ...args: Parameters<typeof remove>
-    ): ReturnType<typeof remove> => {
-      if (args[0] === failing) {
-        throw new Error("R2 is unavailable for this one");
-      }
-      await remove(...args);
-    };
-    await queueForSweep(...hashes);
-    Reflect.set(env.FILES, "delete", failingOne);
-    try {
-      await sweepsAt(new Date());
-    } finally {
-      Reflect.set(env.FILES, "delete", remove);
-    }
+    const id = crypto.randomUUID();
+    await storeArtifacts(env, id, artifacts);
+    const keys = await Promise.all(
+      artifacts.map(async ([sha256]) => await artifactKey(sha256))
+    );
+    await env.DB.prepare("DELETE FROM sdk_artifact_refs WHERE seal = ?")
+      .bind(id)
+      .run();
+    await sweepsAt(new Date());
     const left = await Promise.all(
-      hashes.map(
-        async (sha256) => (await env.FILES.head(artifactKey(sha256))) !== null
-      )
-    );
-    const still = await env.DB.prepare(
-      "SELECT sha256 FROM sdk_artifact_candidates WHERE sha256 IN (?, ?, ?)"
-    )
-      .bind(...hashes)
-      .all<{ sha256: string }>();
-    expect([left, still.results]).toStrictEqual([
-      [false, true, false],
-      [{ sha256: hashes[1] }],
-    ]);
-  });
-
-  it("of more seals than one page holds are all deleted", async () => {
-    const start = new Date();
-    const hashes = await Promise.all(
-      Array.from(
-        { length: candidatePage + 20 },
-        async () => await sha256Hex(crypto.randomUUID())
-      )
-    );
-    await Promise.all(
-      hashes.map(async (sha256) => {
-        await env.FILES.put(artifactKey(sha256), "left behind");
-      })
-    );
-    await env.DB.batch(
-      hashes.map((sha256) =>
-        env.DB.prepare(
-          "INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at) VALUES (?, 'app_gone', 1, ?)"
-        ).bind(sha256, start.getTime())
-      )
-    );
-    await sweepsAt(after(start, sealGraceMs + 60_000));
-    const left = await Promise.all(
-      hashes.map(async (sha256) => await env.FILES.head(artifactKey(sha256)))
+      keys.map(async (key) => await env.FILES.head(key))
     );
     expect(left.filter((object) => object !== null)).toHaveLength(0);
-  });
-
-  it("queued again while a sweep deletes them stay queued for the next", async () => {
-    const sha256 = await sha256Hex(crypto.randomUUID());
-    await env.FILES.put(artifactKey(sha256), "queued");
-    await env.DB.prepare(
-      "INSERT INTO sdk_artifact_candidates (sha256, queued_at) VALUES (?, ?)"
-    )
-      .bind(sha256, Date.now() - 60_000)
-      .run();
-    const remove = env.FILES.delete.bind(env.FILES);
-    // Mid-delete, an unfinished seal's reservation of them is swept, which
-    // queues them again: another sweep's step, run for real.
-    const requeueing = async (
-      ...args: Parameters<typeof remove>
-    ): ReturnType<typeof remove> => {
-      if (args[0] === artifactKey(sha256)) {
-        await env.DB.prepare(
-          "INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at) VALUES (?, 'app_gone', 1, ?)"
-        )
-          .bind(sha256, Date.now() - 2 * sealGraceMs)
-          .run();
-        await queueOrphanedReservations(env, new Date());
-      }
-      await remove(...args);
-    };
-    Reflect.set(env.FILES, "delete", requeueing);
-    try {
-      await sweepsAt(new Date());
-    } finally {
-      Reflect.set(env.FILES, "delete", remove);
-    }
-    const queued = await env.DB.prepare(
-      "SELECT sha256 FROM sdk_artifact_candidates WHERE sha256 = ?"
-    )
-      .bind(sha256)
-      .all();
-    expect(queued.results).toStrictEqual([{ sha256 }]);
-  });
-
-  it("a sweep queued and didn't get to are dealt with by the next", async () => {
-    const [gone, kept] = await Promise.all([
-      sha256Hex(crypto.randomUUID()),
-      sha256Hex(crypto.randomUUID()),
-    ]);
-    await env.FILES.put(artifactKey(gone), "queued");
-    await env.FILES.put(artifactKey(kept), "referenced again");
-    // Queued as their references went; one was referenced again since.
-    await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO sdk_artifact_candidates (sha256, queued_at) VALUES (?1, ?3), (?2, ?3)"
-      ).bind(gone, kept, Date.now()),
-      env.DB.prepare(
-        "INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at) VALUES (?, 'app_sealing', 1, ?)"
-      ).bind(kept, Date.now()),
-    ]);
-    await sweepsAt(new Date());
-    const queued = await env.DB.prepare(
-      "SELECT sha256 FROM sdk_artifact_candidates WHERE sha256 IN (?, ?)"
-    )
-      .bind(gone, kept)
-      .all();
-    expect([
-      await env.FILES.head(artifactKey(gone)),
-      (await env.FILES.head(artifactKey(kept))) !== null,
-      queued.results,
-    ]).toStrictEqual([null, true, []]);
   });
 });
 
@@ -710,11 +662,21 @@ describe("a deleted release", { timeout: 120_000 }, () => {
         event.target?.id === app &&
         event.detail?.version === 1
     );
+    const deleted = events.filter(
+      (event) =>
+        event.action === "app.release.deleted" && event.target?.id === app
+    );
     expect({
       current: back.currentVersion,
       published: published.length,
+      deleted: deleted.map(({ actor, detail }) => [actor, detail?.version]),
       loads: await failure(async () => await loadRelease(env, app, 1)),
-    }).toStrictEqual({ current: 1, published: 2, loads: "ok" });
+    }).toStrictEqual({
+      current: 1,
+      published: 2,
+      deleted: [[{ type: "system" }, 1]],
+      loads: "ok",
+    });
   });
 
   it("leaves its store serving its App alone, even with every binding gone", async () => {

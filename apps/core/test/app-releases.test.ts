@@ -37,6 +37,7 @@ import { allEvents } from "./audit-events.ts";
 import {
   appWith,
   artifactKey,
+  putArtifact,
   failure,
   person,
   seal,
@@ -236,7 +237,7 @@ describe("sealing a release", { timeout: 120_000 }, () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);
     const references = await env.FILES.get(
-      artifactKey(artifactAt(release, "server/_generated/api.ts").sha256)
+      await artifactKey(artifactAt(release, "server/_generated/api.ts").sha256)
     );
     const text = (await references?.text()) ?? "";
     // Names, the same for every release: no App or version in them.
@@ -375,7 +376,7 @@ const storedText = async (entry: Json): Promise<[string, string]> => {
   const { path, sha256 } = z
     .object({ path: z.string(), sha256: z.string() })
     .parse(entry);
-  const stored = await env.FILES.get(artifactKey(sha256));
+  const stored = await env.FILES.get(await artifactKey(sha256));
   const bytes = (await stored?.arrayBuffer()) ?? new ArrayBuffer(0);
   return [
     path,
@@ -410,7 +411,7 @@ const recordEvidence = async (
   change: Rewrite
 ): Promise<void> => {
   const entry = artifactAt(release, evidencePath);
-  const stored = await env.FILES.get(artifactKey(entry.sha256));
+  const stored = await env.FILES.get(await artifactKey(entry.sha256));
   const evidence = jsonRecord((await stored?.text()) ?? "{}");
   const observed = jsonRecord(JSON.stringify(evidence.observed));
   evidence.source = {
@@ -442,7 +443,7 @@ const recordEvidence = async (
   const text = change.evidenceText?.(evidence) ?? canonicalJson(evidence);
   const bytes = new TextEncoder().encode(text);
   const sha256 = await sha256Hex(text);
-  await env.FILES.put(artifactKey(sha256), bytes);
+  await putArtifact(sha256, bytes);
   const artifacts: readonly Json[] = Array.isArray(manifest.artifacts)
     ? manifest.artifacts
     : [];
@@ -468,13 +469,13 @@ const rewrite = async (
   const manifest = jsonRecord(JSON.stringify(release.manifest));
   if (change.contracts !== undefined) {
     const entry = artifactAt(release, ".grasp/contracts.json");
-    const stored = await env.FILES.get(artifactKey(entry.sha256));
+    const stored = await env.FILES.get(await artifactKey(entry.sha256));
     const contracts = jsonRecord((await stored?.text()) ?? "{}");
     change.contracts(contracts);
     const text = `${canonicalJson(contracts)}\n`;
     const bytes = new TextEncoder().encode(text);
     const sha256 = await sha256Hex(text);
-    await env.FILES.put(artifactKey(sha256), bytes);
+    await putArtifact(sha256, bytes);
     manifest.artifacts = release.manifest.artifacts.map((artifact) =>
       artifact.path === entry.path
         ? { path: artifact.path, sha256, bytes: bytes.byteLength }
@@ -503,7 +504,7 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     const release = await seal(fixture);
     // App source loses a leading mark when built, so storage adds one.
     const entry = artifactAt(release, "modules/app~server~notes.js");
-    const stored = await env.FILES.get(artifactKey(entry.sha256));
+    const stored = await env.FILES.get(await artifactKey(entry.sha256));
     const code = (await stored?.text()) ?? "";
     const bytes = new Uint8Array([
       0xef,
@@ -512,7 +513,7 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
       ...new TextEncoder().encode(code),
     ]);
     const sha256 = await sha256OfBytes(bytes);
-    await env.FILES.put(artifactKey(sha256), bytes);
+    await putArtifact(sha256, bytes);
     await rewrite(fixture.app, release, {
       manifest: (manifest) => {
         manifest.artifacts = release.manifest.artifacts.map((artifact) =>
@@ -531,14 +532,14 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     const release = await seal(fixture);
     // The same number of bytes, one of them changed: only the hash tells.
     const entry = artifactAt(release, "modules/app~server~notes.js");
-    const stored = await env.FILES.get(artifactKey(entry.sha256));
+    const stored = await env.FILES.get(await artifactKey(entry.sha256));
     const code = (await stored?.text()) ?? "";
     const forged = code.replace("notes", "motes");
     expect([forged.length, forged === code]).toStrictEqual([
       code.length,
       false,
     ]);
-    await env.FILES.put(artifactKey(entry.sha256), forged);
+    await putArtifact(entry.sha256, forged);
     await expect(
       failure(async () => await loadRelease(env, fixture.app, 1))
     ).resolves.toBe("version.artifact_corrupt");
@@ -772,7 +773,7 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     const fixture = await appWith(tablelessFiles());
     const sealed = await seal(fixture);
     const entry = artifactAt(sealed, ".grasp/contracts.json");
-    const key = artifactKey(entry.sha256);
+    const key = await artifactKey(entry.sha256);
     const stored = await env.FILES.get(key);
     const bytes = (await stored?.arrayBuffer()) ?? new ArrayBuffer(0);
     await env.FILES.delete(key);
@@ -804,7 +805,7 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);
     await env.FILES.delete(
-      artifactKey(artifactAt(release, ".grasp/contracts.json").sha256)
+      await artifactKey(artifactAt(release, ".grasp/contracts.json").sha256)
     );
     await expect(
       failure(async () => await loadRelease(env, fixture.app, 1))
@@ -917,7 +918,7 @@ describe(
       const fixture = await appWith(notesFiles());
       const release = await seal(fixture);
       const entry = artifactAt(release, evidencePath);
-      const stored = await env.FILES.get(artifactKey(entry.sha256));
+      const stored = await env.FILES.get(await artifactKey(entry.sha256));
       const evidence = jsonRecord((await stored?.text()) ?? "{}");
       const { manifest } = release;
       const { tree } = await findVersion(env, fixture.app, 1);

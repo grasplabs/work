@@ -15,7 +15,6 @@ import { z } from "zod";
 
 import { callAppFunction, callPageFunction } from "../src/app-functions.ts";
 import { publishVersion } from "../src/app-publish.ts";
-import { artifactKey } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import {
   bindWorkflowToApp,
@@ -56,7 +55,13 @@ import {
   stopped as stopRun,
   whileEngineRefuses,
 } from "./runs.ts";
-import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
+import {
+  artifactKey,
+  appWith,
+  person,
+  queryReference,
+  seal,
+} from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 
@@ -273,7 +278,9 @@ const sealedText = async (release: Release, path: string): Promise<string> => {
     (artifact) => artifact.path === path
   );
   const object =
-    entry === undefined ? null : await env.FILES.get(artifactKey(entry.sha256));
+    entry === undefined
+      ? null
+      : await env.FILES.get(await artifactKey(entry.sha256));
   if (object === null) {
     throw new Error(`The release has no ${path}`);
   }

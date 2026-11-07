@@ -52,7 +52,7 @@ import {
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { configuredLimits } from "./quota-limits.ts";
 import { aroundEngine, runObject, whileEngineRefuses } from "./runs.ts";
-import { artifactKey } from "./sealed-apps.ts";
+import { artifactKey, putArtifact } from "./sealed-apps.ts";
 import { moduleOf } from "./sealed-run-harness.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
@@ -164,7 +164,7 @@ const forgedModule = async (id: string, code: string): Promise<void> => {
     .parse(JSON.parse(row?.manifest ?? "{}"));
   const bytes = new TextEncoder().encode(code);
   const sha256 = await sha256HexOfBytes(bytes);
-  await env.FILES.put(artifactKey(sha256), bytes);
+  await putArtifact(sha256, bytes);
   const { build } = manifest;
   build.artifacts = build.artifacts.map((artifact) =>
     artifact.path === `modules/${generatedModule}`
@@ -381,7 +381,7 @@ describe("runs of JSON workflows", () => {
       ({ path }) => path === `modules/${generatedModule}`
     );
     await env.FILES.put(
-      artifactKey(compiled?.sha256 ?? ""),
+      await artifactKey(compiled?.sha256 ?? ""),
       moduleOf('return { status: "forged" };')
     );
     const { runId } = await start(by, workflow.id);

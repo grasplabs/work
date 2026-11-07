@@ -75,6 +75,14 @@ import {
 } from "./migration-transform.ts";
 import { pageArtifact, versionPages } from "./pages.ts";
 import type { BuildProfile, BuiltPage, PageBuildResult } from "./pages.ts";
+import {
+  artifactKey,
+  generationsOf,
+  newSeal,
+  releaseSealQuietly,
+  sealReferencedSql,
+  storeArtifacts,
+} from "./sealed-artifacts.ts";
 import { defineSchemaOnStore, schemaStatus } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 
@@ -107,11 +115,10 @@ import { liveStoreSql } from "./store-deletion.ts";
 //   and the evidence of the seal's checks against the identities and
 //   artifacts it names (check-evidence.ts).
 //   A new version is a new manifest; a sealed one never changes.
-// - Bytes a release names are deleted: each seal references its artifacts
-//   (`sdk_release_artifacts`) before it stores them and before its
-//   manifest, which it writes only while every reference stands; bytes go
-//   only once nothing references them (release-retention.ts), so bytes
-//   releases share are never deleted.
+// - Bytes a release names are deleted: its seal references every artifact
+//   it names before uploading them, its manifest's row is written only
+//   while every reference stands, and an artifact is collected only once
+//   nothing references it (sealed-artifacts.ts).
 // - A release reaches a store it shouldn't: no App code, request or
 //   manifest field names a store. The seal binds its App's own store, the
 //   one `app_default_stores` keys by the App (data-stores.ts,
@@ -132,10 +139,6 @@ import { liveStoreSql } from "./store-deletion.ts";
 //   release share one only for as long as a load may take (`sharedRun`),
 //   and only a load that verified every byte keeps its release
 //   (`verified`); a failure keeps nothing (`loadRelease`).
-
-/** Where an artifact's bytes are, by their SHA-256. */
-export const artifactKey = (sha256: string): string =>
-  `release-artifacts/${sha256}`;
 
 const encoder = new TextEncoder();
 
@@ -245,19 +248,30 @@ export type ArtifactReader = (
 ) => Promise<ArrayBuffer | Uint8Array | undefined>;
 
 /**
- * A sealed release's artifacts, as stored: in R2, under their hashes. One
- * whose size isn't the manifest's is never read, so an object grown in R2
- * costs no memory before it is refused.
+ * `manifest`'s artifacts, as stored: in R2, under each artifact's live
+ * generation. One whose size isn't the manifest's is never read, so an
+ * object grown in R2 costs no memory before it is refused.
  */
-const storedArtifacts =
-  (env: Env): ArtifactReader =>
-  async (sha256, bytes) => {
-    const object = await env.FILES.get(artifactKey(sha256));
+const storedArtifacts = async (
+  env: Env,
+  manifest: ReleaseManifest
+): Promise<ArtifactReader> => {
+  const generations = await generationsOf(
+    env,
+    manifest.artifacts.map(({ sha256 }) => sha256)
+  );
+  return async (sha256, bytes) => {
+    const generation = generations.get(sha256);
+    const object =
+      generation === undefined
+        ? null
+        : await env.FILES.get(artifactKey(sha256, generation));
     if (object !== null && object.size !== bytes) {
       await object.body.cancel();
     }
     return object?.size === bytes ? await object.arrayBuffer() : undefined;
   };
+};
 
 /**
  * The loads running now in this isolate, by manifest hash: loads of a
@@ -508,8 +522,9 @@ const bindingAgrees = (
 /**
  * The sealed manifest of `app`'s `version` and its hash, its text checked
  * against the hash and the host's record of its store binding, its
- * artifacts not read: `version.not_sealed`, `version.revoked` or
- * `version.manifest_corrupt` as `loadRelease` says.
+ * artifacts not read: `version.not_sealed`, `version.revoked`,
+ * `version.format_unsupported` or `version.manifest_corrupt` as
+ * `loadRelease` says.
  */
 export const checkedManifest = async (
   env: Env,
@@ -616,9 +631,13 @@ export const loadRelease = async (
       hash,
       releaseReadMs(env, manifest),
       async () => {
-        const loaded = await verifiedRelease(storedArtifacts(env), manifest, {
-          pages: false,
-        });
+        const loaded = await verifiedRelease(
+          await storedArtifacts(env, manifest),
+          manifest,
+          {
+            pages: false,
+          }
+        );
         // A load that ran on past being taken for abandoned keeps what is
         // there already: the same release, as the hash is the same.
         if (!verified.has(hash)) {
@@ -650,9 +669,13 @@ export const readBackRelease = async (
   version: number
 ): Promise<Release> => {
   const { manifest, hash } = await checkedManifest(env, app, version);
-  const release = await verifiedRelease(storedArtifacts(env), manifest, {
-    pages: true,
-  });
+  const release = await verifiedRelease(
+    await storedArtifacts(env, manifest),
+    manifest,
+    {
+      pages: true,
+    }
+  );
   return { ...release, manifestHash: hash };
 };
 
@@ -675,7 +698,7 @@ export const sealedPage = async (
   if (entry === undefined) {
     throw pageErrors.create("page.not_sealed");
   }
-  const text = await artifactText(storedArtifacts(env), entry);
+  const text = await artifactText(await storedArtifacts(env, manifest), entry);
   try {
     const sealed = sealedPageSchema.parse(JSON.parse(text));
     if (
@@ -714,7 +737,7 @@ export const sealedSurfaces = async (
   if (entry === undefined) {
     return [];
   }
-  const text = await artifactText(storedArtifacts(env), entry);
+  const text = await artifactText(await storedArtifacts(env, manifest), entry);
   try {
     return sealedSurfacesSchema.parse(JSON.parse(text));
   } catch (error) {
@@ -769,33 +792,6 @@ export const loadDraftRelease = async (
     ...(await verifiedRelease(read, manifest, { pages: false })),
     manifestHash: hash,
   };
-};
-
-/**
- * References `hashes` from release `key` (`sdk_release_artifacts`), so no
- * sweep deletes their bytes once this release names them
- * (release-retention.ts): written before the bytes are stored. A
- * reference made again is renewed, so a seal retried long after a failed
- * one isn't swept as an orphan while it runs. `key.app` is the release's
- * resource: an App, or an independent workflow whose version seals its
- * build (workflow-builds.ts).
- */
-export const reserveArtifacts = async (
-  env: Env,
-  key: { app: string; version: number },
-  hashes: readonly string[]
-): Promise<void> => {
-  const now = Date.now();
-  const statements = [...new Set(hashes)].map((sha256) =>
-    env.DB.prepare(
-      `INSERT INTO sdk_release_artifacts (sha256, app_id, version, reserved_at)
-       VALUES (?1, ?2, ?3, ?4)
-       ON CONFLICT (sha256, app_id, version) DO UPDATE SET reserved_at = excluded.reserved_at`
-    ).bind(sha256, key.app, key.version, now)
-  );
-  if (statements.length > 0) {
-    await env.DB.batch(statements);
-  }
 };
 
 /** The empty dependency lock: server code imports no packages. */
@@ -958,7 +954,7 @@ const sealedAppManifest = async (
   const text =
     entry === undefined
       ? undefined
-      : await artifactText(storedArtifacts(env), entry);
+      : await artifactText(await storedArtifacts(env, manifest), entry);
   if (text === undefined || (await sha256Hex(text)) !== manifest.contractHash) {
     throw versionErrors.create("version.artifact_corrupt", {
       path: generatedPaths.contracts,
@@ -1096,9 +1092,8 @@ const boundStore = async (
 };
 
 /**
- * A release sealed already: its artifacts referenced again before it is
- * answered, so sealing a version always leaves its release protected;
- * then read back, every byte checked (`readBackRelease`).
+ * A release sealed already: read back, every byte checked
+ * (`readBackRelease`).
  * Its store's definition was recorded with its seal, in the same write.
  * One whose store abandoned the target its schema waited on is refused
  * (`migration.abandoned`), as a fresh seal of it would be: its store
@@ -1107,15 +1102,8 @@ const boundStore = async (
  */
 const resealed = async (
   env: Env,
-  { app, version }: { app: AppId; version: number },
-  sealedManifest: string
+  { app, version }: { app: AppId; version: number }
 ): Promise<Release> => {
-  const named = manifestOf(sealedManifest, { app, version });
-  await reserveArtifacts(
-    env,
-    { app, version },
-    named.artifacts.map(({ sha256 }) => sha256)
-  );
   const release = await readBackRelease(env, app, version);
   if (release.store !== null) {
     const status = await schemaStatus(
@@ -1423,18 +1411,8 @@ export const sealRelease = async (
   const { app, version } = request;
   // Only the App's builders seal its versions.
   await appFor(env, request.by, app, "builder");
-  const sealed = await drizzle(env.DB)
-    .select({ manifest: sdkReleaseManifests.manifest })
-    .from(sdkReleaseManifests)
-    .where(
-      and(
-        eq(sdkReleaseManifests.appId, app),
-        eq(sdkReleaseManifests.version, version)
-      )
-    )
-    .get();
-  if (sealed !== undefined) {
-    return await resealed(env, { app, version }, sealed.manifest);
+  if (await isSealed(env, app, version)) {
+    return await resealed(env, { app, version });
   }
   const row = await findVersion(env, app, version);
   const files = await versionFiles(env, app, version);
@@ -1457,41 +1435,28 @@ export const sealRelease = async (
   );
   const { manifest, final, sdk, schema } = built;
 
-  // Referenced first, so no retention sweep deletes bytes this release
-  // will name (release-retention.ts); then the bytes, each under its hash,
-  // so a manifest never names a missing artifact. Storing the same bytes
-  // again changes nothing.
-  await reserveArtifacts(
-    env,
-    { app, version },
-    artifacts.map(({ entry }) => entry.sha256)
-  );
-  await Promise.all(
-    artifacts.map(async ({ entry, bytes }) => {
-      // The very bytes hashed, so what is stored is what the hash names.
-      await env.FILES.put(artifactKey(entry.sha256), bytes, {
-        sha256: entry.sha256,
-      });
-    })
-  );
-
+  // Referenced and uploaded first, so a manifest never names a missing
+  // artifact; then the row, only while every reference stands
+  // (sealed-artifacts.ts).
+  const seal = newSeal();
   const db = drizzle(env.DB);
   try {
+    await storeArtifacts(
+      env,
+      seal,
+      artifacts.map(({ entry, bytes }) => [entry.sha256, bytes] as const)
+    );
     await auditedBatch(env, db, [
       db.insert(sdkReleaseManifests).values({
         appId: app,
         version,
-        // The hash only while every artifact the manifest names is
-        // referenced by this release: otherwise NULL, which the column
-        // refuses, and the whole seal with it. References go only with
-        // the manifest, so no sweep deletes bytes a sealed release names.
-        manifestHash: sql`(SELECT ${hash} WHERE NOT EXISTS (
-          SELECT 1 FROM json_each(${text}, '$.artifacts') AS named
-          WHERE NOT EXISTS (SELECT 1 FROM sdk_release_artifacts AS reserved
-            WHERE reserved.app_id = ${app} AND reserved.version = ${version}
-              AND reserved.sha256 = json_extract(named.value, '$.sha256'))))`,
+        // The hash only while the seal references every artifact the
+        // manifest names: otherwise NULL, which the column refuses, and
+        // the whole seal with it.
+        manifestHash: sql`(SELECT ${hash} WHERE ${sealReferencedSql(seal, text, "$.artifacts")})`,
         manifest: text,
         sealedAt: new Date(),
+        sealId: seal,
       }),
       ...(store === null
         ? []
@@ -1552,6 +1517,8 @@ export const sealRelease = async (
       }),
     ]);
   } catch (error) {
+    // Not written: nothing names this seal's references.
+    await releaseSealQuietly(env, seal);
     if (notNullFailed(error, "sdk_resource_bindings.target_id")) {
       // Being deleted (or gone), or replaced, as the batch ran.
       throw dataErrors.create("data.store_unavailable");

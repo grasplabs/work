@@ -4,11 +4,14 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { artifactKey } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { mockIdp } from "./idp.ts";
 import { notesFiles } from "./notes-client-app.ts";
-import { person as actingPerson } from "./sealed-apps.ts";
+import {
+  artifactKey,
+  putArtifact,
+  person as actingPerson,
+} from "./sealed-apps.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 
 // An App's surfaces (spec 34.1): where the host places one of the App's
@@ -257,7 +260,10 @@ export const Route = createFileRoute("/_layout")({ component: Outlet });
     if (surfaces === undefined) {
       throw new Error("The release has its surfaces");
     }
-    await env.FILES.put(artifactKey(surfaces.sha256), '[{"kind":"elsewhere"}]');
+    await env.FILES.put(
+      await artifactKey(surfaces.sha256),
+      '[{"kind":"elsewhere"}]'
+    );
     const sidebar = await builder.api.pages.sidebar();
     expect(
       Object.fromEntries(
@@ -286,7 +292,7 @@ export const Route = createFileRoute("/_layout")({ component: Outlet });
     if (module === undefined) {
       throw new Error("The release has a module");
     }
-    await env.FILES.put(artifactKey(module.sha256), "tampered");
+    await putArtifact(module.sha256, "tampered");
     const sidebar = await builder.api.pages.sidebar();
     expect(sidebar.filter((entry) => entry.app === app)).toHaveLength(1);
   });

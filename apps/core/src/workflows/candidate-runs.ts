@@ -43,6 +43,11 @@ import {
   workflowResources,
 } from "../db/core/schema.ts";
 import { notNullFailed } from "../db/d1.ts";
+import {
+  newSeal,
+  releaseSealQuietly,
+  sealReferencedSql,
+} from "../sealed-artifacts.ts";
 import { requireNotStaff } from "../sharing.ts";
 import {
   loadCandidateBuild,
@@ -106,7 +111,7 @@ import { snapshotFrom, snapshotOf, snapshotStored } from "./state-snapshots.ts";
 //   `maxKeptCandidateRuns` kept of a workflow; a test run waits at most
 //   `maxCandidateWaitMs` at a time and goes on at most
 //   `maxCandidateLifetimeMs` in all, and its builders can stop it. Its rows and builds
-//   are kept a week (`sweepCandidateRuns`, release-retention.ts).
+//   are kept a week (`sweepCandidateRuns`).
 // - Its record. Every row of its own is immutable but its status
 //   (migration 0110), and what the audit log keeps of it says it was a
 //   test run (`candidate: true`).
@@ -209,10 +214,6 @@ const failedByCore = async (
     ...(entry === undefined ? [] : [outboxedIfChanged(db, entry)]),
   ]);
 };
-
-/** Whose build artifacts a test run's are: its own. */
-const reservationOf = (workflow: string, run: string): string =>
-  `${workflow}~candidate~${run}`;
 
 /**
  * Whose a test run's isolates and admissions are: its workflow's test
@@ -336,7 +337,8 @@ export const startCandidateRun = async (
   // writes nothing back (sealed-run.ts, `stepRecording`).
   const snapshot = await snapshotFrom(await workflowStateOf(env, workflow.id));
   const runId = crypto.randomUUID();
-  const reservation = reservationOf(workflow.id, runId);
+  // Its build's own seal (sealed-artifacts.ts), which its row names.
+  const reservation = newSeal();
   const manifest = canonicalJson({
     formatVersion: 1,
     target: "workflow-candidate",
@@ -369,10 +371,10 @@ export const startCandidateRun = async (
     WHERE ${workflowResources.id} = ${workflow.id} AND ${workflowResources.deletedAt} IS NULL
       AND ${going} < ${maxLiveCandidateRuns} AND ${kept} < ${maxKeptCandidateRuns})`;
   try {
-    // Its build's bytes, reserved for this run and stored before the row
+    // Its build's bytes, referenced by its seal and stored before the row
     // that names them; given back, as is any part stored, if the row
     // isn't written.
-    await storeBuild(env, { id: reservation, version: 1 }, built.compiled);
+    await storeBuild(env, reservation, built.compiled);
     await admit?.();
     await auditedBatch(env, db, [
       // Its snapshot, before the row that names it.
@@ -382,7 +384,9 @@ export const startCandidateRun = async (
         workflowResourceId: allowed,
         draftRevision: revision,
         manifest,
-        manifestHash,
+        // Only while its seal references every artifact its build names:
+        // otherwise NULL, which fails the batch (sealed-artifacts.ts).
+        manifestHash: sql`(SELECT ${manifestHash} WHERE ${sealReferencedSql(reservation, manifest, "$.build.artifacts")})`,
         buildHash: built.compiled.build.hash,
         reservation,
         principalId: by.userId,
@@ -411,11 +415,9 @@ export const startCandidateRun = async (
       }),
     ]);
   } catch (error) {
-    await releaseBuild(env, { id: reservation, version: 1 }).catch(
-      (releaseError: unknown) => {
-        log.warn("workflow.build_release_failed", errorFields(releaseError));
-      }
-    );
+    await releaseBuild(env, reservation).catch((releaseError: unknown) => {
+      log.warn("workflow.build_release_failed", errorFields(releaseError));
+    });
     if (notNullFailed(error, "workflow_candidate_runs.workflow_resource_id")) {
       if ((await liveWorkflow(env, workflow.id)) === undefined) {
         throw workflowResourceErrors.create("workflow.resource_unavailable");
@@ -893,10 +895,14 @@ const endOverdue = async (env: Env, cutoff: Date): Promise<void> => {
 };
 
 /**
- * Removes ended test run `id`: its engine record, lineage and row, and the
- * item of a test it ran, if it ran one.
+ * Removes ended test run `id`: its engine record, lineage and row, the
+ * item of a test it ran, if it ran one, and then its build's references,
+ * under the seal `reservation` names.
  */
-const removed = async (env: Env, id: string): Promise<boolean> => {
+const removed = async (
+  env: Env,
+  { id, reservation }: { id: string; reservation: string }
+): Promise<boolean> => {
   const db = drizzle(env.DB);
   try {
     await runEngine(env).remove(id);
@@ -912,6 +918,8 @@ const removed = async (env: Env, id: string): Promise<boolean> => {
         .delete(workflowItemTests)
         .where(eq(workflowItemTests.candidateRunId, id)),
     ]);
+    // What a failure leaves, the sweep takes (sealed-artifacts.ts).
+    await releaseSealQuietly(env, reservation);
     return true;
   } catch (error) {
     log.warn("workflow.candidate_sweep_failed", {
@@ -928,8 +936,8 @@ const removed = async (env: Env, id: string): Promise<boolean> => {
  * kept (`endOverdue`), then removes those that ended and are older, oldest
  * first, batch after batch for as long as the sweep's time allows: each
  * with its engine record and lineage, and its row, whose build's
- * reservation goes with it (the release sweep takes the bytes nothing else
- * names, release-retention.ts). From the clock, for the time `at`.
+ * references go with it (sealed-artifacts.ts). From the clock, for the
+ * time `at`.
  */
 export const sweepCandidateRuns = async (
   env: Env,
@@ -958,7 +966,10 @@ export const sweepCandidateRuns = async (
   while (Date.now() < until) {
     // oxlint-disable-next-line no-await-in-loop -- batch after batch
     const batch = await db
-      .select({ id: workflowCandidateRuns.id })
+      .select({
+        id: workflowCandidateRuns.id,
+        reservation: workflowCandidateRuns.reservation,
+      })
       .from(workflowCandidateRuns)
       .where(
         and(
@@ -969,9 +980,9 @@ export const sweepCandidateRuns = async (
       .orderBy(workflowCandidateRuns.createdAt)
       .limit(candidatesPerSweep);
     let gone = 0;
-    for (const { id } of batch) {
+    for (const run of batch) {
       // oxlint-disable-next-line no-await-in-loop -- one run after another
-      if (await removed(env, id)) {
+      if (await removed(env, run)) {
         gone += 1;
       }
     }

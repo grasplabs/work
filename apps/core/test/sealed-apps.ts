@@ -17,6 +17,7 @@ import {
   sealGraceMs,
   sweepReleases,
 } from "../src/release-retention.ts";
+import { artifactKey as keyOf } from "../src/sealed-artifacts.ts";
 import { published } from "./apps.ts";
 
 // Apps of spec 8's layout as the release tests build them: a builder's
@@ -118,9 +119,35 @@ export const failure = async (
   return "ok";
 };
 
-/** Where an artifact's bytes are kept. */
-export const artifactKey = (sha256: string): string =>
-  `release-artifacts/${sha256}`;
+/** Where the artifact `sha256`'s bytes are kept: under its live generation. */
+export const artifactKey = async (sha256: string): Promise<string> => {
+  const row = await env.DB.prepare(
+    "SELECT generation FROM sdk_artifacts WHERE sha256 = ?"
+  )
+    .bind(sha256)
+    .first<{ generation: string }>();
+  return keyOf(sha256, row?.generation ?? "none");
+};
+
+/**
+ * Stores `body` as the artifact `sha256`, under its live generation or a
+ * new one referenced by a seal of its own, whatever its bytes hash to: for
+ * tests that forge or swap artifacts.
+ */
+export const putArtifact = async (
+  sha256: string,
+  body: string | Uint8Array
+): Promise<void> => {
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO sdk_artifacts (sha256, generation, created_at) VALUES (?, lower(hex(randomblob(16))), ?) ON CONFLICT (sha256) DO NOTHING"
+    ).bind(sha256, Date.now()),
+    env.DB.prepare(
+      "INSERT INTO sdk_artifact_refs (seal, sha256, created_at) VALUES (?, ?, ?)"
+    ).bind(crypto.randomUUID(), sha256, Date.now()),
+  ]);
+  await env.FILES.put(await artifactKey(sha256), body);
+};
 
 /** The first version of the stand-in releases `newerReleases` writes. */
 const newerFrom = 1_000_000;

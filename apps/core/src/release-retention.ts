@@ -5,12 +5,11 @@ import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
-import { artifactKey } from "./app-releases.ts";
 import {
   auditedBatch,
   outboxedEventWhere,
@@ -19,10 +18,8 @@ import {
 } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
-  appVersions,
   apps,
-  sdkArtifactCandidates,
-  sdkReleaseArtifacts,
+  sdkArtifactRefs,
   sdkReleaseManifests,
   sdkReleasePins,
   sdkResourceBindings,
@@ -32,6 +29,7 @@ import {
   requireStillAdmin,
   stillAdminSql,
 } from "./permissions.ts";
+import { collectArtifacts, sweepArtifacts } from "./sealed-artifacts.ts";
 
 // How long a sealed release stays (spec 16.3), and how it is revoked.
 // What could go wrong, and what stops it:
@@ -47,24 +45,22 @@ import {
 // - A release is referenced again as it goes: the statement that deletes
 //   it checks every reference again, and a pin or a lease needs the
 //   release's row, so one is either taken first and keeps it, or refused.
-// - A deleted release's version is made current untested: deleting it
-//   clears its version's `published` status in the same transaction, so
-//   it runs again only once published again, sealed anew and tested
-//   (app-publish.ts).
+// - A deleted release's version is made current untested: a version
+//   counts as published only while the release its publish tested is
+//   stored (apps.ts, `publishedSql`), so it runs again only once published
+//   again, sealed anew and tested (app-publish.ts).
 // - A revoked release comes back: it is kept for good, so its version can
 //   neither be sealed again nor made current (`version.revoked`).
-// - An artifact other releases share is deleted with one of them:
-//   artifacts are content-addressed, so releases share bytes. Each seal
-//   references the artifacts it names (`sdk_release_artifacts`) before it
-//   stores them, and bytes are deleted only once no reference names them.
-//   A reference written in the moment between that check and the delete
-//   loses its bytes; such a release is refused as it is made current,
-//   which reads every byte back (`makeCurrent`), so it never runs.
-// - Bytes are left behind: removing a release's or an unfinished seal's
-//   references queues its bytes (`sdk_artifact_candidates`) in the same
-//   statement, and a sweep dequeues each only once its bytes are dealt
-//   with, page by page, so a sweep that stops or fails half-way leaves the
-//   rest queued for the next.
+// - Bytes another release shares are deleted with one: releases share
+//   artifacts, each referenced by every seal naming it; deleting a release
+//   removes only its own seal's references, in the batch that deletes its
+//   row, and an artifact goes only in the statement that finds no
+//   reference left (sealed-artifacts.ts).
+// - Bytes are left behind: a release's artifacts are collected once its
+//   row is deleted; what a stopped deletion leaves, the sweep collects
+//   (`sweepArtifacts`).
+// - A deletion goes unrecorded: each is audited
+//   (`app.release.deleted`), in the batch that deletes the row.
 // - Pins pile up: every page leases its release over and over. A lapsed
 //   lease is deleted by the next sweep, and a release's pins with it.
 // - A release turns out to be dangerous: an admin of the organization
@@ -81,15 +77,8 @@ export const frameLeaseMs = 15 * 60_000;
 /** How many of an App's latest releases are kept, to roll back to. */
 export const keptReleases = 10;
 
-/**
- * How long a seal may take: a release is kept this long after it was
- * sealed, and a seal's references this long while no release names them.
- */
+/** How long a release is kept after its seal: a publish under way. */
 export const sealGraceMs = 24 * 60 * 60_000;
-
-/** Queued bytes one page of a sweep deals with, and the pages per sweep. */
-export const candidatePage = 100;
-const candidatePages = 10;
 
 /** The most releases one sweep deletes. */
 const sweepBatch = 20;
@@ -391,107 +380,10 @@ export const within = async <T>(work: Promise<T>, ms: number): Promise<T> => {
 };
 
 /**
- * Deals with the queued bytes (`sdk_artifact_candidates`), page by page,
- * at most `candidatePages` pages: each nothing references any more is
- * deleted, and each is dequeued once dealt with (deleted, or referenced
- * again: shared, so never deleted). Bytes whose deletion failed stay
- * queued for the next sweep.
- */
-const drainCandidates = async (env: Env): Promise<void> => {
-  const db = drizzle(env.DB);
-  let after = "";
-  for (let page = 0; page < candidatePages; page += 1) {
-    // Pages one after the other, by hash, so none is skipped.
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    const queued = await db
-      .select({
-        sha256: sdkArtifactCandidates.sha256,
-        queuedAt: sdkArtifactCandidates.queuedAt,
-        referenced: sql<number>`EXISTS (SELECT 1 FROM sdk_release_artifacts AS refs
-          WHERE refs.sha256 = sdk_artifact_candidates.sha256)`,
-      })
-      .from(sdkArtifactCandidates)
-      .where(sql`${sdkArtifactCandidates.sha256} > ${after}`)
-      .orderBy(sdkArtifactCandidates.sha256)
-      .limit(candidatePage);
-    for (const { sha256, queuedAt, referenced: shared } of queued) {
-      try {
-        if (shared === 0) {
-          // oxlint-disable-next-line no-await-in-loop -- one after the other
-          await env.FILES.delete(artifactKey(sha256));
-        }
-        // Only as read: queued again since, it is the next sweep's.
-        // oxlint-disable-next-line no-await-in-loop -- as above
-        await db
-          .delete(sdkArtifactCandidates)
-          .where(
-            and(
-              eq(sdkArtifactCandidates.sha256, sha256),
-              eq(sdkArtifactCandidates.queuedAt, queuedAt)
-            )
-          );
-      } catch (error) {
-        log.error("release.artifact_delete_failed", {
-          sha256,
-          ...errorFields(error),
-        });
-      }
-    }
-    const last = queued.at(-1);
-    if (last === undefined || queued.length < candidatePage) {
-      return;
-    }
-    after = last.sha256;
-  }
-};
-
-/**
- * Queues the bytes of the references `where` selects, to be dealt with,
- * at the real time: queued again, an entry's time is renewed, so a drain
- * that read it before dequeues it no more.
- */
-const queueReserved = (
-  db: ReturnType<typeof drizzle>,
-  where: SQL | undefined
-) =>
-  db
-    .insert(sdkArtifactCandidates)
-    .select(
-      db
-        .selectDistinct({
-          sha256: sdkReleaseArtifacts.sha256,
-          queuedAt: sql<Date>`${Date.now()}`.as("queued_at"),
-        })
-        .from(sdkReleaseArtifacts)
-        .where(where)
-    )
-    .onConflictDoUpdate({
-      target: sdkArtifactCandidates.sha256,
-      set: { queuedAt: sql`excluded.queued_at` },
-    });
-
-/**
- * Removes the references `where` matches and queues their bytes, in one
- * transaction, for a seal that won't name them after all (a JSON
- * workflow's publication that lost its race, workflow-builds.ts): the
- * sweep deletes bytes nothing else references.
- */
-export const releaseReservations = async (
-  env: Env,
-  where: SQL
-): Promise<void> => {
-  const db = drizzle(env.DB);
-  await db.batch([
-    queueReserved(db, where),
-    db.delete(sdkReleaseArtifacts).where(where),
-  ]);
-};
-
-/**
  * Deletes release `key` if nothing keeps it at `now`, in the statement
- * that checks it, with its bindings, pins and references (its bytes
- * queued), and its version's `published` status, in one transaction.
- * Whether it was deleted.
+ * that checks it, with its bindings, pins and seal's references, audited
+ * in the same batch; then collects the artifacts it named. Whether it was
+ * deleted.
  */
 const deleteRelease = async (
   env: Env,
@@ -499,13 +391,44 @@ const deleteRelease = async (
   now: Date
 ): Promise<boolean> => {
   const db = drizzle(env.DB);
+  const row = await db
+    .select({
+      seal: sdkReleaseManifests.sealId,
+      manifestHash: sdkReleaseManifests.manifestHash,
+    })
+    .from(sdkReleaseManifests)
+    .where(releaseIs(key))
+    .get();
+  if (row === undefined) {
+    return false;
+  }
   /** That the release's manifest row is gone: deleted by this batch. */
   const gone = sql`NOT EXISTS (SELECT 1 FROM sdk_release_manifests WHERE app_id = ${key.app} AND version = ${key.version})`;
-  const [[deleted]] = await db.batch([
+  const event = createAuditEvent(
+    {
+      actor: { type: "system" },
+      action: "app.release.deleted",
+      target: { type: "app", id: key.app },
+      detail: { version: key.version, manifestHash: row.manifestHash },
+    },
+    "core"
+  );
+  const [deleted, , dropped] = await auditedBatch(env, db, [
     db
       .delete(sdkReleaseManifests)
-      .where(and(releaseIs(key), sql`NOT ${referenced(now)}`))
+      .where(
+        and(
+          releaseIs(key),
+          eq(sdkReleaseManifests.manifestHash, row.manifestHash),
+          sql`NOT ${referenced(now)}`
+        )
+      )
       .returning({ appId: sdkReleaseManifests.appId }),
+    outboxedEventWhere(db, event, sql`changes() > 0`),
+    db
+      .delete(sdkArtifactRefs)
+      .where(and(sql`${sdkArtifactRefs.seal} IS ${row.seal}`, gone))
+      .returning({ sha256: sdkArtifactRefs.sha256 }),
     db.delete(sdkResourceBindings).where(
       and(
         // A release's own store binding: a workflow resource's bindings
@@ -525,77 +448,23 @@ const deleteRelease = async (
           gone
         )
       ),
-    // Its version runs again only once published again: sealed anew and
-    // its tests run on what was sealed (app-publish.ts).
-    db
-      .update(appVersions)
-      .set({ status: null })
-      .where(
-        and(
-          eq(appVersions.appId, key.app),
-          eq(appVersions.version, key.version),
-          gone
-        )
-      ),
-    // Its bytes queued as its references go, in one transaction.
-    queueReserved(
-      db,
-      and(
-        eq(sdkReleaseArtifacts.appId, key.app),
-        eq(sdkReleaseArtifacts.version, key.version),
-        gone
-      )
-    ),
-    db
-      .delete(sdkReleaseArtifacts)
-      .where(
-        and(
-          eq(sdkReleaseArtifacts.appId, key.app),
-          eq(sdkReleaseArtifacts.version, key.version),
-          gone
-        )
-      ),
   ]);
-  return deleted !== undefined;
-};
-
-/**
- * Removes the references of seals that never finished, a day before
- * `now`, and queues their bytes, in one transaction: the sweep's step
- * before it deals with the queue.
- */
-export const queueOrphanedReservations = async (
-  env: Env,
-  now: Date
-): Promise<void> => {
-  const db = drizzle(env.DB);
-  const orphaned = and(
-    lt(sdkReleaseArtifacts.reservedAt, new Date(now.getTime() - sealGraceMs)),
-    sql`NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS manifests
-      WHERE manifests.app_id = ${sdkReleaseArtifacts.appId}
-        AND manifests.version = ${sdkReleaseArtifacts.version})`,
-    // Nor a JSON workflow version's sealed build (workflow-builds.ts):
-    // versions are never deleted, so neither are the bytes they run.
-    sql`NOT EXISTS (SELECT 1 FROM workflow_resource_versions AS versions
-      WHERE versions.workflow_resource_id = ${sdkReleaseArtifacts.appId}
-        AND versions.version = ${sdkReleaseArtifacts.version})`,
-    // Nor a test run's build while its row is kept
-    // (workflows/candidate-runs.ts): the sweep of test runs deletes the
-    // row, and with it what keeps the reference.
-    sql`NOT EXISTS (SELECT 1 FROM workflow_candidate_runs AS candidates
-      WHERE candidates.reservation = ${sdkReleaseArtifacts.appId})`
+  if (deleted.length === 0) {
+    return false;
+  }
+  // What a failure here leaves, the sweep collects (`sweepArtifacts`).
+  await collectArtifacts(
+    env,
+    dropped.map(({ sha256 }) => sha256)
   );
-  await db.batch([
-    queueReserved(db, orphaned),
-    db.delete(sdkReleaseArtifacts).where(orphaned),
-  ]);
+  return true;
 };
 
 /**
  * The retention sweep (see the header), from the clock: deletes lapsed
  * leases, then the releases nothing keeps, each checked again as it is
- * deleted, with the bytes nothing else references, and the references of
- * seals that never finished.
+ * deleted, with their artifacts, and then the artifacts nothing
+ * references.
  */
 export const sweepReleases = async (env: Env, now: Date): Promise<void> => {
   const db = drizzle(env.DB);
@@ -637,6 +506,5 @@ export const sweepReleases = async (env: Env, now: Date): Promise<void> => {
       });
     }
   }
-  await queueOrphanedReservations(env, now);
-  await drainCandidates(env);
+  await sweepArtifacts(env, now);
 };

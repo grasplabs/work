@@ -759,7 +759,7 @@ describe("a JSON workflow's compute modules", () => {
     );
     expect(compiled).toBeDefined();
     await env.FILES.put(
-      artifactKey(compiled?.sha256 ?? ""),
+      await artifactKey(compiled?.sha256 ?? ""),
       "export const total = 1;"
     );
     await expect(ran(by, workflow.id)).resolves.toStrictEqual({

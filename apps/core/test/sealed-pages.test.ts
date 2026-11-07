@@ -192,7 +192,7 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
     const entry = sealed.manifest.artifacts.find(
       ({ path }) => path === "pages.json"
     );
-    await env.FILES.delete(artifactKey(entry?.sha256 ?? ""));
+    await env.FILES.delete(await artifactKey(entry?.sha256 ?? ""));
     await clearBuildCache();
 
     expect({
@@ -211,7 +211,7 @@ describe("pages sealed with their release", { timeout: 120_000 }, () => {
       ({ path }) => path === "pages.json"
     );
     await env.FILES.put(
-      artifactKey(entry?.sha256 ?? ""),
+      await artifactKey(entry?.sha256 ?? ""),
       JSON.stringify({ changed: true })
     );
 

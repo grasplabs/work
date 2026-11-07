@@ -166,6 +166,31 @@ const checkerThat = (check: () => Promise<unknown>): Env => {
   return { ...env, BUILD_WAIT_MS: "50", LOADER: loader };
 };
 
+/**
+ * What workflow `id`'s versions' seals reference, by SHA-256, and how many
+ * references made since `since` no version's row names: a publication that
+ * didn't land gave its own back.
+ */
+const referencesOf = async (
+  id: string,
+  since: number
+): Promise<{ reserved: string[]; stray: number | undefined }> => {
+  const named = await env.DB.prepare(
+    "SELECT DISTINCT refs.sha256 AS sha256 FROM sdk_artifact_refs AS refs JOIN workflow_resource_versions AS versions ON versions.seal_id = refs.seal WHERE versions.workflow_resource_id = ? ORDER BY refs.sha256"
+  )
+    .bind(id)
+    .all<{ sha256: string }>();
+  const stray = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM sdk_artifact_refs AS refs WHERE refs.created_at >= ? AND NOT EXISTS (SELECT 1 FROM workflow_resource_versions AS versions WHERE versions.seal_id = refs.seal)"
+  )
+    .bind(since)
+    .first<{ n: number }>();
+  return {
+    reserved: named.results.map(({ sha256 }) => sha256),
+    stray: stray?.n,
+  };
+};
+
 describe("JSON workflow builds", () => {
   it("seals SDK TypeScript that runs each step in the definition's order, and exports it", async () => {
     const by = await builder();
@@ -274,7 +299,7 @@ describe("JSON workflow builds", () => {
     const artifacts = await sealedArtifacts(workflow.id, 1);
     const generated = artifacts.find(({ path }) => path === generatedPath);
     await env.FILES.put(
-      artifactKey(generated?.sha256 ?? ""),
+      await artifactKey(generated?.sha256 ?? ""),
       "export default null;"
     );
     await expect(
@@ -318,7 +343,9 @@ describe("JSON workflow builds", () => {
 
     const artifacts = await sealedArtifacts(workflow.id, 1);
     const generated = artifacts.find(({ path }) => path === generatedPath);
-    const sealed = await env.FILES.get(artifactKey(generated?.sha256 ?? ""));
+    const sealed = await env.FILES.get(
+      await artifactKey(generated?.sha256 ?? "")
+    );
     expect(next === "still waiting" ? next : next.source).toBe(
       await sealed?.text()
     );
@@ -332,7 +359,7 @@ describe("JSON workflow builds", () => {
     const { workflow, version } = await published(by, definitionOf("done"));
     const artifacts = await sealedArtifacts(workflow.id, 1);
     const generated = artifacts.find(({ path }) => path === generatedPath);
-    const key = artifactKey(generated?.sha256 ?? "");
+    const key = await artifactKey(generated?.sha256 ?? "");
     const stored = await env.FILES.get(key);
     const text = (await stored?.text()) ?? "";
     await env.FILES.delete(key);
@@ -360,13 +387,13 @@ describe("JSON workflow builds", () => {
     const by = await builder();
     const { workflow } = await published(by, definitionOf("done"));
     const year = 365 * 86_400_000;
-    // Well past every grace: a reservation no release keeps would go.
+    // Well past every grace: an artifact nothing references would go.
     await sweepReleases(env, new Date(Date.now() + year));
     await sweepReleases(env, new Date(Date.now() + 2 * year));
     const artifacts = await sealedArtifacts(workflow.id, 1);
     const heads = await Promise.all(
       artifacts.map(
-        async ({ sha256 }) => await env.FILES.head(artifactKey(sha256))
+        async ({ sha256 }) => await env.FILES.head(await artifactKey(sha256))
       )
     );
     expect(heads.every((head) => head !== null)).toBeTruthy();
@@ -567,7 +594,8 @@ describe("JSON workflow builds", () => {
     });
   });
 
-  it("gives back what a publication that lost its race reserved, but what the winner names", async () => {
+  it("gives back what a publication that lost its race referenced, but what the winner names", async () => {
+    const since = Date.now();
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
     const raced: Env = {
@@ -585,22 +613,19 @@ describe("JSON workflow builds", () => {
         basedOn: null,
       })
     );
-    const reserved = await env.DB.prepare(
-      "SELECT sha256 FROM sdk_release_artifacts WHERE app_id = ? ORDER BY sha256"
-    )
-      .bind(workflow.id)
-      .all<{ sha256: string }>();
     const named = await sealedArtifacts(workflow.id, 1);
     expect({
       lost,
-      reserved: reserved.results.map(({ sha256 }) => sha256),
+      ...(await referencesOf(workflow.id, since)),
     }).toStrictEqual({
       lost: "workflow.version_conflict",
       reserved: [...new Set(named.map(({ sha256 }) => sha256))].toSorted(),
+      stray: 0,
     });
   });
 
-  it("gives back only its own reservations when its upload fails as another publication of the version goes on", async () => {
+  it("gives back only its own references when its upload fails as another publication of the version goes on", async () => {
+    const since = Date.now();
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
     // Sealed artifacts fail to store for this publication alone.
@@ -608,7 +633,7 @@ describe("JSON workflow builds", () => {
       get: (target, property) => {
         if (property === "put") {
           return async (...args: Parameters<R2Bucket["put"]>) => {
-            if (args[0].startsWith(artifactKey(""))) {
+            if (args[0].startsWith("artifacts/")) {
               throw new Error("The bucket is unavailable");
             }
             return await target.put(...args);
@@ -645,20 +670,16 @@ describe("JSON workflow builds", () => {
         basedOn: null,
       })
     );
-    const reserved = await env.DB.prepare(
-      "SELECT DISTINCT sha256 FROM sdk_release_artifacts WHERE app_id = ? ORDER BY sha256"
-    )
-      .bind(workflow.id)
-      .all<{ sha256: string }>();
     const named = await sealedArtifacts(workflow.id, 1);
     expect({
       failed: failure.code === "ok",
       saved,
-      reserved: reserved.results.map(({ sha256 }) => sha256),
+      ...(await referencesOf(workflow.id, since)),
     }).toStrictEqual({
       failed: false,
       saved: "ok",
       reserved: [...new Set(named.map(({ sha256 }) => sha256))].toSorted(),
+      stray: 0,
     });
   });
 
@@ -671,7 +692,7 @@ describe("JSON workflow builds", () => {
       get: (target, property) => {
         if (property === "put") {
           return async (...args: Parameters<R2Bucket["put"]>) => {
-            if (!args[0].startsWith(artifactKey(""))) {
+            if (!args[0].startsWith("artifacts/")) {
               return await target.put(...args);
             }
             if (!uploads.failed) {
@@ -704,7 +725,8 @@ describe("JSON workflow builds", () => {
     }).toStrictEqual({ failed: false, runningAtEnd: 0 });
   });
 
-  it("gives back what a publication reserved when storing its bytes fails, so only a saved version's stay reserved", async () => {
+  it("gives back what a publication referenced when storing its bytes fails, so only a saved version's stay referenced", async () => {
+    const since = Date.now();
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
     const failingFiles = new Proxy(env.FILES, {
@@ -713,7 +735,7 @@ describe("JSON workflow builds", () => {
         // stores as ever.
         if (property === "put") {
           return async (...args: Parameters<R2Bucket["put"]>) => {
-            if (args[0].startsWith(artifactKey(""))) {
+            if (args[0].startsWith("artifacts/")) {
               throw new Error("The bucket is unavailable");
             }
             return await target.put(...args);
@@ -736,18 +758,14 @@ describe("JSON workflow builds", () => {
       definition: definitionOf("second"),
       basedOn: null,
     });
-    const reserved = await env.DB.prepare(
-      "SELECT sha256 FROM sdk_release_artifacts WHERE app_id = ? ORDER BY sha256"
-    )
-      .bind(workflow.id)
-      .all<{ sha256: string }>();
     const named = await sealedArtifacts(workflow.id, 1);
     expect({
       failed: failed === "ok",
-      reserved: reserved.results.map(({ sha256 }) => sha256),
+      ...(await referencesOf(workflow.id, since)),
     }).toStrictEqual({
       failed: false,
       reserved: [...new Set(named.map(({ sha256 }) => sha256))].toSorted(),
+      stray: 0,
     });
   });
 });

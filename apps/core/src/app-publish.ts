@@ -5,6 +5,7 @@ import type { App } from "@grasp-os/shared/apps";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -16,7 +17,9 @@ import {
   changeEntry,
   editableApp,
   findVersion,
+  isPublished,
   makeCurrent,
+  publishedSql,
   versionFiles,
 } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
@@ -59,13 +62,14 @@ import { requireMigrationEvidence } from "./migration-evidence.ts";
 //   unmarked, or marked and not current; publishing again seals nothing
 //   new (the release stored is found) and goes on from there.
 // - A release deleted or changed under a published version: the mark
-//   holds only while the release it was tested on is stored (its manifest
-//   hash, in the statement that marks it), the retention sweep clears it as
-//   it deletes the release (release-retention.ts), and making a version
+//   names the manifest it tested (`published_manifest_hash`), and a
+//   version counts as published only while a release with that hash is
+//   stored (apps.ts, `publishedSql`), whoever deleted it; making a version
 //   current reads its release back from storage, every byte checked.
-// - A failure misread as a pass: anything thrown leaves the version
-//   unmarked; an expected refusal marks it `failed`, which nothing makes
-//   current, and the refusal is thrown as it came.
+// - A failure misread as a pass, or unrecorded: anything thrown leaves the
+//   version unmarked and marks it `failed`, which nothing makes current,
+//   audited with its code (`internal.unexpected` for an error no code
+//   names), and is thrown as it came.
 // - Someone without the right: only the App's builders publish
 //   (`editableApp`, and again in `makeCurrent` and `sealRelease`); made
 //   current by someone who couldn't grant the App's permissions, its
@@ -178,9 +182,53 @@ const sealed = async (
 };
 
 /**
+ * Marks `version` of `app` `failed`, unless a publish passed meanwhile,
+ * audited with the code of `error` (`internal.unexpected` for one no code
+ * names): logged rather than thrown should that write fail, so the
+ * caller throws the error that failed the publish.
+ */
+const recordFailure = async (
+  env: Env,
+  by: Identity,
+  app: AppId,
+  version: number,
+  error: unknown
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  try {
+    await auditedBatch(env, db, [
+      db
+        .update(appVersions)
+        .set({ status: "failed", publishedManifestHash: null })
+        .where(
+          and(
+            eq(appVersions.appId, app),
+            eq(appVersions.version, version),
+            sql`NOT ${publishedSql(app, version)}`
+          )
+        ),
+      outboxedIfChanged(
+        db,
+        changeEntry(by, "app.version.publish_failed", app, {
+          version,
+          code: isExpectedError(error) ? error.code : "internal.unexpected",
+        })
+      ),
+    ]);
+  } catch (recordError) {
+    log.error("app.publish_failure_unrecorded", {
+      app,
+      version,
+      ...errorFields(recordError),
+    });
+  }
+};
+
+/**
  * Builds, seals and tests `version` of `app` for `by`, then marks it
- * `published` while the release it tested is stored, audited with it. An
- * expected refusal marks it `failed`, audited, and is thrown.
+ * `published` with the hash of the manifest it tested, while that release
+ * is stored, audited with it. A failure marks it `failed`, audited
+ * (`recordFailure`), and is thrown.
  */
 const publish = async (
   env: Env,
@@ -189,67 +237,46 @@ const publish = async (
   version: number
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  const files = await versionFiles(env, app, version);
-  let manifestHash: string | null = null;
   try {
+    const files = await versionFiles(env, app, version);
+    let manifestHash: string | null = null;
     if (isAppLayout(files)) {
       manifestHash = await sealed(env, by, app, version);
       await requireMigrationEvidence(env, app, version);
       await requireAppTestsPass(env, app, version, files);
     }
-  } catch (error) {
-    if (isExpectedError(error)) {
-      await auditedBatch(env, db, [
-        db
-          .update(appVersions)
-          .set({ status: "failed" })
-          .where(
-            and(
-              eq(appVersions.appId, app),
-              eq(appVersions.version, version),
-              // A publish that passed meanwhile stands.
-              sql`${appVersions.status} IS NOT 'published'`
-            )
-          ),
-        outboxedIfChanged(
-          db,
-          changeEntry(by, "app.version.publish_failed", app, {
-            version,
-            code: error.code,
-          })
-        ),
-      ]);
-    }
-    throw error;
-  }
-  const [marked] = await auditedBatch(env, db, [
-    db
-      .update(appVersions)
-      .set({ status: "published" })
-      .where(
-        and(
-          eq(appVersions.appId, app),
-          eq(appVersions.version, version),
-          // Only while the release it tested is stored: one the sweep
-          // deleted since leaves it unmarked.
-          manifestHash === null
-            ? undefined
-            : sql`EXISTS (SELECT 1 FROM sdk_release_manifests
-                WHERE app_id = ${app} AND version = ${version}
-                  AND manifest_hash = ${manifestHash})`
+    const [marked] = await auditedBatch(env, db, [
+      db
+        .update(appVersions)
+        .set({ status: "published", publishedManifestHash: manifestHash })
+        .where(
+          and(
+            eq(appVersions.appId, app),
+            eq(appVersions.version, version),
+            // Only while the release it tested is stored: one deleted
+            // since leaves it unmarked.
+            manifestHash === null
+              ? undefined
+              : sql`EXISTS (SELECT 1 FROM sdk_release_manifests
+                  WHERE app_id = ${app} AND version = ${version}
+                    AND manifest_hash = ${manifestHash})`
+          )
         )
-      )
-      .returning({ version: appVersions.version }),
-    outboxedIfChanged(
-      db,
-      changeEntry(by, "app.version.published", app, {
-        version,
-        manifestHash,
-      })
-    ),
-  ]);
-  if (marked.length === 0) {
-    throw versionErrors.create("version.unpublished");
+        .returning({ version: appVersions.version }),
+      outboxedIfChanged(
+        db,
+        changeEntry(by, "app.version.published", app, {
+          version,
+          manifestHash,
+        })
+      ),
+    ]);
+    if (marked.length === 0) {
+      throw versionErrors.create("version.unpublished");
+    }
+  } catch (error) {
+    await recordFailure(env, by, app, version, error);
+    throw error;
   }
 };
 
@@ -280,7 +307,7 @@ export const publishVersion = async (
   if (basedOn !== found.currentVersion) {
     throw appErrors.create("app.conflict");
   }
-  if (row.status !== "published") {
+  if (!(await isPublished(env, found.id, row.version))) {
     await publish(env, by, found.id, row.version);
   }
   return await makeCurrent(env, by, found.id, row.version, basedOn);

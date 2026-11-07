@@ -822,6 +822,7 @@ export const commitFiles = async (
     pages: hasPages(files),
     proposedBy: null,
     status: null,
+    publishedManifestHash: null,
   };
   const db = drizzle(env.DB);
   let undone: unknown[];
@@ -1006,6 +1007,7 @@ export const proposeDraft = async (
     pages: hasPages(files),
     proposedBy: by.via ?? null,
     status: null,
+    publishedManifestHash: null,
   };
   const db = drizzle(env.DB);
   let undone: unknown;
@@ -1244,13 +1246,33 @@ const requireRunnableRelease = async (
 };
 
 /**
- * Holds while `version` of `app` passed publishing (app-publish.ts), as
- * the statement runs: the retention sweep clears it as it deletes the
- * version's release, so a release sealed again is published again.
+ * Holds while `version` of `app` is published (app-publish.ts), as the
+ * statement runs: it passed publishing, and the release it tested, by its
+ * manifest's hash, is still stored. A release deleted, by whatever
+ * release of core, or sealed again, is published again before it runs.
+ * The database's own trigger asks the same (migration 0223).
  */
-const publishedSql = (app: AppId, version: number) =>
-  sql`EXISTS (SELECT 1 FROM app_versions
-    WHERE app_id = ${app} AND version = ${version} AND status = 'published')`;
+export const publishedSql = (app: AppId, version: number) =>
+  sql`EXISTS (SELECT 1 FROM app_versions AS published
+    WHERE published.app_id = ${app} AND published.version = ${version}
+      AND published.status = 'published'
+      AND (published.published_manifest_hash IS NULL
+        OR EXISTS (SELECT 1 FROM sdk_release_manifests AS tested
+          WHERE tested.app_id = published.app_id
+            AND tested.version = published.version
+            AND tested.manifest_hash = published.published_manifest_hash)))`;
+
+/** Whether `version` of `app` is published now (`publishedSql`). */
+export const isPublished = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<boolean> => {
+  const row = await drizzle(env.DB).get<{ published: number }>(
+    sql`SELECT (${publishedSql(app, version)}) AS published`
+  );
+  return row?.published === 1;
+};
 
 /**
  * Makes a published version the one that runs (app-publish.ts): the
@@ -1277,11 +1299,7 @@ export const makeCurrent = async (
 ): Promise<App> => {
   const found = await appFor(env, by, app, "builder");
   const appId = found.id;
-  const {
-    version: number,
-    approved,
-    status,
-  } = await findVersion(env, appId, version);
+  const { version: number, approved } = await findVersion(env, appId, version);
   if (found.currentVersion === number) {
     return found;
   }
@@ -1290,7 +1308,7 @@ export const makeCurrent = async (
   if (found.currentVersion !== basedOn) {
     throw appErrors.create("app.conflict");
   }
-  if (status !== "published") {
+  if (!(await isPublished(env, appId, number))) {
     throw versionErrors.create("version.unpublished");
   }
   const files = await versionFiles(env, appId, number);
@@ -1451,8 +1469,7 @@ export const makeCurrent = async (
       await requireRunnableRelease(env, appId, number);
     }
     // Unpublished since it was checked: its release deleted by the sweep.
-    const now = await findVersion(env, appId, number);
-    if (now.status !== "published") {
+    if (!(await isPublished(env, appId, number))) {
       throw versionErrors.create("version.unpublished");
     }
     // What is left is a conflict: the base moved.

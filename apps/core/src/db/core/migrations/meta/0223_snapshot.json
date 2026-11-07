@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d8356c41-3809-4932-984d-c8a87b9c1202",
+  "id": "3a60a2b9-f423-406c-89af-81554579cff9",
   "prevId": "3b8b32f9-fa7c-4da1-8393-d6bea5e0148f",
   "tables": {
     "access_revocations": {
@@ -1962,6 +1962,13 @@
         },
         "status": {
           "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "published_manifest_hash": {
+          "name": "published_manifest_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -8283,6 +8290,84 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "sdk_artifact_refs": {
+      "name": "sdk_artifact_refs",
+      "columns": {
+        "seal": {
+          "name": "seal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "sdk_artifact_refs_sha256": {
+          "name": "sdk_artifact_refs_sha256",
+          "columns": [
+            "sha256"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "sdk_artifact_refs_seal_sha256_pk": {
+          "columns": [
+            "seal",
+            "sha256"
+          ],
+          "name": "sdk_artifact_refs_seal_sha256_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "sdk_artifacts": {
+      "name": "sdk_artifacts",
+      "columns": {
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "generation": {
+          "name": "generation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "sdk_release_artifacts": {
       "name": "sdk_release_artifacts",
       "columns": {
@@ -8394,6 +8479,13 @@
         "revoked_at": {
           "name": "revoked_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "seal_id": {
+          "name": "seal_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -12710,6 +12802,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "seal_id": {
+          "name": "seal_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },
