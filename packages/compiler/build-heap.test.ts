@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
@@ -51,8 +52,18 @@ const harnessRun = (args: string[]): string =>
     { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }
   );
 
+/** Every built-in core ships: each folder of `blueprints` with its manifest, by name. */
+const builtIns = readdirSync(blueprints, { withFileTypes: true })
+  .filter(
+    (entry) =>
+      entry.isDirectory() &&
+      existsSync(path.join(blueprints, entry.name, "blueprint.json"))
+  )
+  .map(({ name }) => name)
+  .toSorted();
+
 const every = <T>(each: (blueprint: string, target: string) => T): T[] =>
-  ["intake", "workflow-map"].flatMap((blueprint) =>
+  builtIns.flatMap((blueprint) =>
     ["pages", "preview-pages", "app"].map((target) => each(blueprint, target))
   );
 
