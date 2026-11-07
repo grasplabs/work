@@ -443,6 +443,22 @@ const pageClosure = (
 };
 
 /**
+ * What the classes `records` write break, by the design system's checks
+ * (classes.ts), every file looked through in one build.
+ */
+const classErrors = async (
+  records: readonly ModuleRecord[]
+): Promise<Diagnostic[]> => {
+  const looked = new Set<string>();
+  const found: Diagnostic[] = [];
+  for (const record of records) {
+    // oxlint-disable-next-line no-await-in-loop -- the design system loads once, then each is quick
+    found.push(...(await classProblems(record.path, record.classes, looked)));
+  }
+  return found;
+};
+
+/**
  * The CSS for the kit's theme and every class used by the App and by the
  * kit modules it loads (`kitModules`).
  */
@@ -665,13 +681,7 @@ export const buildPagesIncrementally = async (
   // The design system's checks of every class the pages write, beside
   // the type check, which a preview's frame skips too (`checks`).
   if (checks) {
-    const looked = new Set<string>();
-    for (const record of records) {
-      errors.push(
-        // oxlint-disable-next-line no-await-in-loop -- the design system loads once, then each is quick
-        ...(await classProblems(record.path, record.classes, looked))
-      );
-    }
+    errors.push(...(await classErrors(records)));
   }
   // The App's declarations aren't modules, but they name modules for
   // their types: held to what a page must never reach, as a page's
