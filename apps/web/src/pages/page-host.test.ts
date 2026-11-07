@@ -7,12 +7,6 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { wait } from "../core.ts";
 import { CoreLink } from "./core-link.ts";
 import {
-  appDrafts,
-  draftGatherMs,
-  draftsFor,
-  saveDraft,
-} from "./form-drafts.ts";
-import {
   appPage,
   callFunction,
   failureOf,
@@ -144,66 +138,13 @@ describe("a page's function call through the page", () => {
   });
 });
 
-// A running App page's drafts once core refuses the person: whichever
-// way the page hears it, the drafts go and the frame gets no more. Core
-// stands in here as one connection, signed in as Ada, whose frames' `delivery`
-// answers as the test says, and as the HTTP answers to streaming calls.
+// Core stands in here as one connection, signed in as Ada, whose frames'
+// `delivery` answers as the test says, and as the HTTP answers to
+// streaming calls.
 
-/** A tab's session storage, as a browser keeps it. */
-const tabStorage = (): Storage => {
-  const items = new Map<string, string>();
-  return {
-    get length() {
-      return items.size;
-    },
-    clear: () => {
-      items.clear();
-    },
-    getItem: (key) => items.get(key) ?? null,
-    key: (index) => [...items.keys()][index] ?? null,
-    removeItem: (key) => {
-      items.delete(key);
-    },
-    setItem: (key, value) => {
-      items.set(key, value);
-    },
-  };
-};
-
-/**
- * The page's own events, as a browser fires them: `pagehide` calls what
- * listens for it then.
- */
-const pageEvents = () => {
-  const listeners = new Set<() => void>();
-  vi.stubGlobal("addEventListener", (type: string, listener: () => void) => {
-    if (type === "pagehide") {
-      listeners.add(listener);
-    }
-  });
-  vi.stubGlobal(
-    "removeEventListener",
-    (_type: string, listener: () => void) => {
-      listeners.delete(listener);
-    }
-  );
-  return {
-    hide: () => {
-      for (const listener of listeners) {
-        listener();
-      }
-    },
-  };
-};
-
-/**
- * A link to core signed in as Ada, whose frames' `delivery` calls `present`, and
- * whose `whoami`, after the link's own, calls `whoami`.
- */
+/** A link to core signed in as Ada, whose frames' `delivery` calls `present`. */
 const linkAsAda = (
   present: () => Promise<string>,
-  whoami: () => Promise<{ userId: string }> = async () =>
-    await Promise.resolve({ userId: "ada" }),
   watchQuery: (
     app: string,
     lease: string,
@@ -225,14 +166,8 @@ const linkAsAda = (
       },
     })
 ): CoreLink => {
-  let asked = 0;
   const session = {
-    whoami: async () => {
-      asked += 1;
-      return asked === 1
-        ? await Promise.resolve({ userId: "ada" })
-        : await whoami();
-    },
+    whoami: async () => await Promise.resolve({ userId: "ada" }),
     pages: {
       // The frame's own way to its App, for the build core leased it.
       frame: async (app: string, lease: string) =>
@@ -285,16 +220,13 @@ const bundle: PageBundle = {
   lease: "lease",
 };
 
-/** The notes App's page, running for Ada, with a draft she kept. */
-const runningWithDraft = async (
+/** The notes App's page, running for Ada. */
+const runningPage = async (
   present: () => Promise<string>,
   states: PageState[] = []
 ) => {
   // What core pushes the page about the App's version, once it follows it.
   const following = Promise.withResolvers<(push: AppVersionPush) => void>();
-  vi.stubGlobal("sessionStorage", tabStorage());
-  const events = pageEvents();
-  saveDraft("ada", bundle.app, "n1", "Ada's draft");
   const source = appPage(
     bundle.app,
     confirmNothing,
@@ -303,7 +235,6 @@ const runningWithDraft = async (
   );
   const link = linkAsAda(
     present,
-    undefined,
     undefined,
     undefined,
     async (_app, onVersion) => {
@@ -316,7 +247,7 @@ const runningWithDraft = async (
     }
   );
   const cleanups: (() => void)[] = [];
-  const { target, running } = source.connect(
+  const { running } = source.connect(
     link,
     bundle,
     () => {
@@ -327,7 +258,6 @@ const runningWithDraft = async (
   running?.((state) => {
     states.push(state);
   });
-  await expect(target.drafts()).resolves.toStrictEqual({ n1: "Ada's draft" });
   const pushVersion = await following.promise;
   /** Core's push of the App's version, once the page has taken it. */
   const pushed = async (push: AppVersionPush): Promise<void> => {
@@ -335,125 +265,8 @@ const runningWithDraft = async (
     // The page asks core about its build in a turn of its own.
     await wait(0);
   };
-  return { target, cleanups, events, pushed };
+  return { cleanups, pushed };
 };
-
-describe("a running page's drafts once core refuses the person", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-  });
-
-  it("go when a streaming call is refused, and the frame gets no more", async () => {
-    const { target, cleanups } = await runningWithDraft(
-      async () => await Promise.resolve("open")
-    );
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          await Promise.resolve(
-            Response.json(
-              { code: "role.forbidden", message: "No." },
-              { status: 403 }
-            )
-          )
-      )
-    );
-    await expect(
-      target.streamFunction(
-        "stream",
-        "{}",
-        async () => {
-          await Promise.resolve();
-        },
-        () => {
-          // Never followed.
-        }
-      )
-    ).rejects.toMatchObject({ code: "role.forbidden" });
-    target.saveDraft("n2", "Another");
-    expect({
-      frame: await target.drafts(),
-      kept: draftsFor("ada", bundle.app),
-    }).toStrictEqual({ frame: {}, kept: {} });
-    for (const cleanup of cleanups) {
-      cleanup();
-    }
-  });
-
-  it("go when a stream core accepted is refused later on", async () => {
-    const { target, cleanups } = await runningWithDraft(
-      async () => await Promise.resolve("open")
-    );
-    const refusal = JSON.stringify({
-      type: "refused",
-      error: { code: "role.forbidden", message: "No." },
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => await Promise.resolve(new Response(`${refusal}\n`)))
-    );
-    const delivered = Promise.withResolvers<unknown>();
-    await target.streamFunction(
-      "stream",
-      "{}",
-      async (sent) => {
-        delivered.resolve(sent);
-        await Promise.resolve();
-      },
-      () => {
-        // Ends with the refusal.
-      }
-    );
-    await expect(delivered.promise).resolves.toMatchObject({
-      type: "refused",
-    });
-    await expect(target.drafts()).resolves.toStrictEqual({});
-    for (const cleanup of cleanups) {
-      cleanup();
-    }
-  });
-
-  it("go when cancelling a stream is refused", async () => {
-    const { target, cleanups } = await runningWithDraft(
-      async () => await Promise.resolve("open")
-    );
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          await Promise.resolve(
-            Response.json(
-              { code: "role.forbidden", message: "No." },
-              { status: 403 }
-            )
-          )
-      )
-    );
-    await expect(target.cancelStream("{}")).rejects.toMatchObject({
-      code: "role.forbidden",
-    });
-    await expect(target.drafts()).resolves.toStrictEqual({});
-    for (const cleanup of cleanups) {
-      cleanup();
-    }
-  });
-
-  it("go when core refuses the person the App's version, though the page asks for nothing", async () => {
-    const { target, cleanups, pushed } = await runningWithDraft(
-      async () => await Promise.resolve("open")
-    );
-    await pushed({
-      type: "refused",
-      error: { code: "role.forbidden", message: "No." },
-    });
-    await expect(target.drafts()).resolves.toStrictEqual({});
-    for (const cleanup of cleanups) {
-      cleanup();
-    }
-  });
-});
 
 describe("a page core refuses to open", () => {
   // As the refusal reaches the page over the connection: its code, with
@@ -492,7 +305,7 @@ describe("a running page whose App's version core refuses the person", () => {
     ["auth.token_unavailable", undefined],
   ])("on %s, ends as %o, offering no new version", async (code, ended) => {
     const states: PageState[] = [];
-    const { cleanups, pushed } = await runningWithDraft(
+    const { cleanups, pushed } = await runningPage(
       async () => await Promise.resolve("open"),
       states
     );
@@ -511,7 +324,7 @@ describe("a running page as its App's version changes", () => {
 
   it("shows a new version made current once, and nothing for the version it runs", async () => {
     const states: PageState[] = [];
-    const { cleanups, pushed } = await runningWithDraft(
+    const { cleanups, pushed } = await runningPage(
       async () => await Promise.resolve("open"),
       states
     );
@@ -531,12 +344,9 @@ describe("a running page as its App's version changes", () => {
   it("asks core about its build when access may have dropped, and stops once it no longer gets the data", async () => {
     let delivery = "open";
     const refused: string[] = [];
-    vi.stubGlobal("sessionStorage", tabStorage());
-    pageEvents();
     let pushVersion: ((push: AppVersionPush) => void) | undefined;
     const link = linkAsAda(
       async () => await Promise.resolve(delivery),
-      undefined,
       undefined,
       undefined,
       async (_app, onVersion) => {
@@ -591,7 +401,6 @@ describe("a running page as its App's version changes", () => {
         async () => await Promise.resolve("open"),
         undefined,
         undefined,
-        undefined,
         async () => {
           asked += 1;
           if (asked === 1) {
@@ -630,7 +439,6 @@ describe("a running page as its App's version changes", () => {
     let released = 0;
     const link = linkAsAda(
       async () => await Promise.resolve("open"),
-      undefined,
       undefined,
       undefined,
       async (_app, onVersion) => {
@@ -674,74 +482,16 @@ describe("a running page as its App's version changes", () => {
   });
 });
 
-describe("a running page's drafts while it follows a query", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("go when core refuses the person on a query it follows", async () => {
-    vi.stubGlobal("sessionStorage", tabStorage());
-    pageEvents();
-    saveDraft("ada", bundle.app, "n1", "Ada's draft");
-    let toPage: ((push: unknown) => Promise<unknown>) | undefined;
-    const link = linkAsAda(
-      async () => await Promise.resolve("open"),
-      undefined,
-      async (_app, _lease, _request, onSnapshot) => {
-        toPage = onSnapshot;
-        return await Promise.resolve({});
-      }
-    );
-    const source = appPage(
-      bundle.app,
-      confirmNothing,
-      confirmNoLink,
-      noNavigation
-    );
-    const cleanups: (() => void)[] = [];
-    const { target } = source.connect(
-      link,
-      bundle,
-      () => {
-        // Core never refuses the build here.
-      },
-      cleanups
-    );
-    const heard: unknown[] = [];
-    using toFrame = new RpcStub(async (push: unknown) => {
-      heard.push(push);
-      await Promise.resolve();
-    });
-    await target.watchQuery("{}", toFrame);
-    await toPage?.({
-      revision: 2,
-      result: { ok: false, error: { code: "role.forbidden", message: "No." } },
-    });
-    expect({
-      heard: heard.length,
-      frame: await target.drafts(),
-      kept: draftsFor("ada", bundle.app),
-    }).toStrictEqual({ heard: 1, frame: {}, kept: {} });
-    for (const cleanup of cleanups) {
-      cleanup();
-    }
-  });
-});
-
 describe("a running page whose query core refuses for its build", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("is stopped once core confirms it, and its drafts go", async () => {
-    vi.stubGlobal("sessionStorage", tabStorage());
-    pageEvents();
-    saveDraft("ada", bundle.app, "n1", "Ada's draft");
+  it("is stopped once core confirms it", async () => {
     let toPage: ((push: unknown) => Promise<unknown>) | undefined;
     let delivery = "open";
     const link = linkAsAda(
       async () => await Promise.resolve(delivery),
-      undefined,
       async (_app, _lease, _request, onSnapshot) => {
         toPage = onSnapshot;
         return await Promise.resolve({});
@@ -772,211 +522,7 @@ describe("a running page whose query core refuses for its build", () => {
       revision: 2,
       result: { ok: false, error: { code: "page.revoked", message: "No." } },
     });
-    expect({
-      stopped: await stopped.promise,
-      kept: draftsFor("ada", bundle.app),
-    }).toStrictEqual({ stopped: "revoked", kept: {} });
-    for (const cleanup of cleanups) {
-      cleanup();
-    }
-  });
-});
-
-describe("an App's drafts when its page can't be opened", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  /** Opening the notes App's page, refused with `code`: its drafts after. */
-  const refusedWith = async (code: string) => {
-    vi.stubGlobal("sessionStorage", tabStorage());
-    saveDraft("ada", bundle.app, "n1", "Ada's draft");
-    const session = {
-      pages: {
-        open: async () => {
-          await Promise.resolve();
-          throw Object.assign(new Error("No."), { code });
-        },
-      },
-    };
-    // SAFETY: opening reaches only `pages.open`, which this stand-in has.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
-    const asSession = session as unknown as Parameters<
-      ReturnType<typeof appPage>["open"]
-    >[0];
-    await appPage(bundle.app, confirmNothing, confirmNoLink, noNavigation)
-      .open(asSession)
-      .catch(() => {
-        // Refused, as the test says.
-      });
-    return draftsFor("ada", bundle.app);
-  };
-
-  it("shut every running page of the App when the person is refused it, a change waiting written nowhere", async () => {
-    vi.useFakeTimers();
-    try {
-      vi.stubGlobal("sessionStorage", tabStorage());
-      const running = appDrafts(
-        bundle.app,
-        async () => await Promise.resolve("ada")
-      );
-      await running.drafts();
-      running.save("n1", "typed in the other page");
-      await refusedWith("role.forbidden");
-      await vi.advanceTimersByTimeAsync(draftGatherMs);
-      running.flush();
-      expect(draftsFor("ada", bundle.app)).toStrictEqual({});
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("stay when only the page isn't found, and go when the person is refused the App", async () => {
-    expect({
-      pageGone: await refusedWith("page.not_found"),
-      refused: await refusedWith("role.forbidden"),
-    }).toStrictEqual({ pageGone: { n1: "Ada's draft" }, refused: {} });
-  });
-});
-
-describe("a page's drafts handed over", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("none while core can't say, the drafts kept for when it can", async () => {
-    vi.stubGlobal("sessionStorage", tabStorage());
-    pageEvents();
-    saveDraft("ada", bundle.app, "n1", "Ada's draft");
-    const link = linkAsAda(async () => {
-      await Promise.resolve();
-      throw new Error("Core is out of reach.");
-    });
-    const cleanups: (() => void)[] = [];
-    const { target } = appPage(
-      bundle.app,
-      confirmNothing,
-      confirmNoLink,
-      noNavigation
-    ).connect(
-      link,
-      bundle,
-      () => {
-        // Core never refuses the build here.
-      },
-      cleanups
-    );
-    await expect(target.drafts()).rejects.toThrow("out of reach");
-    expect(draftsFor("ada", bundle.app)).toStrictEqual({ n1: "Ada's draft" });
-    for (const cleanup of cleanups) {
-      cleanup();
-    }
-  });
-
-  it("only while core still hands its build the App's data", async () => {
-    vi.stubGlobal("sessionStorage", tabStorage());
-    pageEvents();
-    saveDraft("ada", bundle.app, "n1", "Ada's draft");
-    const link = linkAsAda(async () => await Promise.resolve("revoked"));
-    const stopped: string[] = [];
-    const cleanups: (() => void)[] = [];
-    const { target } = appPage(
-      bundle.app,
-      confirmNothing,
-      confirmNoLink,
-      noNavigation
-    ).connect(
-      link,
-      bundle,
-      (reason) => {
-        stopped.push(reason);
-      },
-      cleanups
-    );
-    expect({ handed: await target.drafts(), stopped }).toStrictEqual({
-      handed: {},
-      stopped: ["revoked"],
-    });
-    for (const cleanup of cleanups) {
-      cleanup();
-    }
-  });
-});
-
-describe("a running page's drafts as the page goes away", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-  });
-
-  it("are written as the page hides, though their gathering hasn't ended", async () => {
-    vi.useFakeTimers();
-    const { target, cleanups, events } = await runningWithDraft(
-      async () => await Promise.resolve("open")
-    );
-    target.saveDraft("n1", "Typed just before the refresh");
-    events.hide();
-    expect(draftsFor("ada", bundle.app)).toStrictEqual({
-      n1: "Typed just before the refresh",
-    });
-    for (const cleanup of cleanups) {
-      cleanup();
-    }
-  });
-});
-
-describe("a running page's drafts once core stops its build", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-  });
-
-  it("keep nothing of a save still waiting to know who is signed in", async () => {
-    vi.useFakeTimers();
-    vi.stubGlobal("sessionStorage", tabStorage());
-    pageEvents();
-    const person = Promise.withResolvers<{ userId: string }>();
-    const following = Promise.withResolvers<(push: AppVersionPush) => void>();
-    const link = linkAsAda(
-      async () => await Promise.resolve("revoked"),
-      async () => await person.promise,
-      undefined,
-      undefined,
-      async (_app, onVersion) => {
-        following.resolve(onVersion);
-        return await Promise.resolve({
-          release: async () => {
-            await Promise.resolve();
-          },
-        });
-      }
-    );
-    await link.session();
-    const source = appPage(
-      bundle.app,
-      confirmNothing,
-      confirmNoLink,
-      noNavigation
-    );
-    const stopped: string[] = [];
-    const refused = (reason: string): void => {
-      stopped.push(reason);
-    };
-    const cleanups: (() => void)[] = [];
-    const { target, running } = source.connect(link, bundle, refused, cleanups);
-    running?.(() => {
-      // The page's state isn't looked at here.
-    });
-    target.saveDraft("n1", "Typed as it was revoked");
-    // A release revoked: core's version subscription says to look.
-    (await following.promise)({ type: "current", version: 1, recheck: true });
-    await vi.advanceTimersByTimeAsync(0);
-    person.resolve({ userId: "ada" });
-    await vi.advanceTimersByTimeAsync(draftGatherMs);
-    expect({ stopped, kept: draftsFor("ada", bundle.app) }).toStrictEqual({
-      stopped: ["revoked"],
-      kept: {},
-    });
+    await expect(stopped.promise).resolves.toBe("revoked");
     for (const cleanup of cleanups) {
       cleanup();
     }
@@ -1143,8 +689,6 @@ describe("a preview's stream through the page", () => {
 
 describe("where in the App a frame is, as the page carries it", () => {
   it("hands the frame the page's address, and moves the page's address a new entry only for the person's own act in the frame", () => {
-    vi.stubGlobal("sessionStorage", tabStorage());
-    pageEvents();
     const moved: { href: string; push: boolean }[] = [];
     const guards: boolean[] = [];
     const opening: PageOpening = {

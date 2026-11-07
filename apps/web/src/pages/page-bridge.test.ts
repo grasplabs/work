@@ -50,7 +50,6 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
   const functionCalls: string[] = [];
   const decided: { decision: string; answer: unknown }[] = [];
   const reports: string[] = [];
-  const draftRequests: string[] = [];
   const navigations: { href: string; push: boolean }[] = [];
   const followers: ((href: string) => void)[] = [];
   const guards: boolean[] = [];
@@ -84,16 +83,6 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
       decided.push({ decision, answer: given });
       return await Promise.resolve("decided");
     },
-    drafts: async () => {
-      draftRequests.push("drafts");
-      return await Promise.resolve({});
-    },
-    saveDraft: (_key, text) => {
-      draftRequests.push(text === null ? "drop" : "save");
-    },
-    clearDrafts: () => {
-      draftRequests.push("clear");
-    },
     location: () => "/notes/n1",
     navigated: (href, push) => {
       navigations.push({ href, push });
@@ -125,7 +114,6 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
   });
   return {
     serverCalls,
-    draftRequests,
     functionCalls,
     decided,
     guards,
@@ -457,37 +445,6 @@ describe("the page's bridge to a page", () => {
       refused: 180,
       reachedInFlood: 10,
       later: ["answered", "answered", "page.rate_limited"],
-    });
-  });
-
-  it("hands over drafts to a burst of twenty, and passes on every change and clear", async () => {
-    const frame = framed();
-    const handedOver = await Promise.all(
-      Array.from({ length: 30 }, async () => await frame.page.drafts())
-    );
-    for (let count = 0; count < 30; count += 1) {
-      void frame.page.saveDraft("draft", "text");
-    }
-    void frame.page.saveDraft("draft", null);
-    void frame.page.clearDrafts();
-    // In order on the one port: once this is answered, so are the rest.
-    await poke(frame);
-    frame.close();
-
-    const count = (kind: string) =>
-      frame.draftRequests.filter((request) => request === kind).length;
-    expect({
-      handedOver: handedOver.length,
-      drafts: count("drafts"),
-      kept: count("save"),
-      dropped: count("drop"),
-      cleared: count("clear"),
-    }).toStrictEqual({
-      handedOver: 30,
-      drafts: 20,
-      kept: 30,
-      dropped: 1,
-      cleared: 1,
     });
   });
 

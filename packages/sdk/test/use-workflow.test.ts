@@ -1656,19 +1656,6 @@ const reviewing = {
   canRespond: true,
 } as const;
 
-/** A draft the person keeps, under `key`. */
-const keep = (client: GraspClient, key: string) => {
-  clientInternals(client).drafts.put(key, {
-    fingerprint: "save-note",
-    id: "note-1",
-    rev: 1,
-    rest: null,
-    base: { body: "" },
-    values: { body: "Kept" },
-    conflict: false,
-    at: Date.now(),
-  });
-};
 /** A sign-in refusal, as the page rejects an answer with it. */
 const refusedSignIn = () =>
   Object.assign(new Error("Signed out."), {
@@ -1798,15 +1785,14 @@ describe("answering a decision the selected run is held at", () => {
     // Refused as the latest thing that happened: the client is fenced.
     const plain = host();
     const shown = await showing(plain);
-    keep(plain.client, "before");
     plain.decideWith(async () => {
       await Promise.resolve();
       throw refusedSignIn();
     });
     const plainCode = await codeOf(shown.store.respond(reviewing, answer));
 
-    // Refused late: a fence came while it waited, and a draft was kept
-    // after it, which the old refusal must not clear.
+    // Refused late: a fence came while it waited, which the old refusal
+    // must not repeat.
     const raced = host();
     const racing = await showing(raced);
     const pending = Promise.withResolvers<never>();
@@ -1816,27 +1802,21 @@ describe("answering a decision the selected run is held at", () => {
     clientInternals(raced.client).workflowLink.fence(
       clientError("auth.principal_changed")
     );
-    keep(raced.client, "after");
     pending.reject(refusedSignIn());
     const lateCode = await late;
 
     expect({
       plain: {
         code: plainCode,
-        draft: clientInternals(plain.client).drafts.get("before"),
+        fences: clientInternals(plain.client).fences(),
       },
       raced: {
         code: lateCode,
-        kept: clientInternals(raced.client).drafts.get("after")?.values,
         fences: clientInternals(raced.client).fences(),
       },
     }).toStrictEqual({
-      plain: { code: "auth.principal_changed", draft: undefined },
-      raced: {
-        code: "auth.principal_changed",
-        kept: { body: "Kept" },
-        fences: 1,
-      },
+      plain: { code: "auth.principal_changed", fences: 1 },
+      raced: { code: "auth.principal_changed", fences: 1 },
     });
   });
 
