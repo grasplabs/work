@@ -25,7 +25,7 @@ import {
   windowExtentOf,
 } from "./app-functions.ts";
 import type { EvaluatedQuery } from "./app-functions.ts";
-import { callDraft, draftRunOf } from "./draft-runs.ts";
+import { callDraftOn } from "./draft-runs.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
 import { delivering, leaseKey } from "./page-delivery.ts";
 import type { PageLease } from "./page-delivery.ts";
@@ -449,15 +449,20 @@ const evaluatePage = async (
 ): Promise<EvaluatedQuery> => {
   if (lease?.kind === "draft") {
     let reads: EvaluatedQuery["reads"];
-    const run = await draftRunOf(env, by, app, lease.chatId);
-    const answer = await callDraft(env, by, run, request, {
-      deadline,
-      kind: "query",
-      chargeWindow: chargePages,
-      observeReads: (storeId, readSet) => {
-        reads = { storeId: storeIdSchema.parse(storeId), readSet };
-      },
-    });
+    const answer = await callDraftOn(
+      env,
+      by,
+      { app, chatId: lease.chatId },
+      request,
+      {
+        deadline,
+        kind: "query",
+        chargeWindow: chargePages,
+        observeReads: (storeId, readSet) => {
+          reads = { storeId: storeIdSchema.parse(storeId), readSet };
+        },
+      }
+    );
     return { answer, reads };
   }
   return await delivering(

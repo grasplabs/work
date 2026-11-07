@@ -210,7 +210,7 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     });
   });
 
-  it("opens a draft whose page doesn't build on the App's latest version, with its own server code, keeping what it runs out of the draft's check, then takes the next write that builds", async () => {
+  it("opens a draft whose page doesn't build on the App's latest version, its calls on the draft as it is and heard by the draft's check, then takes the next write that builds", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await notesApp(builder);
     const { chats } = builder.api;
@@ -238,8 +238,8 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
         revision: broken.refresh?.revision,
         appVersion: broken.refresh?.appVersion,
       },
-      // Its calls run on the latest version's own server code: they name
-      // that version.
+      // It shows that version; its calls run on the draft as it is, which
+      // renamed the function.
       callsAt: callsAt(broken),
       titles: await titlesAt(builder, chatId, app, callsAt(broken)),
       // Asked for the draft's page, it still doesn't build.
@@ -247,7 +247,8 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
         chats.previewUpdate(chatId, app, 1, { appVersion: 1 })
       ),
     };
-    // The draft's own page never ran: the agent's check saw nothing.
+    // The draft's call failed through its own fault: the agent's check
+    // hears it.
     const reports = await chatsOf(builder).previewReports(chatId, app, 1, 0);
     await writeDraft(
       builder,
@@ -279,10 +280,10 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
         revision: 1,
         refresh: { revision: 1, appVersion: 1 },
         callsAt: { appVersion: 1 },
-        titles: [],
+        titles: "operation.not_found",
         update: "page.build_failed",
       },
-      reports: { seen: false, problems: 0 },
+      reports: { seen: true, problems: 1 },
       fixed: { revision: 2, appVersion: undefined, served: 200, says: true },
     });
   });
@@ -306,8 +307,8 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
     const server = await chats.preview(serverChat, app);
     const deleted = await chats.preview(pageless, app);
 
-    // The draft's pages build against the App's latest version's server
-    // code in place of its own, which doesn't: the problem is being fixed.
+    // The draft's pages import references its server code doesn't build:
+    // the frame shows the App's latest version, and its calls say why.
     expect({
       server: {
         fallback: server.fallback,
@@ -316,7 +317,11 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       },
       deleted: { fallback: deleted.fallback },
     }).toStrictEqual({
-      server: { fallback: undefined, serverUnbuilt: true, titles: [] },
+      server: {
+        fallback: true,
+        serverUnbuilt: undefined,
+        titles: "version.build_failed",
+      },
       deleted: { fallback: true },
     });
   });
@@ -621,7 +626,8 @@ export const Route = createFileRoute("/elsewhere")({ component: Elsewhere });
       reopened: {
         fallback: true,
         callsAt: { appVersion: 2 },
-        titles: ["from version 2"],
+        // Its calls run on the draft, still over version 1.
+        titles: [],
       },
     });
   });

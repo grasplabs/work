@@ -5,10 +5,14 @@ import {
 } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId, WorkspaceId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { operationErrors } from "@grasp-os/shared/operations";
+import {
+  draftSealFailures,
+  operationErrors,
+} from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { roleErrors } from "@grasp-os/shared/roles";
@@ -580,6 +584,35 @@ export const callDraft = async (
     told(thrown);
   }
   return answerOf(result, run);
+};
+
+/**
+ * `request`, a page's call as its text, run on `by`'s draft of `app` in
+ * their chat `chatId` as it is now (`draftRunOf`, `callDraft`): a draft
+ * whose code doesn't seal answers why, as a call answers a refusal, for
+ * its page to show while it is being fixed; the agent's check of the
+ * draft builds it and hears why itself.
+ */
+export const callDraftOn = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  { app, chatId }: { app: AppId; chatId: ChatId },
+  request: unknown,
+  options: DraftCallOptions
+): Promise<FunctionAnswer> => {
+  let run: DraftRun;
+  try {
+    run = await draftRunOf(env, by, app, chatId);
+  } catch (error) {
+    if (!(isExpectedError(error) && draftSealFailures.has(error.code))) {
+      throw error;
+    }
+    return answerOf({
+      ok: false,
+      error: refusalOf(error, crypto.randomUUID()),
+    });
+  }
+  return await callDraft(env, by, run, request, options);
 };
 
 /**

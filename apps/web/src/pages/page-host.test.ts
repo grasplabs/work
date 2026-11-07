@@ -1,7 +1,8 @@
+import { appErrors } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { portTransport } from "@grasp-os/shared/page-port";
+import { pageLeaseHeader } from "@grasp-os/shared/pages";
 import type { AppVersionPush, PageBundle } from "@grasp-os/shared/pages";
-import { RpcSession, RpcStub, RpcTarget } from "capnweb";
+import { RpcStub } from "capnweb";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { wait } from "../core.ts";
@@ -551,140 +552,6 @@ describe("core's answer to a page's file request", () => {
   });
 });
 
-/**
- * Core, over a real Cap'n Web session, as far as a preview's stream
- * reaches it: its chats are itself, it sends each stream `frames` at
- * once, and the hold on a stream it answers is one of its own, which only
- * gets released.
- */
-class PreviewCore extends RpcTarget {
-  released = false;
-  readonly #frames: readonly unknown[];
-
-  constructor(frames: readonly unknown[] = []) {
-    super();
-    this.#frames = frames;
-  }
-
-  get chats(): this {
-    return this;
-  }
-
-  previewStream(
-    _chatId: string,
-    _app: string,
-    _revision: number,
-    _what: string,
-    _request: string,
-    onFrame: (sent: unknown) => Promise<unknown>
-  ): PreviewCore {
-    for (const sent of this.#frames) {
-      void onFrame(sent).catch(() => {
-        // The page's side is gone.
-      });
-    }
-    return new PreviewCore();
-  }
-
-  release(): void {
-    this.released = true;
-  }
-}
-
-/**
- * A preview's stream on the page, over a real session with core sending
- * `sending`; `taking` is how the frame takes each. `drop` ends the session
- * from core's side, as a dropped connection does.
- */
-const previewStreamOver = async (
-  sending: readonly unknown[],
-  taking: () => Promise<unknown>
-) => {
-  const { port1, port2 } = new MessageChannel();
-  // oxlint-disable-next-line no-new -- the session serves core's side
-  new RpcSession(portTransport(port1), new PreviewCore(sending));
-  const core = new RpcSession<PreviewCore>(
-    portTransport(port2)
-  ).getRemoteMain();
-  const link = {
-    session: async () => await Promise.resolve(core),
-    person: async () => await Promise.resolve("ada"),
-    retrying: async <T>(run: (session: unknown) => Promise<T>) =>
-      await run(core),
-  };
-  // SAFETY: a preview's stream reaches only `chats.previewStream`, which
-  // this stand-in has.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
-  const asLink = link as unknown as FrameLink;
-  const target = previewTarget(
-    asLink,
-    "chat",
-    { ...bundle, revision: 1 },
-    atRoot
-  );
-  const frames: unknown[] = [];
-  const seen = { frames, ended: 0 };
-  await target.streamFunction(
-    "stream",
-    "{}",
-    async (sent) => {
-      seen.frames.push(sent);
-      return await taking();
-    },
-    () => {
-      seen.ended += 1;
-    }
-  );
-  return {
-    seen,
-    drop: () => {
-      port1.postMessage(null);
-    },
-    close: () => {
-      port1.close();
-      port2.close();
-    },
-  };
-};
-
-describe("a preview's stream through the page", () => {
-  it("tells the frame `closed` and ends once its connection drops before the last frame", async () => {
-    const stream = await previewStreamOver(
-      [],
-      async () => await Promise.resolve(null)
-    );
-    stream.drop();
-    await vi.waitFor(() => {
-      expect(stream.seen).toStrictEqual({
-        frames: [{ type: "closed" }],
-        ended: 1,
-      });
-    });
-    stream.close();
-  });
-
-  it("sends no `closed` after a last frame the frame is still taking when the connection drops", async () => {
-    const result = { type: "result", seq: 1, result: { ok: true, value: 1 } };
-    const stream = await previewStreamOver(
-      [result],
-      // Never taken.
-      async () => await Promise.withResolvers<null>().promise
-    );
-    await vi.waitFor(() => {
-      expect(stream.seen.frames).toStrictEqual([result]);
-    });
-    stream.drop();
-    // A break handled now would have sent `closed` within a tick or two.
-    const waited = Promise.withResolvers<null>();
-    setTimeout(() => {
-      waited.resolve(null);
-    }, 50);
-    await waited.promise;
-    expect(stream.seen).toStrictEqual({ frames: [result], ended: 0 });
-    stream.close();
-  });
-});
-
 describe("where in the App a frame is, as the page carries it", () => {
   it("hands the frame the page's address, and moves the page's address a new entry only for the person's own act in the frame", () => {
     const moved: { href: string; push: boolean }[] = [];
@@ -745,52 +612,37 @@ describe("where in the App a frame is, as the page carries it", () => {
   });
 });
 
-/**
- * A preview's target over a core that records what it was asked: each
- * call's revision, each report, and each live query it follows, with the
- * page's relay of it, which core pushes to.
- */
 /** A query's answer of one title. */
 const value = (title: string) => ({ ok: true, value: [title] });
 
-const previewOver = (answer: unknown) => {
-  const calls: number[] = [];
-  const cancels: number[] = [];
+/**
+ * A preview's target over a core that records what it was asked: each
+ * report and the revision it names, each live query its frame follows,
+ * with the page's relay of it, which core pushes to; its calls answer
+ * `answer` on every page's call path.
+ */
+const previewOver = (answer: unknown, lease: string | null = "lease") => {
   const reports: string[] = [];
-  const watches: { revision: number; released: boolean }[] = [];
-  const asked = { calls, cancels, reports, watches };
+  const watches: { released: boolean }[] = [];
+  const calls: { path: string; lease: string | null }[] = [];
+  const asked = { reports, watches, calls };
   const relays: ((push: unknown) => Promise<unknown>)[] = [];
-  const chats = {
-    previewFunction: async (_chat: string, _app: string, revision: number) => {
-      asked.calls.push(revision);
-      return await Promise.resolve(answer);
-    },
-    previewCancelStream: async (
-      _chat: string,
-      _app: string,
-      revision: number
-    ) => {
-      asked.cancels.push(revision);
-      return await Promise.resolve({ requested: false });
-    },
-    previewReport: async (
-      _chat: string,
-      _app: string,
-      revision: number,
-      _page: string,
-      problem: { kind: string }
-    ) => {
-      asked.reports.push(`${problem.kind} at ${revision}`);
-      await Promise.resolve();
-    },
-    previewWatchQuery: async (
-      _chat: string,
-      _app: string,
-      revision: number,
+  vi.stubGlobal(
+    "fetch",
+    async (path: string, init: RequestInit): Promise<Response> => {
+      asked.calls.push({
+        path,
+        lease: new Headers(init.headers).get(pageLeaseHeader),
+      });
+      return await Promise.resolve(Response.json(answer));
+    }
+  );
+  const frameApi = {
+    watchQuery: async (
       _request: string,
       relay: (push: unknown) => Promise<unknown>
     ) => {
-      const watch = { revision, released: false };
+      const watch = { released: false };
       asked.watches.push(watch);
       relays.push(relay);
       return await Promise.resolve({
@@ -800,22 +652,44 @@ const previewOver = (answer: unknown) => {
         },
       });
     },
+    close: async () => {
+      await Promise.resolve();
+    },
+    [Symbol.dispose]: () => {
+      // Nothing held.
+    },
+  };
+  const session = {
+    chats: {
+      previewReport: async (
+        _chat: string,
+        _app: string,
+        revision: number,
+        _page: string,
+        problem: { kind: string }
+      ) => {
+        asked.reports.push(`${problem.kind} at ${revision}`);
+        await Promise.resolve();
+      },
+    },
+    pages: { frame: async () => await Promise.resolve(frameApi) },
   };
   const link = {
-    session: async () => await Promise.resolve({ chats }),
+    session: async () => await Promise.resolve(session),
     person: async () => await Promise.resolve("ada"),
   };
   let problems = 0;
   // The revision the frame's reports are of, as its updates say.
   const reporting = { at: 1 };
   // SAFETY: a preview's calls, reports and live queries reach only these
-  // of `chats`, which the stand-in has.
+  // of `chats` and `pages`, which the stand-in has.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion, anti-slop/no-chained-type-assertions -- see SAFETY
   const asLink = link as unknown as FrameLink;
+  const { lease: _bundleLease, ...unleased } = bundle;
   const target = previewTarget(
     asLink,
     "chat",
-    { ...bundle, revision: 1 },
+    { ...unleased, revision: 1, ...(lease === null ? {} : { lease }) },
     atRoot,
     {
       problem: () => {
@@ -831,6 +705,10 @@ const previewOver = (answer: unknown) => {
 };
 
 describe("a preview's frame as its draft changes", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("counts a problem the page reported as one being fixed, but not a library's warning", async () => {
     const { target, asked, problems } = previewOver({ result: { ok: true } });
     await target.report({ kind: "warning", message: "React says" });
@@ -842,44 +720,50 @@ describe("a preview's frame as its draft changes", () => {
     });
   });
 
-  it("names the revision the frame runs as each call and report arrives, the update it tries included", async () => {
+  it("names the revision the frame runs as each report arrives, the update it tries included", async () => {
     const { target, asked, reporting } = previewOver({ result: { ok: true } });
-    // The frame is trying revision 2: its first render and mount effects
-    // call, and its failure comes before its answer.
+    // The frame is trying revision 2: its failure comes before its answer.
     reporting.at = 2;
-    const called = target.callFunction("{}");
-    const cancelled = target.cancelStream("{}");
     const sent = target.report({ kind: "error", message: "The update broke" });
     // Rolled back before core was reached: still the update's.
     reporting.at = 1;
-    await Promise.all([called, cancelled, sent]);
-    await target.callFunction("{}");
+    await sent;
     await target.report({ kind: "error", message: "The page shown broke" });
+    expect(asked.reports).toStrictEqual(["error at 2", "error at 1"]);
+  });
+
+  it("calls on every page's call path under the preview's lease, and calls nothing without one", async () => {
+    const leased = previewOver({ result: { ok: true, value: null } });
+    const answered = await leased.target.callFunction("{}");
+    const unleased = previewOver({ result: { ok: true } }, null);
+    const refused: unknown = await unleased.target.callFunction("{}").then(
+      () => "answered",
+      (error: unknown) =>
+        error instanceof Error ? appErrors.codeOf(error) : undefined
+    );
     expect({
-      calls: asked.calls,
-      cancels: asked.cancels,
-      reports: asked.reports,
+      answered,
+      calls: leased.asked.calls,
+      refused,
+      unleasedCalls: unleased.asked.calls,
     }).toStrictEqual({
-      calls: [2, 1],
-      cancels: [2],
-      reports: ["error at 2", "error at 1"],
+      answered: { result: { ok: true, value: null } },
+      calls: [{ path: "/api/app-functions/notes", lease: "lease" }],
+      refused: "app.preview_outdated",
+      unleasedCalls: [],
     });
   });
 
   it("counts a call the draft's own code failed as a problem, and not a refusal that isn't its fault", async () => {
-    const failed = previewOver(
-      JSON.stringify({
-        result: { ok: false, error: { code: "contract.invalid_output" } },
-      })
-    );
+    const failed = previewOver({
+      result: { ok: false, error: { code: "contract.invalid_output" } },
+    });
     await failed.target.callFunction("{}");
-    const outdated = previewOver(
-      JSON.stringify({
-        result: { ok: false, error: { code: "app.preview_outdated" } },
-      })
-    );
-    await outdated.target.callFunction("{}");
-    expect([failed.problems(), outdated.problems()]).toStrictEqual([1, 0]);
+    const refused = previewOver({
+      result: { ok: false, error: { code: "role.forbidden" } },
+    });
+    await refused.target.callFunction("{}");
+    expect([failed.problems(), refused.problems()]).toStrictEqual([1, 0]);
   });
 
   it("hands the frame every data change of a live query across page writes, each numbered past the last it was handed", async () => {
@@ -921,39 +805,28 @@ describe("a preview's frame as its draft changes", () => {
     ]);
   });
 
-  it("names the revision the frame shows, and follows its live queries again there, keeping them going", async () => {
-    const { target, asked, relays, reporting } = previewOver({
-      result: { ok: true },
-    });
+  it("follows its live queries again once the frame moves on, letting go of the old ones only then", async () => {
+    const { target, asked, relays } = previewOver({ result: { ok: true } });
     const pushes: unknown[] = [];
-    const frameCallback = new RpcStub(async (push: unknown) => {
-      pushes.push(push);
-      await Promise.resolve();
-    });
-    await target.watchQuery("{}", frameCallback);
-    await target.callFunction("{}");
-    // Core refuses the revision the frame is moving past: the frame never
-    // hears it.
-    await relays[0]?.({
-      revision: 3,
-      result: { ok: false, error: { code: "app.preview_outdated" } },
-    });
-    // The frame took revision 2: it shows it, and runs it.
-    reporting.at = 2;
+    await target.watchQuery(
+      "{}",
+      new RpcStub(async (push: unknown) => {
+        pushes.push(push);
+        await Promise.resolve();
+      })
+    );
     target.moved(2);
-    await target.callFunction("{}");
     await vi.waitFor(() => {
       expect(asked.watches).toStrictEqual([
-        { revision: 1, released: true },
-        { revision: 2, released: false },
+        { released: true },
+        { released: false },
       ]);
     });
     await relays[1]?.({ revision: 4, result: { ok: true, value: [] } });
     // A push of the one let go of reaches nothing.
     await relays[0]?.({ revision: 5, result: { ok: true, value: ["old"] } });
-    expect({ calls: asked.calls, pushes }).toStrictEqual({
-      calls: [1, 2],
-      pushes: [{ revision: 4, result: { ok: true, value: [] } }],
-    });
+    expect(pushes).toStrictEqual([
+      { revision: 4, result: { ok: true, value: [] } },
+    ]);
   });
 });

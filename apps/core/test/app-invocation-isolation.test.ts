@@ -154,8 +154,13 @@ describe(
         id: other.userId,
         role: "builder",
       });
+      // With a page, which its preview opens, and its lease with it.
       const drafted = {
         "server/notes.ts": `${isolationFiles["server/notes.ts"] ?? ""}\n// Drafted.\n`,
+        "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
+
+export const Route = createFileRoute("/")({ component: () => <p>Notes</p> });
+`,
       };
       const [ownDraft, theirDraft] = await Promise.all([
         chatWithDraft(owner, app, drafted),

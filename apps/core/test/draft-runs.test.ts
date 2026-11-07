@@ -136,12 +136,13 @@ describe("a draft's preview", { timeout: 180_000 }, () => {
     const { app, chatId } = await deskDraft(builder);
     const before = await preferenceCall(builder, { chatId, app }, "get", {});
     await preferenceCall(builder, { chatId, app }, "update", {
-      theme: "dark",
+      expectedRevision: 0,
+      patch: { theme: "dark" },
     });
     const after = await preferenceCall(builder, { chatId, app }, "get", {});
     expect({ before, after }).toStrictEqual({
-      before: { compact: false, theme: "light" },
-      after: { compact: false, theme: "dark" },
+      before: { _rev: 0, compact: false, theme: "light" },
+      after: { _rev: 1, compact: false, theme: "dark" },
     });
   });
 

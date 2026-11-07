@@ -37,7 +37,7 @@ import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
 import { visitorCall, visitorStatusFor } from "./app-visitors.ts";
 import { currentVersionOf } from "./apps.ts";
 import { identify, identifyFull } from "./auth/identity.ts";
-import { callDraft, draftRunOf } from "./draft-runs.ts";
+import { callDraftOn } from "./draft-runs.ts";
 import { errorResponse } from "./errors.ts";
 import {
   delivering,
@@ -555,9 +555,11 @@ const memberCall = async (
   const deadline = Date.now() + pageCallMs;
   const chargeWindow = windowCharger(env, person, id);
   if (lease?.kind === "draft") {
-    const run = await draftRunOf(env, person, id, lease.chatId);
     return withinFrame(
-      await callDraft(env, person, run, body, { deadline, chargeWindow })
+      await callDraftOn(env, person, { app: id, chatId: lease.chatId }, body, {
+        deadline,
+        chargeWindow,
+      })
     );
   }
   return await delivering(env, person, id, buildOf(lease), "call", async () =>
