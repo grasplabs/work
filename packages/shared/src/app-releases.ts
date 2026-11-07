@@ -78,7 +78,6 @@ export const migrationFixtureReasons = [
   "too_large",
   "invalid_answer",
   "unexpected_output",
-  "rule_changed",
 ] as const;
 
 /**

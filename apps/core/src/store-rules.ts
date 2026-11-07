@@ -58,8 +58,8 @@ import type { Fragment } from "./store-expressions.ts";
 // - A migration's transform, which reads every row of its table whoever
 //   may, moves a row into other people's sight or carries one row's
 //   values into another's: a transform never changes a field a rule
-//   reads (`rule_changed`, store-host.ts `applySchema`, and
-//   migration-run.ts), so a row's audience moves only through
+//   reads (`rule_changed`, store-host.ts `applySchema`, by stable ID),
+//   so a row's audience moves only through
 //   writes, which pass the rules before and after; and each batch holds
 //   rows of one audience (`audienceKey`), the module state of its call
 //   ending with it, so whatever it carries between rows stays with the
