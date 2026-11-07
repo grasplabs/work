@@ -57,9 +57,26 @@ export interface TargetCall {
   args: readonly unknown[];
   /**
    * The names its method's source gives its parameters, in order (`input`
-   * for one destructured): what each argument is, never what it holds.
+   * for one destructured), from the host's `ParamNames`: what each argument
+   * is, never what it holds.
    */
   params: readonly string[];
+}
+
+/**
+ * The names each method of a host's targets gives its parameters, in
+ * order (`input` for one destructured), by the class that declares it,
+ * then the method. Generated from their source before it's bundled, as a
+ * minified bundle renames parameters (core's build-rpc-params.ts).
+ */
+export type ParamNames = Readonly<
+  Record<string, Readonly<Record<string, readonly string[]>>>
+>;
+
+/** What runs around every call of a host's targets, and what it's told of each. */
+export interface CallAround {
+  hook: CallHook;
+  params: ParamNames;
 }
 
 /**
@@ -70,48 +87,23 @@ export interface TargetCall {
  */
 export type CallHook = (call: TargetCall, run: () => unknown) => unknown;
 
-const parameterName = /^(?:\.\.\.)?(?<name>[A-Za-z_$][\w$]*)/u;
-const openers = new Set(["(", "[", "{"]);
-const closers = new Set([")", "]", "}"]);
-
 /**
- * The names `method`'s source gives its parameters, in order: a
- * destructured or otherwise unnamed one is `input`. Read from its
- * parameter list, split at the commas outside any brackets.
+ * The names `className`'s method `name` gives its parameters, from
+ * `around`'s `ParamNames`. A method they don't name is refused when its
+ * class is first constructed, never called with its arguments unnamed.
  */
-export const paramNamesOf = (
-  method: (...args: unknown[]) => unknown
-): string[] => {
-  // From its source, which keeps its names as core's bundle isn't minified.
-  const source = Function.prototype.toString.call(method);
-  const start = source.indexOf("(");
-  if (start === -1) {
-    return [];
+const paramsOf = (
+  around: CallAround,
+  className: string,
+  name: string
+): readonly string[] => {
+  const params = around.params[className]?.[name];
+  if (params === undefined) {
+    throw new TypeError(
+      `${className}.${name} has no parameter names: generate them again.`
+    );
   }
-  const parts: string[] = [];
-  let depth = 0;
-  let part = "";
-  for (const character of source.slice(start + 1)) {
-    if (depth === 0 && character === ")") {
-      break;
-    }
-    if (depth === 0 && character === ",") {
-      parts.push(part);
-      part = "";
-      continue;
-    }
-    if (openers.has(character)) {
-      depth += 1;
-    } else if (closers.has(character)) {
-      depth -= 1;
-    }
-    part += character;
-  }
-  parts.push(part);
-  return parts
-    .map((each) => each.trim())
-    .filter((each) => each !== "")
-    .map((each) => parameterName.exec(each)?.groups?.name ?? "input");
+  return params;
 };
 
 /** `method`, refusing arguments past `bounds` before it runs. */
@@ -119,23 +111,22 @@ const bounded = (
   name: string,
   method: (...args: unknown[]) => unknown,
   bounds: ValueBounds,
-  around: CallHook | undefined
-): ((...args: unknown[]) => unknown) => {
-  const params = around === undefined ? [] : paramNamesOf(method);
+  around: { hook: CallHook; params: readonly string[] } | undefined
+): ((...args: unknown[]) => unknown) =>
   // A method, so it's called with the target as `this`, as Cap'n Web
   // calls it, and keeps the name it had.
-  return (
-    {
-      [name](this: object, ...args: unknown[]): unknown {
-        holdWithin(args, bounds);
-        const run = (): unknown => Reflect.apply(method, this, args);
-        return around === undefined
-          ? run()
-          : around({ target: this, method: name, args, params }, run);
-      },
-    }[name] ?? method
-  );
-};
+  ({
+    [name](this: object, ...args: unknown[]): unknown {
+      holdWithin(args, bounds);
+      const run = (): unknown => Reflect.apply(method, this, args);
+      return around === undefined
+        ? run()
+        : around.hook(
+            { target: this, method: name, args, params: around.params },
+            run
+          );
+    },
+  })[name] ?? method;
 
 /** Whether a prototype's property is a method. */
 const isMethod = (value: unknown): value is (...args: unknown[]) => unknown =>
@@ -153,7 +144,7 @@ const wrapMethods = (
   prototype: object,
   base: object,
   bounds: ValueBounds,
-  around: CallHook | undefined
+  around: CallAround | undefined
 ): void => {
   // Every prototype of the chain not wrapped yet: a wrapped one has every
   // prototype above it wrapped too, as all of them are marked together.
@@ -166,6 +157,8 @@ const wrapMethods = (
     chain.push(current);
   }
   for (const current of chain) {
+    const className: unknown = Reflect.get(current, "constructor");
+    const declaredBy = typeof className === "function" ? className.name : "";
     for (const name of Reflect.ownKeys(current)) {
       const property = Reflect.getOwnPropertyDescriptor(current, name);
       const method: unknown = property?.value;
@@ -180,7 +173,17 @@ const wrapMethods = (
         isMethod(method) &&
         !Reflect.defineProperty(current, name, {
           ...property,
-          value: bounded(name, method, bounds, around),
+          value: bounded(
+            name,
+            method,
+            bounds,
+            around === undefined
+              ? undefined
+              : {
+                  hook: around.hook,
+                  params: paramsOf(around, declaredBy, name),
+                }
+          ),
         })
       ) {
         throw new TypeError(
@@ -205,11 +208,12 @@ const wrapMethods = (
  * `maxDepth` (a direct argument's levels, the call's list of arguments
  * apart), `size` the longest message its transport takes.
  *
- * A method a target calls on itself is held to the same bounds. `around`
- * runs around every call of every method, once its arguments are within
- * them.
+ * A method a target calls on itself is held to the same bounds. `around`'s
+ * hook runs around every call of every method, once its arguments are
+ * within them, told the names the method gives its parameters
+ * (`around.params`).
  */
-export const boundedRpcTarget = (bounds: ValueBounds, around?: CallHook) => {
+export const boundedRpcTarget = (bounds: ValueBounds, around?: CallAround) => {
   class BoundedRpcTarget extends RpcTarget {
     constructor() {
       super();

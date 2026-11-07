@@ -30,6 +30,8 @@ const generated = [
   "packages/sdk/src/connector-catalog.gen.ts",
   // Each native tool's class, from the same connectors.
   "apps/core/src/native-tool-classes.gen.ts",
+  // The names core's RPC targets give their parameters, from their source.
+  "apps/core/src/rpc-param-names.gen.ts",
 ];
 
 /** Why a target may not extend Cap'n Web's or workerd's RpcTarget itself. */

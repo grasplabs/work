@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 
 import {
   assetKey,
@@ -55,6 +56,11 @@ const wranglerConfigSchema = z.strictObject({
   preview_urls: z.boolean(),
   // Bundling only: the modules it produces are in the dry-run output.
   rules: z.array(z.unknown()).optional(),
+  minify: z.boolean().optional(),
+  keep_names: z.boolean().optional(),
+  // Its source maps go up with its modules, as Wrangler uploads them by
+  // default.
+  upload_source_maps: z.boolean().default(true),
   // Passed to the Workers API as it is, so only keys that mean the same in
   // every account: one like `destinations` names account resources.
   observability: observabilitySchema.default({}),
@@ -303,6 +309,9 @@ const mebibytes = (bytes: number): string =>
  *   leaves a quarter of that as headroom. The deploy streams them into the
  *   upload, so they don't bound its memory. The 1 s startup limit isn't
  *   a size: Cloudflare checks it on every upload.
+ * - Its source maps, all together: Cloudflare counts them apart from the
+ *   modules, up to 60 MiB raw and 15 MiB gzipped; 45 MiB and 11 MiB leave
+ *   about a quarter of each as headroom.
  * - A static file: Cloudflare takes 25 MiB at most. The deploy sends one
  *   this large on its own, holding it read and as base64, so this bounds
  *   its memory too.
@@ -311,16 +320,38 @@ const mebibytes = (bytes: number): string =>
  */
 export const releaseBudget = {
   workerModules: 48 * 1024 * 1024,
+  sourceMaps: 45 * 1024 * 1024,
+  sourceMapsGzipped: 11 * 1024 * 1024,
   staticFile: 20 * 1024 * 1024,
 } as const;
 
 /** Throws when a Worker's build carries more than `releaseBudget` allows. */
 const checkBudget = (build: WorkerBuild): void => {
   const over: string[] = [];
-  const modules = build.modules.reduce((total, { size }) => total + size, 0);
+  let modules = 0;
+  let sourceMaps = 0;
+  let sourceMapsGzipped = 0;
+  for (const { type, size, bytes } of build.modules) {
+    if (type === "sourcemap") {
+      sourceMaps += size;
+      sourceMapsGzipped += gzipSync(bytes).byteLength;
+    } else {
+      modules += size;
+    }
+  }
   if (modules > releaseBudget.workerModules) {
     over.push(
       `its modules are ${mebibytes(modules)} (budget ${mebibytes(releaseBudget.workerModules)})`
+    );
+  }
+  if (sourceMaps > releaseBudget.sourceMaps) {
+    over.push(
+      `its source maps are ${mebibytes(sourceMaps)} (budget ${mebibytes(releaseBudget.sourceMaps)})`
+    );
+  }
+  if (sourceMapsGzipped > releaseBudget.sourceMapsGzipped) {
+    over.push(
+      `its source maps are ${mebibytes(sourceMapsGzipped)} gzipped (budget ${mebibytes(releaseBudget.sourceMapsGzipped)})`
     );
   }
   for (const [file, { size }] of Object.entries(build.assets?.manifest ?? {})) {

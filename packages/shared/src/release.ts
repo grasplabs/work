@@ -74,7 +74,9 @@ const workerEntrySchema = z.strictObject({
   /** The entry module, one of `modules`. */
   mainModule: z.string(),
   modules: z.array(
-    fileRef.extend({ type: z.enum(["esm", "text", "wasm", "data"]) })
+    fileRef.extend({
+      type: z.enum(["esm", "text", "wasm", "data", "sourcemap"]),
+    })
   ),
   compatibilityFlags: z.array(z.string()),
   /** Script-upload API bindings, account-specific values as placeholders. */

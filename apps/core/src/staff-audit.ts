@@ -1,5 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { TargetCall } from "@grasp-os/shared/rpc-target";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
@@ -84,7 +85,8 @@ const targetKeyOf = (target: object): string => {
 
 /**
  * A target's name as a surface's: `KnowledgeRpc` is `knowledge`. Read from
- * its class's name, which holds as core's bundle isn't minified.
+ * its class's name, which the minified bundle keeps (`keep_names`,
+ * wrangler.jsonc; scripts/workerd-minified-checks.ts checks it).
  */
 const namespaceOf = (target: object): string => {
   const name = target.constructor.name.replace(/Rpc$/u, "");
@@ -178,6 +180,27 @@ export interface StaffView extends Named {
   /** How many arguments the call took. */
   args: number;
 }
+
+/**
+ * What `call`, the call running now (call-context.ts), viewed, as its
+ * entry names it: its surface, how many arguments it took, their kinds,
+ * and the IDs they name (none on a surface whose IDs could name an
+ * interviewee, `kindsOnly`). A check outside any call is the session's.
+ */
+export const staffViewOf = (call: TargetCall | undefined): StaffView => {
+  const surface =
+    call === undefined
+      ? "session"
+      : `${namespaceOf(call.target)}.${call.method}`;
+  const args = call?.args ?? [];
+  const named = namedBy(args, call?.params ?? []);
+  return {
+    surface,
+    args: args.length,
+    kinds: named.kinds,
+    ids: kindsOnly(surface) ? [] : named.ids,
+  };
+};
 
 /**
  * Writes `view` by `person`, staff, to the client's audit log: in core's
@@ -278,22 +301,12 @@ export const staffAudited = (env: Env, check: SessionCheck): SessionCheck => {
         return person;
       }
       const call = currentCall();
-      const surface =
-        call === undefined
-          ? "session"
-          : `${namespaceOf(call.target)}.${call.method}`;
-      const args = call?.args ?? [];
+      const view = staffViewOf(call);
       // The target too: the same method of two Apps' frames is two views.
       const target = call === undefined ? "" : targetKeyOf(call.target);
-      const key = `${surface}\u0000${target}\u0000${await argsHash(args)}`;
+      const key = `${view.surface}\u0000${target}\u0000${await argsHash(call?.args ?? [])}`;
       await writeOnce(key, async () => {
-        const named = namedBy(args, call?.params ?? []);
-        await recordStaffView(env, person, {
-          surface,
-          args: args.length,
-          kinds: named.kinds,
-          ids: kindsOnly(surface) ? [] : named.ids,
-        });
+        await recordStaffView(env, person, view);
       });
       return person;
     },

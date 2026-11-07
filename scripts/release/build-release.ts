@@ -116,7 +116,9 @@ const buildWorker = async (
   return {
     key: app,
     config,
-    ...(await collectModules(outDir)),
+    ...(await collectModules(outDir, {
+      sourceMaps: config.upload_source_maps,
+    })),
     d1Migrations: Object.fromEntries(
       await Promise.all(
         config.d1_databases.map(

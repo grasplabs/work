@@ -84,12 +84,16 @@ export const renderBindings = (
     return rendered;
   });
 
-/** The API's content type for each module type in the manifest. */
+/**
+ * The API's content type for each module type in the manifest. A source
+ * map goes up as Wrangler sends it, beside the module it maps.
+ */
 const moduleTypes = {
   esm: "application/javascript+module",
   text: "text/plain",
   wasm: "application/wasm",
   data: "application/octet-stream",
+  sourcemap: "application/source-map",
 } as const;
 
 /**

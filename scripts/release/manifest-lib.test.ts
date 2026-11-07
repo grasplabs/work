@@ -203,6 +203,44 @@ describe("the release manifest", () => {
         },
       ])
     ).toThrow(/static file \/big\.wasm/u);
+    // A source map counts apart from the modules, against a budget of its
+    // own: as large as all modules may be, it's over the maps' budget, and
+    // leaves the modules within theirs.
+    const map = {
+      ...main,
+      name: "index.js.map",
+      type: "sourcemap" as const,
+      size: releaseBudget.workerModules,
+      bytes: Buffer.alloc(0),
+    };
+    expect(() =>
+      generateManifest(info, [
+        connect,
+        { ...core, modules: [...core.modules, map] },
+      ])
+    ).toThrow(
+      /core is over the release budget: its source maps are 48\.0 MiB \(budget 45\.0 MiB\)$/u
+    );
+    // Random bytes don't compress: 12 MiB of them, within the raw budget,
+    // are over the gzipped one.
+    const incompressible = Buffer.alloc(12 * 1024 * 1024);
+    for (let at = 0; at < incompressible.length; at += 65_536) {
+      crypto.getRandomValues(incompressible.subarray(at, at + 65_536));
+    }
+    expect(() =>
+      generateManifest(info, [
+        connect,
+        {
+          ...core,
+          modules: [
+            ...core.modules,
+            { ...map, size: incompressible.length, bytes: incompressible },
+          ],
+        },
+      ])
+    ).toThrow(
+      /core is over the release budget: its source maps are 12\.0 MiB gzipped \(budget 11\.0 MiB\)$/u
+    );
     expect(() => generateManifest(info, [connect, core])).not.toThrow();
   });
 });

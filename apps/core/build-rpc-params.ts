@@ -1,0 +1,170 @@
+/**
+ * Writes the names each method of core's RPC targets gives its parameters
+ * (src/rpc-param-names.gen.ts), by its class, then the method: what a
+ * staff member's view is audited by (src/staff-audit.ts, `namedBy`), which
+ * reads an ID only from a parameter named as one. Read from their source
+ * with Babel's parser, as the minified bundle renames every parameter, so
+ * the function's own source can't say them at run time. Core's `typegen`
+ * runs it, and CI refuses the file when it is stale.
+ *
+ * A target is a class that extends `CoreRpcTarget` (src/rpc-target.ts), or
+ * a class that extends one. Its methods are the ones its prototype holds,
+ * as `boundedRpcTarget` wraps them: not static ones, private ones (`#x`),
+ * accessors or fields. A parameter is named by its identifier; one
+ * destructured is `input`. Class names must be unique among targets, as the
+ * bundle keeps them (`keep_names`, wrangler.jsonc) and the table is read by
+ * them.
+ */
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+import { parse } from "@babel/parser";
+import { traverseFast } from "@babel/types";
+import type { Node } from "@babel/types";
+
+const source = path.join(import.meta.dirname, "src");
+const generatedFile = path.join(source, "rpc-param-names.gen.ts");
+
+/** The base every target extends, directly or through another target. */
+const base = "CoreRpcTarget";
+
+/** A class as its declaration says: what it extends, and its methods. */
+interface DeclaredClass {
+  file: string;
+  extendsName: string | null;
+  methods: Map<string, string[]>;
+}
+
+/** Every TypeScript source file of core but tests, declarations and this output. */
+const sourceFiles = (): string[] =>
+  readdirSync(source, { recursive: true, withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.endsWith(".ts") &&
+        !entry.name.endsWith(".d.ts") &&
+        !entry.name.endsWith(".test.ts") &&
+        !entry.name.endsWith(".gen.ts")
+    )
+    .map((entry) => path.join(entry.parentPath, entry.name))
+    .toSorted();
+
+/** A parameter's name: its identifier, or `input` for one destructured. */
+const paramName = (param: Node): string => {
+  if (param.type === "Identifier") {
+    return param.name;
+  }
+  if (param.type === "AssignmentPattern") {
+    return paramName(param.left);
+  }
+  if (param.type === "RestElement") {
+    return paramName(param.argument);
+  }
+  return "input";
+};
+
+/** The prototype methods `body` declares, each with its parameters' names. */
+const methodsOf = (body: readonly Node[]): Map<string, string[]> => {
+  const methods = new Map<string, string[]>();
+  for (const member of body) {
+    if (
+      member.type === "ClassMethod" &&
+      member.kind === "method" &&
+      !member.static &&
+      !member.computed &&
+      (member.key.type === "Identifier" || member.key.type === "StringLiteral")
+    ) {
+      const name =
+        member.key.type === "Identifier" ? member.key.name : member.key.value;
+      methods.set(name, member.params.map(paramName));
+    }
+  }
+  return methods;
+};
+
+/** Every named class `file` declares, at any depth. */
+const classesIn = (file: string): Map<string, DeclaredClass> => {
+  const ast = parse(readFileSync(file, "utf-8"), {
+    sourceType: "module",
+    plugins: ["typescript"],
+  });
+  const found = new Map<string, DeclaredClass>();
+  traverseFast(ast.program, (node) => {
+    if (
+      (node.type === "ClassDeclaration" || node.type === "ClassExpression") &&
+      node.id !== null &&
+      node.id !== undefined
+    ) {
+      found.set(node.id.name, {
+        file,
+        extendsName:
+          node.superClass?.type === "Identifier" ? node.superClass.name : null,
+        methods: methodsOf(node.body.body),
+      });
+    }
+  });
+  return found;
+};
+
+/** Core's targets: each class extending `base`, or a target, by name. */
+const targetsOf = (files: readonly string[]): Map<string, DeclaredClass> => {
+  const declared = new Map<string, DeclaredClass[]>();
+  for (const file of files) {
+    for (const [name, declaration] of classesIn(file)) {
+      declared.set(name, [...(declared.get(name) ?? []), declaration]);
+    }
+  }
+  const targets = new Map<string, DeclaredClass>();
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [name, declarations] of declared) {
+      const target = declarations.find(
+        ({ extendsName }) =>
+          extendsName === base ||
+          (extendsName !== null && targets.has(extendsName))
+      );
+      if (target === undefined || targets.has(name)) {
+        continue;
+      }
+      if (declarations.length > 1) {
+        throw new Error(
+          `More than one class is named ${name} (${declarations.map(({ file }) => path.relative(source, file)).join(", ")}): a target's name must be its own`
+        );
+      }
+      targets.set(name, target);
+      grew = true;
+    }
+  }
+  return targets;
+};
+
+/** The generated module's source for `targets`. */
+const paramNamesSource = (targets: ReadonlyMap<string, DeclaredClass>) => {
+  const classes = [...targets.keys()].toSorted().map((name) => {
+    const methods = [...(targets.get(name)?.methods ?? new Map())]
+      .toSorted(([a], [b]) => (a < b ? -1 : 1))
+      .map(
+        ([method, params]: [string, string[]]) =>
+          `    ${JSON.stringify(method)}: ${JSON.stringify(params)},`
+      );
+    return `  ${JSON.stringify(name)}: {\n${methods.join("\n")}\n  },`;
+  });
+  return `// Generated by Grasp from core's RPC targets (apps/core/build-rpc-params.ts).
+// Don't edit it: \`vp run -r typegen\` makes it again, and CI refuses it stale.
+
+import type { ParamNames } from "@grasp-os/shared/rpc-target";
+
+/**
+ * The names each method of core's RPC targets gives its parameters, by
+ * its class, then the method (\`CoreRpcTarget\`, rpc-target.ts).
+ */
+export const rpcParamNames: ParamNames = {
+${classes.join("\n")}
+};
+`;
+};
+
+if (import.meta.main) {
+  writeFileSync(generatedFile, paramNamesSource(targetsOf(sourceFiles())));
+}

@@ -23,6 +23,16 @@
       "fallthrough": true,
     },
   ],
+  // Minified, core is less than half its size (23 MB to 11 MB): a faster
+  // upload, a lighter deploy, and more room under Cloudflare's startup
+  // limit. Class and function names stay (esbuild's keepNames), as core
+  // reads them at run time (src/staff-audit.ts), and so do its libraries;
+  // the on-prem smoke run fails a bundle that loses one. Its source map
+  // goes up with it, so Cloudflare's logs show stack traces with real
+  // files and functions.
+  "minify": true,
+  "keep_names": true,
+  "upload_source_maps": true,
   // No platform line per invocation: core logs the events it needs itself
   // (@grasp-os/shared/log), never headers or bodies (threat model R17).
   // Query strings stay out of logs and traces: the OAuth callback's carries

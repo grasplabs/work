@@ -31,7 +31,9 @@ export const fixtureBuild = async (app: string): Promise<WorkerBuild> => {
   return {
     key: app,
     config,
-    ...(await collectModules(path.join(TESTDATA, "bundles", app))),
+    ...(await collectModules(path.join(TESTDATA, "bundles", app), {
+      sourceMaps: config.upload_source_maps,
+    })),
     d1Migrations: Object.fromEntries(
       config.d1_databases.map((database) => [database.binding, migrations])
     ),
