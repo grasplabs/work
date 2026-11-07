@@ -20,8 +20,8 @@ export type RecordChangeOp = (typeof recordChangeOps)[number];
  * What made a change: a commit of the App's (or a consumer's) mutation, a
  * cascade of a deletion (in that commit or after it, as the store's
  * cascade job), an import of a table's CSV, or a schema change the store
- * applied as a release was made current, giving records a default or a
- * value they lacked (core's store-schema-changes.ts).
+ * applied as a version was published, giving records a default or a
+ * value they lacked (core's store-host.ts, `applySchema`).
  * A migration's transform keeps no change: it never moves a field a row
  * rule reads.
  */

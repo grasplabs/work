@@ -18,20 +18,24 @@ import {
   isRecord,
 } from "@grasp-os/shared/json";
 import { jsonOf } from "@grasp-os/shared/operations";
-import { documentMaxBytes } from "@grasp-os/shared/stores";
+import { documentMaxBytes, migrationErrors } from "@grasp-os/shared/stores";
 import type { StoreFields } from "@grasp-os/shared/stores";
 
 import type { Release } from "./app-releases.ts";
+import type { OpenStore } from "./data-stores.ts";
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv, SandboxedWorker } from "./sandboxed.ts";
 import { audienceKey, audienceOf, ruleFieldsOf } from "./store-rules.ts";
 
-// Running an App's explicit migration (spec 17.2) on a batch of records:
-// the transform is App code, so it runs only in an isolate with no env and
-// no network, on the sandbox host on-prem (`callSandboxed`), and nothing it
-// answers is trusted. This module only transforms: which records, when,
-// and how the result commits against their revisions is the store's
-// (GRA-250's later slices). Threat model, and how each is closed:
+// Running an App's explicit migrations (spec 17.2): on their fixtures as
+// the release is sealed (`migrationEvidence`), and once on the store's
+// records as the version is published (`runMigrations`), its output staged
+// in the store and applied with the schema in one transaction
+// (store-host.ts, `applySchema`), so a migration that fails anywhere
+// changes nothing. The transform is App code, so it runs only in an
+// isolate with no env and no network, on the sandbox host on-prem
+// (`callSandboxed`), and nothing it answers is trusted. Threat model, and
+// how each is closed:
 //
 // - The transform reaches a model, a connector, the network or the store,
 //   or reads another record: its isolate has no env, no bindings, no
@@ -48,9 +52,10 @@ import { audienceKey, audienceOf, ruleFieldsOf } from "./store-rules.ts";
 //   keys are refused), and the record's managed fields are never in what
 //   it gets or answers: the store keeps them.
 // - The transform drops or rewrites data the target doesn't declare
-//   (fields kept for a retained version, or a rename's old name): they are
-//   kept outside it and merged back, so a migration never contracts a
-//   record; handed back unchanged they pass, changed they are refused.
+//   (fields the schema keeps though it left them out): they are kept
+//   outside it and merged back; handed back unchanged they pass, changed
+//   they are refused. A field renamed in the same publish leaves its old
+//   name as the store applies the output.
 // - A row the transform wasn't written for: when it declares `input`, each
 //   row is validated against it first, and a row that doesn't fit fails
 //   the batch naming the record, before any App code sees it.
@@ -70,16 +75,18 @@ import { audienceKey, audienceOf, ruleFieldsOf } from "./store-rules.ts";
 //   rewrites every record of its table, whoever may read it: the version
 //   review says so.
 // - The transform moves a record into other people's sight by rewriting a
-//   field a row rule reads (a team, an assignee): refused
-//   (`rule_changed`), here, so its fixtures catch it as its release is
-//   sealed, and again by the store as it commits (store-migrations.ts,
-//   `outputRefusal`). Who a record reaches changes only through writes,
-//   which pass the rules before and after. A transform answers only for
-//   the records of its own table it was handed, never another table's,
-//   so it can't move rows into a table whose rules admit more people.
+//   field a row rule reads (a team, an assignee): refused (`rule_changed`)
+//   here, so its fixtures catch it as its release is sealed, and again by
+//   the store as it applies the output, by each field's stable ID
+//   (store-host.ts), which also refuses one that rewrites a reference
+//   behind its reference index (`reference_changed`). Who a record reaches
+//   changes only through writes, which pass the rules before and after.
+//   A transform answers only for the records of its own table it was
+//   handed, never another table's, so it can't move rows into a table
+//   whose rules admit more people.
 // - The transform writes a record's values into its failure, which the
-//   migration's builders are shown (store-host.ts, `schemaStatus`) though
-//   the table may keep the record from them: in what it throws
+//   migration's builders are shown as their publish fails, though the
+//   table may keep the record from them: in what it throws
 //   (`throw new Error(row.amount)`), in a key its output holds
 //   (`{ [row.amount]: 1 }`, which validation names), in a stack it forges
 //   (a line or column of its choosing). On records of any table but one
@@ -98,15 +105,13 @@ import { audienceKey, audienceOf, ruleFieldsOf } from "./store-rules.ts";
 //   so do fixtures, the App's own data (`transformRows`).
 // - The transform answers differently each time: randomness and clocks
 //   are taken away while it runs and while its answer is serialized (sdk
-//   runner, `runMigration`). Best effort, not a boundary: a value captured
-//   as its modules loaded can still differ between calls, so a retried
-//   batch is answered from the store's receipt, never compared with an
-//   earlier answer.
+//   runner, `runMigration`). Best effort, not a boundary: it runs once on
+//   each record, and what it answered is what is applied.
 // - A transform that answers wrong (valid for the table, but not what was
 //   meant) rewrites real records before anyone notices: it runs on its
 //   fixtures first, as its release is sealed (`migrationEvidence`), and
 //   only one whose fixtures all passed runs on records
-//   (migration-evidence.ts). Fixtures are the App's own data, reviewed
+//   (`requireMigrationEvidence`). Fixtures are the App's own data, reviewed
 //   with it; what the run found is sealed into the release's manifest by
 //   the host, never reported by App code. Not a boundary against a
 //   transform written to tell fixtures from records (it sees their IDs and
@@ -125,44 +130,15 @@ import { audienceKey, audienceOf, ruleFieldsOf } from "./store-rules.ts";
 //   profile. (An exception left uncaught in a microtask is printed by
 //   workerd only when served `--verbose`, which the supervisor isn't.)
 
-/** Rows one batch transforms, at most (spec 17.2's bounded batches). */
-export const transformBatchMaxRows = 100;
-
 /**
- * The most bytes a batch's rows take as JSON: a store's caller cuts its
- * batch before it passes this, so the isolate's call stays bounded.
+ * Rows one batch transforms, at most, and the bytes they take as JSON:
+ * what one call into the sandbox holds. A page of the store's records
+ * (`StoreHost.migrationRows`) stays within both.
  */
-export const transformBatchMaxBytes = 2 * 1024 * 1024;
+export const transformBatchMaxRows = 100;
+const transformBatchMaxBytes = 2 * 1024 * 1024;
 
 const encoder = new TextEncoder();
-
-/** What a batch's array takes besides its records: its brackets. */
-export const transformBatchOverhead = 2;
-
-/**
- * What one record's canonical text (`text`) adds to a batch: its UTF-8
- * bytes, and the comma before it unless it is the first (`afterAnother`).
- * A caller cutting a batch adds these up as it goes, measuring each
- * record once, and lands where `transformBatchBytes` would.
- */
-export const transformRecordBytes = (
-  text: string,
-  afterAnother: boolean
-): number => encoder.encode(text).byteLength + (afterAnother ? 1 : 0);
-
-/**
- * The bytes a batch of records takes as one JSON array of their fields'
- * canonical texts (`texts`): the brackets, the commas between them and
- * each text's UTF-8 bytes. The transform's bound (`requireBatch`) uses
- * it, and the store cutting its batches (store-migrations.ts) sums the
- * same parts, so a batch the store hands out always passes the transform's.
- */
-export const transformBatchBytes = (texts: readonly string[]): number =>
-  transformBatchOverhead +
-  texts.reduce(
-    (sum, text, index) => sum + transformRecordBytes(text, index > 0),
-    0
-  );
 
 /** The most bytes of JSON text a batch's answer may take. */
 export const transformAnswerMaxBytes = 4 * 1024 * 1024;
@@ -394,7 +370,7 @@ const fieldText = (fields: StoreFields, name: string): string | undefined =>
  * The first of `names` whose value differs between `before` and `after`
  * (present in one and not the other included), or undefined.
  */
-export const firstChanged = (
+const firstChanged = (
   names: Iterable<string>,
   before: StoreFields,
   after: StoreFields
@@ -406,10 +382,6 @@ export const firstChanged = (
   }
   return undefined;
 };
-
-/** Why an output that changes `field`, which a row rule reads, is refused. */
-export const ruleChangedIssue = (field: string): string =>
-  `${field}: A migration doesn't change a field a row rule reads; a write changes who sees a record`;
 
 /** `fields` with only the keys `keep` holds. */
 const picked = (
@@ -571,8 +543,8 @@ const requireBatch = (
 ): void => {
   if (
     rows.length > transformBatchMaxRows ||
-    transformBatchBytes(rows.map(({ fields }) => canonicalJson(fields))) >
-      transformBatchMaxBytes
+    encoder.encode(JSON.stringify(rows.map(({ fields }) => fields)))
+      .byteLength > transformBatchMaxBytes
   ) {
     throw new Error("A transform's batch is past its bounds");
   }
@@ -590,9 +562,15 @@ const requireBatch = (
 };
 
 /**
- * `transformBatch` of `rows` that are records, or the migration's own
- * fixtures: the App's data, so what its code threw on them is shown as it
- * said, whatever the table.
+ * Runs migration `name` of `release` on `rows` (one audience's, at most
+ * `transformBatchMaxRows`, `transformBatchMaxBytes` of JSON): each
+ * record's fields after it, in order, the transform's output validated
+ * against the target table and merged over the fields the target doesn't
+ * declare; or the failure, naming the record. On the migration's own
+ * `fixtures`, the App's data, what its code threw is shown as it said,
+ * whatever the table. Throws `SandboxUnavailableError` when the sandbox
+ * didn't answer, and an error for a batch past its bounds or a migration
+ * the release doesn't declare, which only a bug in the caller sends.
  */
 const transformRows = async (
   env: SandboxedEnv,
@@ -698,6 +676,8 @@ const transformRows = async (
       ...picked(row.fields, (key) => !Object.hasOwn(target.fields, key)),
       ...checked.fields,
     };
+    // Caught here, so a fixture fails on it as its release is sealed; the
+    // store refuses it again as it applies the output, by stable ID.
     const moved = firstChanged(ruleFieldsOf(target.rules), row.fields, fields);
     if (moved !== undefined) {
       return {
@@ -705,7 +685,9 @@ const transformRows = async (
         failure: {
           id: row.id,
           reason: "rule_changed",
-          issues: [ruleChangedIssue(moved)],
+          issues: [
+            `${moved}: A migration doesn't change a field a row rule reads; a write changes who sees a record`,
+          ],
         },
       };
     }
@@ -724,16 +706,7 @@ const transformRows = async (
   return { ok: true, rows: transformed };
 };
 
-/**
- * Runs migration `name` of `release` on `rows` (at most
- * `transformBatchMaxRows`, `transformBatchMaxBytes` of JSON): each
- * record's fields after it, in order, the transform's output validated
- * against the target table and merged over the fields the target doesn't
- * declare; or the failure, naming the record. Throws
- * `SandboxUnavailableError` when the sandbox didn't answer, and an error
- * for a batch past its bounds or a migration the release doesn't declare,
- * which only a bug in the caller sends.
- */
+/** `transformRows` of `rows` that are the store's records. */
 export const transformBatch = async (
   env: SandboxedEnv,
   release: TransformRelease,
@@ -917,4 +890,166 @@ export const requireMigrationsTarget = (
       });
     }
   }
+};
+
+/**
+ * The evidence of the first of `migrations` whose fixtures failed as
+ * `release` was sealed; undefined when they all passed.
+ */
+const failedEvidence = (
+  evidence: readonly MigrationEvidence[],
+  migrations: readonly string[]
+): MigrationEvidence | undefined =>
+  evidence.find(
+    (found) => !found.passed && migrations.includes(found.migration)
+  );
+
+/**
+ * `version.migration_fixtures_failed` for `evidence`: the migration, the
+ * fixture (counted from 1, as its author reads them; null when none is to
+ * blame) and why. Fixtures are the App's own data, so this is safe to
+ * show whoever publishes the version.
+ */
+const fixturesFailedError = (evidence: MigrationEvidence): Error =>
+  versionErrors.create("version.migration_fixtures_failed", {
+    migration: evidence.migration,
+    fixture:
+      evidence.failure?.fixture === null ||
+      evidence.failure?.fixture === undefined
+        ? null
+        : evidence.failure.fixture + 1,
+    reason: evidence.failure?.reason ?? null,
+    issues: [...(evidence.failure?.issues ?? [])],
+  });
+
+/**
+ * Refuses publishing a version while any of its migrations failed on its
+ * fixtures as it was sealed (`version.migration_fixtures_failed`), from
+ * the release's hash-checked manifest alone.
+ */
+export const requireMigrationEvidence = (
+  evidence: readonly MigrationEvidence[]
+): void => {
+  const failed = evidence.find(({ passed }) => !passed);
+  if (failed !== undefined) {
+    throw fixturesFailedError(failed);
+  }
+};
+
+/** A migration's output staged in the store, as `applySchema` applies it. */
+export interface StagedMigration {
+  readonly id: string;
+  /** The schema it transforms from: the one the store held. */
+  readonly from: string;
+  /** The tables it transforms, by the release's names. */
+  readonly tables: string[];
+}
+
+/** `runMigrations` for one migration (`declared`) of its table. */
+const runMigration = async (
+  env: SandboxedEnv,
+  store: Pick<OpenStore, "migrationRows" | "stageMigration">,
+  release: TransformRelease,
+  {
+    declared,
+    migrationId,
+    tableId,
+  }: {
+    declared: MigrationManifest;
+    migrationId: string;
+    tableId: string;
+  }
+): Promise<void> => {
+  const target = release.app.schema.tables[declared.table];
+  if (target === undefined) {
+    throw new Error("A migration's table isn't in its release's schema");
+  }
+  const audience = audienceOf(target);
+  let after: string | null = null;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one page at a time
+    const rows = await store.migrationRows(tableId, after);
+    if (rows.length === 0) {
+      return;
+    }
+    after = rows.at(-1)?.id ?? null;
+    const revisions = new Map(rows.map(({ id, revision }) => [id, revision]));
+    for (const batch of Map.groupBy(rows, (row) =>
+      audienceKey(audience, row)
+    ).values()) {
+      // oxlint-disable-next-line no-await-in-loop -- one audience at a time
+      const outcome = await transformBatch(env, release, declared.name, batch);
+      if (!outcome.ok) {
+        throw migrationErrors.create("migration.failed", {
+          migration: declared.name,
+          table: declared.table,
+          id: outcome.failure.id,
+          reason: outcome.failure.reason,
+          issues: [...outcome.failure.issues],
+        });
+      }
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await store.stageMigration({
+        migrationId,
+        table: tableId,
+        rows: outcome.rows.map(({ id, fields }) => ({
+          id,
+          revision: revisions.get(id) ?? 0,
+          fields,
+        })),
+      });
+    }
+  }
+};
+
+/**
+ * Runs `release`'s migrations from the schema `store` holds (those whose
+ * `fromSchema` it is), once, on every record of their tables, a page at a
+ * time, each page's records of one audience in an isolate of their own
+ * (`audienceKey`), and stages what each answered in the store with the
+ * revision it was read at (`StoreHost.stageMigration`). Answers what
+ * `applySchema` applies, or undefined when no migration transforms from
+ * the schema in force. A migration that fails is `migration.failed`,
+ * naming its record and why, as its builders may be shown it
+ * (`hidesText`), and nothing of it is applied. `tableIds` gives each of
+ * the release's tables its stable ID, which the store finds it by, so a
+ * table renamed in the same publish is still read where it is.
+ */
+export const runMigrations = async (
+  env: SandboxedEnv,
+  store: Pick<OpenStore, "beginMigration" | "migrationRows" | "stageMigration">,
+  release: TransformRelease & {
+    readonly manifest: Pick<Release["manifest"], "migrationEvidence">;
+  },
+  tableIds: Readonly<Record<string, string>>
+): Promise<StagedMigration | undefined> => {
+  const { migrationId, schemaHash } = await store.beginMigration();
+  const due = Object.values(release.app.migrations).filter(
+    ({ fromSchema }) => fromSchema === schemaHash
+  );
+  if (schemaHash === null || due.length === 0) {
+    return undefined;
+  }
+  const failed = failedEvidence(
+    release.manifest.migrationEvidence,
+    due.map(({ name }) => name)
+  );
+  if (failed !== undefined) {
+    throw fixturesFailedError(failed);
+  }
+  for (const declared of due) {
+    // One migration, one page and one audience at a time: each call
+    // into the sandbox is bounded, and a failure stops the rest.
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await runMigration(env, store, release, {
+      declared,
+      migrationId,
+      tableId: tableIds[declared.table] ?? "",
+    });
+  }
+  return {
+    id: migrationId,
+    from: schemaHash,
+    tables: due.map(({ table }) => table),
+  };
 };

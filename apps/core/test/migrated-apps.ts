@@ -9,7 +9,7 @@ import { commitFiles } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { appDefinition } from "./app-definitions.ts";
-import { commit } from "./pending-stores.ts";
+import { commit } from "./notes-stores.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { newRecordId } from "./store-schemas.ts";

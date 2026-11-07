@@ -660,8 +660,10 @@ export const noStore = (): OpenStore => ({
   // SAFETY: an ID no store has, for logs only: every call is refused.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   id: "none" as OpenStore["id"],
-  defineTables: unbound,
-  activate: unbound,
+  applySchema: unbound,
+  beginMigration: unbound,
+  migrationRows: unbound,
+  stageMigration: unbound,
   get: unbound,
   claim: unbound,
   commit: unbound,

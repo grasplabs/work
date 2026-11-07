@@ -402,11 +402,6 @@ export const rpcParamNames: ParamNames = {
     "updateSettings": ["change"],
     "week": [],
   },
-  "StoresRpc": {
-    "abandonBackfill": ["input"],
-    "appBackfills": ["app"],
-    "backfill": ["store"],
-  },
   "Subscription": {
     "release": [],
   },

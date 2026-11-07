@@ -10,7 +10,6 @@ import {
   generatedPaths,
   generateModules,
   readSealedWorkflows,
-  manifestText,
   manifestVersion,
   readAppManifest,
   schemaHash,
@@ -39,7 +38,6 @@ import type { SurfaceSummary } from "@grasp-os/shared/pages";
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import { dataErrors, migrationErrors } from "@grasp-os/shared/stores";
-import type { AppliedContract } from "@grasp-os/shared/stores";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -71,7 +69,7 @@ import {
   evidenceFits,
   migrationEvidence,
   requireMigrationsTarget,
-} from "./migration-transform.ts";
+} from "./migration-run.ts";
 import { pageArtifact, versionPages } from "./pages.ts";
 import type { BuildProfile, BuiltPage, PageBuildResult } from "./pages.ts";
 import {
@@ -82,7 +80,6 @@ import {
   sealReferencedSql,
   storeArtifacts,
 } from "./sealed-artifacts.ts";
-import { defineSchemaOnStore, schemaStatus } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 
 // Sealing an App's release (spec 8, 16): turning one version of an App of
@@ -1018,24 +1015,16 @@ export const sealedEvidence = async (
 /**
  * The store release `request` binds, its App's own (`appStoreFor`, created
  * now if the App has none that lives), with the App's schema (`schema`,
- * its hash) applied to it for this version, and what that did to the
- * store's contract; or null for an App without tables or preferences.
- * The store applies the schema only
- * when the change to its contract is safe (store-host.ts,
- * `defineTables`), and refuses one that needs a migration
- * (`migration.required`), so no release is sealed on a store whose data
- * its schema doesn't fit. A schema whose defaulted fields the store's
- * records lack is taken as the store's pending target: the release is
- * sealed, and runs only once the store has filled them in
- * (store-backfill.ts). A seal that fails after the store applied the
- * schema leaves it applied: a retry finds it so, and its receipt.
+ * its hash); or null for an App without tables or preferences. Sealing
+ * changes nothing in the store: its schema is applied as the version is
+ * published (app-schema.ts).
  */
 const boundStore = async (
   env: Env,
   request: SealRequest,
   manifest: AppManifest,
   schema: string
-): Promise<{ binding: DataStoreBinding; contract: AppliedContract } | null> => {
+): Promise<DataStoreBinding | null> => {
   if (!needsStore(manifest)) {
     return null;
   }
@@ -1049,83 +1038,28 @@ const boundStore = async (
   // contract takes them only once the release is sealed
   // (`appliedPreferences`).
   await definedPreferences(env, opened.id, manifest, false);
-  const defined = await defineSchemaOnStore(
-    env,
-    opened,
-    manifestText(manifest.schema),
-    { resourceId: request.app, resourceVersion: request.version },
-    Object.values(manifest.migrations).map(
-      ({ name, table, fromSchema, toSchema }) => ({
-        name,
-        table,
-        fromSchema,
-        toSchema,
-      })
-    ),
-    (manifest.answers ?? []).map((answer) => ({ ...answer }))
-  );
-  if (defined.schemaHash !== schema) {
-    throw new Error("The store defined another schema than the App's");
-  }
   return {
-    binding: {
-      alias: "default",
-      storeId: opened.id,
-      schemaVersion: manifestVersion,
-      schemaHash: schema,
-      operationManifestHash: await operationManifestHash(manifest),
-    },
-    contract: defined.contract,
+    alias: "default",
+    storeId: opened.id,
+    schemaVersion: manifestVersion,
+    schemaHash: schema,
+    operationManifestHash: await operationManifestHash(manifest),
   };
 };
 
 /**
  * A release sealed already: read back, every byte checked
- * (`readBackRelease`).
- * Its store's definition was recorded with its seal, in the same write.
- * One whose store abandoned the target its schema waited on is refused
- * (`migration.abandoned`), as a fresh seal of it would be: its store
- * keeps that per release (store-abandon.ts), so this holds even once a
- * later release brought the same schema back into force.
+ * (`readBackRelease`). Its store's definition was recorded with its seal,
+ * in the same write.
  */
 const resealed = async (
   env: Env,
   { app, version }: { app: AppId; version: number }
 ): Promise<Release> => {
   const release = await readBackRelease(env, app, version);
-  if (release.store !== null) {
-    const status = await schemaStatus(
-      env,
-      storeIdSchema.parse(release.store.storeId),
-      release.store.schemaHash,
-      { resourceId: app, resourceVersion: version }
-    );
-    if (status.state === "abandoned") {
-      throw migrationErrors.create("migration.abandoned");
-    }
-  }
   await appliedPreferences(env, release);
   return release;
 };
-
-/**
- * What the store recorded of applying a release's schema, its receipt
- * included, for the seal's audit entry: evidence from the store itself,
- * beside the release. Nothing for a release without a store.
- */
-const storeEvidence = (
-  bound: Awaited<ReturnType<typeof boundStore>>
-): Record<string, string | boolean | null> =>
-  bound === null
-    ? {}
-    : {
-        store: bound.binding.storeId,
-        storeContractHash: bound.contract.hash,
-        storePlanHash: bound.contract.planHash,
-        storeContractChanged: bound.contract.changed,
-        storeContractPending: bound.contract.pending,
-        storeReceipt: bound.contract.receiptId,
-      };
 
 /** What sealing makes of an App's files, before the host binds or stores any of it. */
 interface InspectedRelease {
@@ -1199,7 +1133,7 @@ const inspectForSeal = async (
   // Each explicit migration run on its fixtures, the release's own code in
   // the sandbox, before the store is handed it: what the host found is
   // sealed into the manifest, passed or failed, and only a passed
-  // migration runs on records or is made current (migration-evidence.ts).
+  // migration runs on records or is published (migration-run.ts).
   const evidence = await migrationEvidence(env, {
     app: manifest,
     modules: final,
@@ -1405,8 +1339,7 @@ export const sealRelease = async (
     files,
     "production"
   );
-  const bound = await boundStore(env, request, built.manifest, built.schema);
-  const store = bound?.binding ?? null;
+  const store = await boundStore(env, request, built.manifest, built.schema);
   // Every page built and sealed with the release, so none is compiled
   // when it opens.
   const pages = await builtPages(env, { app, version }, files, built.generated);
@@ -1495,7 +1428,7 @@ export const sealRelease = async (
           // The check's evidence, by its hash: in the audit chain, out of
           // the storage the release is kept in (check-evidence.ts).
           verificationReportHash: releaseManifest.verificationReportHash,
-          ...storeEvidence(bound),
+          ...(store === null ? {} : { store: store.storeId }),
         },
       }),
     ]);

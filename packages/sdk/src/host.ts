@@ -41,35 +41,9 @@ export { migrationPlatformMessages } from "./migration.ts";
 export type { MigrationManifest } from "./migration.ts";
 
 // A schema as a store's host reads, hashes and compares it.
-export type {
-  AccessChange,
-  FieldChange,
-  IndexChange,
-  SchemaChange,
-  SchemaDiff,
-  TableChange,
-} from "./schema-diff.ts";
-export {
-  holdsId,
-  planSchemaChange,
-  schemaCovered,
-  withDefaultsFilled,
-} from "./schema-plan.ts";
-export type {
-  AcceptedPlan,
-  PlanOptions,
-  PlannedChanges,
-  PlannedCheck,
-  PlannedField,
-  PlannedIndex,
-  PlannedRename,
-  PlanRefusal,
-  PlanRefusalReason,
-  RefusedPlan,
-  ReservedFields,
-  SchemaAnswer,
-  SchemaPlan,
-} from "./schema-plan.ts";
+export { referencesRenamed } from "./descriptor-references.ts";
+export { fieldWidens, holdsReference } from "./field-change.ts";
+export type { SchemaAnswer } from "./schema-answer.ts";
 export {
   manifestMaxBytes,
   manifestText,

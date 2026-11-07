@@ -19,7 +19,7 @@ import type { Acting } from "../src/auth/identity.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { accessedManifest } from "./store-schemas.ts";
+import { accessedManifest, appliedTables } from "./store-schemas.ts";
 
 // Grouped aggregates and related records of a business store
 // (store-queries.ts `groupsOf` and `withRelated`), through core's way into
@@ -68,7 +68,8 @@ const storeWith = async (
   const store = await openStore(env, await storeOfNewApp(env, builder));
   const mode = (table: string, fallback: AccessMode): AccessMode =>
     access[table] ?? fallback;
-  const defined = await store.defineTables(
+  const defined = await appliedTables(
+    store,
     manifestText(
       accessedManifest(schema, {
         tables: {

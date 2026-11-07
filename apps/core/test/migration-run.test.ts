@@ -10,8 +10,8 @@ import {
   outputMismatch,
   threwOnRecord,
   transformBatchMaxRows,
-} from "../src/migration-transform.ts";
-import type { TransformRow } from "../src/migration-transform.ts";
+} from "../src/migration-run.ts";
+import type { TransformRow } from "../src/migration-run.ts";
 import { SandboxUnavailableError } from "../src/sandboxed.ts";
 import { reviewVersion } from "../src/version-review.ts";
 import { appDefinition } from "./app-definitions.ts";

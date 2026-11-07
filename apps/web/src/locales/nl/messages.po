@@ -177,10 +177,6 @@ msgstr "{app}, gedeeld: {whose}"
 msgid "{app}: run of {workflowId}"
 msgstr "{app}: run van {workflowId}"
 
-#: src/apps/store-changes.tsx
-msgid "{appName}, version {version}"
-msgstr "{appName}, versie {version}"
-
 #: src/routes/_shell.settings.packages.index.tsx
 msgid "{approvals, plural, one {# approval} other {# approvals}}"
 msgstr "{approvals, plural, one {# goedkeuring} other {# goedkeuringen}}"
@@ -1407,18 +1403,6 @@ msgstr "Een wijziging"
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Een wijziging geldt voor runs die daarna starten: runs die al bezig zijn houden de waarden waarmee ze begonnen. Elke wijziging wordt vastgelegd, zonder de waarde."
 
-#: src/apps/store-changes.tsx
-msgid "A change to the store {name} can't be applied"
-msgstr "Een wijziging in de opslag {name} kan niet worden toegepast"
-
-#: src/apps/store-changes.tsx
-msgid "A change to the store {name} is being applied"
-msgstr "Een wijziging in de opslag {name} wordt toegepast"
-
-#: src/apps/store-changes.tsx
-msgid "A change to the store {name} is ready"
-msgstr "Een wijziging aan de opslag {name} is klaar"
-
 #: src/apps/app-access-requests.tsx
 msgid "A collection"
 msgstr "Een collectie"
@@ -1442,14 +1426,6 @@ msgstr "Een verbinding moet opnieuw worden aangemeld"
 #: src/activity/audit-words.ts
 msgid "A connection refused to say what changed"
 msgstr "Een verbinding weigerde te zeggen wat er veranderd is"
-
-#: src/apps/store-change-errors.ts
-msgid "A data migration moved this App's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
-msgstr "Een gegevensmigratie heeft de records van deze app na deze versie omgezet, dus die kan niet opnieuw actueel worden gemaakt, en geen bewaarde versie past er nu nog bij. Bouw in plaats daarvan een nieuwe versie."
-
-#: src/apps/store-change-errors.ts
-msgid "A data migration moved this App's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
-msgstr "Een gegevensmigratie heeft de records van deze app na deze versie omgezet, dus die kan niet opnieuw actueel worden gemaakt. Bewaarde versies die er nog bij passen: {versions}."
 
 #: src/apps/field-kinds.tsx
 msgid "A day and time"
@@ -1617,10 +1593,6 @@ msgstr "Een betaalbewijs bij elke geslaagde betaling."
 msgid "A record of another table"
 msgstr "Een record van een andere tabel"
 
-#: src/apps/store-change-errors.ts
-msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
-msgstr "Er is al een nieuwe poging voor deze wijziging gestart, dus die is niet opgegeven. De pagina toont nu hoe het ervoor staat."
-
 #: src/inbox/items.ts
 msgid "A run of {name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting."
 msgstr "Een run van {name} wacht op je antwoord. Er gebeurt niets meer in totdat iemand antwoordt, of totdat hij niet meer wacht."
@@ -1747,18 +1719,6 @@ msgstr "Heeft een workflow een app nodig die hier nog niet staat? Laat Grasp wet
 #: src/workflows/requests/request-plan.tsx
 msgid "A workflow started"
 msgstr "Een gestarte workflow"
-
-#: src/apps/store-changes.tsx
-msgid "Abandon the change"
-msgstr "Wijziging opgeven"
-
-#: src/apps/store-changes.tsx
-msgid "Abandon this change"
-msgstr "Deze wijziging opgeven"
-
-#: src/apps/store-changes.tsx
-msgid "Abandon this change?"
-msgstr "Deze wijziging opgeven?"
 
 #: src/apps/app-settings.tsx
 msgid "About"
@@ -2267,18 +2227,6 @@ msgstr "Amsterdam"
 msgid "An admin"
 msgstr "Een beheerder"
 
-#: src/apps/store-change-errors.ts
-msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the App to be built again."
-msgstr "Een beheerder heeft de gegevenswijziging opgegeven die deze versie nodig heeft, dus die kan nooit actueel worden gemaakt. Laat de app opnieuw bouwen."
-
-#: src/apps/store-change-errors.ts
-msgid "An admin can see the record that holds it back, and abandon the change, in the App's settings."
-msgstr "Een admin ziet het record dat de wijziging tegenhoudt, en kan de wijziging verwerpen in de instellingen van de App."
-
-#: src/apps/store-change-errors.ts
-msgid "An admin can see what went wrong, and abandon the change, in the App's settings."
-msgstr "Een admin ziet wat er misging, en kan de wijziging verwerpen in de instellingen van de App."
-
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
 msgstr "Een beheerder wijzigt die, bij Leden en rollen."
@@ -2500,10 +2448,6 @@ msgstr "App"
 #: src/connections/connection-list.tsx
 msgid "App {app}"
 msgstr "App {app}"
-
-#: src/apps/store-changes.tsx
-msgid "App {app}, version {version}"
-msgstr "App {app}, versie {version}"
 
 #: src/routes/_shell.apps.$app_.edit.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
@@ -3595,10 +3539,6 @@ msgstr "Wijzigingen gepubliceerd vanuit de werkruimte van de App"
 msgid "Changes since {when}"
 msgstr "Wijzigingen sinds {when}"
 
-#: src/apps/store-changes.tsx
-msgid "Changes to the App's stores"
-msgstr "Wijzigingen in de opslag van de app"
-
 #: src/apps/data-model-changes.tsx
 msgid "Changes who can see and change the records of {table}."
 msgstr "Wijzigt wie de records van {table} kan zien en wijzigen."
@@ -3830,7 +3770,6 @@ msgstr "Filters wissen"
 #: src/apps/package-approvals.tsx
 #: src/apps/release-controls.tsx
 #: src/apps/resource-bindings.tsx
-#: src/apps/store-changes.tsx
 #: src/brain/forget.tsx
 #: src/brain/remember-dialog.tsx
 #: src/brain/share-record.tsx
@@ -5503,14 +5442,6 @@ msgstr "Bestanden naar workflows"
 msgid "Fill this in."
 msgstr "Vul dit in."
 
-#: src/apps/store-changes.tsx
-msgid "Filling in the new field {field} of the table {table} would make the record {record} larger than a record may be."
-msgstr "Het invullen van het nieuwe veld {field} van de tabel {table} zou het record {record} groter maken dan een record mag zijn."
-
-#: src/apps/store-changes.tsx
-msgid "Filling in the new fields stopped making progress, and trying again didn't help."
-msgstr "Het invullen van de nieuwe velden kwam niet meer verder, en opnieuw proberen hielp niet."
-
 #: src/activity/audit-log.tsx
 #: src/settings/filter-menu.tsx
 msgid "Filter"
@@ -6972,10 +6903,6 @@ msgstr "De link"
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "De berichten worden definitief verwijderd en elke wijziging die de agent voor je vasthoudt, wordt afgewezen. Wat de agent deed, blijft in het auditlog."
 
-#: src/apps/store-changes.tsx
-msgid "Its migration has transformed every record. It takes over when a release that needs it is made current; until then the current release goes on using the store as before."
-msgstr "De migratie heeft elk record omgezet. Ze gaat in zodra een release die haar nodig heeft actueel wordt gemaakt; tot dan gebruikt de actuele release de opslag zoals voorheen."
-
 #: src/chat/builds.tsx
 msgid "Its migrations can't be read: it may rewrite the records of any table"
 msgstr "De migraties zijn niet te lezen: het kan de records van elke tabel herschrijven"
@@ -6983,10 +6910,6 @@ msgstr "De migraties zijn niet te lezen: het kan de records van elke tabel hersc
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Its model tasks"
 msgstr "Zijn modeltaken"
-
-#: src/apps/store-changes.tsx
-msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
-msgstr "De standaardwaarden van de nieuwe velden worden ingevuld. Releases die dit nodig hebben, kunnen actueel worden gemaakt zodra het klaar is."
 
 #: src/workflows/files-and-apps.tsx
 msgid "Its next start is refused until an admin approves {alias} again, and runs already started fail at their next call through it."
@@ -8388,10 +8311,6 @@ msgstr "Nog geen projecten"
 msgid "No query uses it yet"
 msgstr "Nog geen query gebruikt hem"
 
-#: src/apps/store-change-errors.ts
-msgid "No record is to blame, so an admin can only abandon the change, in the App's settings."
-msgstr "Geen enkel record is de oorzaak, dus een admin kan de wijziging alleen verwerpen in de instellingen van de App."
-
 #: src/apps/app-data.tsx
 msgid "No record of this table has that ID."
 msgstr "Geen record van deze tabel heeft die ID."
@@ -9255,10 +9174,6 @@ msgstr "Alleen jij en je agents lezen het, tot je het deelt."
 #: src/connections/connected-dialog.tsx
 msgid "Only you can use it."
 msgstr "Alleen jij kunt het gebruiken."
-
-#: src/apps/store-change-errors.ts
-msgid "Only your organization's admins can abandon a change to a store."
-msgstr "Alleen de beheerders van je organisatie kunnen een wijziging in een opslag opgeven."
 
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/in-inbox.tsx
@@ -10438,10 +10353,6 @@ msgstr "Record-to-Report"
 msgctxt "a table's records"
 msgid "Records"
 msgstr "Records"
-
-#: src/apps/store-changes.tsx
-msgid "Records checked: {scanned}. Filled in: {filled}."
-msgstr "Gecontroleerde records: {scanned}. Ingevuld: {filled}."
 
 #: src/apps/data-model-changes.tsx
 msgid "Records in {table} that lack {field} get “{value}”."
@@ -12626,10 +12537,6 @@ msgstr "Iemand niet langer een app laten bezoeken"
 msgid "Stopped."
 msgstr "Gestopt."
 
-#: src/apps/store-changes.tsx
-msgid "Store ID: {store}"
-msgstr "Opslag-ID: {store}"
-
 #: src/routes/_shell.settings.billing.tsx
 msgid "Stripe is not linked yet"
 msgstr "Stripe is nog niet gekoppeld"
@@ -13148,10 +13055,6 @@ msgstr "De catalogus vermeldt {app} niet, dus de tools kunnen niet worden getoon
 msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 msgstr "De catalogus van integraties kon niet worden gelezen, dus deze pagina toont alleen wat je accounts erover zeggen."
 
-#: src/apps/store-changes.tsx
-msgid "The change to the store {name} was abandoned"
-msgstr "De wijziging in de opslag {name} is opgegeven"
-
 #: src/apps/indexes-view.tsx
 msgid "The chat adds indexes as it writes the App’s queries."
 msgstr "De chat voegt indexen toe terwijl hij de query’s van de App schrijft."
@@ -13327,14 +13230,6 @@ msgstr "De migratie {migration} faalde op haar testrecord {fixture} toen deze ve
 msgid "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the App again."
 msgstr "De migratie {migration} faalde op haar testrecords toen deze versie werd verzegeld: {reason}. Ze draait op geen enkel record, dus de versie kan niet actueel worden gemaakt: herstel de migratie of haar testrecords en laat de app opnieuw bouwen."
 
-#: src/apps/store-changes.tsx
-msgid "The migration {migration} of the table {table} failed as a whole: its code failed, not a record."
-msgstr "De migratie {migration} van de tabel {table} is als geheel mislukt: de code mislukte, niet een record."
-
-#: src/apps/store-changes.tsx
-msgid "The migration {migration} of the table {table} failed on the record {record}."
-msgstr "De migratie {migration} van de tabel {table} is mislukt bij het record {record}."
-
 #: src/apps/store-change-errors.ts
 msgid "the migration threw an error"
 msgstr "de migratie gaf een fout"
@@ -13358,10 +13253,6 @@ msgstr "Het maandbudget voor AI is nog niet vastgesteld."
 #: src/apps/blueprints.tsx
 msgid "The new App starts as a copy of it, with none of its data. Its access waits for an admin."
 msgstr "De nieuwe app begint als kopie ervan, zonder de gegevens. De toegang ervan wacht op een beheerder."
-
-#: src/apps/store-changes.tsx
-msgid "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
-msgstr "Het nieuwe veld {field} van de tabel {table} kan niet worden ingevuld: het record {record} heeft onder die naam al een waarde die het veld niet accepteert."
 
 #: src/dashboard/todo-pile.tsx
 msgid "The next one"
@@ -13545,10 +13436,6 @@ msgstr "De bronbestanden van versie {sourceVersion}"
 msgid "The step, as JSON"
 msgstr "De stap, als JSON"
 
-#: src/apps/store-changes.tsx
-msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this App or any other App using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
-msgstr "De opslag houdt zijn tabellen zoals ze zijn en neemt weer wijzigingen aan. De release die deze wijziging nodig had, kan nooit actueel worden gemaakt, in deze app noch in een andere app die de opslag gebruikt: die moet opnieuw worden gebouwd. De nieuwe velden blijven gereserveerd met de betekenis die deze wijziging ze gaf: een latere versie kan ze alleen precies zo opnieuw toevoegen. De al ingevulde waarden blijven onzichtbaar in de records staan. Dit kan niet ongedaan worden gemaakt."
-
 #: src/settings/teams.tsx
 msgid "The team couldn't be created. Try again."
 msgstr "Het team kon niet worden gemaakt. Probeer het opnieuw."
@@ -13702,10 +13589,6 @@ msgstr "Dit zijn je apps. Elke app is gemaakt voor een team of een persoon, met 
 msgid "These features always use Grasp's own provider keys, whichever providers you connect above."
 msgstr "Deze functies gebruiken altijd de eigen sleutels van Grasp, welke providers je hierboven ook koppelt."
 
-#: src/apps/store-changes.tsx
-msgid "These fields stay reserved with their current meaning: {reserved}."
-msgstr "Deze velden blijven gereserveerd met hun huidige betekenis: {reserved}."
-
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named} and {more} more."
 msgstr "Deze notities rusten nergens anders op en gaan ook mee: {named} en nog {more}."
@@ -13713,10 +13596,6 @@ msgstr "Deze notities rusten nergens anders op en gaan ook mee: {named} en nog {
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named}."
 msgstr "Deze notities rusten nergens anders op en gaan ook mee: {named}."
-
-#: src/apps/store-changes.tsx
-msgid "These releases can never be made current: {releases}."
-msgstr "Deze releases kunnen nooit actueel worden gemaakt: {releases}."
 
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
@@ -13796,17 +13675,9 @@ msgstr "Deze browser is te oud voor app-pagina’s. Werk hem bij of open deze pa
 msgid "This can't be undone. Confirm by {until}, or prepare it again."
 msgstr "Dit kan niet ongedaan worden gemaakt. Bevestig vóór {until}, of bereid het opnieuw voor."
 
-#: src/apps/store-change-errors.ts
-msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
-msgstr "Deze wijziging wordt opnieuw toegepast, dus die kan nu niet worden opgegeven. De pagina toont nu hoe het ervoor staat."
-
 #: src/apps/app-code.tsx
 msgid "This change is too large to show line by line."
 msgstr "Deze wijziging is te groot om regel voor regel te tonen."
-
-#: src/apps/store-change-errors.ts
-msgid "This change was already abandoned."
-msgstr "Deze wijziging is al opgegeven."
 
 #: src/brain/memory-page.tsx
 msgctxt "memory record scope"
@@ -14003,26 +13874,6 @@ msgstr "Deze pagina wil een andere site openen in een nieuw tabblad. Open die al
 msgid "This page's stored code no longer matches the code that was published, so it wasn't opened. Tell an admin."
 msgstr "De opgeslagen code van deze pagina komt niet meer overeen met de gepubliceerde code, dus is hij niet geopend. Laat het een beheerder weten."
 
-#: src/apps/store-change-errors.ts
-msgid "This store no longer exists, so there is nothing to abandon."
-msgstr "Deze opslag bestaat niet meer, dus er valt niets op te geven."
-
-#: src/apps/store-change-errors.ts
-msgid "This version changes the App's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
-msgstr "Deze versie wijzigt de gegevens van de app met een migratie, en die kan niet afronden: de omzetting mislukte, of gaf iets terug dat de tabel niet accepteert."
-
-#: src/apps/store-change-errors.ts
-msgid "This version changes the App's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
-msgstr "Deze versie wijzigt de gegevens van de app, en de wijziging kan niet worden toegepast: een record heeft al een waarde die een van de nieuwe velden niet accepteert."
-
-#: src/apps/store-change-errors.ts
-msgid "This version changes the App's data, and the change can't be applied: filling in its new fields stopped making progress."
-msgstr "Deze versie wijzigt de gegevens van de app, en de wijziging kan niet worden toegepast: het invullen van de nieuwe velden kwam niet meer verder."
-
-#: src/apps/store-change-errors.ts
-msgid "This version changes the App's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
-msgstr "Deze versie wijzigt de gegevens van de app, en de wijziging kan niet worden toegepast: het invullen van een van de nieuwe velden zou een record groter maken dan een record mag zijn."
-
 #: src/apps/app-code.tsx
 msgid "This version has no files."
 msgstr "Deze versie heeft geen bestanden."
@@ -14038,10 +13889,6 @@ msgstr "Deze versie van de app is ingetrokken en draait niet meer. Een beheerder
 #: src/pages/page-frame.tsx
 msgid "This version of the App was revoked, and the page was stopped. An admin can make another version current."
 msgstr "Deze versie van de app is ingetrokken en de pagina is gestopt. Een beheerder kan een andere versie actueel maken."
-
-#: src/apps/store-change-errors.ts
-msgid "This version's data change is still being applied. Try again in a moment."
-msgstr "De gegevenswijziging van deze versie wordt nog toegepast. Probeer het zo opnieuw."
 
 #: src/chat/thread.tsx
 msgid "Thought for {time}"
@@ -14472,14 +14319,6 @@ msgstr "Tot Grasp-support er een instelt, kunnen interviewlinks niet per mail we
 #: src/routes/_shell.settings.billing.tsx
 msgid "Until it is, there is no plan, card or invoice. The billing details and emails below are kept for when it is."
 msgstr "Tot die tijd is er geen abonnement, kaart of factuur. De factuurgegevens en e-mails hieronder worden daarvoor bewaard."
-
-#: src/apps/store-changes.tsx
-msgid "Until this is resolved, no release that changes this store's tables can be made current, in this App or any other App using the store. Mend the record through the App and the change is tried again, or abandon it."
-msgstr "Tot dit is opgelost, kan geen release die de tabellen van deze opslag wijzigt actueel worden gemaakt, in deze app noch in een andere app die de opslag gebruikt. Herstel het record via de app, dan wordt de wijziging opnieuw geprobeerd, of geef haar op."
-
-#: src/apps/store-changes.tsx
-msgid "Until this is resolved, no release that changes this store's tables can be made current, in this App or any other App using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
-msgstr "Tot dit is opgelost, kan geen release die de tabellen van deze opslag wijzigt actueel worden gemaakt, in deze app noch in een andere app die de opslag gebruikt. Geen enkel record is de oorzaak, dus er valt niets te herstellen: geef de wijziging op, zodat de opslag weer wijzigingen aanneemt."
 
 #: src/apps/app-versions.tsx
 msgid "Up for review"

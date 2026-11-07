@@ -376,6 +376,7 @@ export const definitionToolNames = [
   "addField",
   "changeField",
   "renameField",
+  "renameTable",
   "setAccess",
   "addIndex",
   "addPermission",

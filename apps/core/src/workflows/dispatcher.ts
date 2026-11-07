@@ -6,7 +6,6 @@ import type {
   WorkflowStep,
 } from "@grasp-os/workerflow/contracts";
 
-import { runBackfill } from "../backfill-run.ts";
 import { runExtraction } from "../knowledge/extraction.ts";
 import { brainOf } from "../knowledge/ports.ts";
 import { runCandidateWorkflow } from "./candidate-runs.ts";
@@ -111,7 +110,6 @@ const internalRuns: Record<
   (env: Env, input: unknown, step: RunStep) => Promise<void>
 > = {
   extraction: runExtraction,
-  backfill: runBackfill,
   indexing: async (env, input, step) => {
     await runIndexing(brainOf(env), input, step);
   },

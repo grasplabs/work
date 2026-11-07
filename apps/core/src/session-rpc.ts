@@ -35,7 +35,6 @@ import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
 import { staffAudited } from "./staff-audit.ts";
 import { StephenRequestsRpc } from "./stephen-requests.ts";
-import { StoresRpc } from "./stores-rpc.ts";
 import { TemplatesRpc } from "./templates-rpc.ts";
 import { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
 import { WaitingRpc } from "./waiting-rpc.ts";
@@ -80,7 +79,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #audit: AuditRpc;
   readonly #models: ModelsRpc;
   readonly #aiProviders: AiProvidersRpc;
-  readonly #stores: StoresRpc;
   readonly #pendingActions: PendingActionsRpc;
   readonly #unknownOutcomes: UnknownOutcomesRpc;
   readonly #signals: SignalsRpc;
@@ -127,7 +125,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#audit = new AuditRpc(env, full);
     this.#models = new ModelsRpc(env, full);
     this.#aiProviders = new AiProvidersRpc(env, full);
-    this.#stores = new StoresRpc(env, full);
     this.#pendingActions = new PendingActionsRpc(env, full);
     this.#unknownOutcomes = new UnknownOutcomesRpc(env, full);
     this.#signals = new SignalsRpc(env, full);
@@ -291,10 +288,6 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get aiProviders(): AiProvidersRpc {
     return this.#aiProviders;
-  }
-
-  get stores(): StoresRpc {
-    return this.#stores;
   }
 
   get pendingActions(): PendingActionsRpc {

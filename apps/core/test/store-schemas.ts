@@ -10,6 +10,9 @@ import type { AccessMode, SchemaManifest } from "@grasp-os/sdk/host";
 import { mintRecordId } from "@grasp-os/shared/record-ids";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 
+import type { SchemaIds } from "../src/schema-changes.ts";
+import type { AppliedSchema, SchemaApply } from "../src/store-host.ts";
+
 /**
  * The manifest text of a schema of tables `names`, each with a `title`, as
  * core hands a store's object a schema to define its tables from. Each
@@ -82,3 +85,68 @@ export const memberRoles: WriterRoles = { appMember: true, appBuilder: true };
 
 /** A new record's ID, as core mints one for an insert. */
 export const newRecordId = (): string => mintRecordId();
+
+/** Each table's stable ID in these tests, by name: a UUID, as a definition's. */
+const tableIds = new Map<string, string>();
+
+/**
+ * The stable IDs a definition would give the schema whose manifest is
+ * `text`: each table one of its own, the same for its name in every test
+ * of the file, and each field its name.
+ */
+export const namedIds = (text: string): SchemaIds => {
+  let tables: SchemaManifest["tables"];
+  try {
+    ({ tables } = readSchemaManifest(text).manifest);
+  } catch {
+    // Text that isn't a manifest: the store refuses it.
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(tables).map(([name, table]) => {
+      const id = tableIds.get(name) ?? crypto.randomUUID();
+      tableIds.set(name, id);
+      return [
+        name,
+        {
+          id,
+          fields: Object.fromEntries(
+            Object.keys(table.fields).map((field) => [field, field])
+          ),
+        },
+      ];
+    })
+  );
+};
+
+/**
+ * The schema whose manifest is `text` as a publish applies it
+ * (`StoreHost.applySchema`), its IDs `namedIds`, applied for Ada.
+ */
+export const applied = (
+  text: string,
+  more: Partial<SchemaApply> = {}
+): SchemaApply => ({
+  manifest: text,
+  ids: namedIds(text),
+  actor: { type: "person", userId: "ada" },
+  principal: "ada",
+  ...more,
+});
+
+/**
+ * Applies the schema whose manifest is `text` to `store` (`applied`):
+ * what it answered, and each of its tables' IDs by name.
+ */
+export const appliedTables = async (
+  store: { applySchema: (change: SchemaApply) => Promise<AppliedSchema> },
+  text: string
+): Promise<AppliedSchema & { tables: Record<string, string> }> => {
+  const answered = await store.applySchema(applied(text));
+  return {
+    ...answered,
+    tables: Object.fromEntries(
+      Object.entries(namedIds(text)).map(([name, { id }]) => [name, id])
+    ),
+  };
+};

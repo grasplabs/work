@@ -15,7 +15,12 @@ import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { readConsistently, StoreReader } from "../src/store-reader.ts";
 import { storeOfNewApp } from "./app-stores.ts";
-import { accessedManifest, memberRoles, newRecordId } from "./store-schemas.ts";
+import {
+  accessedManifest,
+  applied,
+  memberRoles,
+  newRecordId,
+} from "./store-schemas.ts";
 
 // A query operation's reads as one state of the store (spec 6.3), through
 // core's way into a store and its Durable Object: the host-side reader
@@ -45,16 +50,18 @@ interface Fixture {
 
 const storeWithNotes = async (): Promise<Fixture> => {
   const store = await openStore(env, await storeOfNewApp(env, builder));
-  const { schemaHash } = await store.defineTables(
-    manifestText(
-      accessedManifest(schema, {
-        tables: {
-          notes: { read: "appMembers", write: "appMembers" },
-          people: { read: "appMembers", write: "appMembers" },
-          // Read by the App's builders only: refused to Ada's reads.
-          drafts: { read: "appBuilders", write: "appMembers" },
-        },
-      })
+  const { schemaHash } = await store.applySchema(
+    applied(
+      manifestText(
+        accessedManifest(schema, {
+          tables: {
+            notes: { read: "appMembers", write: "appMembers" },
+            people: { read: "appMembers", write: "appMembers" },
+            // Read by the App's builders only: refused to Ada's reads.
+            drafts: { read: "appBuilders", write: "appMembers" },
+          },
+        })
+      )
     )
   );
   return {

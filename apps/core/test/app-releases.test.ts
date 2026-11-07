@@ -1631,7 +1631,7 @@ JSON.stringify = (value, ...rest) => {
 
   it("binds its own App's store alone: another App's seal, by a builder of both, never reaches it", async () => {
     const first = await appWith(notesFiles());
-    await seal(first);
+    await publishVersion(env, first.owner, first.app, 1);
     const second = await appWith(withTable("beta"), "Beta", first.owner);
     const sealed = await seal(second);
     const opened = await openStore(env, first.store);

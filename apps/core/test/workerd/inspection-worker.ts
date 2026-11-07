@@ -14,11 +14,11 @@ import { inspectApp, registerApp } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 
 import { inspected } from "../../src/app-inspection.ts";
-import { transformBatch } from "../../src/migration-transform.ts";
+import { transformBatch } from "../../src/migration-run.ts";
 import type {
   TransformOutcome,
   TransformRelease,
-} from "../../src/migration-transform.ts";
+} from "../../src/migration-run.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import type { SandboxedEnv } from "../../src/sandboxed.ts";
 

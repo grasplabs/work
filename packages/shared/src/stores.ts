@@ -466,59 +466,6 @@ export const committedSchema = z.strictObject({
 });
 export type Committed = z.infer<typeof committedSchema>;
 
-/**
- * Whom a store applies a schema for: one version of a resource (an App's
- * sealed release), named in the receipt the store keeps of it.
- */
-export const schemaConsumerSchema = z.strictObject({
-  resourceId: identifierSchema,
-  resourceVersion: z.number().int().min(1),
-});
-export type SchemaConsumer = z.infer<typeof schemaConsumerSchema>;
-
-/**
- * What handing a store a schema did to its data contract: the contract's
- * hash after it, the hash of the plan that moved it, whether it changed,
- * and the receipt the store keeps of it for its consumer (null when none
- * was named). Applying the same schema again answers the first receipt.
- */
-export interface AppliedContract {
-  /**
-   * The contract's hash after the change: for a receipt answered again,
-   * the one its first application left, so it always matches `planHash`.
-   */
-  hash: string;
-  planHash: string;
-  changed: boolean;
-  receiptId: string | null;
-  /**
-   * Whether the contract `hash` names is still pending: its defaulted
-   * fields are being filled in (`StoreHost.fillMissing`), or it `awaits`
-   * its version being made current, and the store's contract in force is
-   * the one before it until then.
-   */
-  pending: boolean;
-  /**
-   * Whether the change checks the store's records and is applied as its
-   * version is made current (`StoreHost.activateReady`).
-   */
-  awaits: boolean;
-}
-
-/**
- * What a store answers when handed a schema: the schema's hash, which its
- * host computed from the manifest itself, the ID of each of the schema's
- * tables by name, and of every table the store holds, the schema's among
- * them (tables are never removed, so a store may hold others), and what
- * it did to the store's contract.
- */
-export interface DefinedTables {
-  schemaHash: string;
-  tables: Record<string, string>;
-  storeTables: Record<string, string>;
-  contract: AppliedContract;
-}
-
 /** One record, as the store holds it: its managed fields and its document. */
 export interface StoredRecord {
   id: string;
@@ -582,63 +529,33 @@ export const dataErrors = defineErrorFamily({
 });
 
 /**
- * Why a store refused a schema it was handed (spec 17): the change needs
- * a migration (`details.changes` lists each change and why), or records
- * don't fit a field it checks (`details.questions`, `SchemaQuestion`),
- * as it was sealed or as its release was being made current; the store's
- * record of its contract disagrees with its own recorded schemas, or
- * can't be rebuilt from them, which blocks every schema change until
- * repaired, since guessing could lose data; or other schemas kept
- * changing the contract meanwhile (retryable). And why a schema the store
- * took isn't in force yet: its defaulted fields are still being filled in
- * (`migration.pending`, retryable, with the backfill's progress), or the
- * fill found a record whose value doesn't fit the field
- * (`migration.backfill_failed`, naming the record and the target and run
- * an admin abandons it as); a backfill's step from a run the store moved
- * past is `migration.superseded`. Once an admin abandoned a failed
- * target, the releases sealed on it are `migration.abandoned`; only a
- * failed one can be (`migration.not_failed`). A release whose schema an
- * explicit migration left behind can't be made current again (a rollback,
- * spec 17.4): `migration.rollback_incompatible`, its details naming the
- * App's retained versions on the same store that still fit
- * (`details.compatible`, newest first).
+ * Why a store refused a version's schema as it was published (spec 17):
+ * the change needs a migration (`details.refused`, each change and why),
+ * or records lack a field it requires (`details.lacking`, each with how
+ * many); its migration doesn't transform from the schema the store holds,
+ * or failed on a record (`details`: the migration, table, record and
+ * why); records changed while it ran, or another version's publish
+ * applied its schema meanwhile (retryable). And why a call is refused: a
+ * version runs on its store only under the schema the store holds, its
+ * App's current version's.
  */
-/**
- * The most of an App's retained releases a refused rollback looks at for
- * versions that still fit its store (`migration.rollback_incompatible`):
- * its newest.
- */
-export const compatibleVersionsMax = 100;
-
 export const migrationErrors = defineErrorFamily({
   "migration.required":
-    "This schema change can't be applied on its own. Each change it lists needs a migration; each question names records that don't fit a field it checks, and is answered by a migration or, where records lack the field, a value for it.",
+    "This schema change can't be published as it is: each change it lists needs a migration in code, and each field records lack needs a value for them (an answer) or a migration.",
   "migration.preference_changed":
     "This version changes a preference people may already have chosen. Keep each preference as it was (only its default may change), or add a new preference under a new name.",
   "migration.metadata_missing":
-    "This store's schema contract is missing and can't be rebuilt from the schemas it recorded, so no schema change can be applied until it is repaired.",
-  "migration.busy":
-    "This store kept changing while the schema was applied. Try again in a moment.",
+    "This store holds records but no catalog of its schema, so no schema can be applied to it.",
   "migration.metadata_corrupt":
-    "This store's record of its schema contract is damaged, so no schema change can be applied until it is repaired.",
-  "migration.pending":
-    "This store is still filling in the defaults of a schema change. Try again once it has finished.",
-  "migration.backfill_failed":
-    "This store couldn't fill in a schema change's defaults: a record already holds a value the new field doesn't accept, so the change needs a migration.",
-  "migration.superseded":
-    "This backfill step belongs to a run the store has moved past.",
-  "migration.not_failed":
-    "Only a failed schema change can be abandoned: this one's defaults are still being filled in.",
-  "migration.abandoned":
-    "An admin abandoned this schema change after its defaults couldn't be filled in, so a release sealed on it can't run on this store. Seal a new version.",
+    "This store's record of its preferences is damaged, so no version can change them until it is repaired.",
+  "migration.busy":
+    "This store changed while the schema was applied, or another version was being published. Publish again in a moment.",
   "migration.invalid":
-    "This version's migrations don't fit this store: each transforms one table, from a schema the store recorded, to this version's schema, and a migration can't share a change with defaults to fill in elsewhere.",
-  "migration.incompatible_write":
-    "This version's schema no longer fits the store: a newer version's schema change or migration moved its records on. Make that version current, or make this one current again.",
+    "This version's migrations don't fit its store: each transforms one table from the schema the store holds to this version's.",
+  "migration.failed":
+    "This version's migration failed on a record, so nothing was published. Fix the migration and publish again.",
   "migration.not_current":
-    "This version's schema change is applied to the store's records as the version is made current. Until then it can't write to the store.",
-  "migration.rollback_incompatible":
-    "This version's schema no longer fits its store: a migration moved its records on, so it can't be made current again. Make one of the compatible versions current instead.",
+    "This version's schema isn't the one its store holds: a version runs on its store only once it is published.",
 });
 
 /**
@@ -651,47 +568,8 @@ export const queryErrors = defineErrorFamily({
 });
 
 /**
- * Why a store's backfill failed (`StoresApi.backfill`): a record whose
- * value doesn't fit a field it fills in, or runs that couldn't move on.
- */
-export type StoreBackfillFailure =
-  | {
-      table: string;
-      field: string;
-      id: string;
-      reason: "invalid_value" | "too_large";
-    }
-  | MigrationFailure
-  | { reason: "stalled" }
-  | { reason: "ready" };
-
-/**
- * Why an explicit migration's batch failed (spec 17.2): the record, when
- * one is to blame, and what was wrong with it. `issues` (what the
- * transform threw, or why its output was refused) may carry content of
- * other records of the batch, so only the migration's App's builders and
- * admins are shown it.
- */
-export interface MigrationFailure {
-  table: string;
-  id: string | null;
-  migration: string;
-  reason:
-    | "invalid_input"
-    | "threw"
-    | "invalid_output"
-    | "too_large"
-    | "invalid_answer"
-    | "outside_contract"
-    | "reference_changed"
-    | "rule_changed"
-    | "fixtures_failed";
-  issues: string[];
-}
-
-/**
- * An App's value for the records that lack one field a change requires
- * (the SDK's `SchemaAnswer`, schema-plan.ts): a backfill's default.
+ * An App's value for the records that lack one field its schema requires
+ * (the SDK's `SchemaAnswer`), filled in as the version is published.
  */
 export const schemaAnswerSchema = z.strictObject({
   table: z.string().min(1).max(64),
@@ -701,120 +579,3 @@ export const schemaAnswerSchema = z.strictObject({
 
 /** The most answers one schema is applied with. */
 export const schemaAnswersMax = 64;
-
-/**
- * Why a record doesn't fit a field a schema change checks: it lacks the
- * field where it's required and no value was given for it (`missing`),
- * the value given for it doesn't fit (`unfit`), it holds a value that
- * doesn't fit (`invalid`, which only a migration reshapes), or it would
- * grow past what a record holds (`too_large`). Never what the record
- * holds.
- */
-export type SchemaCheckReason = "missing" | "invalid" | "unfit" | "too_large";
-
-/**
- * A field a schema change checks that records don't fit, as the store
- * asks about it (`migration.required`, `details.questions`): how many
- * records don't, the first of them by ID with why, and what may answer
- * it: an explicit migration, and a value the App gives the field where
- * one would settle the records (`missing`, `unfit`) and the change isn't
- * a rollback, whose answers are the old release's.
- */
-export interface SchemaQuestion {
-  table: string;
-  field: string;
-  rows: number;
-  records: { id: string; reason: SchemaCheckReason }[];
-  answers: ("value" | "migration")[];
-}
-
-/** The most records a question lists. */
-export const schemaQuestionRecordsMax = 20;
-
-/** The explicit migration a schema is applied with, for one table. */
-export const storeMigrationSchema = z.strictObject({
-  name: z.string().min(1).max(64),
-  table: z.string().min(1).max(64),
-  fromSchema: z.string().regex(/^[0-9a-f]{64}$/u),
-  toSchema: z.string().regex(/^[0-9a-f]{64}$/u),
-});
-export type StoreMigration = z.input<typeof storeMigrationSchema>;
-
-/**
- * A store's pending schema change and its backfill, as an admin sees it:
- * the target, the run it is at, how far it got, and why it failed.
- */
-export interface StoreBackfill {
-  target: string;
-  state: "running" | "failed";
-  attempt: number;
-  scanned: number;
-  filled: number;
-  failure: StoreBackfillFailure | null;
-  /**
-   * An explicit migration that finished: it takes over as a release that
-   * needs it is made current, and an admin may still abandon it.
-   */
-  ready: boolean;
-}
-
-/**
- * A store an App uses, and its pending schema change
- * (`StoresApi.appBackfills`).
- */
-export interface AppStoreBackfill {
-  store: string;
-  /**
-   * What the App calls the store: the alias of its newest binding; null
-   * for its default store when no version it runs or reviews binds it.
-   */
-  alias: string | null;
-  backfill: StoreBackfill;
-}
-
-/**
- * An admin's abandonment of a store's failed backfill: the target, as
- * of the run they saw fail (`StoreBackfill.attempt`).
- */
-export const abandonBackfillSchema = z.strictObject({
-  store: storeIdSchema,
-  target: z.string().regex(/^[0-9a-f]{64}$/u),
-  attempt: z.number().int().min(1),
-});
-export type AbandonBackfill = z.input<typeof abandonBackfillSchema>;
-
-/**
- * What abandoning a failed backfill did: the releases sealed on the
- * target, which now never run on the store, and the fields it reserved,
- * which a later schema may add again only as they were.
- */
-export interface AbandonedBackfill {
-  store: string;
-  target: string;
-  attempt: number;
-  scanned: number;
-  filled: number;
-  failure: StoreBackfillFailure;
-  releases: { app: string; version: number }[];
-  reserved: { table: string; field: string }[];
-  abandonedAt: string;
-}
-
-/**
- * Business stores, for admins: a store's failed schema change, and
- * abandoning it (spec 17.2, 17.3). Abandoning keeps the store's contract
- * as it was and takes the releases sealed on the change out of force, so
- * the store takes schema changes again. Never Grasp staff.
- */
-export interface StoresApi {
-  /** The store's pending schema change and its backfill; null for none. */
-  backfill: (store: string) => Promise<StoreBackfill | null>;
-  /**
-   * The pending schema changes of the stores an App runs on: those its
-   * current and pending versions are bound to, newest first, then its
-   * default store. Stores without one aren't listed.
-   */
-  appBackfills: (app: string) => Promise<AppStoreBackfill[]>;
-  /** Abandons the store's failed backfill (see `AbandonedBackfill`). */
-  abandonBackfill: (input: AbandonBackfill) => Promise<AbandonedBackfill>;
-}

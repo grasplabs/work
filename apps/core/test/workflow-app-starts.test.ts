@@ -83,6 +83,7 @@ import { allEvents } from "./audit-events.ts";
 import { objectSchema } from "./json-workflow-apps.ts";
 import { sleeping, woken } from "./runs.ts";
 import { outcome, unique } from "./sign-in.ts";
+import { applied } from "./store-schemas.ts";
 
 // Starting independent workflows from an App's server functions
 // (operations.ts, workflow-start-intents.ts): an action's
@@ -460,7 +461,7 @@ const fixture = async (waits = false): Promise<Fixture> => {
   const sealed = await sealedManifest(app);
   const storeId = await storeOfNewApp(env, ada);
   const store = await openStore(env, storeId);
-  await store.defineTables(manifestText(manifest.schema));
+  await store.applySchema(applied(manifestText(manifest.schema)));
   const workflow = await workflowOf(ada, waits);
   const binding = await bindWorkflowToApp(env, ada, workflow.id, {
     app,

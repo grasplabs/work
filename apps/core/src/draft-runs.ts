@@ -8,7 +8,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId, WorkspaceId } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
 import {
   draftSealFailures,
   operationErrors,
@@ -21,6 +21,7 @@ import type { WriterRoles } from "@grasp-os/shared/stores";
 import { exports } from "cloudflare:workers";
 
 import { operationRoles } from "./app-access.ts";
+import { schemaIdsOf } from "./app-definition.ts";
 import {
   publicOperationOf,
   readFunctionRequest,
@@ -53,7 +54,7 @@ import { personalWorkspaceId } from "./personal-workspace.ts";
 import { functionProblem } from "./preview-reports.ts";
 import { readWindow } from "./query-windows.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
-import { schemaRefusal } from "./store-backfill.ts";
+import type { SchemaIds } from "./schema-changes.ts";
 import { isWorkflowQueryPath } from "./workflow-reference-queries.ts";
 import type { Draft } from "./workspace.ts";
 
@@ -117,6 +118,8 @@ export interface DraftRun {
    */
   readonly seed: string;
   readonly release: Release;
+  /** The stable IDs its definition gives its schema (app-definition.ts). */
+  readonly ids: SchemaIds;
 }
 
 /** How long a throwaway store keeps what it holds once nothing uses it. */
@@ -223,6 +226,7 @@ export const draftRunOf = async (
     app
   );
   const files = await draftFiles(env, app, draft);
+  const release = await sealed(env, app, (draft.base ?? 0) + 1, files);
   return {
     app,
     chatId,
@@ -230,7 +234,8 @@ export const draftRunOf = async (
     revision: draft.revision,
     own: Object.keys(draft.changes).length > 0,
     seed,
-    release: await sealed(env, app, (draft.base ?? 0) + 1, files),
+    release,
+    ids: schemaIdsOf(Object.fromEntries(files), release.app.schema),
   };
 };
 
@@ -284,8 +289,10 @@ const draftStore = async (
         run.app,
         run.seed,
         release.manifest.schemaHash,
-        // Its preferences' shape too, which the schema's hash leaves out:
-        // another type of one is a new store, never one it can't read.
+        // Its tables' and fields' IDs and its preferences' shape too, which
+        // the schema's hash leaves out: other ones are a new store, never
+        // one it can't read.
+        canonicalText(run.ids),
         JSON.stringify(release.app.preferences),
       ])
     )}`
@@ -305,24 +312,14 @@ const draftStore = async (
     { storeId: id, seed: run.seed, revision: run.revision }
   );
   await holdThrowawayStore(env, id, now + throwawayStoreMs);
-  const consumer = {
-    resourceId: run.app,
-    resourceVersion: release.manifest.resourceVersion,
-  };
-  const defined = await store.defineTables(
-    manifestText(release.app.schema),
-    consumer,
-    [],
-    (release.app.answers ?? []).map((answer) => ({ ...answer }))
-  );
-  // Its version is current there at once, so a change that checks
-  // records applies now, and must leave the schema in force.
-  if (defined.contract.awaits) {
-    const status = await store.activate(defined.schemaHash, consumer);
-    if (status.state !== "active") {
-      throw schemaRefusal(status);
-    }
-  }
+  // A store made for this schema alone: applied again, it changes nothing.
+  await store.applySchema({
+    manifest: manifestText(release.app.schema),
+    ids: run.ids,
+    answers: release.app.answers ?? [],
+    actor: { type: "person", userId },
+    principal: userId,
+  });
   heldStores.set(id, now);
   return store;
 };

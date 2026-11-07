@@ -73,8 +73,6 @@ import { SaveAsBlueprint } from "./blueprints.tsx";
 import { PackageApprovals } from "./package-approvals.tsx";
 import { ResourceBindings } from "./resource-bindings.tsx";
 import type { ResourcesPage } from "./resource-bindings.tsx";
-import type { readStoreChanges } from "./store-changes.tsx";
-import { StoreChanges } from "./store-changes.tsx";
 import { useAppRead } from "./use-app-read.ts";
 import type { AppRead } from "./use-app-read.ts";
 
@@ -648,31 +646,26 @@ const General = ({
   app,
   identity,
   builds,
-  changes,
 }: {
   app: ViewedApp;
   identity: Identity;
   builds: boolean;
-  changes: StoreChangesRead;
 }) => {
   const read = useAppRead(
     app.id,
     isAdmin(identity.role) ? readGeneralAsAdmin : readGeneralAsMember
   );
   return (
-    <>
-      <StoreChanges changes={changes} app={app} />
-      <Read read={read}>
-        {(loaded) => (
-          <GeneralForm
-            app={app}
-            builds={builds}
-            identity={identity}
-            read={loaded}
-          />
-        )}
-      </Read>
-    </>
+    <Read read={read}>
+      {(loaded) => (
+        <GeneralForm
+          app={app}
+          builds={builds}
+          identity={identity}
+          read={loaded}
+        />
+      )}
+    </Read>
   );
 };
 
@@ -983,9 +976,7 @@ const SectionBody = ({
   identity,
   builds,
   options,
-  changes,
 }: {
-  changes: StoreChangesRead;
   section: AppSettingsSection;
   app: ViewedApp;
   identity: Identity;
@@ -993,14 +984,7 @@ const SectionBody = ({
   options: Loaded<SurfaceSummary[]> | undefined;
 }) => {
   if (section === "general") {
-    return (
-      <General
-        app={app}
-        builds={builds}
-        changes={changes}
-        identity={identity}
-      />
-    );
+    return <General app={app} builds={builds} identity={identity} />;
   }
   if (section === "sharing") {
     return <Sharing app={app} identity={identity} />;
@@ -1028,12 +1012,6 @@ const sectionDescriptions = {
   packages: msg`The npm packages approved for the App, and taking an approval back.`,
   options: msg`The settings the App offers itself.`,
 } satisfies Partial<Record<AppSettingsSection, MessageDescriptor>>;
-
-/**
- * The read of the App's stores' changes, started by the route's loader:
- * for the organization's own admins alone, who may abandon one.
- */
-export type StoreChangesRead = ReturnType<typeof readStoreChanges>;
 
 /** A section's link in the list: the workspace's or the settings page's. */
 const SectionLink = ({
@@ -1089,13 +1067,11 @@ export const AppSettings = ({
   identity,
   section: asked,
   within,
-  storeChanges,
 }: {
   app: ViewedApp;
   identity: Identity;
   section: AppSettingsSection | undefined;
   within: "workspace" | "page";
-  storeChanges: StoreChangesRead;
 }) => {
   const { t, i18n } = useLingui();
   const builds = buildsApp(app, identity);
@@ -1142,7 +1118,6 @@ export const AppSettings = ({
           <SectionBody
             app={app}
             builds={builds}
-            changes={storeChanges}
             identity={identity}
             key={`${app.id}/${section}`}
             options={surfaces}

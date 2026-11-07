@@ -20,12 +20,10 @@ import {
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
 import { HammerIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { makeCurrentFailure } from "../apps/store-change-errors.ts";
-import { storeChangesAnchor } from "../apps/store-changes.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -483,9 +481,8 @@ type MadeCurrent = { made: true } | ReturnType<typeof makeCurrentFailure>;
 /**
  * Makes `version` of `app` current, and with `publish` then publishes the
  * App (a draft until then: its users can't open it, its triggers don't
- * fire), or says why core refused: a store's failed change it waits on
- * points to the App's page (`link`). Outside the component, as the
- * React Compiler can't compile `try`.
+ * fire), or says why core refused. Outside the component, as the React
+ * Compiler can't compile `try`.
  */
 const setCurrentOf = async (
   session: Session,
@@ -645,18 +642,6 @@ export const PendingVersion = ({
               </li>
             ))}
           </ul>
-        )}
-        {refused?.link === undefined ? null : (
-          <p className="text-muted-foreground">
-            <Link
-              className="underline underline-offset-3"
-              hash={storeChangesAnchor}
-              params={{ app: app.id }}
-              to="/apps/$app/settings"
-            >
-              {refused.link}
-            </Link>
-          </p>
         )}
       </CardContent>
       {loaded === undefined ? null : (

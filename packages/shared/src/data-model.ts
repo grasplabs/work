@@ -115,7 +115,7 @@ export interface PlanField {
 /**
  * What publishing a definition does to the App's records: the move from
  * the definition of the version people use to the draft's, as the store
- * plans it (@grasp-os/sdk's schema-plan.ts).
+ * plans it (core's schema-changes.ts).
  */
 export interface DefinitionPlan {
   /** Whether the store can apply it without a migration in code. */
