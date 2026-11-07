@@ -55,6 +55,17 @@ const packageApprovalTests = /(?:dashboard|engine-packages|inbox)\.e2e\.ts$/u;
  */
 const adminTests = /\/e2e\/admin\//u;
 const ci = process.env.CI === "true";
+/**
+ * Whether a run uses the e2e stack already running on this checkout's
+ * ports, started with `vp run e2e:stack` (scripts/e2e-stack.ts), instead
+ * of building and starting its own: locally only, and only when asked
+ * (`GRASP_E2E_REUSE=1`), for running a file again while working on it. The
+ * stack then holds what earlier runs left, which the parallel projects'
+ * tests don't mind (each signs in people of its own); the serial ones
+ * (onboarding, interview, journeys) need the fresh stack a plain run
+ * starts.
+ */
+export const reuseStack = !ci && process.env.GRASP_E2E_REUSE === "1";
 
 /** A `--var` for wrangler dev, quoted once for the shell. */
 const devVar = (name: string, value: string): string =>
@@ -192,9 +203,11 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: e2eProjects(),
-  // Never a server already running: on this checkout's ports (e2e/stack.ts)
-  // that is a stale run or another checkout's stack, with state the tests
-  // don't expect. Playwright then fails, naming the port.
+  // Never a server already running, unless asked (`reuseStack`, above): on
+  // this checkout's ports (e2e/stack.ts) that is a stale run or another
+  // checkout's stack, with state the tests don't expect. Playwright then
+  // fails, naming the port. scripts/e2e-stack.ts starts these same servers
+  // and keeps them up.
   webServer: [
     // The full local stack: core serves the built frontend, as in
     // production. `--local` keeps remote bindings off, so it runs without
@@ -243,7 +256,7 @@ export default defineConfig({
         TOKEN_ENCRYPTION_KEY: testTokenKey,
       },
       port: corePort,
-      reuseExistingServer: false,
+      reuseExistingServer: reuseStack,
       // Building the frontend and starting wrangler takes about 120 s on a
       // CI runner, so a runner a few seconds slower missed a 120 s limit
       // before any test ran.
@@ -254,14 +267,14 @@ export default defineConfig({
     {
       command: "node e2e/model-fake.ts",
       port: modelFakePort,
-      reuseExistingServer: false,
+      reuseExistingServer: reuseStack,
       timeout: 30_000,
     },
     // Stands in for the client's Entra tenant.
     {
       command: `node_modules/.bin/wrangler dev -c apps/core/test/idp.wrangler.jsonc --port ${idpPort}`,
       port: idpPort,
-      reuseExistingServer: false,
+      reuseExistingServer: reuseStack,
       timeout: 60_000,
     },
   ],
