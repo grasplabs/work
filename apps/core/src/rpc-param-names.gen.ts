@@ -125,6 +125,8 @@ export const rpcParamNames: ParamNames = {
     "cited": ["chatId","messageId"],
     "connectionRequests": ["chatId"],
     "create": ["title"],
+    "dataModel": ["chatId","app"],
+    "defineDraft": ["chatId","app","operation","preview"],
     "denyConnection": ["chatId","id"],
     "discardDraft": ["chatId","app"],
     "draftFiles": ["chatId","app"],
