@@ -1,5 +1,5 @@
 /**
- * The parser of the lint isolate's ESLint lints (lint.ts, server-lint.ts),
+ * The parser of the lint isolate's ESLint lint (lint.ts),
  * and the one @shadcn/lint reads the kit's components with: oxc's, on the
  * oxc.wasm instance Ultracite's lint runs on (oxc-wasm/src/lib.rs
  * `parse`), with typescript-eslint's own scope analysis and visitor keys.

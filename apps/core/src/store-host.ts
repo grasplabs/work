@@ -29,7 +29,7 @@ import {
   auditProvenanceMaxItems,
 } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
-import { sha256Hex } from "@grasp-os/shared/encoding";
+import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { identifierSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
@@ -1563,6 +1563,9 @@ const leftBehind = (contract: SchemaManifest, manifest: string): boolean =>
  * clock; tests choose them, inside the object. Not a Durable Object
  * itself, so none of this is reachable over RPC.
  */
+/** A receipt's seed: 32 bytes, as hex. */
+const seedPattern = /^[0-9a-f]{64}$/u;
+
 export class StoreHost {
   readonly ctx: DurableObjectState;
   readonly env: Env;
@@ -4001,6 +4004,8 @@ export class StoreHost {
     const receiptId = await sha256Hex(
       canonicalJson({ storeId, scope: { ...scope }, key: [...key] })
     );
+    // A new receipt's, kept with it: every attempt answers from the same.
+    const seed = toHex(crypto.getRandomValues(new Uint8Array(32)));
     const claimed = this.ctx.storage.transactionSync((): Claimed => {
       this.#bind(storeId);
       const now = Date.now();
@@ -4022,9 +4027,10 @@ export class StoreHost {
             deadline,
             createdAt: now,
             retainUntil: now + retentionMs,
+            seed,
           })
           .run();
-        return { held: { receiptId, fence: 1 }, startedAt: now };
+        return { held: { receiptId, fence: 1 }, startedAt: now, seed };
       }
       if (receipt.expiredAt !== null) {
         throw submissionErrors.create("submission.expired");
@@ -4039,16 +4045,25 @@ export class StoreHost {
         };
       }
       const fence = receipt.fence + 1;
+      // One without a seed of its own (written by a release from before
+      // receipts kept one, after a rollback) is given one now, kept for
+      // its later attempts.
+      const kept = seedPattern.test(receipt.seed) ? receipt.seed : seed;
       this.#db
         .update(receipts)
         .set({
           fence,
           deadline,
           retainUntil: Math.max(receipt.retainUntil, now + retentionMs),
+          seed: kept,
         })
         .where(eq(receipts.receiptId, receiptId))
         .run();
-      return { held: { receiptId, fence }, startedAt: receipt.createdAt };
+      return {
+        held: { receiptId, fence },
+        startedAt: receipt.createdAt,
+        seed: kept,
+      };
     });
     await this.schedule();
     return claimed;

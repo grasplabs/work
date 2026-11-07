@@ -62,7 +62,8 @@ const release = {
   },
   sdk: {
     [kitModuleName("@grasp-os/sdk/runner")]:
-      "export const runFunction = async (registered, path, args, channel) => await registered[path](channel, args);",
+      // Its mutation runtime changes nothing: the function isn't a mutation.
+      "export const installMutationRuntime = () => () => {};\nexport const runFunction = async (registered, path, args, channel) => await registered[path](channel, args);",
   },
 };
 

@@ -360,6 +360,10 @@ const capturedLevels = ["debug", "info", "log", "warn", "error"];
 const capturingSource = (
   options: QuietOptions
 ): string => `${quietErrors(options).imports}const silent = () => undefined;
+// The platform's clock, taken as this module loads, first: a mutation's
+// isolate fixes Date.now after (the SDK's mutation runtime), and its
+// lines keep when they were written.
+const capturedNow = Date.now.bind(Date);
 const lines = [];
 const partOf = (part) => {
   if (typeof part === "string") {
@@ -390,7 +394,7 @@ const recording = (level) => (...parts) => {
   // Printing a value may log too (its toJSON): those lines may have
   // filled the call's lines meanwhile.
   if (lines.length < ${maxCapturedLines}) {
-    lines.push({ at: Date.now(), level, message });
+    lines.push({ at: capturedNow(), level, message });
   }
 };
 const levels = new Set(${JSON.stringify(capturedLevels)});

@@ -75,10 +75,12 @@ const { manifest } = inspectApp(
 );
 
 /**
- * The SDK's runner as far as these functions use it. Everything in the
- * isolate is untrusted, the runner too, so the sandbox can't rely on it.
+ * The SDK's runner as far as these functions use it, with a mutation
+ * runtime that changes nothing (none of them is a mutation). Everything in
+ * the isolate is untrusted, the runner too, so the sandbox can't rely on it.
  */
-const runner = `export const runFunction = async (registered, path, args, channel) => {
+const runner = `export const installMutationRuntime = () => () => {};
+export const runFunction = async (registered, path, args, channel) => {
   const fn = registered[path];
   if (typeof fn !== "function") throw new Error("no such function");
   return await fn(channel, args);

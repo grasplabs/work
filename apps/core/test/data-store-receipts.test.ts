@@ -166,6 +166,28 @@ describe("receipts", () => {
     await expect(rowsOf(store, "sdk_records")).resolves.toHaveLength(1);
   });
 
+  it("give every attempt of a submission the same seed, and one without a seed a seed of its own", async () => {
+    const store = await newStore();
+    const input = { title: "Launch" };
+    const seedOf = async (key: string): Promise<unknown> =>
+      Reflect.get(await store.claim(await claimOf(key, input)), "seed");
+    const first = await seedOf("k1");
+    const again = await seedOf("k1");
+    const other = await seedOf("k2");
+    // As a release from before receipts kept a seed writes one, after a
+    // rollback.
+    await runInDurableObject(objectOf(store), (_instance, state) => {
+      state.storage.sql.exec("UPDATE sdk_mutation_receipts SET seed = ''");
+    });
+    const given = await seedOf("k1");
+    expect({
+      again: again === first,
+      other: other === first,
+      given: typeof given === "string" && /^[0-9a-f]{64}$/u.test(given),
+      kept: (await seedOf("k1")) === given,
+    }).toStrictEqual({ again: true, other: false, given: true, kept: true });
+  });
+
   it("refuse other input under a key before its mutation commits too", async () => {
     const store = await newStore();
     await store.claim(await claimOf("k1", { title: "Launch" }));

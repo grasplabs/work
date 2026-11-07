@@ -926,6 +926,327 @@ export const flood = query({ args: {}, handler: () => "x".repeat(2 * 1024 * 1024
 `,
 };
 
+/**
+ * An App that reads the clock and randomness in each kind of function,
+ * every way the platform has of reading them: the platform's own
+ * functions as App code held them before the host started anything, the
+ * real `Date`'s `now` through its descriptor, the performance timeline, a
+ * formatter given no date, and a new file's and mark's time. `roll` fails
+ * with what it read, and what a query it runs read, so nothing commits
+ * and its caller may send it again under its key.
+ */
+const diceFiles: Record<string, string> = {
+  ...appDefinition({
+    name: "Dice",
+    tables: {
+      rolls: {
+        fields: { uuid: "v.string()" },
+        access: { read: "owner", write: "owner" },
+      },
+    },
+  }),
+  "server/dice.ts": `import { AppError, v } from "@grasp-os/sdk";
+import { action, mutation, query } from "@server/_generated/server";
+
+const heldRandom = Math.random;
+const heldNow = Date.now;
+const formatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  fractionalSecondDigits: 3,
+});
+
+/**
+ * What \`Reflect.construct\`, replaced while a file is made, is handed to
+ * construct: a file of it, made as the platform makes one, if any.
+ */
+const swappedConstruct = () => {
+  const real = Reflect.construct;
+  let handed: unknown;
+  Object.defineProperty(Reflect, "construct", {
+    configurable: true,
+    writable: true,
+    value: (target: never, args: never, newTarget?: never) => {
+      handed = target;
+      return real(target, args, newTarget);
+    },
+  });
+  try {
+    new File([], "a");
+  } finally {
+    Object.defineProperty(Reflect, "construct", { configurable: true, writable: true, value: real });
+  }
+  return typeof handed === "function" ? new (handed as typeof File)([], "a").lastModified : null;
+};
+
+/** A file made while an index setter on \`Array.prototype\` takes what's set. */
+const settersOnArrays = () => {
+  Object.defineProperty(Array.prototype, "2", { configurable: true, set: () => {} });
+  try {
+    return new File([], "a").lastModified;
+  } finally {
+    Reflect.deleteProperty(Array.prototype, "2");
+  }
+};
+
+const read = () => ({
+  now: Date.now(),
+  date: new Date().getTime(),
+  heldNow: heldNow(),
+  descriptorNow: Object.getOwnPropertyDescriptor(Date, "now")?.value(),
+  performanceNow: performance.now(),
+  formatted: formatter.format(),
+  fileTime: new File([], "a").lastModified,
+  fileUndefined: new File([], "a", { lastModified: undefined }).lastModified,
+  fileSetters: settersOnArrays(),
+  handedFile: swappedConstruct(),
+  // Where the platform has the timeline's marks: its compatibility date
+  // decides.
+  markTime: "mark" in performance ? performance.mark("a").startTime : null,
+  random: Math.random(),
+  heldRandom: heldRandom(),
+  uuid: crypto.randomUUID(),
+  bytes: Array.from(crypto.getRandomValues(new Uint8Array(8))),
+});
+
+/** What it read, then what it reads once time has passed. */
+const twice = async () => {
+  const before = read();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  return { before, after: read() };
+};
+
+export const sample = query({ args: {}, handler: () => read() });
+
+/** Whether generating a key, which no seed reaches, is refused. */
+const keyRefused = async () => {
+  try {
+    await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign"]);
+    return false;
+  } catch {
+    return true;
+  }
+};
+
+export const roll = mutation({
+  args: {},
+  uses: [sample],
+  handler: async (ctx) => {
+    await ctx.db.query("rolls").take(1);
+    const read = await twice();
+    throw new AppError("dice.rolled", "Rolled.", {
+      ...read,
+      nested: [await ctx.runQuery(sample, {}), await ctx.runQuery(sample, {})],
+      keyRefused: await keyRefused(),
+    });
+  },
+});
+
+export const keep = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const uuid = crypto.randomUUID();
+    await ctx.db.insert("rolls", { uuid });
+    return uuid;
+  },
+});
+
+/** Tries to put the platform's randomness back. */
+export const tamper = mutation({
+  args: {},
+  handler: () => {
+    try {
+      Math.random = () => 0.5;
+      return "replaced";
+    } catch (error) {
+      return error instanceof TypeError ? "refused" : "failed";
+    }
+  },
+});
+
+export const look = query({ args: {}, handler: twice });
+
+export const peek = action({ args: {}, handler: twice });
+
+export const generate = action({ args: {}, handler: keyRefused });
+`,
+};
+
+/** A read of the clock and randomness, as `diceFiles`' `read` answers it. */
+const readSchema = z.strictObject({
+  now: z.number(),
+  date: z.number(),
+  heldNow: z.number(),
+  descriptorNow: z.number(),
+  performanceNow: z.number(),
+  formatted: z.string(),
+  fileTime: z.number(),
+  fileUndefined: z.number(),
+  fileSetters: z.number(),
+  handedFile: z.number().nullable(),
+  markTime: z.number().nullable(),
+  random: z.number(),
+  heldRandom: z.number(),
+  uuid: z.string(),
+  bytes: z.array(z.number()),
+});
+
+/** Two reads, one before and one after time passed. */
+const twiceSchema = z.strictObject({ before: readSchema, after: readSchema });
+
+/** What `roll` fails with. */
+const rolledSchema = z.strictObject({
+  before: readSchema,
+  after: readSchema,
+  nested: z.tuple([readSchema, readSchema]),
+  keyRefused: z.boolean(),
+});
+
+/** `read`'s randomness alone. */
+const randomnessOf = ({
+  random,
+  heldRandom,
+  uuid,
+  bytes,
+}: z.infer<typeof readSchema>) => [random, heldRandom, uuid, bytes.join(",")];
+
+/** `read`'s times alone, from every way it reads one. */
+const timesOf = (read: z.infer<typeof readSchema>) => ({
+  date: read.date,
+  heldNow: read.heldNow,
+  descriptorNow: read.descriptorNow,
+  formatted: read.formatted,
+  fileTime: read.fileTime,
+  fileUndefined: read.fileUndefined,
+  fileSetters: read.fileSetters,
+  handedFile: read.handedFile,
+});
+
+describe("a mutation's time and randomness", { timeout: 120_000 }, () => {
+  it("are the same in every attempt of one submission, and new for another", async () => {
+    const dice = await sealedNotes(diceFiles);
+    const roll = async (key: string) => {
+      const answered = await callAppFunction(
+        env,
+        dice.owner,
+        dice.app,
+        JSON.stringify({
+          reference: { name: "dice.roll", kind: "mutation" },
+          input: {},
+          idempotencyKey: key,
+        })
+      );
+      if (answered.result.ok) {
+        throw new Error("Expected the roll to fail");
+      }
+      return rolledSchema.parse(answered.result.error.details);
+    };
+    const started = Date.now();
+    const first = await roll("roll-one");
+    const again = await roll("roll-one");
+    const other = await roll("roll-two");
+    const ended = Date.now();
+    const { before, after, nested } = first;
+    const formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "UTC",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3,
+    });
+    const startedAt = {
+      date: before.now,
+      heldNow: before.now,
+      descriptorNow: before.now,
+      formatted: formatter.format(before.now),
+      fileTime: before.now,
+      fileUndefined: before.now,
+      fileSetters: before.now,
+      // Never handed the platform's \`File\`.
+      handedFile: null,
+    };
+    expect({
+      again,
+      // Held still while it ran, every way it is read, in the queries it
+      // ran too.
+      times: [before, after, ...nested].map(timesOf),
+      timeline: [after, ...nested].map(
+        ({ performanceNow, markTime }) =>
+          performanceNow === before.performanceNow &&
+          (markTime === null || markTime === before.performanceNow)
+      ),
+      whenStarted: before.now >= started && before.now <= ended,
+      // Each query a seed of its own, never the mutation's.
+      ownSeeds: new Set(
+        [before, ...nested].map((read) => randomnessOf(read).join(","))
+      ).size,
+      newForAnother: randomnessOf(other.before).map(
+        (value, index) => value === randomnessOf(before)[index]
+      ),
+      aUuid: z.uuidv4().safeParse(before.uuid).success,
+      keyRefused: first.keyRefused,
+    }).toStrictEqual({
+      again: first,
+      times: [startedAt, startedAt, startedAt, startedAt],
+      timeline: [true, true, true],
+      whenStarted: true,
+      ownSeeds: 3,
+      newForAnother: [false, false, false, false],
+      aUuid: true,
+      keyRefused: true,
+    });
+  });
+
+  it("commit as any mutation does, and can't be put back by App code", async () => {
+    const dice = await sealedNotes(diceFiles);
+    const kept = valueOf(await call(dice, dice.owner, "dice.keep", {}));
+    expect({
+      kept: z.uuidv4().safeParse(kept).success,
+      tamper: valueOf(await call(dice, dice.owner, "dice.tamper", {})),
+    }).toStrictEqual({ kept: true, tamper: "refused" });
+  });
+
+  it("leave a query's and an action's the platform's own", async () => {
+    const dice = await sealedNotes(diceFiles);
+    const live = async (path: string) => {
+      const started = Date.now();
+      const { before, after } = twiceSchema.parse(
+        valueOf(await call(dice, dice.owner, path, {}))
+      );
+      return {
+        moves:
+          after.now > before.now &&
+          after.date > before.date &&
+          after.descriptorNow > before.descriptorNow &&
+          after.performanceNow > before.performanceNow &&
+          after.fileTime > before.fileTime &&
+          (after.markTime === null ||
+            before.markTime === null ||
+            after.markTime > before.markTime),
+        whenRead: before.now >= started && after.now <= Date.now(),
+        differs: [
+          after.random === before.random,
+          after.heldRandom === before.heldRandom,
+          after.uuid === before.uuid,
+          after.bytes.join(",") === before.bytes.join(","),
+        ],
+      };
+    };
+    const platform = {
+      moves: true,
+      whenRead: true,
+      differs: [false, false, false, false],
+    };
+    expect({
+      query: await live("dice.look"),
+      action: await live("dice.peek"),
+      keyRefused: valueOf(await call(dice, dice.owner, "dice.generate", {})),
+    }).toStrictEqual({ query: platform, action: platform, keyRefused: false });
+  });
+});
+
 describe("a function that declares no return", { timeout: 120_000 }, () => {
   it("answers what its handler returns, of each kind, still held to JSON and the output limit", async () => {
     const app = await sealedNotes(undeclaredReturnFiles);
@@ -1106,12 +1427,13 @@ describe("the SDK a release runs with", { timeout: 120_000 }, () => {
 
   it("needs nothing of its runner but what its protocol pins", async () => {
     const notes = await sealedNotes();
-    // A runner exporting only runFunction, manifestOfApp and
-    // registerApp, as any SDK sealed under protocol 3 does: the
-    // host brings the rest itself.
+    // A runner exporting only what the host's modules import of it
+    // (runFunction, installMutationRuntime, manifestOfApp) and what an
+    // App's entry does (registerApp): the host brings the rest itself.
     await rewriteSdk(notes, "sdk/@grasp-os~sdk~runner.js", (text) => {
       const pinned = exportsOnly(text, [
         "runFunction",
+        "installMutationRuntime",
         "manifestOfApp",
         "registerApp",
       ]);

@@ -562,6 +562,13 @@ export const receipts = sqliteTable(
     /** When the attempt holding it must commit by, as it claimed. */
     deadline: integer().notNull(),
     createdAt: integer("created_at").notNull(),
+    /**
+     * The random seed (64 hex digits) the mutation's randomness answers
+     * from in every attempt (operations.ts), made with the receipt. The
+     * default is only there for SQLite to add the column: its migration
+     * gives every receipt made before it a seed of its own.
+     */
+    seed: text().notNull().default(""),
     retainUntil: integer("retain_until").notNull(),
     expiredAt: integer("expired_at"),
     /** What the mutation answered, as JSON; null until it committed. */

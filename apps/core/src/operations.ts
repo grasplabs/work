@@ -19,7 +19,7 @@ import {
   appErrorDetailsOf,
 } from "@grasp-os/sdk/host";
 import type { AppManifest, OperationManifest } from "@grasp-os/sdk/host";
-import type { OperationChannel } from "@grasp-os/sdk/runner";
+import type { MutationStart, OperationChannel } from "@grasp-os/sdk/runner";
 import type { RunHandle } from "@grasp-os/sdk/server";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { appCallLimits } from "@grasp-os/shared/apps";
@@ -487,7 +487,13 @@ export type Runner = (
    * runs, nested or not, so a runner may run them together (on-prem, in
    * the sandbox session of the function the caller named).
    */
-  call?: RunnerCall
+  call?: RunnerCall,
+  /**
+   * A mutation's: when it started and the seed of its randomness, from
+   * its receipt, which its time and randomness answer from inside it
+   * (the SDK's `installMutationRuntime`). None for a query or an action.
+   */
+  start?: MutationStart
 ) => Promise<unknown>;
 
 /** An App as the host runs it: its inspected manifest and its runner. */
@@ -2915,7 +2921,8 @@ const runHandler = async (
   operation: OperationManifest,
   args: Json,
   capabilities: Capabilities,
-  stale?: () => Promise<boolean>
+  stale?: () => Promise<boolean>,
+  start?: MutationStart
 ): Promise<Json> => {
   if (run.depth === 0) {
     // A new attempt: what an earlier one's nested calls threw isn't why
@@ -2958,10 +2965,14 @@ const runHandler = async (
   });
   const stopped = new AbortController();
   const ran = settle(
-    run.app.run(operation.path, fresh(args), open.channel, stopped.signal, {
-      tree: run.call,
-      nested: run.depth > 0,
-    })
+    run.app.run(
+      operation.path,
+      fresh(args),
+      open.channel,
+      stopped.signal,
+      { tree: run.call, nested: run.depth > 0 },
+      start
+    )
   );
   try {
     const outcome = await untilDeadline(
@@ -3057,7 +3068,8 @@ const stagedQuery = async (
   callee: OperationManifest,
   args: Json,
   reader: StoreReader,
-  spend: () => void
+  spend: () => void,
+  start: Promise<MutationStart>
 ): Promise<Json> => {
   // A mutation runs queries only (inspection and `nestedCall` see to it):
   // checked again here, where anything else would see its staged state.
@@ -3076,12 +3088,19 @@ const stagedQuery = async (
       ])
     ),
   };
-  return await runHandler(run, narrowed, args, {
-    read: async (request) => {
-      spend();
-      return await readFor(run, narrowed, reader, request);
+  return await runHandler(
+    run,
+    narrowed,
+    args,
+    {
+      read: async (request) => {
+        spend();
+        return await readFor(run, narrowed, reader, request);
+      },
     },
-  });
+    undefined,
+    await start
+  );
 };
 
 /**
@@ -3148,6 +3167,8 @@ const startNested = async (
         readonly reader: StoreReader;
         /** Spends one of the mutation's reads (`spendRead`). */
         readonly spend: () => void;
+        /** The nested query's time and seed, from the mutation's. */
+        readonly start: Promise<MutationStart>;
       }
     | {
         readonly type: "action";
@@ -3198,7 +3219,8 @@ const startNested = async (
         callee,
         admitted,
         within.reader,
-        within.spend
+        within.spend,
+        within.start
       );
     }
     // oxlint-disable-next-line no-use-before-define -- an action's calls run functions of every kind, actions among them
@@ -3319,6 +3341,17 @@ const runMutation = async (
     // oxlint-disable-next-line no-await-in-loop -- one run after the other
     const scope = await scopeOf(compiled, invocation, roles);
     const staging = stagingFor(compiled, operation, Date.now());
+    // Each query it runs answers as it does from the mutation's start and
+    // a seed of its own, by the order this run calls them: the same in
+    // every run of the mutation, never the mutation's own seed again.
+    let nestedCalls = 0;
+    const nestedStart = async (): Promise<MutationStart> => {
+      nestedCalls += 1;
+      return {
+        startedAt: claimed.startedAt,
+        seed: await sha256Hex(`${claimed.seed}:${nestedCalls}`),
+      };
+    };
     // The workflows it starts once it commits, staged by this run alone: a
     // run again for stale reads stages its own from nothing. A start holds
     // its place from before it is admitted (`placed`).
@@ -3357,7 +3390,7 @@ const runMutation = async (
               run,
               operation,
               { kind, path, args: callArgs },
-              { type: "mutation", reader, spend }
+              { type: "mutation", reader, spend, start: nestedStart() }
             ),
           // Its only reach past the store: starts of the workflows it
           // lists, staged for its commit and made from its outbox after.
@@ -3466,7 +3499,10 @@ const runMutation = async (
           },
         },
         // A failure torn reads may have caused is a stale run too.
-        async () => !(await trusted(async () => await reader.isCurrent()))
+        async () => !(await trusted(async () => await reader.isCurrent())),
+        // The same for every run of it, and every attempt of its
+        // submission: it computes what it did the first time.
+        { startedAt: claimed.startedAt, seed: claimed.seed }
       );
     } catch (error) {
       if (error === staleRun) {

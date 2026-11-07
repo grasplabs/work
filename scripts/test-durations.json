@@ -35,7 +35,6 @@
   "@grasp-os/compiler src/packages/svg.test.ts": 0,
   "@grasp-os/compiler src/packages/tarball.test.ts": 0.3,
   "@grasp-os/compiler src/references.test.ts": 0.7,
-  "@grasp-os/compiler src/server-lint.test.ts": 0,
   "@grasp-os/compiler src/type-check.test.ts": 0.8,
   "@grasp-os/connect test/actions.test.ts": 2.2,
   "@grasp-os/connect test/ai-providers.test.ts": 0.6,
