@@ -366,22 +366,17 @@ const permissionsFrom = (
   people: boolean
 ): Record<string, unknown> => {
   const permissions: Record<string, unknown> = {};
-  const listed: Record<"connections" | "apps", unknown[]> = {
-    connections: [],
-    apps: [],
-  };
+  const connections: unknown[] = [];
   for (const declared of [...resources.values(), ...browser.values()]) {
     const kind = declared["~permission"];
-    if (kind === "connections" || kind === "apps") {
-      listed[kind].push(declared);
+    if (kind === "connections") {
+      connections.push(declared);
     } else {
       permissions[kind] = declared;
     }
   }
-  for (const [kind, held] of Object.entries(listed)) {
-    if (held.length > 0) {
-      permissions[kind] = held;
-    }
+  if (connections.length > 0) {
+    permissions.connections = connections;
   }
   if (workflows.size > 0) {
     permissions.workflows = [...workflows.values()];

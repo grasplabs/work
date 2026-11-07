@@ -21,8 +21,7 @@ import { platformGrantOf } from "./resource-platform.ts";
 //   it acts (`authorize`).
 // - Someone else invites: only a person's own call does (a page's, or an
 //   agent's for its person: `interactive`); a workflow run's is refused,
-//   and so is any call another App made through an app resource
-//   (`BindingCaller.chain`, `fromRun`), whose code would get the link.
+//   whose code would get the link.
 //   The chat is for, and spends the model budget of, the person the call
 //   acts for, as core resolved them, never anything App code sends.
 // - Another App's chats: guests.ts finds a chat only by the release's own
@@ -93,15 +92,11 @@ const inviteFor = async (
   input: unknown,
   alias: string
 ) => {
-  // A person's own call only: never a run's, nor one another App made
-  // (its chain names more than this App), however it got here.
-  const throughAnother = (caller.chain?.length ?? 1) > 1;
+  // A person's own call only, never a run's, however it got here.
   if (
     caller.authority.mode !== "interactive" ||
     caller.context.type !== "app" ||
-    caller.context.appId !== caller.app ||
-    caller.fromRun === true ||
-    throughAnother
+    caller.context.appId !== caller.app
   ) {
     throw operationErrors.create("resource.not_allowed");
   }

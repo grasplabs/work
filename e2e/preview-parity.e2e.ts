@@ -5,7 +5,7 @@ import { test } from "./csp.ts";
 import { writeDraft } from "./draft-writes.ts";
 import { apiOf, peopleIn } from "./people.ts";
 
-// Every built-in App's page renders the same in a chat's preview and
+// Every built-in App's first page renders the same in a chat's preview and
 // published, from the same files and the same data (none yet). The
 // preview runs on a build of its own, instrumented for React Fast
 // Refresh, on React's development build, with its modules on the
@@ -35,11 +35,6 @@ const pages = [
     appPage: "intake",
     heading: "Intake",
     settled: "No drafts wait for review.",
-  },
-  {
-    blueprint: "board-page",
-    heading: "Board page",
-    settled: "No snapshots yet. Take the first one.",
   },
   {
     blueprint: "workflow-map",

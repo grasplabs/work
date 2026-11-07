@@ -73,7 +73,6 @@ const kindLabels: Readonly<
   knowledge: msg`Brain`,
   grasp: msg`The platform's statistics`,
   guests: msg`Guests`,
-  app: msg`Another App`,
 };
 
 const stateLabels: Readonly<Record<BindingState, MessageDescriptor>> = {
@@ -119,10 +118,6 @@ const BoundTo = ({
   if (target.kind === "guests" || target.kind === "grasp") {
     const { permissionId: permission } = target;
     return <Trans>Permission {permission}</Trans>;
-  }
-  if (target.kind === "app") {
-    const { appId: app } = target;
-    return <Trans>App {app}</Trans>;
   }
   if (target.kind === "connector") {
     // Core names the bound connection for everyone who reads the review,
@@ -226,12 +221,6 @@ const NothingToChoose = ({
     guests: (
       <Trans>
         The App has no permission to invite guests. Grant one first.
-      </Trans>
-    ),
-    app: (
-      <Trans>
-        No other App serves every function it declares, public and exactly as
-        declared.
       </Trans>
     ),
   };
@@ -348,16 +337,6 @@ const BindForm = ({
           {choices.permissions.map(({ permissionId: permission }) => (
             <NativeSelectOption key={permission} value={permission}>
               {t`Permission ${permission}`}
-            </NativeSelectOption>
-          ))}
-        </Choice>
-      ) : null}
-      {choices.kind === "app" ? (
-        <Choice label={t`App`} onChange={setPicked} value={picked}>
-          {choices.apps.map(({ appId, name }) => (
-            <NativeSelectOption key={appId} value={appId}>
-              {/* Names needn't be unique: the ID tells two apart. */}
-              {t`${name} (${appId})`}
             </NativeSelectOption>
           ))}
         </Choice>

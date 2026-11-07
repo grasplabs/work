@@ -4,13 +4,12 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canBuild, isAdmin } from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
-import { and, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { connectionOwnersOf } from "./connections.ts";
 import {
-  appResourceBindings,
   apps as appsTable,
   businessStoreMembers,
   businessStores,
@@ -27,28 +26,23 @@ import type { CollectionAccess, PersonAccess } from "./knowledge/access.ts";
 // anyone who couldn't read that where it comes from.
 //
 // What an App may have read: every connection it was ever granted, and
-// every collection it was ever granted to read; and, through calls between
-// Apps, what the Apps it was ever granted to call may have read (their
-// answers carry it), and what the Apps ever granted to write into it may
-// have read (their input carries it), whatever the depth
-// (`reachedThroughCalls`). Calls between Apps are v1 grants on another
-// App's exports; sealed app bindings an admin approved (resource-apps.ts),
-// each counted both ways, since the functions an App declares live in its
-// releases, not the binding, so any call may write; and store grants on
-// another App's store (store-operations.ts), both ways too, since a store's
-// actions can't tell a read from a write. A workflow (an independent
-// resource) holding such a store grant links the App to that workflow's own
-// sources, and through it to every other App it holds a grant on, the same
-// way (`workflow:<id>` in the graph). So does an App's grant on such a
+// every collection it was ever granted to read; and, through store grants
+// on another App's store (store-operations.ts), what that App may have
+// read, and what an App holding one may have sent it, whatever the depth
+// (`reachedThroughCalls`): both ways, since a store's actions can't tell a
+// read from a write. A workflow (an independent resource) holding such a
+// store grant links the App to that workflow's own sources, and through it
+// to every other App it holds a grant on, the same way (`workflow:<id>` in
+// the graph). So does an App's grant on such a
 // workflow: following its runs (`read`) brings the workflow's output into
 // the App, and starting it (`start`) sends the App's input into the
 // workflow too, from where its store grants carry it on. A store's own
 // grants (a store as subject: connections and collections) are its
 // owner's sources, or, for a business store no App owns, the store's,
 // read by whoever holds it. Once granted counts for
-// good, revoked or not: the App may still hold what it read. An app
-// binding to an App with no row, or a store grant on a store that exists
-// nowhere, fails closed, as an unresolved source (`app:<id>`, `store:<id>`),
+// good, revoked or not: the App may still hold what it read. A store
+// grant on a store that exists nowhere, or one whose App has no row,
+// fails closed, as an unresolved source (`app:<id>`, `store:<id>`),
 // and so does a graph past the caps below (`app:*`). A store grant on a
 // business store no App owns (`business_stores` only) is a source of its
 // own: it is read by whoever manages the store, the only access such a
@@ -244,12 +238,6 @@ const edgesOf = async (
 ): Promise<Map<string, Edges>> => {
   const { apps: frontierApps, workflows } = frontier;
   const db = drizzle(env.DB);
-  const everGranted = and(
-    eq(permissions.subjectType, "app"),
-    eq(permissions.objectType, "app"),
-    isNotNull(permissions.grantedAt)
-  );
-  const callee = sql<string>`json_extract(${appResourceBindings.target}, '$.appId')`;
   // An App's or a workflow's (an independent resource's) grant on a store:
   // permissions.ts lets both name one.
   const storeGrant = and(
@@ -267,38 +255,7 @@ const edgesOf = async (
       inList(permissions.subjectId, workflows)
     )
   );
-  const [called, writers, bound, consumed, served, run] = await Promise.all([
-    // v1 grants on another App's exports: what it calls answers it.
-    db
-      .select({ from: permissions.subjectId, to: permissions.objectId })
-      .from(permissions)
-      .where(and(everGranted, inList(permissions.subjectId, frontierApps))),
-    // And what may write into it sends it.
-    db
-      .select({ from: permissions.objectId, to: permissions.subjectId })
-      .from(permissions)
-      .where(
-        and(
-          everGranted,
-          inList(permissions.objectId, frontierApps),
-          // Anything beyond reading, as permissions.ts's changesThingsSql.
-          sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value <> 'read')`
-        )
-      ),
-    // Sealed app bindings ever approved, active or revoked, either end in
-    // the frontier: counted both ways below.
-    db
-      .select({ caller: appResourceBindings.appId, callee })
-      .from(appResourceBindings)
-      .where(
-        and(
-          eq(appResourceBindings.kind, "app"),
-          or(
-            inList(appResourceBindings.appId, frontierApps),
-            inList(callee, frontierApps)
-          )
-        )
-      ),
+  const [consumed, served, run] = await Promise.all([
     // Store grants ever given to a node of the frontier, with the store's
     // owning App, if any, and whether it is a business store at all.
     db
@@ -368,16 +325,6 @@ const edgesOf = async (
       found.get(key)?.edges.push(...edges);
     }
   };
-  for (const { from, to } of called) {
-    link([from], { from: appNode(from), to: appNode(to) });
-  }
-  for (const { from, to } of writers) {
-    link([from], { from: appNode(from), to: appNode(to) });
-  }
-  for (const { caller, callee: to } of bound) {
-    const [a, b] = [appNode(caller), appNode(to)];
-    link([caller, to], { from: a, to: b }, { from: b, to: a });
-  }
   const nodeOf = (type: string, id: string): string =>
     type === "workflow" ? workflowNode(id) : appNode(id);
   for (const { type, consumer, store, owner, business } of consumed) {
@@ -580,11 +527,10 @@ const walk = async (
 
 /**
  * The nodes (Apps, and workflows holding store grants) whose data each of
- * `apps` may hold through calls between Apps (app-calls.ts,
- * resource-apps.ts, store-operations.ts), itself included, following every
- * grant and binding ever given (`edgesOf`), as sources are, up to the
- * caps; and what of them doesn't resolve: a store that exists nowhere, an
- * App bound that has no row, or an App past the caps (`app:*`). A few
+ * `apps` may hold through store grants (store-operations.ts), itself
+ * included, following every grant ever given (`edgesOf`), as sources are,
+ * up to the caps; and what of them doesn't resolve: a store that exists
+ * nowhere, an App that has no row, or an App past the caps (`app:*`). A few
  * queries a level of the graph, both directions at once.
  */
 const reachedThroughCalls = async (

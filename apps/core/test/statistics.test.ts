@@ -25,7 +25,7 @@ import { auditedDuring, signedInApi, unique } from "./sign-in.ts";
 
 // The platform's statistics (src/statistics.ts) through an App's sealed
 // functions: the platform's own read-only functions its actions declare
-// (`permission.grasp`, `ctx.apps.grasp`), which reach nothing until an
+// (`permission.grasp`, `ctx.grasp`), which reach nothing until an
 // admin binds them to the App's permission to read the platform's
 // statistics (resource-grasp.ts). These tests start from the ways it can
 // fail: a declaration that grants itself, or a binding that serves
@@ -87,7 +87,7 @@ export const platformRead = action({
   returns: v.string(),
   uses: [grasp],
   handler: async (ctx, args) =>
-    await outcome(async () => await loose(ctx.apps.grasp).call("statistics.read", JSON.parse(args.json))),
+    await outcome(async () => await loose(ctx.grasp).call("statistics.read", JSON.parse(args.json))),
 });
 
 // A function the platform doesn't serve, called past the types.
@@ -96,7 +96,7 @@ export const platformWrite = action({
   returns: v.string(),
   uses: [grasp],
   handler: async (ctx, args) =>
-    await outcome(async () => await loose(ctx.apps.grasp).call("statistics.write", JSON.parse(args.json))),
+    await outcome(async () => await loose(ctx.grasp).call("statistics.write", JSON.parse(args.json))),
 });
 
 export const platformReadMany = action({
@@ -106,7 +106,7 @@ export const platformReadMany = action({
   handler: async (ctx, args) =>
     await outcome(async () => {
       for (let read = 0; read < args.count; read += 1) {
-        await loose(ctx.apps.grasp).call("statistics.read", JSON.parse(args.json));
+        await loose(ctx.grasp).call("statistics.read", JSON.parse(args.json));
       }
     }),
 });
@@ -119,7 +119,7 @@ export const platformReadBurst = action({
   handler: async (ctx, args) =>
     await outcome(async () => {
       await Promise.all(
-        Array.from({ length: args.count }, async () => await loose(ctx.apps.grasp).call("statistics.read", JSON.parse(args.json)))
+        Array.from({ length: args.count }, async () => await loose(ctx.grasp).call("statistics.read", JSON.parse(args.json)))
       );
     }),
 });
@@ -348,9 +348,15 @@ describe("the platform's functions", { timeout: 60_000 }, () => {
           permissionId: permissionIdSchema.parse(crypto.randomUUID()),
         })
     );
-    // As another App: the target of another kind serves it nothing.
+    // Bound to another App, as Apps once called each other: no such
+    // target any more, refused as the client sends it.
+    const anotherApp: unknown = { kind: "app", appId: watched };
     const asApp = await failure(
-      async () => await bind(admin, app, { kind: "app", appId: watched })
+      async () =>
+        // SAFETY: a target the types no longer have, sent as a client
+        // could send it.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        await bind(admin, app, anotherApp as BindingTargetInput)
     );
     // A builder may not approve one.
     const byBuilder = await failure(
@@ -394,7 +400,7 @@ describe("the platform's functions", { timeout: 60_000 }, () => {
       ],
       unbound: { error: "resource.unavailable" },
       unnamed: "resource.target_invalid",
-      asApp: "resource.undeclared",
+      asApp: "resource.binding_invalid",
       byBuilder: "role.forbidden",
       bound: [],
       write: { error: "resource.not_allowed" },

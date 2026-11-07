@@ -1,5 +1,5 @@
 import type { Id } from "@grasp-os/sdk";
-import { useAction, useMutation } from "@grasp-os/sdk/react";
+import { useAction, useForm } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
@@ -7,7 +7,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@grasp-os/ui/components/card";
-import { Input } from "@grasp-os/ui/components/input";
 import {
   Select,
   SelectContent,
@@ -15,7 +14,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
-import { Textarea } from "@grasp-os/ui/components/textarea";
+import {
+  Form,
+  FormError,
+  SubmitButton,
+  TextareaField,
+  TextField,
+} from "@grasp-os/ui/form";
 import { api } from "@server/_generated/api";
 import { useState } from "react";
 
@@ -23,12 +28,6 @@ import { maturityLevels } from "./board";
 import { whilePending } from "./pending";
 import { settle } from "./snapshot";
 import type { Snapshot } from "./snapshot";
-
-/** Longest the decision a snapshot asks for is (values.ts). */
-const decisionMax = 1000;
-
-/** Longest a snapshot's narrative is (values.ts). */
-const narrativeMax = 30_000;
 
 const levels = Array.from({ length: maturityLevels + 1 }, (_, level) => ({
   value: String(level),
@@ -101,80 +100,55 @@ export const TakeSnapshot = ({
 
 /**
  * The snapshot's narrative and the decision it asks for, saved as its
- * next version; what it froze stays as it was taken.
+ * next version; what it froze stays as it was taken. The form starts from
+ * the snapshot as it was opened, its revision among what it sends, so a
+ * save someone else's overtook fails as `data.conflict`, shown in the
+ * form, with what the person typed kept.
  */
 export const NarrativeEditor = ({
   snapshot,
   onSaved,
-  onRefused,
 }: {
   snapshot: Snapshot;
   onSaved: (id: Id<"snapshots">) => void;
-  onRefused: (code: string) => void;
 }) => {
-  const [decision, setDecision] = useState(
-    snapshot.record.decisionNeeded ?? ""
-  );
-  const [body, setBody] = useState(snapshot.body);
-  const [saving, setSaving] = useState(false);
-  const write = useMutation(api.snapshots.write);
-  const save = async (): Promise<void> => {
-    const answer = await whilePending(
-      setSaving,
-      async () =>
-        await settle(
-          async () =>
-            await write({
-              id: snapshot.id,
-              expectedRevision: snapshot.revision,
-              decisionNeeded: decision,
-              narrative: body,
-            })
-        )
-    );
-    if ("error" in answer) {
-      onRefused(answer.error);
-      return;
-    }
-    onSaved(snapshot.id);
-  };
+  const form = useForm(api.snapshots.write, {
+    defaultValues: {
+      id: snapshot.id,
+      expectedRevision: snapshot.revision,
+      decisionNeeded: snapshot.record.decisionNeeded ?? "",
+      narrative: snapshot.body,
+    },
+    onSuccess: () => {
+      onSaved(snapshot.id);
+    },
+  });
   return (
     <Card>
       <CardHeader>
         <CardTitle>Narrative and decision</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-col gap-2">
-          <Input
-            aria-label="Edit the decision needed"
-            maxLength={decisionMax}
+        <Form aria-label="Narrative and decision" form={form}>
+          <TextField
+            form={form}
+            label="Decision needed"
+            name="decisionNeeded"
             placeholder="The one decision the board needs to make"
-            value={decision}
-            onChange={(event) => {
-              setDecision(event.target.value);
-            }}
           />
-          <Textarea
-            aria-label="Edit the narrative"
-            maxLength={narrativeMax}
+          <TextareaField
+            form={form}
+            label="Narrative"
+            name="narrative"
             placeholder="Where we stand and what changed, in a few lines"
-            value={body}
-            onChange={(event) => {
-              setBody(event.target.value);
-            }}
           />
+          <FormError form={form} />
           <div>
-            <Button
-              variant="outline"
-              disabled={saving}
-              onClick={() => {
-                void save();
-              }}
-            >
+            <SubmitButton form={form} variant="outline">
               Save
-            </Button>
+            </SubmitButton>
           </div>
-        </div>
+        </Form>
       </CardContent>
     </Card>
   );

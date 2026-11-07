@@ -3,9 +3,10 @@
 // `connector-catalog.gen.ts`) and some of its actions, and
 // `ctx.connections.<alias>.call(action, args)` then infers that action's
 // arguments and answer from the contract alone, without a cast or a
-// generic argument; another App's functions are typed by what the
-// declaration says of them; `ctx.ai`, `ctx.brain` and `ctx.guests` are
-// there only for an action that lists them. This file is type-checked by
+// generic argument; the platform's functions are typed by what
+// `permission.grasp()` declares of them; `ctx.ai`, `ctx.brain`,
+// `ctx.grasp` and `ctx.guests` are there only for an action that lists
+// them. This file is type-checked by
 // `vp check` and never run: every `@ts-expect-error` below must stay an
 // error.
 import { expectTypeOf } from "vite-plus/test";
@@ -215,50 +216,21 @@ permission.connection("lookalike", {
   actions: ["X"],
 });
 
-// Another App's public functions: each declared path's arguments and
-// return, inferred from the declaration alone.
-const ledger = permission.app("ledger", {
-  functions: {
-    "entries.list": {
-      kind: "query",
-      args: { limit: v.number().optional() },
-      returns: v.array(v.object({ amount: v.number() })),
-    },
-    "entries.add": {
-      kind: "mutation",
-      args: { amount: v.number() },
-      returns: v.null(),
-    },
-  },
-});
-declare const ledgerCtx: ActionCtx<readonly [typeof ledger]>;
-expectTypeOf(
-  ledgerCtx.apps.ledger.call("entries.list", {})
-).resolves.toEqualTypeOf<{ amount: number }[]>();
-expectTypeOf(
-  ledgerCtx.apps.ledger.call("entries.add", { amount: 3 })
-).resolves.toEqualTypeOf<null>();
-// @ts-expect-error -- only the functions it declares
-await ledgerCtx.apps.ledger.call("entries.remove", {});
-// @ts-expect-error -- arguments as the function declares them
-await ledgerCtx.apps.ledger.call("entries.add", { amount: "3" });
-// A path known only as one of several: its arguments must fit whichever
-// it is, so arguments that fit only `entries.list` are refused.
-declare const entriesPath: "entries.add" | "entries.list";
-// @ts-expect-error -- fits `entries.list`, but not `entries.add`
-await ledgerCtx.apps.ledger.call(entriesPath, {});
+// Apps don't call each other: there's no declaration of another App's
+// functions.
+expectTypeOf(permission).not.toHaveProperty("app");
 
 // The platform's own read-only functions, under `grasp`.
 const grasp = permission.grasp();
 declare const graspCtx: ActionCtx<readonly [typeof grasp]>;
-const runs = await graspCtx.apps.grasp.call("statistics.read", {
+const runs = await graspCtx.grasp.call("statistics.read", {
   measure: "platform.workflow_runs",
   days: 30,
   apps: ["app_1"],
   groupBy: ["app"],
 });
 expectTypeOf(runs.groups[0]?.count).toEqualTypeOf<number | undefined>();
-await graspCtx.apps.grasp.call("statistics.read", {
+await graspCtx.grasp.call("statistics.read", {
   // @ts-expect-error -- only the measures the platform publishes
   measure: "invoices_booked",
   days: 30,
@@ -299,4 +271,4 @@ expectTypeOf(bare).not.toHaveProperty("ai");
 expectTypeOf(bare).not.toHaveProperty("brain");
 expectTypeOf(bare).not.toHaveProperty("guests");
 expectTypeOf(bare.connections).not.toHaveProperty("mail");
-expectTypeOf(bare.apps).not.toHaveProperty("ledger");
+expectTypeOf(bare).not.toHaveProperty("grasp");

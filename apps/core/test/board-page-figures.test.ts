@@ -23,22 +23,22 @@ import {
 import { mockIdp } from "./idp.ts";
 import { auditedDuring, unique } from "./sign-in.ts";
 
-// The board page, the built-in App (apps/core/blueprints/board-page/):
-// it takes snapshots of the workflow map's numbers, in its own store, shows
-// the newest, and saves its narrative and the decision it asks for,
-// keeping what the snapshot froze. A snapshot freezes each workflow's
-// hours as drawn, designed and as it runs, read from the map (an `app`
-// resource an admin binds to a workflow map), and the improvement signals
-// of the App workflows the map links to, read from the platform's
+// The board page of the built-in workflow map
+// (apps/core/blueprints/workflow-map/): it takes snapshots of the map's
+// numbers, in the App's own store, shows the newest, and saves its
+// narrative and the decision it asks for, keeping what the snapshot froze.
+// A snapshot freezes each workflow's hours as drawn, designed and as it
+// runs, read from the map's own `figures.list`, and the improvement
+// signals of the App workflows the map links to, read from the platform's
 // statistics (bound to the permission an admin grants). These tests go in
-// through the Apps' functions, as their pages call them, and start from
-// the ways it can fail: a number that isn't what the map and the runs say
-// (a run outside the window counted, the designed version taken for the
+// through the App's functions, as its pages call them, and start from the
+// ways it can fail: a number that isn't what the map and the runs say (a
+// run outside the window counted, the designed version taken for the
 // drawn one); a later save, run or day of signals changing a snapshot
 // taken before it; a save of the narrative changing what it froze; a
 // signal's subject (a person) or another App's signals frozen; part of a
 // snapshot frozen; and someone who isn't one of its builders taking or
-// writing one, or a snapshot taken from a map nobody bound.
+// writing one.
 
 const idp = mockIdp();
 const { setUp } = boardPageOf(idp);

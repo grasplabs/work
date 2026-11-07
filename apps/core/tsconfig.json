@@ -33,7 +33,6 @@
   "exclude": [
     "blueprints/intake",
     "blueprints/workflow-map",
-    "blueprints/board-page",
     "blueprints/*/files/pages",
     "blueprints/*/files/components",
     "test/fixtures/blueprints/*/files"

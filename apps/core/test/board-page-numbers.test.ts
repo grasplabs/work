@@ -7,8 +7,8 @@ import {
   rowsShown,
   signalRows,
   topByHours,
-} from "../blueprints/board-page/files/src/components/board.ts";
-import type { WorkflowFigures } from "../blueprints/board-page/files/src/components/board.ts";
+} from "../blueprints/workflow-map/files/src/components/board.ts";
+import type { WorkflowFigures } from "../blueprints/workflow-map/files/src/components/board.ts";
 
 // What the board page shows of a snapshot's frozen figures (its page
 // works it out): where the hours go now, before and after, the headline

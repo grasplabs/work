@@ -31,25 +31,25 @@ import { validateValue } from "./value-interpreter.ts";
 import { readDescriptor } from "./value-read.ts";
 import { descriptorOf } from "./value-schema.ts";
 
-// Forms (spec 10.2.1–10.3): one `useForm`, three ways in.
+// Forms (spec 10.2.1–10.2.4): one `useForm`, two ways in.
 //
 // - `useForm(ref, { defaultValues, onSuccess?, resetOnSuccess? })` binds a
 //   public mutation or action: its fields are its input, checked by the
 //   argument descriptor its reference carries, built with the App's server
 //   code. Core checks the submission again with the function's own
-//   validator, and what it refuses shows by the fields it names.
-// - `useForm(ref, { record, fields, args, onSuccess? })` edits a live
-//   document with explicit Save: the chosen fields are editable, `args`
-//   maps the captured baseline to the rest, and the baseline stays frozen
-//   while there is a draft.
+//   validator, and what it refuses shows by the fields it names. Editing a
+//   record is this form too: `defaultValues` from the record, with its
+//   `expectedRevision` among them, so a stale save fails as `data.conflict`
+//   at the form's level.
 // - `useForm(schema, { defaultValues, onSubmit })` is a local form: a
-//   native schema validates, `onSubmit` gets its normalized output.
+//   native schema validates, `onSubmit` gets its normalized output (a
+//   decision's answer, which no App function takes).
 //
 // TanStack Form holds the values, field state and subscriptions; the
 // native interpreter (value-interpreter.ts) is the only validator; the
 // session client submits. This module adds what neither does: the
-// submission identity and lock, the record's baseline, and errors mapped
-// back to fields. Failure modes, and how each is closed:
+// submission identity and lock, and errors mapped back to fields. Failure
+// modes, and how each is closed:
 //
 // - A double click saves twice: a submit while one is active joins it.
 // - A save goes through with what the person kept typing: one snapshot of
@@ -62,28 +62,19 @@ import { descriptorOf } from "./value-schema.ts";
 //   again, which gets its outcome from its receipt: a change's or an
 //   action's, never a second run, while the receipt is kept. The person
 //   can `discard` it instead, knowingly.
-// - One person's draft is sent as another's: the session client sends a
-//   key left unknown only for the person it was sent for, and refuses it
-//   unsent as `auth.principal_changed` once someone else signed in or
-//   access was lost; the form then drops what it kept. A resend refused
-//   before it ran (a sign-out, the request budget) keeps it, key and all:
-//   the next submit sends it again, never anew.
-// - A remote change overwrites a draft: while the editable values differ
-//   from the baseline, newer records are only remembered; they replace
-//   the draft only on a deliberate `reload()`.
-// - An old snapshot regresses a newer one: a record of a lower revision
-//   than the one held is ignored.
-// - A stale save overwrites someone else's: the save carries the
-//   baseline's revision through `args`; `data.conflict` keeps the draft
-//   and the baseline until the person reloads.
+// - One person's submission is sent as another's: the session client
+//   sends a key left unknown only for the person it was sent for, and
+//   refuses it unsent as `auth.principal_changed` once someone else signed
+//   in or access was lost; the form then drops what it kept. A resend
+//   refused before it ran (a sign-out, the request budget) keeps it, key
+//   and all: the next submit sends it again, never anew.
 // - A callback's failure passes for a failed save: `onSuccess` runs once,
 //   after the confirmed outcome, for a still-mounted form; what it throws
 //   is reported apart, and never resubmits or unlocks.
-// - The person can't tell what changed, or must retype to keep their
-//   edits: `changes()` compares the draft, its baseline and the latest
-//   record field by field, and `reapply()`, a deliberate step, puts the
-//   fields the person changed on top of the latest record as a new draft,
-//   to review and save. Nothing is merged or saved on its own.
+// - Edits lost by leaving: while the values differ from what was last
+//   saved, or a submission is in flight or unknown, the form tells the
+//   session client (`GraspClient.guardLeave`), and the host asks before
+//   leaving the page.
 
 /** A form-level validator as TanStack Form runs it. */
 type Validate<Values> = FormValidateFn<Values>;
@@ -150,10 +141,6 @@ export interface FormStatus {
   readonly failure: FormFailure | undefined;
   /** Server issues of editable fields, by field name. */
   readonly fieldIssues: Readonly<Record<string, string>>;
-  /** Record forms: the save was refused as stale, the draft kept. */
-  readonly conflict: boolean;
-  /** Record forms: a newer record arrived than the baseline. */
-  readonly newer: boolean;
   /** The save committed, but `onSuccess` failed: what it said. */
   readonly applicationError: string | undefined;
   /**
@@ -169,8 +156,6 @@ const initialStatus: FormStatus = Object.freeze({
   attempted: false,
   failure: undefined,
   fieldIssues: Object.freeze({}),
-  conflict: false,
-  newer: false,
   applicationError: undefined,
   uploading: false,
 });
@@ -187,7 +172,7 @@ export interface GraspForm<Values, Result> {
    * error. A submit while one is active joins it.
    */
   readonly submit: () => Promise<Result>;
-  /** Discards unsaved edits: back to the initial values, or the record's baseline. */
+  /** Discards unsaved edits: back to the initial values. */
   readonly reset: () => void;
   /**
    * Gives up a submission whose outcome is unknown, once the person
@@ -198,46 +183,6 @@ export interface GraspForm<Values, Result> {
   readonly discard: () => void;
 }
 
-/** A record form: a Grasp form that can adopt the latest record. */
-export interface RecordForm<Values, Result> extends GraspForm<Values, Result> {
-  /**
-   * Discards the draft and adopts the latest record supplied, clearing a
-   * conflict: a deliberate step, after the person confirmed losing edits.
-   */
-  readonly reload: () => void;
-  /**
-   * Puts the fields the person changed on top of the latest record
-   * supplied, which becomes the baseline, clearing a conflict: a
-   * deliberate step, once the person saw what changed. Nothing is saved;
-   * the next save carries the latest record's revision. Does nothing
-   * until a newer record than the baseline has arrived.
-   */
-  readonly reapply: () => void;
-}
-
-/** One editable field, as the draft, its baseline and the latest record hold it. */
-export interface FieldChange {
-  readonly field: string;
-  /** As the draft started from. */
-  readonly base: unknown;
-  /** As the person has it now. */
-  readonly draft: unknown;
-  /** As the latest record supplied has it. */
-  readonly latest: unknown;
-  /** Whether the person changed it. */
-  readonly mine: boolean;
-  /** Whether the latest record changed it since the baseline. */
-  readonly theirs: boolean;
-}
-
-/** What changed since a record form's draft started. */
-export interface RecordChanges {
-  /** Whether a newer record than the baseline has arrived. */
-  readonly latestKnown: boolean;
-  /** The fields the person or the latest record changed, in the form's order. */
-  readonly fields: readonly FieldChange[];
-}
-
 /** An operation-bound form's options (spec 10.2.1). */
 export interface OperationFormOptions<Reference> {
   /** The editable input, as the operation takes it. */
@@ -246,61 +191,6 @@ export interface OperationFormOptions<Reference> {
   readonly onSuccess?: (result: ReturnOf<Reference>) => void | Promise<void>;
   /** Back to `defaultValues` after a confirmed outcome. Off by default. */
   readonly resetOnSuccess?: boolean;
-}
-
-/** The fields of `Doc` and the mutation's arguments alike. */
-type SharedKey<Reference, Doc> = Extract<keyof Doc, keyof ArgsOf<Reference>> &
-  string;
-
-/**
- * The fields of `Doc` a record form can edit for the mutation: those the
- * mutation takes as arguments, of a type the argument takes.
- */
-export type EditableKey<Reference, Doc> = {
-  [Key in SharedKey<Reference, Doc>]: Doc[Key] extends ArgsOf<Reference>[Key]
-    ? Key
-    : never;
-}[SharedKey<Reference, Doc>];
-
-/** The arguments `args` maps from the baseline: the rest of the input. */
-type RemainingArgs<Reference, Field extends PropertyKey> = Omit<
-  ArgsOf<Reference>,
-  Field
-> &
-  Readonly<Partial<Record<Field, never>>>;
-
-/** What a record form's options say of a mutation that doesn't answer the record. */
-interface AnswersOtherThanRecord {
-  readonly "A record form binds a mutation that returns the record": never;
-}
-
-/**
- * Nothing, when `Reference` answers the record `Doc`: its document type,
- * or it or `null` for a delete-style save. A save answering anything else
- * says nothing of what the record is now, so it doesn't bind a record form.
- */
-export type AnswersRecord<Reference, Doc> = [ReturnOf<Reference>] extends [
-  Doc | null,
-]
-  ? [Doc] extends [ReturnOf<Reference>]
-    ? unknown
-    : AnswersOtherThanRecord
-  : AnswersOtherThanRecord;
-
-/** A record form's options (spec 10.3). */
-export interface RecordFormOptions<
-  Reference,
-  Doc,
-  Field extends EditableKey<Reference, Doc>,
-> {
-  /** The live document, as the parent's query supplies it. */
-  readonly record: Doc;
-  /** The record's fields the person edits. */
-  readonly fields: readonly Field[];
-  /** The rest of the arguments, from the captured baseline only. */
-  readonly args: (baseline: Doc) => RemainingArgs<Reference, Field>;
-  /** After a confirmed save, with the mutation's declared result. */
-  readonly onSuccess?: (result: ReturnOf<Reference>) => void | Promise<void>;
 }
 
 /** A local form's options (spec 10.2.4). */
@@ -332,26 +222,6 @@ interface Submission {
    */
   readonly again?: () => Promise<unknown>;
 }
-
-/** A document's identity and revision, as the SDK binds records by them. */
-const identityOf = (
-  record: unknown
-): { id: unknown; rev: number } | undefined =>
-  isPlainObject(record) && typeof record._rev === "number"
-    ? { id: record._id, rev: record._rev }
-    : undefined;
-
-/** `record`'s values of `fields`. */
-const pick = (
-  record: unknown,
-  fields: readonly string[]
-): Record<string, unknown> =>
-  Object.fromEntries(
-    fields.map((field) => [
-      field,
-      isPlainObject(record) ? record[field] : undefined,
-    ])
-  );
 
 /** Whether two plain values are the same, as JSON reads them, whatever their keys' order. */
 const same = (a: unknown, b: unknown): boolean => {
@@ -429,12 +299,6 @@ type Target =
       readonly send: Send;
       readonly args: ValueDescriptor;
     }
-  | {
-      readonly kind: "record";
-      readonly send: Send;
-      readonly args: ValueDescriptor;
-      readonly fields: readonly string[];
-    }
   | { readonly kind: "schema"; readonly schema: StandardSchemaV1 };
 
 /**
@@ -446,13 +310,10 @@ type AnyCallback<Result> = {
   call(value: unknown): Result;
 }["call"];
 
-/** The options of any of the three ways in, as the hook reads them. */
+/** The options of either way in, as the hook reads them. */
 export interface FormOptionsInput {
   readonly defaultValues?: unknown;
-  readonly record?: unknown;
-  readonly fields?: readonly string[];
   readonly resetOnSuccess?: boolean;
-  readonly args?: AnyCallback<unknown>;
   readonly onSuccess?: AnyCallback<void | Promise<void>>;
   readonly onSubmit?: AnyCallback<unknown>;
 }
@@ -469,10 +330,6 @@ type Checked =
   | { readonly issues: readonly StandardSchemaV1.Issue[] }
   | { readonly value: unknown; readonly issues?: undefined };
 
-/**
- * What a form holds beside TanStack's state: its status, the record's
- * baseline and the submission in flight. One per mounted form.
- */
 /** What separates the steps of a field's path: `a.b`, `a[0]`. */
 const fieldPathBreak = /[.[\]]/u;
 /** A step of a path into an array. */
@@ -491,12 +348,16 @@ const nativeDescriptorOf = (
 
 /** A field's upload, as the form holds it while it runs. */
 export interface UploadHold {
-  /** Whether the draft it was started for is still the form's. */
+  /** Whether the edits it was started for are still the form's. */
   readonly current: () => boolean;
   /** It ended: the form may submit once every one has. */
   readonly end: () => void;
 }
 
+/**
+ * What a form holds beside TanStack's state: its status and the
+ * submission in flight. One per mounted form.
+ */
 export class FormBinding {
   readonly #target: Target;
   readonly #listeners = new Set<() => void>();
@@ -508,11 +369,8 @@ export class FormBinding {
   #started = 0;
   /** A submission whose outcome is unknown, asked again as it was until discarded. */
   #uncertain: Submission | undefined;
-  /** The record the draft started from, and the latest supplied. */
-  #baseline: unknown;
-  #latest: unknown;
-  /** This form, as the session client's leave guard knows its holders. */
-  readonly #holder = {};
+  /** This form, as the session client's leave guard knows it. */
+  readonly #owner = {};
   #mounted = true;
   /** The last values checked, and what the check said: one check a submit. */
   #checked:
@@ -532,8 +390,8 @@ export class FormBinding {
   /** What `#leaveGuard` was told last. */
   #guarded = false;
   /**
-   * An operation form's values its last successful submission sent, kept
-   * in the fields (no `resetOnSuccess`): saved, so not edits to guard.
+   * The values its last successful submission sent, kept in the fields
+   * (no `resetOnSuccess`): saved, so not edits to guard.
    */
   #savedValues: Record<string, unknown> | undefined;
 
@@ -546,8 +404,6 @@ export class FormBinding {
     this.#leaveGuard = leaveGuard;
     this.#target = target;
     this.#options = options;
-    this.#baseline = options.record;
-    this.#latest = options.record;
     this.initialValues = initialValues;
   }
 
@@ -601,7 +457,7 @@ export class FormBinding {
     };
   }
 
-  /** Keeps the latest callbacks and mapper, as the form last rendered. */
+  /** Keeps the latest callbacks, as the form last rendered. */
   setOptions(options: FormOptionsInput): void {
     this.#options = options;
   }
@@ -623,8 +479,8 @@ export class FormBinding {
 
   /**
    * Whether leaving the page would lose something: while mounted, edits
-   * not saved (a record form's draft, another form's values changed from
-   * where they started), or a submission in flight or of unknown outcome.
+   * not saved (values changed from where they started or were last
+   * saved), or a submission in flight or of unknown outcome.
    * Told to the client only when it changes.
    */
   #tellGuard(): void {
@@ -634,26 +490,21 @@ export class FormBinding {
       (this.#status.phase !== "idle" || this.#unsaved());
     if (guarded !== this.#guarded) {
       this.#guarded = guarded;
-      this.#leaveGuard?.(this.#holder, guarded);
+      this.#leaveGuard?.(this.#owner, guarded);
     }
   }
 
   /** Whether the values hold edits not saved. */
   #unsaved(): boolean {
-    return this.#target.kind === "record"
-      ? this.#dirty()
-      : !same(
-          this.#formOf().state.values,
-          this.#savedValues ?? this.initialValues
-        );
+    return !same(
+      this.#formOf().state.values,
+      this.#savedValues ?? this.initialValues
+    );
   }
 
   /** Whether `field` is one the person edits. */
   #editable(field: string): boolean {
     const target = this.#target;
-    if (target.kind === "record") {
-      return target.fields.includes(field);
-    }
     if (target.kind === "operation") {
       // Every argument the operation declares is the person's to fill,
       // given a default or not: the form sends nothing else.
@@ -662,15 +513,6 @@ export class FormBinding {
         : Object.hasOwn(this.initialValues, field);
     }
     return true;
-  }
-
-  /** The complete input of the values: a record form's with `args(baseline)`. */
-  #assembled(values: Record<string, unknown>): unknown {
-    if (this.#target.kind !== "record") {
-      return values;
-    }
-    const rest = this.#options.args?.(this.#baseline);
-    return { ...(isPlainObject(rest) ? rest : {}), ...values };
   }
 
   /** Checks `values` with the form's one validator: issues, or the normalized input. */
@@ -688,7 +530,7 @@ export class FormBinding {
         ? { value: checked.value }
         : { issues: checked.issues };
     }
-    const checked = validateValue(target.args, this.#assembled(values));
+    const checked = validateValue(target.args, values);
     return checked.issues === undefined
       ? { value: checked.value }
       : { issues: checked.issues };
@@ -703,7 +545,7 @@ export class FormBinding {
       : errorsOf(checked.issues, (field) => this.#editable(field));
   };
 
-  /** A field changed: its server issue is out of date, and the leave guard too. */
+  /** A field changed: its server issue is out of date. */
   readonly fieldChanged = (name: unknown): void => {
     if (
       typeof name === "string" &&
@@ -723,88 +565,6 @@ export class FormBinding {
     return this.#form;
   }
 
-  /** Whether the editable values differ from the record's baseline. */
-  #dirty(): boolean {
-    const target = this.#target;
-    if (target.kind !== "record") {
-      return false;
-    }
-    return !same(
-      this.#formOf().state.values,
-      pick(this.#baseline, target.fields)
-    );
-  }
-
-  /** Makes `record` the baseline, and its fields the values. */
-  #adopt(record: unknown): void {
-    const target = this.#target;
-    if (target.kind !== "record") {
-      return;
-    }
-    this.#baseline = record;
-    this.#remember(record);
-    this.#formOf().reset(pick(record, target.fields), {
-      keepDefaultValues: true,
-    });
-    this.#set({
-      conflict: false,
-      newer: false,
-      failure: undefined,
-      fieldIssues: {},
-      attempted: false,
-    });
-  }
-
-  /** Keeps `record` as the latest supplied, unless one of a later revision is. */
-  #remember(record: unknown): void {
-    const latest = identityOf(this.#latest);
-    const next = identityOf(record);
-    if (
-      latest === undefined ||
-      (next !== undefined && next.rev >= latest.rev)
-    ) {
-      this.#latest = record;
-    }
-  }
-
-  /**
-   * A record the parent supplied (spec 10.3): adopted with its revision
-   * while the form is pristine and idle; otherwise remembered for a
-   * deliberate reload. A lower revision than the latest is ignored, and
-   * another document's identity too: a different record is a remount.
-   */
-  supply(record: unknown): void {
-    if (this.#target.kind !== "record") {
-      return;
-    }
-    const next = identityOf(record);
-    const latest = identityOf(this.#latest);
-    if (
-      next === undefined ||
-      latest === undefined ||
-      next.id !== latest.id ||
-      next.rev < latest.rev
-    ) {
-      return;
-    }
-    if (next.rev === latest.rev && same(record, this.#latest)) {
-      return;
-    }
-    this.#remember(record);
-    // A record at the baseline's revision or below is one the form holds
-    // already, or older: a read sent before a save that answered after it.
-    const baseline = identityOf(this.#baseline);
-    if (baseline !== undefined && next.rev <= baseline.rev) {
-      return;
-    }
-    const { phase, conflict } = this.#status;
-    if (phase === "idle" && !conflict && !this.#dirty()) {
-      this.#adopt(record);
-      return;
-    }
-    this.#set({ newer: true });
-  }
-
   /** See `GraspForm.reset`. */
   reset(): void {
     // A submission in flight, or one whose outcome is unknown, keeps its
@@ -815,14 +575,9 @@ export class FormBinding {
     ) {
       return;
     }
-    const target = this.#target;
-    const values =
-      target.kind === "record"
-        ? pick(this.#baseline, target.fields)
-        : this.initialValues;
     this.#savedValues = undefined;
     this.#cancelUploads();
-    this.#formOf().reset(values, { keepDefaultValues: true });
+    this.#formOf().reset(this.initialValues, { keepDefaultValues: true });
     this.#set({
       attempted: false,
       failure: undefined,
@@ -840,97 +595,15 @@ export class FormBinding {
     this.#set({ phase: "idle", failure: undefined });
   }
 
-  /** See `RecordForm.reload`. */
-  reload(): void {
-    if (
-      this.#status.phase === "submitting" ||
-      this.#status.phase === "uncertain"
-    ) {
-      return;
-    }
-    this.#cancelUploads();
-    this.#adopt(this.#latest);
-  }
-
-  /** Whether a newer record of the baseline's than the baseline was supplied. */
-  #latestIsNewer(): boolean {
-    const latest = identityOf(this.#latest);
-    const baseline = identityOf(this.#baseline);
-    return (
-      latest !== undefined &&
-      baseline !== undefined &&
-      same(latest.id, baseline.id) &&
-      latest.rev > baseline.rev
-    );
-  }
-
-  /** See `RecordChanges`: empty for a form that edits no record. */
-  changes(): RecordChanges {
-    const target = this.#target;
-    if (target.kind !== "record" || this.#form === undefined) {
-      return { latestKnown: false, fields: [] };
-    }
-    const latestKnown = this.#latestIsNewer();
-    const base = pick(this.#baseline, target.fields);
-    const draft = pick(this.#form.state.values, target.fields);
-    const latest = latestKnown ? pick(this.#latest, target.fields) : base;
-    const fields = target.fields.flatMap((field) => {
-      const mine = !same(draft[field], base[field]);
-      const theirs = !same(latest[field], base[field]);
-      return mine || theirs
-        ? [
-            {
-              field,
-              base: base[field],
-              draft: draft[field],
-              latest: latest[field],
-              mine,
-              theirs,
-            },
-          ]
-        : [];
-    });
-    return { latestKnown, fields };
-  }
-
-  /** See `RecordForm.reapply`. */
-  reapply(): void {
-    const target = this.#target;
-    if (
-      target.kind !== "record" ||
-      this.#status.phase !== "idle" ||
-      !this.#latestIsNewer()
-    ) {
-      return;
-    }
-    const { fields } = this.changes();
-    const latest = this.#latest;
-    const values = pick(latest, target.fields);
-    for (const change of fields) {
-      if (change.mine) {
-        values[change.field] = change.draft;
-      }
-    }
-    this.#baseline = latest;
-    this.#formOf().reset(values, { keepDefaultValues: true });
-    this.#set({
-      conflict: false,
-      newer: false,
-      failure: undefined,
-      fieldIssues: {},
-      attempted: false,
-    });
-  }
-
   /** The uploads under way, each by how to cancel it. */
   readonly #uploads = new Map<object, () => void>();
 
   /**
    * A field's upload started, `cancel` stopping it: the form refuses to
-   * submit until every one ended. Discarding the draft (`reset`,
-   * `reload`) cancels them: an upload that still finishes belongs to a
-   * draft that is gone, and `current` says so, so its file isn't written
-   * into the one that replaced it.
+   * submit until every one ended. Discarding the edits (`reset`) cancels
+   * them: an upload that still finishes belongs to edits that are gone,
+   * and `current` says so, so its file isn't written into the values that
+   * replaced them.
    */
   startUpload(cancel: () => void): UploadHold {
     const hold = {};
@@ -946,7 +619,7 @@ export class FormBinding {
     };
   }
 
-  /** Cancels every upload under way: what they upload goes with the draft. */
+  /** Cancels every upload under way: what they upload goes with the edits. */
   #cancelUploads(): void {
     const cancels = [...this.#uploads.values()];
     this.#uploads.clear();
@@ -1032,10 +705,7 @@ export class FormBinding {
       throw this.#failed(error, submission);
     }
     this.#uncertain = undefined;
-    const refused = this.#succeeded(result, sentValues);
-    if (refused !== undefined) {
-      throw refused;
-    }
+    this.#succeeded(result, sentValues);
     return result;
   }
 
@@ -1054,7 +724,7 @@ export class FormBinding {
   }
 
   /**
-   * A submission failed: the draft stays, its errors where they belong.
+   * A submission failed: the values stay, its errors where they belong.
    * Answers the structured error `submit` rejects with: the local
    * callback's own failure as `form.failed`, with its message.
    */
@@ -1125,62 +795,21 @@ export class FormBinding {
         failure = { ...failureOf(error), message: errors.form };
       }
     }
-    this.#set({
-      phase: "idle",
-      failure,
-      fieldIssues,
-      conflict: error.code === "data.conflict",
-    });
+    this.#set({ phase: "idle", failure, fieldIssues });
     return error;
   }
 
-  /** A submission committed: the new baseline, the reset and the callback. */
-  #succeeded(
-    result: unknown,
-    sentValues: Record<string, unknown>
-  ): GraspError | undefined {
-    const target = this.#target;
-    if (target.kind === "record") {
-      const committed = identityOf(result);
-      const baseline = identityOf(this.#baseline);
-      const latest = identityOf(this.#latest);
-      if (result === null) {
-        // A delete-style save (`Doc | null`): the record is gone, so
-        // there is nothing to adopt, and no later revision of it.
-        this.#set({ phase: "idle" });
-      } else if (
-        committed === undefined ||
-        baseline === undefined ||
-        committed.id !== baseline.id
-      ) {
-        // A record form binds a mutation that answers the record it saved
-        // (`useForm`'s types say so); anything else says nothing of what
-        // the record is now, so nothing is adopted and the values stay.
-        const refused = clientError("contract.invalid_result");
-        this.#set({ phase: "idle", failure: failureOf(refused) });
-        return refused;
-      } else {
-        this.#set({ phase: "idle" });
-        // A newer record supplied while the save was in flight wins: the
-        // form is pristine now, and never goes back a revision.
-        this.#adopt(
-          latest !== undefined && latest.rev > committed.rev
-            ? this.#latest
-            : result
-        );
-      }
-    } else {
-      // Set first: the guard `#set` tells reads it.
-      this.#savedValues =
-        this.#options.resetOnSuccess === true ? undefined : sentValues;
-      this.#set({ phase: "idle", attempted: false });
-      if (this.#options.resetOnSuccess === true) {
-        this.#formOf().reset(this.initialValues, { keepDefaultValues: true });
-        this.#tellGuard();
-      }
+  /** A submission committed: the values saved, the reset and the callback. */
+  #succeeded(result: unknown, sentValues: Record<string, unknown>): void {
+    // Set first: the guard `#set` tells reads it.
+    this.#savedValues =
+      this.#options.resetOnSuccess === true ? undefined : sentValues;
+    this.#set({ phase: "idle", attempted: false });
+    if (this.#options.resetOnSuccess === true) {
+      this.#formOf().reset(this.initialValues, { keepDefaultValues: true });
+      this.#tellGuard();
     }
     void this.#notify(result, this.#started);
-    return undefined;
   }
 
   /**
@@ -1236,11 +865,7 @@ const readArgs = (value: unknown): ValueDescriptor | undefined => {
 };
 
 /** The way `target` and `options` make the form, read once. */
-const targetOf = (
-  client: GraspClient,
-  target: unknown,
-  options: FormOptionsInput
-): Target => {
+const targetOf = (client: GraspClient, target: unknown): Target => {
   if (isSchema(target)) {
     return { kind: "schema", schema: target };
   }
@@ -1249,11 +874,7 @@ const targetOf = (
   // server code. Core checks the submission again with the function's own
   // validator, and the form shows what it refuses by the fields it names.
   const kind = isPlainObject(target) ? target.kind : undefined;
-  // A record form binds a mutation only.
-  if (
-    kind !== "mutation" &&
-    (kind !== "action" || options.record !== undefined)
-  ) {
+  if (kind !== "mutation" && kind !== "action") {
     throw clientError("contract.invalid_request");
   }
   clientInternals(client).readReference(target, kind);
@@ -1272,24 +893,7 @@ const targetOf = (
     // SAFETY: read as a mutation reference just above.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     await client.mutation(target as MutationReference, input, submit);
-  if (options.record !== undefined) {
-    const fields = (options.fields ?? []).filter(
-      (field) => typeof field === "string"
-    );
-    return { kind: "record", send, args, fields };
-  }
   return { kind: "operation", send, args };
-};
-
-/** The values a form starts from, by the way it is made. */
-const initialValuesOf = (
-  target: Target,
-  options: FormOptionsInput
-): Record<string, unknown> => {
-  if (target.kind === "record") {
-    return pick(options.record, target.fields);
-  }
-  return isPlainObject(options.defaultValues) ? options.defaultValues : {};
 };
 
 /**
@@ -1301,27 +905,25 @@ export const bindForm = (
   client: GraspClient,
   target: unknown,
   options: FormOptionsInput
-): FormBinding => {
-  const read = targetOf(client, target, options);
-  return new FormBinding(
-    read,
-    initialValuesOf(read, options),
+): FormBinding =>
+  new FormBinding(
+    targetOf(client, target),
+    isPlainObject(options.defaultValues) ? options.defaultValues : {},
     options,
     (holder, guarded) => {
       client.guardLeave(holder, guarded);
     }
   );
-};
 
 /**
- * The form hook, untyped: what `useForm` in react.ts types by its three
+ * The form hook, untyped: what `useForm` in react.ts types by its two
  * ways in. `client` is the session client.
  */
 export const useGraspForm = (
   client: GraspClient,
   target: unknown,
   options: FormOptionsInput
-): RecordForm<Record<string, unknown>, unknown> => {
+): GraspForm<Record<string, unknown>, unknown> => {
   // One binding for the form's life, never replaced: no setter.
   // oxlint-disable-next-line react/hook-use-state -- see above
   const [binding] = useState(() => bindForm(client, target, options));
@@ -1342,7 +944,7 @@ export const useGraspForm = (
   // oxlint-disable-next-line react/hook-use-state -- see above
   const [graspForm] = useState(() => {
     binding.attach(form);
-    const made: RecordForm<Record<string, unknown>, unknown> = {
+    const made: GraspForm<Record<string, unknown>, unknown> = {
       Field: form.Field,
       Subscribe: form.Subscribe,
       submit: async () => await binding.submit(),
@@ -1352,23 +954,13 @@ export const useGraspForm = (
       discard: () => {
         binding.discard();
       },
-      reload: () => {
-        binding.reload();
-      },
-      reapply: () => {
-        binding.reapply();
-      },
     };
     bindings.set(made, binding);
     return made;
   });
-  const { record } = options;
   useEffect(() => {
     binding.setOptions(options);
   });
-  useEffect(() => {
-    binding.supply(record);
-  }, [binding, record]);
   useEffect(() => {
     binding.setMounted(true);
     return () => {

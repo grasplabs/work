@@ -15,11 +15,7 @@ import type {
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { ResourceRecallInput } from "@grasp-os/shared/knowledge";
-import {
-  resourceAliasPattern,
-  storeOperationPathMaxLength,
-  storeOperationPathPattern,
-} from "@grasp-os/shared/operation-limits";
+import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
 import type {
   PlatformMeasure,
   platformMeasures,
@@ -50,8 +46,10 @@ import type { Infer, InferInput, ObjectInput, ValueShape } from "./values.ts";
 //   (`ctx.brain`);
 // - `workflows`: independent workflows the App starts
 //   (`ctx.workflows.<alias>.start`);
-// - `apps`: another App's public functions (`ctx.apps.<alias>`), and the
-//   platform's own read-only ones (`permission.grasp`, `ctx.apps.grasp`);
+// - `grasp`: the platform's own read-only functions, such as its
+//   statistics (`permission.grasp`, `ctx.grasp`). An App never calls
+//   another App: Apps that belong together are one App, and a workflow
+//   moves data between Apps;
 // - `people`: the organization's members (`ctx.people`), a flag on the
 //   App's `permissions`, never a declaration;
 // - `files`: what the App's pages may do with files;
@@ -67,15 +65,14 @@ import type { Infer, InferInput, ObjectInput, ValueShape } from "./values.ts";
 // it lists in its `uses`; queries and mutations never reach the network
 // (inspection refuses a permission in their `uses`, app.ts). A mutation
 // lists the workflows it starts after it commits.
-//
-// Another App's functions are its public queries, mutations and actions,
-// each named by its path with the exact arguments and return the App
-// declares for it, so the binding resolves only where that App serves
-// exactly that. Its tables and schema stay its own: the declaration
-// copies none of them, and the host runs each call as that App's own code.
 
 /** The kinds of permission an action reaches through `ctx`. */
-export type PermissionKind = "ai" | "connections" | "brain" | "apps" | "guests";
+export type PermissionKind =
+  | "ai"
+  | "connections"
+  | "brain"
+  | "grasp"
+  | "guests";
 
 /**
  * The fixed alias of each permission an App holds at most once: what the
@@ -84,16 +81,11 @@ export type PermissionKind = "ai" | "connections" | "brain" | "apps" | "guests";
 export const permissionAliases = Object.freeze({
   ai: "ai",
   brain: "brain",
+  grasp: "grasp",
   guests: "guests",
   files: "files",
   links: "links",
 } as const);
-
-/**
- * The alias of the platform's own read-only functions among an App's
- * `apps` (`permission.grasp`): never another App's.
- */
-export const graspAlias = "grasp";
 
 /** What an `ai` permission may say. */
 export interface AiConfig {
@@ -266,35 +258,22 @@ export interface BrainConfig<Operations extends readonly BrainOperation[]> {
 /** What a `guests` permission may do with the App's guest chats. */
 export type GuestsOperation = "invite" | "list" | "read" | "revoke";
 
-/** The kinds of another App's public function an `apps` permission calls. */
-export type AppFunctionKind = "query" | "mutation" | "action";
-
 /**
- * One of another App's public functions, as an `apps` permission declares
- * it: its kind, its arguments (a map of field schemas, as that App
- * declares the function's `args`) and its return, exactly as that App
- * declares them.
+ * One of the platform's read-only functions (`graspFunctions`): a query,
+ * its arguments a map of field schemas, and its return.
  */
-export interface AppFunctionConfig<
+interface GraspFunctionConfig<
   Shape extends ValueShape = ValueShape,
   Returns extends AnySchema = AnySchema,
 > {
-  readonly kind: AppFunctionKind;
+  readonly kind: "query";
   readonly args: Shape;
   readonly returns: Returns;
 }
 
-/** What an `apps` permission may say about another App. */
-export interface AppConfig<
-  Functions extends Readonly<Record<string, AppFunctionConfig>>,
-> {
-  /** The App's public functions this App calls, by path, e.g. `contacts.find`. */
-  readonly functions: Functions;
-}
-
-/** One of another App's functions as a declaration holds it: data only. */
-export interface AppFunctionShape {
-  readonly kind: AppFunctionKind;
+/** One of the platform's functions as a declaration holds it: data only. */
+export interface GraspFunctionShape {
+  readonly kind: "query";
   /** The object descriptor of its arguments. */
   readonly args: ValueDescriptor;
   readonly returns: ValueDescriptor;
@@ -336,19 +315,12 @@ export interface GuestsPermission<
 }
 
 /**
- * An `apps` permission: another App's public functions, and the App is
- * the one an admin binds it to, which must serve each exactly as declared.
- * Under alias `grasp`, the platform's own (`permission.grasp`).
+ * A `grasp` permission: the platform's own read-only functions
+ * (`graspFunctions`), which an admin binds to the platform's statistics
+ * permission they grant the App.
  */
-export interface AppPermission<
-  Alias extends string = string,
-  Functions extends Readonly<Record<string, AppFunctionConfig>> = Readonly<
-    Record<string, AppFunctionConfig>
-  >,
-> extends DeclarationBase<"apps", Alias> {
-  readonly functions: Readonly<Record<string, AppFunctionShape>>;
-  /** The functions' types, for types only: never set. */
-  readonly "~functions"?: Functions;
+export interface GraspPermission extends DeclarationBase<"grasp", "grasp"> {
+  readonly functions: Readonly<Record<string, GraspFunctionShape>>;
 }
 
 /**
@@ -427,7 +399,7 @@ export type AnyPermission =
   | ConnectionPermission
   | BrainPermission
   | GuestsPermission
-  | AppPermission;
+  | GraspPermission;
 
 /** One search result from the Brain: a title and an excerpt of it. */
 export interface BrainHit {
@@ -611,15 +583,13 @@ type FunctionCallArgs<
     : never;
 
 /**
- * What `ctx.apps.<alias>` is: each declared function by its path, with its
- * arguments, answering its return.
+ * What `ctx.grasp` is: each of the platform's functions by its path, with
+ * its arguments, answering its return.
  */
-export interface AppClient<
-  Functions extends Readonly<Record<string, AppFunctionConfig>>,
-> {
-  readonly call: <Path extends Extract<keyof Functions, string>>(
-    ...call: FunctionCallArgs<Functions, Path>
-  ) => Promise<Infer<Functions[Path]["returns"]>>;
+export interface GraspClient {
+  readonly call: <Path extends Extract<keyof GraspFunctions, string>>(
+    ...call: FunctionCallArgs<GraspFunctions, Path>
+  ) => Promise<Infer<GraspFunctions[Path]["returns"]>>;
 }
 
 /** What `ctx.connections.<alias>` is for `Permission`. */
@@ -640,12 +610,6 @@ export type BrainClientOf<Permission> =
 export type GuestsClientOf<Permission> =
   Permission extends GuestsPermission<infer Operations>
     ? GuestsClient<Operations>
-    : never;
-
-/** What `ctx.apps.<alias>` is for `Permission`. */
-export type AppClientOf<Permission> =
-  Permission extends AppPermission<string, infer Functions>
-    ? AppClient<Functions>
     : never;
 
 /** Why a permission's declaration was refused. */
@@ -869,96 +833,6 @@ const checkedOrigins = (origins: unknown): readonly string[] => {
   return Object.freeze(checked);
 };
 
-/** The descriptors of one function's arguments and return. */
-type FunctionShapeOf = (config: Record<string, unknown>) => {
-  readonly args: ValueDescriptor;
-  readonly returns: ValueDescriptor;
-};
-
-/**
- * An apps permission's functions, as data: 1 to 32 paths, each one of an
- * App's function paths (`storeOperationPathPattern`), a query, a mutation
- * or an action, its arguments an object, each with the descriptors
- * `shapeOf` reads from its config: from schemas in code, from data in a
- * manifest.
- */
-const checkedFunctions = (
-  functions: unknown,
-  shapeOf: FunctionShapeOf
-): Readonly<Record<string, AppFunctionShape>> => {
-  if (!isPlainObject(functions)) {
-    return refuse("An apps permission's `functions` is an object of paths.");
-  }
-  const entries = Object.entries(functions);
-  if (entries.length === 0 || entries.length > listMax) {
-    return refuse(
-      `An apps permission lists between 1 and ${listMax} functions.`
-    );
-  }
-  const checked: Record<string, AppFunctionShape> = {};
-  for (const [path, entry] of entries) {
-    if (
-      path.length > storeOperationPathMaxLength ||
-      !storeOperationPathPattern.test(path)
-    ) {
-      return refuse(
-        `\`${path}\` isn't a function's path: up to four dotted names, at most ${storeOperationPathMaxLength} characters.`
-      );
-    }
-    const config = checkedConfig(entry, ["kind", "args", "returns"]);
-    const { kind } = config;
-    if (kind !== "query" && kind !== "mutation" && kind !== "action") {
-      return refuse(
-        "An apps permission calls another App's queries, mutations and actions."
-      );
-    }
-    const { args, returns } = shapeOf(config);
-    if (args.kind !== "object") {
-      return refuse("A function's arguments are an object.");
-    }
-    checked[path] = { kind, args, returns };
-  }
-  return checked;
-};
-
-/** A function's descriptors, from the schemas code declares it with. */
-const shapeFromSchemas: FunctionShapeOf = (config) => {
-  if (!isPlainObject(config.args)) {
-    return refuse(
-      "A function's `args` is a map of field names to schemas, as its App declares them."
-    );
-  }
-  // SAFETY: `args` was checked to be a plain object; `v.object` checks
-  // each field is a schema.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const argsSchema = v.object(config.args as ValueShape);
-  return {
-    args: structuredClone(descriptorOf(argsSchema)),
-    returns: structuredClone(descriptorOf(config.returns)),
-  };
-};
-
-/** A function's descriptors, as a manifest holds them. */
-const shapeFromData: FunctionShapeOf = (config) => ({
-  args: readDescriptor(config.args, 1, { nodes: 0 }),
-  returns: readDescriptor(config.returns, 1, { nodes: 0 }),
-});
-
-/** An apps declaration, from its alias and its functions as data. */
-const appDeclaration = (
-  alias: string,
-  functions: unknown,
-  shapeOf: FunctionShapeOf
-): AppPermission =>
-  // SAFETY: built from what was checked: the alias and the functions,
-  // each with its descriptors, as `AppPermission` holds them.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  declared({
-    "~permission": "apps",
-    alias,
-    functions: checkedFunctions(functions, shapeOf),
-  }) as AppPermission;
-
 /** The measures the platform publishes (`platformMeasures`). */
 const measureNames = [
   "platform.workflow_runs",
@@ -973,8 +847,8 @@ const measureDimensions = [
 ] as const satisfies readonly (typeof platformMeasures)[PlatformMeasure][number][];
 
 /**
- * The platform's read-only functions an App reaches through `apps`, under
- * alias `grasp` (`permission.grasp`), by path:
+ * The platform's read-only functions an App reaches under alias `grasp`
+ * (`permission.grasp`), by path:
  *
  * - `statistics.read`: a measure the platform publishes (such as the runs
  *   of Apps' workflows) over the last `days` × 24 hours up to `until`,
@@ -1017,9 +891,9 @@ export const graspFunctions = Object.freeze({
       computation: v.string().nullable().optional(),
     }),
   },
-} as const satisfies Readonly<Record<string, AppFunctionConfig>>);
+} as const satisfies Readonly<Record<string, GraspFunctionConfig>>);
 
-/** The platform's read-only functions, as `ctx.apps.grasp` calls them. */
+/** The platform's read-only functions, as `ctx.grasp` calls them. */
 export type GraspFunctions = typeof graspFunctions;
 
 /**
@@ -1132,49 +1006,31 @@ export const permission = Object.freeze({
     }) as WorkflowPermission<Alias, InferInput<Input>, Infer<Output>>;
   },
   /**
-   * Some of another App's public functions, by path: queries, mutations
-   * and actions, each with exactly the arguments and return that App
-   * declares, so the host binds only an App that serves exactly that. Each
-   * call runs as the person this App's call acts for, under the other
-   * App's own roles (`ctx.apps.<alias>`).
-   */
-  app: <
-    const Alias extends string,
-    const Functions extends Readonly<Record<string, AppFunctionConfig>>,
-  >(
-    alias: Alias,
-    config: AppConfig<Functions>
-  ): AppPermission<Alias, Functions> => {
-    const checked = checkedConfig(config, ["functions"]);
-    if (alias === graspAlias) {
-      refuse(
-        `\`${graspAlias}\` is the platform's own functions: declare them with \`permission.grasp()\`.`
-      );
-    }
-    // SAFETY: built from what was checked of the arguments the type is
-    // inferred from: the alias given, and the functions given, by path.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return appDeclaration(
-      checkedAlias(alias),
-      checked.functions,
-      shapeFromSchemas
-    ) as AppPermission<Alias, Functions>;
-  },
-  /**
    * The platform's own read-only functions (`graspFunctions`), such as the
-   * runs of Apps' workflows, under alias `grasp` among the App's `apps`
-   * (`ctx.apps.grasp`). An admin binds it to the platform's statistics
-   * permission they grant the App.
+   * runs of Apps' workflows. An App holds one (`ctx.grasp`); an admin
+   * binds it to the platform's statistics permission they grant the App.
    */
-  grasp: (): AppPermission<typeof graspAlias, GraspFunctions> =>
-    // SAFETY: the platform's own functions, declared as code declares
-    // another App's.
+  grasp: (): GraspPermission =>
+    // SAFETY: built from the platform's own functions, each with the
+    // descriptors of its arguments and return, as `GraspPermission` holds
+    // them.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    appDeclaration(
-      graspAlias,
-      graspFunctions,
-      shapeFromSchemas
-    ) as AppPermission<typeof graspAlias, GraspFunctions>,
+    declared({
+      "~permission": "grasp",
+      alias: permissionAliases.grasp,
+      functions: Object.fromEntries(
+        Object.entries(graspFunctions).map(
+          ([path, { kind, args, returns }]) => [
+            path,
+            {
+              kind,
+              args: structuredClone(descriptorOf(v.object(args))),
+              returns: structuredClone(descriptorOf(returns)),
+            },
+          ]
+        )
+      ),
+    }) as GraspPermission,
   /**
    * Guest chats, under a permission an admin binds: inviting a guest for
    * the person the call acts for, and listing, reading back and revoking
@@ -1291,21 +1147,15 @@ export const readPermissionDeclaration = (
   if (kind === "connections") {
     return permission.connection(alias, loose);
   }
-  if (kind === "apps") {
-    const { functions, ...rest } = config;
-    if (Object.keys(rest).length > 0) {
-      return refuse("An apps permission's config has only `functions`.");
-    }
-    if (alias !== graspAlias) {
-      return appDeclaration(checkedAlias(alias), functions, shapeFromData);
-    }
+  if (kind === "grasp") {
     // The platform's own, exactly: a manifest whose `grasp` declares
     // anything else is no declaration `permission.grasp` makes.
+    fixedAlias(alias, permissionAliases.grasp);
     const grasp = permission.grasp();
-    if (canonicalText(functions) !== canonicalText(grasp.functions)) {
-      return refuse(
-        `\`${graspAlias}\` declares exactly the platform's own functions.`
-      );
+    if (
+      canonicalText(config) !== canonicalText({ functions: grasp.functions })
+    ) {
+      return refuse("`grasp` declares exactly the platform's own functions.");
     }
     return grasp;
   }

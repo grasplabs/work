@@ -1,8 +1,8 @@
-// Compile-time guarantees of `useForm` (spec 10.2.1–10.3.1), against the
-// Notes fixture's generated references: the three ways in infer their
-// values and result from what they bind; a record form's editable fields
-// and `args` partition the arguments, rejecting missing, overlapping or
-// mistyped ones; queries, internal and streaming references never bind.
+// Compile-time guarantees of `useForm` (spec 10.2.1–10.2.4), against the
+// Notes fixture's generated references: both ways in infer their values
+// and result from what they bind; a record is edited through its
+// mutation's arguments, its revision among them; queries, internal and
+// streaming references never bind.
 // This file is type-checked by `vp check` and never run: every
 // `@ts-expect-error` below must stay an error.
 import { expectTypeOf } from "vite-plus/test";
@@ -10,7 +10,7 @@ import { expectTypeOf } from "vite-plus/test";
 import { v } from "../src/index.ts";
 import type { Id } from "../src/index.ts";
 import { useForm } from "../src/react.ts";
-import type { GraspForm, RecordForm, TextFieldName } from "../src/react.ts";
+import type { GraspForm, TextFieldName } from "../src/react.ts";
 import { api } from "./notes/server/_generated/api.ts";
 import { internal } from "./notes/server/_generated/internal.ts";
 
@@ -47,7 +47,7 @@ export const useChecks = (): void => {
   expectTypeOf<TextFieldName<{ body?: string; title: string }>>().toEqualTypeOf<
     "body" | "title"
   >();
-  // @ts-expect-error -- an operation-bound form has no reload
+  // @ts-expect-error -- a form has no record to reload
   void create.reload;
   // @ts-expect-error -- a value of the wrong type
   void useForm(api.notes.create, { defaultValues: { title: 1 } });
@@ -63,79 +63,20 @@ export const useChecks = (): void => {
   // @ts-expect-error -- a streaming action doesn't bind
   void useForm(api.notes.exportAll, { defaultValues: { format: "csv" } });
 
-  // A record form: the editable fields from the record, the rest from
-  // the captured baseline, the committed document the result.
+  // Editing a record: its values and revision as the defaults, the
+  // committed document the result.
   const edit = useForm(api.notes.update, {
-    record: note,
-    fields: ["title", "body"],
-    args: (baseline) => ({
-      id: baseline._id,
-      expectedRevision: baseline._rev,
-    }),
+    defaultValues: {
+      id: note._id,
+      expectedRevision: note._rev,
+      title: note.title,
+      body: note.body,
+    },
   });
-  expectTypeOf(edit).toEqualTypeOf<
-    RecordForm<{ title: string; body: string }, Note>
-  >();
-  expectTypeOf(edit.reload).toEqualTypeOf<() => void>();
-  // @ts-expect-error -- the mapper can't supply an editable field
-  void useForm(api.notes.update, {
-    record: note,
-    fields: ["title", "body"],
-    args: (baseline) => ({
-      id: baseline._id,
-      expectedRevision: baseline._rev,
-      title: baseline.title,
-    }),
-  });
+  expectTypeOf(edit.submit()).toEqualTypeOf<Promise<Note>>();
   // @ts-expect-error -- the revision is missing
   void useForm(api.notes.update, {
-    record: note,
-    fields: ["title", "body"],
-    args: (baseline) => ({ id: baseline._id }),
-  });
-  // @ts-expect-error -- the id is of another type
-  void useForm(api.notes.update, {
-    record: note,
-    fields: ["title"],
-    args: (baseline) => ({
-      id: baseline._rev,
-      expectedRevision: baseline._rev,
-      body: baseline.body,
-    }),
-  });
-  // @ts-expect-error -- `summary` isn't an argument of the mutation
-  void useForm(api.notes.update, {
-    record: note,
-    fields: ["title", "summary"],
-    args: (baseline) => ({
-      id: baseline._id,
-      expectedRevision: baseline._rev,
-      body: baseline.body,
-    }),
-  });
-  // @ts-expect-error -- the record's `summary` may be null; the argument may not
-  void useForm(api.notes.setSummary, {
-    record: note,
-    fields: ["summary"],
-    args: (baseline) => ({ id: baseline._id, expectedRevision: baseline._rev }),
-  });
-  // @ts-expect-error -- a record form binds a mutation returning the record, not its ID
-  void useForm(api.notes.create, {
-    record: note,
-    fields: ["title", "body"],
-    args: () => ({}),
-  });
-  // @ts-expect-error -- nor one returning only null, which says nothing of the record
-  void useForm(api.notes.remove, {
-    record: note,
-    fields: [],
-    args: (baseline) => ({ id: baseline._id, expectedRevision: baseline._rev }),
-  });
-  // @ts-expect-error -- a record form binds a mutation, not an action
-  void useForm(api.notes.tally, {
-    record: note,
-    fields: [],
-    args: () => ({}),
+    defaultValues: { id: note._id, title: note.title, body: note.body },
   });
 
   // A local form: the schema's input its fields, the callback's result

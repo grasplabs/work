@@ -12,9 +12,9 @@ import { calledAs } from "./sealed-apps.ts";
 import { signedInApi, unique } from "./sign-in.ts";
 
 // The board page's tests' helpers, shared by its test files
-// (board-page*.test.ts): an admin's board page and workflow map, the
-// map's workflows, runs and signals seeded, and the page's functions
-// called as its pages call them.
+// (board-page*.test.ts): an admin's workflow map, whose board page takes
+// snapshots of it, the map's workflows, runs and signals seeded, and the
+// page's functions called as its pages call them.
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
@@ -93,37 +93,27 @@ const fromBuiltin = async (admin: Person, blueprint: string) => {
  */
 export const boardPageOf = (idp: Idp) => ({
   /**
-   * An admin's board page and workflow map: the page's `map` bound to the
-   * map unless `bindMap` is false, and its `grasp` (the platform's
-   * statistics) to the statistics permission it asks for, granted, unless
-   * `bindStatistics` is false.
+   * An admin's workflow map, with its board page: its `grasp` (the
+   * platform's statistics) bound to the statistics permission it asks
+   * for, granted, unless `bindStatistics` is false. `app` and `map` are
+   * the same App: the board page is one of its pages.
    */
   setUp: async ({
-    bindMap = true,
     bindStatistics = true,
-  }: { bindMap?: boolean; bindStatistics?: boolean } = {}) => {
+  }: { bindStatistics?: boolean } = {}) => {
     const admin = await signedInApi(idp, "admin");
-    const board = await fromBuiltin(admin, "board-page");
-    const { app: map } = await fromBuiltin(admin, "workflow-map");
-    if (bindMap) {
-      await admin.api.resourceBindings.approve({
-        app: board.app,
-        alias: "map",
-        target: { kind: "app", appId: map },
-        reviewed: { version: 1 },
-      });
-    }
-    const [permission] = board.permissions;
+    const made = await fromBuiltin(admin, "workflow-map");
+    const [permission] = made.permissions;
     if (bindStatistics && permission !== undefined) {
       await grantReviewed(admin.api, permission.id);
       await admin.api.resourceBindings.approve({
-        app: board.app,
+        app: made.app,
         alias: "grasp",
         target: { kind: "grasp", permissionId: permission.id },
         reviewed: { version: 1 },
       });
     }
-    return { admin, app: board.app, map };
+    return { admin, app: made.app, map: made.app };
   },
 });
 

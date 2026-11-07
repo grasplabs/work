@@ -1588,8 +1588,8 @@ export const resourceTemplates = sqliteTable(
  * for its actions (resource-bindings.ts): approved by an admin, for the
  * exact declaration they reviewed (`declaration_hash`) and the contract it
  * serves as it was then (`contract_id`, `fingerprint`). `target` is the
- * provider (JSON, `BindingTarget`): a model, one of the App's permissions
- * or another App. At most one active binding per alias; approving
+ * provider (JSON, `BindingTarget`): a model, or one of the App's
+ * permissions. At most one active binding per alias; approving
  * another revokes it in the same batch. Revoked rows stay, for the audit
  * log's references.
  */
@@ -1602,7 +1602,7 @@ export const appResourceBindings = sqliteTable(
       .references(() => apps.id),
     alias: text().notNull(),
     kind: text({
-      enum: ["model", "connector", "knowledge", "grasp", "guests", "app"],
+      enum: ["model", "connector", "knowledge", "grasp", "guests"],
     }).notNull(),
     target: text().notNull(),
     declarationHash: text("declaration_hash").notNull(),

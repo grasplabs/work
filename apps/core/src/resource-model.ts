@@ -176,7 +176,6 @@ const generate = async (
     args[1] === undefined
       ? undefined
       : descriptorFromText(JSON.stringify(args[1]));
-  const { runOrigin } = caller;
   try {
     const answer = await models(env).call({
       model: target.model,
@@ -190,10 +189,8 @@ const generate = async (
       ),
       purpose: "app.resource",
       // The App for a page's call; the run for a workflow's, whose
-      // workflow and run lineage then count it too, as they do for a call
-      // made, through other Apps, from a run's: its requests are the
-      // run's, besides the called App's binding.
-      trigger: runOrigin?.actor ?? caller.actor,
+      // workflow and run lineage then count it too.
+      trigger: caller.actor,
       provenance: [...caller.sources.snapshot().collectionIds],
       work: { authority: caller.authority, context: caller.context },
       requestId: context.requestId,

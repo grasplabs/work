@@ -1555,6 +1555,13 @@
       "when": 1793988093647,
       "tag": "0221_pages_as_file_routes",
       "breakpoints": true
+    },
+    {
+      "idx": 222,
+      "version": "6",
+      "when": 1793994271557,
+      "tag": "0222_drop_app_calls",
+      "breakpoints": true
     }
   ]
 }

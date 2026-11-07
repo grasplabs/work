@@ -47,7 +47,7 @@ export const appBindingKinds = [
   "ai",
   "connections",
   "brain",
-  "apps",
+  "grasp",
   "guests",
   "files",
   "links",

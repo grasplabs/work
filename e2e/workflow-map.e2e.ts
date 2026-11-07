@@ -39,8 +39,13 @@ const mapFor = async (admin: Person): Promise<string> => {
     const created = await api.apps.blueprints.create(workflowMap, {
       name: `Workflow map ${crypto.randomUUID().slice(0, 8)}`,
     });
-    // It asks for nothing: its workflows are in its own store.
-    expect(created.permissions).toStrictEqual([]);
+    // It asks only to read the platform's statistics, for its board page:
+    // its workflows are in its own store.
+    expect(
+      created.permissions.map(({ object, actions }) => ({ object, actions }))
+    ).toStrictEqual([
+      { object: { type: "platform" }, actions: ["statistics"] },
+    ]);
     await api.apps.versions.setCurrent(created.app.id, 1);
     // Published, for the people it is shared with (a draft is its
     // builders' alone).

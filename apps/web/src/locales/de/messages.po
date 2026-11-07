@@ -766,10 +766,6 @@ msgstr "{name} · mit {teams}"
 msgid "{name} ({apart})"
 msgstr "{name} ({apart})"
 
-#: src/engines/resource-bindings.tsx
-msgid "{name} ({appId})"
-msgstr "{name} ({appId})"
-
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
 msgstr "{name} (Grasp-Team)"
@@ -2396,10 +2392,6 @@ msgstr "Und weitere."
 msgid "And the rest."
 msgstr "Und der Rest."
 
-#: src/engines/resource-bindings.tsx
-msgid "Another App"
-msgstr "Andere App"
-
 #: src/onboarding/send-plan-form.tsx
 msgid "Another day"
 msgstr "Ein anderer Tag"
@@ -2488,7 +2480,6 @@ msgstr "Noch etwas?"
 
 #: src/connections/request-app-dialog.tsx
 #: src/dashboard/dependency-requests.tsx
-#: src/engines/resource-bindings.tsx
 #: src/inbox/items.ts
 #: src/pages/page-frame.tsx
 #: src/projects/new-item-dialog.tsx
@@ -2507,7 +2498,6 @@ msgstr "App"
 
 #: src/connections/connection-list.tsx
 #: src/engines/app-data.tsx
-#: src/engines/resource-bindings.tsx
 msgid "App {app}"
 msgstr "App {app}"
 
@@ -8360,10 +8350,6 @@ msgstr "Für diese Instanz ist noch kein Modell eingerichtet."
 #: src/workflows/module-files.tsx
 msgid "No modules yet. A module holds calculations a task calls through a local binding."
 msgstr "Noch keine Module. Ein Modul enthält Berechnungen, die eine Aufgabe über eine lokale Bindung aufruft."
-
-#: src/engines/resource-bindings.tsx
-msgid "No other App serves every function it declares, public and exactly as declared."
-msgstr "Keine andere App bietet jede Funktion, die sie deklariert, öffentlich und genau wie deklariert."
 
 #: src/people/person-picker.tsx
 msgid "No owner yet"

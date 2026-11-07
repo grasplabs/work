@@ -9,7 +9,7 @@ import {
   peoplePermission,
 } from "./definition.ts";
 import type { AppDefinition, DefinedField } from "./definition.ts";
-import { graspAlias, readPermissionDeclaration } from "./permissions.ts";
+import { readPermissionDeclaration } from "./permissions.ts";
 import type {
   AnyPermission,
   BrowserPermission,
@@ -183,17 +183,6 @@ const fieldsOf = (fields: readonly DefinedField[]): t.ObjectExpression =>
 
 const permission = t.identifier("permission");
 
-/** An object descriptor's fields, as a map of field schemas. */
-const shapeOf = (descriptor: ValueDescriptor): t.ObjectExpression =>
-  descriptor.kind === "object"
-    ? objectOf(
-        Object.entries(descriptor.fields).map(([name, field]) => [
-          name,
-          validatorOf(field),
-        ])
-      )
-    : t.objectExpression([]);
-
 /** The `permission.*` call that declares `declared`. */
 const permissionOf = (
   declared: AnyPermission | BrowserPermission | WorkflowPermission
@@ -231,28 +220,8 @@ const permissionOf = (
         ]),
       ]);
     }
-    case "apps": {
-      if (declared.alias === graspAlias) {
-        return call(permission, "grasp");
-      }
-      return call(permission, "app", [
-        alias,
-        objectOf([
-          [
-            "functions",
-            objectOf(
-              Object.entries(declared.functions).map(([path, fn]) => [
-                path,
-                objectOf([
-                  ["kind", t.stringLiteral(fn.kind)],
-                  ["args", shapeOf(fn.args)],
-                  ["returns", validatorOf(fn.returns)],
-                ]),
-              ])
-            ),
-          ],
-        ]),
-      ]);
+    case "grasp": {
+      return call(permission, "grasp");
     }
     case "guests":
     case "files": {
@@ -298,7 +267,7 @@ const permissionKinds = [
   ["connections", true],
   ["brain", false],
   ["workflows", true],
-  ["apps", true],
+  ["grasp", false],
   ["files", false],
   ["guests", false],
   ["links", false],
@@ -344,15 +313,10 @@ export const configSource = (definition: AppDefinition): string => {
   if (answers.length > 0) {
     config.push(["answers", literal(answers)]);
   }
-  // `v` declares preferences, a workflow's input and output, and another
-  // App's functions.
+  // `v` declares preferences, and a workflow's input and output.
   const validated =
     definition.preferences.length > 0 ||
-    declarations.some(
-      (declared) =>
-        declared["~permission"] === "workflows" ||
-        (declared["~permission"] === "apps" && declared.alias !== graspAlias)
-    );
+    declarations.some((declared) => declared["~permission"] === "workflows");
   return printed(generatedFiles.config, [
     sdkImport([
       "defineApp",

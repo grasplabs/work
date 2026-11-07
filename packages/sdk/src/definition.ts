@@ -312,7 +312,7 @@ export const definedPermissions = (
     }
     const declared = readPermissionDeclaration(data);
     const kind = declared["~permission"];
-    if (kind === "connections" || kind === "apps" || kind === "workflows") {
+    if (kind === "connections" || kind === "workflows") {
       const list = listed.get(kind) ?? [];
       list.push(declared);
       listed.set(kind, list);

@@ -13,7 +13,6 @@ import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
 import type { DeclaredPermission, Permission } from "./permissions.ts";
-import { platformLimits } from "./platform-limits.ts";
 
 // An App's code is a tree of text files, versioned as a whole: builders
 // commit changes over the App's latest version as the next version; the
@@ -1046,23 +1045,6 @@ export const appErrors = defineErrorFamily({
  * file there is refused (`app.v1_server`).
  */
 export const appV1ServerFolder = "app/";
-
-/**
- * The limits of a sealed function's call of another App's through an app
- * resource. The input and the answer are JSON, measured in bytes of UTF-8
- * as sent: the function called is a public operation, held to spec 18.1's
- * input and output limits as any other is. One call may lead to more (the called App calling another), at most
- * `depth` calls deep, so 3 hops, 4 Apps: A calls B, B calls C, C calls D,
- * and D calls no further. Never back into an App already in it; all of
- * them end by the time the first one must. Through app resources, all the
- * calls one call leads to, down every branch, are at most `calls`.
- */
-export const appCallLimits = {
-  inputBytes: platformLimits.operationInputBytes,
-  answerBytes: platformLimits.operationOutputBytes,
-  depth: 3,
-  calls: 32,
-} as const;
 
 /**
  * The most an App's error carries to its caller besides its code (its

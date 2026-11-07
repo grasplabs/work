@@ -598,35 +598,6 @@ describe("sharing an App", () => {
   });
 });
 
-/**
- * An app binding `caller` holds of `callee`'s public functions, as an
- * admin's approval writes it (resource-bindings.ts), revoked if asked:
- * what sharing follows, whatever its declaration's functions.
- */
-const appBinding = async (
-  caller: string,
-  callee: string,
-  status: "active" | "revoked" = "active"
-): Promise<void> => {
-  await env.DB.prepare(
-    `INSERT INTO app_resource_bindings (id, app_id, alias, kind, target,
-      declaration_hash, contract_id, fingerprint, reviewed_version, status,
-      approved_by, approved_at, revoked_by, revoked_at)
-     VALUES (?, ?, ?, 'app', ?, 'hash', ?, 'fingerprint', 1, ?, 'test', 0, ?, ?)`
-  )
-    .bind(
-      crypto.randomUUID(),
-      caller,
-      `peer${unique().replaceAll("-", "")}`.slice(0, 40),
-      JSON.stringify({ kind: "app", appId: callee }),
-      `apps.${callee}`,
-      status,
-      status === "revoked" ? "test" : null,
-      status === "revoked" ? 0 : null
-    )
-    .run();
-};
-
 /** A permission row's subject and object types, as permissions.ts names them. */
 type SubjectType = "app" | "workflow" | "store";
 type ObjectType = "store" | "connection" | "workflow";
@@ -713,7 +684,7 @@ const businessStore = async (
 };
 
 describe("sharing an App that reaches other Apps sealed", () => {
-  it("is refused when an App it calls through an approved binding read a mailbox, revoked or not, either end", async () => {
+  it("is refused when an App whose store it holds a grant on read a mailbox, revoked or not, either end", async () => {
     const [owner, anna] = await Promise.all([
       personApi("builder"),
       personApi("builder"),
@@ -725,8 +696,13 @@ describe("sharing an App that reaches other Apps sealed", () => {
     ]);
     const mailbox = await mailboxOf(owner);
     await grantConnection(owner, callee, mailbox);
-    await appBinding(caller, callee);
-    await appBinding(revokedCaller, callee, "revoked");
+    await storeGrant(caller, callee);
+    const revoked = await storeGrant(revokedCaller, callee);
+    await env.DB.prepare(
+      "UPDATE permissions SET status = 'revoked' WHERE object_id = ?"
+    )
+      .bind(revoked)
+      .run();
     // And the other way: the caller read a mailbox, its calls may carry it.
     const [sender, receiver] = await Promise.all([
       newApp(owner),
@@ -734,7 +710,7 @@ describe("sharing an App that reaches other Apps sealed", () => {
     ]);
     const sent = await mailboxOf(owner);
     await grantConnection(owner, sender, sent);
-    await appBinding(sender, receiver);
+    await storeGrant(sender, receiver);
     const anyone = { type: "person", id: anna.userId } as const;
 
     await expect(
@@ -778,14 +754,14 @@ describe("sharing an App that reaches other Apps sealed", () => {
     ]);
   });
 
-  it("fails closed for a binding to an App that doesn't exist", async () => {
+  it("fails closed for a store grant on an App that doesn't exist", async () => {
     const [owner, anna] = await Promise.all([
       personApi("builder"),
       personApi("builder"),
     ]);
     const app = await newApp(owner);
     const ghost = `app_${unique().replaceAll("-", "")}`;
-    await appBinding(app, ghost);
+    await storeGrant(app, ghost);
 
     await expect(
       shareRefusal(owner, app, { type: "person", id: anna.userId })
@@ -799,12 +775,6 @@ describe("sharing an App that reaches other Apps sealed", () => {
 /** Ways an App `a` comes to hold what an App `b` read, both sealed. */
 const links = [
   [
-    "an app binding",
-    async (a: string, b: string) => {
-      await appBinding(a, b);
-    },
-  ],
-  [
     "a store grant",
     async (a: string, b: string) => {
       await storeGrant(a, b);
@@ -815,10 +785,10 @@ const links = [
 /** Ways an App comes to hold something that doesn't resolve, and how it is named. */
 const dangling = [
   [
-    "an app binding",
+    "a store grant on an App that doesn't exist",
     async (app: string) => {
       const ghost = `app_${unique().replaceAll("-", "")}`;
-      await appBinding(app, ghost);
+      await storeGrant(app, ghost);
       return `app:${ghost}`;
     },
   ],
@@ -923,13 +893,13 @@ describe("how far sharing follows Apps reaching each other", () => {
     const mailbox = await mailboxOf(owner);
     await grantConnection(owner, c, mailbox);
     // A calls B, which calls C (the mailbox's App).
-    await appBinding(a, b);
-    await appBinding(b, c);
+    await storeGrant(a, b);
+    await storeGrant(b, c);
     // And X and Y call each other, X's data from Y's mailbox.
     const other = await mailboxOf(owner);
     await grantConnection(owner, y, other);
-    await appBinding(x, y);
-    await appBinding(y, x);
+    await storeGrant(x, y);
+    await storeGrant(y, x);
     const anyone = { type: "person", id: anna.userId } as const;
 
     await expect(
@@ -958,7 +928,7 @@ describe("how far sharing follows Apps reaching each other", () => {
     // The writer holds a grant on the store storeOwner owns: its writes
     // are in the store. And caller calls storeOwner.
     await storeGrant(writer, storeOwner);
-    await appBinding(caller, storeOwner);
+    await storeGrant(caller, storeOwner);
     const anyone = { type: "person", id: anna.userId } as const;
 
     await expect(
@@ -985,7 +955,7 @@ describe("how far sharing follows Apps reaching each other", () => {
       const to = chain[at + 1];
       if (to !== undefined) {
         // oxlint-disable-next-line no-await-in-loop -- in order
-        await appBinding(from, to);
+        await storeGrant(from, to);
       }
     }
 
@@ -1194,7 +1164,7 @@ describe("deciding many Apps at once past the walk's cap", () => {
       // oxlint-disable-next-line no-await-in-loop -- one App at a time
       const wide = await newApp(owner);
       // oxlint-disable-next-line no-await-in-loop -- one App at a time
-      await appBinding(app, wide);
+      await storeGrant(app, wide);
       const workflows = Array.from(
         { length: workflowsEach },
         () => `workflow_${unique().replaceAll("-", "")}`
@@ -1274,7 +1244,7 @@ describe("deciding many Apps that reach one wide graph", () => {
     // the walk follows: none of them passes, alone or together.
     await Promise.all(
       bound.map(async (app) => {
-        await appBinding(app, hub);
+        await storeGrant(app, hub);
       })
     );
     await env.DB.batch(
@@ -1290,7 +1260,7 @@ describe("deciding many Apps that reach one wide graph", () => {
     );
     // `medium` calls an App following fewer: it passes on its own, once
     // the batch has tripped the cap. `small` reaches nothing.
-    await appBinding(medium, wide);
+    await storeGrant(medium, wide);
     await env.DB.batch(
       Array.from({ length: workflowsEach }, () =>
         grantStatement(

@@ -1,4 +1,3 @@
-import { graspAlias } from "@grasp-os/sdk";
 import type { AnyPermission } from "@grasp-os/sdk";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
@@ -6,22 +5,19 @@ import type { ConnectorContract } from "@grasp-os/shared/connect";
 import type { AppId, ConnectionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { Provenance } from "@grasp-os/shared/knowledge";
-import type { OperationResult } from "@grasp-os/shared/operations";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import type { BindingTarget } from "@grasp-os/shared/resource-bindings";
-import type { Role } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
 
 import type { ResourceContext } from "./operations.ts";
-import type { CallingAgent } from "./workflow-start-intents.ts";
 
 // How a resource binding reaches its provider (resource-bindings.ts): one
 // adapter per kind of target a permission binds to. An adapter runs in
 // core, never in App code, and reaches its provider only through the
 // platform's own way out: the model gateway, connect, the Brain's delegate
-// reads, another App's functions, the platform's own reads. Whatever it answers is checked again by the operation host
-// against the declaration's contract before App code sees it.
+// reads, the platform's own reads. Whatever it answers is checked again
+// by the operation host against the declaration's contract before App
+// code sees it.
 
 /**
  * Where what an invocation read through its resources comes from: the
@@ -172,108 +168,14 @@ export interface BindingCaller {
    * binding (`resourceBindingsFor` makes it).
    */
   readonly counts?: Map<string, number>;
-  /**
-   * The Apps whose calls this invocation was made through, its own App
-   * last (resource-apps.ts): a call of another App's function refuses one
-   * already in it, and one past the deepest chain.
-   */
-  readonly chain?: readonly AppId[];
-  /**
-   * Calls a public function of another App as a page's call of it runs,
-   * for `by`, carrying the chain and the caller's own checks
-   * (app-functions.ts, `callFunction`): given by core's invocation, so an
-   * app resource reaches the called App only as that does.
-   */
-  readonly callApp?: AppFunctionCall;
-  /**
-   * Whether this invocation is a workflow run's, or was called, through
-   * other Apps, from one (resource-apps.ts): the Apps it calls start no
-   * workflows, as a run's own call starts none.
-   */
-  readonly fromRun?: boolean;
-  /**
-   * The agent whose call this invocation is, or was called, through other
-   * Apps, from (agent-apps.ts): named on what the Apps it calls start, and
-   * on the record of each call.
-   */
-  readonly agent?: CallingAgent;
-  /**
-   * How many calls of other Apps' functions the whole call this
-   * invocation belongs to has made, its first App's included: one count
-   * down the chain, so a call can't fan out past `appCallLimits.calls`.
-   */
-  readonly appCalls?: { used: number };
-  /**
-   * For an invocation called, through other Apps, from a workflow run's
-   * (resource-apps.ts): the run, as the audit log names it. A model
-   * request down the chain is the run's (resource-model.ts): it counts in
-   * the run's workflow and lineage spend, and meets the rules for its
-   * workflow, besides the called App's own binding.
-   */
-  readonly runOrigin?: RunOrigin;
-  /**
-   * Aborted once the person cancels the page's call this invocation is
-   * part of (`CallOptions.cancelled`): the Apps it calls stop with it.
-   */
-  readonly cancelled?: AbortSignal;
 }
-
-/** The workflow run a chain of calls between Apps started from. */
-export interface RunOrigin {
-  readonly actor: AuditActor;
-}
-
-/** How an app resource calls another App's function (`BindingCaller.callApp`). */
-export type AppFunctionCall = (
-  by: {
-    readonly userId: string;
-    readonly role: Role;
-    readonly teams: Identity["teams"];
-  },
-  app: AppId,
-  request: string,
-  options: {
-    readonly deadline: number;
-    readonly stillAllowed: () => Promise<void>;
-    readonly parentSession?: string;
-    readonly chain: readonly AppId[];
-    readonly fromRun: boolean;
-    readonly agent?: CallingAgent;
-    readonly appCalls: { used: number };
-    /**
-     * The release and contract the reviewed binding was checked against:
-     * the call runs only there (`version.mismatch` otherwise), never on
-     * a version published since, whatever the request names.
-     */
-    readonly pinned?: {
-      readonly version: number;
-      readonly fingerprint: string;
-    };
-    /** For a run's chain: its lease, checked just before each commit. */
-    readonly requireHolds?: () => void;
-    /** For a run's chain: the run (`BindingCaller.runOrigin`). */
-    readonly runOrigin?: RunOrigin;
-    /** The calling invocation's cancellation (`BindingCaller.cancelled`). */
-    readonly cancelled?: AbortSignal;
-    /**
-     * The calling invocation's sources (`BindingCaller.sources`), which
-     * the called function reads into and its model and connector requests
-     * carry: what the caller read is in what it may pass on.
-     */
-    readonly sources: InvocationSources;
-  }
-) => Promise<{
-  readonly result: OperationResult;
-  readonly provenance: InvocationProvenance | null;
-}>;
 
 /** The permission each kind of binding target serves. */
 interface PermissionOfTarget {
   readonly model: "ai";
   readonly connector: "connections";
   readonly knowledge: "brain";
-  readonly app: "apps";
-  readonly grasp: "apps";
+  readonly grasp: "grasp";
   readonly guests: "guests";
 }
 
@@ -286,8 +188,8 @@ export type DeclarationOf<Kind extends BindingTarget["kind"]> = Extract<
 /**
  * The kind of target `declaration` binds to: AI to a model, a connection
  * to a connection permission, the Brain to collection permissions, guests
- * to the platform's guests permission, and another App to that App, but
- * the platform's own functions (`grasp`) to its statistics permission.
+ * to the platform's guests permission, and the platform's own functions
+ * (`grasp`) to its statistics permission.
  */
 export const targetKindOf = (
   declaration: AnyPermission
@@ -305,7 +207,7 @@ export const targetKindOf = (
   if (kind === "guests") {
     return "guests";
   }
-  return declaration.alias === graspAlias ? "grasp" : "app";
+  return "grasp";
 };
 
 /** A binding target of one kind. */

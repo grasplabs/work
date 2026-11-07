@@ -15,9 +15,6 @@ export const noChoice = (choices: BindingChoices): boolean => {
   if (choices.kind === "model") {
     return choices.models.length === 0;
   }
-  if (choices.kind === "app") {
-    return choices.apps.length === 0;
-  }
   return choices.permissions.length === 0;
 };
 
@@ -25,9 +22,6 @@ export const noChoice = (choices: BindingChoices): boolean => {
 export const firstChoice = (choices: BindingChoices): string => {
   if (choices.kind === "model") {
     return choices.models[0] ?? "";
-  }
-  if (choices.kind === "app") {
-    return choices.apps[0]?.appId ?? "";
   }
   return choices.permissions[0]?.permissionId ?? "";
 };
@@ -83,11 +77,6 @@ export const targetOf = (
       ? { kind: choices.kind, permissionId: picked }
       : undefined;
   }
-  if (choices.kind === "app") {
-    return choices.apps.some(({ appId }) => appId === picked)
-      ? { kind: "app", appId: picked }
-      : undefined;
-  }
   return allChosen(resource.collections, chosen)
     ? {
         kind: "knowledge",
@@ -103,9 +92,6 @@ const choiceIds = (choices: BindingChoices | null): string[] => {
   }
   if (choices.kind === "model") {
     return choices.models;
-  }
-  if (choices.kind === "app") {
-    return choices.apps.map(({ appId }) => appId);
   }
   return choices.permissions.map(({ permissionId }) => permissionId);
 };

@@ -264,14 +264,13 @@ const call = async (
   by: Identity,
   path: keyof typeof kinds,
   args: Json,
-  options: { key?: string; fromRun?: boolean; runEnv?: Env } = {}
+  options: { key?: string; runEnv?: Env } = {}
 ): Promise<OperationResult> =>
   await callWith(
     await invocationFor(options.runEnv ?? env, fx.release, {
       by,
       requestId: crypto.randomUUID(),
       deadline: Date.now() + 30_000,
-      ...(options.fromRun === true ? { fromRun: true } : {}),
     }),
     path,
     args,
@@ -635,21 +634,6 @@ describe("an action's ctx.notifyPeople", () => {
         },
       ],
     });
-  });
-
-  it("tells nobody from a workflow run's call", async () => {
-    const fx = await fixture();
-    const sent = await call(
-      fx,
-      fx.bob,
-      "orders.tell",
-      { to: fx.bob.userId, title: "From a run" },
-      { fromRun: true }
-    );
-    expect({
-      answer: answerOf(sent),
-      told: await toldTo(fx.bob),
-    }).toStrictEqual({ answer: "resource.unavailable", told: [] });
   });
 });
 

@@ -1126,8 +1126,8 @@ const ranNothing = (settled: Settled, isAction: boolean): boolean =>
  * date: a confirmed change; an action's failure after a step, or its lost
  * answer, which undoes none of what it committed (its queries are read
  * again, the action itself is never run again); or records that moved on since this
- * client read them (`data.conflict`), so a draft kept for the person to
- * reload gets the record as it is now.
+ * client read them (`data.conflict`), so a form edited from them gets the
+ * record as it is now.
  */
 const showsStale = (settled: Settled, isAction: boolean): boolean =>
   settled.kind === "value" ||

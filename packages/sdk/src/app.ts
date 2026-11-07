@@ -17,11 +17,11 @@ import {
 import type {
   AiPermission,
   AnyPermission,
-  AppPermission,
   BrainPermission,
   BrowserPermission,
   ConnectionPermission,
   FilesPermission,
+  GraspPermission,
   GuestsPermission,
   LinksPermission,
   PermissionKind,
@@ -145,8 +145,8 @@ export interface AppPermissions {
   /** The workflows it starts, each under its alias (`ctx.workflows.<alias>`). */
   // oxlint-disable-next-line typescript/no-explicit-any -- any workflow's input and output
   readonly workflows?: readonly WorkflowPermission<string, any, any>[];
-  /** Other Apps' public functions, each under its alias (`ctx.apps.<alias>`). */
-  readonly apps?: readonly AppPermission[];
+  /** The platform's own read-only functions (`ctx.grasp`). */
+  readonly grasp?: GraspPermission;
   /**
    * Whether it reads the organization's people (`ctx.people`,
    * `usePeople`): names, emails and teams of every member. Shown to whoever
@@ -426,7 +426,7 @@ const permissionKeys: ReadonlyMap<string, string> = new Map([
   ["connections", "a list of `permission.connection`"],
   ["brain", "one `permission.brain`"],
   ["workflows", "a list of `permission.workflow`"],
-  ["apps", "a list of `permission.app` or `permission.grasp`"],
+  ["grasp", "one `permission.grasp()`"],
   ["people", "`true` when it reads the organization's people"],
   ["files", "one `permission.files`"],
   ["guests", "one `permission.guests`"],
@@ -434,11 +434,7 @@ const permissionKeys: ReadonlyMap<string, string> = new Map([
 ]);
 
 /** The keys of an App's `permissions` that hold a list. */
-const listedKeys: ReadonlySet<string> = new Set([
-  "connections",
-  "workflows",
-  "apps",
-]);
+const listedKeys: ReadonlySet<string> = new Set(["connections", "workflows"]);
 
 /** The App's permissions, by what reaches them and by alias, each once. */
 interface PermissionsOf {
@@ -503,7 +499,7 @@ const checkedKeys = (
 };
 
 /**
- * Refuses a fixed alias held by another kind: no connection, App or
+ * Refuses a fixed alias held by another kind: no connection or
  * workflow takes one, so the host never mistakes `ai` for a connection.
  */
 const requireFixedAliases = ({
