@@ -16,6 +16,7 @@ import {
   pageErrors,
   pageLeaseHeader,
   pageLimits,
+  pageVisitorHeader,
   streamCallActions,
 } from "@grasp-os/shared/pages";
 import type { StreamCallAction } from "@grasp-os/shared/pages";
@@ -33,57 +34,81 @@ import {
   refusalOf,
 } from "./app-functions.ts";
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
+import { visitorCall, visitorStatusFor } from "./app-visitors.ts";
 import { currentVersionOf } from "./apps.ts";
 import { identify, identifyFull } from "./auth/identity.ts";
+import { callDraft, draftRunOf } from "./draft-runs.ts";
 import { errorResponse } from "./errors.ts";
 import {
   delivering,
-  leasedBuild,
   personRefusal,
+  readLease,
   requireDelivery,
 } from "./page-delivery.ts";
-import type { LeasedBuild } from "./page-delivery.ts";
+import type { PageLease } from "./page-delivery.ts";
 import { admitted, admitWindow, windowCharger } from "./pages-rpc.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
 import { routeMember } from "./staff-audit.ts";
 
-// A running App's page calling one of its App's functions (spec 32.6):
-// `POST /api/app-functions/<app>`, the request as the body, the frame's
-// lease in a header. A plain request, not the page's WebSocket, so the
-// request's bytes are bounded as they are read, before anything parses
-// them: one message on the socket may be 14 MiB. Threat model, and how
-// each is closed:
+// Every page's one way to call its App's functions (spec 32.6):
+// `POST /api/app-functions/<app>`, the call as the body. A running App's
+// page, a builder's preview of their draft and a visitor's page of a
+// public App all call here; their live queries go over the page's socket
+// (pages-rpc.ts, `PageFrameRpc`), decided the same way. What a call runs
+// on is the lease core signed for the frame (page-delivery.ts): the App's
+// current release on the App's store, or the builder's draft on a
+// throwaway store with no resources (draft-runs.ts). A plain request, not
+// the socket, so its bytes are bounded as they are read, before anything
+// parses them. Threat model, and how each is closed:
 //
-// - A request too large to bother with: the body is read no further than
-//   `functionRequestMaxBytes`, whatever `content-length` says, and the
-//   request is refused before it is decoded or parsed.
-// - Another site calls in the person's name: only from the deployment's
-//   own pages (`Origin`) and only with a JSON body, which no form on
-//   another site can send without a preflight core never answers.
-// - Someone without a role in the App, or who lost it: the session is read
-//   on every request, the role checked by the call itself
-//   (`callPageFunction`), and the App named only by the path. A
-//   paginated list's window is read as the person too (query-windows.ts).
-// - The page's frame was opened for one person and the browser's cookie
-//   is now someone else's (they signed in in another tab): the page names
-//   the person its frame is for (`pagePersonHeader`), and a call whose
-//   session is anyone else's is refused before it is counted or read
-//   (`personRefusal`), so what the frame sends again, such as a save
-//   under an idempotency key whose answer was lost, never runs as them.
-// - Code core didn't serve gets the App's data: the frame's lease, signed
-//   by core for exactly this person and App, says which build calls; the
-//   call runs only inside `delivering`, which checks that build's delivery
-//   (its release not revoked) before the call and again before its
-//   answer. No lease is code core didn't serve: refused unless the App's
-//   data is `ordinary` (data-policy.ts).
-// - A flood: each request counts against the person's requests of the
-//   App's pages (`admitted`), before its body is read; a paginated
-//   list's window counts one more for every page past its first
-//   (`admitWindow`), and every page past what it paid for is charged as
-//   it is read (`windowCharger`).
-// - An answer larger than a frame takes: refused here
-//   (`page.answer_too_large`), as a call of the App's server is.
+// - A visitor calling a builder's draft. A draft's lease is signed only
+//   for a member who builds the App, when their chat's preview opens
+//   (chats-rpc.ts), and names them: a visitor's calls are checked against
+//   `visitor:<session>`, which no member's ID is, so such a lease is no
+//   lease for them; and their calls never reach the draft runner at all
+//   (`visitorCall` takes only a release's lease, `leasedBuild`, and
+//   refuses a draft's).
+// - A preview reaching the App's real store or a resource. No store is
+//   ever named by a page: it follows from what the signed lease runs on.
+//   A draft runs on its throwaway store, which no inventory lists, with
+//   nothing bound (draft-runs.ts); its actions run in the same invocation
+//   objects as a release's, by a name of their own, and tell no webhook
+//   (action-invocation.ts). A draft's lease on a path that only a
+//   release's page reaches (files, links) is refused, never taken for no
+//   lease (`leasedBuild`).
+// - A page of one App calling another. The App is named by the path
+//   alone, and the lease is signed over it: another App's lease is no
+//   lease here, so the call is code core didn't serve, refused unless the
+//   App's data is `ordinary` (page-delivery.ts), and then only as the
+//   person, with their own role in this App. A visitor's session opens
+//   its own App and no other.
+// - Forged release, draft or store. Each is in the lease, under a MAC
+//   only core can make, over the person, the App, the build and the
+//   target; anything else is no lease. A draft's chat is looked up in the
+//   person's own Workspace object, which knows no one else's.
+// - Another person's lease, or session. A lease is signed for one person
+//   (or one visitor's session), and checked against who calls now; the
+//   page names the person its frame is for, and a call whose session is
+//   anyone else's is refused before it is counted or read
+//   (`personRefusal`), so nothing the frame sends again runs as them. A
+//   visitor's token is a header, never a cookie, so no other site's
+//   request carries it; another site can't call as a member either: only
+//   the deployment's own pages (`Origin`), and only with a JSON body,
+//   which no form sends without a preflight core never answers.
+// - Skipping the rate limits. Every call is counted before its body is
+//   read: a member's against their requests of the App's pages, whether
+//   on the release or a draft (`admitted`); a visitor's against theirs and
+//   the App's visitors' together. A paginated list's window counts one
+//   more for each page past its first (`admitWindow`), and every page past
+//   what it paid for is charged as it is read (`windowCharger`).
+// - A request or an answer too large: the body is read no further than
+//   `functionRequestMaxBytes`, whatever `content-length` says; an answer
+//   larger than a frame takes is refused (`page.answer_too_large`).
+// - Someone who lost their role, a build whose release was revoked. The
+//   session and role are read on every call, by the call itself; a
+//   release's build is checked before the call and again before its
+//   answer (`delivering`), and a draft's builder before every step.
 //
 // A streaming action (spec 10.7.6) goes through the same admission, at
 // `<path>/<app>/<stream | attach | cancel>`, and runs in an object of its
@@ -102,13 +127,10 @@ import { routeMember } from "./staff-audit.ts";
 // - Another person reaches the stream: the invocation is named by the
 //   person signed in, never by anything in the request.
 //
-// A plain action sent under a key (`<path>/<app>`, as every session
-// client sends one) runs in the same object, without progress
-// (`streaming: false`), so a lost answer is recovered by its key: the
-// resend joins the run under way or answers its receipt, never runs it
-// again. Every resend is admitted exactly as a start is, the person's
-// access fingerprinted again (`accessOf`), the build's delivery checked
-// before the run and again before its answer.
+// A plain action sent under a key runs in the same object, without
+// progress (`streaming: false`), so a lost answer is recovered by its key:
+// the resend joins the run under way or answers its receipt, never runs it
+// again. A visitor's page has no streams, and no actions at all.
 
 /** How long a page waits for a function's answer. */
 const pageCallMs = 30_000;
@@ -122,10 +144,6 @@ const appAfter = (pathname: string, base: string): string | undefined => {
   const app = pathname.slice(prefix.length);
   return app.length > 0 && !app.includes("/") ? app : undefined;
 };
-
-/** The App ID in `pathname`, if it is a function call's path. */
-export const functionCallApp = (pathname: string): string | undefined =>
-  appAfter(pathname, appFunctionPath);
 
 const streamActions: ReadonlySet<string> = new Set(streamCallActions);
 
@@ -164,7 +182,7 @@ export const statusOf = (code: string): number => {
   if (code.startsWith("auth.")) {
     return 401;
   }
-  return 403;
+  return visitorStatusFor[code] ?? 403;
 };
 
 /** `answer`, unless it is more than a frame takes in one call. */
@@ -203,14 +221,90 @@ const refusalResponse = (
 /** How much of a path's App ID a log line keeps: the path is the caller's. */
 const loggedAppMaxLength = 128;
 
-/** Who calls, and as which build. */
-interface Caller {
-  person: Identity;
-  /** The lease the call came with, or `null` for none. */
-  lease: string | null;
+/**
+ * The body of `request`, read no further than a call may be, whatever
+ * its `content-length` says: `request.too_large` past it.
+ */
+const boundedBody = async (request: Request): Promise<string> => {
+  // SAFETY: a request's body in workerd is a byte stream, of Uint8Array
+  // chunks; its type says `any` only for streams in general.
+  const stream = request.body as ReadableStream<Uint8Array> | null;
+  const length = Number(request.headers.get("content-length") ?? 0);
+  const body =
+    stream === null || length > functionRequestMaxBytes
+      ? undefined
+      : await readAtMost(stream, functionRequestMaxBytes);
+  if (body === undefined) {
+    throw requestErrors.create("request.too_large");
+  }
+  return new TextDecoder().decode(body);
+};
+
+/** A member's call core admitted: who, which App, its body, what it runs on. */
+interface AdmittedCall {
+  readonly person: Identity;
+  readonly id: AppId;
+  readonly body: string;
+  /** The lease core signed for the frame, if it signed one for them. */
+  readonly lease: PageLease | undefined;
   /** Who calls now, read again: the session still theirs. */
-  current: () => Promise<Identity | undefined>;
+  readonly current: () => Promise<Identity | undefined>;
 }
+
+/**
+ * What every member's call passes before anything reads its body (see
+ * the header): a session, the person the page names, the person's rate,
+ * then the body bounded and the lease read. A refusal as the response to
+ * answer; one that is thrown is the caller's to answer.
+ */
+const admitMember = async (
+  request: Request,
+  env: Env,
+  app: string,
+  requestId: string,
+  operation: "app.functions" | "app.functions.stream"
+): Promise<AdmittedCall | Response> => {
+  // A staff member's ask is in the client's audit log, refused or
+  // not (staff-audit.ts).
+  const person = await routeMember(
+    env,
+    await identify(env, request.headers),
+    operation,
+    { app }
+  );
+  if (person === undefined) {
+    return errorResponse(
+      401,
+      authErrors.create("auth.unauthenticated"),
+      requestId
+    );
+  }
+  const refusal = personRefusal(request.headers, person.userId);
+  if (refusal !== undefined) {
+    // Who was named and who is signed in stay out of the log: only why,
+    // and for which App.
+    log.info("app_function.person_refused", {
+      requestId,
+      app: app.slice(0, loggedAppMaxLength),
+      reason: refusal.code,
+    });
+    return errorResponse(statusOf(refusal.code), refusal, requestId);
+  }
+  const id = await admitted(env, person, app);
+  const body = await boundedBody(request);
+  return {
+    person,
+    id,
+    body,
+    lease: await readLease(
+      env,
+      person.userId,
+      id,
+      request.headers.get(pageLeaseHeader)
+    ),
+    current: async () => await identifyFull(env, request.headers),
+  };
+};
 
 /** One frame's line as the relay reads it: its type, if it is JSON at all. */
 const frameOf = (line: string): { type?: unknown; result?: unknown } => {
@@ -243,73 +337,83 @@ const keyedAction = (
     : undefined;
 };
 
-/** Which App a keyed action is for, and as which build. */
-interface KeyedTarget {
-  readonly id: AppId;
-  readonly build: LeasedBuild | undefined;
-}
+/** The release's build a lease names, if it names one: a draft's has none. */
+const buildOf = (lease: PageLease | undefined) =>
+  lease?.kind === "release" ? lease.build : undefined;
+
+/** The draft's chat a lease names, if it names one. */
+const draftOf = (lease: PageLease | undefined) =>
+  lease?.kind === "draft" ? lease.chatId : undefined;
+
+/**
+ * Refuses, as a call is refused, unless what `call` runs on gets the
+ * App's data now: a release's build (`requireDelivery`); a draft reaches
+ * none of the App's data, and its builder is checked by its run.
+ */
+const requireRuns = async (
+  env: Env,
+  person: Identity,
+  { id, lease }: Pick<AdmittedCall, "id" | "lease">,
+  operation: "call" | "stream",
+  stage: "admission" | "delivery" | "push"
+): Promise<void> => {
+  if (lease?.kind === "draft") {
+    return;
+  }
+  await requireDelivery(env, person, id, buildOf(lease), { operation, stage });
+};
 
 /**
  * The release versions an invocation's answer comes from: the App's
  * current one, which answers every page's call, and the one it runs, or
  * ran, under (`ActionInvocation.version`), which a join, an attach or a
- * receipt may have from before a publish.
+ * receipt may have from before a publish. None for a draft's.
  */
 const releasesOf = async (
   env: Env,
   invocation: ReturnType<typeof actionInvocation>,
-  userId: string,
-  app: AppId
+  { person, id, lease }: AdmittedCall
 ): Promise<readonly number[]> => {
-  const running = await invocation.version(userId);
+  if (lease?.kind === "draft") {
+    return [];
+  }
+  const running = await invocation.version(person.userId);
   return [
     ...new Set([
-      await currentVersionOf(env, app),
+      await currentVersionOf(env, id),
       ...(running === undefined ? [] : [running]),
     ]),
   ];
 };
 
 /**
- * Throws `version.revoked` once any of `versions` of `app` is revoked:
- * the build's delivery reads the App's current release only, which a
+ * Whether the caller of `call` is still who they were, with the access
+ * `access` fingerprints (organization role, teams and role in the App,
+ * `accessOf`), what it runs on still gets the App's data, and no release
+ * it runs under (`versions`) was revoked: throws the refusal otherwise.
+ * The build's delivery reads the App's current release only, which a
  * publish moves on from the one an invocation ran.
- */
-const requireReleasesLive = async (
-  env: Env,
-  app: AppId,
-  versions: readonly number[]
-): Promise<void> => {
-  for (const version of versions) {
-    // oxlint-disable-next-line no-await-in-loop -- one or two, in turn
-    await requireNotRevoked(env, app, version);
-  }
-};
-
-/**
- * Whether `caller` is still who they were, with the access `access`
- * fingerprints, and their build still gets the App's data: throws the
- * refusal otherwise.
  */
 const stillTheirs = async (
   env: Env,
-  { person, current }: Caller,
-  { id, build }: KeyedTarget,
-  { access, versions }: { access: string; versions: readonly number[] }
+  call: AdmittedCall,
+  { access, versions }: { access: string; versions: readonly number[] },
+  operation: "call" | "stream",
+  stage: "push" | "delivery"
 ): Promise<void> => {
-  const now = await current();
-  if (now?.userId !== person.userId) {
+  const now = await call.current();
+  if (now?.userId !== call.person.userId) {
     throw authErrors.create("auth.unauthenticated");
   }
   // Refuses, too, someone with no role in the App any more.
-  if ((await accessOf(env, now, id)) !== access) {
+  if ((await accessOf(env, now, call.id)) !== access) {
     throw operationErrors.create("operation.access_changed");
   }
-  await requireDelivery(env, now, id, build, {
-    operation: "call",
-    stage: "delivery",
-  });
-  await requireReleasesLive(env, id, versions);
+  await requireRuns(env, now, call, operation, stage);
+  for (const version of versions) {
+    // oxlint-disable-next-line no-await-in-loop -- one or two, in turn
+    await requireNotRevoked(env, call.id, version);
+  }
 };
 
 /**
@@ -338,39 +442,32 @@ interface KeyedAnswer {
 }
 
 /**
- * The answer to the plain action `call`, under `key`, for `caller`: from
- * the invocation its key names (action-invocation.ts), which starts it,
- * joins it or answers its receipt, read to its result. Its result comes
- * from core's own object, so it is handed on as it is; what it read (its
- * provenance) stays with the run, and so does the release it ran
- * (`manifestHash`), which the receipt doesn't keep.
- *
- * What the invocations keep now grows with every keyed action, not just
- * with streams: accepted, since the invocation object's cap on running
- * plain actions, the request rate, and its receipt's retention and
- * tombstone bound how many one person holds in an App, and no answer is
- * larger than an operation's.
+ * The answer to the plain action `call`, under `key`, for `admittedCall`:
+ * from the invocation its key names (action-invocation.ts), which starts
+ * it, joins it or answers its receipt, read to its result, on the release
+ * or the draft its lease names. Its result comes from core's own object,
+ * so it is handed on as it is.
  */
 const keyedAnswer = async (
   env: Env,
-  caller: Caller,
-  target: KeyedTarget,
+  admittedCall: AdmittedCall,
   { call, key }: { call: FunctionRequest; key: string }
 ): Promise<KeyedAnswer> => {
-  const { person } = caller;
-  const { id, build } = target;
+  const { person, id, lease } = admittedCall;
   // Nothing ran yet: a build refused is refused as any call is.
-  await requireDelivery(env, person, id, build, {
-    operation: "call",
-    stage: "admission",
+  await requireRuns(env, person, admittedCall, "call", "admission");
+  const draft = draftOf(lease);
+  const name = await invocationName(person.userId, id, call, key, {
+    streaming: false,
+    ...(draft === undefined ? {} : { draft }),
   });
-  const name = await invocationName(person.userId, id, call, key, false);
   const access = await accessOf(env, person, id);
   const invocation = actionInvocation(env, name);
   const frames = await invocation.open({
     by: { userId: person.userId, role: person.role, teams: person.teams },
     access,
     app: id,
+    ...(draft === undefined ? {} : { draft }),
     name,
     call,
     streaming: false,
@@ -387,7 +484,7 @@ const keyedAnswer = async (
   if (frame === undefined) {
     throw new Error("The invocation ended without a result.");
   }
-  const versions = await releasesOf(env, invocation, person.userId, id);
+  const versions = await releasesOf(env, invocation, admittedCall);
   const answer: KeyedAnswer = {
     result: frame.result,
     provenance: null,
@@ -396,13 +493,18 @@ const keyedAnswer = async (
   // Checked again before the answer is handed over, as a stream's relay
   // checks before its result: someone signed out, whose access changed,
   // or whose build's or answer's release was revoked while it ran gets
-  // nothing of it. The
-  // run settles on its own receipt whatever happens here, and may have
-  // changed something: the refusal is no answer to what it did, so it
-  // goes back as an outcome withheld, with its key, never as a failure
-  // that invites a resubmit under a fresh one.
+  // nothing of it. The run settles on its own receipt whatever happens
+  // here, and may have changed something: the refusal is no answer to
+  // what it did, so it goes back as an outcome withheld, with its key,
+  // never as a failure that invites a resubmit under a fresh one.
   try {
-    await stillTheirs(env, caller, target, { access, versions });
+    await stillTheirs(
+      env,
+      admittedCall,
+      { access, versions },
+      "call",
+      "delivery"
+    );
   } catch (error) {
     if (!isExpectedError(error)) {
       throw error;
@@ -432,227 +534,88 @@ const keyedAnswer = async (
 };
 
 /**
- * Calls a function of `app` for `caller` under the bounds of the header:
- * counted, the body read no further than a request may be, the build's
- * trust checked before and after. Answers the call's `FunctionAnswer`,
- * whatever its result; a refusal before the call as an error response.
+ * A member's call of `app`'s functions, admitted (see the header): an
+ * action under a key through its invocation; any other call on what the
+ * lease names, the App's current release inside its build's delivery or
+ * the builder's draft. Answers the call's `FunctionAnswer`, whatever its
+ * result.
  */
-const boundedCall = async (
+const memberCall = async (
+  env: Env,
+  admittedCall: AdmittedCall
+): Promise<unknown> => {
+  const { person, id, body, lease } = admittedCall;
+  // A window counts as the pages it reads (query-windows.ts).
+  await admitWindow(env, person, id, body);
+  const keyed = keyedAction(body);
+  if (keyed !== undefined) {
+    // Checks delivery itself, before the run and again before its answer.
+    return await keyedAnswer(env, admittedCall, keyed);
+  }
+  const deadline = Date.now() + pageCallMs;
+  const chargeWindow = windowCharger(env, person, id);
+  if (lease?.kind === "draft") {
+    const run = await draftRunOf(env, person, id, lease.chatId);
+    return withinFrame(
+      await callDraft(env, person, run, body, { deadline, chargeWindow })
+    );
+  }
+  return await delivering(env, person, id, buildOf(lease), "call", async () =>
+    withinFrame(
+      await callPageFunction(env, person, id, body, deadline, chargeWindow, {
+        // A page's keyed mutation commits its form with its writes.
+        tellsForm: true,
+      })
+    )
+  );
+};
+
+/**
+ * `POST /api/app-functions/<app>`: calls a function of the App for whoever
+ * the page is for, as their page running what its lease names (see the
+ * header): a visitor by their session's token, otherwise the member signed
+ * in. Answers the call's `FunctionAnswer`, whatever its result; a refusal
+ * before the call as an error response.
+ */
+const appFunctionResponse = async (
   request: Request,
   env: Env,
   app: string,
-  caller: Caller,
   requestId: string
 ): Promise<Response> => {
-  const { person, lease } = caller;
   try {
-    const id = await admitted(env, person, app);
-    // SAFETY: a request's body in workerd is a byte stream, of Uint8Array
-    // chunks; its type says `any` only for streams in general.
-    const stream = request.body as ReadableStream<Uint8Array> | null;
-    const length = Number(request.headers.get("content-length") ?? 0);
-    const body =
-      stream === null || length > functionRequestMaxBytes
-        ? undefined
-        : await readAtMost(stream, functionRequestMaxBytes);
-    if (body === undefined) {
+    const token = request.headers.get(pageVisitorHeader);
+    if (token !== null) {
+      return Response.json(
+        await visitorCall(env, {
+          token,
+          app,
+          lease: request.headers.get(pageLeaseHeader),
+          read: async () => await boundedBody(request),
+        })
+      );
+    }
+    const admittedCall = await admitMember(
+      request,
+      env,
+      app,
+      requestId,
+      "app.functions"
+    );
+    if (admittedCall instanceof Response) {
+      return admittedCall;
+    }
+    return Response.json(await memberCall(env, admittedCall));
+  } catch (error) {
+    if (requestErrors.codeOf(error) === "request.too_large") {
       return errorResponse(
         413,
         requestErrors.create("request.too_large"),
         requestId
       );
     }
-    const text = new TextDecoder().decode(body);
-    // A window counts as the pages it reads (query-windows.ts).
-    await admitWindow(env, person, id, text);
-    const build = await leasedBuild(env, person.userId, id, lease);
-    const keyed = keyedAction(text);
-    if (keyed !== undefined) {
-      // Checks delivery itself, before the run and again before its answer.
-      return Response.json(
-        await keyedAnswer(env, caller, { id, build }, keyed)
-      );
-    }
-    const answer = await delivering(env, person, id, build, "call", async () =>
-      withinFrame(
-        await callPageFunction(
-          env,
-          person,
-          id,
-          text,
-          Date.now() + pageCallMs,
-          windowCharger(env, person, id),
-          // A page's keyed mutation commits its form with its writes.
-          { tellsForm: true }
-        )
-      )
-    );
-    return Response.json(answer);
-  } catch (error) {
     return refusalResponse(error, requestId, "app_function.failed");
   }
-};
-
-/**
- * The refusal of a page's call whose frame names someone other than
- * the person signed in (`pagePersonHeader`, see the header), or none:
- * a streaming action's calls as much as a plain call.
- */
-const personRefused = (
-  request: Request,
-  person: Identity,
-  app: string,
-  requestId: string
-): Response | undefined => {
-  const refusal = personRefusal(request.headers, person.userId);
-  if (refusal === undefined) {
-    return undefined;
-  }
-  // Who was named and who is signed in stay out of the log: only why,
-  // and for which App.
-  log.info("app_function.person_refused", {
-    requestId,
-    app: app.slice(0, loggedAppMaxLength),
-    reason: refusal.code,
-  });
-  return errorResponse(statusOf(refusal.code), refusal, requestId);
-};
-
-/**
- * `POST /api/app-functions/<app>`: calls a function of the App for the
- * person signed in, as their page running the build its lease names
- * (see the header). Answers the call's `FunctionAnswer`, whatever its
- * result; a refusal before the call as an error response.
- */
-export const appFunctionResponse = async (
-  request: Request,
-  env: Env,
-  app: string,
-  requestId: string
-): Promise<Response> => {
-  if (request.method !== "POST") {
-    return errorResponse(
-      404,
-      requestErrors.create("request.not_found"),
-      requestId
-    );
-  }
-  if (!(isOwnOrigin(request, env) && isJson(request))) {
-    return errorResponse(
-      403,
-      requestErrors.create("request.forbidden"),
-      requestId
-    );
-  }
-  // A staff member's ask is in the client's audit log, refused or
-  // not (staff-audit.ts).
-  const person = await routeMember(
-    env,
-    await identify(env, request.headers),
-    "app.functions",
-    { app }
-  );
-  if (person === undefined) {
-    return errorResponse(
-      401,
-      authErrors.create("auth.unauthenticated"),
-      requestId
-    );
-  }
-  const misnamed = personRefused(request, person, app, requestId);
-  if (misnamed !== undefined) {
-    return misnamed;
-  }
-  return await boundedCall(
-    request,
-    env,
-    app,
-    {
-      person,
-      // A missing lease is no build: code core didn't serve.
-      lease: request.headers.get(pageLeaseHeader),
-      current: async () => await identifyFull(env, request.headers),
-    },
-    requestId
-  );
-};
-
-/** A call core admitted: who makes it, for which App, its body, its build. */
-interface AdmittedCall {
-  readonly person: Identity;
-  readonly id: AppId;
-  readonly body: string;
-  readonly build: LeasedBuild | undefined;
-}
-
-/**
- * What every call of a page's passes before anything reads its body
- * (see the header): the method, the origin, JSON, a session, the
- * person's rate, the body bounded and the lease read. A refusal as the
- * response to answer.
- */
-const admitCall = async (
-  request: Request,
-  env: Env,
-  app: string,
-  requestId: string
-): Promise<AdmittedCall | Response> => {
-  if (request.method !== "POST") {
-    return errorResponse(
-      404,
-      requestErrors.create("request.not_found"),
-      requestId
-    );
-  }
-  if (!(isOwnOrigin(request, env) && isJson(request))) {
-    return errorResponse(
-      403,
-      requestErrors.create("request.forbidden"),
-      requestId
-    );
-  }
-  // A staff member's ask is in the client's audit log, refused or
-  // not (staff-audit.ts).
-  const person = await routeMember(
-    env,
-    await identify(env, request.headers),
-    "app.functions.stream",
-    { app }
-  );
-  if (person === undefined) {
-    return errorResponse(
-      401,
-      authErrors.create("auth.unauthenticated"),
-      requestId
-    );
-  }
-  const misnamed = personRefused(request, person, app, requestId);
-  if (misnamed !== undefined) {
-    return misnamed;
-  }
-  const id = await admitted(env, person, app);
-  // SAFETY: a request's body in workerd is a byte stream, of Uint8Array
-  // chunks; its type says `any` only for streams in general.
-  const stream = request.body as ReadableStream<Uint8Array> | null;
-  const length = Number(request.headers.get("content-length") ?? 0);
-  const body =
-    stream === null || length > functionRequestMaxBytes
-      ? undefined
-      : await readAtMost(stream, functionRequestMaxBytes);
-  if (body === undefined) {
-    return errorResponse(
-      413,
-      requestErrors.create("request.too_large"),
-      requestId
-    );
-  }
-  const build = await leasedBuild(
-    env,
-    person.userId,
-    id,
-    request.headers.get(pageLeaseHeader)
-  );
-  return { person, id, body: new TextDecoder().decode(body), build };
 };
 
 /**
@@ -663,47 +626,9 @@ const admitCall = async (
  */
 const streamRecheckMs = 5000;
 
-/**
- * Whether the person whose session `headers` carry is still `call`'s,
- * with the access `access` fingerprints (organization role, teams and
- * role in the App, `accessOf`), its build still gets the App's data, and
- * no release the stream runs under (`versions`) was revoked: throws the
- * refusal otherwise. The build's delivery reads the App's current
- * release only, which a publish moves on from the one the stream runs.
- */
-const stillDelivering = async (
-  env: Env,
-  headers: Headers,
-  {
-    call,
-    access,
-    versions,
-  }: {
-    readonly call: AdmittedCall;
-    readonly access: string;
-    readonly versions: readonly number[];
-  },
-  stage: "push" | "delivery"
-): Promise<void> => {
-  const now = await identifyFull(env, headers);
-  if (now?.userId !== call.person.userId) {
-    throw authErrors.create("auth.unauthenticated");
-  }
-  // Refuses, too, someone with no role in the App any more.
-  if ((await accessOf(env, now, call.id)) !== access) {
-    throw operationErrors.create("operation.access_changed");
-  }
-  await requireDelivery(env, now, call.id, call.build, {
-    operation: "stream",
-    stage,
-  });
-  await requireReleasesLive(env, call.id, versions);
-};
-
 /** What the relay of one stream needs besides its frames. */
 interface RelayOf {
   readonly env: Env;
-  readonly headers: Headers;
   readonly call: AdmittedCall;
   /** The access the request was admitted under (`accessOf`). */
   readonly access: string;
@@ -724,13 +649,16 @@ interface RelayOf {
  */
 const relay = (
   frames: ReadableStream<Uint8Array>,
-  { env, headers, call, access, versions, requestId, cancel }: RelayOf
+  { env, call, access, versions, requestId, cancel }: RelayOf
 ): ReadableStream<Uint8Array> => {
   const reader = frames.pipeThrough(new TextDecoderStream()).getReader();
   const encoder = new TextEncoder();
   let buffered = "";
   let done = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const still = async (stage: "push" | "delivery"): Promise<void> => {
+    await stillTheirs(env, call, { access, versions }, "stream", stage);
+  };
   const finish = async (): Promise<void> => {
     done = true;
     clearTimeout(timer);
@@ -789,12 +717,7 @@ const relay = (
         // Runs on a timer nobody awaits: it never throws.
         const check = async (): Promise<void> => {
           try {
-            await stillDelivering(
-              env,
-              headers,
-              { call, access, versions },
-              "push"
-            );
+            await still("push");
           } catch (error) {
             try {
               await refuse?.(error);
@@ -832,12 +755,7 @@ const relay = (
           return;
         }
         try {
-          await stillDelivering(
-            env,
-            headers,
-            { call, access, versions },
-            "delivery"
-          );
+          await still("delivery");
         } catch (error) {
           await refuse?.(error);
           return;
@@ -885,15 +803,15 @@ const streamRequestOf = (
 
 /**
  * `POST /api/app-functions/<app>/<stream | attach | cancel>`: one of the
- * App's streaming actions (spec 10.7.6), for the person signed in, as
- * their page running the build its lease names, each admitted as a
- * start is, against the person's role now. `stream` starts the
- * invocation its key names (or joins it, with the same input) and
- * `attach` reads it again without ever starting it, each answering its
- * frames as JSON lines (action-invocation.ts), relayed only while the
- * person and the build still get the App's data; `cancel` asks it to
- * stop, answering `{ requested }`: whether it was still running, never
- * what stopping did, which its result says.
+ * App's streaming actions (spec 10.7.6), for the member signed in, as
+ * their page running what its lease names, each admitted as a start is,
+ * against the person's role now. `stream` starts the invocation its key
+ * names (or joins it, with the same input) and `attach` reads it again
+ * without ever starting it, each answering its frames as JSON lines
+ * (action-invocation.ts), relayed only while the person and the build
+ * still get the App's data; `cancel` asks it to stop, answering
+ * `{ requested }`: whether it was still running, never what stopping did,
+ * which its result says. A visitor has no streams.
  */
 const appStreamResponse = async (
   request: Request,
@@ -903,26 +821,33 @@ const appStreamResponse = async (
   requestId: string
 ): Promise<Response> => {
   try {
-    const admittedCall = await admitCall(request, env, app, requestId);
+    if (request.headers.has(pageVisitorHeader)) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    const admittedCall = await admitMember(
+      request,
+      env,
+      app,
+      requestId,
+      "app.functions.stream"
+    );
     if (admittedCall instanceof Response) {
       return admittedCall;
     }
-    const { person, id, body, build } = admittedCall;
-    await requireDelivery(env, person, id, build, {
-      operation: "stream",
-      stage: "admission",
-    });
+    const { person, id, body, lease } = admittedCall;
+    await requireRuns(env, person, admittedCall, "stream", "admission");
     const { call, key } = streamRequestOf(body);
-    const name = await invocationName(person.userId, id, call, key, true);
+    const draft = draftOf(lease);
+    const name = await invocationName(person.userId, id, call, key, {
+      streaming: true,
+      ...(draft === undefined ? {} : { draft }),
+    });
     const invocation = actionInvocation(env, name);
     if (action === "cancel") {
       return Response.json({
         requested: await invocation.cancel(person.userId),
       });
     }
-    // A start's form, told to the App's webhooks once its run succeeds,
-    // named as its own release resolves it (action-invocation.ts).
-    const tellsForm = action === "stream";
     // Admitted as a start is, against the person's access now, which the
     // invocation compares with the access it started under.
     const access = await accessOf(env, person, id);
@@ -930,19 +855,21 @@ const appStreamResponse = async (
       by: { userId: person.userId, role: person.role, teams: person.teams },
       access,
       app: id,
+      ...(draft === undefined ? {} : { draft }),
       name,
       call,
       streaming: true,
       attach: action === "attach",
-      ...(tellsForm ? { form: { key } } : {}),
+      // A start's form, told to the App's webhooks once its run succeeds,
+      // named as its own release resolves it (action-invocation.ts).
+      ...(action === "stream" ? { form: { key } } : {}),
     });
     // The release it runs under, besides the caller's: a join or an attach
     // may follow a run a release published since started.
-    const versions = await releasesOf(env, invocation, person.userId, id);
+    const versions = await releasesOf(env, invocation, admittedCall);
     return new Response(
       relay(frames, {
         env,
-        headers: request.headers,
         call: admittedCall,
         access,
         versions,
@@ -957,6 +884,13 @@ const appStreamResponse = async (
       }
     );
   } catch (error) {
+    if (requestErrors.codeOf(error) === "request.too_large") {
+      return errorResponse(
+        413,
+        requestErrors.create("request.too_large"),
+        requestId
+      );
+    }
     return refusalResponse(error, requestId, "app_function.stream_failed");
   }
 };
@@ -965,27 +899,44 @@ const appStreamResponse = async (
  * The response to `request` when `pathname` is a page's call of one of
  * its App's functions: a call (`<path>/<app>`) or one of a streaming
  * action's (`<path>/<app>/<stream | attach | cancel>`); undefined for any
- * other path.
+ * other path. Only a POST from the deployment's own pages, with a JSON
+ * body, is taken (see the header).
  */
-export const appFunctionRoute = async (
+export const pageCallRoute = async (
   request: Request,
   env: Env,
   pathname: string,
   requestId: string
 ): Promise<Response | undefined> => {
-  const app = functionCallApp(pathname);
-  if (app !== undefined) {
-    return await appFunctionResponse(request, env, app, requestId);
+  const app = appAfter(pathname, appFunctionPath);
+  const stream = app === undefined ? functionStreamCall(pathname) : undefined;
+  if (app === undefined && stream === undefined) {
+    return undefined;
   }
-  const stream = functionStreamCall(pathname);
-  if (stream !== undefined) {
-    return await appStreamResponse(
-      request,
-      env,
-      stream.app,
-      stream.action,
+  if (request.method !== "POST") {
+    return errorResponse(
+      404,
+      requestErrors.create("request.not_found"),
       requestId
     );
   }
-  return undefined;
+  if (!(isOwnOrigin(request, env) && isJson(request))) {
+    return errorResponse(
+      403,
+      requestErrors.create("request.forbidden"),
+      requestId
+    );
+  }
+  if (app !== undefined) {
+    return await appFunctionResponse(request, env, app, requestId);
+  }
+  return stream === undefined
+    ? undefined
+    : await appStreamResponse(
+        request,
+        env,
+        stream.app,
+        stream.action,
+        requestId
+      );
 };

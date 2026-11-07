@@ -26,7 +26,7 @@ import type { ServerLog } from "@grasp-os/shared/pages";
 // A problem is text the draft's code wrote, or what the person typed into
 // the preview. It reaches the agent only as data in a check's result,
 // never as instructions (agent-builds.ts). A preview reads no real data
-// (sealed-previews.ts: a store of its own, no resources), so it carries
+// (draft-runs.ts: a store of its own, no resources), so it carries
 // none.
 
 /** Most problems kept of one revision, warnings aside: the first ones. */
@@ -72,12 +72,12 @@ const functionOf = (request: unknown): string => {
   }
 };
 
-/** The refusals of a draft that a change of its code fixes (sealed-previews.ts). */
+/** The refusals of a draft that a change of its code fixes (draft-runs.ts). */
 export { draftSealFailures } from "@grasp-os/shared/operations";
 
 /**
  * What a preview's call of a function of a draft of spec 8's layout
- * (sealed-previews.ts) failed with, as a problem of the draft: one of its
+ * (draft-runs.ts) failed with, as a problem of the draft: one of its
  * code (`source`) or of a contract a function or its caller broke
  * (`contract`), or code that doesn't seal, all the draft's to fix;
  * nothing for a result that

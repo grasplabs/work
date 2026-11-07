@@ -67,6 +67,9 @@ const watchSweepMs = 5 * 60 * 1000;
 /** The key a discarded fixture store keeps, alone (`discardFixture`). */
 const discardedKey = "grasp_fixture_discarded";
 
+/** When a throwaway store empties itself, unless held again (`holdThrowaway`). */
+const throwawayKey = "grasp_throwaway_until";
+
 export class DataStore extends DurableObject<Env> {
   readonly #host: StoreHost;
   readonly #watches = new StoreWatches();
@@ -612,8 +615,7 @@ export class DataStore extends DurableObject<Env> {
    * Discards a fixture store an App's tests ran on (app-tests.ts):
    * everything the object holds, and its alarm, and marks it discarded,
    * so it refuses every call after (`#live`) and wakes to nothing. Only
-   * for a store core recorded as a fixture (`app_test_fixtures`, or a
-   * preview's, `preview_fixture_stores`, sealed-previews.ts) and its
+   * for a store core recorded as a fixture (`app_test_fixtures`) and its
    * inventory doesn't list, whatever asks: a business store is only ever
    * deleted through its deletion (store-deletion.ts), audited and kept
    * until nothing refers to it. Its live queries' watches go with it. Both are read in one query, and nothing
@@ -624,7 +626,7 @@ export class DataStore extends DurableObject<Env> {
       throw new Error("That isn't this object's store.");
     }
     const found = await this.env.DB.prepare(
-      "SELECT EXISTS (SELECT 1 FROM business_stores WHERE id = ?1) AS listed, (EXISTS (SELECT 1 FROM app_test_fixtures WHERE store_id = ?1) OR EXISTS (SELECT 1 FROM preview_fixture_stores WHERE store_id = ?1)) AS fixture"
+      "SELECT EXISTS (SELECT 1 FROM business_stores WHERE id = ?1) AS listed, EXISTS (SELECT 1 FROM app_test_fixtures WHERE store_id = ?1) AS fixture"
     )
       .bind(storeId)
       .first<{ listed: number; fixture: number }>();
@@ -643,15 +645,61 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /**
+   * Keeps this object as a builder's throwaway preview store
+   * (draft-runs.ts) until `until`, when it empties itself unless held
+   * again: whatever someone typed into a preview goes once nobody uses it,
+   * with no record or sweep of core's to keep up. Only for a store the
+   * inventory doesn't list, whatever asks: a business store is never
+   * emptied this way.
+   */
+  async holdThrowaway(storeId: StoreId, until: number): Promise<void> {
+    if (this.ctx.id.name !== undefined && this.ctx.id.name !== storeId) {
+      throw new Error("That isn't this object's store.");
+    }
+    const listed = await this.env.DB.prepare(
+      "SELECT 1 AS listed FROM business_stores WHERE id = ?1"
+    )
+      .bind(storeId)
+      .first<{ listed: number }>();
+    if (listed !== null) {
+      throw new Error("A listed store is never a throwaway one.");
+    }
+    this.ctx.storage.kv.put(throwawayKey, until);
+    await this.#throwawayAlarm(until);
+  }
+
+  /** Brings the alarm forward to `until`, when the throwaway store empties. */
+  async #throwawayAlarm(until: number): Promise<void> {
+    const alarm = await this.ctx.storage.getAlarm();
+    if (alarm === null || alarm > until) {
+      await this.ctx.storage.setAlarm(until);
+    }
+  }
+
+  /**
    * `StoreHost.runAlarm`, with the deployment's outbox consumers, and a
    * sweep of the live queries whose watchers are gone; nothing
-   * for a discarded fixture store, which arms no alarm again.
+   * for a discarded fixture store, which arms no alarm again. A throwaway
+   * store past its hold empties itself and starts again from nothing at
+   * its next call, its live queries ended with it.
    */
   override async alarm(): Promise<void> {
     if (this.#discarded()) {
       return;
     }
+    const throwaway = this.ctx.storage.kv.get<number>(throwawayKey);
+    if (throwaway !== undefined && throwaway <= Date.now()) {
+      await this.ctx.storage.deleteAll();
+      await this.ctx.storage.deleteAlarm();
+      // Its host's state in memory is gone with its rows: the next call
+      // wakes a new object, which makes its tables afresh.
+      this.ctx.abort("The throwaway store expired.");
+      return;
+    }
     await this.#live().runAlarm(storeOutboxConsumers(this.env));
+    if (throwaway !== undefined) {
+      await this.#throwawayAlarm(throwaway);
+    }
     if (this.#watches.size > 0) {
       await this.#watches.sweep();
       const next = await this.ctx.storage.getAlarm();

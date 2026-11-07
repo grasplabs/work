@@ -774,13 +774,9 @@ const storedOf = async (
   call: FunctionRequest,
   key: string
 ): Promise<string> => {
-  const name = await invocationName(
-    opened.builderId,
-    opened.app,
-    call,
-    key,
-    true
-  );
+  const name = await invocationName(opened.builderId, opened.app, call, key, {
+    streaming: true,
+  });
   return await runInDurableObject(
     env.ACTION_INVOCATIONS.getByName(name),
     (_instance, state) => JSON.stringify([...state.storage.kv.list()])
@@ -1194,13 +1190,9 @@ const invocationOf = async (
 ) => {
   const by = { userId: opened.builderId, role: "builder" as const, teams: [] };
   const app = appIdSchema.parse(opened.app);
-  const name = await invocationName(
-    opened.builderId,
-    app,
-    call,
-    key,
-    streaming
-  );
+  const name = await invocationName(opened.builderId, app, call, key, {
+    streaming,
+  });
   const stub = env.ACTION_INVOCATIONS.getByName(name);
   const access = await accessOf(env, by, app);
   return {

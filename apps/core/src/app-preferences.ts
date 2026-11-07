@@ -187,8 +187,8 @@ export interface PreferencesCaller {
     readSet: Record<string, number>
   ) => void;
   /**
-   * The store a draft preview answers from instead (sealed-previews.ts):
-   * the preview's own fixture store, never the App's. A draft release
+   * The store a draft preview answers from instead (draft-runs.ts):
+   * the preview's throwaway store, never the App's. A draft release
    * binds none, so without it there is no store to answer from.
    */
   readonly previewStore?: StoreId;

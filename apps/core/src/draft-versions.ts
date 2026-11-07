@@ -19,7 +19,7 @@ import type { Draft } from "./workspace.ts";
 // latest: the person's undo point per message. They see how the draft
 // got where it is, preview an earlier version and restore it, which makes
 // a new version rather than rewriting any. The preview follows every
-// write (sealed-previews.ts); a version, the draft as its turn left it.
+// write (draft-runs.ts); a version, the draft as its turn left it.
 //
 // Each write of a turn keeps its version again, in the write's own
 // transaction, from the draft as that write left it: no write lands

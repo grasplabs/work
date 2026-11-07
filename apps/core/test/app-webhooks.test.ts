@@ -1148,7 +1148,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
         reference: { name: "notes.add" },
       },
       "fresh",
-      false
+      { streaming: false }
     );
     await runInDurableObject(
       env.ACTION_INVOCATIONS.getByName(name),
@@ -1349,7 +1349,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       open.app,
       call,
       "gone-a",
-      false
+      { streaming: false }
     );
     const by = {
       userId: open.builder.userId,
@@ -1396,7 +1396,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       open.app,
       call,
       "held-a",
-      false
+      { streaming: false }
     );
     const invocation = env.ACTION_INVOCATIONS.getByName(name);
     const untold = async () =>
@@ -1568,7 +1568,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
       open.app,
       call,
       "late-a",
-      false
+      { streaming: false }
     );
     const invocation = env.ACTION_INVOCATIONS.getByName(name);
     const trigger = `refuse_${open.app.replaceAll("-", "_")}`;
@@ -1745,7 +1745,7 @@ describe("an App's webhooks", { timeout: 120_000 }, () => {
         open.app,
         call,
         key,
-        false
+        { streaming: false }
       );
       const frames = await env.ACTION_INVOCATIONS.getByName(name).open({
         by,

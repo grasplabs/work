@@ -1,7 +1,6 @@
 import type { PreviewBundle, PreviewUpdate } from "@grasp-os/shared/chat";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
@@ -17,11 +16,12 @@ import {
   servedAll,
 } from "./page-frames.ts";
 import type { LoadedFrame } from "./page-frames.ts";
-import { livePushes, notesFiles, previewDraftsOf } from "./preview-drafts.ts";
+import { notesFiles, previewDraftsOf } from "./preview-drafts.ts";
 import {
   chatsOf,
   chatWithDraft,
   outcome,
+  previewCall,
   previewStores,
   requestFor,
   refreshed,
@@ -110,39 +110,9 @@ const titlesUnbuilt = (notesFiles("drafted")["server/notes.ts"] ?? "").replace(
   'ctx.db.query("notes").take(1000)).map'
 );
 
-/** The error codes among `pushes`. */
-const refusedIn = (pushes: readonly { result: unknown }[]): unknown[] =>
-  pushes.flatMap(({ result }) =>
-    typeof result === "object" &&
-    result !== null &&
-    "ok" in result &&
-    result.ok === false &&
-    "error" in result &&
-    typeof result.error === "object" &&
-    result.error !== null &&
-    "code" in result.error
-      ? [result.error.code]
-      : []
-  );
-
 /** What a frame's policy lets run. */
 const scripts = (frame: LoadedFrame | null): string[] =>
   frame?.policy.get("script-src") ?? [];
-
-/** The revision the chat's kept draft release was sealed at. */
-const sealedAt = async (
-  person: Parameters<typeof chatsOf>[0],
-  chatId: string
-): Promise<number[]> =>
-  await runInDurableObject(chatsOf(person), (_instance, state) =>
-    state.storage.sql
-      .exec<{ revision: number }>(
-        "SELECT revision FROM preview_releases WHERE chat_id = ?",
-        chatId
-      )
-      .toArray()
-      .map(({ revision }) => revision)
-  );
 
 describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
   it("answers the page of the draft now by its module's address, staging only the modules the write changed where the open frame loads them, within the kit it loaded", async () => {
@@ -227,20 +197,19 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     });
   });
 
-  it("keeps what the preview's store holds, and seals nothing again, across writes of its pages", async () => {
+  it("keeps what the preview's store holds across writes of its pages and its server code, while its schema stays", async () => {
     const { builder, app, chatId, revision, write } = await setUp();
     const { chats } = builder.api;
     const call = async (at: number, path: string, input: unknown = {}) =>
       outcome(
-        await chats.previewFunction(
+        await previewCall(
+          builder,
           chatId,
           app,
-          at,
           await requestFor(builder, { chatId, app, revision: at }, path, input)
         )
       );
     await call(revision, "notes.create", { title: "kept" });
-    const sealedBefore = await sealedAt(builder, chatId);
     const storesBefore = await previewStores(builder, chatId, app);
     const next = await write(
       { "src/routes/index.tsx": deskSaying("Changed") },
@@ -248,31 +217,27 @@ describe("a preview taking its draft's writes", { timeout: 180_000 }, () => {
     );
     await chats.previewUpdate(chatId, app, next, {});
     const kept = await call(next, "notes.titles");
-    const sealedAfter = await sealedAt(builder, chatId);
-    const storesAfter = await previewStores(builder, chatId, app);
-    // A write of its server code starts afresh, on a new release.
     const server = await write(
       {
         "server/notes.ts": notesFiles("rewritten")["server/notes.ts"] ?? "",
       },
       next
     );
-    const fresh = await call(server, "notes.titles");
+    const rewritten = await call(server, "notes.titles");
+    const storesAfter = await previewStores(builder, chatId, app);
     expect({
       kept,
-      sealed: [sealedBefore, sealedAfter],
+      rewritten,
       stores: [storesBefore, storesAfter].map((rows) =>
         rows.map(({ store_id: id }) => id)
       ),
-      fresh,
     }).toStrictEqual({
       kept: ["kept"],
-      sealed: [[revision], [revision]],
+      rewritten: ["kept"],
       stores: [
         storesBefore.map(({ store_id: id }) => id),
         storesBefore.map(({ store_id: id }) => id),
       ],
-      fresh: [],
     });
   });
 
@@ -341,131 +306,6 @@ export const Route = createFileRoute("/")({ component: Desk });
       readOnly: false,
       connect: [["'none'"], ["'none'"], ["'none'"]],
       eval: [false, false, false],
-    });
-  });
-
-  it("keeps a frame on the last version that worked calling the draft's code, following its data and reporting, until changed server code builds", async () => {
-    const { builder, app, chatId, revision, write } = await setUp();
-    const { chats } = builder.api;
-    // What a page's call sends: its reference, the same for every
-    // revision of the same server code.
-    const titles = await requestFor(
-      builder,
-      { chatId, app, revision },
-      "notes.titles"
-    );
-    await chats.previewFunction(
-      chatId,
-      app,
-      revision,
-      await requestFor(builder, { chatId, app, revision }, "notes.create", {
-        title: "still here",
-      })
-    );
-    // The agent writes a page that doesn't build: the frame keeps the
-    // version at `revision`, and calls from there.
-    const broken = await write(
-      { "src/routes/index.tsx": "export default function Desk( {" },
-      revision
-    );
-    const calls = outcome(
-      await chats.previewFunction(chatId, app, revision, titles)
-    );
-    const live = livePushes();
-    await chats.previewWatchQuery(chatId, app, revision, titles, live.push);
-    await live.until((latest) => {
-      expect(latest?.result).toStrictEqual({ ok: true, value: ["still here"] });
-    });
-    // What the frame met trying the broken update is filed under the
-    // revision it tried; what the earlier page it shows meets, nowhere.
-    await chats.previewReport(chatId, app, broken, "/", {
-      kind: "error",
-      message: "The fix didn't render.",
-    });
-    await chats.previewReport(chatId, app, revision, "/", {
-      kind: "error",
-      message: "The earlier page failed.",
-    });
-    const reported = await chatsOf(builder).previewReports(
-      chatId,
-      app,
-      broken,
-      0
-    );
-    // A later revision than the draft's, or changed server code once the
-    // preview built it: nothing from the old frame reaches it any more.
-    const ahead = await codeOf(
-      chats.previewFunction(chatId, app, broken + 1, "{}")
-    );
-    const server = await write(
-      {
-        "server/notes.ts": notesFiles("changed")["server/notes.ts"] ?? "",
-        "src/routes/index.tsx":
-          notesFiles("drafted")["src/routes/index.tsx"] ?? "",
-      },
-      broken
-    );
-    await chats.previewUpdate(chatId, app, server, {});
-    const afterServer = await codeOf(
-      chats.previewFunction(chatId, app, revision, "{}")
-    );
-    expect({
-      calls,
-      reported: reported.problems.map(({ message }) => message),
-      ahead,
-      afterServer,
-    }).toStrictEqual({
-      calls: ["still here"],
-      reported: ["The fix didn't render."],
-      ahead: "app.preview_outdated",
-      afterServer: "app.preview_outdated",
-    });
-  });
-
-  it("decides a revision's check only by what that revision's page ran into, never an earlier page's", async () => {
-    const { builder, app, chatId, revision, write } = await setUp();
-    const { chats } = builder.api;
-    const object = chatsOf(builder);
-    const titles = await requestFor(
-      builder,
-      { chatId, app, revision },
-      "notes.titles"
-    );
-    const broken = await requestFor(
-      builder,
-      { chatId, app, revision },
-      "notes.broken"
-    );
-    // A false pass: the agent writes the page again, and before the
-    // frame takes it, the page still on `revision` calls fine. The new
-    // revision is no more seen than before.
-    const next = await write(
-      { "src/routes/index.tsx": deskSaying("Unseen") },
-      revision
-    );
-    await chats.previewFunction(chatId, app, revision, titles);
-    const unseen = await object.previewReports(chatId, app, next, 0);
-    // A false failure: the earlier page's call fails through the
-    // draft's code, which the new revision's page never called.
-    await chats.previewFunction(chatId, app, revision, broken);
-    const notFailed = await object.previewReports(chatId, app, next, 0);
-    // Its own page's calls decide it, a failure included.
-    await chats.previewFunction(chatId, app, next, broken);
-    const own = await object.previewReports(chatId, app, next, 0);
-    expect({
-      unseen: { seen: unseen.seen, problems: unseen.problems },
-      notFailed: { seen: notFailed.seen, problems: notFailed.problems },
-      own: {
-        seen: own.seen,
-        problems: own.problems.map(({ source, at }) => ({ source, at })),
-      },
-    }).toStrictEqual({
-      unseen: { seen: false, problems: [] },
-      notFailed: { seen: false, problems: [] },
-      own: {
-        seen: true,
-        problems: [{ source: "server", at: "notes.broken" }],
-      },
     });
   });
 
@@ -553,191 +393,6 @@ export const Route = createFileRoute("/")({ component: Desk });
       older: "app.preview_outdated",
       elsewhere: "agent.chat_not_found",
       built: [next],
-    });
-  });
-
-  it("takes the draft's new server code in place: a live query of the revision before is told it is out of date, never that the App is gone, and the next revision's reads the new code", async () => {
-    const { builder, app, chatId, revision, write } = await setUp();
-    const { chats } = builder.api;
-    const titles = await requestFor(
-      builder,
-      { chatId, app, revision },
-      "notes.titles"
-    );
-    const before = livePushes();
-    await chats.previewWatchQuery(chatId, app, revision, titles, before.push);
-    await before.until((latest) => {
-      expect(latest?.result).toStrictEqual({ ok: true, value: [] });
-    });
-    // Past the second a live query's look at its access holds
-    // (query-subscriptions.ts), as on a page open a while: the change is
-    // met by that look first.
-    await scheduler.wait(1100);
-    // The agent changes the server code alone: the frame takes the build
-    // of the next revision, its page as it was.
-    const next = await write(
-      { "server/notes.ts": titlesSaying("new code") },
-      revision
-    );
-    const update = refreshed(await chats.previewUpdate(chatId, app, next, {}));
-    await before.until((latest) => {
-      expect(latest?.result).toMatchObject({ ok: false });
-    });
-    const after = livePushes();
-    await chats.previewWatchQuery(chatId, app, next, titles, after.push);
-    await after.until((latest) => {
-      expect(latest?.result).toStrictEqual({ ok: true, value: ["new code"] });
-    });
-    expect({
-      revision: update.revision,
-      serverUnbuilt: update.serverUnbuilt,
-      refused: refusedIn(before.pushed),
-    }).toStrictEqual({
-      revision: next,
-      serverUnbuilt: undefined,
-      refused: ["app.preview_outdated"],
-    });
-  });
-
-  it("shows the draft's pages on the last server code that built while its own doesn't, keeping what the preview's store holds, then takes its server code once it builds", async () => {
-    const { builder, app, chatId, revision, write } = await setUp();
-    const { chats } = builder.api;
-    const titles = await requestFor(
-      builder,
-      { chatId, app, revision },
-      "notes.titles"
-    );
-    await chats.previewFunction(
-      chatId,
-      app,
-      revision,
-      await requestFor(builder, { chatId, app, revision }, "notes.create", {
-        title: "kept",
-      })
-    );
-    // Server code that fails its type check, then a write of the page.
-    const broken = await write({ "server/notes.ts": titlesUnbuilt }, revision);
-    const atBroken = refreshed(
-      await chats.previewUpdate(chatId, app, broken, {})
-    );
-    const page = await write(
-      { "src/routes/index.tsx": deskSaying("Changed") },
-      broken
-    );
-    const atPage = refreshed(await chats.previewUpdate(chatId, app, page, {}));
-    const onPage = outcome(
-      await chats.previewFunction(chatId, app, page, titles)
-    );
-    const live = livePushes();
-    await chats.previewWatchQuery(chatId, app, page, titles, live.push);
-    await live.until((latest) => {
-      expect(latest?.result).toStrictEqual({ ok: true, value: ["kept"] });
-    });
-    // The agent fixes the server code: the frame takes it as any write.
-    const fixed = await write(
-      { "server/notes.ts": titlesSaying("fixed") },
-      page
-    );
-    const atFixed = refreshed(
-      await chats.previewUpdate(chatId, app, fixed, {})
-    );
-    const onFixed = outcome(
-      await chats.previewFunction(chatId, app, fixed, titles)
-    );
-    const pageAfter = await codeOf(
-      chats.previewFunction(chatId, app, page, titles)
-    );
-    expect({
-      broken: atBroken.serverUnbuilt,
-      page: {
-        serverUnbuilt: atPage.serverUnbuilt,
-        changed: atPage.entry !== atBroken.entry,
-        titles: onPage,
-      },
-      fixed: { serverUnbuilt: atFixed.serverUnbuilt, titles: onFixed },
-      pageAfter,
-    }).toStrictEqual({
-      broken: true,
-      page: { serverUnbuilt: true, changed: true, titles: ["kept"] },
-      fixed: { serverUnbuilt: undefined, titles: ["fixed"] },
-      pageAfter: "app.preview_outdated",
-    });
-  });
-
-  it("keeps the draft's frames on the last server code that built, store and all, when the chat's object starts again while its own server code doesn't", async () => {
-    const { builder, app, chatId, revision, write } = await setUp();
-    const { chats } = builder.api;
-    const titles = await requestFor(
-      builder,
-      { chatId, app, revision },
-      "notes.titles"
-    );
-    await chats.previewFunction(
-      chatId,
-      app,
-      revision,
-      await requestFor(builder, { chatId, app, revision }, "notes.create", {
-        title: "kept",
-      })
-    );
-    const broken = await write({ "server/notes.ts": titlesUnbuilt }, revision);
-    const before = refreshed(
-      await chats.previewUpdate(chatId, app, broken, {})
-    );
-    // A deploy restarts the object: nothing it held in memory is left.
-    await runInDurableObject(chatsOf(builder), (_instance, state) => {
-      state.abort("Restarted by the test");
-    }).catch(() => {
-      // Aborting fails the call that aborted: that is the restart.
-    });
-    const called = outcome(
-      await chats.previewFunction(chatId, app, broken, titles)
-    );
-    const after = refreshed(await chats.previewUpdate(chatId, app, broken, {}));
-    expect({
-      before: before.serverUnbuilt,
-      called,
-      after: { serverUnbuilt: after.serverUnbuilt, entry: after.entry },
-    }).toStrictEqual({
-      before: true,
-      called: ["kept"],
-      after: { serverUnbuilt: true, entry: before.entry },
-    });
-  });
-
-  it("keeps the draft's last server code that built when a frame on the App's version runs too, so the draft's frames still reach it once the chat's object starts again", async () => {
-    const { builder, app, chatId, revision, write } = await setUp();
-    const { chats } = builder.api;
-    const titles = await requestFor(
-      builder,
-      { chatId, app, revision },
-      "notes.titles"
-    );
-    await chats.previewFunction(
-      chatId,
-      app,
-      revision,
-      await requestFor(builder, { chatId, app, revision }, "notes.create", {
-        title: "kept",
-      })
-    );
-    // A frame on the App's version runs it too, beside the draft's.
-    const onVersion = outcome(
-      await chats.previewFunction(chatId, app, { appVersion: 1 }, titles)
-    );
-    const broken = await write({ "server/notes.ts": titlesUnbuilt }, revision);
-    // A deploy restarts the object: nothing it held in memory is left.
-    await runInDurableObject(chatsOf(builder), (_instance, state) => {
-      state.abort("Restarted by the test");
-    }).catch(() => {
-      // Aborting fails the call that aborted: that is the restart.
-    });
-    const called = outcome(
-      await chats.previewFunction(chatId, app, broken, titles)
-    );
-    expect({ onVersion, called }).toStrictEqual({
-      onVersion: [],
-      called: ["kept"],
     });
   });
 

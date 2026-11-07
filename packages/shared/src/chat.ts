@@ -4,12 +4,7 @@ import type { AppFiles } from "./apps.ts";
 import type { DataModelChange, DraftDataModel } from "./data-model.ts";
 import type { AppId } from "./ids.ts";
 import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
-import type {
-  QuerySnapshotPush,
-  SubscriptionApi,
-  PageBundle,
-  PageProblem,
-} from "./pages.ts";
+import type { PageBundle, PageProblem } from "./pages.ts";
 import type { ThinkingStep } from "./thinking.ts";
 import { uploadTypes } from "./uploads.ts";
 
@@ -205,21 +200,15 @@ export interface ChatDraft {
 export const readOnlyRevision = -1;
 
 /**
- * The build a frame of a chat's preview shows, which its calls run on and
+ * The build a frame of a chat's preview shows, which its reports name and
  * its updates are asked from: the draft at its revision
  * (`readOnlyRevision` for a version of the draft opened read-only), or a
- * version of the App, shown while the draft changes nothing or its
- * page doesn't build. A frame's calls run on exactly that build, so two
- * frames on two versions of the App each call their own, and only the
- * draft's own revision counts toward the agent's check of the draft.
+ * version of the App, shown while the draft changes nothing or its page
+ * doesn't build. Only the draft's own revision counts toward the agent's
+ * check of the draft. Its calls name nothing of it: they run on the draft
+ * as it is, under the frame's lease (`PreviewBundle.lease`).
  */
 export type PreviewAt = number | { appVersion: number };
-
-/** A `PreviewAt` as a frame names it, checked. */
-export const previewAtSchema = z.union([
-  z.int(),
-  z.strictObject({ appVersion: z.int().positive() }),
-]);
 
 /** What a frame showing `refresh` names (`PreviewAt`). */
 export const shownAt = ({
@@ -263,11 +252,18 @@ export interface ChatDraftVersion {
 export interface PreviewBundle extends Omit<PageBundle, "version" | "lease"> {
   /**
    * The draft's revision it was opened at; `readOnlyRevision` for a
-   * version of the draft opened read-only, which is also what its calls
-   * name. A frame that takes updates names what its `refresh` shows
-   * (`shownAt`).
+   * version of the draft opened read-only. A frame that takes updates
+   * names what its `refresh` shows (`shownAt`) in its reports.
    */
   revision: number;
+  /**
+   * Core's lease for the builder on the chat's draft, which the frame's
+   * calls and live queries carry on the path every page calls on, as a
+   * running App's page carries its own: they run on the draft as it is
+   * then, on a throwaway store with no resources. Only for the draft as it
+   * is now; a version opened read-only has none, and calls nothing.
+   */
+  lease?: string;
   /**
    * The pages' modules, as the frame opened them: what later updates
    * are measured against (`PreviewUpdate`). Only for the draft as it is
@@ -1094,61 +1090,6 @@ export interface ChatsApi {
     revision: number,
     shown: PreviewShown
   ) => Promise<PreviewUpdate>;
-  /**
-   * Calls a function of the draft of an App of spec 8's layout, as a
-   * page's `callFunction` does, in the draft's preview: its draft
-   * release, on a store of its own, with no resources, so it changes none
-   * of the App's data and reaches nothing outside. `request` is the
-   * call's text; answers as a page's call is answered. `at` is the build
-   * the frame shows: `app.preview_outdated` once the draft's server code
-   * moved past the draft's revision it names.
-   */
-  previewFunction: (
-    chatId: string,
-    app: string,
-    at: PreviewAt,
-    request: string
-  ) => Promise<unknown>;
-  /**
-   * Follows a public query of the draft of an App of spec 8's layout in
-   * its preview, as a page's `watchQuery` does: each push goes to
-   * `onSnapshot`, until the hold is released, the draft moves past the
-   * build `at` names or the person no longer builds the App.
-   */
-  previewWatchQuery: (
-    chatId: string,
-    app: string,
-    at: PreviewAt,
-    request: string,
-    onSnapshot: (snapshot: QuerySnapshotPush) => void
-  ) => Promise<SubscriptionApi>;
-  /**
-   * Starts (`stream`) or follows again (`attach`) a streaming action of
-   * the draft of an App of spec 8's layout in its preview, as a page's
-   * `streamFunction` does (spec 10.7.6): run on its draft release and
-   * store, with no resources, under the request's key. Each frame goes
-   * to `onFrame`, one at a time, the next only once it took the last:
-   * the newest progress, then `result`, `refused` (the person, or the
-   * preview, no longer gets it) or `closed`. Until the hold is released.
-   */
-  previewStream: (
-    chatId: string,
-    app: string,
-    at: PreviewAt,
-    what: "stream" | "attach",
-    request: string,
-    onFrame: (frame: unknown) => Promise<unknown>
-  ) => Promise<SubscriptionApi>;
-  /**
-   * Asks the preview's invocation of the streaming action `request` names
-   * to stop: `{ requested }`, whether it was still running.
-   */
-  previewCancelStream: (
-    chatId: string,
-    app: string,
-    at: PreviewAt,
-    request: string
-  ) => Promise<{ requested: boolean }>;
   /**
    * Tells the chat's agent of `problem`, one the preview of the draft at
    * `at` ran into at the route `path` (an uncaught error, an unhandled

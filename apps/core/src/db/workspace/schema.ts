@@ -631,12 +631,9 @@ export const customWidgets = sqliteTable(
 );
 
 /**
- * The draft release a chat's preview of its draft of an App runs
- * (sealed-previews.ts): the draft sealed at `revision` as the version it
- * would become (`version`), its manifest's canonical text and that text's
- * SHA-256. One per chat and App; replaced when the draft changes, and
- * gone with the draft, its proposal or the chat. Never a version's
- * release: no version is sealed here.
+ * Unused since a draft's preview seals the draft where it runs it
+ * (draft-runs.ts): kept while a release that writes it may serve or be
+ * rolled back to, and dropped in a later release.
  */
 export const previewReleases = sqliteTable(
   "preview_releases",
@@ -651,11 +648,7 @@ export const previewReleases = sqliteTable(
   (table) => [primaryKey({ columns: [table.chatId, table.appId] })]
 );
 
-/**
- * Each artifact a preview's draft release names (`previewReleases`), by
- * the SHA-256 of its bytes: its text, whose UTF-8 bytes are those sealed,
- * read back and checked against that hash at every load.
- */
+/** Unused, with `previewReleases`, and dropped with it. */
 export const previewReleaseArtifacts = sqliteTable(
   "preview_release_artifacts",
   {
@@ -670,11 +663,10 @@ export const previewReleaseArtifacts = sqliteTable(
 );
 
 /**
- * The store each preview of a chat's draft of an App reads and writes, at
- * the draft's `revision` (sealed-previews.ts): a fixture store of the
- * stores' namespace that core's inventory never lists. Recorded before
- * its object is first touched, and forgotten only once it is discarded,
- * so none is lost to a failure in between.
+ * The throwaway stores a chat's previews of its drafts of an App run on
+ * (draft-runs.ts), first at the draft's `revision`: kept so deleting the
+ * chat, or erasing or removing its person, empties them at once rather
+ * than a day after their last use, when each empties itself anyway.
  */
 export const previewStores = sqliteTable("preview_stores", {
   storeId: text("store_id").primaryKey(),

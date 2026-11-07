@@ -10,13 +10,14 @@ import { openTestRun } from "./agent-chat.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { loadFrame, servedAll } from "./page-frames.ts";
+import { deskFiles, notesApp, notesFiles } from "./preview-drafts.ts";
 import {
-  deskFiles,
-  livePushes,
-  notesApp,
-  notesFiles,
-} from "./preview-drafts.ts";
-import { chatsOf, chatWithDraft, outcome, refreshed } from "./previews.ts";
+  chatsOf,
+  chatWithDraft,
+  outcome,
+  previewCall,
+  refreshed,
+} from "./previews.ts";
 import { followedVersion, signedInApi } from "./sign-in.ts";
 
 // A chat's preview of its draft of an App: the draft's pages and server
@@ -100,16 +101,18 @@ const titlesRequest = JSON.stringify({
   input: {},
 });
 
-/** What a call of `notes.titles` in the chat's preview of `app` at `at` answers. */
+/**
+ * What a call of `notes.titles` in the chat's preview of `app` answers: on
+ * the draft as it is, whatever build the frame shows (`at`, kept for what
+ * the test reads of the frame).
+ */
 const titlesAt = async (
   person: Person,
   chatId: ChatId,
   app: AppId,
-  at: PreviewAt
+  _at: PreviewAt
 ): Promise<unknown> =>
-  outcome(
-    await person.api.chats.previewFunction(chatId, app, at, titlesRequest)
-  );
+  outcome(await previewCall(person, chatId, app, titlesRequest));
 
 /** What the calls of a frame opened on `bundle` name, as the page has them. */
 const callsAt = (bundle: PreviewBundle): PreviewAt =>
@@ -282,72 +285,6 @@ describe("previewing a chat's draft", { timeout: 120_000 }, () => {
       reports: { seen: false, problems: 0 },
       fixed: { revision: 2, appVersion: undefined, served: 200, says: true },
     });
-  });
-
-  it("keeps serving the App's latest version a frame shows in place of a draft whose page doesn't build, its live query and store included, while the draft's update seals the draft's server code", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await notesApp(builder);
-    const { chats } = builder.api;
-    const chatId = await appChat(builder, app);
-    // The draft's server code seals; its page doesn't build.
-    await writeDraft(
-      builder,
-      chatId,
-      app,
-      {
-        "src/routes/index.tsx": "export default function Desk( {",
-        "server/notes.ts": renamedTitles,
-      },
-      0
-    );
-    const broken = await chats.preview(chatId, app);
-    const at = callsAt(broken);
-    /** Has the frame on the version write a note titled `title`. */
-    const create = async (title: string): Promise<unknown> =>
-      outcome(
-        await chats.previewFunction(
-          chatId,
-          app,
-          at,
-          JSON.stringify({
-            reference: { name: "notes.create", kind: "mutation" },
-            input: { title },
-          })
-        )
-      );
-    await create("Before");
-    const live = livePushes();
-    await chats.previewWatchQuery(chatId, app, at, titlesRequest, live.push);
-    await live.until((latest) => {
-      expect(latest?.result).toStrictEqual({ ok: true, value: ["Before"] });
-    });
-    // The page checks the draft's update: that builds the draft's pages,
-    // which seals the draft's server code.
-    const update = await answer(
-      chats.previewUpdate(chatId, app, 1, { appVersion: 1 })
-    );
-    // The frame still shows the version, on its own store: what it wrote
-    // before is there, and what it writes now its live query reads.
-    const kept = await titlesAt(builder, chatId, app, at);
-    const refused = (): unknown[] =>
-      live.pushed.filter(
-        ({ result }) => !z.object({ ok: z.boolean() }).parse(result).ok
-      );
-    expect({ at, update, kept, refused: refused() }).toStrictEqual({
-      at: { appVersion: 1 },
-      update: "page.build_failed",
-      kept: ["Before"],
-      refused: [],
-    });
-
-    await create("After");
-    await live.until((latest) => {
-      expect(latest?.result).toStrictEqual({
-        ok: true,
-        value: ["After", "Before"],
-      });
-    });
-    expect(refused()).toStrictEqual([]);
   });
 
   it("opens a draft whose server code doesn't build, or that deletes every page, on the App's latest version", async () => {
@@ -596,37 +533,6 @@ export const Route = createFileRoute("/elsewhere")({ component: Elsewhere });
         says: true,
       },
       afterProposal: 3,
-    });
-  });
-
-  it("runs each frame's calls on the App's version it shows: one still on version 1 once another frame opened on version 2", async () => {
-    const builder = await signedInApi(idp, "builder");
-    const app = await notesApp(builder);
-    const { chats } = builder.api;
-    const chatId = await appChat(builder, app);
-    const first = await chats.preview(chatId, app);
-    await builder.api.apps.files.commit(
-      app,
-      { "server/notes.ts": titlesSaying("from version 2") },
-      "Second"
-    );
-    const second = await chats.preview(chatId, app);
-    // Back and forth, as two frames open side by side call.
-    const calls = [
-      await titlesAt(builder, chatId, app, callsAt(first)),
-      await titlesAt(builder, chatId, app, callsAt(second)),
-      await titlesAt(builder, chatId, app, callsAt(first)),
-    ];
-
-    expect({
-      at: [callsAt(first), callsAt(second)],
-      calls,
-      // A version of the App the frame names that it doesn't have.
-      missing: await answer(titlesAt(builder, chatId, app, { appVersion: 9 })),
-    }).toStrictEqual({
-      at: [{ appVersion: 1 }, { appVersion: 2 }],
-      calls: [[], ["from version 2"], []],
-      missing: "app.version_not_found",
     });
   });
 

@@ -15,9 +15,11 @@ import type { PreviewProblem } from "@grasp-os/shared/chat";
 import type { DefinitionPlan } from "@grasp-os/shared/data-model";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { operationErrors } from "@grasp-os/shared/operations";
 import type { ServerLog } from "@grasp-os/shared/pages";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
@@ -36,6 +38,7 @@ import {
   operationDetail,
   refuseDefinitionFiles,
 } from "./app-definition.ts";
+import type { FunctionAnswer } from "./app-functions.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import {
   appFor,
@@ -54,6 +57,8 @@ import type { Acting, Member } from "./auth/identity.ts";
 import { batchesOf, callSplitting, ultraciteBatch } from "./batches.ts";
 import { inspectDraft } from "./draft-references.ts";
 import type { DraftInspection } from "./draft-references.ts";
+import { callDraft, draftRunOf } from "./draft-runs.ts";
+import type { DraftRun } from "./draft-runs.ts";
 import { workspace } from "./durable-objects.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
 import type { Resolved } from "./packages/resolve.ts";
@@ -104,7 +109,7 @@ import type { Draft, DraftWriter } from "./workspace.ts";
 // same way again, and refuses it while anything fails. The agent can also call
 // the draft's server code itself (`call`), in that same preview: the draft
 // sealed into a draft release, with its own empty store, never the App's
-// live data (sealed-previews.ts). Tests run in isolates with an empty
+// live data (draft-runs.ts). Tests run in isolates with an empty
 // env: nothing they do leaves them. Once a draft passes, the
 // agent proposes it: it becomes the App's next version, pending review,
 // with a review of what
@@ -271,21 +276,15 @@ const functionResultSchema = z.discriminatedUnion("ok", [
 
 /**
  * What a call of a function of a draft of spec 8's layout answered
- * (`FunctionAnswer`, as text from the chat's object), as the agent reads
- * it: its value, or its failure's code and message as data.
+ * (`callDraft`), as the agent reads it: its value, or its failure's code
+ * and message as data; `thrown`, what the draft's own code threw, which
+ * the call answers only as `internal.unexpected`.
  */
-const functionCall = (text: string): DraftCall => {
-  let answered: unknown;
-  try {
-    answered = JSON.parse(text);
-  } catch {
-    answered = undefined;
-  }
-  const result: unknown =
-    typeof answered === "object" && answered !== null
-      ? Reflect.get(answered, "result")
-      : undefined;
-  const parsed = functionResultSchema.safeParse(result);
+const functionCall = (
+  answer: FunctionAnswer,
+  thrown: string | undefined
+): DraftCall => {
+  const parsed = functionResultSchema.safeParse(answer.result);
   if (!parsed.success) {
     return {
       ok: false,
@@ -297,24 +296,16 @@ const functionCall = (text: string): DraftCall => {
   if (parsed.data.ok) {
     return {
       ok: true,
-      // SAFETY: parsed from JSON, so plain data RPC carries.
+      // SAFETY: an operation's result is plain data, which RPC carries.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       answer: parsed.data.value as AppAnswer,
     };
   }
-  // What the draft's own code threw, which its caller hears only as
-  // `internal.unexpected` (workspace.ts, `callDraftFunction`): the
-  // agent's to fix, as data in its tool's result.
-  const thrown: unknown =
-    typeof answered === "object" && answered !== null
-      ? Reflect.get(answered, "thrown")
-      : undefined;
   return {
     ok: false,
     code: parsed.data.error.code,
     message:
-      parsed.data.error.code === "internal.unexpected" &&
-      typeof thrown === "string"
+      parsed.data.error.code === "internal.unexpected" && thrown !== undefined
         ? thrown
         : parsed.data.error.message,
     note: callNote,
@@ -1572,11 +1563,11 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
   /**
    * Calls the chat's draft of `app` in its preview, as a page of the
    * draft would: its public function at path `method`, with `args` as its
-   * input, on its draft release (sealed-previews.ts), on a store of the
-   * preview's own and with no resources. How the draft's code failed, if
-   * it did, comes back as data; anything else (no draft, a refusal) is
-   * thrown. Every draft holds its definition's config and schema from its
-   * first write (apps.ts, `applyChanges`), so every draft previews.
+   * input, run as the preview runs it (draft-runs.ts), on its throwaway
+   * store and with no resources. How the draft's code failed, if it did,
+   * comes back as data; anything else (no draft, a refusal) is thrown.
+   * Every draft holds its definition's config and schema from its first
+   * write (apps.ts, `applyChanges`), so every draft previews.
    */
   async call(
     app: unknown,
@@ -1587,8 +1578,7 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
       "build.call",
       async (by): Promise<DraftCall> => {
         const id = await this.#buildable(by, app);
-        const { workspaceId, chatId, personId } = this.ctx.props;
-        const chats = workspace(this.env, workspaceId);
+        const { chatId } = this.ctx.props;
         if (typeof method !== "string") {
           throw appErrors.create("app.invalid", {
             issues: ["A function's path and its input, as plain data."],
@@ -1603,15 +1593,17 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
             issues: ["A function's path and its input, as plain data."],
           });
         }
-        let answered: string;
+        let run: DraftRun;
+        let kind: "query" | "mutation" | "action";
         try {
-          answered = await chats.callDraftFunction(
-            chatId,
-            personId,
-            id,
-            method,
-            args ?? {}
-          );
+          run = await draftRunOf(this.env, by, id, chatId);
+          const operation = Object.hasOwn(run.release.app.operations, method)
+            ? run.release.app.operations[method]
+            : undefined;
+          if (operation === undefined || operation.visibility !== "public") {
+            throw operationErrors.create("operation.not_found");
+          }
+          ({ kind } = operation);
         } catch (error) {
           // The draft's to fix, as data: a path that names none of its
           // public functions, or code that doesn't seal (doesn't build
@@ -1622,7 +1614,25 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           }
           return failed;
         }
-        return functionCall(answered);
+        // What the draft's code threw, for the agent's own call: as data
+        // in its tool's result, never in any page's answer.
+        let thrown: string | undefined;
+        const answer = await callDraft(
+          this.env,
+          by,
+          run,
+          JSON.stringify({
+            reference: { name: method, kind },
+            input: args ?? {},
+          }),
+          {
+            deadline: Date.now() + platformLimits.serverInvocationWallMs,
+            thrown: (message) => {
+              thrown = message;
+            },
+          }
+        );
+        return functionCall(answer, thrown);
       },
       (called) => ({
         app: typeof app === "string" ? app : null,

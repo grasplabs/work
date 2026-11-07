@@ -191,7 +191,7 @@ export const actionMaxRunning = 16;
 
 /**
  * How long a plain action's invocation may run: as long as a page's
- * direct call (core's app-function-route.ts), never the 60 s a streaming
+ * direct call (core's page-calls.ts), never the 60 s a streaming
  * action, which someone follows, gets.
  */
 export const actionInvocationWallMs = 30_000;

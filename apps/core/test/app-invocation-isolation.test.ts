@@ -12,7 +12,7 @@ import { appMembers } from "../src/db/core/schema.ts";
 import { release as released } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { isolationFiles } from "./isolation-app.ts";
-import { chatWithDraft, outcome, requestFor } from "./previews.ts";
+import { chatWithDraft, outcome, previewCall, requestFor } from "./previews.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
@@ -169,10 +169,10 @@ describe(
         input: Json = {}
       ): Promise<unknown> =>
         outcome(
-          await by.api.chats.previewFunction(
+          await previewCall(
+            by,
             chatId,
             app,
-            revision,
             await requestFor(by, { chatId, app, revision }, path, input)
           )
         );

@@ -333,7 +333,7 @@ export interface Invocation {
    * only as `internal.unexpected`, at most once a call: its name and
    * message, when they are strings, cut to `draftFailureMaxLength`, as
    * data (`tellerOf`). Only a chat's preview of its
-   * own draft (sealed-previews.ts) is told, for the agent's check to read
+   * own draft (draft-runs.ts) is told, for the agent's check to read
    * as a tool's result; every other caller's App code keeps its failures
    * to the log, and no caller's answer ever carries them.
    */

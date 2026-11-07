@@ -3,17 +3,15 @@ import { preferenceOperations } from "@grasp-os/sdk/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
-import { env } from "cloudflare:workers";
 
 import { appDefinition, preferencesOf, redefined } from "./app-definitions.ts";
 import { release } from "./apps.ts";
 import type { Idp } from "./idp.ts";
-import type { previewStores } from "./previews.ts";
-import { chatsOf, chatWithDraft, outcomeOfText } from "./previews.ts";
+import { chatWithDraft, outcome, previewCall } from "./previews.ts";
 import { signedInApi } from "./sign-in.ts";
 
-// The sealed previews' tests' helpers, shared by their test files
-// (sealed-preview*.test.ts): a Notes App and a Desk App, each with a
+// The previews' tests' helpers, shared by their test files
+// (draft-runs.test.ts, preview-*.test.ts): a Notes App and a Desk App, each with a
 // chat's draft of it, and the preview's calls, stores and live queries as
 // those tests read them.
 
@@ -328,35 +326,20 @@ export const Route = createFileRoute("/")({ component: Desk });
 
 /**
  * What a call of the draft's preference operation `name` answers in its
- * preview, sent straight to the chat's object (past the checks of
- * `chats-rpc.ts`, which only add to the preview's own), at `revision`.
+ * preview, as its frame's page sends it (`previewCall`).
  */
 export const preferenceCall = async (
   person: Person,
-  {
-    chatId,
-    app,
-    revision,
-  }: {
-    chatId: Parameters<typeof previewStores>[1];
-    app: AppId;
-    revision: number;
-  },
+  { chatId, app }: { chatId: string; app: AppId },
   name: "get" | "update",
-  input: unknown,
-  options: { deadline?: number } = {}
+  input: unknown
 ): Promise<unknown> =>
-  outcomeOfText(
-    await chatsOf(person).previewFunction(
+  outcome(
+    await previewCall(
+      person,
       chatId,
-      person.userId,
       app,
-      revision,
-      JSON.stringify({
-        reference: preferenceReference(name),
-        input,
-      }),
-      options
+      JSON.stringify({ reference: preferenceReference(name), input })
     )
   );
 
@@ -387,26 +370,3 @@ export const previewDraftsOf = (idp: Idp) => ({
     return { builder, app, ...draft };
   },
 });
-
-/** When the sweep tries preview store `id` again, as core records it. */
-export const retryOf = async (id: string) =>
-  await env.DB.prepare(
-    "SELECT retry_after AS retryAfter FROM preview_fixture_stores WHERE store_id = ?"
-  )
-    .bind(id)
-    .first<{ retryAfter: number | null }>();
-
-/** A preview call that was out of date or answered: anything else as it is. */
-export const settled = (answer: unknown): unknown =>
-  answer === "app.preview_outdated" || Array.isArray(answer)
-    ? "settled"
-    : answer;
-
-/** The release a preview call's answer says ran, or null. */
-export const answerHashOf = (answer: unknown): string | null => {
-  const hash: unknown =
-    typeof answer === "object" && answer !== null
-      ? Reflect.get(answer, "manifestHash")
-      : null;
-  return typeof hash === "string" ? hash : null;
-};

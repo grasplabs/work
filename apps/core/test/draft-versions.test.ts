@@ -12,7 +12,13 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { loadFrame, modulePartsOf } from "./page-frames.ts";
 import type { Framed } from "./page-frames.ts";
-import { chatsOf, chatWithDraft, outcome, requestFor } from "./previews.ts";
+import {
+  chatsOf,
+  chatWithDraft,
+  outcome,
+  previewCall,
+  requestFor,
+} from "./previews.ts";
 import { failure } from "./sealed-apps.ts";
 import { signedInApi } from "./sign-in.ts";
 
@@ -343,28 +349,15 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
 
   it("previews an earlier version as it was, read-only, and the draft once it is restored", async () => {
     const builder = await signedInApi(idp, "builder");
-    const { app, chatId, revision } = await twoVersions(builder);
+    const { app, chatId } = await twoVersions(builder);
     const { chats } = builder.api;
 
     const now = await chats.preview(chatId, app);
     const first = await chats.preview(chatId, app, 1);
     const second = await chats.preview(chatId, app, 2);
-    // Calls of a version's page, the latest's (the draft as it is
-    // now) too: refused, as nothing a version opened read-only runs.
-    const request = await requestFor(
-      builder,
-      { chatId, app, revision },
-      "notes.titles"
-    );
-    const calls = await Promise.all(
-      [first, second].map(
-        async (bundle) =>
-          await failure(
-            async () =>
-              await chats.previewFunction(chatId, app, bundle.revision, request)
-          )
-      )
-    );
+    // A version's page, the latest's (the draft as it is now) too, gets
+    // no lease: nothing a version opened read-only calls runs.
+    const calls = [first.lease, second.lease];
     await chats.restoreDraftVersion(chatId, app, 1);
     const restored = await chats.preview(chatId, app);
 
@@ -383,13 +376,13 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       first: readOnlyRevision,
       differs: true,
       secondIsNow: true,
-      calls: ["app.preview_outdated", "app.preview_outdated"],
+      calls: [undefined, undefined],
       restoredIsFirst: true,
       missing: "app.version_not_found",
     });
   });
 
-  it("previews the version a draft was proposed as, at the draft's revision, its calls running there and nowhere earlier", async () => {
+  it("previews the version a draft was proposed as, at the draft's revision, its calls running there", async () => {
     const builder = await signedInApi(idp, "builder");
     const other = await signedInApi(idp, "builder");
     const { app, chatId, revision } = await twoVersions(builder);
@@ -399,12 +392,6 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
       role: "builder",
     });
     const { chats } = builder.api;
-    const request = await requestFor(
-      builder,
-      { chatId, app, revision },
-      "notes.titles"
-    );
-
     // Proposed, the draft changes nothing: its preview shows the version
     // it became, at the draft's revision, its calls on that version.
     const version = await chats.proposeDraft(chatId, app, "Two");
@@ -424,20 +411,8 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
         revision: latest.revision,
         appVersion: latest.refresh?.appVersion,
         at: latestAt,
-        titles: outcome(
-          await chats.previewFunction(chatId, app, latestAt, latestRequest)
-        ),
+        titles: outcome(await previewCall(builder, chatId, app, latestRequest)),
       },
-      // The draft's own revision, and a read-only one, run nothing.
-      calls: await Promise.all(
-        [readOnlyRevision, revision].map(
-          async (named) =>
-            await failure(
-              async () =>
-                await chats.previewFunction(chatId, app, named, request)
-            )
-        )
-      ),
       // Another builder of the App, through a chat that isn't theirs.
       othersChat: await failure(
         async () => await other.api.chats.preview(chatId, app)
@@ -451,7 +426,6 @@ describe("versions of a chat's draft", { timeout: 180_000 }, () => {
         at: { appVersion: 2 },
         titles: [],
       },
-      calls: ["app.preview_outdated", "app.preview_outdated"],
       othersChat: "agent.chat_not_found",
     });
   });

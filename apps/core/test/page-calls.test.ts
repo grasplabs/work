@@ -11,6 +11,7 @@ import {
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { revokeRelease } from "../src/release-retention.ts";
@@ -19,15 +20,25 @@ import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { person } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import { routed, signedIn, signedInApi, withSignIn } from "./sign-in.ts";
+import {
+  outcome,
+  routed,
+  signedIn,
+  signedInApi,
+  withSignIn,
+} from "./sign-in.ts";
 
-// A running App's page calling one of its App's functions over core's
-// plain request (app-function-route.ts), from the page's side: a page
+// A page calling one of its App's functions over core's
+// plain request (page-calls.ts), from the page's side: a page
 // with the lease core gave its build calls through, no admin approving
 // it; one with no lease of core's, one with someone else's lease, another site, someone signed out or without
 // a role, a session that is someone else's than the frame's, and a body
 // larger than any request may be, are refused, the last before core reads
-// past its bound.
+// past its bound. Then, from the one path's threat model (page-calls.ts),
+// a builder's preview of a draft on that same path: its calls on its own
+// store and never the App's, and another person's, a forged or another
+// App's draft lease, someone who no longer builds the App and a flood all
+// refused. A visitor's attacks on it are in app-visitor-calls.test.ts.
 
 const idp = mockIdp();
 
@@ -488,3 +499,196 @@ describe("a page calling its App's functions", { timeout: 120_000 }, () => {
     });
   });
 });
+
+/**
+ * `served`'s App with `colleague` added as one of its builders, each with
+ * their own chat of it previewed, and the lease each preview opened with:
+ * a draft of the App (one that changes nothing yet), run on a throwaway
+ * store of the preview's own.
+ */
+const previewed = async (served: Served) => {
+  const colleague = await personApi("builder");
+  await served.builder.api.apps.members.add(served.app, {
+    type: "person",
+    id: colleague.userId,
+    role: "builder",
+  });
+  const leaseOf = async (by: Person) => {
+    const { id } = await by.api.chats.forApp(served.app);
+    const { lease } = await by.api.chats.preview(id, served.app);
+    if (lease === undefined) {
+      throw new Error("The preview opened with no lease.");
+    }
+    return { chatId: id, lease };
+  };
+  return {
+    colleague,
+    own: await leaseOf(served.builder),
+    theirs: await leaseOf(colleague),
+  };
+};
+
+/** `lease` with the chat it names swapped for `chatId`, its MAC kept. */
+const withChat = (lease: string, chatId: string): string => {
+  const [artifact, , mac] = lease.split(".");
+  const chat = btoa(chatId)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "");
+  return `${artifact}.d${chat}.${mac}`;
+};
+
+describe(
+  "one call path for releases and drafts, from its threat model",
+  { timeout: 180_000 },
+  () => {
+    it("runs a draft's calls on the preview's own store: the App's real store never sees them, nor the draft the App's", async () => {
+      const served = await servedApp();
+      const { own } = await previewed(served);
+      const as = served.builder;
+      const draft = { as, lease: own.lease };
+      const real = { as, lease: served.lease };
+      await resultOf(
+        await post(
+          served.app,
+          requestFor(served, "notes.create", { title: "Real" }),
+          real
+        )
+      );
+      const drafted = await resultOf(
+        await post(
+          served.app,
+          requestFor(served, "notes.create", { title: "Draft" }),
+          draft
+        )
+      );
+      expect({
+        drafted: z.object({ ok: z.boolean() }).loose().parse(drafted).ok,
+        draft: await resultOf(
+          await post(served.app, requestFor(served, "notes.titles", {}), draft)
+        ),
+        real: await titlesOf(served),
+      }).toStrictEqual({
+        drafted: true,
+        draft: { ok: true, value: ["Draft"] },
+        real: { ok: true, value: ["Real"] },
+      });
+    });
+
+    it("follows a draft's live query over the page's socket on its own store, and answers no workflow run", async () => {
+      const served = await servedApp();
+      const { own } = await previewed(served);
+      const frame = served.builder.api.pages.frame(served.app, own.lease);
+      const pushed = Promise.withResolvers<unknown>();
+      await frame.watchQuery(requestFor(served, "notes.titles", {}), (push) => {
+        pushed.resolve(push.result);
+      });
+      expect({
+        pushed: await pushed.promise,
+        delivery: await frame.delivery(),
+        decide: await outcome(
+          frame.decide("run", "decision", { approved: true })
+        ),
+      }).toStrictEqual({
+        pushed: { ok: true, value: [] },
+        delivery: "open",
+        decide: "app.preview_side_effect",
+      });
+    });
+
+    it("refuses another person's draft lease, a forged one and another App's, as no lease, before anything runs", async () => {
+      const served = await servedApp();
+      const other = await servedApp();
+      const { colleague, own, theirs } = await previewed(served);
+      const create = requestFor(served, "notes.create", { title: "Leaked" });
+      const as = served.builder;
+      const otherPreview = await previewed(other);
+      expect({
+        // Their lease, replayed by the builder; the builder's, by them.
+        theirs: await refusalOf(
+          await post(served.app, create, { as, lease: theirs.lease })
+        ),
+        replayed: await refusalOf(
+          await post(served.app, create, { as: colleague, lease: own.lease })
+        ),
+        // The builder's own lease, its chat swapped for their colleague's.
+        forgedChat: await refusalOf(
+          await post(served.app, create, {
+            as,
+            lease: withChat(own.lease, theirs.chatId),
+          })
+        ),
+        // A draft's lease of another App.
+        anotherApps: await refusalOf(
+          await post(served.app, create, { as, lease: otherPreview.own.lease })
+        ),
+      }).toStrictEqual({
+        theirs: { status: 403, code: "page.unreviewed" },
+        replayed: { status: 403, code: "page.unreviewed" },
+        forgedChat: { status: 403, code: "page.unreviewed" },
+        anotherApps: { status: 403, code: "page.unreviewed" },
+      });
+      await expect(titlesOf(served)).resolves.toStrictEqual({
+        ok: true,
+        value: [],
+      });
+    });
+
+    it("refuses a draft's call once the person no longer builds the App, or names someone else", async () => {
+      const served = await servedApp();
+      const { colleague, theirs } = await previewed(served);
+      const titles = requestFor(served, "notes.titles", {});
+      const named = await refusalOf(
+        await post(served.app, titles, {
+          as: colleague,
+          named: served.builder.userId,
+          lease: theirs.lease,
+        })
+      );
+      await served.builder.api.apps.members.add(served.app, {
+        type: "person",
+        id: colleague.userId,
+        role: "user",
+      });
+      expect({
+        named,
+        user: await refusalOf(
+          await post(served.app, titles, { as: colleague, lease: theirs.lease })
+        ),
+      }).toStrictEqual({
+        named: { status: 401, code: "auth.principal_changed" },
+        user: { status: 403, code: "role.forbidden" },
+      });
+    });
+
+    it("counts a draft's calls against the person's requests of the App's pages, as a release's", async () => {
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+      try {
+        const served = await servedApp();
+        const { own } = await previewed(served);
+        const titles = requestFor(served, "notes.titles", {});
+        const sent = { as: served.builder, lease: own.lease };
+        const statuses: number[] = [];
+        for (let count = 0; count < pageLimits.requests.burst; count += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one request after another, as a page sends them
+          const response = await post(served.app, titles, sent);
+          statuses.push(response.status);
+          // oxlint-disable-next-line no-await-in-loop -- each body read so its request ends
+          await response.body?.cancel();
+        }
+        // Opening the App's page counted one, and so did the preview.
+        expect(statuses.at(-1)).toBe(429);
+        await expect(
+          refusalOf(
+            await post(served.app, titles, {
+              as: served.builder,
+              lease: served.lease,
+            })
+          )
+        ).resolves.toStrictEqual({ status: 429, code: "page.rate_limited" });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
+);

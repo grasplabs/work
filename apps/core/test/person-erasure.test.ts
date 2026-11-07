@@ -1795,12 +1795,12 @@ describe("erasing a person", () => {
     });
   });
 
-  it("finishes their workspace's erasure when the weekly sweep discarded a preview's store first", async () => {
+  it("finishes their workspace's erasure, emptying the preview stores it lists", async () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "builder");
     const chat = await person.api.chats.create("Theirs");
-    // A preview's store the workspace still lists, which the sweep already
-    // discarded, with core's record of it (sealed-previews.ts).
+    // A throwaway store of a preview's the workspace lists, which its
+    // erasure empties (draft-runs.ts).
     await runInDurableObject(
       workspace(env, personalWorkspaceId(person.userId)),
       (_instance, state) => {

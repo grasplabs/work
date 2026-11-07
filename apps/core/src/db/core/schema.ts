@@ -1530,15 +1530,9 @@ export const appTestDecisions = sqliteTable(
 );
 
 /**
- * The fixture stores chats' previews of their drafts run on
- * (sealed-previews.ts), each recorded before its object is first touched
- * and deleted once the object is discarded. Kept apart from App tests'
- * (`app_test_fixtures`), whose sweep discards a store an hour after it
- * was made: a preview's lives as long as its draft's revision, and the
- * chat's Workspace object, which also records it, discards it then; core
- * discards it a week after it was made whatever that object does
- * (`sweepPreviewStores`, by `created_at`). A fixture store is never in the
- * store inventory (`business_stores`).
+ * Unused since a draft's preview runs on a throwaway store that empties
+ * itself once unused (draft-runs.ts): kept while a release that writes it
+ * may serve or be rolled back to, and dropped in a later release.
  */
 export const previewFixtureStores = sqliteTable(
   "preview_fixture_stores",
@@ -3341,7 +3335,7 @@ export const appVisitorEntries = sqliteTable(
 
 /**
  * The functions each version of an App grants its visitors
- * (app-visitor-calls.ts), as its builders chose them: the App's own
+ * (app-visitor-grants.ts), as its builders chose them: the App's own
  * queries and mutations, by path. A version starts with none, so a new
  * current version grants nothing until a builder grants it again.
  */

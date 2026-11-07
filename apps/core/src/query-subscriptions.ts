@@ -1,6 +1,7 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -24,9 +25,10 @@ import {
   windowExtentOf,
 } from "./app-functions.ts";
 import type { EvaluatedQuery } from "./app-functions.ts";
+import { callDraft, draftRunOf } from "./draft-runs.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
-import { delivering } from "./page-delivery.ts";
-import type { LeasedBuild } from "./page-delivery.ts";
+import { delivering, leaseKey } from "./page-delivery.ts";
+import type { PageLease } from "./page-delivery.ts";
 import { windowPages } from "./query-windows.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { Subscription } from "./subscription.ts";
@@ -279,7 +281,7 @@ interface Listener {
 interface Evaluation {
   readonly key: string;
   readonly app: AppId;
-  readonly build: LeasedBuild | undefined;
+  readonly build: PageLease | undefined;
   readonly request: string;
   readonly listeners: Set<Listener>;
   /** How many pushes it made: each push's `Snapshot.seq`. */
@@ -357,15 +359,14 @@ interface Following {
 
 /**
  * What the connection's access check says, before each push of data: open,
- * no role in the App, the build refused (`revoked`, `unreviewed`), or a
- * build of a chat's preview the preview no longer serves (`outdated`),
- * whose frame follows its queries again at the build it shows next.
+ * no role in the App (for a draft's, none that builds it), or the build
+ * refused (`revoked`, `unreviewed`).
  */
 export type AccessCheck<By = Identity> = (
   by: By,
   app: AppId,
-  build: LeasedBuild | undefined
-) => Promise<"open" | "role" | "revoked" | "unreviewed" | "outdated">;
+  build: PageLease | undefined
+) => Promise<"open" | "role" | "revoked" | "unreviewed">;
 
 /** Whoever a connection's live queries are read for, by `userId`. */
 export interface Reader {
@@ -425,7 +426,7 @@ export interface LiveReads<By extends Reader> {
   evaluate: (
     by: By,
     app: AppId,
-    build: LeasedBuild | undefined,
+    build: PageLease | undefined,
     request: string,
     deadline: number,
     chargePages: (pages: number) => Promise<void>
@@ -433,10 +434,48 @@ export interface LiveReads<By extends Reader> {
 }
 
 /**
+ * What a page's live query reads, as its lease names it (page-delivery.ts):
+ * a builder's draft on its throwaway store (draft-runs.ts), or the App's
+ * current release inside the build's trust check.
+ */
+const evaluatePage = async (
+  env: Env,
+  by: Identity,
+  app: AppId,
+  lease: PageLease | undefined,
+  request: string,
+  deadline: number,
+  chargePages: (pages: number) => Promise<void>
+): Promise<EvaluatedQuery> => {
+  if (lease?.kind === "draft") {
+    let reads: EvaluatedQuery["reads"];
+    const run = await draftRunOf(env, by, app, lease.chatId);
+    const answer = await callDraft(env, by, run, request, {
+      deadline,
+      kind: "query",
+      chargeWindow: chargePages,
+      observeReads: (storeId, readSet) => {
+        reads = { storeId: storeIdSchema.parse(storeId), readSet };
+      },
+    });
+    return { answer, reads };
+  }
+  return await delivering(
+    env,
+    by,
+    app,
+    lease?.build,
+    "watchQuery",
+    async () =>
+      await evaluateAppQuery(env, by, app, request, deadline, chargePages)
+  );
+};
+
+/**
  * A page's live reads: as the person behind the connection's session
- * (`check`), checked with `access` before each push, read from the App's
- * current release inside the build's trust check, and charged to the
- * person's live reads of the App.
+ * (`check`), checked with `access` before each push, read from what the
+ * frame's lease runs on (`evaluatePage`), and charged to the person's
+ * live reads of the App.
  */
 export const pageReads = (
   env: Env,
@@ -453,14 +492,14 @@ export const pageReads = (
     check.forget?.();
   },
   evaluate: async (by, app, build, request, deadline, chargePages) => {
-    const { answer, reads, revision } = await delivering(
+    const { answer, reads, revision } = await evaluatePage(
       env,
       by,
       app,
       build,
-      "watchQuery",
-      async () =>
-        await evaluateAppQuery(env, by, app, request, deadline, chargePages)
+      request,
+      deadline,
+      chargePages
     );
     return {
       result: answer.result,
@@ -481,7 +520,7 @@ const storeOf = (env: Env, storeId: StoreId) =>
  */
 const keyOf = (
   app: AppId,
-  build: LeasedBuild | undefined,
+  build: PageLease | undefined,
   userId: string,
   request: string
 ): string => {
@@ -493,13 +532,7 @@ const keyOf = (
   } catch {
     // Keyed by its text.
   }
-  return canonicalJson([
-    app,
-    build?.artifact ?? null,
-    build?.version ?? null,
-    userId,
-    call,
-  ]);
+  return canonicalJson([app, leaseKey(build), userId, call]);
 };
 
 /**
@@ -633,7 +666,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   subscribe(
     by: By,
     app: AppId,
-    build: LeasedBuild | undefined,
+    build: PageLease | undefined,
     request: string,
     onSnapshot: SnapshotCallback,
     /**
@@ -702,7 +735,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   #start(
     key: string,
     app: AppId,
-    build: LeasedBuild | undefined,
+    build: PageLease | undefined,
     request: string
   ): Evaluation {
     const evaluation: Evaluation = {
@@ -1053,11 +1086,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     } catch (error) {
       return { refusal: refusalResult(error) };
     }
-    const key = canonicalJson([
-      app,
-      build?.artifact ?? null,
-      build?.version ?? null,
-    ]);
+    const key = canonicalJson([app, leaseKey(build)]);
     const now = Date.now();
     let cached = this.#cleared.get(key);
     if (cached === undefined || cached.by !== by || cached.until <= now) {
@@ -1107,11 +1136,6 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     ) {
       return {
         refusal: refusalResult(pageErrors.create(`page.${access}`)),
-      };
-    }
-    if (read.value !== undefined && access === "outdated") {
-      return {
-        refusal: refusalResult(appErrors.create("app.preview_outdated")),
       };
     }
     return {

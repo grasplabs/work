@@ -38,7 +38,6 @@ import { sweepBuilds } from "./pages.ts";
 import { retryErasures } from "./person-erasure.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
 import { sweepReleases } from "./release-retention.ts";
-import { sweepPreviewStores } from "./sealed-previews.ts";
 import { sweepSpokenLines } from "./speech-cache.ts";
 import { sendStephenSummaries } from "./stephen-summary.ts";
 import { sweepCandidateRuns } from "./workflows/candidate-runs.ts";
@@ -264,11 +263,6 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "pages.frames",
     period: "quarterHour",
     run: sweepPageFrames,
-  },
-  {
-    name: "pages.previews",
-    period: "quarterHour",
-    run: sweepPreviewStores,
   },
   { name: "pages.builds", period: "quarterHour", run: sweepBuilds },
   {

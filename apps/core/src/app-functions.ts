@@ -941,7 +941,7 @@ const callFunction = async (
 };
 
 /**
- * Who a visitor's call runs for (app-visitor-calls.ts): never a person.
+ * Who a visitor's call runs for (app-visitor-grants.ts): never a person.
  * The App's version is the one it was granted on.
  */
 export interface VisitorCaller {
@@ -1032,7 +1032,7 @@ export const visitorInvocation = async (
 };
 
 /**
- * Calls a function of a published App for a visitor (app-visitor-calls.ts),
+ * Calls a function of a published App for a visitor (app-visitor-grants.ts),
  * as the App itself: only a public query or mutation of the version the
  * visitor's grant is on, never an action (which reaches resources) and
  * never core's own workflow or preference queries, which are a member's.
