@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/shared/errors";
 import { readAtMost } from "@grasp-os/shared/http";
 import type { AppId } from "@grasp-os/shared/ids";
+import { isRecord } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
@@ -310,7 +311,7 @@ const admitMember = async (
 const frameOf = (line: string): { type?: unknown; result?: unknown } => {
   try {
     const frame: unknown = JSON.parse(line);
-    return typeof frame === "object" && frame !== null ? frame : {};
+    return isRecord(frame) ? frame : {};
   } catch {
     return {};
   }

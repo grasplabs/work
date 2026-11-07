@@ -1,5 +1,6 @@
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
@@ -555,20 +556,13 @@ const framesOf = async (response: Response): Promise<unknown[]> => {
 /** The result the last of `frames` carries. */
 const resultOfLast = (frames: unknown[]): unknown => {
   const last = frames.at(-1);
-  return typeof last === "object" && last !== null
-    ? Reflect.get(last, "result")
-    : undefined;
+  return isRecord(last) ? last.result : undefined;
 };
 
 /** The error code a refused result carries. */
 const errorCodeOf = (result: unknown): unknown => {
-  const error: unknown =
-    typeof result === "object" && result !== null
-      ? Reflect.get(result, "error")
-      : undefined;
-  return typeof error === "object" && error !== null
-    ? Reflect.get(error, "code")
-    : undefined;
+  const error = isRecord(result) ? result.error : undefined;
+  return isRecord(error) ? error.code : undefined;
 };
 
 /** `lease` with the chat it names swapped for `chatId`, its MAC kept. */
