@@ -1,4 +1,3 @@
-import { isAppLayout } from "@grasp-os/compiler";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { App } from "@grasp-os/shared/apps";
@@ -150,12 +149,9 @@ const publish = async (
   const db = drizzle(env.DB);
   try {
     const files = await versionFiles(env, app, version);
-    let manifestHash: string | null = null;
-    if (isAppLayout(files)) {
-      manifestHash = await sealed(env, by, app, version);
-      await requireMigrationEvidence(env, app, version);
-      await requireAppTestsPass(env, app, version, files);
-    }
+    const manifestHash = await sealed(env, by, app, version);
+    await requireMigrationEvidence(env, app, version);
+    await requireAppTestsPass(env, app, version, files);
     const [marked] = await auditedBatch(env, db, [
       db
         .update(appVersions)
@@ -166,11 +162,9 @@ const publish = async (
             eq(appVersions.version, version),
             // Only while the release it tested is stored: one deleted
             // since leaves it unmarked.
-            manifestHash === null
-              ? undefined
-              : sql`EXISTS (SELECT 1 FROM sdk_release_manifests
-                  WHERE app_id = ${app} AND version = ${version}
-                    AND manifest_hash = ${manifestHash})`
+            sql`EXISTS (SELECT 1 FROM sdk_release_manifests
+              WHERE app_id = ${app} AND version = ${version}
+                AND manifest_hash = ${manifestHash})`
           )
         )
         .returning({ version: appVersions.version }),

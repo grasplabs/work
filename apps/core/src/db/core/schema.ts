@@ -1042,8 +1042,7 @@ export const appVersions = sqliteTable(
      * The hash of the sealed manifest its publish tested: the version
      * counts as published only while a release with this hash is stored
      * (src/apps.ts, `publishedSql`), so one deleted, by whatever release of
-     * core, or sealed again, is published again. Null for a version not of
-     * spec 8's layout, which has no release.
+     * core, or sealed again, is published again. Null until it is.
      */
     publishedManifestHash: text("published_manifest_hash"),
   },

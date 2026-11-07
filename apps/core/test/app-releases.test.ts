@@ -22,7 +22,13 @@ import {
   sealRelease,
 } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles, createApp, findVersion } from "../src/apps.ts";
+import {
+  commitFiles,
+  createApp,
+  draftOverLatest,
+  findVersion,
+  proposeDraft,
+} from "../src/apps.ts";
 import { deleteStore, openStore } from "../src/data-stores.ts";
 import {
   sdkReleaseManifests,
@@ -1804,6 +1810,26 @@ export const reach = action({
           })
       )
     ).resolves.toBe("app.v1_server");
+  });
+
+  it("is an App of spec 8's layout: a draft that drops its schema isn't proposed", async () => {
+    const fixture = await appWith(notesFiles());
+    const draft = await draftOverLatest(env, fixture.app, {
+      base: 1,
+      changes: { "server/schema.ts": null },
+    });
+    await expect(
+      failure(
+        async () =>
+          await proposeDraft(
+            env,
+            fixture.owner,
+            fixture.app,
+            draft,
+            "No schema"
+          )
+      )
+    ).resolves.toBe("app.layout_missing");
   });
 
   it("can't keep anything but server code under operations/: each is refused by name", async () => {

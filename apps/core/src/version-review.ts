@@ -104,7 +104,7 @@ const rowRulesOf = async (
   app: AppId,
   proposed: { version: number; files: Readonly<Record<string, string>> }
 ): Promise<TableRowRules[] | null> => {
-  let manifest: AppManifest | undefined;
+  let manifest: AppManifest;
   try {
     manifest = await versionManifest(
       env,
@@ -116,7 +116,7 @@ const rowRulesOf = async (
     log.warn("version_review.manifest_unread", errorFields(error));
     return null;
   }
-  return Object.entries(manifest?.schema.tables ?? {})
+  return Object.entries(manifest.schema.tables)
     .filter(([, table]) => table.rules !== undefined)
     .map(([table, { rules, access }]) => {
       // Who changes its rows, as the store holds writes: its write rules;
@@ -152,7 +152,7 @@ const handsFilesOf = async (
   app: AppId,
   proposed: { version: number; files: Readonly<Record<string, string>> }
 ): Promise<boolean | null> => {
-  let manifest: AppManifest | undefined;
+  let manifest: AppManifest;
   try {
     manifest = await versionManifest(
       env,
@@ -163,10 +163,6 @@ const handsFilesOf = async (
   } catch (error) {
     log.warn("version_review.manifest_unread", errorFields(error));
     return null;
-  }
-  // No App layout: no App, nothing to hand.
-  if (manifest === undefined) {
-    return false;
   }
   const readsFiles = Object.values(manifest.browserResources).some(
     (resource) =>
@@ -202,7 +198,7 @@ const readsPeopleOf = async (
       proposed.version,
       proposed.files
     );
-    return manifest?.people === true;
+    return manifest.people === true;
   } catch (error) {
     log.warn("version_review.manifest_unread", errorFields(error));
     return null;
@@ -227,7 +223,7 @@ const migrationsOf = async (
     | undefined,
   serverChanged: boolean
 ): Promise<VersionReview["migrations"]> => {
-  let next: AppManifest | undefined;
+  let next: AppManifest;
   let previous: AppManifest | undefined;
   let evidence: Awaited<ReturnType<typeof sealedEvidence>>;
   try {
@@ -243,7 +239,7 @@ const migrationsOf = async (
   }
   const had = previous?.migrations ?? {};
   const listed: NonNullable<VersionReview["migrations"]> = [];
-  for (const declared of Object.values(next?.migrations ?? {})) {
+  for (const declared of Object.values(next.migrations)) {
     const old = Object.hasOwn(had, declared.name)
       ? had[declared.name]
       : undefined;

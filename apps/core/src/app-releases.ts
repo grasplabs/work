@@ -1,6 +1,5 @@
 import {
   compilerVersion,
-  isAppLayout,
   isPageFile,
   kitModules,
   serverSdkModules,
@@ -889,18 +888,15 @@ export const isSealed = async (
  * The App manifest of `version` of `app`, as the host reads it: its
  * sealed release's when it has one, otherwise its code built and
  * inspected in the sandbox as a seal's first inspection does (symbolic
- * references, nothing stored). Undefined for a version not of spec 8's
- * layout. Throws as a seal would for code that doesn't build or inspect.
+ * references, nothing stored). Throws as a seal would for code that
+ * doesn't build or inspect.
  */
 export const versionManifest = async (
   env: Env,
   app: AppId,
   version: number,
   files: Readonly<Record<string, string>>
-): Promise<AppManifest | undefined> => {
-  if (!isAppLayout(files)) {
-    return undefined;
-  }
+): Promise<AppManifest> => {
   if (await isSealed(env, app, version)) {
     const release = await loadRelease(env, app, version);
     return release.app;
@@ -913,21 +909,17 @@ export const versionManifest = async (
  * release's manifest and what its seal resolved of its workflows when it
  * has one, so its pages get the very bytes the release sealed; otherwise
  * its inspected manifest and the workflows as the App binds them now, as a
- * seal would. Undefined for a version not of spec 8's layout. Throws as
- * {@link versionManifest} does.
+ * seal would. Throws as {@link versionManifest} does.
  */
 export const versionReferenceSource = async (
   env: Env,
   app: AppId,
   version: number,
   files: Readonly<Record<string, string>>
-): Promise<
-  | { manifest: AppManifest; workflows: readonly WorkflowBindingExtras[] }
-  | undefined
-> => {
-  if (!isAppLayout(files)) {
-    return undefined;
-  }
+): Promise<{
+  manifest: AppManifest;
+  workflows: readonly WorkflowBindingExtras[];
+}> => {
   if (await isSealed(env, app, version)) {
     const release = await loadRelease(env, app, version);
     return { manifest: release.app, workflows: release.workflows };
@@ -980,8 +972,7 @@ const sealedAppManifest = async (
 /**
  * `version`'s manifest as core already holds it, never working it out:
  * its sealed release's, or the one kept for its code (`cachedFilesManifest`);
- * undefined when core has neither yet, or for a version not of spec 8's
- * layout.
+ * undefined when core has neither yet.
  */
 export const heldManifest = async (
   env: Env,
@@ -989,9 +980,6 @@ export const heldManifest = async (
   version: number,
   files: Readonly<Record<string, string>>
 ): Promise<AppManifest | undefined> => {
-  if (!isAppLayout(files)) {
-    return undefined;
-  }
   if (await isSealed(env, app, version)) {
     return await sealedAppManifest(env, app, version);
   }
@@ -1162,8 +1150,7 @@ interface InspectedRelease {
  * `files`, an App's code for release `key`, built and inspected as a seal
  * does (see the header): inspected with symbolic references, then built
  * and type-checked with the modules generated from what it read; then
- * each explicit migration run on its fixtures. `version.unsealable` for
- * files not of spec 8's layout.
+ * each explicit migration run on its fixtures.
  */
 const inspectForSeal = async (
   env: Env,
@@ -1172,9 +1159,6 @@ const inspectForSeal = async (
   /** `preview` for a chat's draft. */
   profile: BuildProfile
 ): Promise<InspectedRelease> => {
-  if (!isAppLayout(files)) {
-    throw versionErrors.create("version.unsealable");
-  }
   // The SDK read once: the modules the inspection runs with are the
   // modules sealed with the release, and what it runs with.
   const sdk = await serverSdkModules(env.ASSETS);
@@ -1369,7 +1353,6 @@ export interface SealedDraft extends StoredDraft {
  * back through `loadDraftRelease`. Stored nowhere a version's release is,
  * so nothing that runs a version (`loadRelease`) ever finds it, even when
  * it names a committed one (a read-only preview's, `readOnlyReferences`).
- * `version.unsealable` for files not of spec 8's layout.
  */
 export const sealDraftRelease = async (
   env: Env,

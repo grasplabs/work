@@ -206,8 +206,8 @@ export const lostAnswerDb = (writes: RegExp): D1Database => {
 };
 
 /**
- * Marks `version` of `app` published (src/app-publish.ts), as making it
- * current requires: for tests that make a version current by hand, as
+ * Marks `version` of `app` published (src/app-publish.ts) with the release
+ * sealed for it, as making it current requires: for tests that make a version current by hand, as
  * another writer would, to race or bypass the real path.
  */
 export const markPublished = async (
@@ -215,7 +215,9 @@ export const markPublished = async (
   version: number
 ): Promise<void> => {
   await env.DB.prepare(
-    "UPDATE app_versions SET status = 'published' WHERE app_id = ? AND version = ?"
+    `UPDATE app_versions SET status = 'published', published_manifest_hash =
+      (SELECT manifest_hash FROM sdk_release_manifests WHERE app_id = ?1 AND version = ?2)
+    WHERE app_id = ?1 AND version = ?2`
   )
     .bind(app, version)
     .run();

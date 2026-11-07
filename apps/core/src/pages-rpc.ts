@@ -1,5 +1,4 @@
 // oxlint-disable max-classes-per-file -- a connection's pages, and each frame's own way to its App on that connection, which shares its checks
-import { isAppLayout } from "@grasp-os/compiler";
 import { appErrors, appVersionSchema } from "@grasp-os/shared/apps";
 import type { App } from "@grasp-os/shared/apps";
 import type {
@@ -297,18 +296,6 @@ export const visitorPage = async (
 };
 
 /**
- * The surfaces `version` of `app` declares, as its release sealed them:
- * none for a version not of spec 8's layout, which has no release.
- */
-const versionSurfaces = async (
-  env: Env,
-  app: AppId,
-  version: number,
-  files: Record<string, string>
-): Promise<SurfaceSummary[]> =>
-  isAppLayout(files) ? await sealedSurfaces(env, app, version) : [];
-
-/**
  * The surfaces of `app`'s current version (spec 34.1), for someone with a
  * role in it: none while it has no version. Listing them opens nothing:
  * each is opened, and checked, as the App's pages are.
@@ -320,14 +307,7 @@ const appSurfaces = async (
 ): Promise<SurfaceSummary[]> => {
   // Counted as one of the person's requests of the App, as opening is.
   const { id, currentVersion: version } = await admittedApp(env, by, app);
-  return version === null
-    ? []
-    : await versionSurfaces(
-        env,
-        id,
-        version,
-        await versionFiles(env, id, version)
-      );
+  return version === null ? [] : await sealedSurfaces(env, id, version);
 };
 
 /** The most Apps the sidebar reads the surfaces of, and how many at once. */
@@ -351,13 +331,7 @@ const sidebarEntries = async (
   let surfaces: SurfaceSummary[] = [];
   try {
     // Only what its release sealed: listing never builds or runs App code.
-    const raw = await versionFiles(env, app.id, app.currentVersion);
-    const declared = await versionSurfaces(
-      env,
-      app.id,
-      app.currentVersion,
-      raw
-    );
+    const declared = await sealedSurfaces(env, app.id, app.currentVersion);
     const listed = declared.filter(({ kind }) => kind === "sidebar");
     // A revoked release's pages get nothing: none of them is offered.
     // Opening one still checks it, whatever this says.
