@@ -1976,11 +1976,18 @@ const upload = async (
     before.exists &&
     before.migrationTag === lastTag &&
     holdsExactly(given, present);
-  // What it holds that it's no longer given, and what an earlier run's
-  // upload dropped but didn't record (`revoking`).
-  const revoked = [
-    ...new Set([...(progress.revoking[app] ?? []), ...present]),
-  ].filter((name) => !given.has(name));
+  // What an earlier run's upload dropped but didn't record (`revoking`)
+  // and the script no longer holds: gone already, whether given again
+  // since or not, so recorded before this upload can give it back.
+  const gone = (progress.revoking[app] ?? []).filter(
+    (name) => !present.has(name)
+  );
+  if (gone.length > 0) {
+    await recordDropped(db, loaded, progress, { app, target, revoked: gone });
+    await recordProgress(db, loaded, progress);
+  }
+  // What it holds that it's no longer given: what this upload drops.
+  const revoked = [...present].filter((name) => !given.has(name));
   if (before.exists) {
     // What it was observed at, whatever this upload does next.
     await recordMigrated(
@@ -2029,10 +2036,6 @@ const upload = async (
         [app]: await sharedSecretPrints(context.secrets, app),
       },
     });
-  } else if (revoked.length > 0) {
-    // An earlier run's upload dropped them and is observed already.
-    await recordDropped(db, loaded, progress, { app, target, revoked });
-    await recordProgress(db, loaded, progress);
   }
   if (app === "core") {
     // Core live with the settings as this run read them: what's pending is
@@ -2074,10 +2077,11 @@ const upload = async (
   }
   // The names removed, never a value: what an operator set by hand and
   // lost here can be read back from the step.
+  const removed = [...gone, ...revoked];
   await recordStep(db, loaded, app, {
     uploaded: done ? 0 : 1,
-    revoked: revoked.length,
-    revokedNames: revoked.join(","),
+    revoked: removed.length,
+    revokedNames: removed.join(","),
   });
 };
 
@@ -2115,12 +2119,15 @@ const recordLiveVersions = async (
 
 /**
  * The version a namespace connect answers as after this run's upload of
- * it: `first`, what it named in the probe, or, while that's none or the
- * one recorded before the upload (`superseded`), which an isolate of it
- * still answering names, asked again (`connectVersionOf`) after a wait.
- * The upload is the run's one write to connect, its secrets in it, so any
- * other version is the one it made. Null when none answers, so none is
- * recorded, which holds every secret connect holds (src/rollout/drift.ts).
+ * it, read twice in a row the same: `first`, what it named in the probe,
+ * then asked again (`connectVersionOf`) after a wait, until two reads in a
+ * row name one version, and not the one recorded before the upload
+ * (`superseded`), which an isolate of it still answering would name. Two
+ * reads apart the same keep an isolate of a version an earlier attempt's
+ * upload made, never recorded and so never `superseded`, from being taken
+ * for this one's, whose secrets a retry may have changed since. Null when
+ * none settles, so none is recorded, which holds every secret connect
+ * holds (src/rollout/drift.ts).
  */
 const freshConnectVersion = async (
   context: ProvisionContext,
@@ -2128,21 +2135,24 @@ const freshConnectVersion = async (
   first: string | null,
   superseded: string | undefined
 ): Promise<string | null> => {
-  const fresh = (version: string | null): version is string =>
-    version !== null && version !== superseded;
   let asked = false;
-  const version = await observed(
+  let previous: string | null = null;
+  const read = await observed(
     context,
     async () => {
-      if (!asked) {
-        asked = true;
-        return first;
+      let version = first;
+      if (asked) {
+        version = (await connectVersionOf(asking)) ?? null;
       }
-      return (await connectVersionOf(asking)) ?? null;
+      asked = true;
+      const settled =
+        version !== null && version !== superseded && version === previous;
+      previous = version;
+      return { version, settled };
     },
-    fresh
+    ({ settled }) => settled
   );
-  return fresh(version) ? version : null;
+  return read.settled ? read.version : null;
 };
 
 /** How long core's signed probe may take, its body included. */

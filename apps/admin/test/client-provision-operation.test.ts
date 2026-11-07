@@ -5,7 +5,10 @@ import {
   stageOfNamespace,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
-import { provisionProbePath } from "@grasp-os/shared/provision-probe";
+import {
+  connectVersionPath,
+  provisionProbePath,
+} from "@grasp-os/shared/provision-probe";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import {
   assetKey,
@@ -1554,6 +1557,12 @@ describe("provisioning a placed client", () => {
           path: provisionProbePath,
           host: `${clientId}.${domain}`,
         },
+        // Connect's version read again, signed: the same twice apart.
+        {
+          script: core,
+          path: connectVersionPath,
+          host: `${clientId}.${domain}`,
+        },
       ],
       workersDev: 0,
     });
@@ -1834,6 +1843,83 @@ describe("provisioning a placed client", () => {
       changed: true,
       status: "done",
       recorded: live ?? "none",
+    });
+  });
+
+  it("records a namespace connect as its retry's upload, not an earlier attempt's still answering, when the retry changed its shared secrets", async () => {
+    const manifest = await importRelease({}, bindsConnect);
+    const { account, clientId, held } = await setUp(
+      manifest,
+      clientDispatchNamespace
+    );
+    const namespaced = {
+      ...context,
+      router: {
+        ...context.router,
+        dispatcher: cloudflare.dispatcher(account.id, clientDispatchNamespace),
+      },
+    };
+    await runClientProvision(namespaced, held);
+    const { connect } = await scriptsOf(clientId);
+    const liveConnect = () =>
+      account.namespaces.get(clientDispatchNamespace)?.get(connect)
+        ?.deployments[0]?.versions[0]?.version_id;
+    const recordedVersions = async () => {
+      const rows = await db
+        .select({
+          worker: clientWorkers.worker,
+          versionId: clientWorkers.versionId,
+        })
+        .from(clientWorkers)
+        .where(eq(clientWorkers.clientId, clientId));
+      return Object.fromEntries(
+        rows.map(({ worker, versionId }) => [worker, versionId])
+      );
+    };
+    const before = await recordedVersions();
+    const second = await importRelease(
+      { notes: "feat(core): second" },
+      bindsConnect
+    );
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: second.releaseId,
+    });
+    const rerun = await attempt(clientId);
+    // The first attempt uploads connect, then stops before its probe
+    // passes: only core's old isolates answer.
+    cloudflare.coreOf(clientId).answeringVersion = before.core ?? "none";
+    const stopped = await failing(rerun, namespaced);
+    delete cloudflare.coreOf(clientId).answeringVersion;
+    const firstUpload = liveConnect();
+    // Retried with connect's shared secret rotated, so connect is uploaded
+    // again; an isolate of the first attempt's upload answers first.
+    cloudflare.coreOf(clientId).connectAnswersFirst = [firstUpload ?? null];
+    await runClientProvision(
+      {
+        ...namespaced,
+        secrets: {
+          ...secrets,
+          shared: {
+            connect: { ...secrets.shared.connect, COMPOSIO_API_KEY: "rotated" },
+          },
+        },
+      },
+      rerun
+    );
+    const retryUpload = liveConnect();
+    const operation = await operationOf(clientId);
+    const recorded = await recordedVersions();
+
+    expect({
+      stopped: stopped instanceof Error,
+      uploadedAgain: retryUpload !== firstUpload,
+      status: operation?.status,
+      recorded: recorded.connect,
+    }).toStrictEqual({
+      stopped: true,
+      uploadedAgain: true,
+      status: "done",
+      recorded: retryUpload ?? "none",
     });
   });
 
@@ -2526,6 +2612,54 @@ describe("provisioning a placed client", () => {
     }).toStrictEqual({
       afterDeath: { onCore: false, recorded: [] },
       recorded: ["STRAY_KEY"],
+    });
+  });
+
+  it("records a shared secret an upload dropped when its run died after it landed, though it is given again by the next run", async () => {
+    const manifest = await importRelease();
+    const { account, clientId, held } = await setUp(manifest);
+    await expect(failing(held, unbound)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+    const { connect } = await scriptsOf(clientId);
+    const onConnect = (): Map<string, string> =>
+      account.namespaces.get(namespace)?.get(connect)?.versions.at(-1)
+        ?.secrets ?? new Map<string, string>();
+    const { COMPOSIO_API_KEY: _dropped, ...rest } =
+      secrets.shared.connect ?? {};
+
+    // Composio's key is no longer given: connect's upload lands without
+    // it, and its run dies reading it back.
+    let reads = 0;
+    cloudflare.failNext((call) => {
+      if (call.method === "GET" && call.path.endsWith(`/scripts/${connect}`)) {
+        reads += 1;
+      }
+      return reads === 2;
+    }, 400);
+    await expect(
+      failing(held, {
+        ...unbound,
+        secrets: { ...secrets, shared: { connect: rest } },
+      })
+    ).resolves.toBeDefined();
+    const afterDeath = {
+      onConnect: onConnect().has("COMPOSIO_API_KEY"),
+      recorded: await revokedNamesOf(clientId),
+    };
+    // Given again before the retry: its upload gives the key back.
+    await expect(failing(held, unbound)).resolves.toMatchObject({
+      code: "probe_unqualified",
+    });
+
+    expect({
+      afterDeath,
+      onConnect: onConnect().has("COMPOSIO_API_KEY"),
+      recorded: await revokedNamesOf(clientId),
+    }).toStrictEqual({
+      afterDeath: { onConnect: false, recorded: [] },
+      onConnect: true,
+      recorded: ["COMPOSIO_API_KEY"],
     });
   });
 
