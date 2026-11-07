@@ -64,6 +64,7 @@ import {
 import { inList } from "./db/d1.ts";
 import { workspace } from "./durable-objects.ts";
 import { emailHashOf, erasedAddress } from "./erased-people.ts";
+import { discardLegacyPreviewStores } from "./legacy-preview-stores.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
 import {
   erasePerson,
@@ -405,6 +406,8 @@ const removeMember = async (
     } catch (error) {
       log.error("member.preview_empty_failed", errorFields(error));
     }
+    // CONTRACT: goes with `preview_fixture_stores` (legacy-preview-stores.ts).
+    await discardLegacyPreviewStores(env, target);
   }
 };
 

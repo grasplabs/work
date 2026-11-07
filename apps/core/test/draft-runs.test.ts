@@ -311,6 +311,114 @@ describe("a draft preview's throwaway store", { timeout: 180_000 }, () => {
     });
   });
 
+  it("never makes again the store of a call that read the preview's seed before its draft was discarded", async () => {
+    const { builder, app, chatId, revision } = await setUp();
+    const chats = chatsOf(builder);
+    // A call under way read the seed, then the draft was discarded.
+    const { seed } = await chats.previewRun(chatId, builder.userId, app);
+    await builder.api.chats.discardDraft(chatId, app);
+    const storeId = `throwaway-${crypto.randomUUID()}`;
+    const kept = await refusalOf(
+      chats.keepPreviewStore(chatId, builder.userId, app, {
+        storeId,
+        seed,
+        revision,
+      })
+    );
+    const recorded = await previewStores(builder, chatId, app);
+    expect({
+      kept,
+      recorded: recorded.map(({ store_id: id }) => id),
+    }).toStrictEqual({ kept: "app.preview_outdated", recorded: [] });
+  });
+
+  it("refuses the commit of a call still under way when its draft is discarded, and the next draft starts empty", async () => {
+    const { builder, app, chatId, revision, write } = await setUp();
+    const at = { chatId, app, revision };
+    // Writes once a wait is over.
+    const late = previewCall(
+      builder,
+      chatId,
+      app,
+      await requestFor(builder, at, "notes.late")
+    );
+    await vi.waitFor(
+      async () => {
+        await expect(previewStores(builder, chatId, app)).resolves.toHaveLength(
+          1
+        );
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+    await builder.api.chats.discardDraft(chatId, app);
+    const settled = outcome(await late);
+    const { revision: now } = await chatsOf(builder).previewDraft(
+      chatId,
+      builder.userId,
+      app
+    );
+    await write(
+      { "server/notes.ts": notesFiles("again")["server/notes.ts"] ?? "" },
+      now
+    );
+    const titles = outcome(
+      await previewCall(
+        builder,
+        chatId,
+        app,
+        await requestFor(builder, { ...at, revision: now + 1 }, "notes.titles")
+      )
+    );
+    expect({ settled: typeof settled, titles }).toStrictEqual({
+      // Refused, whatever the code: it wrote nothing anywhere.
+      settled: "string",
+      titles: [],
+    });
+  });
+
+  it("starts a new store when a preference's type changes, rather than refusing to read the old", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { app, chatId, revision, write } = await deskDraft(builder);
+    await preferenceCall(builder, { chatId, app }, "update", {
+      expectedRevision: 0,
+      patch: { theme: "dark" },
+    });
+    await write(
+      appDefinition({
+        name: "Desk",
+        preferences: `v.object({
+    compact: v.string().default("no"),
+    theme: v.enum(["light", "dark"]).default("light"),
+  })`,
+      }),
+      revision
+    );
+    await expect(
+      preferenceCall(builder, { chatId, app }, "get", {})
+    ).resolves.toStrictEqual({ _rev: 0, compact: "no", theme: "light" });
+  });
+
+  it("discards a removed person's preview stores made before throwaway stores, which never expire on their own", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const storeId = `legacy-${crypto.randomUUID()}`;
+    await env.DB.prepare(
+      "INSERT INTO preview_fixture_stores (store_id, app_id, person_id, created_at) VALUES (?, 'app-gone', ?, ?)"
+    )
+      .bind(storeId, builder.userId, Date.now())
+      .run();
+    const admin = await signedInApi(idp, "admin");
+    await admin.api.members.remove(builder.userId);
+    const row = await env.DB.prepare(
+      "SELECT 1 AS found FROM preview_fixture_stores WHERE store_id = ?"
+    )
+      .bind(storeId)
+      .first();
+    expect({ row, emptied: await storeEmptied(storeId) }).toStrictEqual({
+      row: null,
+      emptied: true,
+    });
+  });
+
   it("is emptied for good when an admin removes its person", async () => {
     const { builder, storeId } = await withNote();
     const admin = await signedInApi(idp, "admin");

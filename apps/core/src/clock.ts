@@ -29,6 +29,7 @@ import { indexApps } from "./knowledge/apps-collection.ts";
 import { advanceExports } from "./knowledge/brain-export.ts";
 import { brainOf } from "./knowledge/ports.ts";
 import { sweepUploads } from "./knowledge/uploads.ts";
+import { sweepLegacyPreviewStores } from "./legacy-preview-stores.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepModelUsage } from "./model-usage.ts";
 import { checkReadings } from "./onboarding/documents.ts";
@@ -263,6 +264,12 @@ export const clockTasks: readonly ClockTask<Env>[] = [
     name: "pages.frames",
     period: "quarterHour",
     run: sweepPageFrames,
+  },
+  // CONTRACT: goes with `preview_fixture_stores` (legacy-preview-stores.ts).
+  {
+    name: "pages.previews",
+    period: "quarterHour",
+    run: sweepLegacyPreviewStores,
   },
   { name: "pages.builds", period: "quarterHour", run: sweepBuilds },
   {

@@ -284,6 +284,9 @@ const draftStore = async (
         run.app,
         run.seed,
         release.manifest.schemaHash,
+        // Its preferences' shape too, which the schema's hash leaves out:
+        // another type of one is a new store, never one it can't read.
+        JSON.stringify(release.app.preferences),
       ])
     )}`
   );
@@ -299,8 +302,7 @@ const draftStore = async (
     run.chatId,
     userId,
     run.app,
-    id,
-    run.revision
+    { storeId: id, seed: run.seed, revision: run.revision }
   );
   await holdThrowawayStore(env, id, now + throwawayStoreMs);
   const consumer = {

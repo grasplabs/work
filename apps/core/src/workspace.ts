@@ -4230,15 +4230,26 @@ export class Workspace extends DurableObject<Env> {
     appId: string
   ): Promise<{ draft: Draft; seed: string }> {
     const draft = await this.previewDraft(chatId, personId, appId);
-    const { id } = this.#ownChat(chatId, personId);
-    const key = previewSeedKey(id, appId);
+    return { draft, seed: this.previewSeed(chatId, personId, appId) };
+  }
+
+  /**
+   * The seed of `personId`'s own chat's preview of App `appId`
+   * (`previewRun`), made on first use: what a draft action's invocation is
+   * named by too (page-calls.ts), so nothing it kept outlives the
+   * preview's data. `agent.chat_not_found` once the chat is gone.
+   */
+  previewSeed(chatId: unknown, personId: string, appId: string): string {
+    const chat = this.#ownChat(chatId, personId);
+    this.#previewsInChat(chat, appId);
+    const key = previewSeedKey(chat.id, appId);
     const kept = this.ctx.storage.kv.get<string>(key);
     if (kept !== undefined) {
-      return { draft, seed: kept };
+      return kept;
     }
     const seed = crypto.randomUUID();
     this.ctx.storage.kv.put(key, seed);
-    return { draft, seed };
+    return seed;
   }
 
   /**
@@ -4278,10 +4289,18 @@ export class Workspace extends DurableObject<Env> {
     chatId: unknown,
     personId: string,
     appId: string,
-    storeId: string,
-    revision: number
+    {
+      storeId,
+      seed,
+      revision,
+    }: { storeId: string; seed: string; revision: number }
   ): void {
     const { id } = this.#ownChat(chatId, personId);
+    // Only a run of the preview as it is now: one that read its seed
+    // before its data was dropped never makes that store again.
+    if (this.ctx.storage.kv.get<string>(previewSeedKey(id, appId)) !== seed) {
+      throw appErrors.create("app.preview_outdated");
+    }
     this.#db
       .insert(previewStores)
       .values({ storeId, chatId: id, appId, revision })

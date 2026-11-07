@@ -19,6 +19,7 @@ import { revokeRelease } from "../src/release-retention.ts";
 import { appDefinition } from "./app-definitions.ts";
 import { published } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { chatWithDraft, previewLease } from "./previews.ts";
 import { person } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
@@ -775,6 +776,44 @@ describe(
         refused: { status: 403, code: "page.unreviewed" },
         draftTitles: { ok: true, value: ["Streamed"] },
         realTitles: { ok: true, value: [] },
+      });
+    });
+
+    it("hands a draft action's kept result to no one once its draft is discarded or its chat deleted, under the same lease and key", async () => {
+      const served = await servedApp();
+      const { builder } = served;
+      const { chatId } = await chatWithDraft(
+        builder,
+        appIdSchema.parse(served.app),
+        {
+          "server/notes.ts": `${files["server/notes.ts"] ?? ""}\n// Drafted.\n`,
+        }
+      );
+      const lease = await previewLease(builder, chatId, served.app);
+      const sent = { as: builder, lease };
+      const call = requestFor(
+        served,
+        "notes.slow",
+        { title: "Kept", pauseMs: 0 },
+        crypto.randomUUID()
+      );
+      const attach = async (): Promise<Response> =>
+        await post(`${served.app}/attach`, call, sent);
+      const streamed = resultOfLast(
+        await framesOf(await post(`${served.app}/stream`, call, sent))
+      );
+      const before = resultOfLast(await framesOf(await attach()));
+      await builder.api.chats.discardDraft(chatId, served.app);
+      const discarded = errorCodeOf(
+        resultOfLast(await framesOf(await attach()))
+      );
+      await builder.api.chats.remove(chatId);
+      const deleted = await refusalOf(await attach());
+      expect({ streamed, before, discarded, deleted }).toStrictEqual({
+        streamed: { ok: true, value: "Kept" },
+        before: { ok: true, value: "Kept" },
+        discarded: "submission.expired",
+        deleted: { status: 403, code: "agent.chat_not_found" },
       });
     });
 

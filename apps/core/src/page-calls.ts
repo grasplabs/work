@@ -5,7 +5,7 @@ import {
   requestErrors,
 } from "@grasp-os/shared/errors";
 import { readAtMost } from "@grasp-os/shared/http";
-import type { AppId } from "@grasp-os/shared/ids";
+import type { AppId, ChatId } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
@@ -39,6 +39,7 @@ import { visitorCall, visitorStatusFor } from "./app-visitors.ts";
 import { currentVersionOf } from "./apps.ts";
 import { identify, identifyFull } from "./auth/identity.ts";
 import { callDraftOn } from "./draft-runs.ts";
+import { workspace } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import {
   delivering,
@@ -48,6 +49,7 @@ import {
 } from "./page-delivery.ts";
 import type { PageLease } from "./page-delivery.ts";
 import { admitted, admitWindow, windowCharger } from "./pages-rpc.ts";
+import { personalWorkspaceId } from "./personal-workspace.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
 import { routeMember } from "./staff-audit.ts";
@@ -342,9 +344,25 @@ const keyedAction = (
 const buildOf = (lease: PageLease | undefined) =>
   lease?.kind === "release" ? lease.build : undefined;
 
-/** The draft's chat a lease names, if it names one. */
-const draftOf = (lease: PageLease | undefined) =>
-  lease?.kind === "draft" ? lease.chatId : undefined;
+/**
+ * The draft a call's lease names, if it names one: its chat, and its
+ * preview's seed now, which a draft action's invocation is named by, so
+ * one kept from before its data was dropped is never found again. Refused
+ * once the chat is gone (`agent.chat_not_found`).
+ */
+const draftOf = async (
+  env: Env,
+  { person, id, lease }: AdmittedCall
+): Promise<{ chatId: ChatId; seed: string } | undefined> => {
+  if (lease?.kind !== "draft") {
+    return undefined;
+  }
+  const seed = await workspace(
+    env,
+    personalWorkspaceId(person.userId)
+  ).previewSeed(lease.chatId, person.userId, id);
+  return { chatId: lease.chatId, seed };
+};
 
 /**
  * Refuses, as a call is refused, unless what `call` runs on gets the
@@ -454,10 +472,10 @@ const keyedAnswer = async (
   admittedCall: AdmittedCall,
   { call, key }: { call: FunctionRequest; key: string }
 ): Promise<KeyedAnswer> => {
-  const { person, id, lease } = admittedCall;
+  const { person, id } = admittedCall;
   // Nothing ran yet: a build refused is refused as any call is.
   await requireRuns(env, person, admittedCall, "call", "admission");
-  const draft = draftOf(lease);
+  const draft = await draftOf(env, admittedCall);
   const name = await invocationName(person.userId, id, call, key, {
     streaming: false,
     ...(draft === undefined ? {} : { draft }),
@@ -468,7 +486,7 @@ const keyedAnswer = async (
     by: { userId: person.userId, role: person.role, teams: person.teams },
     access,
     app: id,
-    ...(draft === undefined ? {} : { draft }),
+    ...(draft === undefined ? {} : { draft: draft.chatId }),
     name,
     call,
     streaming: false,
@@ -837,10 +855,10 @@ const appStreamResponse = async (
     if (admittedCall instanceof Response) {
       return admittedCall;
     }
-    const { person, id, body, lease } = admittedCall;
+    const { person, id, body } = admittedCall;
     await requireRuns(env, person, admittedCall, "stream", "admission");
     const { call, key } = streamRequestOf(body);
-    const draft = draftOf(lease);
+    const draft = await draftOf(env, admittedCall);
     const name = await invocationName(person.userId, id, call, key, {
       streaming: true,
       ...(draft === undefined ? {} : { draft }),
@@ -858,7 +876,7 @@ const appStreamResponse = async (
       by: { userId: person.userId, role: person.role, teams: person.teams },
       access,
       app: id,
-      ...(draft === undefined ? {} : { draft }),
+      ...(draft === undefined ? {} : { draft: draft.chatId }),
       name,
       call,
       streaming: true,

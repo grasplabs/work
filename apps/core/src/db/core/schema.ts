@@ -1530,9 +1530,11 @@ export const appTestDecisions = sqliteTable(
 );
 
 /**
- * Unused since a draft's preview runs on a throwaway store that empties
- * itself once unused (draft-runs.ts): kept while a release that writes it
- * may serve or be rolled back to, and dropped in a later release.
+ * The fixture stores chats' previews ran on before a preview ran on a
+ * throwaway store that empties itself (draft-runs.ts): nothing writes it
+ * any more, and core discards every store it lists, then its row
+ * (legacy-preview-stores.ts). Dropped in the contract release, with that
+ * module.
  */
 export const previewFixtureStores = sqliteTable(
   "preview_fixture_stores",

@@ -906,7 +906,7 @@ export class ActionInvocation extends DurableObject<Env> {
  * The name of the invocation `call` starts, for `userId` in `app`, as a
  * streaming action's or a plain one's: never both, so a plain call and a
  * stream under one key never share an object; nor a run of a builder's
- * draft (`draft`, its chat) and one of the App's release. Not the App's
+ * draft (`draft`) and one of the App's release. Not the App's
  * version: like a mutation's receipt, an action's outlives a publish that
  * keeps the function; other input is refused by its input's hash.
  */
@@ -917,18 +917,23 @@ export const invocationName = async (
     readonly reference: Pick<FunctionRequest["reference"], "name">;
   },
   key: string,
-  { streaming, draft }: { streaming: boolean; draft?: ChatId }
+  {
+    streaming,
+    draft,
+  }: {
+    streaming: boolean;
+    /** A builder's draft's: its chat, and its preview's seed (draft-runs.ts). */
+    draft?: { readonly chatId: ChatId; readonly seed: string };
+  }
 ): Promise<string> => {
   const { name } = call.reference;
+  const named = [streaming ? "stream" : "action", userId, app, name, key];
+  // A release's as it always was; a draft's apart, and new once its
+  // preview's data is dropped, so nothing it kept outlives that.
   return await sha256Hex(
-    canonicalJson([
-      streaming ? "stream" : "action",
-      userId,
-      app,
-      name,
-      key,
-      draft ?? null,
-    ])
+    canonicalJson(
+      draft === undefined ? named : [...named, draft.chatId, draft.seed]
+    )
   );
 };
 
