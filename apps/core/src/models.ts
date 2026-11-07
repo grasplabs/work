@@ -40,6 +40,7 @@ import { deadline } from "@grasp-os/shared/deadline";
 import type { Deadline, Stopped } from "@grasp-os/shared/deadline";
 import type { ModelRole } from "@grasp-os/shared/deployment-config";
 import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
+import { isRecord } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   defaultModelEffort,
@@ -745,9 +746,6 @@ const errorCodeSchema = z.union([
   z.string().regex(/^[A-Za-z][\w.-]{0,63}$/u),
   z.int(),
 ]);
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** A field of a refusal, if it is an identifier or a number. */
 const codeOf = (value: unknown): string | number | undefined =>

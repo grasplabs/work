@@ -513,7 +513,7 @@ export const buildJobStatuses = [
 ] as const;
 
 /**
- * A build a chat's code handed to a durable job (build-jobs.ts): a check
+ * A build a chat's code handed to a durable job: a check
  * or a proposal of the chat's draft of an App, run as a workflow of core's
  * own, so it outlives the code run that submitted it. Its ID is the
  * workflow instance's, random. It acts on the authority the submitting run

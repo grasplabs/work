@@ -5,7 +5,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { expectedMessageOf, isExpectedError } from "@grasp-os/shared/errors";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { runIdSchema } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -1139,12 +1139,6 @@ const stateRecordSchema = z.looseObject({
 
 /** Whether `value` is a list. */
 const isList = (value: Json): value is readonly Json[] => Array.isArray(value);
-
-/** Whether `value` is an object, not a list. */
-const isRecord = (
-  value: Json
-): value is Readonly<Record<string, Json | undefined>> =>
-  typeof value === "object" && value !== null && !isList(value);
 
 /**
  * How deep a sealed literal nests: none for a scalar, one past its

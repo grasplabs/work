@@ -1,3 +1,4 @@
+import { isRecord } from "@grasp-os/shared/json";
 /**
  * "Ask before building": a few questions Grasp puts to the person, each with answers to pick,
  * shown in the chat as a short form. The person can always write their own answer instead. The
@@ -111,9 +112,6 @@ const clean = (value: string): string => value.replaceAll(tags, "").trim();
 
 const slug = (value: string): string =>
   value.toLowerCase().replaceAll(notSlug, "-").replaceAll(edgeDashes, "");
-
-const isRecord = (input: unknown): input is Record<string, unknown> =>
-  typeof input === "object" && input !== null && !Array.isArray(input);
 
 const record = (input: unknown, what: string): Record<string, unknown> => {
   if (!isRecord(input)) {

@@ -208,8 +208,6 @@ export type DataStoreBinding = z.infer<typeof dataStoreBindingSchema>;
 
 /** Why a release couldn't be sealed, loaded or run. */
 export const versionErrors = defineErrorFamily({
-  "version.unsealable":
-    "This version isn't an App of the current layout: it has no app.ts and schema.ts.",
   "version.build_failed": "This version's server code doesn't build.",
   "version.inspection_failed":
     "This version's server code failed while it was inspected.",

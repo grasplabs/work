@@ -1,5 +1,6 @@
 import type { ValueSchema } from "@grasp-os/sdk";
 import { schemaFromDescriptor } from "@grasp-os/sdk/host";
+import { isRecord } from "@grasp-os/shared/json";
 
 /** JSON, as a schema document is parsed. */
 export type JsonValue =
@@ -12,9 +13,6 @@ export type JsonValue =
 export interface JsonObject {
   [key: string]: JsonValue;
 }
-
-const isObject = (value: JsonValue | undefined): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const pointerEscape = /[~/]/gu;
 
@@ -371,7 +369,7 @@ const enumDraft = (
 const semanticDraft = (node: JsonObject, pointer: string): Draft => {
   const at = pointerJoin(pointer, "x-grasp-value");
   const marker = node["x-grasp-value"];
-  if (!isObject(marker)) {
+  if (!isRecord(marker)) {
     return refuse(
       "schema.invalid",
       at,
@@ -534,7 +532,7 @@ const objectDraft = (
   }
   const at = pointerJoin(pointer, "properties");
   const properties = Object.hasOwn(node, "properties") ? node.properties : {};
-  if (!isObject(properties)) {
+  if (!isRecord(properties)) {
     return refuse(
       "schema.invalid",
       at,
@@ -915,7 +913,7 @@ const compileNode: CompileNode = (node, pointer, depth, context, role) => {
       "Nest the schema at most 32 deep, with at most 10,000 schemas in all."
     );
   }
-  if (!isObject(node)) {
+  if (!isRecord(node)) {
     return refuse("schema.invalid", pointer, "Write a schema as an object.");
   }
   checkKeywords(node, pointer);

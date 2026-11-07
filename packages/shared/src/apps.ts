@@ -955,6 +955,8 @@ export const appErrors = defineErrorFamily({
   "app.nothing_to_commit": "The changes leave the latest version as it is.",
   "app.v1_server":
     "An App no longer has files under app/: its server code is grasp.config.ts, server/schema.ts and its functions in server/. Delete the files under app/ and commit again.",
+  "app.layout_missing":
+    "Every version of an App holds grasp.config.ts and server/schema.ts, which Grasp generates from its definition.json. Restore definition.json, or change the definition with the definition tools, and commit again.",
   "app.conflict": "Someone else changed this App at the same time. Try again.",
   "app.not_running": "The App has no current version to run yet.",
   "app.no_version": "Make a version of the App current before publishing it.",

@@ -1,4 +1,4 @@
-import { isAppLayout, isPageFile } from "@grasp-os/compiler";
+import { isPageFile } from "@grasp-os/compiler";
 import { definitionPath } from "@grasp-os/sdk/definition";
 import type { AppDefinition } from "@grasp-os/sdk/definition";
 import { appLimits } from "@grasp-os/shared/app-limits";
@@ -50,6 +50,7 @@ import {
   heldDefinition,
   withDefinitionCode,
 } from "./app-definition.ts";
+import { refuseWithoutLayout } from "./app-layout.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import { refuseV1Server } from "./app-v1-server.ts";
 import { queuedWebhookDeliveries } from "./app-webhook-queue.ts";
@@ -66,7 +67,6 @@ import {
   appVersions,
   apps,
   auditOutbox,
-  businessStores,
   sdkReleaseManifests,
   sdkResourceBindings,
 } from "./db/core/schema.ts";
@@ -806,6 +806,7 @@ export const commitFiles = async (
   }
   refuseV1Server(files.keys());
   refuseAppWorkflows(files.keys());
+  refuseWithoutLayout(files.keys());
   await storeTree(env, appId, { tree, json });
 
   const row: VersionRow = {
@@ -992,6 +993,7 @@ export const proposeDraft = async (
   }
   refuseV1Server(files.keys());
   refuseAppWorkflows(files.keys());
+  refuseWithoutLayout(files.keys());
   await storeTree(env, appId, { tree, json });
   const row: VersionRow = {
     appId,
@@ -1255,12 +1257,10 @@ const requireRunnableRelease = async (
 export const publishedSql = (app: AppId, version: number) =>
   sql`EXISTS (SELECT 1 FROM app_versions AS published
     WHERE published.app_id = ${app} AND published.version = ${version}
-      AND published.status = 'published'
-      AND (published.published_manifest_hash IS NULL
-        OR EXISTS (SELECT 1 FROM sdk_release_manifests AS tested
-          WHERE tested.app_id = published.app_id
-            AND tested.version = published.version
-            AND tested.manifest_hash = published.published_manifest_hash)))`;
+      AND EXISTS (SELECT 1 FROM sdk_release_manifests AS tested
+        WHERE tested.app_id = published.app_id
+          AND tested.version = published.version
+          AND tested.manifest_hash = published.published_manifest_hash))`;
 
 /** Whether `version` of `app` is published now (`publishedSql`). */
 export const isPublished = async (
@@ -1279,8 +1279,8 @@ export const isPublished = async (
  * pending one after review, or any other, such as an earlier one to roll
  * back. Only over `basedOn`, the version current when its publish began
  * (null for none), and only while the version is still published, in
- * the statement that makes it current. A version of spec 8's layout runs
- * only from its release, read back from storage here first, every byte
+ * the statement that makes it current. A version runs only from its
+ * release, read back from storage here first, every byte
  * checked, so neither a rollback nor a publish switches to bytes changed
  * since they were sealed. Its tests ran as it was published, never again
  * here. The pending version is cleared once it is current. Made current
@@ -1311,19 +1311,14 @@ export const makeCurrent = async (
   if (!(await isPublished(env, appId, number))) {
     throw versionErrors.create("version.unpublished");
   }
-  const files = await versionFiles(env, appId, number);
-  // Nothing makes a version of spec 8's layout current unsealed or
-  // revoked: checked here for a clear refusal, and again as the version is
-  // made current, so neither a revocation nor the retention sweep's
-  // deletion lands in between.
-  const sealedLayout = isAppLayout(files);
-  if (sealedLayout) {
-    await requireRunnableRelease(env, appId, number);
-    // Imported here, not at the top: releases reach back into this module.
-    const { readBackRelease } = await import("./app-releases.ts");
-    await readBackRelease(env, appId, number);
-    await requireStoreSchemaActive(env, appId, number);
-  }
+  // Nothing makes a version current unsealed or revoked: checked here for
+  // a clear refusal, and again as the version is made current, so neither
+  // a revocation nor the retention sweep's deletion lands in between.
+  await requireRunnableRelease(env, appId, number);
+  // Imported here, not at the top: releases reach back into this module.
+  const { readBackRelease } = await import("./app-releases.ts");
+  await readBackRelease(env, appId, number);
+  await requireStoreSchemaActive(env, appId, number);
   const previous = found.currentVersion;
   const event = createAuditEvent(
     changeEntry(by, "app.version.current", appId, {
@@ -1336,26 +1331,23 @@ export const makeCurrent = async (
   // The rules its store owes from its activation below until the batch
   // is done, under this call's own ID.
   const owed: OwedRules = { id: crypto.randomUUID(), kind: "app" };
-  let owing: StoreId[] = [];
-  if (sealedLayout) {
-    // Last before the batch (with it, below): a ready explicit
-    // migration's store switches to its contract, and a change that checks records (a narrowing,
-    // a field required) is applied (store-backfill.ts), after every gate
-    // above, so no refused gate leaves the version still current locked
-    // out of its store. That goes first because applying can still be
-    // refused (a write since the dry run), and the batch can't be taken
-    // back once it is in; a batch that isn't ours (a lost compare and
-    // set, one that keeps failing) leaves the version current refused its
-    // writes where the change left it behind, never reading more. A
-    // changed access mode or row rule waits for the batch: whatever its
-    // outcome, the store then takes the rules of the version D1 has
-    // current (`applyRulesAfterCommit`), so none is in force that D1
-    // never made current. The store and D1 share no transaction: the
-    // batch is retried here if it fails, and a version found current after
-    // all is answered as such.
-    const bound = await storeBindings(env, appId, number);
-    owing = bound.map(({ storeId }) => storeId);
-  }
+  // Last before the batch (with it, below): a ready explicit
+  // migration's store switches to its contract, and a change that checks records (a narrowing,
+  // a field required) is applied (store-backfill.ts), after every gate
+  // above, so no refused gate leaves the version still current locked
+  // out of its store. That goes first because applying can still be
+  // refused (a write since the dry run), and the batch can't be taken
+  // back once it is in; a batch that isn't ours (a lost compare and
+  // set, one that keeps failing) leaves the version current refused its
+  // writes where the change left it behind, never reading more. A
+  // changed access mode or row rule waits for the batch: whatever its
+  // outcome, the store then takes the rules of the version D1 has
+  // current (`applyRulesAfterCommit`), so none is in force that D1
+  // never made current. The store and D1 share no transaction: the
+  // batch is retried here if it fails, and a version found current after
+  // all is answered as such.
+  const bound = await storeBindings(env, appId, number);
+  const owing: StoreId[] = bound.map(({ storeId }) => storeId);
   // Only over the current version read above, so the event's `previous`
   // is the version this replaced. The event is stored only if this batch
   // made it current, and what follows it only then.
@@ -1375,7 +1367,7 @@ export const makeCurrent = async (
                 sql`${apps.currentVersion} IS ${previous}`,
                 // Archived since `editableApp` let it in: read-only now.
                 ne(apps.status, "archived"),
-                sealedLayout ? runnableReleaseSql(appId, number) : undefined,
+                runnableReleaseSql(appId, number),
                 publishedSql(appId, number)
               )
             )
@@ -1401,34 +1393,6 @@ export const makeCurrent = async (
             },
             storedEvent(event.id)
           ),
-          // The store the arriving version's release binds now serves its
-          // definition, and one the leaving version's bound and the arriving
-          // one's doesn't serves none (each subquery finds no binding): core's
-          // inventory follows (data-stores.ts).
-          db
-            .update(businessStores)
-            .set({
-              activeSchemaVersion: sql`(SELECT bound.target_version FROM sdk_resource_bindings AS bound
-          WHERE bound.resource_id = ${appId} AND bound.resource_version = ${number}
-            AND bound.kind = 'store' AND bound.target_id = ${businessStores.id})`,
-              activeSchemaHash: sql`(SELECT bound.schema_hash FROM sdk_resource_bindings AS bound
-          WHERE bound.resource_id = ${appId} AND bound.resource_version = ${number}
-            AND bound.kind = 'store' AND bound.target_id = ${businessStores.id})`,
-              activeOperationManifestHash: sql`(SELECT definition.operation_manifest_hash
-          FROM sdk_resource_bindings AS bound
-          JOIN business_store_versions AS definition
-            ON definition.store_id = bound.target_id AND definition.version = bound.target_version
-          WHERE bound.resource_id = ${appId} AND bound.resource_version = ${number}
-            AND bound.kind = 'store' AND bound.target_id = ${businessStores.id})`,
-            })
-            .where(
-              and(
-                sql`${businessStores.id} IN (SELECT target_id FROM sdk_resource_bindings
-            WHERE resource_id = ${appId} AND resource_version IN (${number}, ${previous ?? number})
-              AND kind = 'store')`,
-                storedEvent(event.id)
-              )
-            ),
         ])
     );
   let made: Awaited<ReturnType<typeof batch>>;
@@ -1438,9 +1402,7 @@ export const makeCurrent = async (
   // what the store owed is settled, so a refusal never leaves the store
   // holding other activations back (`migration.busy`).
   try {
-    if (sealedLayout) {
-      await requireStoreSchemaActive(env, appId, number, { activate: owed });
-    }
+    await requireStoreSchemaActive(env, appId, number, { activate: owed });
     made = await batch();
   } finally {
     await applyRulesAfterCommit(env, owed, appId, owing);
@@ -1464,10 +1426,8 @@ export const makeCurrent = async (
       return await editableApp(env, by, appId);
     }
     requireNotArchived(await findApp(env, appId));
-    if (sealedLayout) {
-      // Revoked or deleted since it was checked: refused as such.
-      await requireRunnableRelease(env, appId, number);
-    }
+    // Revoked or deleted since it was checked: refused as such.
+    await requireRunnableRelease(env, appId, number);
     // Unpublished since it was checked: its release deleted by the sweep.
     if (!(await isPublished(env, appId, number))) {
       throw versionErrors.create("version.unpublished");

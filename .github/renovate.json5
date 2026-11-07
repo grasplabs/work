@@ -57,10 +57,6 @@
       ],
     },
     {
-      groupName: "eslint",
-      matchPackageNames: ["eslint", "@typescript-eslint/**"],
-    },
-    {
       groupName: "pi",
       matchPackageNames: ["@earendil-works/**"],
     },

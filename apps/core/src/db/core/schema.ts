@@ -1042,8 +1042,7 @@ export const appVersions = sqliteTable(
      * The hash of the sealed manifest its publish tested: the version
      * counts as published only while a release with this hash is stored
      * (src/apps.ts, `publishedSql`), so one deleted, by whatever release of
-     * core, or sealed again, is published again. Null for a version not of
-     * spec 8's layout, which has no release.
+     * core, or sealed again, is published again. Null until it is.
      */
     publishedManifestHash: text("published_manifest_hash"),
   },
@@ -1934,8 +1933,8 @@ export const runLineageAttempts = sqliteTable(
 );
 
 /**
- * The build jobs building now, a lease each (src/build-admission.ts): at
- * most a fixed number build at once. A lease counts while it is
+ * The build jobs that were building, a lease each: at most a fixed number
+ * built at once. A lease counts while it is
  * unsettled, up to `admitted_at + reserved_ms` at most, whatever becomes
  * of the step that took it. One row per lease a job's step took, by the
  * job's own sequence (`seq`): its step, the round it waited and the
@@ -3442,8 +3441,7 @@ export const guestMessages = sqliteTable(
  * store's records, receipts and outbox live in its own Durable Object
  * (src/data-store.ts), named by this ID, which the host mints and which no
  * App, workflow or run ID becomes. `physical_namespace_role` says which
- * namespace of objects holds it. The active schema and operation hashes are filled in once a
- * store activates a schema; until then they are null. A deleted store
+ * namespace of objects holds it. A deleted store
  * keeps its row, with `deleted_at` set, and is never served again.
  */
 export const businessStores = sqliteTable("business_stores", {
@@ -3455,11 +3453,9 @@ export const businessStores = sqliteTable("business_stores", {
    */
   ownerId: text("owner_id").notNull(),
   /**
-   * The definition (`business_store_versions`) the release of the current
-   * version of the App the store serves binds, moved in the statement that
-   * makes that version current (apps.ts), and null while that version
-   * binds the store none: a projection, never what the store's object
-   * accepts writes against.
+   * Unused; dropped in a later release (expand, then contract): nothing
+   * reads them, and the release a store serves is its App's current
+   * version's binding (`sdk_resource_bindings`).
    */
   activeSchemaVersion: integer("active_schema_version"),
   activeSchemaHash: text("active_schema_hash"),

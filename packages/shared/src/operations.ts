@@ -260,7 +260,6 @@ export const categoryOf = (code: string): ErrorCategory => {
  * change of the draft fixes.
  */
 export const draftSealFailures: ReadonlySet<string> = new Set([
-  "version.unsealable",
   "version.build_failed",
   "version.inspection_failed",
   "version.invalid_manifest",

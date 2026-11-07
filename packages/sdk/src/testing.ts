@@ -21,8 +21,6 @@ export {
   appTestTimeoutMs,
   maxAppTestName,
   maxAppTests,
-  maxBufferedSnapshots,
-  maxLostInARow,
   runAppSuite,
   TestDefinitionError,
   testNamePattern,

@@ -1,10 +1,9 @@
-import { isAppLayout, isPageFile } from "@grasp-os/compiler";
+import { isPageFile } from "@grasp-os/compiler";
 import type { AppId } from "@grasp-os/shared/ids";
 import { pageErrors } from "@grasp-os/shared/pages";
 
 import {
   isSealed,
-  checkedManifest,
   sealedPage,
   versionReferenceSource,
 } from "./app-releases.ts";
@@ -24,8 +23,7 @@ import type { BuiltPage } from "./pages.ts";
 
 /**
  * `files` (version `version` of `app`), with the references its pages
- * import as `@server/_generated/api` when it is of spec 8's layout and its pages name
- * them. An App whose server code doesn't inspect gets none, and a page
+ * import as `@server/_generated/api` when its pages name them. An App whose server code doesn't inspect gets none, and a page
  * that imports them is told so by the build.
  */
 export const withPageReferences = async (
@@ -43,15 +41,12 @@ export const withPageReferences = async (
 
 /**
  * The code of the pages of `app`'s `version` (its `files`), for whoever
- * opens or reviews them. A version of spec 8's layout with a sealed
- * release gives only what the release sealed (`sealedPage`): never a
- * build, so pages whose sealed bytes are missing are refused, not
- * compiled. A version of the earlier layout has no release to seal them
- * in, and one not sealed yet (a version to review before it is made
- * current) has none either: they are built (`versionPages`), given
- * `unsealed: "build"`; given `"refuse"`, an unsealed version of spec 8's
- * layout is refused as `version.not_sealed`, which is what opening it
- * does.
+ * opens or reviews them. A version with a sealed release gives only what
+ * the release sealed (`sealedPage`): never a build, so pages whose sealed
+ * bytes are missing are refused, not compiled. One not sealed yet (a
+ * version to review before it is made current) has no release: its pages
+ * are built (`versionPages`), given `unsealed: "build"`; given `"refuse"`,
+ * it is refused as `version.not_sealed`, which is what opening it does.
  */
 export const versionPageCodes = async (
   env: Env,
@@ -60,15 +55,8 @@ export const versionPageCodes = async (
   files: Record<string, string>,
   { unsealed }: { unsealed: "build" | "refuse" }
 ): Promise<BuiltPage> => {
-  const sealed = isAppLayout(files) && (await isSealed(env, app, version));
-  if (isAppLayout(files) && (unsealed === "refuse" || sealed)) {
+  if (unsealed === "refuse" || (await isSealed(env, app, version))) {
     if (!Object.keys(files).some((path) => isPageFile(path))) {
-      // A release sealed before pages were file routes holds its pages
-      // under screens/: its release format refuses it, to publish anew,
-      // rather than reading as an App without pages.
-      if (sealed) {
-        await checkedManifest(env, app, version);
-      }
       throw pageErrors.create("page.not_found");
     }
     return await sealedPage(env, app, version);

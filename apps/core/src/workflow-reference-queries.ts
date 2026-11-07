@@ -5,7 +5,7 @@ import {
 } from "@grasp-os/sdk/host";
 import type { WorkflowPin, WorkflowQueryName } from "@grasp-os/sdk/host";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { canonicalText } from "@grasp-os/shared/json";
+import { canonicalText, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
@@ -1115,9 +1115,6 @@ const decisionDetail = async (
   };
 };
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /**
  * `value` checked by `descriptor`, normalized: the arguments a caller sent
  * (`contract.invalid_args` otherwise) or an answer about to leave, which
@@ -1165,7 +1162,7 @@ const answerOf = async (
   const { workflowId } = binding;
   switch (query.name) {
     case "runs": {
-      const pagination = isObject(args.pagination) ? args.pagination : {};
+      const pagination = isRecord(args.pagination) ? args.pagination : {};
       const size =
         typeof pagination.pageSize === "number"
           ? Math.min(pagination.pageSize, maxPageSize)
@@ -1186,7 +1183,7 @@ const answerOf = async (
         : { items: page.items, nextCursor: null, hasMore: false };
     }
     case "decisions": {
-      const pagination = isObject(args.pagination) ? args.pagination : {};
+      const pagination = isRecord(args.pagination) ? args.pagination : {};
       const after = placeOf(pagination.cursor);
       const page = await decisionsPage(
         env,
@@ -1217,7 +1214,7 @@ const answerOf = async (
       );
     }
     case "history": {
-      const pagination = isObject(args.pagination) ? args.pagination : {};
+      const pagination = isRecord(args.pagination) ? args.pagination : {};
       return await historyPage(
         env,
         caller,
@@ -1250,7 +1247,7 @@ export const callWorkflowQuery = async (
   input: unknown
 ): Promise<OperationResult> => {
   const args = checked(query.args, input, "contract.invalid_args");
-  if (!isObject(args)) {
+  if (!isRecord(args)) {
     throw operationErrors.create("contract.invalid_args");
   }
   const answer = await answerOf(env, caller, query, args);
@@ -1284,7 +1281,7 @@ export const readWorkflowWindow = async (
   if (query.name === "decision") {
     throw operationErrors.create("contract.not_paginated");
   }
-  if (!isObject(input) || Object.hasOwn(input, "pagination")) {
+  if (!isRecord(input) || Object.hasOwn(input, "pagination")) {
     // `pagination` is core's to supply: a caller never pages a window.
     throw operationErrors.create("contract.invalid_args");
   }
@@ -1293,7 +1290,7 @@ export const readWorkflowWindow = async (
     { ...input, pagination: {} },
     "contract.invalid_args"
   );
-  if (!isObject(args)) {
+  if (!isRecord(args)) {
     throw operationErrors.create("contract.invalid_args");
   }
   const binding = await bindingOf(env, caller.app, query.alias);
@@ -1359,7 +1356,7 @@ export const readWorkflowWindow = async (
       },
       "contract.invalid_return"
     );
-    const checkedItems: unknown = isObject(checkedPage)
+    const checkedItems: unknown = isRecord(checkedPage)
       ? checkedPage.items
       : undefined;
     if (Array.isArray(checkedItems)) {

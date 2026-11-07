@@ -449,7 +449,7 @@ const addsNestedDefault = (
  * can't prove isn't one; a nested default added isn't one either,
  * `addsNestedDefault`).
  */
-export const fieldWidens = (
+const fieldWidens = (
   before: ValueDescriptor,
   after: ValueDescriptor
 ): boolean =>

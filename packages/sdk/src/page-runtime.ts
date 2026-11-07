@@ -320,7 +320,7 @@ export const bridgeTransport = (
  * Connects the frame to the page's bridge over `port`, each message as
  * text, which the page holds to a size (@grasp-os/shared/page-port).
  */
-export const connectBridge = (port: MessagePort): RpcStub<PageBridge> => {
+const connectBridge = (port: MessagePort): RpcStub<PageBridge> => {
   connected = new RpcSession<PageBridge>(portTransport(port)).getRemoteMain();
   return connected;
 };

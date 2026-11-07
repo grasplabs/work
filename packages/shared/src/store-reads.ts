@@ -1,3 +1,4 @@
+import { isRecord } from "./json.ts";
 import {
   filterMaxDepth,
   filterMaxInValues,
@@ -150,9 +151,6 @@ export const filterChildren = (node: FilterNode): readonly FilterNode[] => {
   return "not" in node ? [node.not] : [];
 };
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /**
  * Why `value`, read as a filter tree, is past a filter's bounds (deeper
  * than `filterMaxDepth`, more than `filterMaxNodes` nodes, an `in` of more
@@ -183,7 +181,7 @@ export const filterBudgetIssue = (value: unknown): string | undefined => {
     if (depth > filterMaxDepth) {
       return `A filter nests at most ${filterMaxDepth} deep`;
     }
-    if (!isObject(node)) {
+    if (!isRecord(node)) {
       continue;
     }
     for (const key of ["and", "or"] as const) {

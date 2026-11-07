@@ -206,7 +206,6 @@ catalog:
   cmdk: 1.1.1
   # The kit's carousel.
   embla-carousel-react: 8.6.0
-  eslint: 10.11.0
   # The WASI oxc.wasm runs on in the isolate, napi-rs's.
   "@tybys/wasm-util": 0.10.4
   # A DOM for the web app's component tests that click and type.

@@ -37,24 +37,19 @@ export type {
   UseManifest,
 } from "./app.ts";
 export { appErrorDetailsOf } from "./app-error.ts";
-export { appMaxMigrations } from "./app.ts";
 export { migrationPlatformMessages } from "./migration.ts";
 export type { MigrationManifest } from "./migration.ts";
 
 // A schema as a store's host reads, hashes and compares it.
-export { diffSchemaManifests, schemaReferences } from "./schema-diff.ts";
 export type {
   AccessChange,
   FieldChange,
   IndexChange,
-  ReferenceStep,
   SchemaChange,
   SchemaDiff,
-  SchemaReference,
   TableChange,
 } from "./schema-diff.ts";
 export {
-  fieldWidens,
   holdsId,
   planSchemaChange,
   schemaCovered,
@@ -91,10 +86,6 @@ export type {
   SchemaManifest,
 } from "./schema-manifest.ts";
 
-// Which currencies and time zones this SDK accepts: a host compares it with
-// its own before it activates an App.
-export { valueCatalogVersion } from "./value-catalog.ts";
-
 // What a host reads a descriptor from its JSON text with: one reader,
 // which a workflow's run uses too (`fittedValue`).
 export { descriptorFromText, schemaFromDescriptor } from "./descriptor-text.ts";
@@ -109,7 +100,6 @@ export {
   contractFingerprints,
   contractsFormatVersion,
   declaredWorkflows,
-  decisionFingerprint,
   eventFingerprint,
   generatedPaths,
   generateModules,
@@ -130,7 +120,6 @@ export type {
   CatalogAction,
   ReleaseIdentity,
 } from "./generate.ts";
-export { workflowReferenceLimits } from "./references.ts";
 export { workflowQueries } from "./workflow-queries.ts";
 export type { WorkflowQueryName } from "./workflow-queries.ts";
 export {

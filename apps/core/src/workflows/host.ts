@@ -54,7 +54,7 @@ import type { Settled, StepError } from "./sealed-isolate.ts";
 import { heldWakeType } from "./wakes.ts";
 
 // The engine a run's workflow code runs on, as core's side of it: the SDK's
-// `WorkflowEngine` (`@grasp-os/sdk/engine`) on the engine's `step` API
+// `WorkflowEngine` (its engine.ts) on the engine's `step` API
 // (Workerflow, engine.ts). The
 // run's main module (sealed-isolate.ts) sends each engine call here over RPC. The
 // isolate is untrusted, so everything it sends is checked, and what it can

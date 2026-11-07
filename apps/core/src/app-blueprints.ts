@@ -34,6 +34,7 @@ import type { BuiltinBlueprint } from "#blueprints";
 
 import { versionMadeCurrent } from "./access-revocations.ts";
 import { appsFoundBy, stillOpenTo } from "./app-access.ts";
+import { refuseWithoutLayout } from "./app-layout.ts";
 import { refuseAppWorkflows } from "./app-no-workflows.ts";
 import { refuseV1Server } from "./app-v1-server.ts";
 import type { AppRow, VersionRow } from "./apps.ts";
@@ -538,6 +539,7 @@ export const createFromBlueprint = async (
   // App is created from it as none is committed with them.
   refuseV1Server(files.keys());
   refuseAppWorkflows(files.keys());
+  refuseWithoutLayout(files.keys());
   const tree = await versionTree(files);
   await storeTree(env, app, tree);
   await storeTree(env, app, takenCode);
@@ -895,6 +897,7 @@ export const acceptBlueprintUpdate = async (
     new Set([...files.keys()].filter((path) => !ours.has(path)))
   );
   refuseAppWorkflows(files.keys());
+  refuseWithoutLayout(files.keys());
   const tree = await versionTree(files);
   const base = await versionTree(theirs);
   await storeTree(env, appId, base);

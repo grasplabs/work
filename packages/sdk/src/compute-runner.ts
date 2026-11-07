@@ -2,9 +2,8 @@
 // clock, randomness and the platform's globals away before anything else
 // in the isolate evaluates. A side-effect import keeps its place.
 import "./compute-lockdown.ts";
-import { actionHandler } from "./action.ts";
 import { lockedDown } from "./compute-locked.ts";
-import { computeHandler } from "./compute.ts";
+import { actionHandlers, computeHandlers } from "./handlers.ts";
 import { filesResource } from "./run-files-client.ts";
 
 // What core runs in the isolate of a workflow's own modules
@@ -106,14 +105,14 @@ export const computeManifestOf = (modules: ComputeModules): string => {
       if (!matches(exportPattern, name)) {
         continue;
       }
-      if (computeHandler(value) !== undefined) {
+      if (computeHandlers.of(value) !== undefined) {
         const contract = exportOf(value, "~compute");
         manifest[`local:${path}#${name}`] = {
           kind: "compute",
           input: exportOf(contract, "input"),
           output: exportOf(contract, "output"),
         };
-      } else if (actionHandler(value) !== undefined) {
+      } else if (actionHandlers.of(value) !== undefined) {
         const contract = exportOf(value, "~action");
         manifest[`local:${path}#${name}`] = {
           kind: "operation",
@@ -157,7 +156,7 @@ export const runCompute = (
 ): ComputeAnswer => {
   requireLockedDown();
   const handler = hasOwn(modules, request.module)
-    ? computeHandler(exportOf(modules[request.module], request.export))
+    ? computeHandlers.of(exportOf(modules[request.module], request.export))
     : undefined;
   if (handler === undefined) {
     return { ok: false, message: "There is no such calculation." };
@@ -322,7 +321,7 @@ export const runAction = async (
   const value = hasOwn(modules, request.module)
     ? exportOf(modules[request.module], request.export)
     : undefined;
-  const handler = actionHandler(value);
+  const handler = actionHandlers.of(value);
   const uses: unknown = exportOf(exportOf(value, "~action"), "uses");
   const hostCall: unknown = reflectGet(host, "call");
   if (

@@ -26,7 +26,7 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { resourceRecallInputSchema } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -1159,12 +1159,6 @@ const sandboxFailureOf = (
   return hostError(operationErrors.create(sandboxCodes[verdict]));
 };
 
-/** A JSON object: `Array.isArray` doesn't narrow a readonly array type. */
-type JsonObject = Readonly<Record<string, Json | undefined>>;
-
-const isJsonObject = (json: Json | undefined): json is JsonObject =>
-  typeof json === "object" && json !== null && !Array.isArray(json);
-
 const isJsonArray = (json: Json | undefined): json is readonly Json[] =>
   Array.isArray(json);
 
@@ -1183,7 +1177,7 @@ const entriesOf = (
 /** The details of an expected error a caller may get: JSON, bounded, the host's only. */
 const safeDetails = (details: unknown): Json | undefined => {
   const json = jsonOf(details);
-  if (!isJsonObject(json)) {
+  if (!isRecord(json)) {
     return undefined;
   }
   // The generations a read depended on are the host's own.
@@ -1342,7 +1336,7 @@ const validFields = (
     });
   }
   const json = jsonOf(result.value);
-  if (!isJsonObject(json)) {
+  if (!isRecord(json)) {
     throw new Error("Validated fields aren't an object");
   }
   return entriesOf(json);
@@ -1628,7 +1622,7 @@ const allowsGuests = (
   }
   return (
     args.length === 1 &&
-    (method === "invite" ? isJsonObject(first) : typeof first === "string")
+    (method === "invite" ? isRecord(first) : typeof first === "string")
   );
 };
 
@@ -1676,7 +1670,7 @@ const isNamedCall = (
     args.length === 2 &&
     typeof name === "string" &&
     declares(name) &&
-    isJsonObject(callArgs)
+    isRecord(callArgs)
   );
 };
 
@@ -1700,8 +1694,7 @@ const allowsKnowledge = (
     schema !== undefined &&
     declaration.operations.some((operation) => operation === method) &&
     args.length === 1;
-  const names =
-    method === "recall" && isJsonObject(first) ? first.collections : [];
+  const names = method === "recall" && isRecord(first) ? first.collections : [];
   const undeclared =
     Array.isArray(names) &&
     names.some(

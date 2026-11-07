@@ -1,5 +1,6 @@
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { RunId, WorkflowId } from "@grasp-os/shared/ids";
+import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import {
   paramDeclarationSchema,
@@ -884,10 +885,6 @@ const resolveParams = (
 const idempotencyKeyOf = (engine: WorkflowEngine, step: string): string =>
   stepIdempotencyKey(engine.runId, step);
 
-/** Whether `value` is an object of options, its keys readable. */
-const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /** A step call's options, checked against its method's schema. */
 const optionsOf = <Schema extends z.ZodType>(
   schema: Schema,
@@ -955,12 +952,12 @@ const createRunner = (
         const retry = optionsOf(
           generatedStepOptionSchemas.retry,
           name,
-          isObject(rawOptions) ? rawOptions.retry : undefined
+          isRecord(rawOptions) ? rawOptions.retry : undefined
         );
         const options = optionsOf(
           stepOptionSchemas.do,
           name,
-          isObject(rawOptions)
+          isRecord(rawOptions)
             ? Object.fromEntries(
                 Object.entries(rawOptions).filter(([key]) => key !== "retry")
               )

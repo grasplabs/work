@@ -20,7 +20,6 @@
     "./action": "./src/action.ts",
     "./brain": "./src/brain.ts",
     "./compute-runner": "./src/compute-runner.ts",
-    "./engine": "./src/engine.ts",
     "./params": "./src/params.ts",
     "./testing": "./src/testing.ts",
     "./client": "./src/client.ts",
@@ -28,8 +27,7 @@
     "./react": "./src/react.ts",
     "./page-runtime": "./src/page-runtime.ts",
     "./preview-refresh": "./src/preview-refresh.ts",
-    "./preview-runtime": "./src/preview-runtime.ts",
-    "./preview-updates": "./src/preview-updates.ts"
+    "./preview-runtime": "./src/preview-runtime.ts"
   },
   "dependencies": {
     "@babel/generator": "catalog:",

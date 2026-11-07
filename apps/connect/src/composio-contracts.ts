@@ -3,6 +3,7 @@ import type {
   ConnectorContract,
   ConnectorContractAction,
 } from "@grasp-os/shared/connect";
+import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 import { allowedTool, composioServer } from "./connections.ts";
@@ -78,9 +79,6 @@ const actionNamePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
 /** What a tool without an output schema answers: its text. */
 const textAnswer = JSON.stringify({ type: "string" });
 
-const isRecord = (value: Json | undefined): value is Record<string, Json> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /**
  * Whether `value` is JSON nesting at most `maxJsonDepth` deep: walked
  * with a stack of its own, never by recursion, however deep it goes.
@@ -148,10 +146,17 @@ const closedSchema = (schema: Json, depth: number): Json | undefined => {
     closedSchema(each, depth + 1);
   const closed: Record<string, Json> = {};
   for (const [key, value] of Object.entries(schema)) {
+    // Left out, as JSON leaves a key whose value is undefined.
+    if (value === undefined) {
+      continue;
+    }
     let served: Json | undefined = value;
     if (key === "properties" && isRecord(value)) {
       const properties: Record<string, Json> = {};
       for (const [name, property] of Object.entries(value)) {
+        if (property === undefined) {
+          continue;
+        }
         const read = deeper(property);
         if (read === undefined) {
           return undefined;

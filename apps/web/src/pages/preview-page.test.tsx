@@ -8,10 +8,11 @@ import {
   refresh,
   register,
 } from "@grasp-os/sdk/preview-refresh";
-import { previewReceiver } from "@grasp-os/sdk/preview-updates";
 import { act, createElement, useState } from "react";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
+
+import { previewReceiver } from "../../../../packages/sdk/src/preview-updates.ts";
 
 // A chat's preview taking an update of its pages, with React, React Fast
 // Refresh and TanStack Router themselves: the route tree's module

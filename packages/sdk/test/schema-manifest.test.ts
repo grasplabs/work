@@ -2,16 +2,15 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { describe, expect, test } from "vite-plus/test";
 
 import {
-  diffSchemaManifests,
   manifestMaxBytes,
   manifestText,
   readSchemaManifest,
   schemaHash,
   schemaLimits,
   schemaManifest,
-  schemaReferences,
 } from "../src/host.ts";
 import type { AccessMode, SchemaManifest, TableAccess } from "../src/host.ts";
+import { diffSchemaManifests } from "../src/schema-diff.ts";
 import type { AnySchema } from "../src/value-schema.ts";
 import { defineSchema, defineTable, rows, v } from "../src/values.ts";
 import type {
@@ -877,52 +876,5 @@ describe("references", () => {
         "onDelete"
       )
     ).toBeFalsy();
-  });
-
-  test("every record ID a table declares, with where it is and what it names", () => {
-    const schema = defineSchema({
-      people: defineTable({
-        name: v.string(),
-        manager: v.id("people").nullable(),
-      }),
-      notes: defineTable({
-        author: v.id("people"),
-        meta: v.object({
-          reviewers: v.array(v.id("people")),
-          byRole: v.record(v.union(v.id("people"), v.id("people"))),
-        }),
-        title: v.string(),
-      }),
-    });
-    expect(schemaReferences(manifestOf(schema, {}))).toStrictEqual([
-      {
-        table: "notes",
-        path: [{ kind: "field", name: "author" }],
-        target: "people",
-      },
-      {
-        table: "notes",
-        path: [
-          { kind: "field", name: "meta" },
-          { kind: "field", name: "byRole" },
-          { kind: "value" },
-        ],
-        target: "people",
-      },
-      {
-        table: "notes",
-        path: [
-          { kind: "field", name: "meta" },
-          { kind: "field", name: "reviewers" },
-          { kind: "item" },
-        ],
-        target: "people",
-      },
-      {
-        table: "people",
-        path: [{ kind: "field", name: "manager" }],
-        target: "people",
-      },
-    ]);
   });
 });

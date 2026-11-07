@@ -6,7 +6,7 @@ import {
   attachmentsSchema,
   sha256Pattern,
 } from "@grasp-os/shared/connector-attachments";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { z } from "zod";
 
@@ -336,9 +336,6 @@ export interface Tool {
   call: (args: unknown, meta?: unknown) => Promise<CallResult>;
 }
 
-const isObject = (value: unknown): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /**
  * What a call's `_meta` asks: its effect key, its stamp, whether its
  * person confirmed it, and whether to find it.
@@ -373,7 +370,7 @@ const callMetaOf = (
 /** The attachments an input names, if it has any. */
 const attachmentsOf = (input: unknown): z.output<typeof attachmentsSchema> => {
   const named: unknown =
-    isObject(input) && attachmentsProperty in input
+    isRecord(input) && attachmentsProperty in input
       ? input[attachmentsProperty]
       : undefined;
   return named === undefined ? [] : attachmentsSchema.parse(named);
@@ -465,11 +462,11 @@ const plainSchemaOf = (schema: z.ZodType): JsonObject => {
  * declares are the platform's, whatever its code does with them.
  */
 const takesAttachmentsExactly = (inputSchema: JsonObject): boolean => {
-  const property = isObject(inputSchema.properties)
+  const property = isRecord(inputSchema.properties)
     ? inputSchema.properties[attachmentsProperty]
     : undefined;
   return (
-    isObject(property) &&
+    isRecord(property) &&
     canonicalJson(z.json().parse(property)) ===
       canonicalJson(z.json().parse(plainSchemaOf(attachmentsSchema)))
   );
@@ -484,7 +481,7 @@ const withFileRefs = (
   contract: ActionManifest["contract"]["input"]
 ): ActionManifest["contract"]["input"] => {
   const { properties } = contract;
-  if (!isObject(properties)) {
+  if (!isRecord(properties)) {
     return contract;
   }
   return {
@@ -515,7 +512,7 @@ const isClosed = (schema: unknown): boolean => {
     return true;
   }
   if (
-    !isObject(schema) ||
+    !isRecord(schema) ||
     !typeKeywords.some((keyword) => keyword in schema) ||
     ["$ref", "patternProperties", "not", "if", "dependentSchemas"].some(
       (keyword) => keyword in schema
@@ -528,7 +525,7 @@ const isClosed = (schema: unknown): boolean => {
     (branch): unknown[] => (Array.isArray(branch) ? branch : [])
   );
   const isObjectSchema = types.includes("object") || "properties" in schema;
-  const properties = isObject(schema.properties) ? schema.properties : {};
+  const properties = isRecord(schema.properties) ? schema.properties : {};
   const objectClosed =
     !isObjectSchema ||
     (schema.additionalProperties === false &&
@@ -695,7 +692,7 @@ export const defineTool = <
     resource === undefined ? undefined : inputSchema.properties?.[resource];
   if (
     resource !== undefined &&
-    (!isObject(resourceProperty) || resourceProperty.type !== "string")
+    (!isRecord(resourceProperty) || resourceProperty.type !== "string")
   ) {
     throw new Error(`${name}: its resource must be a string property`);
   }

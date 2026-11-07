@@ -1,3 +1,4 @@
+import { isRecord } from "@grasp-os/shared/json";
 /**
  * How a package's own package.json maps what is imported to a file, as
  * Node and bundlers read it: `exports` (and `imports` for `#` names) with
@@ -16,9 +17,6 @@ export interface PackageFiles {
   files: ReadonlyMap<string, Uint8Array>;
   manifest: Record<string, unknown>;
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const extensions = [".js", ".mjs", ".cjs", ".json"];
 

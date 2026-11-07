@@ -6,6 +6,7 @@ import {
   operationSegmentPattern,
 } from "@grasp-os/shared/operation-limits";
 
+import { isServerFunction, serverFunctions } from "./handlers.ts";
 import { isMigration } from "./migration.ts";
 import type { Migration, MigrationManifest } from "./migration.ts";
 import {
@@ -33,7 +34,6 @@ import { schemaManifest } from "./schema-manifest.ts";
 import type { SchemaManifest } from "./schema-manifest.ts";
 import type { SchemaAnswer } from "./schema-plan.ts";
 import type { AccessMode, SchemaDefinition } from "./schema.ts";
-import { functionState, isServerFunction } from "./server.ts";
 import type {
   AnyFunction,
   FunctionKind,
@@ -585,7 +585,7 @@ const preferencesOf = (preferences: unknown): ValueDescriptor | null => {
 };
 
 /** The most migrations an App registers. */
-export const appMaxMigrations = 16;
+const appMaxMigrations = 16;
 
 /**
  * The App's migrations, by name, in the order declared, each checked
@@ -836,7 +836,7 @@ const registeredFunctions = (
         `One function is exported twice, as \`${known}\` and \`${path}\`: export it from one module only.`
       );
     }
-    if (functionState(value).schema !== schema) {
+    if (serverFunctions.of(value)?.schema !== schema) {
       refuse(
         `\`${path}\` was declared for another schema than the App's: declare it with the builders of server/_generated/server.`
       );

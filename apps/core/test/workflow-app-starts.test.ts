@@ -22,7 +22,7 @@ import {
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import { canonicalText } from "@grasp-os/shared/json";
+import { canonicalText, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
@@ -570,15 +570,9 @@ const call = async (
   );
 };
 
-/** Whether `value` is a JSON object: `Array.isArray` doesn't narrow a readonly array. */
-const isObject = (
-  value: Json | undefined
-): value is Readonly<Record<string, Json | undefined>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /** A field of a JSON object, or undefined. */
 const field = (value: Json, key: string): Json | undefined =>
-  isObject(value) ? value[key] : undefined;
+  isRecord(value) ? value[key] : undefined;
 
 /** What a call answered, or the code it failed with. */
 const answerOf = (result: OperationResult): unknown =>

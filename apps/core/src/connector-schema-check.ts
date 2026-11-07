@@ -1,3 +1,4 @@
+import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 // The constraints of a generated connector contract's JSON Schema that a
@@ -13,7 +14,7 @@ import type { Json } from "@grasp-os/shared/json";
 // descriptor: types, constants, bounds, patterns, formats, properties,
 // items and unions.
 
-type Schema = Record<string, Json>;
+type Schema = Readonly<Record<string, Json | undefined>>;
 
 /** The keywords a contract's schema may use: each enforced, or an annotation. */
 const enforced = new Set([
@@ -88,9 +89,6 @@ const formats: Readonly<Record<string, (text: string) => boolean>> = {
 
 /** The most a schema nests here, as the SDK's descriptors do. */
 const maxDepth = 32;
-
-const isRecord = (value: Json | undefined): value is Schema =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const isList = (value: Json | undefined): value is readonly Json[] =>
   Array.isArray(value);
@@ -237,11 +235,15 @@ const structureFits = (schema: Schema, value: Json): boolean => {
   }
   const named = isRecord(properties) ? properties : {};
   const present = (isList(required) ? required : []).every(
-    (name) => typeof name === "string" && Object.hasOwn(value, name)
+    (name) => typeof name === "string" && value[name] !== undefined
   );
   return (
     present &&
     Object.entries(value).every(([key, field]) => {
+      // Left out, as JSON leaves a key whose value is undefined.
+      if (field === undefined) {
+        return true;
+      }
       if (Object.hasOwn(named, key)) {
         // oxlint-disable-next-line no-use-before-define -- a schema nests in itself
         return accepts(named[key], field);

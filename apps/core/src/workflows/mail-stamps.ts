@@ -1,6 +1,6 @@
 import { connectErrors } from "@grasp-os/shared/connect";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import type { DeliveredConnectorEvent } from "@grasp-os/shared/workflows";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -188,11 +188,6 @@ const addressText =
 // `Array.isArray` doesn't narrow a readonly array type.
 const isJsonArray = (value: Json | undefined): value is readonly Json[] =>
   Array.isArray(value);
-
-const isJsonObject = (
-  value: Json
-): value is Readonly<Record<string, Json | undefined>> =>
-  typeof value === "object" && value !== null && !isJsonArray(value);
 
 /** `text` as an address, lower case; none if it isn't one. */
 const addressOf = (text: string) => {
@@ -486,7 +481,7 @@ export const stampedMail = async (
   call: StampedCall
 ): Promise<StampedMail> => {
   const { input } = call;
-  if (!mailActions.has(call.action) || !isJsonObject(input)) {
+  if (!mailActions.has(call.action) || !isRecord(input)) {
     return { input };
   }
   const recipients = recipientFields.flatMap((field) => {

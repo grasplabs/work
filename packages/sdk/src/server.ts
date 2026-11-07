@@ -1,6 +1,7 @@
 import { usesMaxEntries } from "@grasp-os/shared/operation-limits";
 
 import type { DatabaseReader, DatabaseWriter } from "./database.ts";
+import { isServerFunction, serverFunctions } from "./handlers.ts";
 import type { PeopleDirectory, User } from "./people.ts";
 import { isPermission, isWorkflowPermission } from "./permissions.ts";
 import type {
@@ -648,27 +649,6 @@ const refuse = (message: string): never => {
   throw new FunctionDefinitionError(message);
 };
 
-/** What the SDK knows of a definition it made, and App code can't forge. */
-export interface FunctionState {
-  readonly schema: SchemaDefinition;
-}
-
-/** Every definition a constructor made, with the schema it was made for. */
-const functions = new WeakMap<object, FunctionState>();
-
-/** Whether `value` is a server function a constructor made. */
-export const isServerFunction = (value: unknown): value is AnyFunction =>
-  typeof value === "object" && value !== null && functions.has(value);
-
-/** The state of a definition a constructor made; throws for anything else. */
-export const functionState = (value: unknown): FunctionState => {
-  const state =
-    typeof value === "object" && value !== null
-      ? functions.get(value)
-      : undefined;
-  return state ?? refuse("That isn't a server function a constructor made.");
-};
-
 /** The keys each kind's declaration has; any other is refused. */
 const declarationKeys: Readonly<Record<FunctionKind, readonly string[]>> = {
   query: ["args", "returns", "tables", "handler"],
@@ -818,7 +798,7 @@ const defineFunction = (
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     handler: handler as AnyFunction["handler"],
   });
-  functions.set(definition, Object.freeze({ schema }));
+  serverFunctions.add(definition, Object.freeze({ schema }));
   return definition;
 };
 
