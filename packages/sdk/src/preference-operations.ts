@@ -1,4 +1,4 @@
-import type { OperationManifest } from "./app.ts";
+import type { OperationManifest } from "./app-types.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 

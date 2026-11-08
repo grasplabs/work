@@ -1,4 +1,4 @@
-import { AppDefinitionError } from "./app.ts";
+import { AppDefinitionError } from "./app-definition-error.ts";
 import { isIdentifier } from "./code-print.ts";
 import { refuser } from "./declaration.ts";
 import {
