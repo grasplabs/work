@@ -112,7 +112,7 @@ const decidersOf = async (
     .where(eq(appTestRuns.runId, runId))
     .get();
   if (row === undefined) {
-    throw operationErrors.create("operation.cancelled");
+    throw operationErrors.create("function.cancelled");
   }
   const deciders = fixtureDecidersSchema.parse(JSON.parse(row.deciders));
   return Object.hasOwn(deciders, alias) ? (deciders[alias] ?? []) : [];
@@ -228,7 +228,7 @@ export const fixtureDecisionOutcome = async (
   }
   const row = await db.select().from(appTestDecisions).where(mine).get();
   if (row === undefined) {
-    throw operationErrors.create("operation.cancelled");
+    throw operationErrors.create("function.cancelled");
   }
   if (
     (row.status === "approved" || row.status === "rejected") &&
@@ -246,7 +246,7 @@ export const fixtureDecisionOutcome = async (
 
 /**
  * Until when `run`'s decision `decision` takes answers, as it opened:
- * `operation.cancelled` once its run's record is gone.
+ * `function.cancelled` once its run's record is gone.
  */
 export const fixtureDecisionDeadline = async (
   env: Env,
@@ -261,7 +261,7 @@ export const fixtureDecisionDeadline = async (
     )
     .get();
   if (row === undefined) {
-    throw operationErrors.create("operation.cancelled");
+    throw operationErrors.create("function.cancelled");
   }
   return row.expiresAt.getTime();
 };

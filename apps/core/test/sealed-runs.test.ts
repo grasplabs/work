@@ -406,7 +406,7 @@ describe("a sealed build's run on the run host", () => {
     }).toStrictEqual({
       answered: { ended: { line: "Hello Ada" }, tampered: [] },
       afterAnswered: 1,
-      retried: failedWith("operation.deadline_exceeded"),
+      retried: failedWith("function.deadline_exceeded"),
       sentByRetried: 1,
       attemptsOfRetried: 2,
       unbilled: { ended: { line: "Hello Ada" }, tampered: [] },
@@ -1505,7 +1505,7 @@ describe("a sealed run's activations", () => {
     }).toStrictEqual({
       evicted: { failed: "internal.unexpected" },
       sentBefore: 1,
-      resumed: { failed: "operation.deadline_exceeded" },
+      resumed: { failed: "function.deadline_exceeded" },
       sent: 1,
     });
   });
@@ -1968,7 +1968,7 @@ describe("a sealed run's decisions on the run host", () => {
       candidate: await run((frozen) => ({ ...frozen, candidate: new Map() })),
     }).toMatchObject({
       fixture: {
-        ran: { ended: "operation.cancelled" },
+        ran: { ended: "function.cancelled" },
         decisions: [],
         asked: 0,
       },

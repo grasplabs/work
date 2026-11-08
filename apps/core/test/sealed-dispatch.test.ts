@@ -613,7 +613,7 @@ describe(
       expect({ evicted, resumed }).toStrictEqual({
         evicted: { failed: "internal.unexpected" },
         // Not `{ status: "Hello" }`: its model call isn't answered again.
-        resumed: { failed: "operation.deadline_exceeded" },
+        resumed: { failed: "function.deadline_exceeded" },
       });
     });
 

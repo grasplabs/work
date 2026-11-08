@@ -85,7 +85,7 @@ export interface OperationChannel {
 /** Why the runner couldn't run what it was asked to. */
 const unknownFunction = (): Error =>
   Object.assign(new Error("There is no such operation."), {
-    code: "operation.not_found",
+    code: "function.not_found",
   });
 
 /**
@@ -130,7 +130,7 @@ const usedPath = (
   if (path === undefined) {
     throw Object.assign(
       new Error("A function calls only what it lists in `uses`."),
-      { code: "operation.not_found" }
+      { code: "function.not_found" }
     );
   }
   return path;
@@ -146,7 +146,7 @@ const usedEvent = (fn: AnyFunction, event: unknown): EventReferenceData => {
   if (read === undefined) {
     throw Object.assign(
       new Error("A mutation notifies only with the events it lists in `uses`."),
-      { code: "operation.not_found" }
+      { code: "function.not_found" }
     );
   }
   return read;
@@ -175,7 +175,7 @@ const notificationsOf = (fn: AnyFunction, channel: OperationChannel) => {
       if (!open) {
         throw Object.assign(
           new Error("A mutation notifies only while its handler runs."),
-          { code: "operation.ended" }
+          { code: "function.ended" }
         );
       }
       const { workflow, alias } = usedEvent(fn, event);
@@ -443,7 +443,7 @@ export const runFunction = async (
       ...permissionsOf(fn, channel),
       workflows: workflowsOf(fn, channel),
       // Only a streaming action has `emit`; the host refuses any other's
-      // use of the channel's `emit` all the same (`operation.no_stream`).
+      // use of the channel's `emit` all the same (`function.no_stream`).
       ...(fn.stream === null
         ? {}
         : {

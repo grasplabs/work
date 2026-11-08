@@ -944,9 +944,9 @@ describe("paths", () => {
         await call(fixture, owner, "mutation", "notes.get", { id: "x" })
       ),
     }).toStrictEqual({
-      internal: "operation.not_found",
-      unknown: "operation.not_found",
-      kind: "operation.kind_mismatch",
+      internal: "function.not_found",
+      unknown: "function.not_found",
+      kind: "function.kind_mismatch",
     });
   });
 });
@@ -1305,7 +1305,7 @@ describe("audit follow-ups", () => {
       past: codeOf(
         await call(fixture, owner, "mutation", "notes.assertMany", { ids })
       ),
-    }).toStrictEqual({ within: "ok", past: "operation.call_limit" });
+    }).toStrictEqual({ within: "ok", past: "function.call_limit" });
   });
 });
 
@@ -1365,10 +1365,10 @@ describe("bounds on one mutation", () => {
       ),
     }).toStrictEqual({
       writeAfter: 1,
-      manyReads: "operation.call_limit",
+      manyReads: "function.call_limit",
       allowedReads: "ok",
       wholeCommit: "ok",
-      heavyReads: "operation.read_limit",
+      heavyReads: "function.read_limit",
     });
   });
 
@@ -1512,8 +1512,8 @@ describe("App code misusing its channel", () => {
       }
     );
     expect([codeOf(fromQuery), codeOf(fromMutation)]).toStrictEqual([
-      "operation.read_only",
-      "operation.no_resources",
+      "function.read_only",
+      "function.no_resources",
     ]);
     const page = valueOf(
       await call(fixture, owner, "query", "notes.list", { pagination: {} })
@@ -1539,7 +1539,7 @@ describe("App code misusing its channel", () => {
     );
     await expect(
       kept?.write({ kind: "insert", table: "notes", fields: { title: "Late" } })
-    ).rejects.toMatchObject({ code: "operation.ended" });
+    ).rejects.toMatchObject({ code: "function.ended" });
   });
 
   it("can't pass a platform error off as the host's, nor leak a cause", async () => {

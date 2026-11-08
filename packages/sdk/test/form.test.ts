@@ -31,7 +31,7 @@ type Answer =
   | { readonly refused: string }
   | "lost"
   /**
-   * An outcome the host itself can't tell (`operation.sandbox_lost`):
+   * An outcome the host itself can't tell (`function.sandbox_lost`):
    * what leaves an action's key unknown, as a lost answer is sent again
    * for the action's receipt.
    */
@@ -84,8 +84,8 @@ const host = (answer: (sent: Sent) => Answer | Promise<Answer>) => {
           result: {
             ok: false,
             error: {
-              code: "operation.sandbox_lost",
-              message: "operation.sandbox_lost",
+              code: "function.sandbox_lost",
+              message: "function.sandbox_lost",
               category: "uncertain",
               retryable: false,
               requestId: "r",
@@ -274,14 +274,14 @@ describe("a form whose submission's outcome is unknown", () => {
   });
 
   it.each([
-    "operation.sandbox_busy",
-    "operation.sandbox_unavailable",
+    "function.sandbox_busy",
+    "function.sandbox_unavailable",
     "mutation.concurrent_change",
     "submission.superseded",
     // Answered while the first call's receipt has no outcome yet.
     "submission.key_conflict",
     "submission.expired",
-    "operation.deadline_exceeded",
+    "function.deadline_exceeded",
   ])(
     "never sends it as whoever signs in after a resend refused with %s",
     async (code) => {

@@ -1,7 +1,7 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
@@ -515,7 +515,7 @@ describe("an App's functions", { timeout: 120_000 }, () => {
       { type: "function", path: "notes.count", kind: "query" },
     ]);
     expect(valueOf(await call(notes, notes.owner, "notes.sneak", {}))).toBe(
-      "caught operation.not_found"
+      "caught function.not_found"
     );
     const page = valueOf(
       await call(notes, notes.owner, "notes.list", { pagination: {} })
@@ -620,8 +620,8 @@ describe("another App's store", { timeout: 120_000 }, () => {
 // their reviewed binding (app-function-calls.test.ts).
 describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
   it.each([
-    ["another kind", { kind: "mutation" as const }, "operation.kind_mismatch"],
-    ["a name nothing is at", { name: "notes.missing" }, "operation.not_found"],
+    ["another kind", { kind: "mutation" as const }, "function.kind_mismatch"],
+    ["a name nothing is at", { name: "notes.missing" }, "function.not_found"],
     [
       "a version beside the name",
       { resourceVersion: 1 },
@@ -708,7 +708,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
     );
     expect(codes).toStrictEqual(
       new Map([
-        ...imitations.map((name) => [name, "operation.not_found"] as const),
+        ...imitations.map((name) => [name, "function.not_found"] as const),
         ["notes.get", "ok"],
       ])
     );
@@ -717,7 +717,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
   it("is refused to an internal function as to one that doesn't exist", async () => {
     const notes = await sealedNotes();
     expect(codeOf(await call(notes, notes.owner, "notes.count", {}, {}))).toBe(
-      "operation.not_found"
+      "function.not_found"
     );
   });
 
@@ -857,7 +857,7 @@ describe("a page's call, by a function's name", { timeout: 120_000 }, () => {
       before: {
         changed: "contract.invalid_args",
         renamed: "ok",
-        gone: "operation.not_found",
+        gone: "function.not_found",
       },
       afterRevoked: "ok",
       oldBuild: "revoked",
@@ -1306,7 +1306,7 @@ describe("a call past its deadline", { timeout: 120_000 }, () => {
       await call(notes, notes.owner, "notes.list", { pagination: {} })
     );
     expect([codeOf(answer), took < 2500, titlesOn(page)]).toStrictEqual([
-      "operation.deadline_exceeded",
+      "function.deadline_exceeded",
       true,
       [],
     ]);

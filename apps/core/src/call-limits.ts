@@ -4,7 +4,7 @@
 
 /**
  * The most functions one call may run nested in its own, at any depth:
- * past it, `operation.call_limit`. With `callMaxDepth`, it keeps one
+ * past it, `function.call_limit`. With `callMaxDepth`, it keeps one
  * action call from fanning out into thousands of invocations.
  */
 export const callMaxNested = 64;

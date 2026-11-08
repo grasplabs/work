@@ -7,9 +7,9 @@ import type {
   DecisionView,
 } from "@grasp-os/shared/decisions";
 import { authErrors, isExpectedError } from "@grasp-os/shared/errors";
+import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import {
   jsonBytes,

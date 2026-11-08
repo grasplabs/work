@@ -41,8 +41,8 @@ import type { StoredPreferences } from "./store-host.ts";
 // - A reference made up, or kept from another release: it is a name and
 //   a kind, resolved by name in the release that answers the call (the
 //   App's current one) against the preferences that release declares,
-//   rebuilt here. A name it doesn't declare is `operation.not_found`,
-//   another kind `operation.kind_mismatch`, and arguments are checked by
+//   rebuilt here. A name it doesn't declare is `function.not_found`,
+//   another kind `function.kind_mismatch`, and arguments are checked by
 //   that release's own descriptors. An App that declares none has none.
 //   No function of the App's shadows them: the SDK keeps the top-level
 //   `preferences` segment for the platform.
@@ -117,7 +117,7 @@ export interface ResolvedPreferenceOperation {
 /**
  * The preference operation `reference` names in `release`, resolved as a
  * function reference is, by its name in the release that answers
- * (`operation.not_found`, `operation.kind_mismatch`); what it takes is
+ * (`function.not_found`, `function.kind_mismatch`); what it takes is
  * that release's preferences' to check.
  */
 export const preferenceOperationOf = async (
@@ -127,14 +127,14 @@ export const preferenceOperationOf = async (
   const declared = release.app.preferences;
   const name = pathPattern.exec(reference.name)?.groups?.name;
   if (declared === null || (name !== "get" && name !== "update")) {
-    throw operationErrors.create("operation.not_found");
+    throw operationErrors.create("function.not_found");
   }
   const operation = preferenceOperations(declared)[name];
   if (operation.path !== preferencePaths[name]) {
-    throw operationErrors.create("operation.not_found");
+    throw operationErrors.create("function.not_found");
   }
   if (reference.kind !== operation.kind) {
-    throw operationErrors.create("operation.kind_mismatch");
+    throw operationErrors.create("function.kind_mismatch");
   }
   const fingerprint = await contractFingerprint(operation);
   return {

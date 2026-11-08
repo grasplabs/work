@@ -174,9 +174,9 @@ describe("an upload's transfer", () => {
     const transfer = new UploadTransfer(clientInternals(client));
     const running = transfer.upload(client.files, resource, photo);
     const cancelling = transfer.cancel();
-    upload(0).refuse("operation.unreachable");
-    await expect(codeOf(cancelling)).resolves.toBe("operation.unreachable");
-    await expect(codeOf(running)).resolves.toBe("operation.unreachable");
+    upload(0).refuse("function.unreachable");
+    await expect(codeOf(cancelling)).resolves.toBe("function.unreachable");
+    await expect(codeOf(running)).resolves.toBe("function.unreachable");
     expect(transfer.view()).toMatchObject({ status: "failed" });
   });
 

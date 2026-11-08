@@ -95,7 +95,7 @@ export const windowPages = (extent: number): number =>
 /**
  * The most pages one read of a window takes: enough for the largest
  * window in pages of ten records. A handler whose pages are shorter still
- * has its window refused (`operation.read_limit`) rather than cut short.
+ * has its window refused (`function.read_limit`) rather than cut short.
  */
 const windowMaxPages = liveWindowMaxItems / 10;
 
@@ -329,7 +329,7 @@ const readOnce = async (
   // Pages too short to fill the window within its bound: refused, never
   // answered as a window shorter than asked, which would leave a Load More
   // adding nothing.
-  throw operationErrors.create("operation.read_limit", {
+  throw operationErrors.create("function.read_limit", {
     maxPages: windowMaxPages,
   });
 };
@@ -375,7 +375,7 @@ export const readWindow = async (
       attempt > 0 &&
       read.kind === "failed" &&
       !read.result.ok &&
-      read.result.error.code === "operation.read_limit"
+      read.result.error.code === "function.read_limit"
     ) {
       break;
     }

@@ -990,9 +990,9 @@ describe("App code starting a workflow it didn't declare", () => {
       outbox: await outboxOf(fx.store),
     }).toStrictEqual({
       actionUnlisted: "resource.not_allowed",
-      mutationUnlisted: "operation.no_resources",
+      mutationUnlisted: "function.no_resources",
       actionUndeclared: "resource.not_allowed",
-      mutationUndeclared: "operation.no_resources",
+      mutationUndeclared: "function.no_resources",
       receipts: [],
       outbox: [],
     });
@@ -1919,7 +1919,7 @@ describe("what a start rechecks, and records", () => {
     expect({
       answer: answerOf(started),
       receipts: await receiptCount(fx.app),
-    }).toStrictEqual({ answer: "operation.cancelled", receipts: 0 });
+    }).toStrictEqual({ answer: "function.cancelled", receipts: 0 });
   });
 
   it("records an unreadable intent, and one whose last attempt fails, as it gives them up", async () => {
@@ -2186,7 +2186,7 @@ describe("what a start rechecks, and records", () => {
     expect({
       answer: answerOf(started),
       receipts: await receiptCount(fx.app),
-    }).toStrictEqual({ answer: "operation.deadline_exceeded", receipts: 0 });
+    }).toStrictEqual({ answer: "function.deadline_exceeded", receipts: 0 });
   });
 
   it("stops once its hand-over's time is up, starting nothing", async () => {

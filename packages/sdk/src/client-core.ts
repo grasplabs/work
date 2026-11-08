@@ -1,9 +1,9 @@
-import { canonicalJson } from "@grasp-os/shared/json";
-import type { Json } from "@grasp-os/shared/json";
 import {
   functionRequestMaxBytes,
   streamIdleCancelMs,
-} from "@grasp-os/shared/operation-limits";
+} from "@grasp-os/shared/function-limits";
+import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
 import {
   liveWindowMaxItems,
   queryMaxResults,
@@ -66,7 +66,7 @@ import { isPlainObject } from "./value-descriptor.ts";
 //   keeps a receipt of each (a mutation's with its commit, an action's in
 //   its invocation's object), so the resend answers what the first did,
 //   or joins it while it still runs, and never runs it a second time. An
-//   outcome the host itself can't tell (`operation.sandbox_lost`) is that
+//   outcome the host itself can't tell (`function.sandbox_lost`) is that
 //   receipt: it rejects at once, with its key.
 // - Retries spend the person's request budget: reads run at most
 //   `maxReadsInFlight` at once, a refusal for the budget waits as long as it
@@ -674,7 +674,7 @@ const settleRead = (
   // A change confirmed after the read was sent may be missing from it.
   const current = read.changes === entry.changes;
   if (settled.kind === "lost") {
-    const error = clientError("operation.unreachable");
+    const error = clientError("function.unreachable");
     if (newest && entry.snapshot.value === undefined) {
       entry.shown = number;
       show(entry, { value: undefined, error });
@@ -1125,13 +1125,13 @@ const uncertainScope = (reference: ReadReference, key: string): string =>
 /**
  * The code of the refusal `settled` is, if it withholds the outcome of
  * what may have run: one `hidesOutcome` names, after a lost answer
- * (`lost`), or, for an action, `operation.access_changed` or
+ * (`lost`), or, for an action, `function.access_changed` or
  * `submission.expired`, which come only once something ran under its key
  * (its receipt, or its tombstone once the receipt expired): a form that
  * stays uncertain past the receipt still keeps its key.
  */
 const ranUnderKeyCodes: ReadonlySet<string> = new Set([
-  "operation.access_changed",
+  "function.access_changed",
   "submission.expired",
 ]);
 
@@ -1191,7 +1191,7 @@ const submissionVerdict = (
     return { next: "fail", error: outcomeUnknown() };
   }
   // A refusal that withholds the outcome of what may have run: after a
-  // lost answer, or an action's `operation.access_changed`, which comes
+  // lost answer, or an action's `function.access_changed`, which comes
   // only once something ran under its key. Still unknown, with the key:
   // never a definite failure that invites a resubmit under a fresh one.
   const withheld = withheldCode(settled, lostSince !== undefined, isAction);
@@ -1512,7 +1512,7 @@ export class GraspClient {
    * Runs the streaming action `reference` names with `args` (spec
    * 10.7.6): `options.onProgress` gets each newer progress snapshot, and
    * the promise resolves with the action's declared result, or rejects
-   * with a structured error, `operation.cancelled` when it was cancelled.
+   * with a structured error, `function.cancelled` when it was cancelled.
    * A lost connection attaches to the same invocation again, never runs
    * it twice (see the header). Aborting `signal` stops only this caller
    * following it: the host cancels it once no one does.
@@ -1781,7 +1781,7 @@ export class GraspClient {
    * it acknowledged the request (`{ requested }`), whether or not the run
    * was still going; rejects a refusal with its error, and an answer that
    * isn't an acknowledgement, a lost one included, with
-   * `operation.unreachable`, so a caller never takes an unconfirmed cancel
+   * `function.unreachable`, so a caller never takes an unconfirmed cancel
    * for one.
    */
   async #cancelStream(
@@ -1799,10 +1799,10 @@ export class GraspClient {
         }
         throw settled.error;
       }
-      throw clientError("operation.unreachable");
+      throw clientError("function.unreachable");
     }
     if (!isPlainObject(answer) || typeof answer.requested !== "boolean") {
-      throw clientError("operation.unreachable");
+      throw clientError("function.unreachable");
     }
   }
 
@@ -2159,7 +2159,7 @@ export class GraspClient {
       entry.stale = true;
       throw settled.kind === "failed"
         ? settled.error
-        : clientError("operation.unreachable");
+        : clientError("function.unreachable");
     }
     return settleRead(entry, read, settled);
   }

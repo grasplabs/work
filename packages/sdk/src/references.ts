@@ -104,7 +104,7 @@ interface SubmissionFields<Kind extends ReferenceKind> {
  * progress schema in `stream`). It runs only for a page following it
  * (`useStream`, `client.stream`): wherever a call answers once
  * (`client.action`, `ctx.runAction`, a test's `action`), its type is
- * refused, as the host refuses the call (`operation.mode_mismatch`). A
+ * refused, as the host refuses the call (`function.mode_mismatch`). A
  * definition is told by its `stream`, a reference by what it streams.
  */
 export interface StreamingFunction {

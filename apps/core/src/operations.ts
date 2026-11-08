@@ -26,11 +26,6 @@ import type { AuditActor } from "@grasp-os/shared/audit";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
-import { canonicalJson, isRecord } from "@grasp-os/shared/json";
-import type { Json } from "@grasp-os/shared/json";
-import { resourceRecallInputSchema } from "@grasp-os/shared/knowledge";
-import { errorFields, log } from "@grasp-os/shared/log";
-import { peopleAlias } from "@grasp-os/shared/notifications";
 import {
   appErrorDetailsMaxBytes,
   appErrorMessageMaxLength,
@@ -42,7 +37,12 @@ import {
   stagedReadMaxBytes,
   streamMaxEmits,
   streamProgressMaxBytes,
-} from "@grasp-os/shared/operation-limits";
+} from "@grasp-os/shared/function-limits";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
+import { resourceRecallInputSchema } from "@grasp-os/shared/knowledge";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { peopleAlias } from "@grasp-os/shared/notifications";
 import {
   categoryOf,
   effectErrors,
@@ -114,7 +114,7 @@ import type {
 // - A caller names a function it can't call: only the App's public tree
 //   is reachable from outside, by path and kind; an internal path, an
 //   unknown one and one of another kind are refused the same way
-//   (`operation.not_found`, `operation.kind_mismatch`), before anything
+//   (`function.not_found`, `function.kind_mismatch`), before anything
 //   runs.
 // - A caller sends too much, or what isn't JSON: the input is read as
 //   JSON and measured (128 KiB of UTF-8, `operationInputMaxBytes`) before
@@ -164,7 +164,7 @@ import type {
 // - A streaming action's progress (spec 10.7.6) is a way out of its
 //   contract: a streaming action runs only through the streaming path,
 //   and any other only through the single-answer one, refused the other
-//   way round (`operation.mode_mismatch`), nested calls included; each
+//   way round (`function.mode_mismatch`), nested calls included; each
 //   snapshot is read as JSON, measured (`streamProgressMaxBytes`),
 //   validated by the action's `stream` descriptor and must already be
 //   normalized, as a return is (`contract.invalid_progress`), and one
@@ -181,7 +181,7 @@ import type {
 // - A cancel claims an outcome it can't know: one that lands while an
 //   effect the run started is still under way (a nested mutation
 //   committing, a request out) answers the uncertain
-//   `operation.outcome_unknown`, never a definite `operation.cancelled`
+//   `function.outcome_unknown`, never a definite `function.cancelled`
 //   that would invite running it again under a new key.
 // - A failure leaks what it shouldn't: a caller gets an `AppErrorPayload`
 //   and nothing more. An `AppError` App code threw keeps its code (never
@@ -726,7 +726,7 @@ const fromApp = <Answer>(work: () => Answer): Answer => {
   try {
     return work();
   } catch (error) {
-    log.error("operation.app_value_threw", errorFields(error));
+    log.error("function.app_value_threw", errorFields(error));
     throw Object.assign(new Error("Unexpected failure"), { unexpected: true });
   }
 };
@@ -746,15 +746,15 @@ const publicOperation = (
       ? manifest.operations[path]
       : undefined;
   if (operation === undefined || operation.visibility !== "public") {
-    throw operationErrors.create("operation.not_found");
+    throw operationErrors.create("function.not_found");
   }
   if (operation.kind !== kind) {
-    throw operationErrors.create("operation.kind_mismatch");
+    throw operationErrors.create("function.kind_mismatch");
   }
   // A streaming action runs only where its progress has somewhere to go,
   // and any other only where it answers once (spec 10.7.6).
   if ((operation.stream !== null) !== streaming) {
-    throw operationErrors.create("operation.mode_mismatch");
+    throw operationErrors.create("function.mode_mismatch");
   }
   return operation;
 };
@@ -916,7 +916,7 @@ const sealed = (error: unknown): unknown => {
   ) {
     return error;
   }
-  log.error("operation.unsealed_failure", errorFields(error));
+  log.error("function.unsealed_failure", errorFields(error));
   return Object.assign(new Error("Unexpected failure"), { unexpected: true });
 };
 
@@ -1047,7 +1047,7 @@ const failureOf = (
       details: field(thrown, "details"),
     };
   } catch (error) {
-    log.error("operation.failure_threw", {
+    log.error("function.failure_threw", {
       requestId,
       path,
       ...errorFields(error),
@@ -1093,7 +1093,7 @@ const failureOf = (
   if (sdkDefinitionCodes.has(code)) {
     return hostError(operationErrors.create("contract.invalid_query"));
   }
-  log.error("operation.failed", {
+  log.error("function.failed", {
     requestId,
     path,
     code: typeof code === "string" ? code : undefined,
@@ -1107,13 +1107,13 @@ const failureOf = (
 
 /** The error each verdict of the sandbox's becomes for a function's caller. */
 const sandboxCodes = {
-  cpu: "operation.cpu_exceeded",
-  memory: "operation.memory_exceeded",
-  deadline: "operation.deadline_exceeded",
-  refused: "operation.sandbox_refused",
-  busy: "operation.sandbox_busy",
-  call_limit: "operation.call_limit",
-  ended: "operation.ended",
+  cpu: "function.cpu_exceeded",
+  memory: "function.memory_exceeded",
+  deadline: "function.deadline_exceeded",
+  refused: "function.sandbox_refused",
+  busy: "function.sandbox_busy",
+  call_limit: "function.call_limit",
+  ended: "function.ended",
 } as const;
 
 const isSandboxVerdict = (
@@ -1133,7 +1133,7 @@ const sandboxFailureOf = (
   { requestId, path, depth }: { requestId: string; path: string; depth: number }
 ): Error | undefined => {
   if (thrown instanceof SandboxUnavailableError) {
-    log.error("operation.sandbox_unavailable", {
+    log.error("function.sandbox_unavailable", {
       requestId,
       path,
       depth,
@@ -1144,8 +1144,8 @@ const sandboxFailureOf = (
     return hostError(
       operationErrors.create(
         thrown.started
-          ? "operation.sandbox_lost"
-          : "operation.sandbox_unavailable"
+          ? "function.sandbox_lost"
+          : "function.sandbox_unavailable"
       )
     );
   }
@@ -1155,7 +1155,7 @@ const sandboxFailureOf = (
   }
   // Every function of the call running in the process logs its own: the
   // deepest of them was running when it was ended, its callers waiting.
-  log.warn("operation.sandbox_ended", { requestId, path, depth, verdict });
+  log.warn("function.sandbox_ended", { requestId, path, depth, verdict });
   return hostError(operationErrors.create(sandboxCodes[verdict]));
 };
 
@@ -1223,7 +1223,7 @@ const payloadOf = (
     };
   }
   if (error instanceof Error && !Object.hasOwn(error, "unexpected")) {
-    log.error("operation.failed", { requestId, path, ...errorFields(error) });
+    log.error("function.failed", { requestId, path, ...errorFields(error) });
   }
   return {
     code: "internal.unexpected",
@@ -1923,7 +1923,7 @@ const providerFailure = (error: unknown, requestId: string): Error => {
       )
     );
   }
-  log.error("operation.resource_failed", {
+  log.error("function.resource_failed", {
     requestId,
     code,
     ...errorFields(error),
@@ -1952,13 +1952,13 @@ const resourceResultMaxBytes = platformLimits.stepPayloadBytes;
  * as its message.
  */
 /**
- * Refuses, with `operation.cancelled`, once `run`'s call is cancelled:
+ * Refuses, with `function.cancelled`, once `run`'s call is cancelled:
  * checked just before an effect (a mutation's commit, a resource request)
  * so a cancel that lands first stops it for certain.
  */
 const requireNotCancelled = (run: Run): void => {
   if (run.cancelled?.aborted === true) {
-    throw hostError(operationErrors.create("operation.cancelled"));
+    throw hostError(operationErrors.create("function.cancelled"));
   }
 };
 
@@ -2128,8 +2128,8 @@ const startFailure = (error: unknown, requestId: string): Error => {
   const stopped = operationErrors.codeOf(error);
   if (
     error instanceof Error &&
-    (stopped === "operation.cancelled" ||
-      stopped === "operation.deadline_exceeded")
+    (stopped === "function.cancelled" ||
+      stopped === "function.deadline_exceeded")
   ) {
     return hostError(error);
   }
@@ -2155,7 +2155,7 @@ const startFailure = (error: unknown, requestId: string): Error => {
   if (code !== undefined) {
     return hostError(operationErrors.create("resource.unavailable"));
   }
-  log.error("operation.workflow_start_failed", {
+  log.error("function.workflow_start_failed", {
     requestId,
     ...errorFields(error),
   });
@@ -2188,7 +2188,7 @@ const startCall = async (
   const requireGoing = (): void => {
     requireNotCancelled(run);
     if (Date.now() >= run.invocation.deadline) {
-      throw hostError(operationErrors.create("operation.deadline_exceeded"));
+      throw hostError(operationErrors.create("function.deadline_exceeded"));
     }
   };
   requireGoing();
@@ -2247,7 +2247,7 @@ const notifyPeopleCall = async (
   }
   requireNotCancelled(run);
   if (Date.now() >= run.invocation.deadline) {
-    throw hostError(operationErrors.create("operation.deadline_exceeded"));
+    throw hostError(operationErrors.create("function.deadline_exceeded"));
   }
   const receipt = await sending(
     async () => await people.send(to, notification, key.join(":"))
@@ -2318,7 +2318,7 @@ const notifyFailure = (error: unknown, requestId: string): Error => {
   if (error instanceof Error && operationErrors.codeOf(error) !== undefined) {
     return hostError(error);
   }
-  log.error("operation.workflow_notify_failed", {
+  log.error("function.workflow_notify_failed", {
     requestId,
     ...errorFields(error),
   });
@@ -2336,7 +2336,7 @@ const readBudget = (): ReadBudget => ({ reads: 0, shipped: 0 });
 
 /**
  * Spends one read of `budget`, sending `staged` bytes of staged writes
- * with it: `operation.read_limit` past `invocationMaxReads` reads or
+ * with it: `function.read_limit` past `invocationMaxReads` reads or
  * `stagedReadMaxBytes` sent, so one call can't make the store apply its
  * staged writes without end. The budget is the whole call's, its nested
  * functions' reads with the one it named (`runReads`): each invocation
@@ -2349,7 +2349,7 @@ const spendRead = (budget: ReadBudget, staged: number): void => {
     budget.reads > invocationMaxReads ||
     budget.shipped > stagedReadMaxBytes
   ) {
-    throw operationErrors.create("operation.read_limit", {
+    throw operationErrors.create("function.read_limit", {
       maxReads: invocationMaxReads,
       maxStagedBytes: stagedReadMaxBytes,
     });
@@ -2513,7 +2513,7 @@ const spendCall = (budget: CallBudget, what: "nested" | "requests"): void => {
     budget.nested > callMaxNested ||
     budget.requests > callMaxResourceRequests
   ) {
-    throw operationErrors.create("operation.call_limit", {
+    throw operationErrors.create("function.call_limit", {
       maxNested: callMaxNested,
       maxResourceRequests: callMaxResourceRequests,
     });
@@ -2522,14 +2522,14 @@ const spendCall = (budget: CallBudget, what: "nested" | "requests"): void => {
 
 /**
  * `capabilities`, each use tracked while it runs: once the handler has
- * settled (`settle`), a new use is refused (`operation.ended`), and
+ * settled (`settle`), a new use is refused (`function.ended`), and
  * `settle` waits for those still running, at most until `deadline`
  * (past which the store refuses whatever they would commit). It answers
  * the failure of the first that was still running when the handler
  * settled and then failed: one the handler never waited for, so it could
  * neither handle it nor report it. One the handler waited for is its own
  * to have handled, and doesn't fail the run again. One stopped at the
- * deadline (`operation.deadline_exceeded`, nested calls sharing it) is
+ * deadline (`function.deadline_exceeded`, nested calls sharing it) is
  * answered as unfinished, the handler's own failure.
  */
 const trackedCalls = (
@@ -2557,7 +2557,7 @@ const trackedCalls = (
       ? undefined
       : async (...args: Args): Promise<unknown> => {
           if (handlerSettled) {
-            throw operationErrors.create("operation.ended");
+            throw operationErrors.create("function.ended");
           }
           const call = use(...args);
           const watched = (async () => {
@@ -2572,7 +2572,7 @@ const trackedCalls = (
               // the wait for it runs out (the host's error, never one to
               // read as App code's).
               if (
-                operationErrors.codeOf(error) === "operation.deadline_exceeded"
+                operationErrors.codeOf(error) === "function.deadline_exceeded"
               ) {
                 pastDeadline = true;
               } else {
@@ -2602,7 +2602,7 @@ const trackedCalls = (
       while (running.size > 0) {
         const left = deadline - Date.now();
         if (left <= 0) {
-          throw hostError(operationErrors.create("operation.unfinished_call"));
+          throw hostError(operationErrors.create("function.unfinished_call"));
         }
         // The timer is cleared once the calls settle first, so no wait is
         // left pending past the run.
@@ -2615,7 +2615,7 @@ const trackedCalls = (
         timer.abort();
       }
       if (pastDeadline) {
-        throw hostError(operationErrors.create("operation.unfinished_call"));
+        throw hostError(operationErrors.create("function.unfinished_call"));
       }
       return unfinished?.error;
     },
@@ -2706,7 +2706,7 @@ interface Capabilities {
   /**
    * Whether an effect it started (a mutation or action it called, a
    * resource request) is still under way: a cancel that lands then can't
-   * say what happened (`operation.outcome_unknown`).
+   * say what happened (`function.outcome_unknown`).
    */
   readonly effectsInFlight?: () => boolean;
 }
@@ -2714,16 +2714,16 @@ interface Capabilities {
 /** Why each kind's channel refuses what it hasn't. */
 const refusalsOf = {
   query: {
-    write: "operation.read_only",
-    call: "operation.read_only",
-    resource: "operation.no_resources",
-    emit: "operation.no_stream",
+    write: "function.read_only",
+    call: "function.read_only",
+    resource: "function.no_resources",
+    emit: "function.no_stream",
   },
-  mutation: { resource: "operation.no_resources", emit: "operation.no_stream" },
+  mutation: { resource: "function.no_resources", emit: "function.no_stream" },
   action: {
-    read: "operation.no_database",
-    write: "operation.no_database",
-    emit: "operation.no_stream",
+    read: "function.no_database",
+    write: "function.no_database",
+    emit: "function.no_stream",
   },
 } as const;
 
@@ -2731,21 +2731,21 @@ const refusalsOf = {
  * Why a run stopped early: its deadline, or a cancel. A cancel that lands
  * while an effect it started is still under way (a mutation committing, a
  * request out) can't say whether that effect happened: uncertain, never
- * a definite `operation.cancelled` that would invite running it again.
+ * a definite `function.cancelled` that would invite running it again.
  */
 const stoppedCode = (
   outcome: "expired" | "cancelled",
   capabilities: Capabilities
 ):
-  | "operation.deadline_exceeded"
-  | "operation.cancelled"
-  | "operation.outcome_unknown" => {
+  | "function.deadline_exceeded"
+  | "function.cancelled"
+  | "function.outcome_unknown" => {
   if (outcome === "expired") {
-    return "operation.deadline_exceeded";
+    return "function.deadline_exceeded";
   }
   return capabilities.effectsInFlight?.() === true
-    ? "operation.outcome_unknown"
-    : "operation.cancelled";
+    ? "function.outcome_unknown"
+    : "function.cancelled";
 };
 
 /** How long a run stopped at its deadline gets to let go of what it held. */
@@ -2998,7 +2998,7 @@ const runHandler = async (
     stopped.abort();
     open.end();
     // Stopped at its deadline or cancelled, or ended with calls it left
-    // still out (`operation.unfinished_call`): kept alive a little longer.
+    // still out (`function.unfinished_call`): kept alive a little longer.
     // A run that settled with nothing left out waits for nothing here.
     await letGo(ran, calls.inFlight);
     // Its session, on-prem, which the function its caller named opened and
@@ -3028,7 +3028,7 @@ const stagedQuery = async (
   // A mutation runs queries only (inspection and `nestedCall` see to it):
   // checked again here, where anything else would see its staged state.
   if (callee.kind !== "query") {
-    throw operationErrors.create("operation.kind_mismatch");
+    throw operationErrors.create("function.kind_mismatch");
   }
   const narrowed: OperationManifest = {
     ...callee,
@@ -3138,7 +3138,7 @@ const startNested = async (
       ? run.app.manifest.operations[path]
       : undefined;
   if (callee === undefined) {
-    throw refusingUse(operationErrors.create("operation.not_found"), {
+    throw refusingUse(operationErrors.create("function.not_found"), {
       use: {
         kind: "function",
         name: sealedName(run.app.manifest.operations, path),
@@ -3147,17 +3147,17 @@ const startNested = async (
     });
   }
   if (callee.kind !== kind) {
-    throw operationErrors.create("operation.kind_mismatch");
+    throw operationErrors.create("function.kind_mismatch");
   }
   if (run.depth + 1 > callMaxDepth) {
-    throw operationErrors.create("operation.depth_exceeded", {
+    throw operationErrors.create("function.depth_exceeded", {
       maxDepth: callMaxDepth,
     });
   }
   // A streaming action runs only for a page following it (spec 10.7.6):
   // nested, its progress would have no one to go to.
   if (callee.stream !== null) {
-    throw operationErrors.create("operation.mode_mismatch");
+    throw operationErrors.create("function.mode_mismatch");
   }
   spendCall(run.budget, "nested");
   const admitted = admittedArgs(run.compiled, callee, args);
@@ -3359,7 +3359,7 @@ const runMutation = async (
               // Its place first, as a start's: the commit's bound counts
               // it with them, refused before core reads anything.
               if (placed >= commitMaxIntents) {
-                throw operationErrors.create("operation.call_limit", {
+                throw operationErrors.create("function.call_limit", {
                   maxStarts: commitMaxIntents,
                 });
               }
@@ -3385,7 +3385,7 @@ const runMutation = async (
               // Its place first, as a start's: the commit's bound counts
               // both, refused before core reads anything.
               if (placed >= commitMaxIntents) {
-                throw operationErrors.create("operation.call_limit", {
+                throw operationErrors.create("function.call_limit", {
                   maxStarts: commitMaxIntents,
                 });
               }
@@ -3413,7 +3413,7 @@ const runMutation = async (
             if (!startsWorkflow(operation, alias)) {
               // Any resource but a workflow it lists: not one of its uses.
               throw refusingUse(
-                operationErrors.create("operation.no_resources"),
+                operationErrors.create("function.no_resources"),
                 { use: undeclaredUse(run, alias), reason: "use_undeclared" }
               );
             }
@@ -3431,7 +3431,7 @@ const runMutation = async (
             // start refused or not: what bounds the gate's reads is how
             // often App code asks, whatever it catches.
             if (placed >= commitMaxIntents) {
-              throw operationErrors.create("operation.call_limit", {
+              throw operationErrors.create("function.call_limit", {
                 maxStarts: commitMaxIntents,
               });
             }
@@ -3540,10 +3540,10 @@ const emitProgress = async (
 ): Promise<null> => {
   await Promise.resolve();
   if (cancelled?.aborted === true) {
-    throw operationErrors.create("operation.cancelled");
+    throw operationErrors.create("function.cancelled");
   }
   if (emitted > streamMaxEmits) {
-    throw operationErrors.create("operation.emit_limit", {
+    throw operationErrors.create("function.emit_limit", {
       maxEmits: streamMaxEmits,
     });
   }
@@ -3606,7 +3606,7 @@ const runAction = async (
       // way or a call cancelled meanwhile: nothing went out. Anything else
       // may have.
       const code = operationErrors.codeOf(error);
-      if (code !== "resource.budget_busy" && code !== "operation.cancelled") {
+      if (code !== "resource.budget_busy" && code !== "function.cancelled") {
         run.onEffect?.();
       }
       throw error;
@@ -3797,7 +3797,7 @@ const tellDraft = (invocation: Invocation, told: Told): void => {
   try {
     invocation.draftFailure(told.failure);
   } catch (error) {
-    log.error("operation.draft_failure_unkept", errorFields(error));
+    log.error("function.draft_failure_unkept", errorFields(error));
   }
 };
 
@@ -3843,7 +3843,7 @@ const answer = async (
     });
     const { progress, cancelled } = options;
     if (cancelled?.aborted === true) {
-      throw hostError(operationErrors.create("operation.cancelled"));
+      throw hostError(operationErrors.create("function.cancelled"));
     }
     const filesAdmitted = async (): Promise<void> => {
       await trusted(async () => {
@@ -3916,7 +3916,7 @@ export const callOperation = async (
     try {
       await asked.sensitiveReads?.([...sensitive.values()]);
     } catch (error) {
-      log.error("operation.sensitive_reads_unkept", errorFields(error));
+      log.error("function.sensitive_reads_unkept", errorFields(error));
     }
   }
   return result;

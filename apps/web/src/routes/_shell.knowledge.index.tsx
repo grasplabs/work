@@ -1,10 +1,10 @@
+import { knowledgeSearchMaxLength } from "@grasp-os/shared/function-limits";
 import type {
   Collection,
   DocumentSummary,
   SearchHit,
 } from "@grasp-os/shared/knowledge";
 import { pageMaxLimit } from "@grasp-os/shared/knowledge";
-import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import {
   Empty,
   EmptyDescription,

@@ -7,7 +7,7 @@
 // What an App, a workflow or any other resource declares is held to them
 // too: a declaration may only be stricter.
 //
-// Free of dependencies, like app-limits.ts and operation-limits.ts, which
+// Free of dependencies, like app-limits.ts and function-limits.ts, which
 // take their values from here: the App compiler's isolate and the SDK's
 // root module import those, and can't bring Zod along.
 

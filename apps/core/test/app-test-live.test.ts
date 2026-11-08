@@ -185,7 +185,7 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
         "a refusal it expects": `
       const owner = await t.as("note-owner");
       const live = await owner.subscribe({ ...api.notes.list, name: "notes.nothing" }, page);
-      await t.rejectsCode(live.next(), "operation.not_found");`,
+      await t.rejectsCode(live.next(), "function.not_found");`,
       }),
     });
     await expect(failuresOf(built)).resolves.toStrictEqual([]);
@@ -219,7 +219,7 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       failuresOf(built, envWith({ APP_TEST_LIMITS_MS: "3000" }))
     ).resolves.toStrictEqual([
       expect.stringMatching(
-        /^tests\/failing\.test\.ts, "follows a query the App doesn't have": unexpected error operation\.not_found: /u
+        /^tests\/failing\.test\.ts, "follows a query the App doesn't have": unexpected error function\.not_found: /u
       ),
       'tests/failing.test.ts, "waits for a note nobody makes": didn\'t finish within 3 seconds, still waiting in live.next on notes.list, whose last snapshot was {"hasMore":false,"items":[],"nextCursor":null}',
       'tests/failing.test.ts, "waits for two snapshots at once": live.next on notes.list waits for one snapshot at a time',

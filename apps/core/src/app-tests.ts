@@ -18,6 +18,7 @@ import {
 } from "@grasp-os/sdk/testing";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
+import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import {
   appIdSchema,
   identifierSchema,
@@ -26,7 +27,6 @@ import {
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { QuerySnapshotPush } from "@grasp-os/shared/pages";
@@ -737,7 +737,7 @@ interface SessionContext {
 
 /** A call that waited for the test's calls before it past the test's time. */
 const waitedTooLong = (): Error =>
-  operationErrors.create("operation.deadline_exceeded");
+  operationErrors.create("function.deadline_exceeded");
 
 /**
  * Runs a suite's calls one at a time, in the order they came: on-prem,
@@ -752,7 +752,7 @@ class OneAtATime {
 
   /**
    * What `work` answers, run once every call that came before it has
-   * settled; refused (`operation.deadline_exceeded`) once `until` (a time
+   * settled; refused (`function.deadline_exceeded`) once `until` (a time
    * in milliseconds) passes while it waits.
    */
   async run<T>(until: number, work: () => Promise<T>): Promise<T> {
@@ -785,10 +785,10 @@ class OneAtATime {
  * the sandbox down or lost, or the call it ran in over.
  */
 const sandboxRefusals: ReadonlySet<string> = new Set([
-  "operation.sandbox_busy",
-  "operation.sandbox_unavailable",
-  "operation.sandbox_lost",
-  "operation.ended",
+  "function.sandbox_busy",
+  "function.sandbox_unavailable",
+  "function.sandbox_lost",
+  "function.ended",
 ]);
 
 /** The most of an answer's JSON text a test sends (`respond`). */
@@ -1042,7 +1042,7 @@ class FixtureSession extends TestTarget {
     try {
       // A test holds at most `maxRunsPerTest` runs: each is real work.
       if (this.#starts >= maxRunsPerTest) {
-        throw operationErrors.create("operation.call_limit");
+        throw operationErrors.create("function.call_limit");
       }
       this.#starts += 1;
       let recorded = false;

@@ -24,7 +24,7 @@ describe("a run's calls in turn", () => {
       await Promise.resolve();
     });
     await expect(b).rejects.toThrow(
-      operationErrors.create("operation.deadline_exceeded").message
+      operationErrors.create("function.deadline_exceeded").message
     );
     // C, made after B gave up: it waits for A.
     const c = inTurn(key, Date.now() + 10_000, async () => {

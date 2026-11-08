@@ -310,8 +310,8 @@ describe("the session client and an outcome it can't tell", () => {
 
   it("never sends an action again once it may have run: not after a sandbox lost mid-call, nor a busy one", async () => {
     for (const [code, category] of [
-      ["operation.sandbox_lost", "uncertain"],
-      ["operation.sandbox_busy", "operational"],
+      ["function.sandbox_lost", "uncertain"],
+      ["function.sandbox_busy", "operational"],
     ] as const) {
       const { client, calls } = network(async () => {
         await Promise.resolve();
@@ -328,11 +328,11 @@ describe("the session client and an outcome it can't tell", () => {
   it("answers an action whose sandbox was lost mid-call with the key the client chose", async () => {
     const { client } = network(async () => {
       await Promise.resolve();
-      return failedWith("operation.sandbox_lost", "uncertain");
+      return failedWith("function.sandbox_lost", "uncertain");
     });
     const failure = await failureOf(client.action(api.notes.tally));
     expect(failure).toMatchObject({
-      code: "operation.sandbox_lost",
+      code: "function.sandbox_lost",
       category: "uncertain",
     });
     expect(failure.details).toHaveProperty("idempotencyKey");
@@ -349,7 +349,7 @@ describe("the session client and an outcome it can't tell", () => {
           : undefined;
       keys.add(key);
       return call === 1
-        ? failedWith("operation.sandbox_lost", "uncertain")
+        ? failedWith("function.sandbox_lost", "uncertain")
         : answered(noteId);
     });
     await expect(
@@ -441,7 +441,7 @@ describe("the session client and lost access", () => {
       if (sent.length === 1) {
         // An outcome the host can't tell: the action's key is left
         // unknown (a lost answer would be sent again for its receipt).
-        return failedWith("operation.sandbox_lost", "uncertain");
+        return failedWith("function.sandbox_lost", "uncertain");
       }
       return signedOut
         ? failedWith("auth.unauthenticated", "authorization")
@@ -473,14 +473,14 @@ describe("the session client and lost access", () => {
   });
 
   it.each([
-    "operation.sandbox_busy",
-    "operation.sandbox_unavailable",
+    "function.sandbox_busy",
+    "function.sandbox_unavailable",
     "mutation.concurrent_change",
     "submission.superseded",
     // Answered while the first call's receipt has no outcome yet.
     "submission.key_conflict",
     "submission.expired",
-    "operation.deadline_exceeded",
+    "function.deadline_exceeded",
   ])(
     "never sends a key left unknown as the next person after a resend refused with %s",
     async (code) => {
@@ -497,7 +497,7 @@ describe("the session client and lost access", () => {
         if (sent.length === 1) {
           // An outcome the host can't tell: the action's key is left
           // unknown (a lost answer would be sent again for its receipt).
-          return failedWith("operation.sandbox_lost", "uncertain");
+          return failedWith("function.sandbox_lost", "uncertain");
         }
         // The resend may not have run: the outcome is as unknown as it was.
         return sent.length === 2
@@ -532,7 +532,7 @@ describe("the session client and lost access", () => {
       if (sent.length === 1) {
         // An outcome the host can't tell: the action's key is left
         // unknown (a lost answer would be sent again for its receipt).
-        return failedWith("operation.sandbox_lost", "uncertain");
+        return failedWith("function.sandbox_lost", "uncertain");
       }
       // Core's own answer, with its request ID: the App stopped running.
       return sent.length === 2 ? failedWith("app.not_running") : answered(3);
@@ -565,7 +565,7 @@ describe("the session client and lost access", () => {
       if (sent.length === 1) {
         // An outcome the host can't tell: the action's key is left
         // unknown (a lost answer would be sent again for its receipt).
-        return failedWith("operation.sandbox_lost", "uncertain");
+        return failedWith("function.sandbox_lost", "uncertain");
       }
       // The page relays core's refusal: the browser's session is someone
       // else's than the page's now.
@@ -609,7 +609,7 @@ describe("the session client and lost access", () => {
       tallies.push(request);
       // An outcome the host can't tell: the action's key is left
       // unknown (a lost answer would be sent again for its receipt).
-      return failedWith("operation.sandbox_lost", "uncertain");
+      return failedWith("function.sandbox_lost", "uncertain");
     });
     const keyed = { idempotencyKey: "weekly" };
     // X's outcome is left unknown; Y, under the same key, goes through.
@@ -801,8 +801,8 @@ describe("the session client and a streaming action's cancel", () => {
     }).toStrictEqual({
       acknowledged: "acknowledged",
       notRunning: "acknowledged",
-      unreadable: "operation.unreachable",
-      lost: "operation.unreachable",
+      unreadable: "function.unreachable",
+      lost: "function.unreachable",
       refused: "page.rate_limited",
     });
   });

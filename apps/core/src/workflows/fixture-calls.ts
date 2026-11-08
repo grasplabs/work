@@ -56,7 +56,7 @@ const ownOf = <Value>(
 ): Value | undefined =>
   Object.hasOwn(record, name) ? record[name] : undefined;
 
-/** Run `runId`'s record, as its calls need it; `operation.cancelled` once gone. */
+/** Run `runId`'s record, as its calls need it; `function.cancelled` once gone. */
 const recordOf = async (env: Env, runId: string) => {
   const row = await drizzle(env.DB)
     .select({ models: appTestRuns.models })
@@ -65,7 +65,7 @@ const recordOf = async (env: Env, runId: string) => {
     .get();
   // Its test ended: nothing more of it is called.
   if (row === undefined) {
-    throw operationErrors.create("operation.cancelled");
+    throw operationErrors.create("function.cancelled");
   }
   return row;
 };

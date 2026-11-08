@@ -1,12 +1,12 @@
 import { fileLimits } from "@grasp-os/shared/app-file-limits";
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { appIdSchema } from "@grasp-os/shared/ids";
-import type { AppId } from "@grasp-os/shared/ids";
-import { log } from "@grasp-os/shared/log";
 import {
   actionMaxRunning,
   streamMaxRunning,
-} from "@grasp-os/shared/operation-limits";
+} from "@grasp-os/shared/function-limits";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
+import { log } from "@grasp-os/shared/log";
 import {
   querySubscriptionLimits,
   pageErrors,

@@ -55,7 +55,7 @@ export class UploadTransfer {
     if (this.#fences.fences() === startedUnder) {
       return undefined;
     }
-    return this.#fences.fencedBy() ?? clientError("operation.unreachable");
+    return this.#fences.fencedBy() ?? clientError("function.unreachable");
   }
 
   /** The view now, as `useSyncExternalStore` reads it. */

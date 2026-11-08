@@ -4,8 +4,8 @@ import {
   signedTextOf,
 } from "@grasp-os/shared/app-webhooks";
 import { toHex } from "@grasp-os/shared/encoding";
+import { streamRetentionMs } from "@grasp-os/shared/function-limits";
 import type { Json } from "@grasp-os/shared/json";
-import { streamRetentionMs } from "@grasp-os/shared/operation-limits";
 import {
   appFunctionPath,
   pageLeaseHeader,

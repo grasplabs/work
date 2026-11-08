@@ -3,9 +3,9 @@ import { GraspError } from "@grasp-os/sdk/client";
 import { GraspClient } from "@grasp-os/sdk/host";
 import type { ClientTransport, StreamLink } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { actionMaxRunning } from "@grasp-os/shared/function-limits";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import { actionMaxRunning } from "@grasp-os/shared/operation-limits";
 import {
   appFunctionPath,
   pageLeaseHeader,
@@ -628,14 +628,14 @@ describe("a streaming action", { timeout: 120_000 }, () => {
       { requested: true }
     );
     await expect(failureOf(running)).resolves.toMatchObject({
-      code: "operation.cancelled",
+      code: "function.cancelled",
       category: "operational",
     });
     await expect(titles(client, opened)).resolves.toStrictEqual(["Started"]);
     // Its receipt answers the same key again: cancelled, not run anew.
     await expect(
       failureOf(client.stream(api.slow, { title: "Started" }, keyed))
-    ).resolves.toMatchObject({ code: "operation.cancelled" });
+    ).resolves.toMatchObject({ code: "function.cancelled" });
     await expect(titles(client, opened)).resolves.toStrictEqual(["Started"]);
   });
 
@@ -668,7 +668,7 @@ describe("a streaming action", { timeout: 120_000 }, () => {
     await expect(
       failureOf(client.stream(api.slow, { title: "Alone" }, keyed))
     ).resolves.toMatchObject({
-      code: "operation.cancelled",
+      code: "function.cancelled",
       details: { reason: "unfollowed" },
     });
     await expect(titles(client, opened)).resolves.toStrictEqual(["Alone"]);
@@ -694,11 +694,11 @@ describe("a streaming action", { timeout: 120_000 }, () => {
     await expect(
       // @ts-expect-error -- a streaming action isn't a single answer's
       failureOf(client.action(api.draft, { topic: "x" }))
-    ).resolves.toMatchObject({ code: "operation.mode_mismatch" });
+    ).resolves.toMatchObject({ code: "function.mode_mismatch" });
     await expect(
       // @ts-expect-error -- an action that answers once doesn't stream
       failureOf(client.stream(api.echo, {}, { onProgress: ignoreProgress }))
-    ).resolves.toMatchObject({ code: "operation.mode_mismatch" });
+    ).resolves.toMatchObject({ code: "function.mode_mismatch" });
     const reference = { name: api.draft.name, kind: "action" };
     const single = await post(
       opened.app,
@@ -707,7 +707,7 @@ describe("a streaming action", { timeout: 120_000 }, () => {
       JSON.stringify({ reference, input: { topic: "x" } })
     );
     await expect(single.json()).resolves.toMatchObject({
-      result: { ok: false, error: { code: "operation.mode_mismatch" } },
+      result: { ok: false, error: { code: "function.mode_mismatch" } },
     });
     const echo = { ...reference, name: api.echo.name };
     const streamed = await post(
@@ -717,7 +717,7 @@ describe("a streaming action", { timeout: 120_000 }, () => {
       JSON.stringify({ reference: echo, input: {}, idempotencyKey: "k" })
     );
     await expect(streamed.text()).resolves.toContain(
-      '"code":"operation.mode_mismatch"'
+      '"code":"function.mode_mismatch"'
     );
   });
 
@@ -866,8 +866,8 @@ describe("a streaming action's bounds and access", { timeout: 120_000 }, () => {
       { onProgress: ignoreProgress }
     );
     expect({ fifth: fifth.code, ended, after }).toStrictEqual({
-      fifth: "operation.stream_limit",
-      ended: steps.map(() => "operation.cancelled"),
+      fifth: "function.stream_limit",
+      ended: steps.map(() => "function.cancelled"),
       after: { text: "Draft about after" },
     });
   });
@@ -925,7 +925,7 @@ describe("a streaming action's bounds and access", { timeout: 120_000 }, () => {
       ),
     }).toStrictEqual({
       failed: "auth.unauthenticated",
-      settled: "operation.cancelled",
+      settled: "function.cancelled",
     });
   });
 
@@ -954,8 +954,8 @@ describe("a streaming action's bounds and access", { timeout: 120_000 }, () => {
         "narrowed"
       ),
     }).toStrictEqual({
-      failed: "operation.access_changed",
-      settled: "operation.cancelled",
+      failed: "function.access_changed",
+      settled: "function.cancelled",
     });
   });
 
@@ -973,7 +973,7 @@ describe("a streaming action's bounds and access", { timeout: 120_000 }, () => {
     await expect(
       failureOf(client.stream(api.draft, input, keyed))
     ).resolves.toMatchObject({
-      code: "operation.access_changed",
+      code: "function.access_changed",
     });
   });
 
@@ -1123,7 +1123,7 @@ describe(
       await expect(
         failureOf(client.stream(api.draft, input, keyed))
       ).resolves.toMatchObject({
-        code: "operation.access_changed",
+        code: "function.access_changed",
       });
     });
 
@@ -1173,7 +1173,7 @@ describe(
         )
       );
       await Promise.all(running);
-      expect(fifth.code).toBe("operation.stream_limit");
+      expect(fifth.code).toBe("function.stream_limit");
     });
   }
 );
@@ -1274,7 +1274,7 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
     ]);
     expect({ requested, end: await endOf(frames) }).toStrictEqual({
       requested: true,
-      end: "operation.cancelled",
+      end: "function.cancelled",
     });
   });
 
@@ -1307,8 +1307,8 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
     // Nothing was recorded: the same key starts once there is room.
     const again = await endOf(await pastRun.open());
     expect({ end, ended: new Set(ended), again }).toStrictEqual({
-      end: "operation.action_limit",
-      ended: new Set(["operation.cancelled"]),
+      end: "function.action_limit",
+      ended: new Set(["function.cancelled"]),
       again: "ok",
     });
   });
@@ -1362,7 +1362,7 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
       JSON.stringify([...state.storage.kv.list()])
     );
     expect({ end, stored }).toStrictEqual({
-      end: "operation.mode_mismatch",
+      end: "function.mode_mismatch",
       stored: "[]",
     });
   });
@@ -1531,7 +1531,7 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
     });
     await runDurableObjectAlarm(stub);
     await expect(running).resolves.toMatchObject({
-      code: "operation.outcome_unknown",
+      code: "function.outcome_unknown",
       details: { idempotencyKey: "stuck" },
     });
     // Its run ends later after all: what was said of it stands.
@@ -1543,7 +1543,7 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
           idempotencyKey: "stuck",
         })
       )
-    ).resolves.toMatchObject({ code: "operation.outcome_unknown" });
+    ).resolves.toMatchObject({ code: "function.outcome_unknown" });
   });
 
   it("carries the key on an uncertain outcome its caller didn't choose a key for", async () => {
@@ -1570,6 +1570,6 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
       code: failed.code,
       key: z.object({ idempotencyKey: z.string() }).safeParse(failed.details)
         .success,
-    }).toStrictEqual({ code: "operation.outcome_unknown", key: true });
+    }).toStrictEqual({ code: "function.outcome_unknown", key: true });
   });
 });

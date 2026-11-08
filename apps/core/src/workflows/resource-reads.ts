@@ -6,6 +6,7 @@ import { documents } from "@grasp-os/brain/schema";
 import { search } from "@grasp-os/brain/search";
 import { read } from "@grasp-os/brain/tools";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import { knowledgeSearchMaxLength } from "@grasp-os/shared/function-limits";
 import {
   chatIdSchema,
   collectionIdSchema,
@@ -15,7 +16,6 @@ import {
 import type { CollectionId, PermissionId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { knowledgeErrors } from "@grasp-os/shared/knowledge";
-import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { and, eq } from "drizzle-orm";

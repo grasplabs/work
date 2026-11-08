@@ -309,7 +309,7 @@ apps: {
    * call as JSON text, \`{ reference, input, idempotencyKey? }\`, sent as a
    * stream: \`env.apps.call(app, new Blob([JSON.stringify(call)]).stream())\`.
    * At most 132 KiB, sent in full within 5 seconds. Calls made at once may run one at a time, in
-   * the order made, each within its own 30 seconds, and at most 8 at once (more answer \`operation.sandbox_busy\`). Needs a permission on the App (\`read\` for a query,
+   * the order made, each within its own 30 seconds, and at most 8 at once (more answer \`function.sandbox_busy\`). Needs a permission on the App (\`read\` for a query,
    * \`write\` otherwise), granted by an admin. Answers the result as data:
    * \`{ result: { ok: true, value } | { ok: false, error }, manifestHash }\`.
    */

@@ -11,10 +11,10 @@ import { runFunction } from "@grasp-os/sdk/runner";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
 import { connectErrors } from "@grasp-os/shared/connect";
+import { streamMaxEmits } from "@grasp-os/shared/function-limits";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import { streamMaxEmits } from "@grasp-os/shared/operation-limits";
 import { effectErrors, operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -930,7 +930,7 @@ describe("composing the App's functions", () => {
       deepest: codeOf(await call(fixture, "action", "chain.level0", {})),
       shallower: valueOf(await call(fixture, "action", "chain.level1", {})),
     }).toStrictEqual({
-      deepest: "operation.depth_exceeded",
+      deepest: "function.depth_exceeded",
       shallower: "deep",
     });
   });
@@ -994,13 +994,13 @@ describe("composing the App's functions", () => {
         )
       ),
     }).toStrictEqual({
-      single: "operation.mode_mismatch",
+      single: "function.mode_mismatch",
       streamed: "ok",
       published: [{ done: 1 }, { done: 2 }],
-      other: "operation.mode_mismatch",
-      nested: "operation.mode_mismatch",
+      other: "function.mode_mismatch",
+      nested: "function.mode_mismatch",
       noEmit: "no emit",
-      cancelled: "operation.cancelled",
+      cancelled: "function.cancelled",
     });
   });
 });
@@ -1051,10 +1051,10 @@ describe("an action's channel", () => {
         async (channel) => await channel.resource("mail", "call", ["send", {}])
       ),
     }).toStrictEqual({
-      read: "operation.no_database",
-      write: "operation.no_database",
-      unused: "operation.not_found",
-      wrongKind: "operation.kind_mismatch",
+      read: "function.no_database",
+      write: "function.no_database",
+      unused: "function.not_found",
+      wrongKind: "function.kind_mismatch",
       resource: "resource.not_allowed",
     });
   });
@@ -1454,7 +1454,7 @@ describe("a streaming action's progress budget", () => {
     }).toStrictEqual({
       many: streamMaxEmits,
       published: streamMaxEmits * 2,
-      over: "operation.emit_limit",
+      over: "function.emit_limit",
     });
   });
 });
@@ -1483,7 +1483,7 @@ describe("cancelling a streaming action", () => {
     expect({
       code: codeOf(result),
       notes: await noteCount(fixture),
-    }).toStrictEqual({ code: "operation.outcome_unknown", notes: 1 });
+    }).toStrictEqual({ code: "function.outcome_unknown", notes: 1 });
   });
 
   it("answers an uncertain outcome when the cancel lands during a mutation's commit", async () => {
@@ -1510,7 +1510,7 @@ describe("cancelling a streaming action", () => {
     expect({
       code: codeOf(result),
       notes: await noteCount(fixture),
-    }).toStrictEqual({ code: "operation.outcome_unknown", notes: 2 });
+    }).toStrictEqual({ code: "function.outcome_unknown", notes: 2 });
   });
 
   it("sends nothing when the cancel lands before a resource request goes out", async () => {
@@ -1534,7 +1534,7 @@ describe("cancelling a streaming action", () => {
       { progress: sink, cancelled: signal, resources }
     );
     expect({ code: codeOf(result), sent }).toStrictEqual({
-      code: "operation.outcome_unknown",
+      code: "function.outcome_unknown",
       sent: 0,
     });
   });
@@ -1559,7 +1559,7 @@ describe("cancelling a streaming action", () => {
       { progress: sink, cancelled: signal, resources }
     );
     expect({ code: codeOf(result), sent }).toStrictEqual({
-      code: "operation.outcome_unknown",
+      code: "function.outcome_unknown",
       sent: 1,
     });
   });
@@ -1585,7 +1585,7 @@ describe("cancelling a streaming action", () => {
       { progress: sink, cancelled: signal, resources }
     );
     expect({ code: codeOf(result), sent }).toStrictEqual({
-      code: "operation.outcome_unknown",
+      code: "function.outcome_unknown",
       sent: 1,
     });
   });
@@ -1613,7 +1613,7 @@ describe("cancelling a streaming action", () => {
     // object the call ran in (GRA-701).
     const settledByAnswer = settled;
     expect({ code: codeOf(result), settledByAnswer }).toStrictEqual({
-      code: "operation.outcome_unknown",
+      code: "function.outcome_unknown",
       settledByAnswer: true,
     });
   });
@@ -1641,7 +1641,7 @@ describe("cancelling a streaming action", () => {
     );
     const notesByAnswer = await noteCount(fixture);
     expect({ code: codeOf(result), notesByAnswer }).toStrictEqual({
-      code: "operation.outcome_unknown",
+      code: "function.outcome_unknown",
       notesByAnswer: 2,
     });
   });
@@ -1665,7 +1665,7 @@ describe("cancelling a streaming action", () => {
     );
     const settledByAnswer = settled;
     expect({ code: codeOf(result), settledByAnswer }).toStrictEqual({
-      code: "operation.unfinished_call",
+      code: "function.unfinished_call",
       settledByAnswer: true,
     });
   });
@@ -1695,7 +1695,7 @@ describe("cancelling a streaming action", () => {
       settledByAnswer: settled,
       answeredWithinAMoment: Date.now() - started < 3000,
     }).toStrictEqual({
-      code: "operation.outcome_unknown",
+      code: "function.outcome_unknown",
       settledByAnswer: false,
       answeredWithinAMoment: true,
     });
@@ -1721,7 +1721,7 @@ describe("cancelling a streaming action", () => {
     expect({
       code: codeOf(result),
       notes: await noteCount(fixture),
-    }).toStrictEqual({ code: "operation.cancelled", notes: 1 });
+    }).toStrictEqual({ code: "function.cancelled", notes: 1 });
   });
 });
 
@@ -1737,8 +1737,8 @@ describe("one call's budget", () => {
       readsTogether: await fan(3, 90),
     }).toStrictEqual({
       allowed: "ok",
-      tooMany: "operation.call_limit",
-      readsTogether: "operation.read_limit",
+      tooMany: "function.call_limit",
+      readsTogether: "function.read_limit",
     });
   });
 
@@ -1760,7 +1760,7 @@ describe("one call's budget", () => {
     expect({
       allowed: await send(callMaxResourceRequests),
       tooMany: await send(callMaxResourceRequests + 1),
-    }).toStrictEqual({ allowed: "ok", tooMany: "operation.call_limit" });
+    }).toStrictEqual({ allowed: "ok", tooMany: "function.call_limit" });
   });
 });
 
@@ -2112,7 +2112,7 @@ describe("an action's nested calls", () => {
         )
       )
     ).toStrictEqual({
-      code: "operation.unfinished_call",
+      code: "function.unfinished_call",
       message:
         "The operation left a call it started running past its deadline.",
       category: "contract",
@@ -2267,7 +2267,7 @@ describe("evidence of a refused use", () => {
           function: "actions.sendMail",
           use: { kind: "function", name: "notes.create" },
           reason: "use_undeclared",
-          errorCode: "operation.not_found",
+          errorCode: "function.not_found",
         },
       ],
       noFunction: [
@@ -2275,7 +2275,7 @@ describe("evidence of a refused use", () => {
           function: "actions.sendMail",
           use: { kind: "function", name: null },
           reason: "use_undeclared",
-          errorCode: "operation.not_found",
+          errorCode: "function.not_found",
         },
       ],
       workflow: [
@@ -2390,27 +2390,27 @@ describe("evidence of a refused use", () => {
       heldNoLonger: tookMs < useEvidenceWaitMs + 5000,
       failing: codeOf(failing),
     }).toStrictEqual({
-      asked: "operation.no_resources",
+      asked: "function.no_resources",
       heard: [
         {
           function: "notes.create",
           use: { kind: "resource", name: "mail" },
           reason: "use_undeclared",
-          errorCode: "operation.no_resources",
+          errorCode: "function.no_resources",
         },
       ],
-      startsUnlisted: "operation.no_resources",
+      startsUnlisted: "function.no_resources",
       workflowHeard: [
         {
           function: "notes.create",
           use: { kind: "workflow", name: "followUp" },
           reason: "use_undeclared",
-          errorCode: "operation.no_resources",
+          errorCode: "function.no_resources",
         },
       ],
       hung: "ok",
       heldNoLonger: true,
-      failing: "operation.no_resources",
+      failing: "function.no_resources",
     });
   });
 
@@ -2481,7 +2481,7 @@ export const probe = action({ args: {}, returns: v.null(), handler: async () => 
             useKind: "function",
             useName: "notes.label",
             reason: "use_undeclared",
-            errorCode: "operation.not_found",
+            errorCode: "function.not_found",
           },
         },
       ],

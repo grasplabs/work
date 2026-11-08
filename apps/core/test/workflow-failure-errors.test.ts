@@ -60,8 +60,8 @@ describe("a step's failure, as a catch sees it", () => {
       "connect.outcome_unknown",
       "connect.outcome_unknown_unresolved",
       "effect.outcome_unknown",
-      "operation.outcome_unknown",
-      "operation.sandbox_lost",
+      "function.outcome_unknown",
+      "function.sandbox_lost",
       "workflow.invalid",
       "execution.stale_attempt",
     ];
@@ -90,7 +90,7 @@ describe("a step's failure, as a catch sees it", () => {
   it("never lets a catch take a timeout of a call that runs its effect once, or of a connector call", () => {
     const timeouts = [
       { name: "TimeoutError", message: "" },
-      { name: "Error", message: "", code: "operation.deadline_exceeded" },
+      { name: "Error", message: "", code: "function.deadline_exceeded" },
     ];
     expect(
       (["grasp.action", "grasp.model"] as const).flatMap((name) =>

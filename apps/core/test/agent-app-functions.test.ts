@@ -1,7 +1,7 @@
 import { preferenceOperations } from "@grasp-os/sdk/host";
 import { agentErrors } from "@grasp-os/shared/agent";
+import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import { appIdSchema } from "@grasp-os/shared/ids";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -346,7 +346,7 @@ describe(
       }).toStrictEqual({
         get: { ok: true, value: { compact: false, _rev: 0 } },
         update: "permission.denied",
-        disguised: "operation.kind_mismatch",
+        disguised: "function.kind_mismatch",
       });
 
       const writing = await run(notes, tryEach({ update: calls.update }), [
@@ -567,7 +567,7 @@ describe(
         ["read"]
       );
       await expect(result()).resolves.toMatchObject({
-        stalled: "operation.deadline_exceeded",
+        stalled: "function.deadline_exceeded",
       });
       const denied = await runIn(
         notes,
@@ -580,7 +580,7 @@ describe(
         titles: "permission.denied",
       });
       await expect(appCalls(chat)).resolves.toStrictEqual([
-        { outcome: "refused", reason: "operation.deadline_exceeded" },
+        { outcome: "refused", reason: "function.deadline_exceeded" },
       ]);
       await expect(appCalls(denied.chat)).resolves.toStrictEqual([
         { outcome: "refused", reason: "permission.denied" },

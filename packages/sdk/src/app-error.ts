@@ -4,7 +4,7 @@ import {
   appErrorMessageMaxLength,
   isAppErrorCode,
   reservedErrorNamespaces,
-} from "@grasp-os/shared/operation-limits";
+} from "@grasp-os/shared/function-limits";
 
 import { isPlainObject, valueLimits } from "./value-descriptor.ts";
 import type { JsonValue } from "./value-descriptor.ts";

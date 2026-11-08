@@ -514,7 +514,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       ),
     }).toStrictEqual({
       forged: "contract.invalid_request",
-      unknown: "operation.not_found",
+      unknown: "function.not_found",
       status: "contract.invalid_args",
       cursor: "data.invalid_cursor",
       historyWindow: "workflow.run_unavailable",
@@ -629,7 +629,7 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       JSON.stringify({ reference: runs, input: { pagination: {} } }),
       Date.now() - 1
     );
-    expect(codeOf(lateAnswer.result)).toBe("operation.deadline_exceeded");
+    expect(codeOf(lateAnswer.result)).toBe("function.deadline_exceeded");
     // Revoked, or the person's role taken away, while the call runs:
     // checked again just before anything is read.
     const during = async (app: string, change: () => Promise<unknown>) => {

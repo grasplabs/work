@@ -613,7 +613,7 @@ describe("page delivery", { timeout: 60_000 }, () => {
       gone: await called(builder, app, { lease: first.lease }),
     }).toMatchObject({
       replayed: { ok: true, value: ["version 2"] },
-      gone: { ok: false, error: { code: "operation.not_found" } },
+      gone: { ok: false, error: { code: "function.not_found" } },
     });
   });
 

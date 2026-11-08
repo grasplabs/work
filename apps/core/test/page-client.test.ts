@@ -320,7 +320,7 @@ describe("the session client", { timeout: 120_000 }, () => {
     const refused = z
       .object({ result: z.object({ error: z.object({ code: z.string() }) }) })
       .parse(JSON.parse(await new Response(frames).text()));
-    expect(refused.result.error.code).toBe("operation.not_found");
+    expect(refused.result.error.code).toBe("function.not_found");
   });
 
   it("withholds an action's receipt from its person once their role narrowed", async () => {
@@ -338,7 +338,7 @@ describe("the session client", { timeout: 120_000 }, () => {
       category: "uncertain",
       details: {
         idempotencyKey: keyed.idempotencyKey,
-        refusal: "operation.access_changed",
+        refusal: "function.access_changed",
       },
     });
     await expect(titles(client, api)).resolves.toStrictEqual(["Budget"]);
@@ -376,7 +376,7 @@ describe("the session client", { timeout: 120_000 }, () => {
       code: "submission.outcome_unknown",
       details: {
         idempotencyKey: keyed.idempotencyKey,
-        refusal: "operation.access_changed",
+        refusal: "function.access_changed",
       },
     });
   });

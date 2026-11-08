@@ -1,6 +1,6 @@
 import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
+import { appMaxOperations } from "@grasp-os/shared/function-limits";
 import { canonicalText } from "@grasp-os/shared/json";
-import { appMaxOperations } from "@grasp-os/shared/operation-limits";
 
 import {
   AppDefinitionError,

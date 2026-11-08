@@ -144,7 +144,7 @@ describe("an App's function on the on-prem sandbox", () => {
 
   it("ends the call as cpu_exceeded when a function it nests loops", async () => {
     const outcome = await call("callsBusy");
-    expect(failure(outcome)).toMatchObject({ code: "operation.cpu_exceeded" });
+    expect(failure(outcome)).toMatchObject({ code: "function.cpu_exceeded" });
     expect(outcome.ms).toBeLessThan(15_000);
   }, 30_000);
 
@@ -181,18 +181,18 @@ describe("an App's function on the on-prem sandbox", () => {
     expect(processesStarted - before).toBe(1);
   });
 
-  it("ends a nested call still being authorized as its caller's deadline passes as operation.ended", async () => {
+  it("ends a nested call still being authorized as its caller's deadline passes as function.ended", async () => {
     const outcome = await call("awaitsLeaf", {
       within: 300,
       slowNested: true,
       settle: 1500,
     });
-    expect(failure(outcome).code).toBe("operation.deadline_exceeded");
+    expect(failure(outcome).code).toBe("function.deadline_exceeded");
     // The nested one reached its runner once its caller's session was over:
     // refused as ended, never given a process of its own.
     expect(outcome.logged).toContainEqual(
       expect.objectContaining({
-        event: "operation.sandbox_ended",
+        event: "function.sandbox_ended",
         path: "jobs.leaf",
         verdict: "ended",
       })
@@ -208,7 +208,7 @@ describe("an App's function on the on-prem sandbox", () => {
     }
     const outcome = await busy;
     expect(failure(outcome)).toMatchObject({
-      code: "operation.cpu_exceeded",
+      code: "function.cpu_exceeded",
       retryable: false,
     });
     // Its 10 s of CPU, as Cloudflare gives a function, and not a minute.
@@ -219,7 +219,7 @@ describe("an App's function on the on-prem sandbox", () => {
   it("ends a function past its memory as the App's fault", async () => {
     const outcome = await call("hogs");
     expect(failure(outcome)).toMatchObject({
-      code: "operation.memory_exceeded",
+      code: "function.memory_exceeded",
       retryable: false,
     });
   }, 30_000);
@@ -227,7 +227,7 @@ describe("an App's function on the on-prem sandbox", () => {
   it("refuses a function that sends core more than a call takes, as the App's fault", async () => {
     const outcome = await call("sendsTooMuch");
     expect(failure(outcome)).toMatchObject({
-      code: "operation.sandbox_refused",
+      code: "function.sandbox_refused",
       retryable: false,
     });
   }, 30_000);
@@ -239,7 +239,7 @@ describe("an App's function on the on-prem sandbox", () => {
 
   it("frees a function's process once the host stops waiting for it", async () => {
     const outcome = await call("waits", { within: 300 });
-    expect(failure(outcome).code).toBe("operation.deadline_exceeded");
+    expect(failure(outcome).code).toBe("function.deadline_exceeded");
     expect(outcome.ms).toBeLessThan(3000);
     await expect
       .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
@@ -253,7 +253,7 @@ describe("an App's function on the on-prem sandbox", () => {
       .toBe(1);
     const outcome = await call("echo", { owner: "app-busy" });
     expect(failure(outcome)).toMatchObject({
-      code: "operation.sandbox_busy",
+      code: "function.sandbox_busy",
       retryable: true,
     });
     await holding;
@@ -287,19 +287,19 @@ describe("an App's function on the on-prem sandbox", () => {
     // so it is never one that ran nothing.
     for (const outcome of await Promise.all(cutOff)) {
       expect(failure(outcome)).toMatchObject({
-        code: "operation.sandbox_lost",
+        code: "function.sandbox_lost",
         retryable: false,
       });
     }
     // Stopped while its session opened: nothing of it ran, to try again.
     expect(failure(await opening)).toMatchObject({
-      code: "operation.sandbox_unavailable",
+      code: "function.sandbox_unavailable",
       retryable: true,
     });
     // With no supervisor to take it, the next call never starts.
     const outcome = await call("echo");
     expect(failure(outcome)).toMatchObject({
-      code: "operation.sandbox_unavailable",
+      code: "function.sandbox_unavailable",
       retryable: true,
     });
   }, 30_000);

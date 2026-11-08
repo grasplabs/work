@@ -545,7 +545,7 @@ export const useFile = <Reference extends FilesReference>(
       setShown({
         client,
         key,
-        error: internals.fencedBy() ?? clientError("operation.unreachable"),
+        error: internals.fencedBy() ?? clientError("function.unreachable"),
       });
     };
     const unfence = internals.onFence(fenced);
@@ -790,7 +790,7 @@ class StreamRun {
     } catch (error) {
       if (!this.#left && error instanceof GraspError) {
         this.#show(
-          error.code === "operation.cancelled"
+          error.code === "function.cancelled"
             ? { status: "cancelled", progress: this.#progress() }
             : { status: "failed", error, progress: this.#progress() }
         );

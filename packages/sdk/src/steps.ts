@@ -1,7 +1,7 @@
 // What the runtime and the describer agree on about steps. Internal to the
 // SDK: neither workflow code nor the runtime imports this module.
 
-import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
+import { resourceAliasPattern } from "@grasp-os/shared/function-limits";
 import {
   maxAttemptTimeoutMs,
   maxStepRetries,

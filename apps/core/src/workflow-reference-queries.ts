@@ -68,8 +68,8 @@ import type { SealedSteps } from "./workflows/sealed-steps.ts";
 //   a kind, resolved by name in the release that answers the call (the
 //   App's current one), against its declared workflow and what its seal
 //   resolved, rebuilt into the generated queries. A name that release
-//   doesn't declare is `operation.not_found`, another kind
-//   `operation.kind_mismatch`, and arguments are checked by its own
+//   doesn't declare is `function.not_found`, another kind
+//   `function.kind_mismatch`, and arguments are checked by its own
 //   descriptors.
 // - Reading another person's runs, or another App's: `runs` lists only
 //   runs whose start receipt says this App started them for the caller,
@@ -150,7 +150,7 @@ const names: ReadonlySet<string> = new Set([
 
 const toName = (name: string): WorkflowQueryName => {
   if (!names.has(name)) {
-    throw operationErrors.create("operation.not_found");
+    throw operationErrors.create("function.not_found");
   }
   // SAFETY: checked against the query names just above.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -174,7 +174,7 @@ export interface ResolvedWorkflowQuery {
 /**
  * The workflow query `reference` names in `release`, resolved as a
  * function reference is, by its name in the release that answers
- * (`operation.not_found`, `operation.kind_mismatch`): a workflow that
+ * (`function.not_found`, `function.kind_mismatch`): a workflow that
  * release no longer binds has no queries.
  */
 export const workflowQueryOf = (
@@ -192,10 +192,10 @@ export const workflowQueryOf = (
       ? undefined
       : workflowQueries(bound)[toName(name)];
   if (operation === undefined || name === undefined) {
-    throw operationErrors.create("operation.not_found");
+    throw operationErrors.create("function.not_found");
   }
   if (reference.kind !== operation.kind) {
-    throw operationErrors.create("operation.kind_mismatch");
+    throw operationErrors.create("function.kind_mismatch");
   }
   return {
     alias,
@@ -737,7 +737,7 @@ const historyPage = async (
  * The most pages one window of a run's history reads: enough for the
  * largest window in pages of ten rows, as an App's own windows
  * (query-windows.ts). A journal sparser than that, mostly bookkeeping no
- * row tells, has its window refused (`operation.read_limit`) rather than
+ * row tells, has its window refused (`function.read_limit`) rather than
  * cut short, so Load More never stalls on the same records.
  */
 const historyWindowMaxPages = liveWindowMaxItems / 10;
@@ -801,7 +801,7 @@ const historyWindow = async (
     }
     cursor = page.nextCursor;
   }
-  throw operationErrors.create("operation.read_limit");
+  throw operationErrors.create("function.read_limit");
 };
 
 /** The version the release pins, while the App's binding still names it. */

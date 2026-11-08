@@ -42,50 +42,49 @@ export type OperationResult =
 
 /** Why the operation host refused or failed a call. */
 export const operationErrors = defineErrorFamily({
-  "operation.not_found": "There is no such operation.",
-  "operation.kind_mismatch":
+  "function.not_found": "There is no such operation.",
+  "function.kind_mismatch":
     "That operation is of another kind than the call expects.",
-  "operation.read_only": "A query reads records and can't change them.",
-  "operation.no_database":
+  "function.read_only": "A query reads records and can't change them.",
+  "function.no_database":
     "An action has no database: it reads and writes through the App's queries and mutations.",
-  "operation.no_resources":
+  "function.no_resources":
     "Only an action uses resources; queries and mutations never reach outside the App.",
-  "operation.ended": "This operation's call has ended.",
-  "operation.deadline_exceeded":
+  "function.ended": "This operation's call has ended.",
+  "function.deadline_exceeded":
     "The operation ran past its deadline, and was stopped before it changed anything more.",
-  "operation.unfinished_call":
+  "function.unfinished_call":
     "The operation left a call it started running past its deadline.",
-  "operation.mode_mismatch":
+  "function.mode_mismatch":
     "That action streams its progress, or doesn't, unlike what the call expects: a streaming action is called through useStream or client.stream, any other through useAction or client.action.",
-  "operation.cancelled":
+  "function.cancelled":
     "The action was cancelled before it finished. What it changed before then stays changed.",
-  "operation.outcome_unknown":
+  "function.outcome_unknown":
     "The action stopped without an answer, so whether it finished is unknown. It wasn't run again.",
-  "operation.stream_limit":
+  "function.stream_limit":
     "You're running as many streaming actions in this App as one person may at once. Wait for one to finish, or cancel one.",
-  "operation.action_limit":
+  "function.action_limit":
     "You're running as many actions in this App as one person may at once. Wait for one to finish.",
-  "operation.access_changed":
+  "function.access_changed":
     "Your access to this App changed since this action started, so its outcome isn't shown. Run it again to see it under your access now.",
-  "operation.no_stream":
-    "Only an action that declares `stream` emits progress.",
-  "operation.emit_limit":
+  "function.no_stream": "Only an action that declares `stream` emits progress.",
+  "function.emit_limit":
     "The action emitted more progress snapshots than one call may.",
-  "operation.call_limit":
+  "function.call_limit":
     "This call made more host calls, ran more nested functions, or made more resource requests than one call may.",
-  "operation.depth_exceeded":
+  "function.depth_exceeded":
     "Functions called each other deeper than one call may go.",
-  "operation.cpu_exceeded":
+  "function.cpu_exceeded":
     "The operation used more CPU time than one call may, so it was stopped.",
-  "operation.memory_exceeded":
+  "function.memory_exceeded":
     "The operation used more memory than one call may, so it was stopped.",
-  "operation.sandbox_refused":
+  "function.sandbox_refused":
     "The operation's code sent the host more than one call may.",
-  "operation.sandbox_busy":
+  "function.sandbox_busy":
     "This App runs as many calls at once as it may. Try again shortly.",
-  "operation.sandbox_unavailable":
+  "function.sandbox_unavailable":
     "The sandbox that runs the App's code isn't available. Try again shortly.",
-  "operation.sandbox_lost":
+  "function.sandbox_lost":
     "The sandbox stopped answering after the call started, so whether it changed anything is unknown.",
   "resource.not_allowed":
     "The App didn't declare that use of this resource for this function.",
@@ -132,7 +131,7 @@ export const operationErrors = defineErrorFamily({
     "That query doesn't take a pagination argument and answer pages, so it can't be read as a paginated list.",
   "mutation.too_large":
     "This change stages more than one commit can hold, with what it returns.",
-  "operation.read_limit":
+  "function.read_limit":
     "This call read the store more often, or with more staged changes, than one call may.",
   "mutation.concurrent_change":
     "The records changed while this change was made. Try again.",
@@ -181,34 +180,34 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "contract.invalid_query": "source",
   "mutation.too_large": "contract",
   "effect.outcome_unknown": "uncertain",
-  "operation.deadline_exceeded": "operational",
-  "operation.sandbox_busy": "operational",
-  "operation.sandbox_unavailable": "operational",
+  "function.deadline_exceeded": "operational",
+  "function.sandbox_busy": "operational",
+  "function.sandbox_unavailable": "operational",
   // The call may have started, and changed something.
-  "operation.sandbox_lost": "uncertain",
+  "function.sandbox_lost": "uncertain",
   // The call ended (its caller went, or it was stopped): nothing the App's
   // code or its caller did wrong.
-  "operation.ended": "operational",
+  "function.ended": "operational",
   // Cancelled by the person, or because no page followed it any more.
-  "operation.cancelled": "operational",
+  "function.cancelled": "operational",
   // Its host went away while it ran: what it did is unknown, not failed.
-  "operation.outcome_unknown": "uncertain",
+  "function.outcome_unknown": "uncertain",
   // Nothing ran: room comes back as the person's other streams end.
-  "operation.stream_limit": "operational",
-  "operation.action_limit": "operational",
-  "operation.access_changed": "authorization",
+  "function.stream_limit": "operational",
+  "function.action_limit": "operational",
+  "function.access_changed": "authorization",
   // The App's own code went past a bound of one call: its source, not the
   // caller's request or the platform.
-  "operation.cpu_exceeded": "source",
-  "operation.memory_exceeded": "source",
-  "operation.sandbox_refused": "source",
-  "operation.call_limit": "source",
-  "operation.depth_exceeded": "source",
-  "operation.emit_limit": "source",
-  "operation.no_stream": "source",
+  "function.cpu_exceeded": "source",
+  "function.memory_exceeded": "source",
+  "function.sandbox_refused": "source",
+  "function.call_limit": "source",
+  "function.depth_exceeded": "source",
+  "function.emit_limit": "source",
+  "function.no_stream": "source",
   // A call it started outlived the operation's deadline: the operation
   // broke its contract to end with its calls.
-  "operation.unfinished_call": "contract",
+  "function.unfinished_call": "contract",
   // A JSON workflow's own error, which its `raise` task declares.
   "workflow.raised": "domain",
 };
@@ -224,8 +223,8 @@ const retryableCodes: ReadonlySet<string> = new Set([
   "resource.budget_busy",
   // Nothing was sent; a provider's rate comes back as its window passes.
   "resource.rate_limited",
-  "operation.sandbox_busy",
-  "operation.sandbox_unavailable",
+  "function.sandbox_busy",
+  "function.sandbox_unavailable",
   // Nothing was published; the build runs on, cached for the next try.
   "workflow.build_slow",
 ]);
@@ -238,7 +237,7 @@ export const categoryOf = (code: string): ErrorCategory => {
   }
   if (
     code.startsWith("contract.") ||
-    code.startsWith("operation.") ||
+    code.startsWith("function.") ||
     code === "data.invalid" ||
     code === "data.invalid_query" ||
     code === "data.unknown_table" ||

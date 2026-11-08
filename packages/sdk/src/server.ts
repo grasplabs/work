@@ -1,4 +1,4 @@
-import { usesMaxEntries } from "@grasp-os/shared/operation-limits";
+import { usesMaxEntries } from "@grasp-os/shared/function-limits";
 
 import type { DatabaseReader, DatabaseWriter } from "./database.ts";
 import { isServerFunction, serverFunctions } from "./handlers.ts";
@@ -479,8 +479,8 @@ export interface StreamEmit<Progress> {
    * host may skip one a slow page hasn't read yet for a newer one: emit
    * the whole state (the text so far), never a delta, and keep critical
    * events in a mutation or a workflow, never in progress. Rejects once
-   * the action is cancelled or has ended (`operation.cancelled`,
-   * `operation.ended`).
+   * the action is cancelled or has ended (`function.cancelled`,
+   * `function.ended`).
    */
   readonly emit: (progress: Progress) => Promise<void>;
 }

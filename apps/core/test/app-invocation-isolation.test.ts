@@ -30,7 +30,7 @@ import { signedInApi } from "./sign-in.ts";
 // discarded once the call answers, so a late write through a kept channel
 // can't even be attempted, and its refusal can't be observed from here.
 // That a channel refuses every use once its invocation ended
-// (`operation.ended`) is operations.test.ts's, where the host's channel
+// (`function.ended`) is operations.test.ts's, where the host's channel
 // is reached directly.
 
 type Sealed = Fixture & { release: Release };
