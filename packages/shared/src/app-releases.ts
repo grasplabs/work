@@ -26,13 +26,15 @@ import { defineErrorFamily } from "./errors.ts";
  * inspection a seal makes, where earlier ones recorded two; version 7
  * seals an SDK whose writes and reads assert no revision and whose
  * records carry no `_rev`, which a store no longer takes or answers, so
- * an older one is refused rather than failing each call. A release
+ * an older one is refused rather than failing each call; version 8
+ * stores an App manifest without `preferences`, which the platform no
+ * longer answers. A release
  * sealed in another format is
  * refused as such (`version.format_unsupported`), sealing it again
  * included, since its manifest is stored for good: a new version
  * replaces it, and none is read as this.
  */
-export const releaseFormatVersion = 7;
+export const releaseFormatVersion = 8;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 
