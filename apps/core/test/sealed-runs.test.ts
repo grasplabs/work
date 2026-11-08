@@ -3,6 +3,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowDuration } from "@grasp-os/workerflow/contracts";
+import { generatorVersion } from "@grasp-os/workflow-schema/generate";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import {
@@ -614,6 +615,32 @@ return { before, after: await late };
     );
     await expect(sealedRunOf(runId ?? "")).rejects.toMatchObject({
       code: "workflow.version_corrupt",
+    });
+  });
+
+  it("refuses a build an earlier generator made before any run of it starts, as one to publish again", async () => {
+    // Sealed with the SDK of generator 1, whose decisions the run host's
+    // engine no longer runs.
+    const older = await publishedBefore((manifest) => {
+      const changed = manifest.replace(
+        `"generator":${JSON.stringify(generatorVersion)}`,
+        '"generator":"grasp-workflow-ts/1"'
+      );
+      expect(changed).not.toBe(manifest);
+      return changed;
+    });
+    const runs = async () =>
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS runs FROM workflow_resource_runs WHERE workflow_resource_id = ?"
+      )
+        .bind(older.workflow.id)
+        .first<{ runs: number }>();
+    expect({
+      start: await startOfFirst(older),
+      runs: await runs(),
+    }).toStrictEqual({
+      start: "workflow.format_unsupported",
+      runs: { runs: 0 },
     });
   });
 

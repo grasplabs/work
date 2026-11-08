@@ -94,8 +94,15 @@ import type {
 /** The SDK the generated module imports, and nothing else. */
 export const generatedImport = "@grasp-os/sdk/workflow";
 
-/** The generator, as a build names what made it. */
-export const generatorVersion = "grasp-workflow-ts/1";
+/**
+ * The generator, as a build names what made it. A build seals the SDK its
+ * code was generated for, which the run host's engine must fit, so a new
+ * version here is a new contract between them: core loads only builds of
+ * this one, and an older build is refused, to publish again
+ * (`workflow.format_unsupported`), never half run. Version 2: a decision
+ * takes no `ask`, and the engine tells its people (`askDecision`).
+ */
+export const generatorVersion = "grasp-workflow-ts/2";
 
 /** A task as its generator writes it: the loops around it are added. */
 type Unscoped<Task> = Task extends unknown ? Omit<Task, "scope"> : never;
