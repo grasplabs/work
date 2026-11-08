@@ -3,21 +3,13 @@ import { canonicalText } from "@grasp-os/shared/json";
 import { storeNamePattern } from "@grasp-os/shared/store-limits";
 
 import { hasExactly, isOverBytes, refuser } from "./declaration.ts";
-import {
-  defineSchema,
-  defineTable,
-  managedFields,
-  SchemaDefinitionError,
-  schemaLimits,
-  tablesOf,
-} from "./schema.ts";
-import type {
-  AccessModes,
-  AnyTable,
-  RowRules,
-  SchemaDefinition,
-  SchemaDefinitionCode,
-} from "./schema.ts";
+import { defineSchema, tablesOf } from "./define-schema.ts";
+import { defineTable } from "./define-table.ts";
+import { SchemaDefinitionError } from "./schema-error.ts";
+import type { SchemaDefinitionCode } from "./schema-error.ts";
+import { managedFields, schemaLimits } from "./schema-limits.ts";
+import type { AnyTable, SchemaDefinition } from "./schema-types.ts";
+import type { AccessModes, RowRules } from "./table-access.ts";
 import { descriptorVersion, isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";

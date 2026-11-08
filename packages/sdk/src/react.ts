@@ -73,7 +73,6 @@ import type {
   UploadOptions,
 } from "./client-files.ts";
 import { readWorkflowReference, workflowChannel } from "./client-workflow.ts";
-import type { PaginationResult } from "./database.ts";
 import { useGraspForm } from "./form.ts";
 import type {
   FormOptionsInput,
@@ -83,6 +82,7 @@ import type {
 } from "./form.ts";
 import { peopleDirectory, peopleReferences } from "./people.ts";
 import type { PeopleDirectory, User } from "./people.ts";
+import type { PaginationResult } from "./query-reads.ts";
 import type {
   AnyWorkflowReference,
   ArgsOf,

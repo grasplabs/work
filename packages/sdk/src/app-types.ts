@@ -12,7 +12,7 @@ import type {
 } from "./permission-types.ts";
 import type { SchemaAnswer } from "./schema-answer.ts";
 import type { SchemaManifest } from "./schema-manifest.ts";
-import type { SchemaDefinition } from "./schema.ts";
+import type { SchemaDefinition } from "./schema-types.ts";
 import type { AnyFunction, FunctionKind, Grant, Visibility } from "./server.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";

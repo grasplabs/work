@@ -10,7 +10,7 @@ import {
 import type { AppDefinition, DefinedField } from "./definition.ts";
 import { readPermissionDeclaration } from "./permission-read.ts";
 import type { AppPermission, PeoplePermission } from "./permission-types.ts";
-import type { RowRule } from "./schema.ts";
+import type { RowRule } from "./table-access.ts";
 import { isSemanticKind } from "./value-descriptor.ts";
 import type { SemanticKind, ValueDescriptor } from "./value-descriptor.ts";
 

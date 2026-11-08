@@ -5,16 +5,16 @@ import { AppDefinitionError } from "./app-definition-error.ts";
 import type { App, AppManifest, AppPermissions } from "./app-types.ts";
 import { defineApp, inspectApp, registerApp } from "./app.ts";
 import { isOverBytes, refuser } from "./declaration.ts";
+import { defineSchema } from "./define-schema.ts";
+import { defineTable } from "./define-table.ts";
 import { readPermissionDeclaration } from "./permission-read.ts";
-import { defineSchema, defineTable } from "./schema.ts";
+import type { AnyTable, SchemaDefinition } from "./schema-types.ts";
 import type {
   AccessMode,
-  AnyTable,
   RowRole,
   RowRule,
-  SchemaDefinition,
   TableAccess,
-} from "./schema.ts";
+} from "./table-access.ts";
 import type { FrozenJson, ValueDescriptor } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import { schemaOf } from "./value-schema.ts";

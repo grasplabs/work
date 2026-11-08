@@ -4,7 +4,8 @@ import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 import { AppError } from "./app-error.ts";
 import { inspectApp } from "./app.ts";
 import { httpContract } from "./connector-contracts.ts";
-import { databaseReader, databaseWriter } from "./database.ts";
+import { databaseReader } from "./database-reader.ts";
+import { databaseWriter } from "./database-writer.ts";
 import { isThenable, refusals } from "./lockdown.ts";
 import { isActionPermission } from "./manifest-permissions.ts";
 import {

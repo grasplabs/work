@@ -27,8 +27,8 @@ import {
   PermissionDefinitionError,
 } from "./permission-checks.ts";
 import { permission } from "./permission.ts";
-import { SchemaDefinitionError } from "./schema.ts";
-import type { AccessMode, RowRole } from "./schema.ts";
+import { SchemaDefinitionError } from "./schema-error.ts";
+import type { AccessMode, RowRole } from "./table-access.ts";
 import { ValueDefinitionError } from "./value-descriptor.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 import { descriptorOf } from "./value-schema.ts";

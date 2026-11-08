@@ -1,7 +1,7 @@
 import { isEventType } from "@grasp-os/shared/sealed-builds";
 
-import type { PaginationResult } from "./database.ts";
 import { namePattern, sha256Pattern } from "./declaration.ts";
+import type { PaginationResult } from "./query-reads.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 
