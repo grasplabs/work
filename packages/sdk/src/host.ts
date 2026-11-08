@@ -123,8 +123,9 @@ export { clientInternals, GraspClient } from "./client-core.ts";
 export type { ClientTransport, StreamLink } from "./client-transport.ts";
 // The workflow channel the typed `useWorkflow` speaks over a client, for
 // core's own tests of the side of it core serves (page-workflows.ts).
-export { readWorkflowReference, workflowChannel } from "./client-workflow.ts";
-export type { FileTransport, TransferProgress } from "./client-files.ts";
+export { workflowChannel } from "./client-workflow.ts";
+export { readWorkflowReference } from "./workflow-reference-read.ts";
+export type { FileTransport, TransferProgress } from "./file-transport.ts";
 
 // The page's side of core's file channel (spec 10.7.5): what moves a
 // page's files' bytes, which never travel in a JSON call.

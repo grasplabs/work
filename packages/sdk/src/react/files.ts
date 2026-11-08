@@ -6,14 +6,11 @@ import { clientInternals } from "../client-core.ts";
 import type { GraspClient } from "../client-core.ts";
 import { clientError } from "../client-error.ts";
 import type { GraspError } from "../client-error.ts";
-import { fileFailure, readFileRef } from "../client-files.ts";
-import type {
-  Declaring,
-  FileRef,
-  FileView,
-  UploadOptions,
-} from "../client-files.ts";
+import { fileFailure } from "../client-files.ts";
+import type { FileView, UploadOptions } from "../client-files.ts";
 import type { FilesReference } from "../file-link-references.ts";
+import { readFileRef } from "../file-references.ts";
+import type { Declaring, FileRef } from "../file-references.ts";
 import { UploadTransfer } from "../upload-transfer.ts";
 import type { UploadView } from "../upload-transfer.ts";
 import { useClient } from "./provider.ts";

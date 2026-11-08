@@ -4,7 +4,7 @@ import type {
   PageFileMessage,
 } from "@grasp-os/shared/app-file-limits";
 
-import type { FileTransport, TransferProgress } from "./client-files.ts";
+import type { FileTransport, TransferProgress } from "./file-transport.ts";
 
 // The frame's side of its file port (spec 10.7.5): how the session client
 // in a page's frame moves files, through the page, which alone reaches

@@ -4,14 +4,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { GraspClient } from "../src/client-core.ts";
 import { GraspError } from "../src/client-error.ts";
 import type { ClientTransport } from "../src/client-transport.ts";
-import {
-  readWorkflowReference,
-  workflowChannel,
-} from "../src/client-workflow.ts";
+import { workflowChannel } from "../src/client-workflow.ts";
 import { bindForm } from "../src/form.ts";
 import type { FormApiOf, FormBinding, FormOptionsInput } from "../src/form.ts";
 import { v } from "../src/index.ts";
 import type { Id } from "../src/index.ts";
+import { readWorkflowReference } from "../src/workflow-reference-read.ts";
 import { api, workflows } from "./notes/server/_generated/api.ts";
 
 // A form's submission state through the real session client, against the

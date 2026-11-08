@@ -1,7 +1,7 @@
 import { canonicalJson } from "@grasp-os/shared/json";
 
 import { AccessFence } from "./access-fence.ts";
-import { clientError, fences } from "./client-error.ts";
+import { clientError } from "./client-error.ts";
 import { ClientFiles } from "./client-files.ts";
 import type { ClientInternals } from "./client-internals.ts";
 import { ClientLinks } from "./client-links.ts";
@@ -21,6 +21,7 @@ import type {
   Streaming,
 } from "./function-references.ts";
 import { Pagers } from "./paginated-query.ts";
+import { fences } from "./refusals.ts";
 import { Streams } from "./streams.ts";
 import { Submissions } from "./submissions.ts";
 

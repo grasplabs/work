@@ -1,6 +1,7 @@
 import type { AccessFence } from "./access-fence.ts";
-import { clientError, fences } from "./client-error.ts";
-import type { GraspError, Settled } from "./client-error.ts";
+import type { Settled } from "./call-answers.ts";
+import { clientError } from "./client-error.ts";
+import type { GraspError } from "./client-error.ts";
 import {
   settleRead,
   settleWindow,
@@ -10,6 +11,7 @@ import {
 import type { QueryEntry } from "./client-query-entry.ts";
 import { observe, waitAfter } from "./client-retry.ts";
 import { sleep } from "./client-shared.ts";
+import { fences } from "./refusals.ts";
 import { submissionBudgetMs } from "./submission-verdict.ts";
 
 /**

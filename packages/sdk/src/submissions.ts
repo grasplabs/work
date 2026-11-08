@@ -2,11 +2,12 @@ import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import { canonicalJson } from "@grasp-os/shared/json";
 
 import type { AccessFence } from "./access-fence.ts";
-import { clientError, settlesSubmission } from "./client-error.ts";
+import { clientError } from "./client-error.ts";
 import { inputOf, readOptions, submitOptionKeys } from "./client-request.ts";
 import type { ReadReference } from "./client-request.ts";
 import { waitAfter, waitFor } from "./client-retry.ts";
 import { freshKey, sleep } from "./client-shared.ts";
+import { settlesSubmission } from "./refusals.ts";
 import {
   readSettled,
   showsStale,

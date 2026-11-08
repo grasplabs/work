@@ -1,5 +1,5 @@
-import type { FileTransport } from "./client-files.ts";
 import type { LinkTransport } from "./client-links.ts";
+import type { FileTransport } from "./file-transport.ts";
 
 /**
  * How the client reaches the host: one call of the App `app`, its

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { clientInternals, GraspClient } from "../src/client-core.ts";
 import { clientError, GraspError } from "../src/client-error.ts";
-import type { FileTransport, TransferProgress } from "../src/client-files.ts";
+import type { FileTransport, TransferProgress } from "../src/file-transport.ts";
 import { UploadTransfer } from "../src/upload-transfer.ts";
 
 // One `useUpload` hook's transfer (spec 10.7.5), against the page's side
