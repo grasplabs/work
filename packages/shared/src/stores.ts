@@ -472,7 +472,9 @@ export const dataErrors = defineErrorFamily({
   "data.too_many_tables": `A store holds at most ${storeMaxTables} tables.`,
   "data.too_many_indexes": `A store holds at most ${storeMaxIndexes} indexes, those kept for older versions included.`,
   "data.conflict":
-    "The record changed since it was read. Read it again, then retry.",
+    "This record is gone, isn't yours to change, or its ID is already in use.",
+  "data.preferences_changed":
+    "Your preferences changed since they were read. Read them again, then retry.",
   "data.store_unavailable": "This store doesn't exist or was deleted.",
   "data.fixture_discarded": "This fixture store was discarded.",
   "data.receipt_invalid":

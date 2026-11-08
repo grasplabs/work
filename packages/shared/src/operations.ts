@@ -167,6 +167,7 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "resource.limit_reached": "operational",
   "data.write_denied": "authorization",
   "data.conflict": "domain",
+  "data.preferences_changed": "domain",
   "data.referenced": "domain",
   "data.reference_invalid": "domain",
   "data.cascade_limit": "domain",

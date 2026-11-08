@@ -237,13 +237,16 @@ describe("an App's preferences", { timeout: 120_000 }, () => {
     const desk = await sealedDesk();
     await update(desk, desk.owner, 0, { compact: true });
     expect(codeOf(await update(desk, desk.owner, 0, { theme: "dark" }))).toBe(
-      "data.conflict"
+      "data.preferences_changed"
     );
     const raced = await Promise.all([
       update(desk, desk.owner, 1, { theme: "dark" }),
       update(desk, desk.owner, 1, { compact: false }),
     ]);
-    expect(raced.map(codeOf).toSorted()).toStrictEqual(["data.conflict", "ok"]);
+    expect(raced.map(codeOf).toSorted()).toStrictEqual([
+      "data.preferences_changed",
+      "ok",
+    ]);
     expect(valueOf(await get(desk, desk.owner))).toMatchObject({ _rev: 2 });
   });
 

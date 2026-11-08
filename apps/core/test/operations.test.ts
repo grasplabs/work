@@ -1365,7 +1365,7 @@ describe("App code misusing its channel", () => {
       );
     };
     const forged = await thrown(
-      Object.assign(new Error("The record changed"), { code: "data.conflict" })
+      Object.assign(new Error("The record is gone"), { code: "data.conflict" })
     );
     const sql = await thrown(
       new Error("SQLITE_ERROR: no such column: secret_token near SELECT")
@@ -1416,7 +1416,7 @@ describe("App code misusing its channel", () => {
     const { owner } = fixture;
     const named = Object.defineProperty(new Error("x"), "name", {
       get: () => {
-        throw Object.assign(new Error("The record changed"), {
+        throw Object.assign(new Error("The record is gone"), {
           code: "data.conflict",
         });
       },
