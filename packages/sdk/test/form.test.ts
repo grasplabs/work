@@ -480,6 +480,24 @@ describe("a form editing a record", () => {
     ]);
   });
 
+  it("sends after a reset every field that differs from what was last saved", async () => {
+    const { client, sent } = host(() => ({ value: record }));
+    const { binding, form } = formOf(client, api.notes.update, {
+      defaultValues: { id: record._id, title: record.title, body: record.body },
+    });
+    form.setFieldValue("title", "Edited");
+    await binding.submit();
+    // Back to the defaults it opened with: the title shows "Before" again,
+    // which the record no longer holds.
+    binding.reset();
+    form.setFieldValue("body", "More notes");
+    await binding.submit();
+    expect(sent.map(({ input }) => input)).toStrictEqual([
+      { id: record._id, title: "Edited" },
+      { id: record._id, title: "Before", body: "More notes" },
+    ]);
+  });
+
   it("shows a save of a record that is gone as the form's own data.conflict, keeping the person's values", async () => {
     const { client } = host(() => ({
       failed: "data.conflict",

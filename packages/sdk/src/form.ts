@@ -395,6 +395,14 @@ export class FormBinding {
    * (no `resetOnSuccess`): saved, so not edits to guard.
    */
   #savedValues: Record<string, unknown> | undefined;
+  /**
+   * The values its last successful submission sent, whatever became of
+   * the fields after (a `reset` to the defaults included): what the
+   * record holds as far as this form knows, which an edit's optional
+   * fields are compared with. None after a submission that reset the
+   * form: the next one starts anew.
+   */
+  #lastSent: Record<string, unknown> | undefined;
 
   constructor(
     target: Target,
@@ -687,9 +695,9 @@ export class FormBinding {
   /**
    * What a submission of an operation sends of `input`, normalized from
    * `values`: every field its arguments require or fill in with a
-   * default, and an optional field only when the person changed it since
-   * the values last saved (or the form's defaults), so an edit sends a
-   * patch. A local form's callback gets its whole output.
+   * default, and an optional field only when it differs from what the
+   * last save sent (or, before one, the form's defaults), so an edit sends
+   * a patch, and one after `reset` sends what the reset put back. A local form's callback gets its whole output.
    */
   #changed(input: unknown, values: Record<string, unknown>): unknown {
     const target = this.#target;
@@ -701,7 +709,7 @@ export class FormBinding {
       return input;
     }
     const { fields } = target.args;
-    const before = this.#savedValues ?? this.initialValues;
+    const before = this.#lastSent ?? this.initialValues;
     return Object.fromEntries(
       Object.entries(input).filter(
         ([name]) =>
@@ -833,6 +841,7 @@ export class FormBinding {
     // Set first: the guard `#set` tells reads it.
     this.#savedValues =
       this.#options.resetOnSuccess === true ? undefined : sentValues;
+    this.#lastSent = this.#savedValues;
     this.#set({ phase: "idle", attempted: false });
     if (this.#options.resetOnSuccess === true) {
       this.#formOf().reset(this.initialValues, { keepDefaultValues: true });
