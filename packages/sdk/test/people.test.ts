@@ -23,9 +23,9 @@ describe("the people reads' references", () => {
       )
     ).toStrictEqual(
       Object.fromEntries(
-        Object.entries(peopleFunctions).map(([read, operation]) => [
+        Object.entries(peopleFunctions).map(([read, fn]) => [
           read,
-          { name: operation.path },
+          { name: fn.path },
         ])
       )
     );

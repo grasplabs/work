@@ -1649,7 +1649,7 @@ const allowsGuests = (
   args: readonly Json[]
 ): boolean => {
   const [first] = args;
-  if (!declaration.operations.some((fn) => fn === method)) {
+  if (!declaration.operations.some((operation) => operation === method)) {
     return false;
   }
   if (method === "list") {
@@ -1727,7 +1727,7 @@ const allowsKnowledge = (
     : undefined;
   const allowed =
     schema !== undefined &&
-    declaration.operations.some((fn) => fn === method) &&
+    declaration.operations.some((operation) => operation === method) &&
     args.length === 1;
   const names = method === "recall" && isRecord(first) ? first.collections : [];
   const undeclared =
