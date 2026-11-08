@@ -106,9 +106,6 @@ export type FunctionReference<
   Progress = unknown,
 > = Callable<Kind, Vis, ArgsIn, Return, Progress>;
 
-/** Any function reference: its phantom members are only ever read. */
-type AnyReference = FunctionReference;
-
 export type { ArgsOf, ReturnOf } from "./references.ts";
 
 /**
@@ -119,15 +116,6 @@ export type { ArgsOf, ReturnOf } from "./references.ts";
  * to an App that doesn't declare them.
  */
 export type Grant = AnyPermission | AnyWorkflow;
-
-/** Any generated event reference, whatever its data. */
-type AnyWorkflowEvent = WorkflowEventReference<
-  string,
-  string,
-  string,
-  // oxlint-disable-next-line typescript/no-explicit-any -- the data is only read, by `EventDataOf`
-  any
->;
 
 /** The event references of the workflows among `Grants`. */
 type GrantedEvent<Grants extends Grant> = WorkflowEventReference<
@@ -605,17 +593,6 @@ const declarationKeys: Readonly<Record<FunctionKind, readonly string[]>> = {
   action: ["args", "returns", "stream", "handler"],
 };
 
-/** Hints for the superseded shapes spec 7 refuses rather than aliases. */
-const supersededHints: Readonly<Record<string, string>> = {
-  input: "Declare `args`, a map of field schemas, not `input`.",
-  output: "Declare `returns`, not `output`.",
-  reads:
-    "There is no `reads` list: a table's access and row rules decide what each caller reads.",
-  writes:
-    "There is no `writes` list: a table's access and row rules decide what each caller writes.",
-  stream: "Only an action streams.",
-};
-
 /** A definition of `kind` and `visibility` from `declaration`, checked. */
 const defineFunction = (
   schema: SchemaDefinition,
@@ -759,10 +736,7 @@ type MutationConstructor<
  * The server constructors and `doc`, specialized to one schema and to
  * what the App's permissions grant (`Grants`).
  */
-interface ServerModule<
-  Tables extends AnyTables,
-  Grants extends Grant = never,
-> {
+interface ServerModule<Tables extends AnyTables, Grants extends Grant = never> {
   readonly query: QueryConstructor<Tables, "public">;
   readonly internalQuery: QueryConstructor<Tables, "internal">;
   readonly mutation: MutationConstructor<Tables, "public", Grants>;

@@ -1216,7 +1216,7 @@ describe("browser permissions", () => {
         uses: [files],
         handler: () => null,
       })
-    ).toThrow("declaration has no `uses`.");
+    ).toThrow("An action's declaration has no `uses`.");
   });
 });
 
@@ -1252,7 +1252,7 @@ describe("reading a manifest back", () => {
           v.object({}).descriptor
         );
       },
-      "Only an action streams",
+      "A query's declaration has no `stream`.",
     ],
     [
       "a key no manifest has",

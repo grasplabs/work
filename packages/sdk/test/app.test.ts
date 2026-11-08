@@ -193,12 +193,12 @@ describe("what a function may use", () => {
   });
 
   test.each([
-    ["query", looseQuery],
-    ["mutation", looseMutation],
-    ["action", looseAction],
+    ["A query", looseQuery],
+    ["A mutation", looseMutation],
+    ["An action", looseAction],
   ] as const)(
-    "a %s that lists its own `uses` or `tables` is refused, never narrowed",
-    (kind, declare) => {
+    "%s that lists its own `uses` or `tables` is refused, never narrowed",
+    (named, declare) => {
       expect([
         refusal(() =>
           declare({
@@ -217,8 +217,8 @@ describe("what a function may use", () => {
           })
         ),
       ]).toStrictEqual([
-        `A ${kind}'s declaration has no \`uses\`.`,
-        `A ${kind}'s declaration has no \`tables\`.`,
+        `${named}'s declaration has no \`uses\`.`,
+        `${named}'s declaration has no \`tables\`.`,
       ]);
     }
   );
