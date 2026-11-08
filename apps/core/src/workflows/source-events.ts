@@ -23,14 +23,19 @@ import { errorResponse } from "../errors.ts";
 import { sourceSecretKeyOf } from "../event-sources.ts";
 import { startOnce } from "./connector-triggers.ts";
 import type { Outcome, Taker } from "./connector-triggers.ts";
+import { routeSourceEvent } from "./event-waits.ts";
+import type { SourceEvent } from "./event-waits.ts";
 
 // Events from outside (GRA-1560): an event source (event-sources.ts) takes
 // POSTs at `/api/hooks/<token>`, each a delivery Standard Webhooks signs
 // (standardwebhooks.com), and turns each into a typed event: the body's
 // `type` and its `data`, as Standard Webhooks shapes a payload. Webhook
 // triggers on that source and type start their workflows with the data as
-// input (trigger-resources.ts). App code never handles the request: a
-// workflow started here calls an App's mutation through its binding.
+// input (trigger-resources.ts); runs waiting on a match its data has take
+// it, or it is kept for a wait reached later (event-waits.ts, whose threat
+// model covers that part). App code never handles the request: a
+// workflow started or woken here calls an App's mutation through its
+// binding.
 // Threat model, written before the code, and how each is closed:
 //
 // - A forged or spoofed sender. The URL's token (128 random bits of the
@@ -227,18 +232,6 @@ const unsigned = (reason: string, requestId: string): Response => {
   );
 };
 
-/** An event a source took: its type and data, and the source it came from. */
-export interface SourceEvent {
-  readonly source: string;
-  /**
-   * Its key: the hash of the source and its `webhook-id`, the same for
-   * every retry of it.
-   */
-  readonly same: string;
-  readonly type: string;
-  readonly data: Json;
-}
-
 /** The body as an event's type and data, if it is one. */
 const eventOf = (
   bytes: Uint8Array
@@ -337,15 +330,16 @@ export const startSourceTriggers = async (
 const retryAfterSeconds = 60;
 
 /**
- * The answer to a signed delivery whose triggers came to `outcomes`: told
- * to sign again when the secret changed under it (no trigger started, as
- * each needed the same secret), to try again later when any trigger may
- * start later, accepted otherwise. A trigger refusing it for good is
- * audited, and the event still accepted: the sender's retry wouldn't
- * change that, and others may have taken it.
+ * The answer to a signed delivery whose triggers came to `outcomes` and
+ * waits to `routed`: told to sign again when the secret changed under it
+ * (no trigger started, as each needed the same secret), to try again
+ * later when any trigger may start later or a waiting run take it later,
+ * accepted otherwise. A trigger or a run refusing it for good is audited,
+ * and the event still accepted: the sender's retry wouldn't change that,
+ * and others may have taken it.
  */
 const answerOf = (
-  outcomes: readonly Outcome[],
+  outcomes: readonly (Outcome | "retry" | "stale")[],
   requestId: string
 ): Response => {
   if (outcomes.includes("stale")) {
@@ -425,10 +419,22 @@ export const sourceEventResponse = async (
   // The same `webhook-id`, however often sent and signed, is the same
   // event: a sender's retries start one run per trigger.
   const same = await sha256Hex(`webhook:${source.id}:${signed.id}`);
-  const outcomes = await startSourceTriggers(
-    env,
-    { source: source.id, same, ...event },
-    stillSignedSql(source.id, source.generation)
+  const taken: SourceEvent = { source: source.id, same, ...event };
+  const also = stillSignedSql(source.id, source.generation);
+  const outcomes = await startSourceTriggers(env, taken, also);
+  if (outcomes.includes("stale")) {
+    return answerOf(outcomes, requestId);
+  }
+  const routed = await routeSourceEvent(env, taken, also);
+  if (routed === "conflict") {
+    return errorResponse(
+      409,
+      eventSourceErrors.create("webhook.delivery_conflict"),
+      requestId
+    );
+  }
+  return answerOf(
+    routed === "retry" || routed === "stale" ? [...outcomes, routed] : outcomes,
+    requestId
   );
-  return answerOf(outcomes, requestId);
 };

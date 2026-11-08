@@ -2349,6 +2349,10 @@ msgstr "Answers come only from what {organizationName} shared, with sources."
 msgid "Answers come only from what your organization shared, with sources."
 msgstr "Answers come only from what your organization shared, with sources."
 
+#: src/workflows/binding-approvals.tsx
+msgid "Any event its webhook source sends of the types its contract admits"
+msgstr "Any event its webhook source sends of the types its contract admits"
+
 #: src/activity/audit-log.tsx
 msgid "Any type"
 msgstr "Any type"
@@ -4585,6 +4589,14 @@ msgstr "Did it happen?"
 #: src/inbox/items.ts
 msgid "Did this happen? {who}"
 msgstr "Did this happen? {who}"
+
+#: src/activity/audit-words.ts
+msgid "Didn't hand a webhook event to the run waiting for it"
+msgstr "Didn't hand a webhook event to the run waiting for it"
+
+#: src/activity/audit-words.ts
+msgid "Didn't keep a webhook event: its source keeps as many as it may"
+msgstr "Didn't keep a webhook event: its source keeps as many as it may"
 
 #: src/activity/audit-words.ts
 msgid "Didn't start a workflow from a webhook event"
@@ -7209,6 +7221,10 @@ msgstr "Let version {version} of {name} go live?"
 #: src/workflows/workflow-status.tsx
 msgid "Let version {version} of {who} go live"
 msgstr "Let version {version} of {who} go live"
+
+#: src/activity/audit-words.ts
+msgid "Let webhook events no run waited for expire"
+msgstr "Let webhook events no run waited for expire"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Let’s start"

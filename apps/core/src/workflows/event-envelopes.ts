@@ -24,6 +24,12 @@ export const eventTypeKey = async (
   type: string
 ): Promise<string> => `ce-${await sha256Hex(`${alias}\n${type}`)}`;
 
+/**
+ * The engine attribute an event core handed a run by a match carries: the
+ * match's hash (event-waits.ts), so only the wait of that match takes it.
+ */
+export const matchAttribute = "graspmatch";
+
 /** An event as the engine keeps it for its run: all but its time. */
 export const storedEventSchema = z.strictObject({
   id: z.string().min(1).max(128),

@@ -14,6 +14,7 @@ import {
   attributesOf,
   contentType,
   eventTypeKey,
+  matchAttribute,
   storedEventSchema,
 } from "./event-envelopes.ts";
 import type { StoredEvent } from "./event-envelopes.ts";
@@ -94,6 +95,10 @@ const deliverySchema = z.strictObject({
     .max(1024)
     .refine((text) => URL.canParse(text), "An absolute URI"),
   sender: z.string().min(1).max(256),
+  match: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/u)
+    .optional(),
 });
 
 /**
@@ -126,7 +131,22 @@ export interface RunEventDelivery {
    * for, whatever release), derived as `source` is, never from the input.
    */
   readonly sender: string;
+  /**
+   * The match core took it to the run by, if any (event-waits.ts): kept
+   * beside it as an engine attribute, so only the wait of that match
+   * takes it.
+   */
+  readonly match?: string;
 }
+
+/** `stored`'s attributes (`attributesOf`), and its match if it has one. */
+const attributesWith = (
+  stored: StoredEvent,
+  match: string | undefined
+): Record<string, string> => ({
+  ...attributesOf(stored),
+  ...(match === undefined ? {} : { [matchAttribute]: match }),
+});
 
 /** An admitted event: its ID, and whether this delivery was the first. */
 export interface AdmittedEvent {
@@ -276,7 +296,7 @@ export const admitRunEvent = async (
     payload: stored,
     // Its ID names the delivery: a sender's key is its own, never another's.
     key: id,
-    attributes: attributesOf(stored),
+    attributes: attributesWith(stored, event.match),
     sender: event.sender,
   });
   switch (outcome) {

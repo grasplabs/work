@@ -284,6 +284,18 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     action: "workflow.webhook.refused",
     text: msg`Didn't start a workflow from a webhook event`,
   },
+  {
+    action: "workflow.webhook.wait_refused",
+    text: msg`Didn't hand a webhook event to the run waiting for it`,
+  },
+  {
+    action: "workflow.webhook.kept_expired",
+    text: msg`Let webhook events no run waited for expire`,
+  },
+  {
+    action: "workflow.webhook.kept_full",
+    text: msg`Didn't keep a webhook event: its source keeps as many as it may`,
+  },
   { action: "workflow.email.read", text: msg`Read an email attachment` },
   {
     action: "workflow.email.attachment.sent",

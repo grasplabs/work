@@ -2349,6 +2349,10 @@ msgstr "Les réponses viennent uniquement de ce que {organizationName} a partag�
 msgid "Answers come only from what your organization shared, with sources."
 msgstr "Les réponses viennent uniquement de ce que votre organisation a partagé, avec leurs sources."
 
+#: src/workflows/binding-approvals.tsx
+msgid "Any event its webhook source sends of the types its contract admits"
+msgstr "Tout événement qu’envoie sa source de webhook, des types que son contrat admet"
+
 #: src/activity/audit-log.tsx
 msgid "Any type"
 msgstr "Tout type"
@@ -4585,6 +4589,14 @@ msgstr "Est-ce arrivé ?"
 #: src/inbox/items.ts
 msgid "Did this happen? {who}"
 msgstr "Est-ce arrivé ? {who}"
+
+#: src/activity/audit-words.ts
+msgid "Didn't hand a webhook event to the run waiting for it"
+msgstr "N’a pas remis un événement de webhook à l’exécution qui l’attendait"
+
+#: src/activity/audit-words.ts
+msgid "Didn't keep a webhook event: its source keeps as many as it may"
+msgstr "N’a pas conservé un événement de webhook : sa source en conserve déjà autant qu’elle le peut"
 
 #: src/activity/audit-words.ts
 msgid "Didn't start a workflow from a webhook event"
@@ -7209,6 +7221,10 @@ msgstr "Mettre en production la version {version} de {name} ?"
 #: src/workflows/workflow-status.tsx
 msgid "Let version {version} of {who} go live"
 msgstr "Mettre en production la version {version} de {who}"
+
+#: src/activity/audit-words.ts
+msgid "Let webhook events no run waited for expire"
+msgstr "A laissé expirer des événements de webhook qu’aucune exécution n’attendait"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Let’s start"

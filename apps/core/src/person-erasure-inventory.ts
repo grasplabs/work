@@ -9,6 +9,10 @@
 //   their ID and frozen name (Nick's D1, D3, D5);
 // - `kept`: a record that must stay: security, accounting, or the erasure's
 //   own, IDs only (D2);
+// - `expires`: a person's data with no key that names them (an outside
+//   system's event, say), so erasure can't find their rows: core deletes
+//   every row on its own within a bounded window, and erasure relies on
+//   that, with why;
 // - `none`: no person in it, with why when a column's name suggests one.
 //
 // A person hides in columns of every name (a JSON event, a scope's key),
@@ -39,6 +43,7 @@ export type ErasureClass =
     }
   | { readonly company: string }
   | { readonly kept: string }
+  | { readonly expires: string }
   | { readonly none: string };
 
 /** A table that holds no person at all. */
@@ -186,6 +191,21 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.workflow_resource_members": { company: "who has a role in a workflow" },
   "core.trigger_resources": { company: "triggers they own" },
   "core.event_sources": { company: "event sources an admin created" },
+  "core.event_waits": { none: "runs' waits, by run and hash" },
+  // An outside system's events may name people anywhere in their data,
+  // under no key of ours: erasing a person can't find them, so each is
+  // deleted within a day (workflows/event-waits.ts), and with its source.
+  "core.kept_events": {
+    expires:
+      "an outside system's events, which may name people; deleted within 24 hours",
+  },
+  "core.kept_event_keys": {
+    expires:
+      "hashes of a kept event's values; deleted with it, within 24 hours",
+  },
+  "core.kept_event_takes": {
+    none: "which run took a kept event; deleted with it",
+  },
   "core.trigger_resource_versions": { none: "a binding's name" },
   "core.trigger_schedules": noPerson,
   "core.trigger_hour_slots": noPerson,

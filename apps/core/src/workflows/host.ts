@@ -1480,6 +1480,15 @@ export interface EventWaitPlan {
   readonly match: readonly EventMatch[];
   /** How long it waits from when it was first reached, in ms. */
   readonly timeoutMs: number;
+  /**
+   * What reaching it does, once, before it waits, until its deadline
+   * (`until`): a wait by a match registering for its events and taking a
+   * kept one (event-waits.ts). Run as a step the engine journals, so a
+   * replay does it no more.
+   */
+  readonly enter?: (until: number) => Promise<void>;
+  /** What its end does, however it ends: it takes no more events. */
+  readonly left?: () => Promise<void>;
 }
 
 /**
@@ -2752,15 +2761,28 @@ export class RunHost extends RpcTarget {
       );
       const until = reached.at + timeoutMs;
       this.#kind.requireWait?.({ until });
+      const { enter, left } = plan;
+      if (enter !== undefined) {
+        await this.#step.do(
+          `${waitStepPrefix}${await waitKeyOf(step)}:entered`,
+          {},
+          async () => {
+            await enter(until);
+            return { at: Date.now() };
+          }
+        );
+      }
       let taken: { payload: unknown; timestamp: Date };
       try {
         taken = await this.#step.waitForMatch(step, { match, until });
       } catch (error) {
         if (isTimeout(error)) {
+          await left?.();
           return { timedOut: true };
         }
         throw error;
       }
+      await left?.();
       // As the host minted it when the run accepted it (run-events.ts).
       const stored = storedEventSchema.parse(taken.payload);
       return {

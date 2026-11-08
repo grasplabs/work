@@ -45,7 +45,9 @@ import { requireNotStaff } from "./sharing.ts";
 //   rotated), never listed, logged or audited. Rotating makes a new
 //   generation, never one used before, so the old secret takes nothing
 //   from then on; revoking takes nothing until a new one is made; deleting
-//   the source clears its token, so its URL answers as one nobody has.
+//   the source clears its token, so its URL answers as one nobody has, and
+//   the events it kept for waits reached later are taken by nothing from
+//   then on, deleted on the clock (workflows/event-waits.ts).
 //   Rotating core's auth secret changes them all. A delivery checked with
 //   a secret rotated, revoked or deleted while it was admitted starts
 //   nothing (source-events.ts).

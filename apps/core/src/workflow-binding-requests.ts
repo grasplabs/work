@@ -25,6 +25,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import type { Acting } from "./auth/identity.ts";
 import {
+  eventSources,
   permissions,
   workflowBindingApprovals,
   workflowResourceLifecycles,
@@ -40,6 +41,7 @@ import {
 } from "./workflow-bindings.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 import type { PinnedBinding } from "./workflow-resources.ts";
+import { sourcedTypesOf } from "./workflows/event-waits.ts";
 import { ingressOf } from "./workflows/run-inboxes.ts";
 
 // The bindings that wait on an admin (`workflowResources.pendingBindings`,
@@ -138,11 +140,28 @@ const labelOf = (target: WorkflowBindingTarget, grant?: string): string => {
 
 /**
  * What an event binding's offer says outsiders may send it, by where
- * from: a run's inbox takes whatever reaches it (run-inboxes.ts).
+ * from: a run's inbox takes whatever reaches it (run-inboxes.ts); a
+ * webhook source's offers name the source (`sourceTargets`).
  */
 const ingressLabels = {
   email: "Replies to the run's mail, from anyone it reaches",
+  webhook: "Events from a webhook source",
 } as const satisfies Record<EventIngressKind, string>;
+
+/** Each live event source, as an event binding's target, by its name. */
+const sourceTargets = async (env: Env): Promise<Offered[]> => {
+  const sources = await drizzle(env.DB)
+    .select({ id: eventSources.id, name: eventSources.name })
+    .from(eventSources)
+    .where(isNull(eventSources.deletedAt))
+    .orderBy(asc(eventSources.createdAt), asc(eventSources.id));
+  return sources.map(({ id, name }) => ({
+    target: { kind: "event", source: id },
+    // What approving it lets the workflow see: anything the source sends
+    // of the types its contract takes, each run handed what matches it.
+    label: `Any event ${name} sends of the types its contract takes, each run handed those matching what it waits for`,
+  }));
+};
 
 /** The names of the Brain collections `ids`, by ID. */
 const collectionNames = async (
@@ -240,8 +259,14 @@ const candidatesOf = async (
       });
     }
     // Who sends its events from outside, when its contract takes any
-    // (run-inboxes.ts): what approving it lets outsiders do.
+    // (run-inboxes.ts, event-waits.ts): what approving it lets outsiders
+    // do. One taking a webhook source's types is offered each live
+    // source, as the one whose events reach it.
     case "event": {
+      const sourced = await sourcedTypesOf(env, binding);
+      if (sourced.length > 0) {
+        return await sourceTargets(env);
+      }
       const ingress = await ingressOf(env, binding);
       return [
         {
