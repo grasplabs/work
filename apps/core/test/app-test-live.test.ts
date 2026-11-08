@@ -274,19 +274,30 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
         "tests/close.test.ts": suiteOf({
           "follows and closes again and again": `
       const owner = await t.as("note-owner");
+      // Queries of their own: a list's pages would count as one.
       for (let round = 0; round < 110; round += 1) {
-        const live = await owner.subscribe(api.notes.list, page);
+        const id = await owner.mutation(api.notes.create, { title: \`Note \${round}\` });
+        const live = await owner.subscribe(api.notes.get, { id });
         await live.close();
       }
       const live = await owner.subscribe(api.notes.list, page);
       await owner.mutation(api.notes.create, { title: "Still live" });
-      await live.next((p) => p.items.length === 1);`,
-          "can't follow more at once than a page's page may": `
+      await live.next((p) => p.items.some((note) => note.title === "Still live"));`,
+          "can't follow more queries at once than a page's page may, a list's pages counting as one": `
       const owner = await t.as("note-owner");
+      const ids = [];
       for (let round = 0; round < 100; round += 1) {
-        await owner.subscribe(api.notes.list, page);
+        ids.push(await owner.mutation(api.notes.create, { title: \`Note \${round}\` }));
       }
-      await t.rejectsCode(owner.subscribe(api.notes.list, page), "page.too_many_queries");`,
+      for (const id of ids.slice(0, 99)) {
+        await owner.subscribe(api.notes.get, { id });
+      }
+      // One paginated list's pages, more than the queries a page's page
+      // may follow: one query.
+      for (let size = 1; size <= 150; size += 1) {
+        await owner.subscribe(api.notes.list, { pagination: { pageSize: size } });
+      }
+      await t.rejectsCode(owner.subscribe(api.notes.get, { id: ids[99] }), "page.too_many_queries");`,
         }),
       })
     );

@@ -757,6 +757,114 @@ describe("pages ended at a cursor", () => {
       gone: "data.cursor_expired",
     });
   });
+
+  it("say where to split them once past twice their size, after their first records", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(
+      fixture,
+      Array.from({ length: 6 }, (_, index) => ({ title: `b${index}` }))
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byTitle = () => db.query("notes").withIndex("by_title");
+    const first = await byTitle().paginate({ pageSize: 2 });
+    const end = first.nextCursor ?? "";
+    const within = await byTitle().paginate({ pageSize: 2, endCursor: end });
+    // Records that sort first move into the page: it holds eight.
+    await insertNotes(
+      fixture,
+      Array.from({ length: 6 }, (_, index) => ({ title: `a${index}` })),
+      "ada",
+      100
+    );
+    const grown = await byTitle().paginate({ pageSize: 2, endCursor: end });
+    const fresh = await byTitle().paginate({ pageSize: 2 });
+    expect({
+      within: "splitCursor" in within,
+      grown: grown.items.length,
+      // Where a page of its size from its start ends now.
+      split: grown.splitCursor,
+    }).toStrictEqual({ within: false, grown: 8, split: fresh.nextCursor });
+  });
+
+  it("expire with an end of its ID alone whose record moved to or before their start", async () => {
+    const fixture = await storeWith("appMembers");
+    await insertNotes(fixture, [
+      { title: long("a") },
+      { title: long("b") },
+      { title: long("c") },
+    ]);
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byTitle = () => db.query("notes").withIndex("by_title");
+    const first = await byTitle().paginate({ pageSize: 1, cursor: null });
+    const start = first.nextCursor ?? "";
+    const second = await byTitle().paginate({ pageSize: 1, cursor: start });
+    const end = second.nextCursor ?? "";
+    // The record the second page ends at is retitled to sort first.
+    await runInDurableObject(
+      env.DATA_STORES.getByName(fixture.store.id),
+      (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE sdk_records SET value_json = json_set(value_json, '$.title', ?) WHERE record_id = ?",
+          long("0"),
+          second.items[0]?._id ?? ""
+        );
+      }
+    );
+    await expect(
+      outcome(
+        byTitle().paginate({ pageSize: 1, cursor: start, endCursor: end })
+      )
+    ).resolves.toBe("data.cursor_expired");
+  });
+
+  it("order text by its code points, as SQLite does, past the Basic Multilingual Plane", async () => {
+    const fixture = await storeWith("appMembers");
+    // UTF-16 puts a surrogate pair (U+1F600) before U+FF21; code points,
+    // and SQLite's bytes, put it after. Accents and other scripts too.
+    const titles = ["a", "é", "z", "Ａ", "😀", "日本", "ß", "Z"];
+    await insertNotes(
+      fixture,
+      titles.map((title) => ({ title }))
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const byTitle = () => db.query("notes").withIndex("by_title");
+    for (const order of ["asc", "desc"] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const whole = await byTitle().order(order).collect();
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const { pages } = await allPages(
+        async (cursor) =>
+          await byTitle().order(order).paginate({ pageSize: 1, cursor })
+      );
+      const cursors = pages.map((page) => page.nextCursor);
+      // Each page ended where the next starts holds exactly its records.
+      // oxlint-disable-next-line no-await-in-loop -- one order at a time
+      const ended = await Promise.all(
+        cursors.slice(0, -1).map(
+          async (endCursor, page) =>
+            await byTitle()
+              .order(order)
+              .paginate({
+                pageSize: 1,
+                cursor: cursors[page - 1] ?? null,
+                endCursor,
+              })
+        )
+      );
+      expect({
+        titles: whole.map(({ title }) => title),
+        ended: ended.map((page) => page.items.map(({ title }) => title)),
+      }).toStrictEqual({
+        titles:
+          order === "asc"
+            ? ["Z", "a", "z", "ß", "é", "日本", "Ａ", "😀"]
+            : ["😀", "Ａ", "日本", "é", "ß", "z", "a", "Z"],
+        ended: pages
+          .slice(0, -1)
+          .map((page) => page.items.map(({ title }) => title)),
+      });
+    }
+  });
 });
 
 describe("pages of owner-only tables", () => {

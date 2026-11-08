@@ -7,6 +7,7 @@ import {
   queryMaxScannedEntries,
   rangeMaxBounds,
   searchMaxTerms,
+  searchTextMaxLength,
   storeNameMaxLength,
   storeNamePattern,
 } from "./store-limits.ts";
@@ -204,7 +205,7 @@ export const queryRequestSchema = z
     filter: filterSchema.nullable(),
     order: z.enum(["asc", "desc"]),
     terminal: terminalSchema,
-    search: z.string().optional(),
+    search: z.string().max(searchTextMaxLength).optional(),
     with: z.array(nameSchema).min(1).optional(),
   })
   .superRefine(({ range, filter, search, terminal }, context) => {

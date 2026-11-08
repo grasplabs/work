@@ -307,17 +307,21 @@ export type WriteRequest =
   | { kind: "replace"; table: string; id: string; fields: WriteFields }
   | { kind: "delete"; table: string; id: string };
 
-/** What separates a search's words. */
-const searchSeparator = /\s+/u;
+/**
+ * What separates a search's words: anything but a letter, a digit or a
+ * mark, as the full-text index's unicode61 tokenizer splits text. So
+ * `a-b` is two words here as it is two tokens there, and a search's
+ * words are what FTS5 reads (`searchMaxTerms`), however they are joined.
+ */
+const searchSeparator = /[^\p{L}\p{N}\p{M}]+/u;
 
-/** A letter or digit: a word without one finds nothing. */
+/** A letter or digit: a word of marks alone finds nothing. */
 const wordCharacter = /[\p{L}\p{N}]/u;
 
 /**
- * The words a search's text looks for, in order: split at white space,
- * each holding at least one letter or digit. A record matches when it
- * holds every word, the last one as a prefix, so a search box finds as
- * its person types.
+ * The words a search's text looks for, in order, as the full-text index
+ * tokenizes them. A record matches when it holds every word, the last
+ * one as a prefix, so a search box finds as its person types.
  */
 export const searchTerms = (text: string): string[] =>
   text.split(searchSeparator).filter((term) => wordCharacter.test(term));

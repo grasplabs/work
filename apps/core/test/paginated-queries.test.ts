@@ -520,17 +520,93 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     await eventually(() => {
       expect({
         titles: list.titles(),
+        // Pages of its first size, one after the other, never one long
+        // page that could outgrow an answer.
         pages: list.pager.pages.map(({ pageSize, cursor }) => ({
           pageSize,
-          cursor,
+          first: cursor === null,
         })),
         error: list.pager.snapshot.error,
       }).toStrictEqual({
         titles: ["Note 7", "Note 6", "Note 5", "Note 4"],
-        pages: [{ pageSize: 4, cursor: null }],
+        pages: [
+          { pageSize: 2, first: true },
+          { pageSize: 2, first: false },
+        ],
         error: undefined,
       });
     });
+    list.stop();
+  });
+
+  it("splits a page that grows past twice its size, so a newest-first feed's first page never outgrows an answer", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    for (let note = 1; note <= 3; note += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await client.mutation(api.create, { title: `Note ${note}` });
+    }
+    const list = listing(client, api.list, 2);
+    await eventually(() => {
+      expect(list.titles()).toHaveLength(2);
+    });
+    await list.pager.loadMore();
+    // Every new note lands in the first page, which ends where it did.
+    const other = await otherTab(opened);
+    for (let note = 4; note <= 6; note += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await other.mutation(api.create, { title: `Note ${note}` });
+    }
+    await eventually(() => {
+      expect({
+        titles: list.titles(),
+        // What each page's own query answers, once all have.
+        pages: list.pager.pages.map(({ entry, held }) =>
+          held === undefined
+            ? z
+                .object({ items: z.array(noteSchema) })
+                .parse(entry.snapshot.value)
+                .items.map(({ title }) => title)
+            : "held"
+        ),
+      }).toStrictEqual({
+        titles: ["Note 6", "Note 5", "Note 4", "Note 3", "Note 2", "Note 1"],
+        pages: [
+          ["Note 6", "Note 5"],
+          ["Note 4", "Note 3", "Note 2"],
+          ["Note 1"],
+        ],
+      });
+    });
+    list.stop();
+  });
+
+  it("reads a page too large to answer again at half its size, rather than fail the list for good", async () => {
+    const opened = await openedApp();
+    const { client } = clientFor(opened);
+    const seed = referenceTo<
+      { prefix: string; count: number; body: string },
+      null,
+      "mutation"
+    >(opened.release, "notes.seed");
+    // Five of these pass what one answer may be; two don't.
+    await client.mutation(seed, {
+      prefix: "Big",
+      count: 5,
+      body: "x".repeat(90_000),
+    });
+    const api = apiOf(opened.release);
+    const list = listing(client, api.list, 5);
+    await eventually(() => {
+      expect({
+        shown: list.titles().length,
+        error: list.pager.snapshot.error?.code,
+        hasMore: list.view().hasMore,
+      }).toStrictEqual({ shown: 2, error: undefined, hasMore: true });
+    });
+    await list.pager.loadMore(2);
+    expect(list.titles()).toHaveLength(4);
     list.stop();
   });
 

@@ -5,6 +5,7 @@ import type { PaginationResult } from "@grasp-os/sdk/server";
 import {
   queryMaxScannedEntries,
   searchMaxTerms,
+  searchTextMaxLength,
 } from "@grasp-os/shared/store-limits";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-reads";
@@ -439,6 +440,74 @@ describe("a search", () => {
   });
 });
 
+/** The record IDs of a page, in order. */
+const ids = (page: { items: readonly { _id: string }[] }): string[] =>
+  page.items.map(({ _id }) => _id);
+
+describe("a search's page ended at a cursor", () => {
+  it("ends at its end's relevance though that record no longer passes the filter, and expires an end ranked before its start", async () => {
+    const fixture = await storeWith("appMembers");
+    await insert(
+      fixture,
+      "ada",
+      ...Array.from({ length: 24 }, (_, index) => ({
+        name: `Widget maker ${index}`,
+        notes: index % 3 === 0 ? "widget widget" : "parts",
+        archived: false,
+      }))
+    );
+    const db = dbOf(fixture, scopeOf(fixture.schemaHash));
+    const live = () =>
+      db.search("customers", "widget").filter({ archived: false });
+    const first = await live().paginate({ pageSize: 8 });
+    const second = await live().paginate({
+      pageSize: 8,
+      cursor: first.nextCursor,
+    });
+    const end = first.nextCursor ?? "";
+    // The record the first page ends at no longer passes the filter: the
+    // page still ends where it did, never running on into the next.
+    await commit(fixture, "ada", [
+      {
+        op: "patch",
+        table: "customers",
+        id: first.items.at(-1)?._id ?? "",
+        fields: { archived: true },
+      },
+    ]);
+    const ended = await live().paginate({ pageSize: 1, endCursor: end });
+    const after = await live().paginate({ pageSize: 8, cursor: end });
+    // The second page's end now says the word more than any record: it
+    // ranks before that page's start.
+    await commit(fixture, "ada", [
+      {
+        op: "patch",
+        table: "customers",
+        id: second.items.at(-1)?._id ?? "",
+        fields: { notes: "widget widget widget widget widget" },
+      },
+    ]);
+    expect({
+      ended: ids(ended),
+      endedAt: ended.nextCursor,
+      after: ids(after),
+      reranked: await attempt(
+        async () =>
+          await live().paginate({
+            pageSize: 1,
+            cursor: end,
+            endCursor: second.nextCursor,
+          })
+      ),
+    }).toStrictEqual({
+      ended: ids(first).slice(0, -1),
+      endedAt: end,
+      after: ids(second),
+      reranked: "data.cursor_expired",
+    });
+  });
+});
+
 describe("a search's bounds", () => {
   it("are refused clearly, by the SDK and again by the store", async () => {
     const fixture = await storeWith("appMembers");
@@ -449,15 +518,32 @@ describe("a search's bounds", () => {
       { length: searchMaxTerms + 1 },
       (_, index) => `w${index}`
     ).join(" ");
+    // One word to a white-space split, but as many tokens as the index's
+    // tokenizer reads: counted as those.
+    const joined = Array.from(
+      { length: searchMaxTerms + 1 },
+      (_, index) => `w${index}`
+    ).join("-");
+    const long = "a".repeat(searchTextMaxLength + 1);
     expect({
       sdkMany: await attempt(
         async () => await db.search("customers", many).collect()
+      ),
+      sdkJoined: await attempt(
+        async () => await db.search("customers", joined).collect()
+      ),
+      sdkLong: await attempt(
+        async () => await db.search("customers", long).collect()
       ),
       // A search has no order; App code could call one anyway.
       sdkOrder: await attempt(() =>
         callAnyway(db.search("customers", "globex"), "order", "desc")
       ),
       storeMany: await outcome(fixture.store.read(scope, searchRequest(many))),
+      storeJoined: await outcome(
+        fixture.store.read(scope, searchRequest(joined))
+      ),
+      storeLong: await outcome(fixture.store.read(scope, searchRequest(long))),
       storeIndex: await outcome(
         fixture.store.read(scope, searchRequest("globex", { index: "by_city" }))
       ),
@@ -484,8 +570,12 @@ describe("a search's bounds", () => {
       ),
     }).toStrictEqual({
       sdkMany: "query.invalid_terminal",
+      sdkJoined: "query.invalid_terminal",
+      sdkLong: "query.invalid_terminal",
       sdkOrder: "query.invalid_terminal",
       storeMany: "data.invalid_query",
+      storeJoined: "data.invalid_query",
+      storeLong: "data.invalid_query",
       storeIndex: "data.invalid_query",
       storeGroup: "data.invalid_query",
       storeUnique: "data.invalid_query",

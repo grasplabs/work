@@ -217,17 +217,23 @@ export const paginationOptionsValidator = v.object({
   endCursor: v.string().min(1).max(cursorMaxLength).nullable().default(null),
 });
 
-/** One page of `item`s: the last one without a cursor, any other with one. */
+/**
+ * One page of `item`s: the last one without a cursor, any other with one.
+ * A page given an end that grew past twice its size also says where to
+ * split it (`splitCursor`), which a live list does.
+ */
 export const paginationResultValidator = <Item extends AnySchema>(item: Item) =>
   v.union(
     v.object({
       items: v.array(item),
       nextCursor: v.null(),
       hasMore: v.literal(false),
+      splitCursor: v.string().min(1).max(cursorMaxLength).optional(),
     }),
     v.object({
       items: v.array(item),
       nextCursor: v.string().min(1).max(cursorMaxLength),
       hasMore: v.literal(true),
+      splitCursor: v.string().min(1).max(cursorMaxLength).optional(),
     })
   );

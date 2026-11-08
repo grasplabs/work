@@ -3,6 +3,7 @@ import {
   queryDefaultPageSize,
   queryMaxScannedEntries,
   searchMaxTerms,
+  searchTextMaxLength,
 } from "@grasp-os/shared/store-limits";
 import { searchTerms } from "@grasp-os/shared/store-reads";
 import type { QueryTerminal } from "@grasp-os/shared/store-reads";
@@ -137,8 +138,11 @@ export const groupTerminal = (
 
 /** The text `search` looks for, checked. */
 export const searchTextOf = (text: unknown): string => {
-  if (typeof text !== "string") {
-    return refuse("query.invalid_terminal", "A search's text is a string.");
+  if (typeof text !== "string" || text.length > searchTextMaxLength) {
+    return refuse(
+      "query.invalid_terminal",
+      `A search's text is a string of at most ${searchTextMaxLength} characters.`
+    );
   }
   if (searchTerms(text).length > searchMaxTerms) {
     return refuse(

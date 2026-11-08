@@ -27,9 +27,11 @@ export const stableIdPattern = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$/u;
 export const storeNameMaxLength = 64;
 
 /**
- * The most fields one index orders by. A page's seek binds two values per
- * index field and one for the record ID (34 at 16), which must fit
- * SQLite's 100 bound parameters a statement beside a query's own
+ * The most fields one index orders by. A page after a cursor runs one
+ * index range per order field (two for a field's left-out values when
+ * descending, store-queries.ts `seeksAfter`), so a page's statements grow
+ * with them; and each binds a value per field and the record ID, which
+ * must fit SQLite's 100 bound parameters beside a query's own
  * (`queryMaxBoundValues`).
  */
 export const indexMaxFields = 16;
@@ -90,8 +92,8 @@ export const filterMaxNodes = 64;
  * condition with a value (an `in` binds its list as one JSON value), one
  * per range bound with a value. A Durable Object's SQLite binds at most
  * 100 parameters per statement, and the host adds its own: the owner (1)
- * and, for a page, a cursor's seek (at most two per index field and the
- * record ID, 34), which leaves 65; 64 keeps a bound to spare.
+ * and, for a page, a cursor's seek (at most one per index field and the
+ * record ID, 17), which leaves 82; 64 keeps room to spare.
  */
 export const queryMaxBoundValues = 64;
 
@@ -128,5 +130,13 @@ export const storeMaxSearchIndexes = 64;
  * The most words one search looks for, each of which must match: SQLite's
  * full-text index reads every word's whole list of matching rows before
  * the store examines the first match, outside `queryMaxScannedEntries`.
+ * Words are counted as its tokenizer splits them (`searchTerms`).
  */
 export const searchMaxTerms = 8;
+
+/**
+ * The longest text one search looks for, in characters: the text is
+ * split and folded before anything is matched, and what a search box
+ * sends is a few words, so this bounds that work whatever the words.
+ */
+export const searchTextMaxLength = 256;

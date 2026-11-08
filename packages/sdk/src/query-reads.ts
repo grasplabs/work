@@ -26,9 +26,16 @@ interface PaginationOptions {
  * one. The last page has no cursor, so an empty cursor never means two
  * things.
  */
-export type PaginationResult<Item> =
+export type PaginationResult<Item> = (
   | { items: Item[]; nextCursor: null; hasMore: false }
-  | { items: Item[]; nextCursor: string; hasMore: true };
+  | { items: Item[]; nextCursor: string; hasMore: true }
+) & {
+  /**
+   * Where to split a page given an end that grew past twice its size,
+   * after its first `pageSize` records: what a live list does with it.
+   */
+  splitCursor?: string;
+};
 
 /**
  * A related record `.with` couldn't show: the caller can't read its table.

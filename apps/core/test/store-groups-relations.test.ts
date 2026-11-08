@@ -590,3 +590,51 @@ describe("related records", () => {
     });
   });
 });
+
+describe("a grouped read past SQLite's own limits", () => {
+  it("is refused as an invalid query, never a raw SQLite error", async () => {
+    // Very many numeric fields, each aggregated four ways: a statement
+    // longer, and wider, than SQLite takes.
+    const fields = Array.from({ length: 600 }, (_, index) => `m${index}`);
+    const wide = defineSchema({
+      metrics: defineTable(
+        Object.fromEntries(
+          fields.map((field) => [field, v.number().optional()])
+        )
+      ),
+    });
+    const store = await openStore(env, await storeOfNewApp(env, builder));
+    const { schemaHash } = await appliedTables(
+      store,
+      manifestText(
+        accessedManifest(wide, {
+          tables: { metrics: { read: "appMembers", write: "appMembers" } },
+        })
+      )
+    );
+    await expect(
+      outcome(
+        async () =>
+          await store.read(scopeOf(schemaHash), {
+            kind: "query",
+            query: {
+              descriptorVersion: 1,
+              table: "metrics",
+              index: null,
+              range: [],
+              filter: null,
+              order: "asc",
+              terminal: {
+                kind: "group",
+                by: ["m0"],
+                sum: fields,
+                avg: fields,
+                min: fields,
+                max: fields,
+              },
+            },
+          })
+      )
+    ).resolves.toBe("data.invalid_query");
+  });
+});

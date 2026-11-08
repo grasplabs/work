@@ -1,6 +1,5 @@
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { queryMaxScannedEntries } from "@grasp-os/shared/store-limits";
 
 import { clientError } from "./client-error.ts";
 import type { GraspError } from "./client-error.ts";
@@ -11,6 +10,7 @@ import { observe } from "./client-retry.ts";
 import {
   failPager,
   isPageSize,
+  ownPage,
   pageOf,
   pageSizeError,
   pagerChanged,
@@ -36,10 +36,19 @@ import { isPlainObject } from "./value-descriptor.ts";
 //   size: a record moved past it shows once more is loaded.
 // - A Load More gives the last page its end, a query of its own: until
 //   that answers, the page shows what it showed, so nothing flickers.
+// - A page with an end grows without bound as records move into it (a
+//   newest-first feed's first page takes every insert), past what one
+//   answer may be: past twice its size core says where to split it
+//   (`splitCursor`), and the list follows its two halves instead, the
+//   first showing the whole until both answer. A page refused as too
+//   large to answer (`page.answer_too_large`, `contract.result_too_large`)
+//   is read again at half its size, the pages after it dropped, rather than leave the list
+//   failed for good.
 // - A cursor no longer applies (the App published a new version, or a
 //   search's anchor record went): a page fails with `data.cursor_expired`
-//   or `data.invalid_cursor`, and the list starts again with one first
-//   page as long as what it showed, showing that meanwhile.
+//   or `data.invalid_cursor`, and the list starts again from its first
+//   page, loading pages of its first size until it holds as many records
+//   as it showed, showing those meanwhile.
 // - A late answer lands in another list: each page is its own query,
 //   keyed by the list's reference, its canonical arguments and its
 //   pagination; a list whose arguments change is another list.
@@ -58,6 +67,15 @@ import { isPlainObject } from "./value-descriptor.ts";
 const cursorRefusals: ReadonlySet<string> = new Set([
   "data.invalid_cursor",
   "data.cursor_expired",
+]);
+
+/**
+ * The codes of a page too large to answer: past what a function may
+ * return, or what one push to a page may carry.
+ */
+const tooLarge: ReadonlySet<string> = new Set([
+  "contract.result_too_large",
+  "page.answer_too_large",
 ]);
 
 /**
@@ -127,6 +145,7 @@ export class Pagers {
       pages: [],
       waiting: undefined,
       held: undefined,
+      refill: undefined,
       failure: undefined,
       snapshot: {
         view: { items: [], hasMore: false, isLoading: true, loadMore },
@@ -192,6 +211,7 @@ export class Pagers {
       entry: this.#queries.entryFor(pager.reference, input),
       stop: undefined,
       held: undefined,
+      twin: undefined,
     };
   }
 
@@ -229,9 +249,18 @@ export class Pagers {
       this.#restart(pager, pager.snapshot.view.items);
       return;
     }
+    if (this.#shrinkTooLarge(pager) || this.#split(pager)) {
+      this.#changed(pager);
+      return;
+    }
     for (const page of pager.pages) {
       const { value } = page.entry.snapshot;
-      if (page.held !== undefined && value !== undefined) {
+      // What it held goes once it answered, and its twin did too.
+      if (
+        page.held !== undefined &&
+        ownPage(page) !== undefined &&
+        (page.twin === undefined || ownPage(page.twin) !== undefined)
+      ) {
         page.held = undefined;
       }
       // A query that answers something other than a page doesn't page.
@@ -250,29 +279,163 @@ export class Pagers {
         pager.waiting = undefined;
       }
     }
-    const [first] = pager.pages;
-    if (first !== undefined && shownPage(first) !== undefined) {
-      pager.held = undefined;
-    }
+    this.#refill(pager);
     pagerChanged(pager);
   }
 
   /**
-   * Starts `pager` again with one first page, as long as `items` (what it
-   * showed, kept on screen until that page answers) or its first size.
+   * Goes on loading what `pager` showed before it started again, a page
+   * of its first size at a time, once its last page shows; it shows what
+   * it held until it holds as many records, or all there are.
+   */
+  #refill(pager: Pager): void {
+    const { refill } = pager;
+    const last = pager.pages.at(-1);
+    if (refill === undefined || last === undefined) {
+      return;
+    }
+    if (last.entry.snapshot.error !== undefined) {
+      pager.refill = undefined;
+      pager.held = undefined;
+      return;
+    }
+    // Only from what core pushed since the page was followed: a cached
+    // answer may be from before the list started again, its cursor one
+    // that no longer applies.
+    if (
+      shownPage(last) === undefined ||
+      (last.entry.live?.revision ?? 0) === 0
+    ) {
+      return;
+    }
+    const loaded = pager.pages.reduce(
+      (count, page) => count + (shownPage(page)?.items.length ?? 0),
+      0
+    );
+    if (loaded >= refill || !this.#extend(pager, pager.initialPageSize)) {
+      pager.refill = undefined;
+      pager.held = undefined;
+    }
+  }
+
+  /**
+   * Reads a page refused as too large to answer (`tooLarge`) again at half its
+   * size, from where it starts, dropping the pages after it: the list
+   * shows less, and Load More goes on from there, rather than failing for
+   * good. Answers whether it did. A page of one record stays refused.
+   */
+  #shrinkTooLarge(pager: Pager): boolean {
+    const at = pager.pages.findIndex(
+      (page) =>
+        tooLarge.has(page.entry.snapshot.error?.code ?? "") && page.pageSize > 1
+    );
+    const page = pager.pages[at];
+    if (page === undefined) {
+      return false;
+    }
+    const dropped = pager.pages.slice(at);
+    for (const gone of dropped) {
+      gone.stop?.();
+      gone.stop = undefined;
+    }
+    // A page whose twin went no longer waits for it.
+    for (const kept of pager.pages.slice(0, at)) {
+      if (kept.twin !== undefined && dropped.includes(kept.twin)) {
+        kept.twin = undefined;
+      }
+    }
+    const smaller = this.#page(
+      pager,
+      page.cursor,
+      null,
+      Math.max(1, Math.floor(page.pageSize / 2))
+    );
+    pager.pages = [...pager.pages.slice(0, at), smaller];
+    this.#follow(pager, smaller);
+    return true;
+  }
+
+  /**
+   * Splits each page with an end that core says to split (`splitCursor`)
+   * into its two halves, each a query of its own; the first shows the
+   * whole page until both answer. Answers whether it split one.
+   */
+  #split(pager: Pager): boolean {
+    let split = false;
+    pager.pages = pager.pages.flatMap((page) => {
+      const own = ownPage(page);
+      if (
+        page.endCursor === null ||
+        own?.splitCursor === undefined ||
+        page.held !== undefined
+      ) {
+        return [page];
+      }
+      split = true;
+      page.stop?.();
+      page.stop = undefined;
+      const first: ListPage = {
+        ...this.#page(pager, page.cursor, own.splitCursor, page.pageSize),
+        held: own,
+      };
+      const second: ListPage = {
+        ...this.#page(pager, own.splitCursor, page.endCursor, page.pageSize),
+        held: { items: [], hasMore: true, nextCursor: page.endCursor },
+      };
+      first.twin = second;
+      second.twin = first;
+      this.#follow(pager, first);
+      this.#follow(pager, second);
+      return [first, second];
+    });
+    return split;
+  }
+
+  /**
+   * Starts `pager` again from its first page. Given `items` (what it
+   * showed), it shows them meanwhile, and loads pages of its first size
+   * until it holds as many records again (`#refill`).
    */
   #restart(pager: Pager, items?: readonly unknown[]): void {
     Pagers.#stopPages(pager);
-    const size = Math.min(
-      queryMaxScannedEntries,
-      Math.max(pager.initialPageSize, items?.length ?? 0)
-    );
-    pager.pages = [this.#page(pager, null, null, size)];
-    pager.held = items === undefined || items.length === 0 ? undefined : items;
+    pager.pages = [this.#page(pager, null, null, pager.initialPageSize)];
+    const keep = items !== undefined && items.length > 0;
+    pager.held = keep ? items : undefined;
+    pager.refill = keep ? items.length : undefined;
     for (const page of pager.pages) {
       this.#follow(pager, page);
     }
     this.#changed(pager);
+  }
+
+  /**
+   * Ends `pager`'s last page where it ends now, as a query of its own
+   * that shows what it showed until it answers, and adds a page of `size`
+   * records from there. Answers whether it did: not while the last page
+   * shows nothing yet, nor once nothing follows it.
+   */
+  #extend(pager: Pager, size: number): boolean {
+    const last = pager.pages.at(-1);
+    const shown = last === undefined ? undefined : shownPage(last);
+    if (
+      last === undefined ||
+      shown === undefined ||
+      !shown.hasMore ||
+      shown.nextCursor === null
+    ) {
+      return false;
+    }
+    const ended: ListPage = {
+      ...this.#page(pager, last.cursor, shown.nextCursor, last.pageSize),
+      held: shown,
+    };
+    last.stop?.();
+    last.stop = undefined;
+    const next = this.#page(pager, shown.nextCursor, null, size);
+    pager.pages = [...pager.pages.slice(0, -1), ended, next];
+    this.#follow(pager, ended);
+    this.#follow(pager, next);
+    return true;
   }
 
   /**
@@ -288,6 +451,7 @@ export class Pagers {
     pager.waiting = undefined;
     pager.failure = undefined;
     pager.held = undefined;
+    pager.refill = undefined;
     const [first] = pager.pages;
     if (
       pager.pages.length !== 1 ||
@@ -338,24 +502,12 @@ export class Pagers {
       await pager.waiting.promise;
       return;
     }
-    if (!shown.hasMore || shown.nextCursor === null) {
+    if (!this.#extend(pager, size)) {
       return;
     }
-    // The last page ends where it ends now, as a query of its own that
-    // shows what it showed until it answers; the new page starts there.
-    const ended: ListPage = {
-      ...this.#page(pager, last.cursor, shown.nextCursor, last.pageSize),
-      held: shown,
-    };
-    last.stop?.();
-    last.stop = undefined;
-    const next = this.#page(pager, shown.nextCursor, null, size);
-    pager.pages = [...pager.pages.slice(0, -1), ended, next];
     pager.waiting = Promise.withResolvers<null>();
     const { promise } = pager.waiting;
     void observe(promise);
-    this.#follow(pager, ended);
-    this.#follow(pager, next);
     this.#changed(pager);
     await promise;
   }

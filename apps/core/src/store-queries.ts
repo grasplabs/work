@@ -581,9 +581,16 @@ export const readRecord = (
  * One page, as `paginate` answers it: the last without a cursor, any
  * other with one (spec 9.2's page envelope).
  */
-export type PageAnswer =
+export type PageAnswer = (
   | { items: ReadDocument[]; nextCursor: null; hasMore: false }
-  | { items: ReadDocument[]; nextCursor: string; hasMore: true };
+  | { items: ReadDocument[]; nextCursor: string; hasMore: true }
+) & {
+  /**
+   * Where to split a page given an end that grew past twice its size:
+   * after its first `pageSize` records (`readPage`).
+   */
+  splitCursor?: string;
+};
 
 /** What a terminal answers. */
 export type QueryAnswer =
@@ -857,6 +864,8 @@ export interface PageRead {
   readonly items: ReadDocument[];
   readonly hasMore: boolean;
   readonly last: Anchor | undefined;
+  /** Where to split it, for a page with an end grown past twice its size. */
+  readonly split?: Anchor;
 }
 
 /** An order field's value as SQLite read it, as an anchor holds it. */
@@ -1262,6 +1271,24 @@ const requireRecordTerminal = (query: QueryRequest): void => {
   }
 };
 
+/** Two strings in code point order, as their UTF-8 bytes compare. */
+const compareCodePoints = (left: string, right: string): number => {
+  const leftPoints = left[Symbol.iterator]();
+  const rightPoints = right[Symbol.iterator]();
+  let one = leftPoints.next();
+  let other = rightPoints.next();
+  while (one.done !== true && other.done !== true) {
+    const difference =
+      (one.value.codePointAt(0) ?? 0) - (other.value.codePointAt(0) ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+    one = leftPoints.next();
+    other = rightPoints.next();
+  }
+  return Number(one.done !== true) - Number(other.done !== true);
+};
+
 // Searches: a table's search index (store-search.ts), read in order of
 // relevance (FTS5's BM25, lower is better), the record ID breaking ties,
 // joined to the records themselves under the caller's access and filter.
@@ -1296,6 +1323,21 @@ interface SearchSeek {
   readonly score: number;
   readonly id: string;
 }
+
+/**
+ * Whether a search's row (its relevance as `score`) comes after `seek` in
+ * the search's order: relevance, then record ID, as `searchPlan` orders.
+ */
+const searchPast = (
+  row: { readonly score?: SqlStorageValue; readonly record_id: string },
+  seek: SearchSeek
+): boolean => {
+  const score = typeof row.score === "number" ? row.score : Number.NaN;
+  return (
+    score > seek.score ||
+    (score === seek.score && compareCodePoints(row.record_id, seek.id) > 0)
+  );
+};
 
 /**
  * A search's anchor as a seek: its record's relevance read again, under
@@ -1356,6 +1398,8 @@ const searchPlan = (
     "updated_at",
     "value_json",
     "length(CAST(value_json AS BLOB)) AS bytes",
+    // Its relevance, for a page's end to be compared with (`searchPast`).
+    "hit.score AS score",
     ...(filter === null ? [] : [`${filter.sql} AS matched`]),
   ];
   const scoped = scopeTerms(table, scope);
@@ -1394,11 +1438,11 @@ const searchMatches = (
   query: QueryRequest,
   { after, end }: { after: Anchor | null; end: Anchor | null },
   scan: Scan
-): Iterator<Match> => {
+): { matches: Iterator<Match>; until: SearchSeek | undefined } => {
   const search = searchOf(pinned, table, query);
   const terms = searchTerms(query.search ?? "");
   if (terms.length === 0) {
-    return [][Symbol.iterator]();
+    return { matches: [][Symbol.iterator](), until: undefined };
   }
   const match = searchMatch(search, terms, scope.principal, table.ownerScoped);
   // Counted among the rows the caller may read, when rules or the owner
@@ -1426,12 +1470,31 @@ const searchMatches = (
     match,
     after
   );
-  searchSeekOf(sql.on(table.name), scope, table, search, match, end);
-  return matchesOf(
-    sql,
-    searchPlan(scope, table, query, search, match, seek),
-    scan
+  const until = searchSeekOf(
+    sql.on(table.name),
+    scope,
+    table,
+    search,
+    match,
+    end
   );
+  // An end that now ranks at or before the page's start: the page it
+  // ended is gone, so the list starts again.
+  if (
+    seek !== undefined &&
+    until !== undefined &&
+    !searchPast({ score: until.score, record_id: until.id }, seek)
+  ) {
+    throw dataErrors.create("data.cursor_expired");
+  }
+  return {
+    matches: matchesOf(
+      sql,
+      searchPlan(scope, table, query, search, match, seek),
+      scan
+    ),
+    until,
+  };
 };
 
 // Grouped aggregates (`group`): every record the query reads, within its
@@ -1656,24 +1719,6 @@ const withDocuments = (
   return documents;
 };
 
-/** Two strings in code point order, as their UTF-8 bytes compare. */
-const compareCodePoints = (left: string, right: string): number => {
-  const leftPoints = left[Symbol.iterator]();
-  const rightPoints = right[Symbol.iterator]();
-  let one = leftPoints.next();
-  let other = rightPoints.next();
-  while (one.done !== true && other.done !== true) {
-    const difference =
-      (one.value.codePointAt(0) ?? 0) - (other.value.codePointAt(0) ?? 0);
-    if (difference !== 0) {
-      return difference;
-    }
-    one = leftPoints.next();
-    other = rightPoints.next();
-  }
-  return Number(one.done !== true) - Number(other.done !== true);
-};
-
 /**
  * The matches of a page's `plans` in order, one statement after another,
  * each run only once the one before is read to its end.
@@ -1725,30 +1770,35 @@ const compareAnchorValues = (left: AnchorValue, right: AnchorValue): number => {
 };
 
 /**
- * Whether `match` (a row read with its order fields' values, `o0`, …)
- * comes after `end` in the query's order: its order fields compared one
- * by one, then its record ID, as `seeksAfter` seeks.
+ * Whether place `key` comes after `end` in the query's order: their order
+ * fields' values compared one by one, then their record IDs, as
+ * `seeksAfter` seeks.
  */
 const isPast = (
-  match: Match,
+  key: Required<Anchor>,
   end: Required<Anchor>,
   direction: "asc" | "desc"
 ): boolean => {
   let order = 0;
   for (const [position, value] of end.values.entries()) {
-    order = compareAnchorValues(
-      anchorValueOf(match.row[`o${position}`]),
-      value
-    );
+    order = compareAnchorValues(key.values[position] ?? [], value);
     if (order !== 0) {
       break;
     }
   }
   if (order === 0) {
-    order = compareCodePoints(match.row.record_id, end.id);
+    order = compareCodePoints(key.id, end.id);
   }
   return direction === "asc" ? order > 0 : order < 0;
 };
+
+/** The place of `match`, a row read with its order fields' values. */
+const placeOf = (match: Match, fields: number): Required<Anchor> => ({
+  id: match.row.record_id,
+  values: Array.from({ length: fields }, (_field, position) =>
+    anchorValueOf(match.row[`o${position}`])
+  ),
+});
 
 /**
  * One page of `query` (a `paginate` terminal) for `scope` from `pinned`,
@@ -1786,26 +1836,46 @@ export const readPage = (
   if (query.search === undefined) {
     const { orderFields } = accessOf(pinned, table, query);
     anchorFields = orderFields.length - 1;
-    const endKey =
-      end === null
+    // A cursor that carries only its record's ID has its values looked up
+    // under the caller's access (`data.cursor_expired` once it went).
+    const placed = (cursor: Anchor | null): Required<Anchor> | undefined =>
+      cursor === null
         ? undefined
         : {
-            id: end.id,
+            id: cursor.id,
             values:
-              end.values ??
+              cursor.values ??
               anchorValuesOf(
                 sql.on(table.name),
                 table,
                 scope,
                 orderFields,
-                end.id
+                cursor.id
               ),
           };
-    const plans = pagePlans(sql.on(table.name), pinned, scope, query, anchor);
+    const start = placed(anchor);
+    const endKey = placed(end);
+    // An end at or before the page's start (its record moved there): the
+    // page it ended is gone, so the list starts again.
+    if (
+      start !== undefined &&
+      endKey !== undefined &&
+      !isPast(endKey, start, query.order)
+    ) {
+      throw dataErrors.create("data.cursor_expired");
+    }
+    const plans = pagePlans(
+      sql.on(table.name),
+      pinned,
+      scope,
+      query,
+      start ?? null
+    );
     for (const match of chainedMatches(sql, plans, scan)) {
       if (
         found.length >= limit ||
-        (endKey !== undefined && isPast(match, endKey, query.order))
+        (endKey !== undefined &&
+          isPast(placeOf(match, anchorFields), endKey, query.order))
       ) {
         more = true;
         break;
@@ -1814,9 +1884,11 @@ export const readPage = (
     }
   } else {
     // A search's anchor is its record's ID alone (`searchSeekOf`), and so
-    // is its end: the page ends at that record, where it ranks now.
+    // is its end: the page ends at that record's relevance as it is now,
+    // the first row past it the next page's, whether or not the record
+    // itself still passes the filter.
     anchorFields = undefined;
-    const matches = searchMatches(
+    const { matches, until } = searchMatches(
       sql,
       pinned,
       scope,
@@ -1825,40 +1897,43 @@ export const readPage = (
       { after: anchor, end },
       scan
     );
-    let ended = false;
     for (let next = matches.next(); next.done !== true; next = matches.next()) {
-      if (ended || found.length >= limit) {
+      if (
+        found.length >= limit ||
+        (until !== undefined && searchPast(next.value.row, until))
+      ) {
         more = true;
         break;
       }
       found.push(next.value);
-      ended = end !== null && next.value.row.record_id === end.id;
     }
   }
-  const lastMatch = found.at(-1);
   const items = found.map(({ row, valueJson }) =>
     documentOf(table, row, valueJson ?? "{}")
   );
   sql.answered(table.name, items.length);
   withRelated(sql, pinned, scope, table, items, query.with ?? [], scan);
+  const anchorAt = (match: Match | undefined): Anchor | undefined =>
+    match === undefined
+      ? undefined
+      : {
+          id: match.row.record_id,
+          ...(anchorFields === undefined
+            ? {}
+            : { values: placeOf(match, anchorFields).values }),
+        };
+  // A page with an end grows as records move into it: past twice its
+  // size it says where to split it, after its first `pageSize`, so a live
+  // list keeps its pages near their size (as Convex's `splitCursor`).
+  const split =
+    end !== null && found.length > 2 * terminal.pageSize
+      ? anchorAt(found[terminal.pageSize - 1])
+      : undefined;
   return {
     items,
     hasMore: more,
-    last:
-      lastMatch === undefined
-        ? undefined
-        : {
-            id: lastMatch.row.record_id,
-            ...(anchorFields === undefined
-              ? {}
-              : {
-                  values: Array.from(
-                    { length: anchorFields },
-                    (_field, position) =>
-                      anchorValueOf(lastMatch.row[`o${position}`])
-                  ),
-                }),
-          },
+    last: anchorAt(found.at(-1)),
+    ...(split === undefined ? {} : { split }),
   };
 };
 
@@ -1881,7 +1956,7 @@ const runSearch = (
       query,
       { after: null, end: null },
       scan
-    );
+    ).matches;
   const read = (limit: number): ReadDocument[] =>
     withDocuments(sql, pinned, scope, table, query, matches(), limit, scan);
   switch (terminal.kind) {

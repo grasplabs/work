@@ -258,9 +258,19 @@ import {
 //   inside the object.
 
 /**
+ * SQLite's refusals of a statement past its own limits: a value too big
+ * (a filter comparing with a huge text), a statement too long or with too
+ * many columns (a `group` over very many fields), an expression too deep.
+ * What the query asked for, never the store's fault.
+ */
+const sqliteLimit =
+  /SQLITE_TOOBIG|too big|too many columns|statement too long|too large|too complex|too many terms/iu;
+
+/**
  * `read()`, with SQLite's refusal of an index it doesn't hold (one an
  * older layout or a damaged store lacks) as `data.index_required`, never
- * a scan.
+ * a scan, and its refusal of a query past its limits (`sqliteLimit`) as
+ * `data.invalid_query`, never a raw SQLite error.
  */
 const indexRequired = <Answer>(read: () => Answer): Answer => {
   try {
@@ -268,14 +278,16 @@ const indexRequired = <Answer>(read: () => Answer): Answer => {
   } catch (error) {
     // SQLite's own error, never one of the store's (whose messages may
     // say as much).
-    if (
-      error instanceof Error &&
-      dataErrors.codeOf(error) === undefined &&
-      /no such index/u.test(error.message)
-    ) {
+    if (!(error instanceof Error) || dataErrors.codeOf(error) !== undefined) {
+      throw error;
+    }
+    if (/no such index/u.test(error.message)) {
       // A store whose indexes don't match its schemas needs looking at.
       log.error("store.index_missing", errorFields(error));
       throw dataErrors.create("data.index_required");
+    }
+    if (sqliteLimit.test(error.message)) {
+      throw dataErrors.create("data.invalid_query");
     }
     throw error;
   }
@@ -2539,10 +2551,16 @@ export class StoreHost {
           ? null
           : await encodeCursor(binding, read.last));
     }
-    const value: PageAnswer =
+    const splitCursor =
+      read.split === undefined
+        ? undefined
+        : await encodeCursor(binding, read.split);
+    const answer: PageAnswer =
       nextCursor === null
         ? { items: read.items, nextCursor: null, hasMore: false }
         : { items: read.items, nextCursor, hasMore: true };
+    const value: PageAnswer =
+      splitCursor === undefined ? answer : { ...answer, splitCursor };
     return { value, generations, sensitive };
   }
 

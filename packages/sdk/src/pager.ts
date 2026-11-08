@@ -37,6 +37,8 @@ export interface PageValue {
   readonly items: readonly unknown[];
   readonly hasMore: boolean;
   readonly nextCursor: string | null;
+  /** Where core says to split the page (`readPage`), if it grew too long. */
+  readonly splitCursor?: string;
 }
 
 /** One of a list's pages: a live query of its own. */
@@ -53,10 +55,13 @@ export interface ListPage {
   /** What stops following it, while the list has readers. */
   stop: (() => void) | undefined;
   /**
-   * What it showed before it was given its end, shown until its own
-   * query, ended there, answers: the same records, so nothing flickers.
+   * What it showed before it was given its end or split, shown instead
+   * of its own answer until that comes (and, once split, its other half's
+   * too): the same records, so nothing flickers.
    */
   held: PageValue | undefined;
+  /** The other half of the page it was split from, if it was. */
+  twin: ListPage | undefined;
 }
 
 /** One paginated list, by reference, arguments and first page size. */
@@ -72,9 +77,11 @@ export interface Pager {
   waiting: PromiseWithResolvers<null> | undefined;
   /**
    * The records it showed before it started again (a cursor expired),
-   * shown until its first page answers.
+   * shown until it has loaded as many again, or all there are.
    */
   held: readonly unknown[] | undefined;
+  /** How many records it loads again after starting again, if it does. */
+  refill: number | undefined;
   /** A Load More's failure, shown until the list is tried again. */
   failure: GraspError | undefined;
   snapshot: PagerSnapshot;
@@ -95,6 +102,9 @@ export const pageOf = (value: unknown): PageValue | undefined =>
         items: value.items,
         hasMore: value.hasMore,
         nextCursor: value.nextCursor,
+        ...(typeof value.splitCursor === "string"
+          ? { splitCursor: value.splitCursor }
+          : {}),
       }
     : undefined;
 
@@ -139,9 +149,9 @@ export const ownPage = (page: ListPage): PageValue | undefined =>
     ? pageOf(page.entry.snapshot.value)
     : undefined;
 
-/** What `page` shows now: its own answer, else what it held. */
+/** What `page` shows now: what it holds, else its own answer. */
 export const shownPage = (page: ListPage): PageValue | undefined =>
-  ownPage(page) ?? page.held;
+  page.held ?? ownPage(page);
 
 /**
  * What a list's readers see: the records of its pages in order, up to the
@@ -158,7 +168,7 @@ export const snapshotOf = (
   let error: GraspError | undefined;
   for (const page of pager.pages) {
     const own = ownPage(page);
-    const value = own ?? page.held;
+    const value = page.held ?? own;
     ({ error } = page.entry.snapshot);
     if (error !== undefined) {
       break;
@@ -169,12 +179,12 @@ export const snapshotOf = (
     }
     // By what core pushed, or what the page held: the same objects until
     // either changes.
-    shown.push(own === undefined ? page.held : page.entry.snapshot.value);
+    shown.push(page.held ?? page.entry.snapshot.value);
     items.push(...value.items);
     ({ hasMore } = value);
   }
-  // Started again: what it showed stays until its first page answers.
-  const restarting = pager.held !== undefined && shown.length === 0;
+  // Started again: what it showed stays until it has loaded that again.
+  const restarting = pager.held !== undefined;
   return {
     snapshot: {
       view: {

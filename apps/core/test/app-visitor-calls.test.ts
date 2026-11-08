@@ -660,12 +660,18 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
 
     // Ana's own budget spent: she is refused, Ben is not.
     const anaId = await session(ana.token);
-    await host.admitRequest(`visitor:${anaId ?? ""}`, burst);
+    for (let request = 0; request < burst; request += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one request at a time
+      await host.admitRequest(`visitor:${anaId ?? ""}`);
+    }
     const anaSpent = await call(app, version, ana, "portal.mine");
     const benStill = await call(app, version, ben, "portal.mine");
     // Every visitor's budget spent: Ben is refused too.
     // Ben's one call is all that came out of it so far.
-    await host.admitRequest("visitors", burst - 1);
+    for (let request = 0; request < burst - 1; request += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one request at a time
+      await host.admitRequest("visitors");
+    }
     const appSpent = await call(app, version, ben, "portal.mine");
 
     expect({ anaSpent, benStill, appSpent }).toStrictEqual({
