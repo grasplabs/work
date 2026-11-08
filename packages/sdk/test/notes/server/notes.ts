@@ -89,7 +89,6 @@ export const count = internalQuery({
 });
 
 export const setSummary = mutation({
-  tables: { notes: { read: true, update: true } },
   args: {
     id: v.id("notes"),
     expectedRevision: v.number().integer().min(1),
@@ -111,7 +110,6 @@ export const setSummary = mutation({
 export const tally = action({
   args: {},
   returns: v.number().integer().min(0),
-  uses: [internal.notes.count],
   handler: async (ctx) => await ctx.runQuery(internal.notes.count, {}),
 });
 

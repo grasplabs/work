@@ -132,7 +132,9 @@ const refusal = (register: () => unknown): string => {
 };
 
 /** The reference `@server/_generated/api` generates for `workflow`'s `edited` event. */
-const eventOf = (workflow: string): WorkflowEventReference => ({
+const eventOf = <Workflow extends string>(
+  workflow: Workflow
+): WorkflowEventReference<Workflow> => ({
   kind: "workflowEvent",
   resourceId: "app",
   resourceVersion: 1,
@@ -144,127 +146,104 @@ const eventOf = (workflow: string): WorkflowEventReference => ({
   data: v.object({ title: v.string() }).descriptor,
 });
 
-describe("access", () => {
-  test("a table without its own access is none, and a mode it leaves out too", () => {
-    const { manifest } = inspectApp(notes());
-    expect(manifest.schema.tables.people?.access).toStrictEqual({
-      read: "appMembers",
-      write: "none",
+describe("what a function may use", () => {
+  test("is the App's: the manifest lists its permissions once, by alias, and no function narrows them", () => {
+    const mail = permission.connection("mail", {
+      contract: "microsoft-365.mail@1",
+      actions: ["send"],
     });
-    expect(manifest.operations["notes.create"]?.tables.people).toStrictEqual({
-      read: true,
-      insert: false,
-      update: false,
-      delete: false,
-    });
-  });
-
-  test("each kind gets only its own capacity", () => {
-    const { manifest } = inspectApp(notes());
-    expect(manifest.operations["notes.list"]?.tables.notes).toStrictEqual({
-      read: true,
-      insert: false,
-      update: false,
-      delete: false,
-    });
-    expect(manifest.operations["notes.create"]?.tables.notes).toStrictEqual({
-      read: true,
-      insert: true,
-      update: true,
-      delete: true,
-    });
-    // An action has no direct data capacity at all.
-    expect(manifest.operations["notes.send"]?.tables.notes).toStrictEqual({
-      read: false,
-      insert: false,
-      update: false,
-      delete: false,
-    });
-  });
-
-  test("a function's tables narrow, and a verb or table they leave out is denied", () => {
-    const narrowed = server.mutation({
-      tables: { notes: { insert: true } },
-      args: {},
-      returns: v.null(),
-      handler: () => null,
+    const files = permission.files({ operations: ["upload"] });
+    const followUp = permission.workflow("followUp", {
+      input: v.object({}),
+      output: v.null(),
     });
     const { manifest } = inspectApp(
-      notes({}, { notes: { list, create: narrowed, send } })
+      notes({
+        permissions: {
+          connections: [mail],
+          files,
+          workflows: [followUp],
+          people: true,
+        },
+      })
     );
-    expect(manifest.operations["notes.create"]?.tables).toStrictEqual({
-      notes: { read: false, insert: true, update: false, delete: false },
-      people: { read: false, insert: false, update: false, delete: false },
+    expect({
+      permissions: Object.fromEntries(
+        Object.entries(manifest.permissions).map(([alias, declared]) => [
+          alias,
+          declared["~permission"],
+        ])
+      ),
+      operation: Object.keys(
+        manifest.operations["notes.send"] ?? {}
+      ).toSorted(),
+      readBack:
+        canonicalText(readAppManifest(JSON.stringify(manifest))) ===
+        canonicalText(manifest),
+    }).toStrictEqual({
+      permissions: {
+        mail: "connections",
+        files: "files",
+        followUp: "workflows",
+        people: "people",
+      },
+      operation: ["args", "kind", "path", "returns", "stream", "visibility"],
+      readBack: true,
     });
-    // Functions without them keep their tables' access.
-    expect(manifest.operations["notes.list"]?.tables.notes?.read).toBeTruthy();
-    // And so does the manifest read back.
-    expect(
-      canonicalText(readAppManifest(JSON.stringify(manifest)))
-    ).toStrictEqual(canonicalText(manifest));
   });
 
   test.each([
-    [
-      "a verb the table's access doesn't allow",
-      "mutation",
-      { people: { insert: true } },
-      "widens access",
-    ],
-    [
-      "a query writing",
-      "query",
-      { notes: { read: true, insert: true } },
-      "a query only reads",
-    ],
-  ] as const)("tables with %s are refused", (_case, kind, tables, message) => {
-    const declared = (kind === "query" ? looseQuery : looseMutation)({
-      tables,
-      args: {},
-      returns: v.null(),
-      handler: () => null,
-    });
-    expect(refusal(() => notes({}, { notes: { list, declared } }))).toContain(
-      message
-    );
-  });
-
-  test.each([
-    [
-      "an action at all",
-      "action",
-      { notes: { read: false } },
-      "declaration has no `tables`",
-    ],
-    [
-      "an unknown table",
-      "mutation",
-      { invoices: { read: false } },
-      "doesn't have",
-    ],
-    [
-      "an unknown verb",
-      "mutation",
-      { notes: { upsert: false } },
-      "to booleans",
-    ],
-    [
-      "a verb that isn't a boolean",
-      "mutation",
-      { notes: { insert: "yes" } },
-      "to booleans",
-    ],
+    ["query", looseQuery],
+    ["mutation", looseMutation],
+    ["action", looseAction],
   ] as const)(
-    "tables with %s are refused as declared",
-    (_case, kind, tables, message) => {
-      const declare = kind === "action" ? looseAction : looseMutation;
-      expect(
+    "a %s that lists its own `uses` or `tables` is refused, never narrowed",
+    (_kind, declare) => {
+      expect([
         refusal(() =>
-          declare({ tables, args: {}, returns: v.null(), handler: () => null })
-        )
-      ).toContain(message);
+          declare({
+            uses: [],
+            args: {},
+            returns: v.null(),
+            handler: () => null,
+          })
+        ),
+        refusal(() =>
+          declare({
+            tables: { notes: { read: true } },
+            args: {},
+            returns: v.null(),
+            handler: () => null,
+          })
+        ),
+      ]).toStrictEqual([
+        "There is no `uses` list: every function may use what the App's `permissions` in grasp.config.ts declare, as its kind allows.",
+        "There is no `tables`: a table's access and row rules decide what each caller reads and writes.",
+      ]);
     }
   );
+
+  test("a manifest read back can't carry a function's own uses or verbs", () => {
+    const { manifest } = inspectApp(notes());
+    const withExtra = (extra: object): string => {
+      // SAFETY: a plain copy of the manifest, whose operations are objects.
+      const data = structuredClone(manifest) as {
+        operations: Record<string, object>;
+      };
+      data.operations["notes.list"] = {
+        ...data.operations["notes.list"],
+        ...extra,
+      };
+      return refusal(() => readAppManifest(JSON.stringify(data)));
+    };
+    expect([
+      withExtra({ uses: [] }),
+      withExtra({ tables: { notes: { read: true } } }),
+    ]).toStrictEqual([
+      "`notes.list` isn't a function as a manifest holds one.",
+      "`notes.list` isn't a function as a manifest holds one.",
+    ]);
+  });
 });
 
 describe("permissions", () => {
@@ -312,14 +291,12 @@ describe("permissions", () => {
       notes({ permissions: { ai, connections: [mail], people: true } })
     );
     expect({
-      resources: Object.keys(manifest.resources).toSorted(),
-      people: manifest.people,
+      permissions: Object.keys(manifest.permissions).toSorted(),
       readBack:
         canonicalText(readAppManifest(JSON.stringify(manifest))) ===
         canonicalText(manifest),
     }).toStrictEqual({
-      resources: ["ai", "mail"],
-      people: true,
+      permissions: ["ai", "mail", "people"],
       readBack: true,
     });
     expect(
@@ -423,14 +400,15 @@ describe("inspection", () => {
   test("hands out a manifest frozen all the way down, and handlers it can't change", () => {
     const registered = notes();
     const { manifest, functions } = inspectApp(registered);
-    const verbs = manifest.operations["notes.list"]?.tables.notes;
-    expect(Reflect.set(verbs ?? {}, "insert", true)).toBeFalsy();
+    const access = manifest.schema.tables.notes?.access;
+    expect(Reflect.set(access ?? {}, "write", "appMembers")).toBeFalsy();
     expect(
       [
         manifest,
         manifest.schema,
         manifest.schema.tables.notes?.access,
-        manifest.operations["notes.create"]?.uses,
+        manifest.operations["notes.create"],
+        manifest.permissions,
       ].every((part) => Object.isFrozen(part))
     ).toBeTruthy();
     // A caller that ignores the read-only type: its copy changes, not the App.
@@ -439,9 +417,8 @@ describe("inspection", () => {
     }
     expect(inspectApp(registered).functions.get("notes.list")).toBe(list);
     expect(
-      inspectApp(registered).manifest.operations["notes.list"]?.tables.notes
-        ?.insert
-    ).toBeFalsy();
+      inspectApp(registered).manifest.schema.tables.notes?.access.write
+    ).toBe("owner");
   });
 });
 
@@ -535,90 +512,174 @@ describe("paths", () => {
   });
 });
 
-describe("uses", () => {
+/** A channel that records every call App code makes, answering null. */
+const recordingChannel = () => {
+  const calls: unknown[][] = [];
+  const record =
+    (method: string) =>
+    async (...args: unknown[]): Promise<null> => {
+      calls.push([method, ...args]);
+      return await Promise.resolve(null);
+    };
+  return {
+    calls,
+    channel: {
+      read: record("read"),
+      write: record("write"),
+      call: record("call"),
+      resource: record("resource"),
+      emit: record("emit"),
+      people: async () => await Promise.resolve(null),
+    },
+  };
+};
+
+describe("the App's permissions in a function's context", () => {
   const mail = permission.connection("mail", {
     contract: "microsoft-365.mail@1",
     actions: ["send"],
   });
+  const followUp = permission.workflow("followUp", {
+    input: v.object({ title: v.string().trim() }),
+    output: v.object({ done: v.boolean() }),
+  });
 
-  test("a function's uses become paths and aliases", () => {
-    const notify = server.action({
+  test("an action has every permission the App declares, and nothing else", async () => {
+    const reach = server.action({
+      args: {},
+      returns: v.array(v.string()),
+      handler: (ctx) =>
+        [
+          Object.keys(ctx.connections),
+          Object.keys(ctx.workflows),
+          "ai" in ctx ? ["ai"] : [],
+          "brain" in ctx ? ["brain"] : [],
+        ].flat(),
+    });
+    const registered = notes(
+      { permissions: { connections: [mail], workflows: [followUp] } },
+      { notes: { list, reach } }
+    );
+    const { channel } = recordingChannel();
+    await expect(
+      runFunction(registered, "notes.reach", {}, channel)
+    ).resolves.toStrictEqual(["mail", "followUp"]);
+  });
+
+  test("a mutation stages the App's workflows, a query has none, and neither reaches a connection", async () => {
+    const stage = server.mutation({
+      args: {},
+      returns: v.array(v.string()),
+      handler: (ctx) => [
+        ...Object.keys(ctx.afterCommit.workflows),
+        ...("connections" in ctx ? ["connections"] : []),
+      ],
+    });
+    const read = server.query({
+      args: {},
+      returns: v.array(v.string()),
+      handler: (ctx) =>
+        ["workflows", "afterCommit", "connections", "runQuery"].filter(
+          (key) => key in ctx
+        ),
+    });
+    const registered = notes(
+      { permissions: { connections: [mail], workflows: [followUp] } },
+      { notes: { stage, read } }
+    );
+    const { channel } = recordingChannel();
+    await expect(
+      runFunction(registered, "notes.stage", {}, channel)
+    ).resolves.toStrictEqual(["followUp"]);
+    await expect(
+      runFunction(registered, "notes.read", {}, channel)
+    ).resolves.toStrictEqual([]);
+  });
+
+  test("a call names the App's function by its path, internal ones included, and the host decides it", async () => {
+    const compose = server.action({
       args: {},
       returns: v.null(),
-      uses: [list, secret, create, mail],
-      handler: () => null,
+      handler: async (ctx) => {
+        await ctx.runQuery(secret, {});
+        await ctx.runMutation(create, { title: "a" });
+        return null;
+      },
     });
-    const { manifest } = inspectApp(
-      notes(
-        { permissions: { connections: [mail] } },
-        { notes: { list, create, notify }, jobs: { secret } }
-      )
+    const registered = notes(
+      {},
+      { notes: { list, create, compose }, jobs: { secret } }
     );
-    expect(manifest.operations["notes.notify"]?.uses).toStrictEqual([
-      { type: "function", path: "notes.list", kind: "query" },
-      { type: "function", path: "jobs.secret", kind: "query" },
-      { type: "function", path: "notes.create", kind: "mutation" },
-      { type: "resource", kind: "connections", alias: "mail" },
+    const { calls, channel } = recordingChannel();
+    await runFunction(registered, "notes.compose", {}, channel);
+    expect(calls.filter(([method]) => method === "call")).toStrictEqual([
+      ["call", "query", "jobs.secret", {}],
+      ["call", "mutation", "notes.create", { title: "a" }],
     ]);
   });
 
-  test("a mutation runs queries only, and never reaches outside", () => {
-    const viaMutation = server.mutation({
+  test("a function the App doesn't register can't be called", async () => {
+    const orphan = server.query({
       args: {},
       returns: v.null(),
-      uses: [create],
       handler: () => null,
     });
-    expect(
-      refusal(() => notes({}, { notes: { list, create, viaMutation } }))
-    ).toContain("may run the App's queries");
-    const viaResource = server.mutation({
+    const caller = server.action({
       args: {},
       returns: v.null(),
-      uses: [mail],
-      handler: () => null,
+      handler: async (ctx) => await ctx.runQuery(orphan, {}),
     });
-    expect(
-      refusal(() =>
-        notes(
-          { permissions: { connections: [mail] } },
-          { notes: { viaResource } }
-        )
-      )
-    ).toContain("only an action reaches `connections`");
+    const registered = notes({}, { notes: { caller } });
+    const { calls, channel } = recordingChannel();
+    await expect(
+      runFunction(registered, "notes.caller", {}, channel)
+    ).rejects.toMatchObject({ code: "operation.not_found" });
+    expect(calls).toStrictEqual([]);
   });
 
-  test("an action's permission must be one the App lists", () => {
-    const sendMail = server.action({
+  test("a mutation notifies with a generated event reference, its contract pinned for the host to check", async () => {
+    const edited = eventOf("workflows.followUp");
+    // Typed by the config, as the generated `server/_generated/server` is.
+    const granted = serverModule(
+      schema,
+      defineApp({ name: "Notes", permissions: { workflows: [followUp] } })
+    );
+    const notify = granted.mutation({
       args: {},
       returns: v.null(),
-      uses: [mail],
-      handler: () => null,
+      handler: (ctx) => {
+        ctx.notify(edited, { runId: "run1", data: { title: "a" } });
+        return null;
+      },
     });
-    expect(refusal(() => notes({}, { notes: { sendMail } }))).toContain(
-      "don't list"
+    const forged = server.mutation({
+      args: {},
+      returns: v.null(),
+      handler: (ctx) => {
+        Reflect.apply(ctx.notify, ctx, [
+          { ...edited, fingerprint: "not a fingerprint" },
+          { runId: "run1", data: {} },
+        ]);
+        return null;
+      },
+    });
+    const registered = notes(
+      { permissions: { workflows: [followUp] } },
+      { notes: { notify, forged } }
     );
-    // The same alias declared again is another requirement, not this one.
-    const lookalike = permission.connection("mail", {
-      contract: "microsoft-365.mail@1",
-      actions: ["send"],
-    });
-    expect(
-      refusal(() =>
-        notes(
-          { permissions: { connections: [lookalike] } },
-          { notes: { sendMail } }
-        )
-      )
-    ).toContain("don't list");
-    expect(
-      refusal(() =>
-        notes(
-          { permissions: { connections: [mail, lookalike] } },
-          { notes: { list } }
-        )
-      )
-    ).toContain("alias `mail`");
+    const { calls, channel } = recordingChannel();
+    await runFunction(registered, "notes.notify", {}, channel);
+    expect(calls).toStrictEqual([
+      [
+        "resource",
+        "followUp",
+        "notify",
+        ["edited", "run1", { title: "a" }, "notes.note.edited", "f".repeat(64)],
+      ],
+    ]);
+    await expect(
+      runFunction(registered, "notes.forged", {}, recordingChannel().channel)
+    ).rejects.toMatchObject({ code: "operation.not_found" });
   });
 
   test("a contract is short enough to name in an audit event", () => {
@@ -632,171 +693,35 @@ describe("uses", () => {
     );
   });
 
-  test("a function the App doesn't register can't be used", () => {
-    const orphan = server.query({
-      args: {},
-      returns: v.null(),
-      handler: () => null,
-    });
-    const caller = server.action({
-      args: {},
-      returns: v.null(),
-      uses: [orphan],
-      handler: () => null,
-    });
-    expect(refusal(() => notes({}, { notes: { caller } }))).toContain(
-      "doesn't register"
+  test("a workflow reads back as declared, and shares no alias", () => {
+    const { manifest } = inspectApp(
+      notes({ permissions: { workflows: [followUp] } })
     );
-  });
-
-  test("a workflow is started by an action or staged by a mutation, only one the App lists, and reads back as declared", () => {
-    const followUp = permission.workflow("followUp", {
-      input: v.object({ title: v.string().trim() }),
-      output: v.object({ done: v.boolean() }),
-    });
-    const start = server.action({
-      args: {},
-      returns: v.null(),
-      uses: [followUp],
-      handler: () => null,
-    });
-    const stage = server.mutation({
-      args: {},
-      returns: v.null(),
-      uses: [list, followUp],
-      handler: () => null,
-    });
-    const registered = notes(
-      { permissions: { workflows: [followUp] } },
-      { notes: { list, start, stage } }
-    );
-    const { manifest } = inspectApp(registered);
-    const lookalike = permission.workflow("followUp", {
-      input: v.object({ title: v.string().trim() }),
-      output: v.object({ done: v.boolean() }),
-    });
+    const declared = manifest.permissions.followUp;
     expect({
-      start: manifest.operations["notes.start"]?.uses,
-      stage: manifest.operations["notes.stage"]?.uses,
-      declared: manifest.workflows.followUp?.input,
-      declaredOutput: manifest.workflows.followUp?.output,
-      // A workflow is neither an action's permission nor a page's.
-      resources: Object.keys(manifest.resources),
+      kind: declared?.["~permission"],
+      input: declared?.["~permission"] === "workflows" ? declared.input : null,
       readBack:
         canonicalText(readAppManifest(JSON.stringify(manifest))) ===
         canonicalText(manifest),
-      unlisted: refusal(() => notes({}, { notes: { list, start } })).includes(
-        "don't list"
-      ),
-      // The same alias declared again is another requirement, not this one.
-      lookalike: refusal(() =>
-        notes(
-          { permissions: { workflows: [lookalike] } },
-          { notes: { list, start } }
-        )
-      ).includes("don't list"),
       sameAlias: refusal(() =>
-        notes(
-          {
-            permissions: {
-              workflows: [followUp],
-              connections: [
-                permission.connection("followUp", {
-                  contract: "microsoft-365.mail@1",
-                  actions: ["send"],
-                }),
-              ],
-            },
+        notes({
+          permissions: {
+            workflows: [followUp],
+            connections: [
+              permission.connection("followUp", {
+                contract: "microsoft-365.mail@1",
+                actions: ["send"],
+              }),
+            ],
           },
-          { notes: { list } }
-        )
+        })
       ).includes("alias `followUp`"),
     }).toStrictEqual({
-      start: [{ type: "workflow", alias: "followUp" }],
-      stage: [
-        { type: "function", path: "notes.list", kind: "query" },
-        { type: "workflow", alias: "followUp" },
-      ],
-      declared: v.object({ title: v.string().trim() }).descriptor,
-      declaredOutput: v.object({ done: v.boolean() }).descriptor,
-      resources: [],
+      kind: "workflows",
+      input: v.object({ title: v.string().trim() }).descriptor,
       readBack: true,
-      unlisted: true,
-      lookalike: true,
       sameAlias: true,
-    });
-  });
-
-  test("a workflow's event is notified by a mutation only, of a workflow the App lists, and reads back as declared", () => {
-    const followUp = permission.workflow("followUp", {
-      input: v.object({ title: v.string().trim() }),
-      output: v.object({ done: v.boolean() }),
-    });
-    const edited = eventOf("workflows.followUp");
-    const notify = server.mutation({
-      args: {},
-      returns: v.null(),
-      uses: [edited],
-      handler: () => null,
-    });
-    const registered = notes(
-      { permissions: { workflows: [followUp] } },
-      { notes: { list, notify } }
-    );
-    const { manifest } = inspectApp(registered);
-    const byAction = server.action({
-      args: {},
-      returns: v.null(),
-      uses: [edited],
-      handler: () => null,
-    });
-    const otherWorkflow = server.mutation({
-      args: {},
-      returns: v.null(),
-      uses: [eventOf("workflows.archive")],
-      handler: () => null,
-    });
-    expect({
-      notify: manifest.operations["notes.notify"]?.uses,
-      readBack:
-        canonicalText(readAppManifest(JSON.stringify(manifest))) ===
-        canonicalText(manifest),
-      byAction: refusal(() =>
-        notes(
-          { permissions: { workflows: [followUp] } },
-          { notes: { list, byAction } }
-        )
-      ).includes("only a mutation notifies"),
-      otherWorkflow: refusal(() =>
-        notes(
-          { permissions: { workflows: [followUp] } },
-          { notes: { list, otherWorkflow } }
-        )
-      ).includes("don't list"),
-      madeUp: refusal(() =>
-        Reflect.apply(server.mutation, server, [
-          {
-            args: {},
-            returns: v.null(),
-            uses: [{ ...edited, fingerprint: "not a fingerprint" }],
-            handler: () => null,
-          },
-        ])
-      ).includes("never IDs or names"),
-    }).toStrictEqual({
-      notify: [
-        {
-          type: "workflowEvent",
-          workflow: "followUp",
-          alias: "edited",
-          eventType: "notes.note.edited",
-          fingerprint: "f".repeat(64),
-        },
-      ],
-      readBack: true,
-      byAction: true,
-      otherWorkflow: true,
-      madeUp: true,
     });
   });
 
@@ -826,88 +751,53 @@ describe("uses", () => {
     }).toStrictEqual({ optional: true, defaulted: "default", noOutput: true });
   });
 
-  test("a manifest can't make a workflow out of something else", () => {
-    const followUp = permission.workflow("followUp", {
-      input: v.object({}),
-      output: v.null(),
-    });
-    const start = server.action({
-      args: {},
-      returns: v.null(),
-      uses: [followUp],
-      handler: () => null,
-    });
+  test("a manifest can't file a permission under another alias, or make one out of something else", () => {
     const { manifest } = inspectApp(
-      notes(
-        { permissions: { workflows: [followUp] } },
-        { notes: { list, start } }
-      )
+      notes({ permissions: { workflows: [followUp], people: true } })
     );
-    // A mutable copy, as JSON: what a manifest read back is.
-    const operations: Record<string, { uses: unknown[] }> = {};
-    for (const [path, operation] of Object.entries(manifest.operations)) {
-      operations[path] = { ...operation, uses: [...operation.uses] };
-    }
-    const data: {
-      operations: Record<string, { uses: unknown[] }>;
-      workflows: Record<string, unknown>;
-      resources: Record<string, unknown>;
-    } = {
-      ...manifest,
-      operations,
-      workflows: { ...manifest.workflows },
-      resources: { ...manifest.resources },
-    };
-    const altered = (change: (copy: typeof data) => void): string => {
-      const copy = structuredClone(data);
-      change(copy);
+    const altered = (
+      change: (permissions: Record<string, unknown>) => void
+    ): string => {
+      // SAFETY: a plain copy of the manifest, whose permissions are objects.
+      const copy = structuredClone(manifest) as {
+        permissions: Record<string, unknown>;
+      };
+      change(copy.permissions);
       return refusal(() => readAppManifest(JSON.stringify(copy)));
     };
     expect({
-      // A use of a workflow the manifest doesn't declare.
-      undeclared: altered((copy) => {
-        copy.workflows = {};
-      }).includes("doesn't declare"),
-      // A workflow filed among an action's resources.
-      asResource: altered((copy) => {
-        copy.resources = copy.workflows;
-        copy.workflows = {};
-      }).includes("isn't an action's permission"),
-      // A query that starts one.
-      byQuery: altered((copy) => {
-        copy.operations["notes.list"]?.uses.push({
-          type: "workflow",
-          alias: "followUp",
-        });
-      }).includes("A query's declaration has no `uses`"),
+      // A workflow under an alias that isn't its own.
+      renamed: altered((permissions) => {
+        permissions.other = permissions.followUp;
+        delete permissions.followUp;
+      }).includes("isn't filed under its alias"),
       // A workflow without the output a run gives.
       noOutput:
-        altered((copy) => {
-          const declared = manifest.workflows.followUp;
-          if (declared !== undefined) {
-            const { output: _output, ...withoutOutput } = declared;
-            copy.workflows = { followUp: withoutOutput };
-          }
+        altered((permissions) => {
+          // SAFETY: the workflow declaration, an object with its output.
+          const { output: _output, ...withoutOutput } =
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+            permissions.followUp as { output: unknown };
+          permissions.followUp = withoutOutput;
         }).length > 0,
+      // `people` that declares more than itself.
+      widenedPeople: altered((permissions) => {
+        permissions.people = {
+          "~permission": "people",
+          alias: "people",
+          teams: ["all"],
+        };
+      }).includes("declares nothing but itself"),
+      // A kind no App holds.
+      unknownKind: altered((permissions) => {
+        permissions.crm = { "~permission": "apps", alias: "crm" };
+      }).includes("isn't one this SDK knows"),
     }).toStrictEqual({
-      undeclared: true,
-      asResource: true,
-      byQuery: true,
+      renamed: true,
       noOutput: true,
+      widenedPeople: true,
+      unknownKind: true,
     });
-  });
-
-  test("uses lists declarations, never names or IDs", () => {
-    expect(
-      refusal(() =>
-        looseAction({
-          args: {},
-          returns: v.null(),
-          uses: ["notes.list"],
-          handler: () => null,
-        })
-      )
-    ).toContain("never IDs or names");
   });
 });
 
@@ -948,9 +838,9 @@ describe("declarations", () => {
   test.each([
     ["`input`", { input: {}, returns: v.null() }, "has no `input`"],
     [
-      "`uses` on a query",
+      "its own `uses`",
       { args: {}, returns: v.null(), uses: [] },
-      "has no `uses`",
+      "There is no `uses` list",
     ],
     [
       "a `returns` that isn't a schema",
@@ -1067,7 +957,6 @@ describe("the runner", () => {
     const recover = server.action({
       args: {},
       returns: v.string(),
-      uses: [create],
       handler: async (ctx) => {
         try {
           await ctx.runMutation(create, { title: "a" });

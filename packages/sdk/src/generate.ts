@@ -3,6 +3,7 @@ import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { isEventType, sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 
+import { declaredPermission, declaredPermissions } from "./app.ts";
 import type { AppManifest, OperationManifest } from "./app.ts";
 import { preferenceOperations } from "./preference-operations.ts";
 import { workflowReferenceLimits } from "./references.ts";
@@ -18,9 +19,10 @@ import type { WorkflowQueryName } from "./workflow-queries.ts";
 // (app-manifest.ts), never from its code:
 //
 // - `server/_generated/server.ts` (`@server/_generated/server`): the
-//   server constructors and `doc`, specialized to the App's schema. Its
-//   code is the same for every App (`serverModule(schema)`); the
-//   specialization is in its types, which come from `server/schema.ts`.
+//   server constructors and `doc`, specialized to the App's schema and
+//   permissions. Its code is the same for every App
+//   (`serverModule(schema, config)`); the specialization is in its types,
+//   which come from `server/schema.ts` and `grasp.config.ts`.
 // - `server/_generated/dataModel.ts` (`@server/_generated/dataModel`): the
 //   data model's types (`Doc`, `Id`, `TableName`), from the schema too.
 // - `server/_generated/internal.ts` (`@server/_generated/internal`): the
@@ -256,7 +258,9 @@ export const declaredWorkflows = (
 ): BoundWorkflow[] => {
   const extras = new Map<string, WorkflowBindingExtras>();
   for (const resolved of bound) {
-    if (!Object.hasOwn(manifest.workflows, resolved.alias)) {
+    if (
+      declaredPermission(manifest, resolved.alias, "workflows") === undefined
+    ) {
       throw new TypeError(
         `${JSON.stringify(resolved.alias)} isn't a workflow the App declares.`
       );
@@ -268,17 +272,15 @@ export const declaredWorkflows = (
     }
     extras.set(resolved.alias, resolved);
   }
-  return Object.values(manifest.workflows)
-    .toSorted((a, b) => (a.alias < b.alias ? -1 : 1))
-    .map((declared) => ({
-      events: {},
-      listens: {},
-      decisions: {},
-      ...extras.get(declared.alias),
-      alias: declared.alias,
-      input: declared.input,
-      output: declared.output,
-    }));
+  return declaredPermissions(manifest, "workflows").map((declared) => ({
+    events: {},
+    listens: {},
+    decisions: {},
+    ...extras.get(declared.alias),
+    alias: declared.alias,
+    input: declared.input,
+    output: declared.output,
+  }));
 };
 
 /**
@@ -650,24 +652,28 @@ export type Doc<Table extends TableName> = SdkDoc<Tables[Table], Table>;
 
 /**
  * `@server/_generated/server`: the constructors, specialized to
- * `schema.ts` by type. The same for every App, so inspection can load it
- * before anything is generated from the App's manifest.
+ * `schema.ts` and to what `grasp.config.ts`'s permissions grant, by type.
+ * The same for every App, so inspection can load it before anything is
+ * generated from the App's manifest.
  */
 export const serverModuleSource = `${banner}import { serverModule } from "@grasp-os/sdk/server";
 import type {
   ActionCtx as SdkActionCtx,
   MutationCtx as SdkMutationCtx,
   QueryCtx as SdkQueryCtx,
-  Use,
 } from "@grasp-os/sdk/server";
 
+import config from "../../grasp.config.ts";
 import schema from "../schema.ts";
 import type { DataModel } from "./dataModel.ts";
 
 export type { CallerCtx } from "@grasp-os/sdk/server";
 export type { Doc, Id, TableName } from "./dataModel.ts";
 
-const server = serverModule(schema);
+const server = serverModule(schema, config);
+
+/** What the App's permissions grant its functions. */
+type Grants = NonNullable<(typeof config)["~grants"]>;
 
 export const query = server.query;
 export const internalQuery = server.internalQuery;
@@ -678,10 +684,8 @@ export const internalAction = server.internalAction;
 export const doc = server.doc;
 
 export type QueryCtx = SdkQueryCtx<DataModel>;
-export type MutationCtx<Uses extends readonly Use[] = readonly []> =
-  SdkMutationCtx<DataModel, Uses>;
-export type ActionCtx<Uses extends readonly Use[] = readonly []> =
-  SdkActionCtx<Uses>;
+export type MutationCtx = SdkMutationCtx<DataModel, Grants>;
+export type ActionCtx = SdkActionCtx<Grants>;
 `;
 
 /** A tree of function references as a module's typed, frozen export. */
@@ -972,9 +976,10 @@ const referencesText = async (
     await workflowsExport(identity, workflows),
   ];
 
-  const resources = Object.values(manifest.browserResources).toSorted((a, b) =>
-    a.alias < b.alias ? -1 : 1
-  );
+  const resources = [
+    ...declaredPermissions(manifest, "files"),
+    ...declaredPermissions(manifest, "links"),
+  ].toSorted((a, b) => (a.alias < b.alias ? -1 : 1));
   const resourceTypes = resources.map((declared) => {
     const literals = (
       declared["~permission"] === "files"

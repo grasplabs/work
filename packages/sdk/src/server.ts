@@ -1,9 +1,6 @@
-import { usesMaxEntries } from "@grasp-os/shared/function-limits";
-
 import type { DatabaseReader, DatabaseWriter } from "./database.ts";
-import { isServerFunction, serverFunctions } from "./handlers.ts";
+import { serverFunctions } from "./handlers.ts";
 import type { PeopleDirectory, User } from "./people.ts";
-import { isPermission, isWorkflowPermission } from "./permissions.ts";
 import type {
   AiClient,
   AiPermission,
@@ -18,7 +15,6 @@ import type {
   GuestsPermission,
   WorkflowPermission,
 } from "./permissions.ts";
-import { eventReferenceData, referenceName } from "./references.ts";
 import type {
   ArgsOf,
   Callable,
@@ -51,33 +47,37 @@ import type {
 // arguments it is called with and what it returns against the declared
 // schemas, which it holds as descriptors, never trusting App code to.
 //
-// What a handler can do is what its context has, and the three differ on
-// purpose:
+// What a handler can do is what its context has: what its kind allows of
+// the App's permissions (grasp.config.ts), the App's one list, as in
+// Convex, where every function of an app may use what the app may. The
+// three kinds differ on purpose:
 // - a query reads (`ctx.db` reads only), and has nothing to write with or
-//   call out through: no `uses`;
+//   call out through;
 // - a mutation reads and stages writes (`ctx.db`), which commit together
 //   after it returns, and may run the App's queries in the same staged
 //   state (`ctx.runQuery`); it has no resources, so no network, and the
-//   only thing it starts is a workflow it lists, after it commits
-//   (`ctx.afterCommit.start`), as part of that commit, and the only event
-//   it sends is one it lists, to a run of the App's own, likewise
-//   (`ctx.notify`, spec 10.7.4); it tells people only once it commits,
-//   likewise (`ctx.afterCommit.notifyPeople`);
+//   only thing it starts is one of the App's workflows, after it commits
+//   (`ctx.afterCommit.workflows`), as part of that commit, and the only
+//   event it sends is one of the App's workflows', to a run of the App's
+//   own, likewise (`ctx.notify`, spec 10.7.4); it tells people only once
+//   it commits, likewise (`ctx.afterCommit.notifyPeople`);
 // - an action has no `db` at all: it composes the App's functions
 //   (`runQuery`, `runMutation`, `runAction`), each its own invocation,
-//   and reaches outside the App only through the permissions its `uses`
-//   lists (`ctx.ai`, `ctx.connections`, `ctx.brain`, `ctx.grasp`,
-//   `ctx.guests`), starts only the workflows it lists (`ctx.workflows`),
-//   and tells people through the platform's notifications
-//   (`ctx.notifyPeople`).
-// The host enforces each of these again at run time, whatever App code
-// sends it; the types here make the mistakes fail to compile first.
+//   reaches outside the App only through the App's permissions (`ctx.ai`,
+//   `ctx.connections`, `ctx.brain`, `ctx.grasp`, `ctx.guests`), starts
+//   the App's workflows (`ctx.workflows`), and tells people through the
+//   platform's notifications (`ctx.notifyPeople`).
+// What a function reads and writes is its tables' access and row rules
+// for whoever calls, which the store decides. The host enforces each of
+// these again at run time, against the App's sealed manifest, whatever
+// App code sends it; the types here make the mistakes fail to compile
+// first.
 //
 // The constructors are specialized to the App's schema by `serverModule`,
 // which the generated `server/_generated/server` module calls; an author never
 // writes their generics. There is no `input`/`output` form, no `reads` or
-// `writes` list and no `ctx.data`: the superseded shapes of spec 7 are
-// refused, not aliased.
+// `writes` list, no per-function `uses` or `tables` and no `ctx.data`:
+// the superseded shapes are refused, not aliased.
 //
 // Adapted from Baseflare's server function constructors (MIT, © 2026
 // Baseflare contributors: packages/baseflare/src/server/functions), with
@@ -85,23 +85,6 @@ import type {
 
 /** The three kinds of server function. */
 export type FunctionKind = ReferenceKind;
-
-/** The verbs a function may use on a table. */
-export interface TableVerbs {
-  readonly read: boolean;
-  readonly insert: boolean;
-  readonly update: boolean;
-  readonly delete: boolean;
-}
-
-/**
- * How a query or a mutation narrows its tables' access (`tables`): the
- * verbs it uses on each table it names, a verb or a table left out
- * denied. It only narrows what the tables' access and its kind give it.
- */
-export type TableNarrowing<Tables extends AnyTables = AnyTables> = Readonly<
-  Partial<Record<keyof Tables & string, Partial<TableVerbs>>>
->;
 
 /** Who may call a function directly: anyone allowed, or the App's own code. */
 export type Visibility = ReferenceVisibility;
@@ -129,12 +112,13 @@ type AnyReference = FunctionReference;
 export type { ArgsOf, ReturnOf } from "./references.ts";
 
 /**
- * What a function's `uses` may list: functions of the App, permissions,
- * the workflows it starts, and the events of the App's workflows it
- * notifies runs of (`workflows.<workflow>.events.<alias>`, a mutation's
- * only).
+ * What an App's permissions grant its functions, as one union: each
+ * permission its actions reach and each workflow it starts. Its pages'
+ * permissions (files, links) and `people` aren't among them: every kind
+ * reads the people the same way (`ctx.people`), which the host refuses
+ * to an App that doesn't declare them.
  */
-export type Use = AnyReference | AnyPermission | AnyWorkflow | AnyWorkflowEvent;
+export type Grant = AnyPermission | AnyWorkflow;
 
 /** Any generated event reference, whatever its data. */
 type AnyWorkflowEvent = WorkflowEventReference<
@@ -145,18 +129,21 @@ type AnyWorkflowEvent = WorkflowEventReference<
   any
 >;
 
-/** The event references among `Uses`. */
-type UsedEvent<Uses extends readonly Use[]> = Extract<
-  Uses[number],
-  AnyWorkflowEvent
+/** The event references of the workflows among `Grants`. */
+type GrantedEvent<Grants extends Grant> = WorkflowEventReference<
+  `workflows.${GrantedWorkflow<Grants>["alias"]}`,
+  string,
+  string,
+  // oxlint-disable-next-line typescript/no-explicit-any -- the data is only read, by `EventDataOf`
+  any
 >;
 
 /**
- * `ctx.notify`: stages the event `event` (one `Uses` lists) for run
- * `runId` of its workflow, with `data` as that event declares it, never
- * inferred from the call.
+ * `ctx.notify`: stages the event `event` (one of a workflow among
+ * `Grants`) for run `runId` of its workflow, with `data` as that event
+ * declares it, never inferred from the call.
  */
-type Notify<Uses extends readonly Use[]> = <Event extends UsedEvent<Uses>>(
+type Notify<Grants extends Grant> = <Event extends GrantedEvent<Grants>>(
   event: Event,
   notification: {
     readonly runId: string;
@@ -168,11 +155,8 @@ type Notify<Uses extends readonly Use[]> = <Event extends UsedEvent<Uses>>(
 // oxlint-disable-next-line typescript/no-explicit-any -- the input is only read, by `WorkflowInput`
 type AnyWorkflow = WorkflowPermission<string, any>;
 
-/** The workflows among `Uses`. */
-type UsedWorkflow<Uses extends readonly Use[]> = Extract<
-  Uses[number],
-  AnyWorkflow
->;
+/** The workflows among `Grants`. */
+type GrantedWorkflow<Grants extends Grant> = Extract<Grants, AnyWorkflow>;
 
 /** The input a caller starts workflow `Workflow` with. */
 type WorkflowInput<Workflow> =
@@ -205,11 +189,11 @@ type StartArgs<Workflow> =
 
 /**
  * `ctx.workflows` (and a mutation's `ctx.afterCommit.workflows`): each
- * workflow `Uses` lists, by its alias, started with its input, answering
- * `Started`.
+ * workflow among `Grants`, by its alias, started with its input,
+ * answering `Started`.
  */
-export type Workflows<Uses extends readonly Use[], Started> = {
-  readonly [Workflow in UsedWorkflow<Uses> as Workflow["alias"]]: {
+export type Workflows<Grants extends Grant, Started> = {
+  readonly [Workflow in GrantedWorkflow<Grants> as Workflow["alias"]]: {
     readonly start: (...input: StartArgs<Workflow>) => Promise<Started>;
   };
 };
@@ -254,14 +238,14 @@ type NotifyPeople<Told> = (
  * `ctx.afterCommit`: what a mutation hands on once it commits, as part of
  * its commit, so nothing is handed on for a mutation that doesn't.
  */
-interface AfterCommit<Uses extends readonly Use[]> {
+interface AfterCommit<Grants extends Grant> {
   /**
-   * Each workflow `Uses` lists, by alias: `start(input)` starts it once
+   * Each of the App's workflows, by alias: `start(input)` starts it once
    * the mutation has committed, staged with its writes, in the same
    * transaction, and started from the store's outbox exactly once. A
    * mutation that fails, is rolled back or is superseded starts nothing.
    */
-  readonly workflows: Workflows<Uses, void>;
+  readonly workflows: Workflows<Grants, void>;
   /**
    * Tells people about what the mutation did, once it has committed
    * (`NotifyPeople`): checked as it is staged (`resource.invalid_args`
@@ -275,35 +259,26 @@ interface AfterCommit<Uses extends readonly Use[]> {
   readonly notifyPeople: NotifyPeople<void>;
 }
 
-/** The references of kind `Kind` among `Uses`. */
-type UsedOfKind<
-  Uses extends readonly Use[],
-  Kind extends FunctionKind,
-> = Extract<Uses[number], FunctionReference<Kind>>;
-
-/** `ctx.runQuery`: one of the queries `Uses` lists, with its arguments. */
-type RunQuery<Uses extends readonly Use[]> = <
-  Reference extends UsedOfKind<Uses, "query">,
->(
+/**
+ * `ctx.runQuery`: one of the App's queries, public or internal, by its
+ * reference (`api.…`, `internal.…`), with its arguments.
+ */
+type RunQuery = <Reference extends FunctionReference<"query">>(
   reference: Reference,
   args: ArgsOf<Reference>
 ) => Promise<ReturnOf<Reference>>;
 
-/** `ctx.runMutation`: one of the mutations `Uses` lists. */
-type RunMutation<Uses extends readonly Use[]> = <
-  Reference extends UsedOfKind<Uses, "mutation">,
->(
+/** `ctx.runMutation`: one of the App's mutations. */
+type RunMutation = <Reference extends FunctionReference<"mutation">>(
   reference: Reference,
   args: ArgsOf<Reference>
 ) => Promise<ReturnOf<Reference>>;
 
 /**
- * `ctx.runAction`: one of the actions `Uses` lists that answers once. A
+ * `ctx.runAction`: one of the App's actions that answers once. A
  * streaming one isn't callable here: its progress has no one to go to.
  */
-type RunAction<Uses extends readonly Use[]> = <
-  Reference extends UsedOfKind<Uses, "action">,
->(
+type RunAction = <Reference extends FunctionReference<"action">>(
   reference: SingleAnswer<Reference>,
   args: ArgsOf<Reference>
 ) => Promise<ReturnOf<Reference>>;
@@ -313,37 +288,32 @@ type Present<Key extends string, Value> = [Value] extends [never]
   ? unknown
   : Readonly<Record<Key, Value>>;
 
-/** The `ai` permission among `Uses`, as `ctx.ai`. */
-type AiOf<Uses extends readonly Use[]> = [
-  Extract<Uses[number], AiPermission>,
-] extends [never]
+/** The `ai` permission among `Grants`, as `ctx.ai`. */
+type AiOf<Grants extends Grant> = [Extract<Grants, AiPermission>] extends [
+  never,
+]
   ? never
   : AiClient;
 
 /**
- * What an action reaches through the permissions its `Uses` lists, each
- * only when listed: `ai`, `brain`, `grasp` (the platform's own functions)
- * and `guests`, and the connections by alias.
+ * What an action reaches through the App's permissions (`Grants`), each
+ * only when declared: `ai`, `brain`, `grasp` (the platform's own
+ * functions) and `guests`, and the connections by alias.
  */
-type PermissionClients<Uses extends readonly Use[]> = {
-  /** Each connection `Uses` lists, by alias. */
+type PermissionClients<Grants extends Grant> = {
+  /** Each of the App's connections, by alias. */
   readonly connections: {
     readonly [
-      Connection in Extract<
-        Uses[number],
-        ConnectionPermission
-      > as Connection["alias"]
+      Connection in Extract<Grants, ConnectionPermission> as Connection["alias"]
     ]: ConnectionClientOf<Connection>;
   };
-} & Present<"ai", AiOf<Uses>> &
+} & Present<"ai", AiOf<Grants>> &
   Present<
     "grasp",
-    [Extract<Uses[number], GraspPermission>] extends [never]
-      ? never
-      : GraspClient
+    [Extract<Grants, GraspPermission>] extends [never] ? never : GraspClient
   > &
-  Present<"brain", BrainClientOf<Extract<Uses[number], BrainPermission>>> &
-  Present<"guests", GuestsClientOf<Extract<Uses[number], GuestsPermission>>>;
+  Present<"brain", BrainClientOf<Extract<Grants, BrainPermission>>> &
+  Present<"guests", GuestsClientOf<Extract<Grants, GuestsPermission>>>;
 
 /** `ctx.auth`: who the call is for, as Convex's `ctx.auth` answers it. */
 export interface Auth {
@@ -381,19 +351,19 @@ export interface QueryCtx<Tables extends AnyTables> extends CallerCtx {
 
 /**
  * What a mutation's handler has: reads and staged writes, which commit
- * together once it returns, and the queries it `uses`, run in the same
- * staged state.
+ * together once it returns, and the App's queries, run in the same staged
+ * state.
  */
 export interface MutationCtx<
   Tables extends AnyTables,
-  Uses extends readonly Use[] = readonly [],
+  Grants extends Grant = never,
 > extends CallerCtx {
   readonly db: DatabaseWriter<Tables>;
-  readonly runQuery: RunQuery<Uses>;
-  readonly afterCommit: AfterCommit<Uses>;
+  readonly runQuery: RunQuery;
+  readonly afterCommit: AfterCommit<Grants>;
   /**
-   * Notifies run `runId` of one of the App's workflows with an event its
-   * `uses` lists (spec 10.7.4): staged with the mutation's writes, in the
+   * Notifies run `runId` of one of the App's workflows with one of its
+   * events (spec 10.7.4): staged with the mutation's writes, in the
    * same transaction, and delivered to the run's inbox from the store's
    * outbox after the commit, once. The host checks the run, the data and
    * the App's grant to send as the mutation runs, and fails the mutation
@@ -401,12 +371,12 @@ export interface MutationCtx<
    * superseded notifies nothing. Its success is the local commit, never
    * the run taking the event, which the host checks again as it delivers.
    */
-  readonly notify: Notify<Uses>;
+  readonly notify: Notify<Grants>;
 }
 
 /**
- * What an action's handler has besides its permissions
- * (`PermissionClients`): the functions it `uses`, its workflows and the
+ * What an action's handler has besides the App's permissions
+ * (`PermissionClients`): the App's functions, its workflows and the
  * platform's notifications.
  *
  * An action is not atomic across its calls. A query it runs and a
@@ -425,14 +395,12 @@ export interface MutationCtx<
  * anew. Keep what an action changes, and in what order, a function of its
  * input.
  */
-interface ActionBaseCtx<
-  Uses extends readonly Use[] = readonly [],
-> extends CallerCtx {
-  readonly runQuery: RunQuery<Uses>;
-  readonly runMutation: RunMutation<Uses>;
-  readonly runAction: RunAction<Uses>;
+interface ActionBaseCtx<Grants extends Grant = never> extends CallerCtx {
+  readonly runQuery: RunQuery;
+  readonly runMutation: RunMutation;
+  readonly runAction: RunAction;
   /**
-   * Each workflow its `uses` lists, by alias: `start(input)` resolves once
+   * Each of the App's workflows, by alias: `start(input)` resolves once
    * the host has admitted the start durably, not once the run ends.
    * Called again under the same idempotency key, the action gets the same
    * start back, matched by its place among the action's starts, as its
@@ -440,7 +408,7 @@ interface ActionBaseCtx<
    * function of the input: starts made at once, in whichever order they
    * happen to land (`Promise.race`), can swap places on the second call.
    */
-  readonly workflows: Workflows<Uses, RunHandle>;
+  readonly workflows: Workflows<Grants, RunHandle>;
   /**
    * Tells people now (`NotifyPeople`), resolving once they are told: how
    * many were. Called again under the same idempotency key, it tells
@@ -453,21 +421,21 @@ interface ActionBaseCtx<
 }
 
 /**
- * What an action's handler has: the functions, permissions and workflows
- * it `uses`. No database: what it reads and writes goes through the App's
+ * What an action's handler has: the App's functions, permissions and
+ * workflows. No database: what it reads and writes goes through the App's
  * queries and mutations, each committed on its own.
  */
-export type ActionCtx<Uses extends readonly Use[] = readonly []> =
-  ActionBaseCtx<Uses> & PermissionClients<Uses>;
+export type ActionCtx<Grants extends Grant = never> = ActionBaseCtx<Grants> &
+  PermissionClients<Grants>;
 
 /**
  * What a streaming action's handler has (spec 10.7.6): an action's
  * context, and `emit`.
  */
 type StreamActionCtx<
-  Uses extends readonly Use[] = readonly [],
+  Grants extends Grant = never,
   Progress = unknown,
-> = ActionCtx<Uses> & StreamEmit<Progress>;
+> = ActionCtx<Grants> & StreamEmit<Progress>;
 
 /** A streaming action's `emit`. */
 interface StreamEmit<Progress> {
@@ -524,9 +492,6 @@ interface ServerFunction<
   readonly args: ObjectSchema<Shape>;
   /** Its `returns` schema, which the host checks its answers against; null where it declares none. */
   readonly returns: AnySchema | null;
-  readonly uses: readonly Use[];
-  /** How it narrows its tables' access, or null where it doesn't. */
-  readonly tables: TableNarrowing | null;
   /** An action's progress snapshots (spec 10.7.6), or null. */
   readonly stream: Stream;
   readonly handler: (ctx: Ctx, args: ObjectOutput<Shape>) => unknown;
@@ -541,8 +506,6 @@ export interface AnyFunction extends FunctionReference {
   readonly visibility: Visibility;
   readonly args: AnySchema;
   readonly returns: AnySchema | null;
-  readonly uses: readonly Use[];
-  readonly tables: TableNarrowing | null;
   readonly stream: AnySchema | null;
   readonly handler: (ctx: never, args: never) => unknown;
 }
@@ -557,8 +520,6 @@ interface QueryDefinition<
   readonly args: Shape;
   /** What it answers; without it, what its handler answers. */
   readonly returns?: Returns;
-  /** The tables it reads, when it reads fewer than its access allows. */
-  readonly tables?: TableNarrowing<Tables>;
   readonly handler: (
     ctx: QueryCtx<Tables>,
     args: ObjectOutput<Shape>
@@ -571,20 +532,13 @@ interface MutationDefinition<
   Shape extends ValueShape,
   Returns extends AnySchema | undefined,
   Result,
-  Uses extends readonly Use[],
+  Grants extends Grant,
 > {
   readonly args: Shape;
   /** What it answers; without it, what its handler answers. */
   readonly returns?: Returns;
-  /**
-   * The queries it runs, the workflows it starts and the events it
-   * notifies runs of; none unless listed.
-   */
-  readonly uses?: Uses;
-  /** The verbs it uses on each table, when fewer than its access allows. */
-  readonly tables?: TableNarrowing<Tables>;
   readonly handler: (
-    ctx: MutationCtx<Tables, Uses>,
+    ctx: MutationCtx<Tables, Grants>,
     args: ObjectOutput<Shape>
   ) => Result | Promise<Result>;
 }
@@ -594,17 +548,15 @@ export interface ActionDefinition<
   Shape extends ValueShape,
   Returns extends AnySchema | undefined,
   Result,
-  Uses extends readonly Use[],
+  Grants extends Grant,
 > {
   readonly args: Shape;
   /** What it answers; without it, what its handler answers. */
   readonly returns?: Returns;
-  /** The functions, permissions and workflows it calls; none unless listed. */
-  readonly uses?: Uses;
   /** Declared only by a streaming action (`StreamActionDefinition`). */
   readonly stream?: undefined;
   readonly handler: (
-    ctx: ActionCtx<Uses>,
+    ctx: ActionCtx<Grants>,
     args: ObjectOutput<Shape>
   ) => Result | Promise<Result>;
 }
@@ -618,18 +570,16 @@ interface StreamActionDefinition<
   Shape extends ValueShape,
   Returns extends AnySchema | undefined,
   Result,
-  Uses extends readonly Use[],
+  Grants extends Grant,
   Stream extends AnySchema,
 > {
   readonly args: Shape;
   /** What it answers; without it, what its handler answers. */
   readonly returns?: Returns;
-  /** The functions, permissions and workflows it calls; none unless listed. */
-  readonly uses?: Uses;
   /** Its progress snapshots: each one whole, bounded like a result. */
   readonly stream: Stream;
   readonly handler: (
-    ctx: StreamActionCtx<Uses, Infer<Stream>>,
+    ctx: StreamActionCtx<Grants, Infer<Stream>>,
     args: ObjectOutput<Shape>
   ) => Result | Promise<Result>;
 }
@@ -650,85 +600,23 @@ const refuse = (message: string): never => {
 
 /** The keys each kind's declaration has; any other is refused. */
 const declarationKeys: Readonly<Record<FunctionKind, readonly string[]>> = {
-  query: ["args", "returns", "tables", "handler"],
-  mutation: ["args", "returns", "uses", "tables", "handler"],
-  action: ["args", "returns", "uses", "stream", "handler"],
+  query: ["args", "returns", "handler"],
+  mutation: ["args", "returns", "handler"],
+  action: ["args", "returns", "stream", "handler"],
 };
 
-const tableVerbNames: ReadonlySet<string> = new Set([
-  "read",
-  "insert",
-  "update",
-  "delete",
-]);
-
-/**
- * A function's `tables`, checked against `schema`: each a table it has,
- * each verb a boolean. Whether it narrows rather than widens is checked
- * as the App registers it, against the tables' access (app.ts).
- */
-const narrowingOf = (
-  schema: SchemaDefinition,
-  tables: unknown
-): TableNarrowing | null => {
-  if (tables === undefined) {
-    return null;
-  }
-  if (!isPlainObject(tables)) {
-    return refuse("`tables` is a map of table names to verbs.");
-  }
-  const known = tablesOf(schema);
-  const narrowing: Record<string, Partial<TableVerbs>> = {};
-  for (const [table, verbs] of Object.entries(tables)) {
-    if (!Object.hasOwn(known, table)) {
-      refuse(`\`tables\` names \`${table}\`, a table the schema doesn't have.`);
-    }
-    if (
-      !isPlainObject(verbs) ||
-      !Object.entries(verbs).every(
-        ([verb, value]) =>
-          tableVerbNames.has(verb) && typeof value === "boolean"
-      )
-    ) {
-      return refuse(
-        `\`tables.${table}\` maps \`read\`, \`insert\`, \`update\` and \`delete\` to booleans.`
-      );
-    }
-    Object.defineProperty(narrowing, table, {
-      enumerable: true,
-      value: Object.freeze({ ...verbs }),
-    });
-  }
-  return Object.freeze(narrowing);
-};
-
-const usesOf = (uses: unknown): readonly Use[] => {
-  if (uses === undefined) {
-    return Object.freeze([]);
-  }
-  if (!Array.isArray(uses) || uses.length > usesMaxEntries) {
-    return refuse(`\`uses\` lists at most ${usesMaxEntries} references.`);
-  }
-  const list: readonly unknown[] = uses;
-  const checked: Use[] = [];
-  for (const use of list) {
-    if (
-      !isServerFunction(use) &&
-      !isPermission(use) &&
-      !isWorkflowPermission(use) &&
-      referenceName(use) === undefined &&
-      eventReferenceData(use) === undefined
-    ) {
-      return refuse(
-        "`uses` lists the App's server functions, their generated references, `permission` declarations and its workflows' generated event references, never IDs or names."
-      );
-    }
-    // SAFETY: one of those just checked: a definition, a permission or
-    // workflow declaration, or a function reference read as data.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    checked.push(use as Use);
-  }
-  return Object.freeze(checked);
+/** Hints for the superseded shapes spec 7 refuses rather than aliases. */
+const supersededHints: Readonly<Record<string, string>> = {
+  input: "Declare `args`, a map of field schemas, not `input`.",
+  output: "Declare `returns`, not `output`.",
+  reads:
+    "There is no `reads` list: a table's access and row rules decide what each caller reads.",
+  writes:
+    "There is no `writes` list: a table's access and row rules decide what each caller writes.",
+  uses: "There is no `uses` list: every function may use what the App's `permissions` in grasp.config.ts declare, as its kind allows.",
+  tables:
+    "There is no `tables`: a table's access and row rules decide what each caller reads and writes.",
+  stream: "Only an action streams.",
 };
 
 /** A definition of `kind` and `visibility` from `declaration`, checked. */
@@ -747,7 +635,7 @@ const defineFunction = (
       refuse(`${article} ${kind}'s declaration has no \`${key}\`.`);
     }
   }
-  const { args, returns, handler, uses, stream, tables } = declaration;
+  const { args, returns, handler, stream } = declaration;
   if (!isPlainObject(args)) {
     refuse(`A ${kind}'s \`args\` is a map of field names to schemas.`);
   }
@@ -773,8 +661,6 @@ const defineFunction = (
     // SAFETY: `descriptorOf` above accepted it, so it is a `v` schema.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     returns: (returns ?? null) as AnySchema | null,
-    uses: usesOf(uses),
-    tables: narrowingOf(schema, tables),
     // SAFETY: as `returns`, when given.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     stream: (stream ?? null) as AnySchema | null,
@@ -804,36 +690,37 @@ type ManagedShape<TableName extends string> = ReturnType<
  * `action` and `internalAction`: a streaming action when the declaration
  * has `stream` (its handler's context has `emit`), any other otherwise.
  */
-interface ActionConstructor<Vis extends Visibility> {
+interface ActionConstructor<
+  Vis extends Visibility,
+  Grants extends Grant = never,
+> {
   <
     const Shape extends ValueShape,
     Stream extends AnySchema,
     Returns extends AnySchema | undefined = undefined,
     Result extends ResultFor<Returns> = ResultFor<Returns>,
-    const Uses extends readonly Use[] = readonly [],
   >(
-    declaration: StreamActionDefinition<Shape, Returns, Result, Uses, Stream>
+    declaration: StreamActionDefinition<Shape, Returns, Result, Grants, Stream>
   ): ServerFunction<
     "action",
     Vis,
     Shape,
     Declared<Returns, Result>,
-    StreamActionCtx<Uses, Infer<Stream>>,
+    StreamActionCtx<Grants, Infer<Stream>>,
     Stream
   >;
   <
     const Shape extends ValueShape,
     Returns extends AnySchema | undefined = undefined,
     Result extends ResultFor<Returns> = ResultFor<Returns>,
-    const Uses extends readonly Use[] = readonly [],
   >(
-    declaration: ActionDefinition<Shape, Returns, Result, Uses>
+    declaration: ActionDefinition<Shape, Returns, Result, Grants>
   ): ServerFunction<
     "action",
     Vis,
     Shape,
     Declared<Returns, Result>,
-    ActionCtx<Uses>
+    ActionCtx<Grants>
   >;
 }
 
@@ -853,29 +740,38 @@ type QueryConstructor<Tables extends AnyTables, Vis extends Visibility> = <
 >;
 
 /** `mutation` and `internalMutation`. */
-type MutationConstructor<Tables extends AnyTables, Vis extends Visibility> = <
+type MutationConstructor<
+  Tables extends AnyTables,
+  Vis extends Visibility,
+  Grants extends Grant = never,
+> = <
   const Shape extends ValueShape,
   Returns extends AnySchema | undefined = undefined,
   Result extends ResultFor<Returns> = ResultFor<Returns>,
-  const Uses extends readonly Use[] = readonly [],
 >(
-  declaration: MutationDefinition<Tables, Shape, Returns, Result, Uses>
+  declaration: MutationDefinition<Tables, Shape, Returns, Result, Grants>
 ) => ServerFunction<
   "mutation",
   Vis,
   Shape,
   Declared<Returns, Result>,
-  MutationCtx<Tables, Uses>
+  MutationCtx<Tables, Grants>
 >;
 
-/** The server constructors and `doc`, specialized to one schema. */
-interface ServerModule<Tables extends AnyTables> {
+/**
+ * The server constructors and `doc`, specialized to one schema and to
+ * what the App's permissions grant (`Grants`).
+ */
+interface ServerModule<
+  Tables extends AnyTables,
+  Grants extends Grant = never,
+> {
   readonly query: QueryConstructor<Tables, "public">;
   readonly internalQuery: QueryConstructor<Tables, "internal">;
-  readonly mutation: MutationConstructor<Tables, "public">;
-  readonly internalMutation: MutationConstructor<Tables, "internal">;
-  readonly action: ActionConstructor<"public">;
-  readonly internalAction: ActionConstructor<"internal">;
+  readonly mutation: MutationConstructor<Tables, "public", Grants>;
+  readonly internalMutation: MutationConstructor<Tables, "internal", Grants>;
+  readonly action: ActionConstructor<"public", Grants>;
+  readonly internalAction: ActionConstructor<"internal", Grants>;
   /**
    * The schema of a whole record of `table` under this schema: its
    * managed fields and its declared fields, for a function's `returns`.
@@ -886,13 +782,20 @@ interface ServerModule<Tables extends AnyTables> {
 }
 
 /**
- * The server constructors for `schema`: what the generated `server/_generated/server`
- * module exports for an App or a store, never imported by App code
- * directly. Throws for anything but a schema `defineSchema` made.
+ * The server constructors for `schema`, typed by what `config` grants
+ * (`defineApp`'s answer, which carries its permissions' types): what the
+ * generated `server/_generated/server` module exports for an App or a
+ * store, never imported by App code directly. The config shapes types
+ * only: the host checks every use against the App's sealed permissions.
+ * Throws for anything but a schema `defineSchema` made.
  */
-export const serverModule = <Tables extends AnyTables>(
-  schema: SchemaDefinition<Tables>
-): ServerModule<Tables> => {
+export const serverModule = <
+  Tables extends AnyTables,
+  Grants extends Grant = never,
+>(
+  schema: SchemaDefinition<Tables>,
+  _config?: { readonly "~grants"?: Grants }
+): ServerModule<Tables, Grants> => {
   // Throws for anything `defineSchema` didn't make.
   const tables = tablesOf(schema);
   const constructor =
@@ -920,5 +823,5 @@ export const serverModule = <Tables extends AnyTables>(
   // frozen definition; `doc` answers the object schema of the table's
   // managed and declared fields.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return Object.freeze(module) as ServerModule<Tables>;
+  return Object.freeze(module) as ServerModule<Tables, Grants>;
 };

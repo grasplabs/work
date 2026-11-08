@@ -1,11 +1,12 @@
 // Compile-time guarantees of server functions: what each kind's context
-// has and hasn't, how arguments and returns are typed, and which
-// references `runQuery`, `runMutation` and `runAction` take. This file is
+// has and hasn't of the App's permissions, how arguments and returns are
+// typed, and which references `runQuery`, `runMutation` and `runAction`
+// take. This file is
 // type-checked by `vp check` and never run: every `@ts-expect-error` below
 // must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import { AppError, permission } from "../src/index.ts";
+import { AppError, defineApp, permission } from "../src/index.ts";
 import { serverModule } from "../src/server.ts";
 import type {
   ActionCtx,
@@ -25,6 +26,7 @@ import {
   v,
 } from "../src/values.ts";
 import type { Id } from "../src/values.ts";
+import { summarizeNote } from "./notes/grasp.config.ts";
 import { workflows } from "./notes/server/_generated/api.ts";
 import type { invoiceWorkflow } from "./workflows/invoice-approval.ts";
 
@@ -42,7 +44,43 @@ const schema = defineSchema({
   people: defineTable({ name: v.string() }),
 });
 
+// An App without permissions: its functions reach nothing outside it.
 const { query, mutation, action, internalQuery, doc } = serverModule(schema);
+
+// An App's permissions: every function may use them, as its kind allows.
+const mail = permission.connection("mail", {
+  contract: "microsoft-365.mail@1",
+  actions: ["send"],
+});
+const brain = permission.brain({
+  operations: ["search"],
+  collections: ["handbook"],
+});
+const ai = permission.ai({ maxOutputTokens: 500 });
+const followUp = permission.workflow("followUp", {
+  input: v.object({
+    noteId: v.id("notes"),
+    reason: v.string().default("new"),
+  }),
+  output: v.null(),
+});
+const optional = permission.workflow("optional", {
+  input: v.string().default("ready"),
+  output: v.null(),
+});
+const granted = serverModule(
+  schema,
+  defineApp({
+    name: "Notes",
+    permissions: {
+      connections: [mail],
+      brain,
+      ai,
+      workflows: [followUp, optional, summarizeNote],
+      people: true,
+    },
+  })
+);
 
 type Tables = (typeof schema)["tables"];
 
@@ -165,8 +203,9 @@ query({ args: {}, returns: v.null(), reads: ["notes"], handler: () => null });
 // @ts-expect-error -- no `writes` list
 mutation({ args: {}, returns: v.null(), writes: [], handler: () => null });
 
-// A query reads, and nothing else: no writer, no uses, no permissions.
-query({
+// A query reads, and nothing else: no writer and no permissions, whatever
+// the App declares.
+granted.query({
   args: { id: v.id("notes") },
   returns: v.null(),
   handler: (ctx) => {
@@ -184,8 +223,12 @@ query({
     return null;
   },
 });
-// @ts-expect-error -- a query uses nothing
+// @ts-expect-error -- no function lists its own `uses`
 query({ args: {}, returns: v.null(), uses: [get], handler: () => null });
+// @ts-expect-error -- nor narrows its tables
+query({ args: {}, tables: { notes: {} }, handler: () => null });
+// @ts-expect-error -- nor a mutation
+mutation({ args: {}, uses: [], handler: () => null });
 // @ts-expect-error -- only an action streams
 query({ args: {}, returns: v.null(), stream: v.string(), handler: () => null });
 
@@ -193,11 +236,8 @@ query({ args: {}, returns: v.null(), stream: v.string(), handler: () => null });
 mutation({
   args: { id: v.id("notes"), person: v.id("people") },
   returns: v.null(),
-  uses: [get],
   handler: async (ctx, args) => {
-    expectTypeOf(ctx).toEqualTypeOf<
-      MutationCtx<Tables, readonly [typeof get]>
-    >();
+    expectTypeOf(ctx).toEqualTypeOf<MutationCtx<Tables>>();
     expectTypeOf(ctx.db.insert("notes", { title: "a" })).resolves.toEqualTypeOf<
       Id<"notes">
     >();
@@ -234,19 +274,19 @@ mutation({
     );
     // @ts-expect-error -- a replacement is the whole record
     await ctx.db.replace("notes", args.id, {}, { expectedRevision: 1 });
-    // The queries it uses run in its staged state.
+    // The App's queries run in its staged state.
     expectTypeOf(ctx.runQuery(get, { id: args.id })).resolves.toExtend<{
       title: string;
     } | null>();
     // No permissions (so no network), queries only, no `ctx.data`, and no
-    // event to notify a run with that it doesn't list.
+    // event of a workflow the App doesn't declare.
     expectTypeOf(ctx).not.toHaveProperty("connections");
     expectTypeOf(ctx).not.toHaveProperty("ai");
     expectTypeOf(ctx).not.toHaveProperty("workflows");
     expectTypeOf(ctx).not.toHaveProperty("runMutation");
     expectTypeOf(ctx).not.toHaveProperty("runAction");
     expectTypeOf(ctx).not.toHaveProperty("data");
-    // @ts-expect-error -- an event the mutation doesn't list in `uses`
+    // @ts-expect-error -- an event of a workflow the App doesn't declare
     ctx.notify(workflows.summarizeNote.events.styleChosen, {
       runId: "run-1",
       data: { style: "short" },
@@ -254,38 +294,33 @@ mutation({
     return null;
   },
 });
-mutation({
+granted.mutation({
   args: {},
   returns: v.null(),
   handler: async (ctx) => {
-    // @ts-expect-error -- a query the mutation doesn't list in `uses`
-    await ctx.runQuery(get, { id: noteId });
+    // Never a mutation or an action, whatever the App declares.
+    // @ts-expect-error -- a mutation isn't a query
+    await ctx.runQuery(create, { title: "a" });
+    expectTypeOf(ctx).not.toHaveProperty("runMutation");
+    expectTypeOf(ctx).not.toHaveProperty("connections");
+    expectTypeOf(ctx).not.toHaveProperty("ai");
+    expectTypeOf(ctx).not.toHaveProperty("brain");
     return null;
   },
 });
 
-// An action has no database, and calls only what it lists.
-const mail = permission.connection("mail", {
-  contract: "microsoft-365.mail@1",
-  actions: ["send"],
-});
-const brain = permission.brain({
-  operations: ["search"],
-  collections: ["handbook"],
-});
-const ai = permission.ai({ maxOutputTokens: 500 });
+// An action has no database, and reaches what the App declares.
 const secret = internalQuery({
   args: {},
   returns: v.string(),
   handler: () => "s",
 });
 
-action({
+granted.action({
   args: { noteId: v.id("notes"), to: v.string().email() },
   returns: v.object({ summary: v.string() }),
-  uses: [get, create, mail, brain, ai, secret],
   handler: async (ctx, args) => {
-    expectTypeOf(ctx).toExtend<ActionCtx<readonly [typeof get]>>();
+    expectTypeOf(ctx).toExtend<ActionCtx>();
     // No database, and no notifications of runs: it tells people only.
     expectTypeOf(ctx).not.toHaveProperty("db");
     expectTypeOf(ctx).not.toHaveProperty("notify");
@@ -315,7 +350,7 @@ action({
     expectTypeOf(ctx.brain.search({ text: "a" })).resolves.toEqualTypeOf<
       { title: string; excerpt: string }[]
     >();
-    // Only the declared operations and permissions.
+    // Only the App's declared operations and permissions.
     expectTypeOf(ctx.brain).not.toHaveProperty("read");
     expectTypeOf(ctx.connections).not.toHaveProperty("calendar");
     expectTypeOf(ctx).not.toHaveProperty("guests");
@@ -328,11 +363,14 @@ action({
 action({
   args: {},
   returns: v.null(),
-  handler: async (ctx) => {
-    // @ts-expect-error -- a function it doesn't list in `uses`
-    await ctx.runQuery(get, { id: noteId });
+  handler: (ctx) => {
+    // The App's functions, but nothing outside an App that declares nothing.
+    expectTypeOf(ctx.runQuery(get, { id: noteId })).resolves.toExtend<{
+      title: string;
+    } | null>();
     expectTypeOf(ctx.connections).not.toHaveProperty("mail");
     expectTypeOf(ctx).not.toHaveProperty("ai");
+    expectTypeOf(ctx).not.toHaveProperty("brain");
     return null;
   },
 });
@@ -345,26 +383,15 @@ action({
   handler: () => null,
 });
 
-// Workflows (spec 7.4, 9.5): an action starts one it lists, and a mutation
-// stages a start of one it lists for after it commits, each by its alias.
-// Neither reaches the engine, and neither starts what it doesn't list.
-const followUp = permission.workflow("followUp", {
-  input: v.object({
-    noteId: v.id("notes"),
-    reason: v.string().default("new"),
-  }),
-  output: v.null(),
-});
-const optional = permission.workflow("optional", {
-  input: v.string().default("ready"),
-  output: v.null(),
-});
+// Workflows (spec 7.4, 9.5): an action starts one of the App's, and a
+// mutation stages a start of one for after it commits, each by its alias.
+// Neither reaches the engine, and neither starts what the App doesn't
+// declare.
 declare const engineWorkflow: ReturnType<typeof invoiceWorkflow>;
 
-action({
+granted.action({
   args: { noteId: v.id("notes") },
   returns: v.null(),
-  uses: [followUp, optional, get, mail],
   handler: async (ctx, args) => {
     // Its input as a caller passes it: the default may be left out.
     const handle = await ctx.workflows.followUp.start({ noteId: args.noteId });
@@ -375,7 +402,7 @@ action({
     await ctx.workflows.followUp.start({ note: args.noteId });
     // @ts-expect-error -- `followUp` needs its input
     await ctx.workflows.followUp.start();
-    // Only what it lists: no other workflow, and no connection or query.
+    // Only the App's: no other workflow, and no connection or query.
     expectTypeOf(ctx.workflows).not.toHaveProperty("unlisted");
     expectTypeOf(ctx.workflows).not.toHaveProperty("mail");
     expectTypeOf(ctx.workflows).not.toHaveProperty("get");
@@ -390,23 +417,20 @@ action({
   args: {},
   returns: v.null(),
   handler: (ctx) => {
-    // It lists no workflow.
+    // The App declares no workflow.
     expectTypeOf(ctx.workflows).not.toHaveProperty("followUp");
     return null;
   },
 });
-action({
-  args: {},
-  returns: v.null(),
-  // @ts-expect-error -- an engine workflow can't be listed
-  uses: [engineWorkflow],
-  handler: () => null,
+defineApp({
+  name: "Notes",
+  // @ts-expect-error -- an engine workflow isn't an App's permission
+  permissions: { workflows: [engineWorkflow] },
 });
 
-mutation({
+granted.mutation({
   args: { title: noteFields.title },
   returns: v.id("notes"),
-  uses: [followUp, get],
   handler: async (ctx, args) => {
     const id = await ctx.db.insert("notes", { title: args.title });
     // Staged with the insert, started once both have committed.
@@ -415,8 +439,8 @@ mutation({
     ).resolves.toBeVoid();
     // @ts-expect-error -- input the declaration doesn't take
     await ctx.afterCommit.workflows.followUp.start({ noteId: 1 });
-    // Only what it lists.
-    expectTypeOf(ctx.afterCommit.workflows).not.toHaveProperty("optional");
+    // Only the App's.
+    expectTypeOf(ctx.afterCommit.workflows).not.toHaveProperty("unlisted");
     // A mutation never starts anything while it runs.
     expectTypeOf(ctx).not.toHaveProperty("workflows");
     return id;
@@ -426,9 +450,9 @@ mutation({
   args: { noteId: v.id("notes") },
   returns: v.null(),
   handler: async (ctx) => {
-    // It lists no workflow.
+    // The App declares no workflow.
     expectTypeOf(ctx.afterCommit.workflows).not.toHaveProperty("followUp");
-    // Tells people once it commits, whatever it lists.
+    // Tells people once it commits, whatever the App declares.
     await ctx.afterCommit.notifyPeople("person", { title: "Done" });
     // @ts-expect-error -- a title is required
     await ctx.afterCommit.notifyPeople("person", { body: "Done" });
@@ -445,16 +469,12 @@ expectTypeOf(doc("notes").shape._rev).toExtend<unknown>();
 // @ts-expect-error -- the schema has no such table
 doc("missing");
 
-// `ctx.notify` (spec 10.7.4): a mutation's only, for an event it lists,
-// its data inferred from the reference and never from the call, and
-// answering nothing (it stages; the commit delivers).
-mutation({
+// `ctx.notify` (spec 10.7.4): a mutation's only, for an event of one of
+// the App's workflows, its data inferred from the reference and never
+// from the call, and answering nothing (it stages; the commit delivers).
+granted.mutation({
   args: { runId: v.string() },
   returns: v.null(),
-  uses: [
-    workflows.summarizeNote.events.styleChosen,
-    workflows.summarizeNote.events.noteEdited,
-  ],
   handler: (ctx, args) => {
     expectTypeOf(ctx.notify).returns.toBeVoid();
     ctx.notify(workflows.summarizeNote.events.styleChosen, {
@@ -480,7 +500,7 @@ mutation({
       // @ts-expect-error -- data typed as nothing in particular
       data: anything,
     });
-    // @ts-expect-error -- an event of another workflow, not listed
+    // @ts-expect-error -- an event of a workflow the App doesn't declare
     ctx.notify(workflows.archiveNotes.events.confirmed, {
       runId: args.runId,
       data: { confirmed: true },

@@ -11,20 +11,11 @@ import {
 import type { AppConfig, AppManifest } from "./app.ts";
 import { migration } from "./migration.ts";
 import type { Migration } from "./migration.ts";
-import {
-  isBrowserPermission,
-  isPermission,
-  isWorkflowPermission,
-  readPermissionDeclaration,
-} from "./permissions.ts";
-import type {
-  AnyPermission,
-  BrowserPermission,
-  WorkflowPermission,
-} from "./permissions.ts";
+import { readPermissionDeclaration } from "./permissions.ts";
+import type { AppPermission } from "./permissions.ts";
 import { readSchemaManifest } from "./schema-manifest.ts";
 import { serverModule } from "./server.ts";
-import type { FunctionKind, TableVerbs, Visibility } from "./server.ts";
+import type { FunctionKind, Visibility } from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import { schemaOf } from "./value-schema.ts";
@@ -44,9 +35,9 @@ import type { AnySchema } from "./value-schema.ts";
 // (its handler running nothing too), and the App through `defineApp` and
 // `registerApp`. What that
 // registration's inspection makes must then be exactly the manifest read,
-// canonically: anything a declaration couldn't have made (a widened verb,
-// a use of something unregistered, a path no module's export makes, a key
-// no declaration has, a descriptor out of bounds) is refused.
+// canonically: anything a declaration couldn't have made (a path no
+// module's export makes, a key no declaration has, a permission filed
+// under another alias, a descriptor out of bounds) is refused.
 // There is no other path from text to an `AppManifest`.
 
 const refuse = (message: string): never => {
@@ -96,7 +87,6 @@ interface ReadFunction {
   readonly kind: FunctionKind;
   readonly visibility: Visibility;
   readonly declaration: Record<string, unknown>;
-  readonly tables: unknown;
 }
 
 /** A handler that runs nothing: the host never runs a read manifest. */
@@ -127,74 +117,8 @@ const shapeFrom = (
   return shape;
 };
 
-/** One entry of a function's `uses`, as what a declaration would list. */
-const useFrom = (
-  use: unknown,
-  path: string,
-  operations: Readonly<Record<string, unknown>>,
-  resources: ReadonlyMap<string, AnyPermission>,
-  workflows: ReadonlyMap<string, WorkflowPermission>
-): unknown => {
-  if (hasExactly(use, ["type", "path", "kind"]) && use.type === "function") {
-    const target =
-      typeof use.path === "string" && Object.hasOwn(operations, use.path)
-        ? operations[use.path]
-        : undefined;
-    const visibility = isPlainObject(target) ? target.visibility : undefined;
-    // A reference by its path, which `registerApp` resolves against what is
-    // registered there, as it does a generated one.
-    return { name: use.path, visibility, kind: use.kind };
-  }
-  if (hasExactly(use, ["type", "kind", "alias"]) && use.type === "resource") {
-    const declared =
-      typeof use.alias === "string" ? resources.get(use.alias) : undefined;
-    if (declared === undefined || declared["~permission"] !== use.kind) {
-      return refuse(`\`${path}\` uses a permission the App doesn't declare.`);
-    }
-    return declared;
-  }
-  if (hasExactly(use, ["type", "alias"]) && use.type === "workflow") {
-    const declared =
-      typeof use.alias === "string" ? workflows.get(use.alias) : undefined;
-    if (declared === undefined) {
-      return refuse(`\`${path}\` starts a workflow the App doesn't declare.`);
-    }
-    return declared;
-  }
-  if (
-    hasExactly(use, [
-      "type",
-      "workflow",
-      "alias",
-      "eventType",
-      "fingerprint",
-    ]) &&
-    use.type === "workflowEvent"
-  ) {
-    if (typeof use.workflow !== "string" || !workflows.has(use.workflow)) {
-      return refuse(`\`${path}\` notifies a workflow the App doesn't declare.`);
-    }
-    // As the generated reference lists it: the declaration reads it back,
-    // and refuses anything that isn't one.
-    return {
-      kind: "workflowEvent",
-      workflow: `workflows.${use.workflow}`,
-      alias: use.alias,
-      type: use.eventType,
-      fingerprint: use.fingerprint,
-    };
-  }
-  return refuse(`\`${path}\`'s \`uses\` holds an entry no declaration makes.`);
-};
-
 /** A function of the manifest, read far enough to declare it again. */
-const functionFrom = (
-  path: string,
-  input: unknown,
-  operations: Readonly<Record<string, unknown>>,
-  resources: ReadonlyMap<string, AnyPermission>,
-  workflows: ReadonlyMap<string, WorkflowPermission>
-): ReadFunction => {
+const functionFrom = (path: string, input: unknown): ReadFunction => {
   if (
     !hasExactly(input, [
       "path",
@@ -203,13 +127,11 @@ const functionFrom = (
       "args",
       "returns",
       "stream",
-      "uses",
-      "tables",
     ])
   ) {
     return refuse(`\`${path}\` isn't a function as a manifest holds one.`);
   }
-  const { kind, visibility, uses, stream } = input;
+  const { kind, visibility, stream } = input;
   if (
     input.path !== path ||
     !kinds.has(kind) ||
@@ -217,10 +139,6 @@ const functionFrom = (
   ) {
     return refuse(`\`${path}\`'s path, kind or visibility isn't one there is.`);
   }
-  if (!Array.isArray(uses)) {
-    return refuse(`\`${path}\`'s \`uses\` is a list.`);
-  }
-  const listed: readonly unknown[] = uses;
   const declaration: Record<string, unknown> = {
     args: shapeFrom(input.args, path),
     handler: inert,
@@ -229,14 +147,8 @@ const functionFrom = (
   if (input.returns !== null) {
     declaration.returns = schemaFrom(input.returns);
   }
-  // Only what the kind's declaration has: a query's has no `uses`, and
-  // only an action's has `stream`. Anything else is the constructor's to
-  // refuse, as it would in code.
-  if (kind !== "query" || listed.length > 0) {
-    declaration.uses = listed.map((use) =>
-      useFrom(use, path, operations, resources, workflows)
-    );
-  }
+  // Only an action's declaration has `stream`: anything else is the
+  // constructor's to refuse, as it would in code.
   if (stream !== null) {
     declaration.stream = schemaFrom(stream);
   }
@@ -246,7 +158,7 @@ const functionFrom = (
     kind: FunctionKind;
     visibility: Visibility;
   };
-  return { path, ...read, declaration, tables: input.tables };
+  return { path, ...read, declaration };
 };
 
 /**
@@ -332,66 +244,36 @@ const migrationsFrom = (input: unknown): Migration[] =>
   });
 
 /**
- * The declarations map `input` (the manifest's `what`) files, each read
- * back through `permission`: of the kind `is` accepts (`kind`, as a
- * refusal names it) and filed under its own alias, or refused.
+ * The manifest's `permissions`, each read back through `permission` and
+ * filed under its own alias, as a config lists them, by kind:
+ * `defineApp` refuses any declaration under a key that isn't its kind.
  */
-const declaredFrom = <Declaration extends { readonly alias: string }>(
-  input: unknown,
-  what: string,
-  is: (value: unknown) => value is Declaration,
-  kind: string
-): Map<string, Declaration> => {
-  const declarations = new Map<string, Declaration>();
-  for (const [alias, entry] of entriesOf(input, what)) {
-    const declared = readPermissionDeclaration(entry);
-    if (!is(declared) || declared.alias !== alias) {
-      refuse(`Permission \`${alias}\` isn't ${kind} filed under its alias.`);
-    } else {
-      declarations.set(alias, declared);
-    }
-  }
-  return declarations;
-};
-
-/**
- * The App's `permissions` the manifest's maps hold, by kind, as a
- * config lists them: `defineApp` refuses any declaration filed under a
- * key that isn't its kind.
- */
-const permissionsFrom = (
-  resources: ReadonlyMap<string, AnyPermission>,
-  browser: ReadonlyMap<string, BrowserPermission>,
-  workflows: ReadonlyMap<string, WorkflowPermission>,
-  people: boolean
-): Record<string, unknown> => {
+const permissionsFrom = (input: unknown): Record<string, unknown> => {
   const permissions: Record<string, unknown> = {};
-  const connections: unknown[] = [];
-  for (const declared of [...resources.values(), ...browser.values()]) {
+  const listed: Record<string, AppPermission[]> = {
+    connections: [],
+    workflows: [],
+  };
+  for (const [alias, entry] of entriesOf(input, "permissions")) {
+    const declared = readPermissionDeclaration(entry);
+    if (declared.alias !== alias) {
+      refuse(`Permission \`${alias}\` isn't filed under its alias.`);
+    }
     const kind = declared["~permission"];
-    if (kind === "connections") {
-      connections.push(declared);
+    const list = Object.hasOwn(listed, kind) ? listed[kind] : undefined;
+    if (list === undefined) {
+      permissions[kind] = kind === "people" ? true : declared;
     } else {
-      permissions[kind] = declared;
+      list.push(declared);
     }
   }
-  if (connections.length > 0) {
-    permissions.connections = connections;
-  }
-  if (workflows.size > 0) {
-    permissions.workflows = [...workflows.values()];
-  }
-  if (people) {
-    permissions.people = true;
+  for (const [kind, list] of Object.entries(listed)) {
+    if (list.length > 0) {
+      permissions[kind] = list;
+    }
   }
   return permissions;
 };
-
-/** Whether two verb maps grant the same verbs on every table. */
-const sameVerbs = (
-  one: Readonly<Record<string, TableVerbs>>,
-  other: unknown
-): boolean => canonicalText(one) === canonicalText(other);
 
 /**
  * The App the manifest in `text` describes, declared again, and its
@@ -417,56 +299,26 @@ export const readAppManifest = (text: string): AppManifest => {
     "name",
     "schema",
     "operations",
-    "resources",
-    "browserResources",
-    "workflows",
+    "permissions",
     "preferences",
     "migrations",
   ];
-  // `people` only where the App reads the organization's people, and
   // `answers` only where it declares any.
-  const readsPeople = isPlainObject(data) && data.people === true;
   const answers = isPlainObject(data) && Object.hasOwn(data, "answers");
-  if (
-    !hasExactly(data, [
-      ...keys,
-      ...(readsPeople ? ["people"] : []),
-      ...(answers ? ["answers"] : []),
-    ])
-  ) {
+  if (!hasExactly(data, [...keys, ...(answers ? ["answers"] : [])])) {
     return refuse(
-      "An App's manifest is `{ name, schema, operations, resources, browserResources, workflows, preferences, people?, migrations, answers? }`."
+      "An App's manifest is `{ name, schema, operations, permissions, preferences, migrations, answers? }`."
     );
   }
   const { schema } = readSchemaManifest(JSON.stringify(data.schema));
-
-  const resources = declaredFrom(
-    data.resources,
-    "resources",
-    isPermission,
-    "an action's permission"
-  );
-  const browser = declaredFrom(
-    data.browserResources,
-    "browser resources",
-    isBrowserPermission,
-    "a pages' permission"
-  );
-  const workflows = declaredFrom(
-    data.workflows,
-    "workflows",
-    isWorkflowPermission,
-    "a workflow"
-  );
 
   const operationEntries = entriesOf(data.operations, "operations");
   // Counted before any is read.
   if (operationEntries.length > appMaxOperations) {
     refuse(`An App registers at most ${appMaxOperations} functions.`);
   }
-  const operationData = Object.fromEntries(operationEntries);
   const functions = operationEntries.map(([path, input]) =>
-    functionFrom(path, input, operationData, resources, workflows)
+    functionFrom(path, input)
   );
   // Each constructor checks the declaration it is given at run time, as
   // it checks one in code; its types describe declarations in code, so it
@@ -482,48 +334,26 @@ export const readAppManifest = (text: string): AppManifest => {
       ...(data.preferences === null
         ? {}
         : { preferences: schemaFrom(data.preferences) }),
-      permissions: permissionsFrom(resources, browser, workflows, readsPeople),
+      permissions: permissionsFrom(data.permissions),
       ...(answers ? { answers: data.answers } : {}),
     } as AppConfig
   );
   const migrations = migrationsFrom(data.migrations);
 
-  /** The registration, each function narrowed by `narrowed`'s `tables`. */
-  const declare = (narrowed: ReadonlyMap<string, unknown>): AppManifest => {
-    const modules: Record<string, Record<string, unknown>> = {};
-    for (const { path, kind, visibility, declaration } of functions) {
-      const construct: unknown = Reflect.get(
-        server,
-        constructorOf[visibility][kind]
-      );
-      if (typeof construct !== "function") {
-        return refuse(`\`${path}\` has no constructor.`);
-      }
-      const tables = narrowed.get(path);
-      place(
-        modules,
-        path,
-        Reflect.apply(construct, undefined, [
-          tables === undefined ? declaration : { ...declaration, tables },
-        ])
-      );
+  const modules: Record<string, Record<string, unknown>> = {};
+  for (const { path, kind, visibility, declaration } of functions) {
+    const construct: unknown = Reflect.get(
+      server,
+      constructorOf[visibility][kind]
+    );
+    if (typeof construct !== "function") {
+      return refuse(`\`${path}\` has no constructor.`);
     }
-    return inspectApp(registerApp({ config, schema, modules, migrations }))
-      .manifest;
-  };
-
-  // A function whose verbs aren't what its kind and its tables' access
-  // give it was narrowed by its `tables`: declared again with its verbs
-  // as them, which `registerApp` refuses if they widen anything.
-  const base = declare(new Map());
-  const narrowed = new Map<string, unknown>();
-  for (const { path, tables } of functions) {
-    const derived = base.operations[path]?.tables;
-    if (derived === undefined || !sameVerbs(derived, tables)) {
-      narrowed.set(path, tables);
-    }
+    place(modules, path, Reflect.apply(construct, undefined, [declaration]));
   }
-  const manifest = narrowed.size === 0 ? base : declare(narrowed);
+  const { manifest } = inspectApp(
+    registerApp({ config, schema, modules, migrations })
+  );
   if (canonicalText(manifest) !== canonicalText(data)) {
     return refuse("The App's manifest isn't what its declaration makes.");
   }
