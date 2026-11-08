@@ -8,13 +8,13 @@ import type {
   WatchState,
   WorkflowChannel,
 } from "./client-workflow.ts";
+import type { DecisionValueOf } from "./workflow-decisions.ts";
+import type { EventDataOf } from "./workflow-events.ts";
 import type {
   AppErrorPayload,
-  DecisionValueOf,
-  EventDataOf,
   RunHandle,
   WorkflowWait,
-} from "./references.ts";
+} from "./workflow-runs.ts";
 
 // One `useWorkflow`'s state (spec 10.4.1–10.4.7, 10.7.3): the run it
 // selects, its own starts and controls, and the view it derives from them

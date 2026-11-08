@@ -36,7 +36,7 @@ import { GraspError } from "./client-error.ts";
 import { calledByApp } from "./console-origin.ts";
 import { portFileTransport } from "./file-port.ts";
 import { portLinkTransport } from "./link-port.ts";
-import { GraspProvider } from "./react.ts";
+import { GraspProvider } from "./react/provider.ts";
 
 export type Theme = "light" | "dark";
 

@@ -24,7 +24,7 @@ import {
   receiptLinkOf,
   settlesSubmission,
 } from "./client-error.ts";
-import type { ArgsOf, ReturnOf } from "./references.ts";
+import type { ArgsOf, ReturnOf } from "./function-references.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";

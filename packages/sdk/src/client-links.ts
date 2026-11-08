@@ -1,6 +1,6 @@
 import { clientError, GraspError, readRejection } from "./client-error.ts";
 import { namePattern } from "./declaration.ts";
-import type { LinksReference } from "./references.ts";
+import type { LinksReference } from "./file-link-references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
 // The session client's links (spec 10.7.7, 32.3): `client.links.open`,

@@ -1,5 +1,5 @@
 import type { OperationManifest } from "./app-types.ts";
-import type { OperationReference } from "./references.ts";
+import type { OperationReference } from "./function-references.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import type { Infer, InferInput } from "./value-types.ts";
 import { v } from "./values.ts";

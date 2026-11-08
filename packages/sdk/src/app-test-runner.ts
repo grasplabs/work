@@ -27,7 +27,7 @@ import type {
   WorkflowTestFunction,
   WorkflowTestRun,
 } from "./app-test-types.ts";
-import type { ReferenceKind } from "./references.ts";
+import type { ReferenceKind } from "./function-references.ts";
 
 /**
  * How long one test may run before it fails, in milliseconds, its calls

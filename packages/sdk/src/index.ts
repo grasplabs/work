@@ -56,42 +56,49 @@ export type {
 } from "./permission-types.ts";
 // References (spec 8, 32.1): what the generated `@server/_generated/api` modules hold.
 export type {
-  AnyOperationReference,
-  AnyWorkflowReference,
-  AppErrorCategory,
-  AppErrorPayload,
-  ArgsOf,
-  DecisionContextOf,
-  DecisionValueOf,
-  DescriptorInputOf,
-  DescriptorOutputOf,
-  DescriptorSchema,
-  EventDataOf,
   FilesOperation,
   FilesReference,
   LinksReference,
+} from "./file-link-references.ts";
+export type {
+  AnyOperationReference,
+  ArgsOf,
   OperationReference,
   ProgressOf,
   ReferenceKind,
   ReferenceVisibility,
   ReturnOf,
+} from "./function-references.ts";
+export type {
+  DecisionContextOf,
+  DecisionValueOf,
+  DescriptorInputOf,
+  DescriptorOutputOf,
+  DescriptorSchema,
+  WorkflowDecisionReference,
+} from "./workflow-decisions.ts";
+export type { EventDataOf, WorkflowEventReference } from "./workflow-events.ts";
+export type {
+  AnyWorkflowReference,
+  WorkflowDecisionsOf,
+  WorkflowEventsOf,
+  WorkflowInputOf,
+  WorkflowOutputOf,
+  WorkflowReference,
+  WorkflowWaitOf,
+} from "./workflow-references.ts";
+export type {
+  AppErrorCategory,
+  AppErrorPayload,
   RunHandle,
   WorkflowDecisionDetail,
   WorkflowDecisionInboxItem,
-  WorkflowDecisionReference,
-  WorkflowDecisionsOf,
   WorkflowDecisionWait,
   WorkflowEngineWait,
-  WorkflowEventReference,
-  WorkflowEventsOf,
   WorkflowEventWait,
-  WorkflowInputOf,
-  WorkflowOutputOf,
   WorkflowQueryPage,
-  WorkflowReference,
   WorkflowWait,
-  WorkflowWaitOf,
-} from "./references.ts";
+} from "./workflow-runs.ts";
 // Who calls an App, and the organization's people (people.ts): what a
 // server function reads as `ctx.auth.getUser()` and `ctx.people`.
 export type {

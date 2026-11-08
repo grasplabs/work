@@ -1,6 +1,6 @@
 import type { AnyActionHandler } from "./action.ts";
 import type { SchemaDefinition } from "./schema-types.ts";
-import type { AnyFunction } from "./server.ts";
+import type { AnyFunction } from "./server-function.ts";
 
 // What each SDK constructor made, by the value it answered: what makes a
 // value a server function, a calculation or an action, and what it holds.

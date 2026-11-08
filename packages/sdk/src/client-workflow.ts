@@ -26,20 +26,20 @@ import {
   steadyMs,
 } from "./client-shared.ts";
 import { deepFreeze, namePattern, sha256Pattern } from "./declaration.ts";
-import { workflowReferenceLimits } from "./references.ts";
-import type {
-  AppErrorPayload,
-  RunHandle,
-  WorkflowDecisionReference,
-  WorkflowEventReference,
-  WorkflowWait,
-} from "./references.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
 import { readDescriptor } from "./value-read.ts";
 import { v } from "./values.ts";
+import type { WorkflowDecisionReference } from "./workflow-decisions.ts";
+import type { WorkflowEventReference } from "./workflow-events.ts";
+import { workflowReferenceLimits } from "./workflow-references.ts";
+import type {
+  AppErrorPayload,
+  RunHandle,
+  WorkflowWait,
+} from "./workflow-runs.ts";
 
 // Workflow runs on a page (spec 10.4–10.4.7, 10.7.2, 10.7.3): what
 // `useWorkflow` (react.ts) shows and does, on the session client's own

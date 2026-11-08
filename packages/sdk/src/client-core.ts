@@ -43,7 +43,7 @@ import type {
   ReferenceKind,
   ReturnOf,
   Streaming,
-} from "./references.ts";
+} from "./function-references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
 // The session client (spec 10.1, 10.7.1): the one object a page's

@@ -8,7 +8,7 @@ import {
 import { AppDefinitionError } from "./app-definition-error.ts";
 import { refuser } from "./declaration.ts";
 import { isServerFunction, serverFunctions } from "./handlers.ts";
-import type { AnyFunction } from "./server.ts";
+import type { AnyFunction } from "./server-function.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
 const refuse: (message: string) => never = refuser(AppDefinitionError);
