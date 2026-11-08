@@ -8,8 +8,8 @@ import {
 } from "vite-plus/test";
 
 import { clientInternals, GraspClient } from "../src/client-core.ts";
-import type { ClientTransport } from "../src/client-core.ts";
 import { clientError, GraspError } from "../src/client-error.ts";
+import type { ClientTransport } from "../src/client-transport.ts";
 import {
   maxWaits,
   readWorkflowReference,

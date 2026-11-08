@@ -3,9 +3,9 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { clientInternals, GraspClient } from "../src/client-core.ts";
-import type { ClientTransport } from "../src/client-core.ts";
 import { GraspError } from "../src/client-error.ts";
 import type { FileRef } from "../src/client-files.ts";
+import type { ClientTransport } from "../src/client-transport.ts";
 import type { Id } from "../src/index.ts";
 import { GraspProvider, useFile } from "../src/react.ts";
 import { api } from "./notes/server/_generated/api.ts";

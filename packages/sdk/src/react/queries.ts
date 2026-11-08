@@ -1,13 +1,12 @@
 import { useSyncExternalStore } from "react";
 
-import { clientInternals, loading, skippedPage } from "../client-core.ts";
-import type {
-  PaginatedQueryView,
-  PagerSnapshot,
-  QueryReference,
-  QuerySnapshot,
-} from "../client-core.ts";
+import { clientInternals } from "../client-core.ts";
+import type { QueryReference } from "../client-core.ts";
+import { loading } from "../client-query-entry.ts";
+import type { QuerySnapshot } from "../client-query-entry.ts";
 import type { ArgsOf, ReturnOf } from "../function-references.ts";
+import { skippedPage } from "../pager.ts";
+import type { PaginatedQueryView, PagerSnapshot } from "../pager.ts";
 import type { PaginationResult } from "../query-reads.ts";
 import { useClient } from "./provider.ts";
 

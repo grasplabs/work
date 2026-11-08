@@ -1,8 +1,8 @@
-import type { ClientInternals } from "./client-core.ts";
 import { clientError } from "./client-error.ts";
 import type { GraspError } from "./client-error.ts";
 import { fileFailure, readSignal, signalOnly } from "./client-files.ts";
 import type { ClientFiles, FileRef } from "./client-files.ts";
+import type { ClientInternals } from "./client-internals.ts";
 
 // One `useUpload` hook's transfer (spec 10.7.5): at most one upload at a
 // time, its view kept as an external store the hook reads. The view says

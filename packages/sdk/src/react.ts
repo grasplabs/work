@@ -55,11 +55,11 @@ export type { WorkflowViewOf } from "./react/workflow.ts";
 export { GraspError } from "./client-error.ts";
 export type { ErrorCategory } from "./client-error.ts";
 export type {
-  PaginatedQueryView,
   QueryOptions,
   StreamOptions,
   SubmitOptions,
 } from "./client-core.ts";
+export type { PaginatedQueryView } from "./pager.ts";
 export type {
   ObservedRun,
   PendingControl,

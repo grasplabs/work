@@ -31,8 +31,8 @@ import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { clientInternals, GraspClient } from "./client-core.ts";
-import type { ClientTransport } from "./client-core.ts";
 import { GraspError } from "./client-error.ts";
+import type { ClientTransport } from "./client-transport.ts";
 import { calledByApp } from "./console-origin.ts";
 import { portFileTransport } from "./file-port.ts";
 import { portLinkTransport } from "./link-port.ts";
