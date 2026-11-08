@@ -31,18 +31,22 @@ import type { AnySchema, DescriptorDraft } from "./value-schema.ts";
 // Baseflare's value validators (MIT, © 2026 Baseflare contributors:
 // packages/baseflare/src/values/types.ts), as is the record ID format.
 
-export { defineSchema, defineTable, rows } from "./schema.ts";
+export { defineSchema } from "./define-schema.ts";
+export { defineTable } from "./define-table.ts";
 export type {
-  AccessMode,
   IndexDefinition,
   IndexField,
+  SchemaDefinition,
+  TableDefinition,
+} from "./schema-types.ts";
+export { rows } from "./table-access.ts";
+export type {
+  AccessMode,
   RowRole,
   RowRule,
   RowRules,
-  SchemaDefinition,
   TableAccess,
-  TableDefinition,
-} from "./schema.ts";
+} from "./table-access.ts";
 export { ValueDefinitionError } from "./value-descriptor.ts";
 export type {
   JsonValue,

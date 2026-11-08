@@ -1,5 +1,7 @@
-import type { DatabaseReader, DatabaseWriter } from "./database.ts";
+import type { DatabaseReader } from "./database-reader.ts";
+import type { DatabaseWriter } from "./database-writer.ts";
 import { refuser } from "./declaration.ts";
+import { tablesOf } from "./define-schema.ts";
 import { serverFunctions } from "./handlers.ts";
 import type { PeopleDirectory, User } from "./people.ts";
 import type {
@@ -28,8 +30,7 @@ import type {
   SingleAnswer,
   WorkflowEventReference,
 } from "./references.ts";
-import { tablesOf } from "./schema.ts";
-import type { AnyTable, SchemaDefinition } from "./schema.ts";
+import type { AnyTable, SchemaDefinition } from "./schema-types.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import { descriptorOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";

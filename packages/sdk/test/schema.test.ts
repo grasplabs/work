@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vite-plus/test";
 
 import { managedFields, schemaLimits } from "../src/host.ts";
-import type { IndexDefinition } from "../src/schema.ts";
+import type { IndexDefinition } from "../src/schema-types.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
 
 // `defineSchema` and `defineTable`: what a declaration may say, refused as

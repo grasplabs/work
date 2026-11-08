@@ -5,21 +5,16 @@
 
 // What a host knows of schemas that App code needn't: the managed fields,
 // the limits, and the error a declaration throws.
-export {
-  allowsNull,
-  indexBase,
-  managedFields,
-  relationOf,
-  SchemaDefinitionError,
-  schemaLimits,
-} from "./schema.ts";
+export { SchemaDefinitionError } from "./schema-error.ts";
+export { allowsNull, indexBase, relationOf } from "./schema-fields.ts";
+export type { IndexBase } from "./schema-fields.ts";
+export { managedFields, schemaLimits } from "./schema-limits.ts";
 export type {
   AccessMode,
-  IndexBase,
   RowRule,
   RowRules,
   TableAccess,
-} from "./schema.ts";
+} from "./table-access.ts";
 // The descriptor format a manifest names, for a host that writes one.
 export { descriptorVersion } from "./value-descriptor.ts";
 
