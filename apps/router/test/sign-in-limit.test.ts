@@ -252,12 +252,12 @@ describe("guest chat rate limit", () => {
     expect(statuses).toStrictEqual([200, 200, 429, 200]);
   });
 
-  it("limits a webhook trigger's URL per client address and per URL, by its own limit, without reaching core", async () => {
+  it("limits an event source's URL per client address and per URL, by its own limit, without reaching core", async () => {
     const limiter = limiterAllowing(2);
     const before = cores.received.length;
     const deliver = async (ip: string, token: string) =>
       await worker.fetch(
-        new Request(`https://acme.guest.test/api/workflow-webhooks/${token}`, {
+        new Request(`https://acme.guest.test/api/hooks/${token}`, {
           method: "POST",
           headers: { "cf-connecting-ip": ip },
           body: "{}",

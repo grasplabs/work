@@ -110,9 +110,9 @@
       "namespace_id": "1007",
       "simple": { "limit": 20, "period": 60 },
     },
-    // A workflow's webhook trigger (/api/workflow-webhooks/<token>), per
-    // hostname and client address, and per URL too: 120 a minute each, two
-    // a second, well past the 60 runs an hour a trigger starts, while a
+    // An event source's URL (/api/hooks/<token>), per hostname and client
+    // address, and per URL too: 120 a minute each, two a second, well past
+    // the 60 runs an hour each of its triggers starts, while a
     // flood of guessed URLs, or of one URL from many addresses, is cut
     // before core looks a URL up or reads a body.
     {

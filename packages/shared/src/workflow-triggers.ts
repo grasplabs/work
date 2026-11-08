@@ -1,11 +1,11 @@
 import { z } from "zod";
 
 import { connectorEventActions } from "./connect.ts";
-import { defineErrorFamily } from "./errors.ts";
 import { connectionIdSchema, identifierSchema } from "./ids.ts";
 import { jsonPointerPattern } from "./json.ts";
 import type { Json } from "./json.ts";
 import type { PermissionRequest, PermissionStatus } from "./permissions.ts";
+import { workflowEventTypeSchema } from "./workflow-resources.ts";
 import { emailLocalPartSchema } from "./workflows.ts";
 
 // An independent workflow's triggers (platform specification 15, 24), as
@@ -123,48 +123,14 @@ export const emailTriggerConfigSchema = z.strictObject({
 });
 
 /**
- * A webhook trigger's configuration (GRA-1478): nothing. Each delivery's
- * JSON body is its run's input, as is, checked against the workflow
+ * A webhook trigger's configuration (GRA-1560): the event source whose
+ * events start it, by its ID, and the event type it starts on. Each such
+ * event's `data` is its run's input, as is, checked against the workflow
  * version's input schema as any start's input is.
  */
-export const webhookTriggerConfigSchema = z.strictObject({});
-
-/** What a webhook trigger's delivery may be, by what it bounds. */
-export const workflowWebhookLimits = {
-  /** The most bytes of a delivery's body. */
-  bodyBytes: 64 * 1024,
-  /**
-   * How far a delivery's timestamp may be from now, either way, in
-   * seconds: a delivery replayed later than this is refused.
-   */
-  toleranceSeconds: 5 * 60,
-} as const;
-
-/**
- * The headers a delivery is signed with, as the Standard Webhooks
- * specification has them (standardwebhooks.com): the delivery's own ID,
- * the same on every retry of it; the Unix time in seconds it was signed
- * at; and one or more signatures, space-separated, each `v1,` and the
- * base64 HMAC-SHA256, with the key of the trigger's secret (`whsec_` and
- * the key, in base64), of the ID, a dot, the timestamp, a dot and the body
- * exactly as sent.
- */
-export const workflowWebhookHeaders = {
-  id: "webhook-id",
-  timestamp: "webhook-timestamp",
-  signature: "webhook-signature",
-} as const;
-
-/** Why a webhook trigger refused a delivery, as its sender is told. */
-export const workflowWebhookErrors = defineErrorFamily({
-  "webhook.signature_invalid":
-    "This delivery isn't signed with the trigger's secret as Standard Webhooks signs one (webhook-id, webhook-timestamp, webhook-signature), or its timestamp is more than five minutes from now.",
-  "webhook.body_invalid":
-    "A delivery's body is one JSON value, of at most 64 KiB.",
-  "webhook.input_refused":
-    "The workflow didn't take this delivery: its body isn't an input the workflow takes, or the trigger may not start it now.",
-  "webhook.busy":
-    "The trigger has started as many runs as it may this hour, or couldn't start one now. Try again later.",
+export const webhookTriggerConfigSchema = z.strictObject({
+  source: identifierSchema,
+  type: workflowEventTypeSchema,
 });
 
 /** A live trigger of a workflow, as `workflowResources.triggers` shows it. */
@@ -184,8 +150,8 @@ export interface WorkflowTrigger {
   createdAt: string;
   /**
    * Its configuration as it was created, in its kind's schema (an email
-   * trigger's without its address, which is `address`); null for a kind
-   * that keeps none (a webhook) or a trigger from before it was kept.
+   * trigger's without its address, which is `address`); null for a
+   * trigger from before it was kept.
    */
   config: Json | null;
   /**
@@ -202,12 +168,11 @@ export interface WorkflowTrigger {
    */
   address: string | null;
   /**
-   * A webhook trigger's token, which its URL ends in
-   * (`<origin>${workflowWebhookPath}/<token>`), shown only to whoever may
-   * see the trigger, and whether its secret takes deliveries (`revoked`
-   * once revoked, until a new one is made); null for any other kind.
+   * The event source a webhook trigger starts on (`config.source`), by its
+   * ID and its name, and whether it was deleted since, when the trigger
+   * starts nothing; null for any other kind.
    */
-  webhook: { token: string; secret: "active" | "revoked" } | null;
+  source: TriggerSource | null;
   /**
    * Whether a schedule trigger stopped after its starts kept failing
    * (`maxFailedStarts` in a row): it starts nothing until its owner
@@ -291,14 +256,23 @@ export const triggerEventsRequest = (
  * What a trigger holding a permission is, for whoever decides it (the
  * admin's pending requests): its kind, and what starts it, without its
  * input or mapping. A schedule's expression and time zone; a connector
- * trigger's event type and connection.
- * An email trigger's address and a webhook's URL are never in it.
+ * trigger's event type and connection; a webhook trigger's event type
+ * and source. An email trigger's address and a source's URL are never in
+ * it.
  */
 export interface TriggerSummary {
   kind: TriggerKind;
   schedule: { cron: string; timeZone: string } | null;
   event: string | null;
   connection: { connectionId: string; resource: string | null } | null;
+  source: TriggerSource | null;
+}
+
+/** The event source a webhook trigger starts on, as a trigger names it. */
+export interface TriggerSource {
+  id: string;
+  name: string;
+  deleted: boolean;
 }
 
 /**
@@ -336,21 +310,7 @@ export interface WorkflowTriggersApi {
   setEnabled: (id: string, enabled: boolean) => Promise<WorkflowTrigger>;
   /** Deletes trigger `id`, for whoever may disable it; audited. */
   delete: (id: string) => Promise<void>;
-  /**
-   * Makes webhook trigger `id` a new secret, for its owner while they still
-   * build the workflow: the old one takes no delivery from then on. The
-   * new one is answered this once, never again; audited, never with it.
-   */
-  rotateWebhookSecret: (id: string) => Promise<{ secret: string }>;
-  /**
-   * Revokes webhook trigger `id`'s secret, for whoever may disable it: no
-   * delivery is taken until its owner makes a new one; audited.
-   */
-  revokeWebhookSecret: (id: string) => Promise<WorkflowTrigger>;
 }
 
-/**
- * A trigger as it was created: a webhook trigger's with its secret, this
- * once (`secret`), never shown again.
- */
-export type CreatedWorkflowTrigger = WorkflowTrigger & { secret?: string };
+/** A trigger as it was created. */
+export type CreatedWorkflowTrigger = WorkflowTrigger;

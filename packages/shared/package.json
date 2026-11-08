@@ -88,6 +88,8 @@
     "./error-namespaces": "./src/error-namespaces.ts",
     "./error-reports": "./src/error-reports.ts",
     "./errors": "./src/errors.ts",
+    "./event-source-path": "./src/event-source-path.ts",
+    "./event-sources": "./src/event-sources.ts",
     "./app-visitors": "./src/app-visitors.ts",
     "./guests": "./src/guests.ts",
     "./interview-hear": "./src/interview-hear.ts",
@@ -177,7 +179,6 @@
     "./workflow-modules": "./src/workflow-modules.ts",
     "./workflow-resources": "./src/workflow-resources.ts",
     "./workflow-triggers": "./src/workflow-triggers.ts",
-    "./workflow-webhook-path": "./src/workflow-webhook-path.ts",
     "./work-knowledge": "./src/work-knowledge.ts",
     "./workflows": "./src/workflows.ts"
   },

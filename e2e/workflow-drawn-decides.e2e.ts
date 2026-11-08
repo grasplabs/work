@@ -1,6 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 
-import { workflowWebhookHeaders } from "@grasp-os/shared/workflow-triggers";
+import { eventSourceHeaders } from "@grasp-os/shared/event-sources";
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -18,9 +18,9 @@ import { origin } from "./stack.ts";
 // approver, whose nav counts the workflow that needs them, and who decides
 // from their inbox, on the decision's own page: its link, which anyone
 // else who opens it only sees isn't for them; and the run ends with their
-// answer. Then a webhook: the builder adds one, an admin grants its
-// request to start the workflow from the inbox, and a delivery signed
-// with its secret starts a run.
+// answer. Then a webhook: an admin adds a source in Settings, the builder
+// starts the workflow on its events, the admin grants that request from
+// the inbox, and an event signed with the source's secret starts a run.
 
 /** A turn of the agent's, its model's calls and the tools they call. */
 const agentTurn = { timeout: 30_000 };
@@ -214,18 +214,32 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await expect(sheet).toContainText('"comment": "Matches the order"');
   await page.keyboard.press("Escape");
 
-  // A webhook: a signed call to its own URL: its secret shown once.
-  await page.getByRole("tab", { name: "Triggers" }).click();
-  await page.getByLabel("What starts it").selectOption({
-    label: "A signed call to its own URL",
-  });
-  await page.getByRole("button", { name: "Add the trigger" }).click();
-  const shown = page.getByRole("dialog");
+  // A webhook: an admin adds a source, its secret shown once.
+  const sourceName = `Invoices ${randomBytes(4).toString("hex")}`;
+  await asAdmin.goto("/settings/webhooks");
+  await asAdmin
+    .getByLabel("New source, named after its sender")
+    .fill(sourceName, pageRead);
+  await asAdmin.getByRole("button", { name: "Add the source" }).click();
+  const shown = asAdmin.getByRole("dialog");
   const secret = await shown
     .getByRole("textbox", { name: "Secret" })
     .inputValue();
   await shown.getByRole("button", { name: "Done" }).click();
-  const url = await page.getByLabel("Webhook URL").inputValue();
+  const url = await asAdmin
+    .getByRole("textbox", { name: `URL of ${sourceName}` })
+    .inputValue(pageRead);
+
+  // The builder starts the workflow on its invoices.
+  await page.getByRole("tab", { name: "Triggers" }).click();
+  await page.getByLabel("What starts it").selectOption({
+    label: "An event from a webhook source",
+  });
+  await page
+    .getByLabel("Source", { exact: true })
+    .selectOption({ label: sourceName });
+  await page.getByLabel("Event type").fill("invoice.received");
+  await page.getByRole("button", { name: "Add the trigger" }).click();
   await expect(page.getByText("Waiting for an admin")).toBeVisible(pageRead);
 
   // Its start waits for an admin, who grants it from their inbox. The
@@ -247,13 +261,15 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     pageRead
   );
   await page.goto(`/workflows/${workflow}?tab=triggers`);
-  await expect(page.getByLabel("Webhook URL")).toBeVisible(pageRead);
+  await expect(
+    page.getByText(`On invoice.received events from ${sourceName}`)
+  ).toBeVisible(pageRead);
   await expect(page.getByText("Waiting for an admin")).toHaveCount(0);
 
-  // A delivery signed with its secret starts a run.
+  // An event signed with the source's secret starts a run.
   const body = JSON.stringify({
-    invoice: "INV-43",
-    approver: `person:${decider.userId}`,
+    type: "invoice.received",
+    data: { invoice: "INV-43", approver: `person:${decider.userId}` },
   });
   const id = `msg_${randomBytes(8).toString("hex")}`;
   const timestamp = String(Math.floor(Date.now() / 1000));
@@ -261,9 +277,9 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     method: "POST",
     headers: {
       "content-type": "application/json",
-      [workflowWebhookHeaders.id]: id,
-      [workflowWebhookHeaders.timestamp]: timestamp,
-      [workflowWebhookHeaders.signature]: signed(secret, id, timestamp, body),
+      [eventSourceHeaders.id]: id,
+      [eventSourceHeaders.timestamp]: timestamp,
+      [eventSourceHeaders.signature]: signed(secret, id, timestamp, body),
     },
     body,
   });

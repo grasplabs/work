@@ -34,6 +34,7 @@ import {
   unbindWorkflowFromApp,
 } from "./app-workflow-bindings.ts";
 import { askableFor } from "./channels/askable-workflows.ts";
+import { EventSourcesRpc } from "./event-sources-rpc.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -113,6 +114,7 @@ export class WorkflowResourcesRpc
   readonly #check: SessionCheck;
   readonly #lifecycle: WorkflowLifecycleRpc;
   readonly #triggers: WorkflowTriggersRpc;
+  readonly #sources: EventSourcesRpc;
 
   constructor(env: Env, check: SessionCheck) {
     super();
@@ -120,6 +122,7 @@ export class WorkflowResourcesRpc
     this.#check = check;
     this.#lifecycle = new WorkflowLifecycleRpc(env, check);
     this.#triggers = new WorkflowTriggersRpc(env, check);
+    this.#sources = new EventSourcesRpc(env, check);
   }
 
   get lifecycle(): WorkflowLifecycleRpc {
@@ -128,6 +131,10 @@ export class WorkflowResourcesRpc
 
   get triggers(): WorkflowTriggersRpc {
     return this.#triggers;
+  }
+
+  get sources(): EventSourcesRpc {
+    return this.#sources;
   }
 
   async create(name: string): Promise<WorkflowResource> {

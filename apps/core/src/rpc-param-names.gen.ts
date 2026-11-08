@@ -208,6 +208,13 @@ export const rpcParamNames: ParamNames = {
     "resolve": ["intent"],
     "status": ["subject"],
   },
+  "EventSourcesRpc": {
+    "create": ["input"],
+    "delete": ["id"],
+    "list": [],
+    "revokeSecret": ["id"],
+    "rotateSecret": ["id"],
+  },
   "HeldStartsRpc": {
     "confirm": ["id","inputHash"],
     "decline": ["id"],
@@ -479,8 +486,6 @@ export const rpcParamNames: ParamNames = {
     "create": ["input"],
     "delete": ["id"],
     "list": ["workflowId"],
-    "revokeWebhookSecret": ["id"],
-    "rotateWebhookSecret": ["id"],
     "setEnabled": ["id","enabled"],
     "setVersion": ["id","version"],
   },

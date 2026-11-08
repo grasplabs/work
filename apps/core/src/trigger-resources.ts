@@ -19,6 +19,7 @@ import {
 } from "@grasp-os/shared/workflow-triggers";
 import type {
   TriggerKind,
+  TriggerSource,
   TriggerSummary,
   WorkflowTrigger,
 } from "@grasp-os/shared/workflow-triggers";
@@ -40,6 +41,7 @@ import {
 } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
+  eventSources,
   permissions,
   triggerResources,
   triggerResourceVersions,
@@ -57,10 +59,6 @@ import {
   requireFreeAddresses,
 } from "./workflows/email-addresses.ts";
 import { quotaLimits } from "./workflows/quotas.ts";
-import {
-  webhookTokenOf,
-  webhookTriggerSecretOf,
-} from "./workflows/webhook-triggers.ts";
 
 // Independent triggers (platform specification 15, 24): each a resource of
 // its own that starts one exact workflow version on its own. This is their
@@ -128,13 +126,13 @@ import {
 //   changed: deleting the trigger gives it up, and making another is how
 //   it changes. Its input is a fixed mapping as a connector trigger's is.
 //   Its mail starts runs as workflows/inbound-email.ts says.
-// - A webhook trigger started by anyone who learns its URL: its URL ends
-//   in a token of 128 random bits of its own, kept as an email trigger's
-//   address is, and every delivery must be signed with its secret, which
-//   is never stored and shown once, to its owner, as it is made (created
-//   or rotated). Its owner rotates it; whoever may stop the trigger
-//   revokes it. Its deliveries start runs as workflows/webhook-triggers.ts
-//   says.
+// - A webhook trigger started by an outside system nobody approved: it
+//   starts on the events of one event source (event-sources.ts), which
+//   only an admin creates, and of one type; the source must be live as
+//   the trigger is created, and its request for `start` names both, so
+//   the admin granting it knows what starts the workflow. Anyone who may
+//   build may start a workflow on a source's events; nothing starts until
+//   that grant. Its events start runs as workflows/source-events.ts says.
 
 /** What a trigger version keeps of its configuration, by kind. */
 interface KindFields {
@@ -145,6 +143,7 @@ interface KindFields {
   connectionId: string | null;
   connectionResource: string | null;
   inputMapping: string | null;
+  eventSourceId: string | null;
 }
 
 const noKindFields: KindFields = {
@@ -155,6 +154,7 @@ const noKindFields: KindFields = {
   connectionId: null,
   connectionResource: null,
   inputMapping: null,
+  eventSourceId: null,
 };
 
 const invalid = (issue: string) =>
@@ -230,10 +230,35 @@ const connectorFieldsOf = async (
 };
 
 /**
+ * A webhook trigger's fields, from `config`, checked: its source must be
+ * live.
+ */
+const webhookFieldsOf = async (
+  env: Env,
+  config: unknown
+): Promise<KindFields> => {
+  const { source, type } = workflowResourceErrors.parse(
+    "workflow.resource_invalid",
+    webhookTriggerConfigSchema,
+    config
+  );
+  const live = await drizzle(env.DB)
+    .select({ id: eventSources.id })
+    .from(eventSources)
+    .where(and(eq(eventSources.id, source), isNull(eventSources.deletedAt)))
+    .get();
+  if (live === undefined) {
+    throw invalid("config.source: Not a source of this workspace.");
+  }
+  return { ...noKindFields, eventType: type, eventSourceId: live.id };
+};
+
+/**
  * What a trigger of `kind` with `config` keeps in its version, checked
  * (`workflow.resource_invalid`): a schedule trigger's schedule and input, accepted by version `version` of workflow
  * `workflowId`, a connector trigger's connection, event and mapping, for
- * `principal`; nothing for any other kind.
+ * `principal`, a webhook trigger's source and type; an email trigger's
+ * mapping.
  */
 const kindFieldsOf = async (
   env: Env,
@@ -255,12 +280,7 @@ const kindFieldsOf = async (
     return { ...noKindFields, inputMapping: canonicalJson(input) };
   }
   if (kind === "webhook") {
-    workflowResourceErrors.parse(
-      "workflow.resource_invalid",
-      webhookTriggerConfigSchema,
-      config
-    );
-    return noKindFields;
+    return await webhookFieldsOf(env, config);
   }
   if (kind !== "schedule") {
     return noKindFields;
@@ -307,8 +327,6 @@ export interface TriggerResource {
   workflowVersion: number;
   principal: string;
   enabled: boolean;
-  /** A webhook trigger's secret, as it was created: never kept. */
-  secret?: string;
 }
 
 const unavailable = () =>
@@ -447,8 +465,6 @@ export const createTriggerResource = async (
       enabled: true,
       createdAt: now,
       emailAddress: kind === "email" ? (chosen ?? randomEmailAddress()) : null,
-      webhookToken: kind === "webhook" ? webhookTokenOf() : null,
-      webhookSecretGeneration: kind === "webhook" ? 1 : null,
     }),
     db.insert(triggerResourceVersions).values({
       triggerId: id,
@@ -510,9 +526,6 @@ export const createTriggerResource = async (
     workflowVersion: version,
     principal: by.userId,
     enabled: true,
-    ...(kind === "webhook"
-      ? { secret: await webhookTriggerSecretOf(env, id, 1) }
-      : {}),
   };
 };
 
@@ -679,6 +692,8 @@ export const updateTriggerVersion = async (
         WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
       inputMapping: sql`(SELECT input_mapping FROM trigger_resource_versions
         WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
+      eventSourceId: sql`(SELECT event_source_id FROM trigger_resource_versions
+        WHERE trigger_id = ${trigger.id} AND version = ${trigger.version})`,
       scheduleCron: schedule?.cron ?? null,
       scheduleTimeZone: schedule?.timeZone ?? null,
       scheduleInput: schedule?.input ?? null,
@@ -808,84 +823,6 @@ export const setTriggerEnabled = async (
   ]);
 };
 
-/** Refuses a trigger that isn't a webhook trigger, as if it weren't there. */
-const requireWebhook = (trigger: TriggerResource): void => {
-  if (trigger.kind !== "webhook") {
-    throw unavailable();
-  }
-};
-
-/**
- * Makes webhook trigger `id` a new secret, for its owner while they still
- * build the workflow (`own`): its generation one more, so the old secret
- * takes nothing from then on, and a revoked one is replaced. The new
- * secret is answered this once, and audited as rotated, never itself.
- */
-export const rotateWebhookSecret = async (
-  env: Env,
-  by: Acting,
-  id: unknown
-): Promise<{ secret: string }> => {
-  const trigger = await requireTriggerManager(env, by, id, "own");
-  requireWebhook(trigger);
-  const db = drizzle(env.DB);
-  const [[rotated]] = await auditedBatch(env, db, [
-    db
-      .update(triggerResources)
-      .set({
-        webhookSecretGeneration: sql`${triggerResources.webhookSecretGeneration} + 1`,
-        webhookSecretRevokedAt: null,
-      })
-      .where(
-        and(
-          eq(triggerResources.id, trigger.id),
-          isNull(triggerResources.deletedAt)
-        )
-      )
-      .returning({ generation: triggerResources.webhookSecretGeneration }),
-    outboxedIfChanged(
-      db,
-      entry(by, "trigger.webhook.secret_rotated", trigger.id)
-    ),
-  ]);
-  if (rotated === undefined || rotated.generation === null) {
-    throw unavailable();
-  }
-  return {
-    secret: await webhookTriggerSecretOf(env, trigger.id, rotated.generation),
-  };
-};
-
-/**
- * Revokes webhook trigger `id`'s secret, for whoever may stop the trigger
- * (`manage`): it takes no delivery until its owner makes a new one.
- * Audited only when it had one.
- */
-export const revokeWebhookSecret = async (
-  env: Env,
-  by: Acting,
-  id: unknown
-): Promise<void> => {
-  const trigger = await requireTriggerManager(env, by, id);
-  requireWebhook(trigger);
-  const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    db
-      .update(triggerResources)
-      .set({ webhookSecretRevokedAt: new Date() })
-      .where(
-        and(
-          eq(triggerResources.id, trigger.id),
-          isNull(triggerResources.webhookSecretRevokedAt)
-        )
-      ),
-    outboxedIfChanged(
-      db,
-      entry(by, "trigger.webhook.secret_revoked", trigger.id)
-    ),
-  ]);
-};
-
 /**
  * Deletes trigger `id` for `by`, who manages it: it starts nothing more,
  * and its permissions, asked for or granted, are revoked by `by` in the
@@ -934,8 +871,6 @@ interface TriggerRow {
   workflowVersion: number;
   principal: string;
   emailAddress: string | null;
-  webhookToken: string | null;
-  webhookSecretRevokedAt: Date | null;
   eventType: string | null;
   scheduleCron: string | null;
   scheduleTimeZone: string | null;
@@ -943,6 +878,9 @@ interface TriggerRow {
   connectionId: string | null;
   connectionResource: string | null;
   inputMapping: string | null;
+  eventSourceId: string | null;
+  sourceName: string | null;
+  sourceDeletedAt: Date | null;
   nextAt: Date | null;
   failedStarts: number | null;
   start: string | null;
@@ -981,10 +919,24 @@ const connectorConfigOf = (row: TriggerRow): Json | null => {
   };
 };
 
+/** The source a webhook trigger starts on, as its row names it. */
+const sourceOf = (row: {
+  eventSourceId: string | null;
+  sourceName: string | null;
+  sourceDeletedAt: Date | null;
+}): TriggerSource | null =>
+  row.eventSourceId === null || row.sourceName === null
+    ? null
+    : {
+        id: row.eventSourceId,
+        name: row.sourceName,
+        deleted: row.sourceDeletedAt !== null,
+      };
+
 /**
  * A trigger's configuration as it was created, in its kind's schema, from
- * the fields its version keeps; null when it keeps none (a webhook). An
- * email trigger's address is served as its `address`, not in here.
+ * the fields its version keeps. An email trigger's address is served as
+ * its `address`, not in here.
  */
 const configOf = (row: TriggerRow): Json | null => {
   if (row.kind === "email") {
@@ -998,7 +950,9 @@ const configOf = (row: TriggerRow): Json | null => {
   if (row.kind === "connector") {
     return connectorConfigOf(row);
   }
-  return null;
+  return row.eventSourceId === null || row.eventType === null
+    ? null
+    : { source: row.eventSourceId, type: row.eventType };
 };
 
 const viewOf = (row: TriggerRow): WorkflowTrigger => ({
@@ -1014,13 +968,7 @@ const viewOf = (row: TriggerRow): WorkflowTrigger => ({
   config: configOf(row),
   nextAt: row.kind === "schedule" ? (row.nextAt?.toISOString() ?? null) : null,
   address: row.emailAddress,
-  webhook:
-    row.webhookToken === null
-      ? null
-      : {
-          token: row.webhookToken,
-          secret: row.webhookSecretRevokedAt === null ? "active" : "revoked",
-        },
+  source: sourceOf(row),
   // Stopped by its own failing starts (workflows/schedule-triggers.ts):
   // no next time, after `maxFailedStarts` in a row.
   stopped:
@@ -1095,8 +1043,6 @@ const triggersWhere = async (
       workflowVersion: triggerResourceVersions.workflowResourceVersion,
       principal: triggerResourceVersions.principalBinding,
       emailAddress: triggerResources.emailAddress,
-      webhookToken: triggerResources.webhookToken,
-      webhookSecretRevokedAt: triggerResources.webhookSecretRevokedAt,
       eventType: triggerResourceVersions.eventType,
       scheduleCron: triggerResourceVersions.scheduleCron,
       scheduleTimeZone: triggerResourceVersions.scheduleTimeZone,
@@ -1104,6 +1050,9 @@ const triggersWhere = async (
       connectionId: triggerResourceVersions.connectionId,
       connectionResource: triggerResourceVersions.connectionResource,
       inputMapping: triggerResourceVersions.inputMapping,
+      eventSourceId: triggerResourceVersions.eventSourceId,
+      sourceName: eventSources.name,
+      sourceDeletedAt: eventSources.deletedAt,
       nextAt: triggerSchedules.nextAt,
       failedStarts: triggerSchedules.failedStarts,
       start: startStatusSql,
@@ -1123,6 +1072,10 @@ const triggersWhere = async (
         eq(triggerSchedules.triggerId, triggerResources.id),
         eq(triggerSchedules.version, triggerResources.currentVersion)
       )
+    )
+    .leftJoin(
+      eventSources,
+      eq(eventSources.id, triggerResourceVersions.eventSourceId)
     )
     .where(and(isNull(triggerResources.deletedAt), where))
     .orderBy(asc(triggerResources.createdAt), asc(triggerResources.id))
@@ -1152,6 +1105,9 @@ export const triggerSummaries = async (
       event: triggerResourceVersions.eventType,
       connectionId: triggerResourceVersions.connectionId,
       resource: triggerResourceVersions.connectionResource,
+      eventSourceId: triggerResourceVersions.eventSourceId,
+      sourceName: eventSources.name,
+      sourceDeletedAt: eventSources.deletedAt,
     })
     .from(triggerResources)
     .innerJoin(
@@ -1160,6 +1116,10 @@ export const triggerSummaries = async (
         eq(triggerResourceVersions.triggerId, triggerResources.id),
         eq(triggerResourceVersions.version, triggerResources.currentVersion)
       )
+    )
+    .leftJoin(
+      eventSources,
+      eq(eventSources.id, triggerResourceVersions.eventSourceId)
     )
     .where(
       and(
@@ -1182,6 +1142,7 @@ export const triggerSummaries = async (
           row.connectionId === null
             ? null
             : { connectionId: row.connectionId, resource: row.resource },
+        source: sourceOf(row),
       },
     ])
   );

@@ -32,6 +32,7 @@ import {
   SparklesIcon,
   UserRoundIcon,
   UsersIcon,
+  WebhookIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -40,8 +41,9 @@ import { SiteHeader } from "../frame/site-header.tsx";
 
 // Settings, as in the prototype (`routes/settings.tsx`): the workspace and
 // who may do what in it, then one's own account, one section at a time.
-// The workspace's sections are for admins (Members and roles, and calls of
-// unknown outcome, never for Grasp staff); the account's for everyone.
+// The workspace's sections are for admins (Members and roles, Webhooks and
+// calls of unknown outcome, never for Grasp staff); the account's for
+// everyone.
 // Core checks the role on every call whatever is listed. Onboarding is the
 // company admin's own view of the interviews, as their onboarding shows
 // it; what only Grasp's staff do there is in Grasp's admin.
@@ -56,6 +58,7 @@ type SettingsPath =
   | "/settings/onboarding"
   | "/settings/brain"
   | "/settings/audit"
+  | "/settings/webhooks"
   | "/settings/outcomes"
   | "/settings/billing"
   | "/settings/profile"
@@ -122,6 +125,12 @@ const groupsFor = ({
         ...(staff
           ? []
           : [
+              // The event sources outside systems send events to.
+              {
+                label: msg`Webhooks`,
+                to: "/settings/webhooks" as const,
+                icon: WebhookIcon,
+              },
               {
                 label: msg`Unknown outcomes`,
                 to: "/settings/outcomes" as const,

@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { BusinessProcess } from "./business-processes.ts";
 import { connectorContractIdSchema } from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
+import type { EventSourcesApi } from "./event-sources.ts";
 import { chatIdSchema, identifierSchema, workspaceIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
 import type { RunFileListing } from "./run-files.ts";
@@ -1445,4 +1446,9 @@ export interface WorkflowResourcesApi {
   readonly lifecycle: WorkflowLifecycleApi;
   /** Its triggers: list, create, move to a version, enable and delete. */
   readonly triggers: WorkflowTriggersApi;
+  /**
+   * The deployment's event sources, which webhook triggers start on:
+   * created and managed by admins, listed for builders too.
+   */
+  readonly sources: EventSourcesApi;
 }

@@ -108,6 +108,7 @@ import {
   signedInWithRole,
   unique,
 } from "./sign-in.ts";
+import { webhookConfig } from "./source-config.ts";
 import { testBinding } from "./test-env.ts";
 
 // The calls of grasp-workflow/1 workflows on the run host (sealed-run.ts,
@@ -1141,7 +1142,7 @@ describe("model calls", () => {
       kind: "webhook",
       workflowId: byTrigger.workflow.id,
       version: 1,
-      config: {},
+      config: await webhookConfig(),
     });
     const triggerGrant = await startOf(
       { type: "trigger", triggerId: triggerIdSchema.parse(trigger.id) },
@@ -1262,7 +1263,7 @@ describe("model calls", () => {
         kind: "webhook",
         workflowId: workflow.id,
         version: 1,
-        config: {},
+        config: await webhookConfig(),
       });
       await granted(ada, admin, {
         subject: {

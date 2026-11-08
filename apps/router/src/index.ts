@@ -2,6 +2,7 @@ import { appVisitorApiPath } from "@grasp-os/shared/app-visitors";
 import { channelsApiPath } from "@grasp-os/shared/channels";
 import { requestErrors } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
+import { eventSourcePath } from "@grasp-os/shared/event-source-path";
 import { guestApiPath } from "@grasp-os/shared/guests";
 import {
   readAtMost,
@@ -38,7 +39,6 @@ import {
 } from "@grasp-os/shared/router";
 import type { RouterTarget } from "@grasp-os/shared/router";
 import { speechPath, transcriptionPath } from "@grasp-os/shared/voice";
-import { workflowWebhookPath } from "@grasp-os/shared/workflow-webhook-path";
 
 import { clientAddress } from "./client-address.ts";
 import { routeCache } from "./route-cache.ts";
@@ -203,13 +203,13 @@ const withinLimit = async (
 
 /**
  * The budget a request counts against besides its client address's, if
- * any: a webhook trigger's own (its URL's token), so a URL someone learned
+ * any: an event source's own (its URL's token), so a URL someone learned
  * can't be flooded from many addresses either, each delivery costing core
  * a body read and a signature check before it is refused unsigned.
  */
 const ownBudgetOf = (pathname: string): string | undefined =>
-  pathname.startsWith(`${workflowWebhookPath}/`)
-    ? `webhook:${pathname.slice(workflowWebhookPath.length + 1)}`
+  pathname.startsWith(`${eventSourcePath}/`)
+    ? `webhook:${pathname.slice(eventSourcePath.length + 1)}`
     : undefined;
 
 /** Core's sign-out route, which the limit leaves alone. */
@@ -296,11 +296,11 @@ const limitFor = (pathname: string): LimitBinding | undefined => {
   if (interviewLinkPaths.has(pathname)) {
     return "INTERVIEW_RATE_LIMIT";
   }
-  // A workflow's webhook trigger (core's workflows/webhook-triggers.ts),
-  // which anyone can post to; core checks each delivery is signed with its
+  // An event source's URL (core's workflows/source-events.ts), which
+  // anyone can post to; core checks each delivery is signed with its
   // secret. Counted per client address and per URL (`ownBudgetOf`), before
   // core looks the URL up or reads a byte of the body.
-  if (pathname.startsWith(`${workflowWebhookPath}/`)) {
+  if (pathname.startsWith(`${eventSourcePath}/`)) {
     return "WEBHOOK_RATE_LIMIT";
   }
   return undefined;

@@ -143,7 +143,7 @@ describe("an independent workflow's triggers over /rpc", () => {
         config: nightly,
         nextAt: "",
         address: null,
-        webhook: null,
+        source: null,
         stopped: false,
         // It asks an admin for its start as it is created.
         start: "requested",
@@ -587,6 +587,7 @@ describe("an independent workflow's triggers over /rpc", () => {
       schedule: null,
       event: "m365.mail.received",
       connection: { connectionId, resource: mailbox },
+      source: null,
     };
     expect({ created, refused, granted }).toStrictEqual({
       created: {
@@ -610,6 +611,7 @@ describe("an independent workflow's triggers over /rpc", () => {
               schedule: nightly.schedule,
               event: null,
               connection: null,
+              source: null,
             },
           },
         ],

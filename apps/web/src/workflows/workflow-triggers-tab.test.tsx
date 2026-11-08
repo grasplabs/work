@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import type { ListedConnection } from "@grasp-os/shared/connect";
+import type { EventSource } from "@grasp-os/shared/event-sources";
 import type { WorkflowTrigger } from "@grasp-os/shared/workflow-triggers";
 import { Tabs } from "@grasp-os/ui/components/tabs";
 import { i18n } from "@lingui/core";
@@ -61,7 +62,7 @@ const stoppedSchedule: WorkflowTrigger = {
   },
   nextAt: null,
   address: null,
-  webhook: null,
+  source: null,
   stopped: true,
 };
 
@@ -79,7 +80,7 @@ const othersMail: WorkflowTrigger = {
   },
   nextAt: null,
   address: null,
-  webhook: null,
+  source: null,
   stopped: false,
   events: "active",
 };
@@ -94,11 +95,17 @@ const ownMail: WorkflowTrigger = {
   config: { input: { fields: {}, defaults: {} } },
   nextAt: null,
   address: "trigger-0b7c",
-  webhook: null,
+  source: null,
   stopped: false,
 };
 
-const webhookSecret = "whsec_c2hvd24tb25seS1vbmNl";
+const shop: EventSource = {
+  id: "source-shop",
+  name: "Shop system",
+  createdAt: "2026-10-01T09:00:00.000Z",
+  createdBy: "admin",
+  delivery: null,
+};
 
 const ownWebhook: WorkflowTrigger = {
   ...base,
@@ -107,19 +114,11 @@ const ownWebhook: WorkflowTrigger = {
   owner: "me",
   principal: "me",
   enabled: true,
-  config: {},
+  config: { source: shop.id, type: "order.paid" },
   nextAt: null,
   address: null,
-  webhook: { token: "token-0b7c", secret: "active" },
+  source: { id: shop.id, name: shop.name, deleted: false },
   stopped: false,
-};
-
-const othersWebhook: WorkflowTrigger = {
-  ...ownWebhook,
-  id: "trigger-others-webhook",
-  owner: "someone-else",
-  principal: "someone-else",
-  webhook: { token: "token-9f1d", secret: "active" },
 };
 
 const connection = (
@@ -150,7 +149,8 @@ const shown = async (
   builder: boolean,
   connectFails = false,
   changeFails = false,
-  listed: readonly WorkflowTrigger[] = [stoppedSchedule, othersMail]
+  listed: readonly WorkflowTrigger[] = [stoppedSchedule, othersMail],
+  sources: readonly EventSource[] = [shop]
 ): Promise<unknown[]> => {
   const asked: unknown[] = [];
   listReads = 0;
@@ -165,29 +165,7 @@ const shown = async (
       if (changeFails) {
         throw new Error("The trigger couldn't be read back.");
       }
-      const webhook =
-        typeof input === "object" &&
-        input !== null &&
-        Reflect.get(input, "kind") === "webhook";
-      return webhook
-        ? { ...ownWebhook, secret: webhookSecret }
-        : stoppedSchedule;
-    },
-    rotateWebhookSecret: async (id: string) => {
-      await Promise.resolve();
-      asked.push({ rotateWebhookSecret: id });
-      if (changeFails) {
-        throw new Error("The secret couldn't be made.");
-      }
-      return { secret: `${webhookSecret}-rotated` };
-    },
-    revokeWebhookSecret: async (id: string) => {
-      await Promise.resolve();
-      asked.push({ revokeWebhookSecret: id });
-      if (changeFails) {
-        throw new Error("The secret couldn't be revoked.");
-      }
-      return ownWebhook;
+      return stoppedSchedule;
     },
     setEnabled: async (id: string, enabled: boolean) => {
       await Promise.resolve();
@@ -211,6 +189,7 @@ const shown = async (
     triggers,
     versions: async () =>
       await Promise.resolve([{ version: 1 }, { version: 2 }]),
+    sources: { list: async () => await Promise.resolve(sources) },
   };
   const connections = {
     list: async (): Promise<ListedConnection[]> => {
@@ -316,12 +295,6 @@ const fill = async (label: string, value: string): Promise<void> => {
     await settled();
   });
 };
-
-/** The secret the page shows, if it shows one. */
-const secretShown = (): string | undefined =>
-  [...document.querySelectorAll("input")].find(
-    (input) => input.getAttribute("aria-label") === "Secret"
-  )?.value;
 
 /** Submits the Add a trigger form. */
 const submit = async (): Promise<void> => {
@@ -555,145 +528,62 @@ describe("a workflow's Triggers tab", () => {
     }).toStrictEqual({ readAgain: true, readAfterAdding: true, said: true });
   });
 
-  it("shows a new webhook trigger's secret once, as core answered it, and never again once closed", async () => {
+  it("adds a webhook trigger on the source and event type chosen, by the source's name", async () => {
     const asked = await shown(true, false, false, []);
     await fill("What starts it", "webhook");
+    const offered = [
+      ...(field("Source")?.querySelectorAll("option") ?? []),
+    ].map((option) => option.textContent);
+    await fill("Source", shop.id);
+    await fill("Event type", " order.paid ");
     await submit();
-    const shownOnce = secretShown();
-    const warned = document.body.textContent.includes("you won't see it again");
-    await press("Done");
 
-    expect({
-      asked,
-      shownOnce,
-      warned,
-      afterClosing: secretShown(),
-    }).toStrictEqual({
+    expect({ offered, asked }).toStrictEqual({
+      offered: ["Choose…", "Shop system"],
       asked: [
         {
           create: {
             kind: "webhook",
             workflowId: "workflow-1",
             version: 2,
-            config: {},
+            config: { source: shop.id, type: "order.paid" },
           },
         },
       ],
-      shownOnce: webhookSecret,
-      warned: true,
-      afterClosing: undefined,
     });
   });
 
-  it("shows a webhook trigger's URL with its token, and how to sign a delivery", async () => {
-    await shown(true, false, false, [ownWebhook]);
-    const url = [...document.querySelectorAll("input")].find(
-      (input) => input.getAttribute("aria-label") === "Webhook URL"
-    )?.value;
+  it("asks for a source before adding a webhook trigger, and says where sources come from when there are none", async () => {
+    const asked = await shown(true, false, false, [], []);
+    await fill("What starts it", "webhook");
+    const text = document.body.textContent;
+    await submit();
 
     expect({
-      url,
-      copy: buttons("Copy").length,
-      signing: document.body.textContent.includes("Standard Webhooks"),
-    }).toStrictEqual({
-      url: `${globalThis.location.origin}/api/workflow-webhooks/token-0b7c`,
-      copy: 1,
-      signing: true,
-    });
-  });
-
-  it("copies a webhook's URL, says so, and still names which webhook the button is for", async () => {
-    await shown(true, false, false, [ownWebhook]);
-    await press("Copy");
-    const [button] = buttons("Copied");
-
-    expect({
-      copied: await navigator.clipboard.readText(),
-      name: button?.getAttribute("aria-label"),
-      announced: [...document.querySelectorAll("output[aria-live]")].some(
-        (region) => region.textContent === "Copied"
-      ),
-    }).toStrictEqual({
-      copied: `${globalThis.location.origin}/api/workflow-webhooks/token-0b7c`,
-      name: "Copy the URL of the webhook ending 0b7c",
-      announced: true,
-    });
-  });
-
-  it("rotates its owner's webhook secret only once they confirm, and shows the new one once", async () => {
-    const asked = await shown(true, false, false, [ownWebhook]);
-    await press("Rotate the secret");
-    const beforeConfirming = asked.length;
-    // The dialog's own button, after the row's.
-    await press("Rotate the secret", 1);
-    // Closed as confirmed: only the row's button is left, so the secret
-    // just shown can't be rotated away by a second click.
-    const left = buttons("Rotate the secret").length;
-
-    expect({
-      beforeConfirming,
+      where: text.includes("an admin adds one in Settings"),
+      said: document.body.textContent.includes("Choose a source."),
       asked,
-      left,
-      shown: secretShown(),
-    }).toStrictEqual({
-      beforeConfirming: 0,
-      asked: [{ rotateWebhookSecret: "trigger-webhook" }],
-      left: 1,
-      shown: `${webhookSecret}-rotated`,
-    });
+    }).toStrictEqual({ where: true, said: true, asked: [] });
   });
 
-  it("closes the confirmation and says why in the row when rotating or revoking fails", async () => {
-    await shown(true, false, true, [ownWebhook]);
-    await press("Rotate the secret");
-    await press("Rotate the secret", 1);
-    const rotating = {
-      left: buttons("Rotate the secret").length,
-      said: document.body.textContent.includes("The secret couldn't be made."),
-    };
-    await press("Revoke the secret");
-    await press("Revoke the secret", 1);
-
-    expect({
-      rotating,
-      revoking: {
-        left: buttons("Revoke the secret").length,
-        said: document.body.textContent.includes(
-          "The secret couldn't be revoked."
-        ),
-      },
-      secret: secretShown(),
-    }).toStrictEqual({
-      rotating: { left: 1, said: true },
-      revoking: { left: 1, said: true },
-      secret: undefined,
-    });
-  });
-
-  it("lets a builder revoke another's webhook secret once they confirm, but not rotate it", async () => {
-    const asked = await shown(true, false, false, [othersWebhook]);
-    const rotate = buttons("Rotate the secret").length;
-    await press("Revoke the secret");
-    const beforeConfirming = asked.length;
-    await press("Revoke the secret", 1);
-
-    expect({ rotate, beforeConfirming, asked }).toStrictEqual({
-      rotate: 0,
-      beforeConfirming: 0,
-      asked: [{ revokeWebhookSecret: "trigger-others-webhook" }],
-    });
-  });
-
-  it("says a revoked webhook secret takes nothing, and offers its owner a new one", async () => {
+  it("shows a webhook trigger by its source and event type, and says once its source was deleted", async () => {
     await shown(true, false, false, [
-      { ...ownWebhook, webhook: { token: "token-0b7c", secret: "revoked" } },
+      ownWebhook,
+      {
+        ...ownWebhook,
+        id: "trigger-gone",
+        source: { id: shop.id, name: shop.name, deleted: true },
+      },
     ]);
+    const text = document.body.textContent;
 
     expect({
-      revoked: document.body.textContent.includes("Secret revoked"),
-      newOne: buttons("Make a new secret").length,
-      revoke: buttons("Revoke the secret").length,
-    }).toStrictEqual({ revoked: true, newOne: 1, revoke: 0 });
+      named: text.includes("On order.paid events from Shop system"),
+      deleted: text.includes(
+        "On order.paid events from a deleted webhook source"
+      ),
+      said: text.includes("Its source was deleted"),
+    }).toStrictEqual({ named: true, deleted: true, said: true });
   });
 
   it("says a trigger waits for an admin to let it start, offering nothing to ask", async () => {
