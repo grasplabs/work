@@ -3805,8 +3805,8 @@ export const eventWaits = sqliteTable(
  * reached after it came (workflows/event-waits.ts): its ID is its
  * delivery's (the source and its `webhook-id`), its data the event's.
  * Each run takes one at most once (`kept_event_takes`), however many
- * runs take it. Deleted past `expires_at`, its data with it, and with its
- * source.
+ * runs take it. Deleted on the clock past `expires_at`, its data with it,
+ * and once its source is deleted, which no run takes it from.
  */
 export const keptEvents = sqliteTable(
   "kept_events",

@@ -13,7 +13,11 @@ import { Webhook } from "standardwebhooks";
 import { afterAll, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { createEventSource, deleteEventSource } from "../src/event-sources.ts";
+import {
+  createEventSource,
+  deleteEventSource,
+  rotateSourceSecret,
+} from "../src/event-sources.ts";
 import {
   approveWorkflowBinding,
   revokeWorkflowBinding,
@@ -25,7 +29,10 @@ import {
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import { sweepEventWaits } from "../src/workflows/event-waits.ts";
+import {
+  keptPerSource,
+  sweepEventWaits,
+} from "../src/workflows/event-waits.ts";
 import { RunHost } from "../src/workflows/host.ts";
 import type { HostHooks, RunStep } from "../src/workflows/host.ts";
 import { loadedActivation, runOf } from "../src/workflows/resource-runs.ts";
@@ -532,6 +539,77 @@ const pausedAtKeep = (gate: Promise<unknown>, atKeep: () => void): Env => {
 };
 
 /**
+ * Core's env with `first` run once, just before the first statement whose
+ * query `at` matches runs: someone acting between what core read and that
+ * statement.
+ */
+const racedAt = (at: RegExp, first: () => Promise<unknown>): Env => {
+  const real = env.DB;
+  let raced = false;
+  const DB: D1Database = {
+    prepare: (query) => {
+      const statement = real.prepare(query);
+      if (raced || !at.test(query)) {
+        return statement;
+      }
+      raced = true;
+      const racing = (prepared: D1PreparedStatement): D1PreparedStatement =>
+        new Proxy(prepared, {
+          get: (target, property, receiver) => {
+            if (property === "bind") {
+              return (...values: unknown[]) => racing(target.bind(...values));
+            }
+            if (
+              property === "all" ||
+              property === "first" ||
+              property === "raw" ||
+              property === "run"
+            ) {
+              return async (...args: unknown[]) => {
+                await first();
+                const run: unknown = Reflect.get(target, property, target);
+                if (typeof run !== "function") {
+                  throw new TypeError(`No ${property} on a statement`);
+                }
+                const result: unknown = await Reflect.apply(run, target, args);
+                return result;
+              };
+            }
+            const value: unknown = Reflect.get(target, property, receiver);
+            return value;
+          },
+        });
+      return racing(statement);
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) =>
+      await real.batch<T>(statements),
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+  return { ...env, DB };
+};
+
+/** Inserts `count` kept events of `source`, expired unless `fresh`, straight in the database. */
+const keptRows = async (
+  source: string,
+  count: number,
+  { fresh = false } = {}
+): Promise<void> => {
+  const at = fresh ? Date.now() + 3_600_000 : Date.now() - 1;
+  const statements = Array.from({ length: count }, (_, index) =>
+    env.DB.prepare(
+      "INSERT INTO kept_events (id, source_id, event_type, data, received_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(`old-${source}-${index}`, source, paid, "{}", Date.now(), at)
+  );
+  for (let start = 0; start < statements.length; start += 500) {
+    // oxlint-disable-next-line no-await-in-loop -- one batch after another
+    await env.DB.batch(statements.slice(start, start + 500));
+  }
+};
+
+/**
  * Core's env with its `nth` statement matching `at` failing, as core
  * killed just there.
  */
@@ -781,6 +859,90 @@ describe(
       });
     });
 
+    it("goes on past a kept event its run refuses to a newer one of its match", async () => {
+      const paying = await paymentWorkflow();
+      const runId = await waitingRun(paying, "INV-1");
+      await send(paying.source, invoice("INV-1", "lots"));
+      await send(paying.source, invoice("INV-1", 5));
+      const ran = await ranAs(runId, waiting());
+
+      expect({ ran, kept: await takenOf(paying.source.id) }).toStrictEqual({
+        ran: { ended: "INV-1", tampered: [] },
+        // The refused one let go; the newer one taken.
+        kept: [[], [runId]],
+      });
+    });
+
+    it("refuses a retry carrying another event, matching nothing by it", async () => {
+      const paying = await paymentWorkflow();
+      const runId = await waitingRun(paying, "INV-B");
+      const first = await send(paying.source, invoice("INV-A"), {
+        id: "msg_twice",
+      });
+      const other = await send(paying.source, invoice("INV-B"), {
+        id: "msg_twice",
+      });
+      const ran = await ranAs(runId, waiting());
+
+      expect({
+        statuses: [first, other],
+        ran,
+        kept: await keptOf(paying.source.id),
+      }).toStrictEqual({
+        statuses: [202, 409],
+        ran: { ended: "none", tampered: [] },
+        kept: [{ data: invoice("INV-A"), taken: [] }],
+      });
+    });
+
+    it("hands a waiting run nothing of a delivery whose secret was rotated as it was handed", async () => {
+      const paying = await paymentWorkflow();
+      const runId = await waitingRun(paying, "INV-1");
+      // Rotated after the delivery was checked, as it looks for waits.
+      const rotating = racedAt(/from "event_waits"/u, async () => {
+        await rotateSourceSecret(env, paying.admin, paying.source.id);
+      });
+      const statuses: number[] = [];
+      const ran = await ranAs(
+        runId,
+        waiting(),
+        inboxEngine(runId, keptOfTest(), async () => {
+          statuses.push(
+            await send(paying.source, invoice("INV-1"), { coreEnv: rotating })
+          );
+        })
+      );
+
+      expect({
+        statuses,
+        ran,
+        inbox: await inboxOf(runId),
+      }).toStrictEqual({
+        statuses: [401],
+        ran: { ended: "none", tampered: [] },
+        inbox: [],
+      });
+    });
+
+    it("sweeps every kept event past its day in one run, in batches, and counts those not yet swept toward the cap", async () => {
+      const paying = await paymentWorkflow();
+      const sweeping = await sourceOf(paying.admin);
+      await keptRows(sweeping.id, 1200);
+      await sweepEventWaits(env);
+      const leftAfterSweep = await keptCount(sweeping.id);
+      // A source holding as many as it may, expired but not yet swept,
+      // keeps nothing more.
+      await keptRows(paying.source.id, keptPerSource);
+      const status = await send(paying.source, invoice("INV-1"));
+      const full = await keptCount(paying.source.id);
+
+      expect({ leftAfterSweep, status, full }).toStrictEqual({
+        leftAfterSweep: 0,
+        status: 202,
+        full: keptPerSource,
+      });
+    });
+
     it("hands the kept event it took once, when core was killed before it said so, and takes no other", async () => {
       const paying = await paymentWorkflow();
       const runId = await waitingRun(paying, "INV-1");
@@ -826,6 +988,7 @@ describe(
       const revoked = await ranAs(runId, waiting());
       const whileRevoked = await keptOf(paying.source.id);
       await deleteEventSource(env, paying.admin, paying.source.id);
+      await sweepEventWaits(env);
 
       expect({
         revoked,

@@ -66,6 +66,8 @@ export const eventSourceErrors = defineErrorFamily({
     "This delivery isn't signed with the source's secret as Standard Webhooks signs one (webhook-id, webhook-timestamp, webhook-signature), or its timestamp is more than five minutes from now.",
   "webhook.body_invalid":
     'A delivery\'s body is one JSON object of at most 64 KiB, with the event\'s "type" and its "data".',
+  "webhook.delivery_conflict":
+    "This webhook-id was delivered before with another event. A retry sends the same event; a new event takes a new webhook-id.",
   "webhook.busy":
     "A workflow this event starts has started as many runs as it may this hour, or couldn't start one now. Try again later.",
   "webhook.source_invalid": "That isn't a source you can create.",

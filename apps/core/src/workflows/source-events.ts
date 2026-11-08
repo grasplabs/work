@@ -339,7 +339,7 @@ const retryAfterSeconds = 60;
  * and others may have taken it.
  */
 const answerOf = (
-  outcomes: readonly (Outcome | "retry")[],
+  outcomes: readonly (Outcome | "retry" | "stale")[],
   requestId: string
 ): Response => {
   if (outcomes.includes("stale")) {
@@ -426,8 +426,15 @@ export const sourceEventResponse = async (
     return answerOf(outcomes, requestId);
   }
   const routed = await routeSourceEvent(env, taken, also);
+  if (routed === "conflict") {
+    return errorResponse(
+      409,
+      eventSourceErrors.create("webhook.delivery_conflict"),
+      requestId
+    );
+  }
   return answerOf(
-    routed === "retry" ? [...outcomes, "retry"] : outcomes,
+    routed === "retry" || routed === "stale" ? [...outcomes, routed] : outcomes,
     requestId
   );
 };
