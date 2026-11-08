@@ -307,7 +307,12 @@ const configSource = (definition: AppDefinition): string => {
   const people = definition.permissions.some(
     (data) => data["~permission"] === peoplePermission
   );
+  // `people` is a flag, held with or without an alias: never read as a
+  // declaration.
   const declarations = definition.permissions.flatMap((data) => {
+    if (data["~permission"] === peoplePermission) {
+      return [];
+    }
     const declared = readPermissionDeclaration(data);
     return declared["~permission"] === "people" ? [] : [declared];
   });
