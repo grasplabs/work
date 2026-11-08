@@ -36,8 +36,9 @@ const kindKeys: Readonly<Record<string, readonly string[]>> = {
   union: ["members"],
 };
 
+/** Refuses a descriptor that isn't one, as read here or from its text. */
 // Typed where it is declared: only then does a call narrow what follows it.
-const refuse: (message: string) => never = (message) => {
+export const refuseDescriptor: (message: string) => never = (message) => {
   throw new ValueDefinitionError("definition.invalid_descriptor", message);
 };
 
@@ -54,7 +55,7 @@ const knownKind = (input: Record<string, unknown>): string => {
       ? kindKeys[kind]
       : undefined;
   if (typeof kind !== "string" || ownKeys === undefined) {
-    return refuse("The descriptor's kind isn't one this SDK knows.");
+    return refuseDescriptor("The descriptor's kind isn't one this SDK knows.");
   }
   const hasDefault = input.presence === "default";
   for (const key of Object.keys(input)) {
@@ -63,7 +64,9 @@ const knownKind = (input: Record<string, unknown>): string => {
       ownKeys.includes(key) ||
       (hasDefault && key === "defaultValue");
     if (!known) {
-      return refuse("The descriptor has a key its kind doesn't have.");
+      return refuseDescriptor(
+        "The descriptor has a key its kind doesn't have."
+      );
     }
   }
   return kind;
@@ -87,7 +90,7 @@ export const readDescriptor = (
     );
   }
   if (!isPlainObject(input)) {
-    return refuse("A descriptor is a JSON object.");
+    return refuseDescriptor("A descriptor is a JSON object.");
   }
   const kind = knownKind(input);
   const nested = (value: unknown): ValueDescriptor =>
@@ -101,13 +104,17 @@ export const readDescriptor = (
     const { members } = input;
     // The length is checked before a member is read.
     if (!Array.isArray(members) || members.length > valueLimits.unionMembers) {
-      return refuse("A union's members are a short list of descriptors.");
+      return refuseDescriptor(
+        "A union's members are a short list of descriptors."
+      );
     }
     draft.members = members.map(nested);
   } else if (kind === "object") {
     const { fields } = input;
     if (!isPlainObject(fields)) {
-      return refuse("An object's fields are a map of names to descriptors.");
+      return refuseDescriptor(
+        "An object's fields are a map of names to descriptors."
+      );
     }
     const descriptors: Record<string, unknown> = {};
     for (const [key, field] of Object.entries(fields)) {

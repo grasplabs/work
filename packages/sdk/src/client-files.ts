@@ -4,6 +4,7 @@ import type {
 } from "@grasp-os/shared/app-file-limits";
 
 import { clientError, GraspError, readRejection } from "./client-error.ts";
+import { namePattern } from "./declaration.ts";
 import type { FilesOperation, FilesReference } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { FileValue } from "./values.ts";
@@ -89,7 +90,6 @@ interface ReadFilesReference {
   readonly operations: readonly FilesOperation[];
 }
 
-const aliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 const operations: ReadonlySet<unknown> = new Set([
   "upload",
   "read",
@@ -113,7 +113,7 @@ const readFilesReference = (
     !isPlainObject(value) ||
     value.kind !== "files" ||
     typeof value.alias !== "string" ||
-    !aliasPattern.test(value.alias) ||
+    !namePattern.test(value.alias) ||
     !Array.isArray(value.operations) ||
     !value.operations.every((item) => operations.has(item))
   ) {

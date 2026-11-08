@@ -19,6 +19,7 @@ import {
   readRejection,
   withReceiptLink,
 } from "./client-error.ts";
+import { namePattern } from "./declaration.ts";
 import { workflowReferenceLimits } from "./references.ts";
 import type {
   AppErrorPayload,
@@ -140,8 +141,6 @@ const readWorkflows = new WeakMap<object, ReadWorkflow>();
 
 const maxEvents = workflowReferenceLimits.events;
 
-const aliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
-
 /** The release and contract of the workflow reference being read. */
 interface WorkflowIdentity {
   readonly resourceId: string;
@@ -161,7 +160,7 @@ const isEventOf = (
   workflow: WorkflowIdentity
 ): event is WorkflowEventReference => {
   if (
-    !aliasPattern.test(alias) ||
+    !namePattern.test(alias) ||
     !isPlainObject(event) ||
     event.kind !== "workflowEvent" ||
     event.alias !== alias ||
@@ -205,7 +204,7 @@ const isDecisionOf = (
   key: string,
   workflow: WorkflowIdentity
 ): decision is WorkflowDecisionReference =>
-  aliasPattern.test(key) &&
+  namePattern.test(key) &&
   isPlainObject(decision) &&
   decision.kind === "workflowDecision" &&
   decision.key === key &&

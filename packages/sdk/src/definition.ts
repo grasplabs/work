@@ -8,6 +8,7 @@ import {
   registerApp,
 } from "./app.ts";
 import type { App, AppManifest, AppPermissions } from "./app.ts";
+import { isOverBytes, refuser } from "./declaration.ts";
 import { readPermissionDeclaration } from "./permissions.ts";
 import { defineSchema, defineTable } from "./schema.ts";
 import type {
@@ -175,9 +176,7 @@ const definitionSchema = z.strictObject({
   ),
 });
 
-const refuse = (message: string): never => {
-  throw new AppDefinitionError(message);
-};
+const refuse: (message: string) => never = refuser(AppDefinitionError);
 
 /** The one item of `items` with ID `id`, or a refusal naming `what`. */
 const byId = <Item extends { readonly id: string }>(
@@ -388,7 +387,7 @@ export const definitionManifest = (definition: AppDefinition): AppManifest =>
  * isn't one.
  */
 export const readDefinition = (text: string): AppDefinition => {
-  if (new TextEncoder().encode(text).byteLength > definitionMaxBytes) {
+  if (isOverBytes(text, definitionMaxBytes)) {
     return refuse(`A definition is at most ${definitionMaxBytes} bytes.`);
   }
   let data: unknown;

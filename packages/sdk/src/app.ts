@@ -6,6 +6,7 @@ import {
 } from "@grasp-os/shared/function-limits";
 import { canonicalText } from "@grasp-os/shared/json";
 
+import { deepFreeze, refuser } from "./declaration.ts";
 import { isServerFunction, serverFunctions } from "./handlers.ts";
 import { isMigration } from "./migration.ts";
 import type { Migration, MigrationManifest } from "./migration.ts";
@@ -248,21 +249,7 @@ export class AppDefinitionError extends Error {
   }
 }
 
-const refuse = (message: string): never => {
-  throw new AppDefinitionError(message);
-};
-
-/** `value` with every object and array in it frozen; data only. */
-const deepFreeze = <Value>(value: Value): Value => {
-  // Into frozen objects too: a frozen object can hold one that isn't.
-  if (typeof value === "object" && value !== null) {
-    Object.freeze(value);
-    for (const entry of Object.values(value)) {
-      deepFreeze(entry);
-    }
-  }
-  return value;
-};
+const refuse: (message: string) => never = refuser(AppDefinitionError);
 
 /** Every config `defineApp` made, with what it checked of it. */
 const configs = new WeakMap<object, CheckedConfig>();
@@ -357,7 +344,6 @@ const exportedFunctions = (modules: unknown): Map<string, unknown> => {
     const namespace: unknown = modules[module];
     if (typeof namespace !== "object" || namespace === null) {
       refuse(`${where} isn't a module.`);
-      continue;
     }
     const segments = module.split("/");
     for (const name of Object.keys(namespace).toSorted()) {
@@ -502,7 +488,6 @@ const permissionsOf = (given: unknown): Map<string, AppPermission> => {
         refuse(
           `An App's \`permissions.${key}\` is ${permissionKeys.get(key) ?? "a permission"}.`
         );
-        continue;
       }
       if (declared.has(alias)) {
         refuse(`Two of the App's permissions have alias \`${alias}\`.`);
@@ -581,7 +566,6 @@ const migrationsOf = (
   for (const declared of listed) {
     if (!isMigration(declared)) {
       refuse("An App's `migrations` lists `migration` declarations only.");
-      continue;
     }
     const manifest = declared["~migration"];
     if (byName.has(manifest.name)) {
@@ -603,7 +587,6 @@ const migrationsOf = (
       refuse(
         `Migration \`${manifest.name}\` transforms \`${manifest.table}\`, a table the schema doesn't have.`
       );
-      continue;
     }
     if (
       manifest.output.kind !== "object" ||
@@ -657,7 +640,6 @@ const registeredFunctions = (
 const checkConfig = (config: unknown): void => {
   if (!isPlainObject(config)) {
     refuse("An App's config is an object.");
-    return;
   }
   for (const key of Object.keys(config)) {
     if (!configKeys.has(key)) {

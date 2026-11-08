@@ -1,4 +1,5 @@
 import type { MemoryPack, RecallInput } from "./brain.ts";
+import { dataReader, namePattern, refuser } from "./declaration.ts";
 import { actionHandlers, isActionHandler } from "./handlers.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 import { isPlainObject } from "./value-descriptor.ts";
@@ -312,9 +313,6 @@ export interface ActionCtx<Uses extends readonly AnyUse[]> {
   };
 }
 
-/** The pattern a binding alias has, as the profile names bindings. */
-const aliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
-
 /** Why an action's declaration was refused. */
 class ActionDefinitionError extends Error {
   readonly code = "action.invalid_definition";
@@ -325,9 +323,7 @@ class ActionDefinitionError extends Error {
   }
 }
 
-const refuse = (message: string): never => {
-  throw new ActionDefinitionError(message);
-};
+const refuse: (message: string) => never = refuser(ActionDefinitionError);
 
 /**
  * The intrinsics this module calls, taken as it loads, before any of the
@@ -445,7 +441,7 @@ const declareUse = <
   operations: readonly string[],
   output?: ValueDescriptor
 ): Use<Alias, Kind, Operation, Output> => {
-  if (typeof alias !== "string" || !aliasPattern.test(alias)) {
+  if (typeof alias !== "string" || !namePattern.test(alias)) {
     return refuse(
       "A resource's alias is a binding alias: letters, digits and _."
     );
@@ -658,13 +654,7 @@ const definitionKeys: ReadonlySet<string> = new Set([
 const maxUses = 32;
 
 /** Reads `key` of `definition` as a data property: never a getter. */
-const dataOf = (definition: object, key: string): unknown => {
-  const property = getOwnPropertyDescriptor(definition, key);
-  if (property !== undefined && !("value" in property)) {
-    return refuse(`An action's \`${key}\` is a value, not a getter.`);
-  }
-  return property?.value;
-};
+const dataOf = dataReader("An action", refuse);
 
 /** The uses `value` lists, each declared by `resource`, each alias once. */
 const usesOf = (value: unknown): ActionContract["uses"] => {

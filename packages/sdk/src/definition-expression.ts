@@ -4,6 +4,7 @@ import type {
   ObjectExpression,
 } from "@oxc-project/types";
 
+import { refuser } from "./declaration.ts";
 import { literalKey, literalValue } from "./expression-lowering.ts";
 import { parseExpression } from "./oxc-parse.ts";
 import { unsafeKeys } from "./value-descriptor.ts";
@@ -30,9 +31,7 @@ export class ExpressionError extends Error {
   }
 }
 
-const refuse = (message: string): never => {
-  throw new ExpressionError(message);
-};
+const refuse: (message: string) => never = refuser(ExpressionError);
 
 /** Why an expression of anything but what is evaluated is refused. */
 const notCode =

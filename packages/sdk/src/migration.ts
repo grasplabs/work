@@ -1,6 +1,12 @@
 import { canonicalText } from "@grasp-os/shared/json";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 
+import {
+  dataReader,
+  isOverBytes,
+  namePattern,
+  refuser,
+} from "./declaration.ts";
 import { isPlainObject, unsafeKeys } from "./value-descriptor.ts";
 import type {
   FrozenJson,
@@ -150,18 +156,13 @@ class MigrationDefinitionError extends Error {
   }
 }
 
-const refuse = (message: string): never => {
-  throw new MigrationDefinitionError(message);
-};
+const refuse: (message: string) => never = refuser(MigrationDefinitionError);
 
 /** A migration's name. */
 const migrationNamePattern = /^[a-z][a-z0-9-]{0,63}$/u;
 
 /** A schema hash: SHA-256, lower-case hex. */
 const schemaHashPattern = /^[0-9a-f]{64}$/u;
-
-/** A table's name, as the schema has them. */
-const tableNamePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 
 const definitionKeys: ReadonlySet<string> = new Set([
   "name",
@@ -195,13 +196,7 @@ const objectDescriptor = (schema: unknown, what: string): ValueDescriptor => {
 };
 
 /** Reads `key` of `definition` as a data property: never a getter. */
-const dataOf = (definition: object, key: string): unknown => {
-  const property = Object.getOwnPropertyDescriptor(definition, key);
-  if (property !== undefined && !("value" in property)) {
-    return refuse(`A migration's \`${key}\` is a value, not a getter.`);
-  }
-  return property?.value;
-};
+const dataOf = dataReader("A migration", refuse);
 
 const fixtureKeys: ReadonlySet<string> = new Set(["row", "expect"]);
 
@@ -291,10 +286,7 @@ const fixturesOf = (fixtures: unknown): MigrationFixtureManifest[] => {
           : fixtureFields(dataOf(fixture, "expect"), `${what}'s \`expect\``),
     });
   });
-  if (
-    new TextEncoder().encode(canonicalText(read)).byteLength >
-    migrationFixturesMaxBytes
-  ) {
+  if (isOverBytes(canonicalText(read), migrationFixturesMaxBytes)) {
     refuse(
       `A migration's \`fixtures\` take at most ${migrationFixturesMaxBytes} bytes of JSON.`
     );
@@ -335,7 +327,7 @@ export const migration = <
       "A migration's `name` is lower-case letters, digits and dashes, starting with a letter, at most 64 characters."
     );
   }
-  if (typeof table !== "string" || !tableNamePattern.test(table)) {
+  if (typeof table !== "string" || !namePattern.test(table)) {
     refuse("A migration's `table` is the name of a table of the App's schema.");
   }
   if (
@@ -355,10 +347,10 @@ export const migration = <
     refuse("A migration's `handler` is a function `(ctx, row) => row`.");
   }
   const manifest: MigrationManifest = Object.freeze({
-    name: String(name),
-    table: String(table),
-    fromSchema: String(fromSchema),
-    toSchema: String(toSchema),
+    name,
+    table,
+    fromSchema,
+    toSchema,
     input: input === undefined ? null : objectDescriptor(input, "input"),
     output: objectDescriptor(output, "output"),
     fixtures: Object.freeze(fixturesOf(fixtures)),

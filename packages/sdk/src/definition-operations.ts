@@ -1,5 +1,6 @@
 import { AppDefinitionError } from "./app.ts";
 import { isIdentifier } from "./code-print.ts";
+import { refuser } from "./declaration.ts";
 import {
   evaluateExpression,
   ExpressionError,
@@ -144,9 +145,7 @@ export type DefinitionOperation =
       readonly to: number;
     };
 
-const refuse = (message: string): never => {
-  throw new AppDefinitionError(message);
-};
+const refuse: (message: string) => never = refuser(AppDefinitionError);
 
 /** The table named `name`. */
 const tableNamed = (definition: AppDefinition, name: string): DefinedTable =>

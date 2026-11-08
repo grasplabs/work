@@ -22,6 +22,7 @@ import type {
 } from "@grasp-os/shared/platform-measures";
 
 import type { ConnectorCatalog } from "./connector-catalog.gen.ts";
+import { deepFreeze, refuser } from "./declaration.ts";
 import type { FilesOperation } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type {
@@ -644,9 +645,7 @@ export class PermissionDefinitionError extends Error {
   }
 }
 
-const refuse = (message: string): never => {
-  throw new PermissionDefinitionError(message);
-};
+const refuse: (message: string) => never = refuser(PermissionDefinitionError);
 
 /** A contract and its major version, e.g. `grasp.mail@1`. */
 const contractPattern =
@@ -794,17 +793,6 @@ const known = <Name extends string>(
   names: readonly Name[]
 ): Name[] =>
   list.filter((name): name is Name => names.some((each) => each === name));
-
-/** `value` with every object and array in it frozen; data only. */
-const deepFreeze = <Value>(value: Value): Value => {
-  if (typeof value === "object" && value !== null) {
-    Object.freeze(value);
-    for (const entry of Object.values(value)) {
-      deepFreeze(entry);
-    }
-  }
-  return value;
-};
 
 /**
  * `declaration`, frozen all the way down, so nothing changes what was

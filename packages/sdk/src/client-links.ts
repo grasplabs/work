@@ -1,4 +1,5 @@
 import { clientError, GraspError, readRejection } from "./client-error.ts";
+import { namePattern } from "./declaration.ts";
 import type { LinksReference } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
@@ -37,15 +38,13 @@ export interface OpenLinkOptions {
   readonly url: string;
 }
 
-const aliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
-
 /** `value` read as a generated links reference: its alias, or refused. */
 const linksAliasOf = (value: unknown): string => {
   if (
     !isPlainObject(value) ||
     value.kind !== "links" ||
     typeof value.alias !== "string" ||
-    !aliasPattern.test(value.alias)
+    !namePattern.test(value.alias)
   ) {
     throw clientError("contract.invalid_request");
   }

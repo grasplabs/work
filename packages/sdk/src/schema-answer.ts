@@ -1,5 +1,6 @@
 import { canonicalText } from "@grasp-os/shared/json";
 
+import { isOverBytes } from "./declaration.ts";
 import type { SchemaManifest } from "./schema-manifest.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { FrozenJson } from "./value-descriptor.ts";
@@ -116,7 +117,7 @@ export const readSchemaAnswers = (
     seen.add(read.key);
   }
   const text = canonicalText(input);
-  if (new TextEncoder().encode(text).byteLength > schemaAnswersMaxBytes) {
+  if (isOverBytes(text, schemaAnswersMaxBytes)) {
     return refuse(
       `An App's answers take at most ${schemaAnswersMaxBytes} bytes.`
     );

@@ -1,6 +1,7 @@
 import { isEventType } from "@grasp-os/shared/sealed-builds";
 
 import type { PaginationResult } from "./database.ts";
+import { namePattern } from "./declaration.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 
@@ -637,7 +638,6 @@ export interface EventReferenceData {
 
 const workflowContractPattern =
   /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})$/u;
-const eventAliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 const eventFingerprintPattern = /^[0-9a-f]{64}$/u;
 
 /**
@@ -661,7 +661,7 @@ export const eventReferenceData = (
   if (
     workflowAlias === undefined ||
     typeof alias !== "string" ||
-    !eventAliasPattern.test(alias) ||
+    !namePattern.test(alias) ||
     typeof type !== "string" ||
     !isEventType(type) ||
     typeof fingerprint !== "string" ||

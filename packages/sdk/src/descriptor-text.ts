@@ -1,24 +1,18 @@
-import { ValueDefinitionError } from "./value-descriptor.ts";
 import type { ValueDescriptor, ValueSchema } from "./value-descriptor.ts";
-import { readDescriptor } from "./value-read.ts";
+import { readDescriptor, refuseDescriptor } from "./value-read.ts";
 import { schemaOf } from "./value-schema.ts";
-
-// Typed where it is declared: only then does a call narrow what follows it.
-const refuse: (message: string) => never = (message) => {
-  throw new ValueDefinitionError("definition.invalid_descriptor", message);
-};
 
 /** The descriptor `text` holds, its structure checked (`readDescriptor`). */
 const descriptorRead = (text: string): ValueDescriptor => {
   if (typeof text !== "string") {
-    return refuse("A descriptor is read from its JSON text.");
+    return refuseDescriptor("A descriptor is read from its JSON text.");
   }
   let data: unknown;
   try {
     data = JSON.parse(text);
   } catch {
     // What the parser said quotes the text; the refusal doesn't.
-    return refuse("The descriptor isn't JSON.");
+    return refuseDescriptor("The descriptor isn't JSON.");
   }
   return readDescriptor(data, 1, { nodes: 0 });
 };

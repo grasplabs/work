@@ -5,6 +5,7 @@ import { isEventType, sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 
 import { declaredPermission, declaredPermissions } from "./app.ts";
 import type { AppManifest, OperationManifest } from "./app.ts";
+import { namePattern } from "./declaration.ts";
 import { preferenceOperations } from "./preference-operations.ts";
 import { workflowReferenceLimits } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
@@ -317,9 +318,6 @@ export const workflowFingerprint = async (
     canonicalText({ input: workflow.input, output: workflow.output })
   );
 
-/** What the App calls a workflow and its events: plain identifiers. */
-const aliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
-
 /**
  * `workflows`, checked: unique aliases, and listen tasks that listen only
  * for events the workflow declares. The host resolved them, so a failure
@@ -328,7 +326,7 @@ const aliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 const checkBoundWorkflows = (workflows: readonly BoundWorkflow[]): void => {
   const aliases = new Set<string>();
   for (const workflow of workflows) {
-    if (!aliasPattern.test(workflow.alias) || aliases.has(workflow.alias)) {
+    if (!namePattern.test(workflow.alias) || aliases.has(workflow.alias)) {
       throw new TypeError(
         `A bound workflow's alias is unique and plain: ${JSON.stringify(workflow.alias)}`
       );
@@ -347,7 +345,7 @@ const checkBoundWorkflows = (workflows: readonly BoundWorkflow[]): void => {
       ...Object.keys(workflow.events),
       ...Object.keys(workflow.decisions),
     ]) {
-      if (!aliasPattern.test(alias)) {
+      if (!namePattern.test(alias)) {
         throw new TypeError(
           `An event's or a decision's alias is plain: ${JSON.stringify(alias)}`
         );
