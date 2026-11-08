@@ -35,11 +35,6 @@ import {
   memberPeople,
   peopleReadOf,
 } from "./app-people.ts";
-import {
-  answerPreferences,
-  isPreferencePath,
-  preferenceOperationOf,
-} from "./app-preferences.ts";
 import { loadDraftRelease, sealDraftRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { draftFiles, editableApp } from "./apps.ts";
@@ -73,8 +68,6 @@ import type { Draft } from "./workspace.ts";
 //   (`draftStore`): a store object no inventory lists and no release
 //   binds, named by the builder, their chat, the App and the draft's
 //   schema, which refuses to be a listed store (`DataStore.holdThrowaway`).
-//   The draft's preferences are answered from that store too, never the
-//   App's.
 // - The draft reaches outside systems, or starts real work: its
 //   invocations bind no resource (no connection, Brain, model, template or
 //   other App), start no workflow, stage no notification and tell no
@@ -261,14 +254,13 @@ const builderGate =
 /** When each throwaway store was last held by this isolate, and made. */
 const heldStores = new Map<string, number>();
 
-/** Whether `release`'s App has a store: tables, or preferences it keeps. */
+/** Whether `release`'s App has a store: tables. */
 const needsStore = (release: Release): boolean =>
-  Object.keys(release.app.schema.tables).length > 0 ||
-  release.app.preferences !== null;
+  Object.keys(release.app.schema.tables).length > 0;
 
 /**
  * The preview's throwaway store for `userId`'s `run`, its tables those of
- * the draft's schema: none for a draft without tables or preferences.
+ * the draft's schema: none for a draft without tables.
  * Held again (and its tables made, which changes nothing the second time)
  * at most every `holdAgainMs` per isolate, well within the day it keeps
  * what it holds, so a store in use never empties under its preview.
@@ -290,11 +282,9 @@ const draftStore = async (
         run.app,
         run.seed,
         release.manifest.schemaHash,
-        // Its tables' and fields' IDs and its preferences' shape too, which
-        // the schema's hash leaves out: other ones are a new store, never
-        // one it can't read.
+        // Its tables' and fields' IDs too, which the schema's hash leaves
+        // out: other ones are a new store, never one it can't read.
         canonicalText(run.ids),
-        JSON.stringify(release.app.preferences),
       ])
     )}`
   );
@@ -470,8 +460,7 @@ const draftCallOf = (
     (windowed &&
       (chargeWindow === undefined ||
         call.reference.kind !== "query" ||
-        isPeoplePath(call.reference.name) ||
-        isPreferencePath(call.reference.name)))
+        isPeoplePath(call.reference.name)))
   ) {
     throw operationErrors.create("contract.invalid_request");
   }
@@ -532,8 +521,8 @@ const operationOf = async (
 
 /**
  * `request`, a page's call as its text, run on `run` for `by` (see the
- * header): a public query, mutation or action of the draft, its
- * preferences or who calls; a window of a query when it may read one.
+ * header): a public query, mutation or action of the draft, or who
+ * calls; a window of a query when it may read one.
  * Answers as a page's call is answered, a refusal included; never throws.
  */
 export const callDraft = async (
@@ -543,7 +532,7 @@ export const callDraft = async (
   request: unknown,
   options: DraftCallOptions
 ): Promise<FunctionAnswer> => {
-  const { deadline, observeReads, thrown: told } = options;
+  const { deadline, thrown: told } = options;
   const requestId = crypto.randomUUID();
   let thrown: string | undefined;
   let result: OperationResult;
@@ -576,27 +565,13 @@ export const callDraft = async (
       return answerOf({ ok: true, value }, run);
     }
     const store = await draftStore(env, by.userId, run);
-    result = isPreferencePath(call.reference.name)
-      ? await answerPreferences(
-          env,
-          {
-            userId: by.userId,
-            release: run.release,
-            previewStore: storeIdSchema.parse(store.id),
-            gate,
-            ...(observeReads === undefined ? {} : { observeReads }),
-          },
-          await preferenceOperationOf(run.release, call.reference),
-          call.input,
-          call.idempotencyKey
-        )
-      : await operationOf(env, by, run, store, call, {
-          ...options,
-          requestId,
-          draftFailure: (message) => {
-            thrown = message;
-          },
-        });
+    result = await operationOf(env, by, run, store, call, {
+      ...options,
+      requestId,
+      draftFailure: (message) => {
+        thrown = message;
+      },
+    });
   } catch (error) {
     result = { ok: false, error: refusalOf(error, requestId) };
   }

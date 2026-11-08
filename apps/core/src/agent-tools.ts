@@ -205,7 +205,7 @@ const answersWithDiagnostics =
 
 /** What the file tools say of the files the definition tools write. */
 const generatedNote =
-  "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code generated from it: change them with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission, their remove counterparts, and the preference tools), never by writing them.";
+  "definition.json, grasp.config.ts and server/schema.ts are the App's definition and the code generated from it: change them with the definition tools (addTable, addField, changeField, renameField, renameTable, setAccess, addIndex, addPermission and their remove counterparts), never by writing them.";
 
 /** What the definition tools say of what they answer with (`env.build.define`). */
 const definitionAnswer =
@@ -843,53 +843,6 @@ const definitions = (known: Set<string>) => [
     ),
     run: async (scope, { app, alias }) =>
       await define(scope, app, { op: "removePermission", alias }),
-  }),
-  tool({
-    name: "addPreference",
-    label: "Add a preference",
-    api: "build",
-    description: `Adds a preference each person sets for themselves in the App (a compact view, a default team), read and changed through \`api.preferences.get\` and \`api.preferences.update\`. Give it a default (\`v.boolean().default(false)\`) or make it optional: nobody has set it yet. ${definitionAnswer}`,
-    parameters: Type.Object(
-      {
-        app: appParameter,
-        name: Type.String({ minLength: 1, maxLength: 64 }),
-        type: typeParameter,
-      },
-      { additionalProperties: false }
-    ),
-    run: async (scope, { app, ...input }) =>
-      await define(scope, app, { op: "addPreference", ...input }),
-  }),
-  tool({
-    name: "changePreference",
-    label: "Change a preference",
-    api: "build",
-    description: `Changes a preference's type. ${definitionAnswer}`,
-    parameters: Type.Object(
-      {
-        app: appParameter,
-        name: Type.String({ minLength: 1, maxLength: 64 }),
-        type: typeParameter,
-      },
-      { additionalProperties: false }
-    ),
-    run: async (scope, { app, ...input }) =>
-      await define(scope, app, { op: "changePreference", ...input }),
-  }),
-  tool({
-    name: "removePreference",
-    label: "Remove a preference",
-    api: "build",
-    description: `Removes a preference. ${definitionAnswer}`,
-    parameters: Type.Object(
-      {
-        app: appParameter,
-        name: Type.String({ minLength: 1, maxLength: 64 }),
-      },
-      { additionalProperties: false }
-    ),
-    run: async (scope, { app, name }) =>
-      await define(scope, app, { op: "removePreference", name }),
   }),
   tool({
     name: "searchFiles",

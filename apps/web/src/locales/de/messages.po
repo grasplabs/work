@@ -2397,10 +2397,6 @@ msgstr "App oder Workflow"
 msgid "App page"
 msgstr "App-Seite"
 
-#: src/settings/erasures.tsx
-msgid "App preferences and usage signals of their collections"
-msgstr "App-Einstellungen und Nutzungssignale ihrer Sammlungen"
-
 #: src/frame/surface-nav.tsx
 msgid "App shortcuts"
 msgstr "App-Verknüpfungen"
@@ -14856,6 +14852,10 @@ msgstr "Was der Workspace für Grasp bezahlt."
 #: src/workflows/requests/request-detail.tsx
 msgid "What they ask"
 msgstr "Was sie fragen"
+
+#: src/settings/erasures.tsx
+msgid "What they sent through App forms, and usage signals of their collections"
+msgstr "Was sie über App-Formulare gesendet haben, und Nutzungssignale ihrer Sammlungen"
 
 #: src/brain/brain-article/statements-by-kind.tsx
 msgid "What they told us"

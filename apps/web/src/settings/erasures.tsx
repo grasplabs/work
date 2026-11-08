@@ -59,7 +59,7 @@ const areaLabels: Record<string, MessageDescriptor> = {
   channels: msg`Chat accounts, invitations and notifications`,
   connect: msg`Personal connections`,
   workspace: msg`Chats, drafts and dashboard`,
-  apps: msg`App preferences and usage signals of their collections`,
+  apps: msg`What they sent through App forms, and usage signals of their collections`,
   brain: msg`Personal Knowledge and memories`,
   runs: msg`Unfinished runs (stopped) and decision confirmations`,
   interview: msg`Onboarding interview`,

@@ -450,7 +450,6 @@ const textOf = (value: unknown): string =>
 /** `definition`'s data model, as the workspace's Data view shows it. */
 export const dataModelOf = (definition: AppDefinition): DataModel => ({
   tables: definition.tables.map(modelTableOf),
-  preferences: definition.preferences.map(modelFieldOf),
   permissions: definition.permissions.map((permission) => ({
     alias: textOf(permission.alias),
     kind: textOf(permission["~permission"]),
@@ -541,12 +540,6 @@ export const definitionOperationSchema: z.ZodType<DefinitionOperation> =
       search: z.boolean().optional(),
     }),
     z.strictObject({ op: z.literal("removePermission"), alias: text }),
-    z.strictObject({
-      op: z.enum(["addPreference", "changePreference"]),
-      name: text,
-      type: text,
-    }),
-    z.strictObject({ op: z.literal("removePreference"), name: text }),
     z.strictObject({
       op: z.literal("moveField"),
       table: text,

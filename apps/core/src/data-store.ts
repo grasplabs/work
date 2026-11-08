@@ -29,10 +29,7 @@ import type {
   ImportBatch,
   MigrationBatch,
   MigrationStart,
-  PreferencesReceipt,
-  PreferencesWritten,
   SchemaApply,
-  StoredPreferences,
   StoreReset,
   TableFacts,
 } from "./store-host.ts";
@@ -203,44 +200,9 @@ export class DataStore extends DurableObject<Env> {
     return this.#live().generations(storeId, names);
   }
 
-  /** `StoreHost.readPreferences`. */
-  readPreferences(
-    storeId: StoreId,
-    personId: string,
-    preferencesText: string
-  ): StoredPreferences {
-    return this.#live().readPreferences(storeId, personId, preferencesText);
-  }
-
   /** `StoreHost.forgetPerson`. */
   forgetPerson(storeId: StoreId, personId: string): { forgotten: number } {
     return this.#live().forgetPerson(storeId, personId);
-  }
-
-  /** `StoreHost.definePreferences`. */
-  definePreferences(
-    storeId: StoreId,
-    preferencesText: string,
-    apply: boolean
-  ): { changed: boolean } {
-    return this.#live().definePreferences(storeId, preferencesText, apply);
-  }
-
-  /** `StoreHost.writePreferences`. */
-  writePreferences(
-    storeId: StoreId,
-    personId: string,
-    expectedRevision: number,
-    valueJson: string,
-    receipt?: PreferencesReceipt
-  ): PreferencesWritten {
-    return this.#live().writePreferences(
-      storeId,
-      personId,
-      expectedRevision,
-      valueJson,
-      receipt
-    );
   }
 
   /**

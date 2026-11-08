@@ -54,7 +54,7 @@ export type FieldType =
     }
   | { kind: "date" | "person" | "file" | "money" | "other" };
 
-/** A field of a table, or a preference. */
+/** A field of a table. */
 export interface DataModelField {
   /** Its ID, which a rename keeps. */
   id: string;
@@ -101,7 +101,6 @@ export interface DataModelTable {
 /** An App's data model, from its definition. */
 export interface DataModel {
   tables: DataModelTable[];
-  preferences: DataModelField[];
   /** What it reaches outside itself, each by its alias and kind. */
   permissions: { alias: string; kind: string }[];
 }

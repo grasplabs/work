@@ -116,7 +116,6 @@
       "operations": ["invite", "list", "read", "revoke"]
     }
   ],
-  "preferences": [],
   "tables": [
     {
       "id": "c0f688b0-d19f-437d-b972-9a85586ef1e8",

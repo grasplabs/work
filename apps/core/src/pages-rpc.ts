@@ -10,7 +10,6 @@ import { authErrors, isExpectedError } from "@grasp-os/shared/errors";
 import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { operationErrors } from "@grasp-os/shared/operations";
 import {
   jsonBytes,
   rateLimited,
@@ -35,7 +34,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { TokenBuckets } from "@grasp-os/shared/token-bucket";
 import { z } from "zod";
 
-import { asksPreferenceWindow, windowExtentOf } from "./app-functions.ts";
+import { windowExtentOf } from "./app-functions.ts";
 import { sealedSurfaces } from "./app-releases.ts";
 import {
   appFor,
@@ -177,11 +176,6 @@ export const admitWindow = async (
   app: AppId,
   request: unknown
 ): Promise<void> => {
-  // Refused before anything is charged: there is no window of one
-  // document (app-preferences.ts).
-  if (asksPreferenceWindow(request)) {
-    throw operationErrors.create("contract.invalid_request");
-  }
   const extent = windowExtentOf(request);
   const more = extent === undefined ? 0 : windowPages(extent) - 1;
   if (more > 0) {

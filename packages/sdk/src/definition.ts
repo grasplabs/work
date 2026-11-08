@@ -19,10 +19,9 @@ import type { FrozenJson, ValueDescriptor } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import { schemaOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
-import { v } from "./values.ts";
 
 // An App's definition: what it is, as data. Its name, the
-// permissions it needs, its people's preferences, and its data model:
+// permissions it needs, and its data model:
 // tables, their fields, indexes and access, and its answers for a change
 // of the schema. Grasp stores it with the App's files (`definition.json`)
 // and generates the App's config (`grasp.config.ts`) and schema
@@ -38,7 +37,7 @@ import { v } from "./values.ts";
 // permission exactly as they check code, so a definition that reads is
 // one the generated files declare.
 
-/** A table's field, or a preference: its ID, its name and its type. */
+/** A table's field: its ID, its name and its type. */
 export interface DefinedField {
   readonly id: string;
   readonly name: string;
@@ -96,7 +95,6 @@ export type DefinedPermission = Readonly<Record<string, FrozenJson>>;
 export interface AppDefinition {
   readonly name: string;
   readonly permissions: readonly DefinedPermission[];
-  readonly preferences: readonly DefinedField[];
   readonly tables: readonly DefinedTable[];
   readonly answers: readonly DefinedAnswer[];
 }
@@ -144,7 +142,6 @@ export const permissionDataSchema = z.record(z.string(), json);
 const definitionSchema = z.strictObject({
   name: z.string(),
   permissions: z.array(permissionDataSchema),
-  preferences: z.array(fieldSchema),
   tables: z.array(
     z.strictObject({
       id: idSchema,
@@ -340,7 +337,6 @@ export const definitionApp = (
   for (const table of definition.tables) {
     requireUniqueIds(table.fields, `fields of \`${table.name}\``);
   }
-  requireUniqueIds(definition.preferences, "preferences");
   const tables: Record<string, AnyTable> = {};
   for (const table of definition.tables) {
     if (Object.hasOwn(tables, table.name)) {
@@ -355,9 +351,6 @@ export const definitionApp = (
   const config = defineApp({
     name: definition.name,
     permissions: definedPermissions(definition),
-    ...(definition.preferences.length === 0
-      ? {}
-      : { preferences: v.object(shapeOf(definition.preferences)) }),
     ...(answers.length === 0 ? {} : { answers }),
   });
   // SAFETY: `defineSchema` checks the tables, and their references, at
@@ -414,7 +407,6 @@ export const definitionText = (definition: AppDefinition): string =>
 export const emptyDefinition = (name: string): AppDefinition => ({
   name,
   permissions: [],
-  preferences: [],
   tables: [],
   answers: [],
 });

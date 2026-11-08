@@ -1,4 +1,3 @@
-import { preferenceOperations } from "@grasp-os/sdk/host";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { functionRequestMaxBytes } from "@grasp-os/shared/function-limits";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -29,7 +28,6 @@ const idp = mockIdp();
 const files: Record<string, string> = {
   ...appDefinition({
     name: "Notes",
-    preferences: { compact: "v.boolean().default(false)" },
     tables: {
       notes: {
         fields: { title: "v.string().min(1).max(200)" },
@@ -91,26 +89,6 @@ const callOf = (release: Release, path: string, input: unknown): string =>
     reference: { name: path, kind: release.app.operations[path]?.kind },
     input,
   });
-
-/**
- * The call of the App's preference operation `name` with `input`, as the
- * chat's code writes it, naming `kind` (the operation's own unless given).
- */
-const preferenceCallOf = (
-  release: Release,
-  name: "get" | "update",
-  input: unknown,
-  kind?: string
-): string => {
-  if (release.app.preferences === null) {
-    throw new Error("The App declares no preferences");
-  }
-  const operation = preferenceOperations(release.app.preferences)[name];
-  return JSON.stringify({
-    reference: { name: operation.path, kind: kind ?? operation.kind },
-    input,
-  });
-};
 
 /** Code that makes each call in turn: its result, or the error's code. */
 const tryEach = (calls: Record<string, string>): string =>
@@ -307,54 +285,39 @@ describe(
         callOf(notes.release, "notes.create", { title: "From the agent" })
       );
       const titles = JSON.stringify(callOf(notes.release, "notes.titles", {}));
+      // The create, named a query so a read permission would let it by.
+      const disguised = JSON.stringify(
+        JSON.stringify({
+          reference: { name: "notes.create", kind: "query" },
+          input: { title: "Disguised" },
+        })
+      );
       const calls = {
         create: `env.apps.call(${app}, stream(${create}))`,
         titles: `env.apps.call(${app}, stream(${titles}))`,
       };
 
-      const reading = await run(notes, tryEach(calls), ["read"]);
+      const reading = await run(
+        notes,
+        tryEach({
+          ...calls,
+          disguised: `env.apps.call(${app}, stream(${disguised}))`,
+        }),
+        ["read"]
+      );
       expect(reading.titles).toStrictEqual({ ok: true, value: [] });
       expect(reading.create).toBe("permission.denied");
+      expect(
+        z
+          .object({ error: z.object({ code: z.string() }) })
+          .parse(reading.disguised).error.code
+      ).toBe("function.kind_mismatch");
 
       const writing = await run(notes, tryEach(calls), ["read", "write"]);
       expect(writing.create).toMatchObject({ ok: true });
       expect(writing.titles).toStrictEqual({
         ok: true,
         value: ["From the agent"],
-      });
-    });
-
-    it("reads its person's preferences with a read permission, and changes them only with a write permission", async () => {
-      const notes = await notesApp();
-      const app = JSON.stringify(notes.app);
-      const update = { expectedRevision: 0, patch: { compact: true } };
-      const calls = {
-        get: `env.apps.call(${app}, stream(${JSON.stringify(preferenceCallOf(notes.release, "get", {}))}))`,
-        update: `env.apps.call(${app}, stream(${JSON.stringify(preferenceCallOf(notes.release, "update", update))}))`,
-        // The update, named a query so a read permission would let it by.
-        disguised: `env.apps.call(${app}, stream(${JSON.stringify(preferenceCallOf(notes.release, "update", update, "query"))}))`,
-      };
-
-      const reading = await run(notes, tryEach(calls), ["read"]);
-      expect({
-        get: reading.get,
-        update: reading.update,
-        disguised: z
-          .object({ error: z.object({ code: z.string() }) })
-          .parse(reading.disguised).error.code,
-      }).toStrictEqual({
-        get: { ok: true, value: { compact: false, _rev: 0 } },
-        update: "permission.denied",
-        disguised: "function.kind_mismatch",
-      });
-
-      const writing = await run(notes, tryEach({ update: calls.update }), [
-        "read",
-        "write",
-      ]);
-      expect(writing.update).toStrictEqual({
-        ok: true,
-        value: { compact: true, _rev: 1 },
       });
     });
 

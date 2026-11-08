@@ -273,19 +273,12 @@ export const readAppManifest = (text: string): AppManifest => {
   } catch {
     return refuse("The App's manifest isn't JSON.");
   }
-  const keys = [
-    "name",
-    "schema",
-    "operations",
-    "permissions",
-    "preferences",
-    "migrations",
-  ];
+  const keys = ["name", "schema", "operations", "permissions", "migrations"];
   // `answers` only where it declares any.
   const answers = isPlainObject(data) && Object.hasOwn(data, "answers");
   if (!hasExactly(data, [...keys, ...(answers ? ["answers"] : [])])) {
     return refuse(
-      "An App's manifest is `{ name, schema, operations, permissions, preferences, migrations, answers? }`."
+      "An App's manifest is `{ name, schema, operations, permissions, migrations, answers? }`."
     );
   }
   const { schema } = readSchemaManifest(JSON.stringify(data.schema));
@@ -309,9 +302,6 @@ export const readAppManifest = (text: string): AppManifest => {
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     {
       name: data.name,
-      ...(data.preferences === null
-        ? {}
-        : { preferences: schemaFrom(data.preferences) }),
       permissions: permissionsFrom(data.permissions),
       ...(answers ? { answers: data.answers } : {}),
     } as AppConfig

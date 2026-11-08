@@ -75,7 +75,7 @@ const notesTable = (): DataModel["tables"][number] => ({
 /** A model of the notes table alone. */
 const notesModel = (): DataModel => ({
   tables: [notesTable()],
-  preferences: [],
+
   permissions: [],
 });
 
@@ -323,7 +323,7 @@ describe("an App's data model, changed in its workspace", () => {
   });
 
   it("creates a table, and adds a field of each kind in line, each sent as the definition's own operation", async () => {
-    const empty: DataModel = { tables: [], preferences: [], permissions: [] };
+    const empty: DataModel = { tables: [], permissions: [] };
     const sent = await shown(empty, (operation, model) => {
       if (operation.op === "addTable") {
         return {

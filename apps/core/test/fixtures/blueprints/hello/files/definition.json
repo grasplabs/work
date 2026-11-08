@@ -1,7 +1,6 @@
 {
   "name": "Hello",
   "permissions": [],
-  "preferences": [],
   "tables": [
     {
       "id": "id1",

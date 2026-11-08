@@ -17,11 +17,7 @@ import type {
 } from "../src/index.ts";
 import type { ValueDescriptor } from "../src/value-descriptor.ts";
 import type { workflows } from "./notes/server/_generated/api.ts";
-import {
-  api,
-  preferences,
-  permissions,
-} from "./notes/server/_generated/api.ts";
+import { api, permissions } from "./notes/server/_generated/api.ts";
 import { internal } from "./notes/server/_generated/internal.ts";
 import type {
   create,
@@ -165,36 +161,6 @@ expectTypeOf(permissions.links.origins).toEqualTypeOf<
 >();
 // @ts-expect-error a permission the App doesn't declare
 void permissions.mail;
-
-// Preferences: `get` and `update`, a query and a mutation like any other,
-// answering every declared field and `_rev`; a patch names only fields
-// the App declared, each optional.
-expectTypeOf<keyof typeof preferences>().toEqualTypeOf<"get" | "update">();
-expectTypeOf(preferences.get).toExtend<
-  OperationReference<
-    Record<never, never>,
-    { _rev: number; compact: boolean },
-    "query"
-  >
->();
-expectTypeOf(preferences.update).toExtend<
-  OperationReference<
-    { expectedRevision: number; patch: { compact?: boolean } },
-    { _rev: number; compact: boolean },
-    "mutation"
-  >
->();
-void query(preferences.get, {});
-void mutation(preferences.update, { expectedRevision: 0, patch: {} });
-void mutation(preferences.update, {
-  expectedRevision: 0,
-  // @ts-expect-error a preference the App doesn't declare
-  patch: { dark: true },
-});
-// @ts-expect-error an update names the revision it read
-void mutation(preferences.update, { patch: { compact: true } });
-// @ts-expect-error `get` reads; it isn't a mutation
-void mutation(preferences.get, {});
 
 // The workflows the App binds, and nothing else (workflow-references.test-d.ts).
 expectTypeOf<keyof typeof workflows>().toEqualTypeOf<

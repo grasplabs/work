@@ -77,10 +77,9 @@ export const store = sqliteTable(
     schemaVersion: integer("schema_version"),
     schemaAppliedAt: integer("schema_applied_at"),
     /**
-     * The store's preferences contract (store-host.ts, `definePreferences`):
-     * every preference any version sealed on it declared, by name, with
-     * its descriptor, as canonical JSON. Null until the first version with
-     * preferences; host-only, never a caller's.
+     * What App preferences kept of a store, which nothing reads or writes
+     * since they were removed: kept because Durable Object SQLite only
+     * expands, and dropped in the contract step (GRA-1550).
      */
     preferencesContract: text("preferences_contract"),
     /**
@@ -518,17 +517,13 @@ export const fileRefs = sqliteTable(
 );
 
 /**
- * The preferences of the App that owns the store (spec 10.7.7), one row
- * per person who ever changed one: host-owned, outside `sdk_tables`, so no
- * query, export or migration of the App's ever reads or writes them; only
- * core does, for the signed-in person (app-preferences.ts). `value_json`
- * holds only the fields the person chose, never a default, checked by the
- * App's preferences when written; `revision` counts the writes, from 1,
- * and is also what a live read of them watches (store-host.ts,
- * `preferencesWatch`). A person with no row has the App's defaults, at
- * revision 0. The last write's idempotency key, the hash of its input and
- * its answer let a resend of that write get the same answer, never a
- * conflict with itself (app-preferences.ts).
+ * What App preferences kept, one row per person who ever changed one.
+ * Nothing writes it since App preferences were removed (an App keeps each
+ * person's settings in a table with an `owner` row rule); kept because
+ * Durable Object SQLite only expands, and dropped in the contract step
+ * (GRA-1550). Until then a person's erasure removes their rows
+ * (store-host.ts, `forgetPerson`), and a deleted store's purge all of
+ * them.
  */
 export const preferences = sqliteTable("sdk_preferences", {
   personId: text("person_id").primaryKey(),

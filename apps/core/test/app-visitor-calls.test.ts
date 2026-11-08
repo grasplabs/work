@@ -800,11 +800,7 @@ describe("a visitor's calls", { timeout: 180_000 }, () => {
     const mail = await mailbox();
     const ana = await visitor(mail, link, `ana@${domain}`);
     await builder.api.apps.setVisitorGrants(app, ["portal.mine"]);
-    const refusedPaths = [
-      "portal.shout",
-      "workflows.followUp.queries.runs",
-      "preferences.get",
-    ];
+    const refusedPaths = ["portal.shout", "workflows.followUp.queries.runs"];
 
     let answers: unknown[] = [];
     const events = await auditedDuring(async () => {

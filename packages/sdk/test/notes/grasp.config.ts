@@ -25,7 +25,6 @@ export const archiveNotes = permission.workflow("archiveNotes", {
 
 export default defineApp({
   name: "Notes",
-  preferences: v.object({ compact: v.boolean().default(false) }),
   permissions: {
     files,
     links,

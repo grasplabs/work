@@ -473,8 +473,6 @@ export const dataErrors = defineErrorFamily({
   "data.too_many_indexes": `A store holds at most ${storeMaxIndexes} indexes, those kept for older versions included.`,
   "data.conflict":
     "This record is gone, isn't yours to change, or its ID is already in use.",
-  "data.preferences_changed":
-    "Your preferences changed since they were read. Read them again, then retry.",
   "data.store_unavailable": "This store doesn't exist or was deleted.",
   "data.fixture_discarded": "This fixture store was discarded.",
   "data.receipt_invalid":
@@ -528,14 +526,10 @@ export const dataErrors = defineErrorFamily({
 export const migrationErrors = defineErrorFamily({
   "migration.required":
     "This schema change can't be published as it is: each change it lists needs a migration in code, and each field records lack needs a value for them (an answer) or a migration.",
-  "migration.preference_changed":
-    "This version changes a preference people may already have chosen. Keep each preference as it was (only its default may change), or add a new preference under a new name.",
   "migration.metadata_missing":
     "This App's data was stored before schemas were applied by stable ID, so it can't be read or changed any more. Reset the App's data in its settings, then publish it again.",
   "migration.reset_refused":
     "This App's data can still be read, so a builder can't reset it. Only an admin of the organization can, in the App's settings.",
-  "migration.metadata_corrupt":
-    "This store's record of its preferences is damaged, so no version can change them until it is repaired.",
   "migration.busy":
     "This store changed while the schema was applied, or another version was being published. Publish again in a moment.",
   "migration.invalid":

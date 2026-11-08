@@ -67,6 +67,6 @@ export const symbolicModules = (): Record<string, string> => {
 `;
   return {
     [generatedPaths.internal]: `${standInImport}${prelude}${standInTree}\nexport const internal = ${symbolicTree} as unknown as StandIn;\n`,
-    [generatedPaths.api]: `${standInImport}${prelude}${standInTree}\nexport const api = ${symbolicTree} as unknown as StandIn;\nexport const workflows: any = Object.freeze({});\nexport const permissions: any = Object.freeze({});\nexport const preferences: any = Object.freeze({});\n`,
+    [generatedPaths.api]: `${standInImport}${prelude}${standInTree}\nexport const api = ${symbolicTree} as unknown as StandIn;\nexport const workflows: any = Object.freeze({});\nexport const permissions: any = Object.freeze({});\n`,
   };
 };
