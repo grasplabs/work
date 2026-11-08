@@ -1,8 +1,8 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { canonicalJson } from "@grasp-os/shared/json";
-import type { Json } from "@grasp-os/shared/json";
+import { canonicalText } from "@grasp-os/shared/json";
 import { storeNamePattern } from "@grasp-os/shared/store-limits";
 
+import { hasExactly, isOverBytes, refuser } from "./declaration.ts";
 import {
   defineSchema,
   defineTable,
@@ -93,35 +93,9 @@ export interface SchemaManifest {
   readonly tables: Readonly<Record<string, ManifestTable>>;
 }
 
-const encoder = new TextEncoder();
-
-/** The bytes of `text` as UTF-8. */
-const byteLength = (text: string): number => encoder.encode(text).byteLength;
-
-/**
- * Whether `text` is more than `max` bytes as UTF-8. A code unit is at most
- * three bytes, so only text that could be over is encoded; text longer
- * than `max` code units is over whatever it holds.
- */
-const isOverBytes = (text: string, max: number): boolean =>
-  text.length > max || (text.length * 3 > max && byteLength(text) > max);
-
-// Typed where it is declared: only then does a call narrow what follows it.
-const refuse: (code: SchemaDefinitionCode, message: string) => never = (
-  code,
-  message
-) => {
-  throw new SchemaDefinitionError(code, message);
-};
-
-/** Whether `value` is a plain object with exactly the keys `keys`. */
-const hasExactly = (
-  value: unknown,
-  keys: readonly string[]
-): value is Record<string, unknown> =>
-  isPlainObject(value) &&
-  Object.keys(value).length === keys.length &&
-  keys.every((key) => Object.hasOwn(value, key));
+const refuse: (code: SchemaDefinitionCode, message: string) => never = refuser(
+  SchemaDefinitionError
+);
 
 /** A map of names an author or a manifest gave, without prototype keys. */
 const mapOf = <Value>(
@@ -149,14 +123,10 @@ const quoted = (name: string, what: string): string =>
  * A manifest's canonical text: the same for the same schema and access,
  * whatever order they were declared in.
  */
-export const manifestText = (manifest: SchemaManifest): string => {
-  // SAFETY: parsing JSON text always gives a JSON value; and a manifest
-  // loses nothing through JSON: it holds names, strings, the versions and
-  // sealed descriptors, whose defaults are JSON.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, unicorn/prefer-structured-clone -- see SAFETY; not a clone, a reading as JSON
-  const json = JSON.parse(JSON.stringify(manifest)) as Json;
-  return canonicalJson(json);
-};
+// A manifest loses nothing through JSON: it holds names, strings, the
+// versions and sealed descriptors, whose defaults are JSON.
+export const manifestText = (manifest: SchemaManifest): string =>
+  canonicalText(manifest);
 
 /** A table's access where it declares none: nobody, both ways. */
 const noAccess: ManifestAccess = Object.freeze({ read: "none", write: "none" });

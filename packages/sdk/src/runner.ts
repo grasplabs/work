@@ -4,6 +4,7 @@ import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 import { AppError } from "./app-error.ts";
 import { inspectApp, isActionPermission } from "./app.ts";
 import { databaseReader, databaseWriter } from "./database.ts";
+import { isThenable, refusals } from "./lockdown.ts";
 import {
   impureMessage,
   migrationHandler,
@@ -511,9 +512,7 @@ type MigrationAnswer =
 const failureMaxLength = 500;
 
 /** A function that refuses, for what a migration can't use. */
-const unavailable = (what: string) => (): never => {
-  throw new Error(impureMessage(what));
-};
+const unavailable = refusals(impureMessage);
 
 /** The message of what a handler threw, bounded. */
 const messageOf = (error: unknown): string => {
@@ -704,12 +703,6 @@ const asJson = (output: unknown): unknown => {
   const json: unknown = JSON.parse(text);
   return json;
 };
-
-/** Whether `value` looks like a promise: anything with a `then` function. */
-const isThenable = (value: unknown): boolean =>
-  (typeof value === "object" || typeof value === "function") &&
-  value !== null &&
-  typeof Reflect.get(value, "then") === "function";
 
 /**
  * Runs migration `request.name` of `registered` (an App `app` made) on

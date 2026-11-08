@@ -4,6 +4,7 @@ import { messageOf } from "@grasp-os/shared/errors";
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
+import { refuser } from "./declaration.ts";
 import type {
   AnyWorkflowReference,
   ArgsOf,
@@ -278,9 +279,7 @@ export class TestDefinitionError extends Error {
   override name = "TestDefinitionError";
 }
 
-const refuseSuite: (message: string) => never = (message) => {
-  throw new TestDefinitionError(message);
-};
+const refuseSuite: (message: string) => never = refuser(TestDefinitionError);
 
 /** The suite `definition` declares, as `kind`, checked and frozen. */
 const readSuite = <Test extends AppTestFunction | WorkflowTestFunction>(
@@ -542,15 +541,17 @@ const requestFor = (
 };
 
 // Values as they cross from the host (JSON), in canonical JSON, so equal
-// values compare equal whatever order their keys are in.
+// values compare equal whatever order their keys are in. Serialised once:
+// a getter or `toJSON` is read a single time.
 const canonical = (value: unknown): string => {
   const text = JSON.stringify(value);
   if (text === undefined) {
     return "undefined";
   }
-  // SAFETY: parsing JSON text always gives a JSON value.
+  // SAFETY: what JSON.parse answers is JSON.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return canonicalJson(JSON.parse(text) as Json);
+  const json = JSON.parse(text) as Json;
+  return canonicalJson(json);
 };
 
 /**

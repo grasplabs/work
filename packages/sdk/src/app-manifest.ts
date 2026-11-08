@@ -9,6 +9,7 @@ import {
   registerApp,
 } from "./app.ts";
 import type { AppConfig, AppManifest } from "./app.ts";
+import { hasExactly, isOverBytes, refuser } from "./declaration.ts";
 import { migration } from "./migration.ts";
 import type { Migration } from "./migration.ts";
 import { readPermissionDeclaration } from "./permissions.ts";
@@ -40,25 +41,7 @@ import type { AnySchema } from "./value-schema.ts";
 // under another alias, a descriptor out of bounds) is refused.
 // There is no other path from text to an `AppManifest`.
 
-const refuse = (message: string): never => {
-  throw new AppDefinitionError(message);
-};
-
-const encoder = new TextEncoder();
-
-/** Whether `text` is more than `max` bytes as UTF-8. */
-const isOverBytes = (text: string, max: number): boolean =>
-  text.length > max ||
-  (text.length * 3 > max && encoder.encode(text).byteLength > max);
-
-/** Whether `value` is a plain object with exactly the keys `keys`. */
-const hasExactly = (
-  value: unknown,
-  keys: readonly string[]
-): value is Record<string, unknown> =>
-  isPlainObject(value) &&
-  Object.keys(value).length === keys.length &&
-  keys.every((key) => Object.hasOwn(value, key));
+const refuse: (message: string) => never = refuser(AppDefinitionError);
 
 /** The entries of map `value`, refused when it isn't one. */
 const entriesOf = (value: unknown, what: string): [string, unknown][] => {
@@ -177,7 +160,6 @@ const place = (
     refuse(
       `\`${path}\` isn't a module's export: a path is a module's and an export's name.`
     );
-    return;
   }
   const module = segments.join("/");
   const exports = Object.hasOwn(modules, module) ? modules[module] : undefined;

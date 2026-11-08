@@ -1,3 +1,4 @@
+import { dataReader, refuser } from "./declaration.ts";
 import { computeHandlers } from "./handlers.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
@@ -64,9 +65,7 @@ class ComputeDefinitionError extends Error {
   }
 }
 
-const refuse = (message: string): never => {
-  throw new ComputeDefinitionError(message);
-};
+const refuse: (message: string) => never = refuser(ComputeDefinitionError);
 
 const definitionKeys: ReadonlySet<string> = new Set([
   "input",
@@ -75,16 +74,10 @@ const definitionKeys: ReadonlySet<string> = new Set([
 ]);
 
 const { apply } = Reflect;
-const { freeze, getOwnPropertyDescriptor, keys } = Object;
+const { freeze, keys } = Object;
 
 /** Reads `key` of `definition` as a data property: never a getter. */
-const dataOf = (definition: object, key: string): unknown => {
-  const property = getOwnPropertyDescriptor(definition, key);
-  if (property !== undefined && !("value" in property)) {
-    return refuse(`A calculation's \`${key}\` is a value, not a getter.`);
-  }
-  return property?.value;
-};
+const dataOf = dataReader("A calculation", refuse);
 
 /**
  * Declares a calculation (see the header): throws `ComputeDefinitionError`

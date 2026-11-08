@@ -1,4 +1,5 @@
 import type { DatabaseReader, DatabaseWriter } from "./database.ts";
+import { refuser } from "./declaration.ts";
 import { serverFunctions } from "./handlers.ts";
 import type { PeopleDirectory, User } from "./people.ts";
 import type {
@@ -582,9 +583,7 @@ class FunctionDefinitionError extends Error {
   }
 }
 
-const refuse = (message: string): never => {
-  throw new FunctionDefinitionError(message);
-};
+const refuse: (message: string) => never = refuser(FunctionDefinitionError);
 
 /** The keys each kind's declaration has; any other is refused. */
 const declarationKeys: Readonly<Record<FunctionKind, readonly string[]>> = {

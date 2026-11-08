@@ -1,3 +1,4 @@
+import { deepFreeze, namePattern, refuser } from "./declaration.ts";
 import {
   descriptorVersion,
   isPlainObject,
@@ -39,13 +40,8 @@ interface Sealed {
 /** Every descriptor `seal` made; nothing else counts as one. */
 const sealed = new WeakMap<object, Sealed>();
 
-// Typed where it is declared: only then does a call narrow what follows it.
-const refuse: (code: ValueDefinitionCode, message: string) => never = (
-  code,
-  message
-) => {
-  throw new ValueDefinitionError(code, message);
-};
+const refuse: (code: ValueDefinitionCode, message: string) => never =
+  refuser(ValueDefinitionError);
 
 const sealedChild = (value: unknown): Sealed => {
   const child =
@@ -202,7 +198,6 @@ const isName = (value: unknown): value is string =>
  * A table's name, as `v.id(tableName)` states it: a letter, then letters,
  * digits and underscores. Whether the table exists is the schema's to check.
  */
-const tableNamePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 
 interface Body {
   readonly children: readonly Sealed[];
@@ -320,7 +315,7 @@ const unionBody = (draft: DescriptorDraft): Body => {
  */
 const idBody = (draft: DescriptorDraft): Body => {
   const { tableName, onDelete } = draft;
-  if (typeof tableName !== "string" || !tableNamePattern.test(tableName)) {
+  if (typeof tableName !== "string" || !namePattern.test(tableName)) {
     return refuse(
       "definition.invalid_name",
       "A table's name starts with a letter and has only letters, digits and underscores."
@@ -474,20 +469,6 @@ const presences: ReadonlySet<unknown> = new Set<Presence>([
 
 const isPresence = (value: unknown): value is Presence => presences.has(value);
 
-const deepFreeze = (value: unknown): FrozenJson => {
-  if (typeof value === "object" && value !== null) {
-    for (const entry of Object.values(value)) {
-      deepFreeze(entry);
-    }
-    Object.freeze(value);
-  }
-  // SAFETY: only called on what the interpreter just returned for a
-  // descriptor, which is JSON it built itself; freezing it makes it
-  // FrozenJson.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return value as FrozenJson;
-};
-
 /**
  * The default a draft proposes, as the schema itself would normalize it. It
  * is checked against the complete declaration every time the declaration
@@ -502,12 +483,16 @@ const sealedDefault = (
     return refuse("definition.invalid_default", "A default needs a value.");
   }
   const result = validateValue(candidate, defaultValue);
-  return result.issues === undefined
-    ? deepFreeze(result.value)
-    : refuse(
-        "definition.invalid_default",
-        "The default isn't a value its own schema accepts."
-      );
+  if (result.issues !== undefined) {
+    return refuse(
+      "definition.invalid_default",
+      "The default isn't a value its own schema accepts."
+    );
+  }
+  // SAFETY: what the interpreter just returned for a descriptor is JSON it
+  // built itself; freezing it makes it FrozenJson.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return deepFreeze(result.value) as FrozenJson;
 };
 
 /**

@@ -32,6 +32,7 @@ import type {
   WriteRequest,
 } from "@grasp-os/shared/store-reads";
 
+import { deepFreeze, refuser } from "./declaration.ts";
 import { allowsNull, indexBase, relationOf, tablesOf } from "./schema.ts";
 import type {
   AnyTable,
@@ -646,13 +647,8 @@ export class QueryDefinitionError extends Error {
   }
 }
 
-// Typed where it is declared: only then does a call narrow what follows it.
-const refuse: (code: QueryDefinitionCode, message: string) => never = (
-  code,
-  message
-) => {
-  throw new QueryDefinitionError(code, message);
-};
+const refuse: (code: QueryDefinitionCode, message: string) => never =
+  refuser(QueryDefinitionError);
 
 /** The managed fields a read may compare, and the base type of each. */
 const managedBases: Readonly<Record<string, IndexBase>> = {
@@ -1005,21 +1001,6 @@ const nodeCount = (filters: readonly FilterNode[]): number => {
     stack.push(...filterChildren(node));
   }
   return count;
-};
-
-/** `node` and everything in it, frozen: a query's state is plain data. */
-const deepFreeze = <Node extends FilterNode>(node: Node): Node => {
-  const stack: object[] = [node];
-  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
-    Object.freeze(next);
-    const children: unknown[] = Object.values(next);
-    for (const child of children) {
-      if (typeof child === "object" && child !== null) {
-        stack.push(child);
-      }
-    }
-  }
-  return node;
 };
 
 /** A count a terminal takes, checked: a whole number from `min` to 100. */

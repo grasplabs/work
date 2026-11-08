@@ -6,6 +6,7 @@ import {
   storeNamePattern,
 } from "@grasp-os/shared/store-limits";
 
+import { refuser } from "./declaration.ts";
 import { descriptorVersion, isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { fieldDescriptors, seal } from "./value-schema.ts";
@@ -100,13 +101,9 @@ export class SchemaDefinitionError extends Error {
   }
 }
 
-// Typed where it is declared: only then does a call narrow what follows it.
-const refuse: (code: SchemaDefinitionCode, message: string) => never = (
-  code,
-  message
-) => {
-  throw new SchemaDefinitionError(code, message);
-};
+const refuse: (code: SchemaDefinitionCode, message: string) => never = refuser(
+  SchemaDefinitionError
+);
 
 /** One index of a table: its name and the fields it orders by, in order. */
 export interface IndexDefinition {

@@ -4,6 +4,7 @@
 import "./compute-lockdown.ts";
 import { lockedDown } from "./compute-locked.ts";
 import { actionHandlers, computeHandlers } from "./handlers.ts";
+import { isThenable } from "./lockdown.ts";
 import { filesResource } from "./run-files-client.ts";
 
 // What core runs in the isolate of a workflow's own modules
@@ -137,12 +138,6 @@ interface ComputeRequest {
 type ComputeAnswer =
   | { readonly ok: true; readonly output: string }
   | { readonly ok: false; readonly message: string };
-
-/** Whether `value` looks like a promise: anything with a `then` function. */
-const isThenable = (value: unknown): boolean =>
-  (typeof value === "object" || typeof value === "function") &&
-  value !== null &&
-  typeof reflectGet(value, "then") === "function";
 
 /**
  * Runs the calculation `request` names on its input: the handler's answer

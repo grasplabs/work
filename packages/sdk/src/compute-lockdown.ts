@@ -18,19 +18,12 @@
 // calculation in an isolate where one didn't.
 
 import { replaceClockAndRandomness, seal } from "./clock-and-randomness.ts";
-
-/**
- * The intrinsic a refusal throws, taken as this module loads, before any
- * module of the workflow's: replacing `Error` can't change it.
- */
-const RefusalError = Error;
+import { refusals } from "./lockdown.ts";
 
 /** A function that refuses, for what a calculation can't use. */
-const unavailable = (what: string) => (): never => {
-  throw new RefusalError(
-    `A calculation is pure: ${what} isn't available to it.`
-  );
-};
+const unavailable = refusals(
+  (what) => `A calculation is pure: ${what} isn't available to it.`
+);
 
 /**
  * The globals a calculation keeps: the ECMAScript intrinsics (some of them
