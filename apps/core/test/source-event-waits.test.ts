@@ -134,8 +134,11 @@ const sourceOf = async (admin: Identity) => {
  * takes `payment.paid` from a webhook source, approved for a source of
  * its own.
  */
-const paymentWorkflow = async () => {
-  const admin = await person("admin");
+const paymentWorkflow = async (on?: {
+  admin: Identity;
+  source: Awaited<ReturnType<typeof sourceOf>>;
+}) => {
+  const admin = on?.admin ?? (await person("admin"));
   const contract = `payments-${unique()}`;
   await publishCatalogContract(env, admin, {
     key: contract,
@@ -154,7 +157,7 @@ const paymentWorkflow = async () => {
     }),
     basedOn: null,
   });
-  const source = await sourceOf(admin);
+  const source = on?.source ?? (await sourceOf(admin));
   const approval = await approveWorkflowBinding(env, admin, workflow.id, {
     alias: "payments",
     target: { kind: "event", source: source.id },
@@ -195,24 +198,32 @@ const waitingRun = async (
 const send = async (
   source: { token: string; secret: string },
   data: unknown,
-  { id = `msg_${unique()}`, type = paid } = {}
+  {
+    id = `msg_${unique()}`,
+    type = paid,
+    coreEnv = env,
+  }: { id?: string; type?: string; coreEnv?: Env } = {}
 ): Promise<number> => {
   const body = JSON.stringify({ type, data });
   const at = new Date();
-  const response = await routed(`${eventSourcePath}/${source.token}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      [eventSourceHeaders.id]: id,
-      [eventSourceHeaders.timestamp]: String(Math.floor(at.getTime() / 1000)),
-      [eventSourceHeaders.signature]: new Webhook(source.secret).sign(
-        id,
-        at,
-        body
-      ),
+  const response = await routed(
+    `${eventSourcePath}/${source.token}`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [eventSourceHeaders.id]: id,
+        [eventSourceHeaders.timestamp]: String(Math.floor(at.getTime() / 1000)),
+        [eventSourceHeaders.signature]: new Webhook(source.secret).sign(
+          id,
+          at,
+          body
+        ),
+      },
+      body,
     },
-    body,
-  });
+    coreEnv
+  );
   return response.status;
 };
 
@@ -431,21 +442,25 @@ const inboxOf = async (runId: string): Promise<unknown[]> => {
   );
 };
 
-/** Source `source`'s kept events: whether each is taken, oldest first. */
+/**
+ * Source `source`'s kept events, oldest first: each one's data, and the
+ * runs that took it, in order.
+ */
 const keptOf = async (source: string) => {
   const rows = await env.DB.prepare(
-    "SELECT data, taken_run FROM kept_events WHERE source_id = ? ORDER BY received_at, id"
+    `SELECT event.data, (SELECT json_group_array(run_id) FROM (SELECT run_id FROM kept_event_takes WHERE event_id = event.id ORDER BY taken_at, run_id)) AS takers
+     FROM kept_events AS event WHERE source_id = ? ORDER BY received_at, id`
   )
     .bind(source)
-    .all<{ data: string | null; taken_run: string | null }>();
-  return rows.results.map(({ data, taken_run }) => ({
-    data: data === null ? null : z.json().parse(JSON.parse(data)),
-    taken: taken_run,
+    .all<{ data: string; takers: string }>();
+  return rows.results.map(({ data, takers }) => ({
+    data: z.json().parse(JSON.parse(data)),
+    taken: z.array(z.string()).parse(JSON.parse(takers)),
   }));
 };
 
-/** Which run took each of source `source`'s kept events, oldest first. */
-const takenOf = async (source: string): Promise<(string | null)[]> => {
+/** Which runs took each of source `source`'s kept events, oldest first. */
+const takenOf = async (source: string): Promise<string[][]> => {
   const kept = await keptOf(source);
   return kept.map(({ taken }) => taken);
 };
@@ -466,6 +481,54 @@ const auditedOf = async (
   return events
     .filter((event) => event.action === action && event.target?.id === target)
     .map(({ detail }) => detail[field]);
+};
+
+/**
+ * Core's env whose first batch that keeps an event (`kept_events`) says
+ * so (`atKeep`), then waits for `gate` before it runs: a delivery paused
+ * just there.
+ */
+const pausedAtKeep = (gate: Promise<unknown>, atKeep: () => void): Env => {
+  const real = env.DB;
+  const queries = new WeakMap<D1PreparedStatement, string>();
+  let paused = false;
+  const remembered = (
+    statement: D1PreparedStatement,
+    query: string
+  ): D1PreparedStatement => {
+    queries.set(statement, query);
+    return statement;
+  };
+  const DB: D1Database = {
+    prepare: (query) => {
+      const statement = real.prepare(query);
+      const bind = statement.bind.bind(statement);
+      return remembered(
+        Object.assign(statement, {
+          bind: (...values: unknown[]) => remembered(bind(...values), query),
+        }),
+        query
+      );
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      if (
+        !paused &&
+        statements.some((each) =>
+          (queries.get(each) ?? "").startsWith('insert into "kept_events"')
+        )
+      ) {
+        paused = true;
+        atKeep();
+        await gate;
+      }
+      return await real.batch<T>(statements);
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+  return { ...env, DB };
 };
 
 /**
@@ -518,7 +581,7 @@ describe(
   () => {
     afterAll(endLiveResourceRuns);
 
-    it("takes the event of its own match that came before it waited, kept for it, and leaves another's kept", async () => {
+    it("takes the event of its own match that came before it waited, kept for it, and leaves another's untaken", async () => {
       const paying = await paymentWorkflow();
       const runId = await waitingRun(paying, "INV-1");
       const early = [
@@ -536,15 +599,15 @@ describe(
         early: [202, 202],
         ran: { ended: "INV-1", tampered: [] },
         inbox: ["INV-1"],
-        // Taken: its data cleared, so nothing else takes it.
+        // Kept for its day, for any other run that waits for it.
         kept: [
-          { data: invoice("INV-2"), taken: null },
-          { data: null, taken: runId },
+          { data: invoice("INV-2"), taken: [] },
+          { data: invoice("INV-1"), taken: [runId] },
         ],
       });
     });
 
-    it("takes an event of its match that comes while it waits, keeping nothing of it, and ends its wait", async () => {
+    it("takes an event of its match that comes while it waits, once, kept for others, and ends its wait", async () => {
       const paying = await paymentWorkflow();
       const runId = await waitingRun(paying, "INV-1");
       const statuses: number[] = [];
@@ -571,38 +634,87 @@ describe(
         statuses: [202],
         ran: { ended: "INV-1", tampered: [] },
         inbox: ["INV-1"],
-        kept: [],
+        kept: [{ data: invoice("INV-1"), taken: [runId] }],
         waits: 0,
       });
     });
 
-    it("hands a kept event to one run, once, however many wait on its match, and a replay takes nothing more", async () => {
+    it("hands a kept event to each run that waits on its match, each once, another workflow's too, and a replay takes nothing more", async () => {
       const paying = await paymentWorkflow();
+      // Another workflow, on the same source, waiting on the same invoice.
+      const also = await paymentWorkflow(paying);
       const first = await waitingRun(paying, "INV-7");
       const second = await waitingRun(paying, "INV-7");
+      const other = await waitingRun(also, "INV-7");
       await send(paying.source, invoice("INV-7"));
       const kept = keptOfTest();
       const ranFirst = await ranAs(first, waiting(), inboxEngine(first, kept));
       const ranSecond = await ranAs(second, waiting());
+      const ranOther = await ranAs(other, waiting());
       // Another event of the match, kept after the first run took its own.
       await send(paying.source, invoice("INV-7", 99));
       const replayed = await ranAs(first, waiting(), inboxEngine(first, kept));
 
       expect({
-        ranFirst,
-        ranSecond,
-        replayed,
-        first: await inboxOf(first),
-        second: await inboxOf(second),
+        ran: [ranFirst, ranSecond, ranOther, replayed].map(
+          ({ ended }) => ended
+        ),
+        inboxes: [
+          await inboxOf(first),
+          await inboxOf(second),
+          await inboxOf(other),
+        ],
         kept: await takenOf(paying.source.id),
       }).toStrictEqual({
-        ranFirst: { ended: "INV-7", tampered: [] },
-        ranSecond: { ended: "none", tampered: [] },
-        replayed: { ended: "INV-7", tampered: [] },
-        first: ["INV-7"],
-        second: [],
-        // The later one stays kept: the replay took nothing more.
-        kept: [first, null],
+        ran: ["INV-7", "INV-7", "INV-7", "INV-7"],
+        inboxes: [["INV-7"], ["INV-7"], ["INV-7"]],
+        // The later one stays untaken: the replay took nothing more.
+        kept: [[first, second, other], []],
+      });
+    });
+
+    it("hands a run an event that came as its wait was being reached, whichever went first", async () => {
+      const paying = await paymentWorkflow();
+      const runId = await waitingRun(paying, "INV-1");
+      // The delivery pauses just as it keeps the event, until the wait has
+      // registered and looked for kept events, found none, and gone on;
+      // the wait is reached only once the delivery got that far.
+      const entered = Promise.withResolvers<boolean>();
+      const keeping = Promise.withResolvers<boolean>();
+      const pausing = pausedAtKeep(entered.promise, () => {
+        keeping.resolve(true);
+      });
+      const engine = inboxEngine(runId);
+      let sending: Promise<number> | undefined;
+      const racing: Engine = {
+        ...engine,
+        step: {
+          ...engine.step,
+          do: async (name, config, fn) => {
+            if (!name.endsWith(":entered")) {
+              return await engine.step.do(name, config, fn);
+            }
+            sending = send(paying.source, invoice("INV-1"), {
+              coreEnv: pausing,
+            });
+            await keeping.promise;
+            const done = await engine.step.do(name, config, fn);
+            entered.resolve(true);
+            await sending;
+            return done;
+          },
+        },
+      };
+      const ran = await ranAs(runId, waiting(), racing);
+
+      expect({
+        sent: await sending,
+        ran,
+        inbox: await inboxOf(runId),
+      }).toStrictEqual({
+        sent: 202,
+        ran: { ended: "INV-1", tampered: [] },
+        inbox: ["INV-1"],
       });
     });
 
@@ -664,7 +776,7 @@ describe(
       }).toStrictEqual({
         ran: { ended: "none", tampered: [] },
         inbox: [],
-        kept: [{ data: invoice("INV-1", "lots"), taken: null }],
+        kept: [{ data: invoice("INV-1", "lots"), taken: [] }],
         audited: ["event_invalid"],
       });
     });
@@ -674,13 +786,13 @@ describe(
       const runId = await waitingRun(paying, "INV-1");
       await send(paying.source, invoice("INV-1"));
       await send(paying.source, invoice("INV-1", 2));
-      // Killed after the event was handed, before it was marked handed: its
-      // wait's step never journaled.
+      // Killed after the wait took the kept event, before it handed it
+      // over: its wait's step never journaled.
       const killed = await ranAs(
         runId,
         waiting(),
         inboxEngine(runId),
-        failingAt(/^update "kept_events" set "data" = (?:null|\?) /u)
+        failingAt(/from "kept_event_takes" inner join/u)
       ).then(
         (outcome) => outcome,
         () => ({ ended: "killed", tampered: [] })
@@ -697,7 +809,7 @@ describe(
         killed: "stopped",
         again: { ended: "INV-1", tampered: [] },
         inbox: ["INV-1"],
-        kept: [runId, null],
+        kept: [[runId], []],
       });
     });
 
@@ -717,11 +829,11 @@ describe(
 
       expect({
         revoked,
-        whileRevoked: whileRevoked.map(({ taken }) => taken),
+        whileRevoked: whileRevoked.map(({ taken }) => taken.length),
         afterDeleting: await keptOf(paying.source.id),
       }).toStrictEqual({
         revoked: { ended: "workflow.event_denied", tampered: [] },
-        whileRevoked: [null],
+        whileRevoked: [0],
         afterDeleting: [],
       });
     });

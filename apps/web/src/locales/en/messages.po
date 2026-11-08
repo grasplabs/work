@@ -2349,6 +2349,10 @@ msgstr "Answers come only from what {organizationName} shared, with sources."
 msgid "Answers come only from what your organization shared, with sources."
 msgstr "Answers come only from what your organization shared, with sources."
 
+#: src/workflows/binding-approvals.tsx
+msgid "Any event its webhook source sends of the types its contract admits"
+msgstr "Any event its webhook source sends of the types its contract admits"
+
 #: src/activity/audit-log.tsx
 msgid "Any type"
 msgstr "Any type"
@@ -12972,10 +12976,6 @@ msgstr "The earlier wording stays in the goal's history."
 #: src/workflows/binding-approvals.tsx
 msgid "The events its contract admits"
 msgstr "The events its contract admits"
-
-#: src/workflows/binding-approvals.tsx
-msgid "The events its contract admits, from a webhook source"
-msgstr "The events its contract admits, from a webhook source"
 
 #: src/chat/chat-more.tsx
 #: src/dashboard/report-dialog.tsx

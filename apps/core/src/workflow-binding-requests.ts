@@ -157,7 +157,9 @@ const sourceTargets = async (env: Env): Promise<Offered[]> => {
     .orderBy(asc(eventSources.createdAt), asc(eventSources.id));
   return sources.map(({ id, name }) => ({
     target: { kind: "event", source: id },
-    label: `Events from ${name}, matched to the run waiting for each`,
+    // What approving it lets the workflow see: anything the source sends
+    // of the types its contract takes, each run handed what matches it.
+    label: `Any event ${name} sends of the types its contract takes, each run handed those matching what it waits for`,
   }));
 };
 

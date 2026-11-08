@@ -2349,6 +2349,10 @@ msgstr "Antworten stammen nur aus dem, was {organizationName} geteilt hat, mit Q
 msgid "Answers come only from what your organization shared, with sources."
 msgstr "Antworten stammen nur aus dem, was Ihre Organisation geteilt hat, mit Quellen."
 
+#: src/workflows/binding-approvals.tsx
+msgid "Any event its webhook source sends of the types its contract admits"
+msgstr "Jedes Ereignis, das seine Webhook-Quelle sendet, von den Typen, die sein Vertrag zulässt"
+
 #: src/activity/audit-log.tsx
 msgid "Any type"
 msgstr "Jeder Typ"
@@ -12972,10 +12976,6 @@ msgstr "Die frühere Formulierung bleibt im Verlauf des Ziels."
 #: src/workflows/binding-approvals.tsx
 msgid "The events its contract admits"
 msgstr "Die Ereignisse, die sein Vertrag zulässt"
-
-#: src/workflows/binding-approvals.tsx
-msgid "The events its contract admits, from a webhook source"
-msgstr "Die Ereignisse, die sein Vertrag zulässt, aus einer Webhook-Quelle"
 
 #: src/chat/chat-more.tsx
 #: src/dashboard/report-dialog.tsx

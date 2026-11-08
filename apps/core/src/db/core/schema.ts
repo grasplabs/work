@@ -3801,11 +3801,12 @@ export const eventWaits = sqliteTable(
 );
 
 /**
- * An event source's events no waiting run took (workflows/event-waits.ts),
- * kept until `expires_at` (a day) for a wait reached after it came: its
- * ID is its delivery's (the source and its `webhook-id`), its data the
- * event's, cleared once a wait took it (`taken_run`, `taken_step`), so
- * nothing else takes it. Deleted past `expires_at`, and with its source.
+ * An event source's events, kept until `expires_at` (a day) for a wait
+ * reached after it came (workflows/event-waits.ts): its ID is its
+ * delivery's (the source and its `webhook-id`), its data the event's.
+ * Each run takes one at most once (`kept_event_takes`), however many
+ * runs take it. Deleted past `expires_at`, its data with it, and with its
+ * source.
  */
 export const keptEvents = sqliteTable(
   "kept_events",
@@ -3813,17 +3814,33 @@ export const keptEvents = sqliteTable(
     id: text().primaryKey(),
     sourceId: text("source_id").notNull(),
     eventType: text("event_type").notNull(),
-    data: text(),
+    data: text().notNull(),
     receivedAt: timestamp("received_at").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
-    takenRun: text("taken_run"),
-    takenStep: text("taken_step"),
-    takenAt: timestamp("taken_at"),
   },
   (table) => [
     index("kept_events_source").on(table.sourceId, table.receivedAt),
     index("kept_events_expires").on(table.expiresAt),
-    index("kept_events_taken").on(table.takenRun, table.takenStep),
+  ]
+);
+
+/**
+ * Which run took a kept event, and at which wait (workflows/event-
+ * waits.ts): a run takes an event once (its primary key), and a wait
+ * takes at most one (`run_id`, `step`), whether it was handed live or
+ * taken kept. Deleted with its event.
+ */
+export const keptEventTakes = sqliteTable(
+  "kept_event_takes",
+  {
+    eventId: text("event_id").notNull(),
+    runId: text("run_id").notNull(),
+    step: text().notNull(),
+    takenAt: timestamp("taken_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.eventId, table.runId] }),
+    uniqueIndex("kept_event_takes_wait").on(table.runId, table.step),
   ]
 );
 

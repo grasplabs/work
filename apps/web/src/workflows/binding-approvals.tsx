@@ -120,7 +120,9 @@ export const targetWords = (
     case "event": {
       return target.source === undefined
         ? i18n._(msg`The events its contract admits`)
-        : i18n._(msg`The events its contract admits, from a webhook source`);
+        : i18n._(
+            msg`Any event its webhook source sends of the types its contract admits`
+          );
     }
     case "files": {
       return i18n._(msg`The run's own files`);

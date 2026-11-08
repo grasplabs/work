@@ -4,7 +4,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
-import { and, asc, eq, gt, inArray, isNull, lte, not, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lte, not, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -18,6 +18,7 @@ import {
 import {
   eventWaits,
   keptEventKeys,
+  keptEventTakes,
   keptEvents,
   workflowBindingApprovals,
 } from "../db/core/schema.ts";
@@ -36,10 +37,11 @@ import { admitRunEvent, notStartedYet } from "./run-events.ts";
 // recorded. Core matches, never the isolate: the run's code only records
 // a value; which event a run takes is decided here, by equality of hashes
 // in core's own database, and handed to the run's inbox through
-// `admitRunEvent`, as every event is. An event that comes before its run
-// waits is kept, for a day, and the first wait reached after it that
-// matches takes it. Threat model, written before the code, and how each
-// is closed:
+// `admitRunEvent`, as every event is. Every event of a source some
+// approval names is kept, for a day, so a run that reaches its wait after
+// the event came still takes it: each run whose wait matches it takes it
+// once, as each run waiting when it came does. Threat model, written
+// before the code, and how each is closed:
 //
 // - One run's event reaching another. An event reaches a run only by a
 //   match: the SHA-256 of the field and the value, which the wait's enter
@@ -56,15 +58,23 @@ import { admitRunEvent, notStartedYet } from "./run-events.ts";
 //   with that attribute, so a match for one wait is never taken by
 //   another wait of the same run on the same binding. Every run waiting
 //   on the same match gets the event: each is a run that asked for it.
-// - A kept event taken by the wrong run, or by two. A kept event is
-//   taken by one wait, in one conditional update (`taken_run IS NULL`),
-//   only for a match on exactly its data's value, source and type;
-//   once taken its data is cleared, and a wait takes at most one
-//   (`claimKept`): a try of its step again after a failure finds the one
-//   it took, never another. Taking it is a step the engine journals
-//   (host.ts, `listen`), so a replay of a wait takes nothing again. One
-//   its run can't take (its contract refuses the data, its approval went,
-//   its inbox is full) is let go for another wait, the refusal audited.
+// - A kept event taken by the wrong run, by two, or by one run alone that
+//   others needed. A kept event is taken by each run whose wait matches
+//   it exactly (its data's value, source and type), the same fan-out as an
+//   event handed live: one run never takes from another what it needed
+//   (two workflows waiting on one order, a loop on a broad match). Each
+//   run takes it at most once (`kept_event_takes`, by event and run), and
+//   each wait takes at most one event (by run and step), whether handed
+//   live or taken kept, recorded in one conditional insert. Taking it is a
+//   step the engine journals (host.ts, `listen`), so a replay of a wait
+//   takes nothing again, and a try of its step again after a failure
+//   finds the one it took, never another. One its run can't take (its
+//   contract refuses the data, its approval went, its inbox is full) is
+//   let go for that run's next wait, the refusal audited.
+// - A delivery and a wait passing each other. A delivery keeps its event
+//   before it looks for waits, and a wait registers before it looks for
+//   kept events, so whichever comes second finds the other; both handing
+//   it is the same event in the run's inbox, under the same key.
 // - A wait taking an event after it ended. Each wait's row is deleted as
 //   it ends, and past its deadline matches nothing; an event for a run
 //   that ended takes nothing (`admitRunEvent` refuses it, audited), and
@@ -82,26 +92,33 @@ import { admitRunEvent, notStartedYet } from "./run-events.ts";
 //   for another run, until it expires.
 // - Floods. Only a signed delivery reaches here. A source keeps at most
 //   `keptPerSource` events at once, counted in the statement that keeps
-//   one; past it an event isn't kept, logged and audited once a day for
-//   the source. An event is kept only when some active approval names
-//   its source, so a source nobody waits on keeps nothing. Each event is
+//   one; past it an event isn't kept (runs waiting then still get it),
+//   logged and audited once a day for the source. An event is kept only
+//   when some active approval names its source, so a source nobody waits
+//   on keeps nothing. Each event is
 //   indexed by at most `maxLeaves` values. Each run's inbox bounds what
 //   one sender fills of it (`source:<id>`), as for any sender.
 // - The secret rotated mid-delivery. An event is kept only while the
 //   secret it was checked with is still the source's (`also`), as a
 //   trigger's start is.
 // - Privacy. A kept event holds an outside system's data, which may name
-//   people: it is kept at most `keptWindowMs` (a day), its data cleared
-//   as soon as a wait takes it, and it is deleted on the clock once
-//   expired (`sweepEventWaits`, audited by source and count) or with its
-//   source. Its keys are hashes. Nothing of it is logged or audited but
+//   people: it is kept at most `keptWindowMs` (a day), for every run that
+//   may yet wait for it, then deleted on the clock with its data, keys and
+//   takes (`sweepEventWaits`, audited by source and count), or with its
+//   source. It names no person core could find it by, so erasing one
+//   relies on that day (person-erasure-inventory.ts). Its keys are
+//   hashes. Nothing of it is logged or audited but
 //   its delivery's hash, its source and its type.
 
-/** How long an event no wait took is kept for one: a day. */
+/** How long an event is kept for a wait reached after it came: a day. */
 export const keptWindowMs = 24 * 60 * 60 * 1000;
 
-/** The most events one source keeps at once. */
-export const keptPerSource = 1000;
+/**
+ * The most events one source keeps at once: a busy shop's or payment
+ * provider's day, each at most 64 KiB (a few KiB as such senders write
+ * them).
+ */
+export const keptPerSource = 5000;
 
 /** The most values of an event's data it may be matched by. */
 const maxLeaves = 256;
@@ -335,7 +352,7 @@ const handed = async (
 };
 
 /**
- * Keeps `event` (`hashes`, its values' match hashes) for a wait reached
+ * Keeps `event` (`hashes`, its values' match hashes) for waits reached
  * later: only while `also` holds (the secret it was checked with still
  * its source's), some active approval names its source, and the source
  * keeps fewer than `keptPerSource`, all in the statement that keeps it.
@@ -355,15 +372,13 @@ const kept = async (
       AND json_extract(${workflowBindingApprovals.target}, '$.source') = ${event.source})`;
   const room = sql`(SELECT COUNT(*) FROM ${keptEvents}
     WHERE ${keptEvents.sourceId} = ${event.source}
-      AND ${keptEvents.takenRun} IS NULL
       AND ${keptEvents.expiresAt} > ${now}) < ${keptPerSource}`;
   await db.batch([
     db
       .insert(keptEvents)
       .select(
         sql`SELECT ${event.same}, ${event.source}, ${event.type},
-          ${JSON.stringify(event.data)}, ${now}, ${now + keptWindowMs},
-          NULL, NULL, NULL
+          ${JSON.stringify(event.data)}, ${now}, ${now + keptWindowMs}
           WHERE ${also} AND ${used} AND ${room}`
       )
       .onConflictDoNothing(),
@@ -392,7 +407,6 @@ const auditedIfFull = async (env: Env, source: string): Promise<void> => {
   const { count } = await drizzle(env.DB).get<{ count: number }>(
     sql`SELECT COUNT(*) AS count FROM ${keptEvents}
       WHERE ${keptEvents.sourceId} = ${source}
-        AND ${keptEvents.takenRun} IS NULL
         AND ${keptEvents.expiresAt} > ${Date.now()}`
   );
   if (count < keptPerSource) {
@@ -408,11 +422,58 @@ const auditedIfFull = async (env: Env, source: string): Promise<void> => {
 };
 
 /**
+ * Records that `wait` takes kept event `eventId`, if its run took it at no
+ * other wait and the wait took no other event: whether this wait has it
+ * (now, or from a try before).
+ */
+const takes = async (
+  env: Env,
+  eventId: string,
+  wait: { runId: string; step: string }
+): Promise<boolean> => {
+  const db = drizzle(env.DB);
+  await db
+    .insert(keptEventTakes)
+    .values({
+      eventId,
+      runId: wait.runId,
+      step: wait.step,
+      takenAt: new Date(),
+    })
+    .onConflictDoNothing();
+  const take = await db
+    .select({ step: keptEventTakes.step })
+    .from(keptEventTakes)
+    .where(
+      and(
+        eq(keptEventTakes.eventId, eventId),
+        eq(keptEventTakes.runId, wait.runId)
+      )
+    )
+    .get();
+  return take?.step === wait.step;
+};
+
+/** Lets `runId` take kept event `eventId` at a later wait: it couldn't now. */
+const letGo = async (
+  env: Env,
+  eventId: string,
+  runId: string
+): Promise<void> => {
+  await drizzle(env.DB)
+    .delete(keptEventTakes)
+    .where(
+      and(eq(keptEventTakes.eventId, eventId), eq(keptEventTakes.runId, runId))
+    );
+};
+
+/**
  * Hands an event a source took (source-events.ts) to every run waiting
  * on a match its data has, from that source and of its type, each by its
- * own match; keeps it when none took it (`kept`), for a wait reached
- * later. What came of it: `retry` when a run's wait may take it later
- * (core failing), so its sender tries again.
+ * own match, once a run. It is kept first (`kept`), for waits reached
+ * later, so a wait registering meanwhile finds it either way. What came
+ * of it: `retry` when a run's wait may take it later (core failing), so
+ * its sender tries again.
  */
 export const routeSourceEvent = async (
   env: Env,
@@ -423,6 +484,14 @@ export const routeSourceEvent = async (
   if (hashes.length === 0) {
     // Nothing in it a match could name.
     return "unkept";
+  }
+  const keeps = await kept(env, event, hashes, also);
+  if (!keeps) {
+    log.warn("workflow.event_unkept", {
+      source: event.source,
+      delivery: event.same,
+    });
+    await auditedIfFull(env, event.source);
   }
   const db = drizzle(env.DB);
   const waits = await db
@@ -437,41 +506,30 @@ export const routeSourceEvent = async (
       )
     )
     .orderBy(asc(eventWaits.runId), asc(eventWaits.step));
-  const outcomes: { wait: Waiting; outcome: string }[] = [];
+  const outcomes: string[] = [];
   for (const wait of waits) {
+    // A run takes a kept event once, and a wait one event.
     // oxlint-disable-next-line no-await-in-loop -- one run after another, few
+    if (keeps && !(await takes(env, event.same, wait))) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- as above
     const run = await callingRunOf(env, wait.workflowId, wait.runId);
     // oxlint-disable-next-line no-await-in-loop -- as above
     const outcome = await handed(env, run, wait, event);
-    outcomes.push({ wait, outcome });
+    if (keeps && outcome !== "taken" && outcome !== "retry") {
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      await letGo(env, event.same, wait.runId);
+    }
+    outcomes.push(outcome);
   }
-  const first = outcomes.find(({ outcome }) => outcome === "taken");
-  if (first !== undefined) {
-    // Kept by an earlier delivery of it: taken now, so no later wait
-    // takes it again.
-    await db
-      .update(keptEvents)
-      .set({
-        takenRun: first.wait.runId,
-        takenStep: first.wait.step,
-        takenAt: new Date(),
-        data: null,
-      })
-      .where(and(eq(keptEvents.id, event.same), isNull(keptEvents.takenRun)));
-    return "taken";
-  }
-  if (outcomes.some(({ outcome }) => outcome === "retry")) {
+  if (outcomes.includes("retry")) {
     return "retry";
   }
-  if (await kept(env, event, hashes, also)) {
-    return "kept";
+  if (outcomes.includes("taken")) {
+    return "taken";
   }
-  log.warn("workflow.event_unkept", {
-    source: event.source,
-    delivery: event.same,
-  });
-  await auditedIfFull(env, event.source);
-  return "unkept";
+  return keeps ? "kept" : "unkept";
 };
 
 /** A wait for an event source's event by a match, as its run reaches it. */
@@ -487,15 +545,12 @@ export interface MatchWait {
 /** A kept event a wait took, as `claimKept` answers it. */
 type Claimed = typeof keptEvents.$inferSelect;
 
-/** Tries at taking a kept event another wait took first. */
-const claimTries = 3;
-
 /**
  * The kept event `wait` takes (`source`'s, of one of `types`, matching its
- * hash), taken in one conditional update so no other wait takes it too:
- * the one it took already if it did (a try of its step again), so it
- * takes at most one; none when there is none, or the one it took was
- * handed already (its data cleared).
+ * hash, one its run took at no other wait), recorded in one conditional
+ * insert (`kept_event_takes`): the one it took already if it did (a try
+ * of its step again, or handed live), so it takes at most one; none when
+ * there is none. Other runs take it all the same.
  */
 const claimKept = async (
   env: Env,
@@ -504,59 +559,41 @@ const claimKept = async (
   types: readonly string[]
 ): Promise<Claimed | undefined> => {
   const db = drizzle(env.DB);
-  const ours = await db
-    .select()
-    .from(keptEvents)
-    .where(
-      and(
-        eq(keptEvents.takenRun, wait.run.runId),
-        eq(keptEvents.takenStep, wait.step)
-      )
+  const { runId } = wait.run;
+  const now = Date.now();
+  await db
+    .insert(keptEventTakes)
+    .select(
+      sql`SELECT event.id, ${runId}, ${wait.step}, ${now}
+        FROM ${keptEvents} AS event
+        JOIN ${keptEventKeys} AS keyed ON keyed.event_id = event.id
+        WHERE event.source_id = ${source}
+          AND ${inList(sql`event.event_type`, types)}
+          AND keyed.match_hash = ${wait.matchHash}
+          AND event.expires_at > ${now}
+          AND NOT EXISTS (SELECT 1 FROM ${keptEventTakes} AS taken
+            WHERE taken.event_id = event.id AND taken.run_id = ${runId})
+        ORDER BY event.received_at, event.id
+        LIMIT 1`
     )
-    .get();
-  if (ours !== undefined) {
-    return ours.data === null ? undefined : ours;
-  }
-  for (let attempt = 0; attempt < claimTries; attempt += 1) {
-    const now = Date.now();
-    const candidate = sql`(SELECT event.id FROM ${keptEvents} AS event
-      JOIN ${keptEventKeys} AS keyed ON keyed.event_id = event.id
-      WHERE event.source_id = ${source}
-        AND ${inList(sql`event.event_type`, types)}
-        AND keyed.match_hash = ${wait.matchHash}
-        AND event.taken_run IS NULL
-        AND event.expires_at > ${now}
-      ORDER BY event.received_at, event.id
-      LIMIT 1)`;
-    // oxlint-disable-next-line no-await-in-loop -- one try after another
-    const [taken] = await db
-      .update(keptEvents)
-      .set({
-        takenRun: wait.run.runId,
-        takenStep: wait.step,
-        takenAt: new Date(now),
-      })
-      .where(and(eq(keptEvents.id, candidate), isNull(keptEvents.takenRun)))
-      .returning();
-    if (taken !== undefined) {
-      return taken;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- as above
-    const left = await db.get<{ any: number }>(
-      sql`SELECT ${candidate} IS NOT NULL AS any`
-    );
-    if (left.any === 0) {
-      return undefined;
-    }
-  }
-  return undefined;
+    .onConflictDoNothing();
+  const [claimed] = await db
+    .select({ event: keptEvents })
+    .from(keptEventTakes)
+    .innerJoin(keptEvents, eq(keptEvents.id, keptEventTakes.eventId))
+    .where(
+      and(eq(keptEventTakes.runId, runId), eq(keptEventTakes.step, wait.step))
+    )
+    .limit(1);
+  return claimed?.event;
 };
 
 /**
  * Reaches `wait` (until `until`, its deadline): registers it for the
  * events of its match (`event_waits`), then takes the oldest kept event
- * of its match, if any (`claimKept`), and hands it to its run. A kept
- * event its run refuses for good is let go for another wait. Refused
+ * of its match its run hasn't taken, if any (`claimKept`), and hands it to
+ * its run. A kept event its run refuses for good is let go for its next
+ * wait. Refused
  * (`workflow.event_denied`) when the run's binding names no source. The
  * host runs it as a step it journals, so a replay reaches nothing again.
  */
@@ -599,7 +636,7 @@ export const enterMatchWait = async (
       set: { sourceId: source, matchHash: wait.matchHash, expiresAt },
     });
   const claimed = await claimKept(env, wait, source, types);
-  if (claimed === undefined || claimed.data === null) {
+  if (claimed === undefined) {
     return;
   }
   const outcome = await handed(
@@ -622,21 +659,10 @@ export const enterMatchWait = async (
   if (outcome === "retry") {
     throw new Error(`Run ${wait.run.runId} couldn't take its kept event now`);
   }
-  // One its run can't take is let go for another wait.
-  const settled =
-    outcome === "taken"
-      ? { data: null }
-      : { takenRun: null, takenStep: null, takenAt: null };
-  await db
-    .update(keptEvents)
-    .set(settled)
-    .where(
-      and(
-        eq(keptEvents.id, claimed.id),
-        eq(keptEvents.takenRun, wait.run.runId),
-        eq(keptEvents.takenStep, wait.step)
-      )
-    );
+  if (outcome !== "taken") {
+    // One its run can't take now is let go, for its next wait.
+    await letGo(env, claimed.id, wait.run.runId);
+  }
 };
 
 /** Ends wait `step` of run `runId`: it takes no event of its match more. */
@@ -651,11 +677,22 @@ export const leaveMatchWait = async (
 };
 
 /**
- * The statements deleting source `id`'s kept events and their keys, as
- * it is deleted (event-sources.ts).
+ * The statements deleting source `id`'s kept events, their keys and
+ * takes, as it is deleted (event-sources.ts).
  */
 export const keptEventsDeleted = (db: ReturnType<typeof drizzle>, id: string) =>
   [
+    db
+      .delete(keptEventTakes)
+      .where(
+        inArray(
+          keptEventTakes.eventId,
+          db
+            .select({ id: keptEvents.id })
+            .from(keptEvents)
+            .where(eq(keptEvents.sourceId, id))
+        )
+      ),
     db
       .delete(keptEventKeys)
       .where(
@@ -674,10 +711,10 @@ export const keptEventsDeleted = (db: ReturnType<typeof drizzle>, id: string) =>
 const sweptPerRun = 500;
 
 /**
- * On the clock: deletes the kept events past their day, and their keys,
- * at most `sweptPerRun` a run, audited by source with how many no wait
- * had taken (`workflow.webhook.kept_expired`); and the waits past their
- * deadline.
+ * On the clock: deletes the kept events past their day, with their data,
+ * keys and takes, at most `sweptPerRun` a run, audited by source with how
+ * many no run took (`workflow.webhook.kept_expired`); and the waits past
+ * their deadline.
  */
 export const sweepEventWaits = async (env: Env): Promise<void> => {
   const db = drizzle(env.DB);
@@ -687,7 +724,8 @@ export const sweepEventWaits = async (env: Env): Promise<void> => {
     .select({
       id: keptEvents.id,
       sourceId: keptEvents.sourceId,
-      takenRun: keptEvents.takenRun,
+      taken: sql<number>`EXISTS (SELECT 1 FROM ${keptEventTakes}
+        WHERE ${keptEventTakes.eventId} = ${keptEvents.id})`,
     })
     .from(keptEvents)
     .where(lte(keptEvents.expiresAt, now))
@@ -698,12 +736,13 @@ export const sweepEventWaits = async (env: Env): Promise<void> => {
   }
   const ids = expired.map(({ id }) => id);
   await db.batch([
+    db.delete(keptEventTakes).where(inList(keptEventTakes.eventId, ids)),
     db.delete(keptEventKeys).where(inList(keptEventKeys.eventId, ids)),
     db.delete(keptEvents).where(inList(keptEvents.id, ids)),
   ]);
   const untaken = new Map<string, number>();
-  for (const { sourceId, takenRun } of expired) {
-    if (takenRun === null) {
+  for (const { sourceId, taken } of expired) {
+    if (taken === 0) {
       untaken.set(sourceId, (untaken.get(sourceId) ?? 0) + 1);
     }
   }

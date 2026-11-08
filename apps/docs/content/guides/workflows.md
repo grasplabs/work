@@ -143,4 +143,4 @@ A workflow can also wait for an event about its own run, such as the payment for
 }
 ```
 
-Grasp works the value out as the wait is reached, and hands the run only the event whose data has it. An event that came before the run started waiting is kept for a day, and the first wait for it takes it, once. A wait on a source's type always names its `match`, so no run takes another's event.
+Grasp works the value out as the wait is reached, and hands the run only the event whose data has it. A source's events are kept for a day, so a run that starts waiting after its event came still gets it; each run whose wait matches an event gets it once. A wait on a source's type always names its `match`, so no run takes another's event. Approving the binding lets the workflow receive any event the source sends of the types its contract takes.

@@ -2349,6 +2349,10 @@ msgstr "Antwoorden komen alleen uit wat {organizationName} heeft gedeeld, met br
 msgid "Answers come only from what your organization shared, with sources."
 msgstr "Antwoorden komen alleen uit wat je organisatie heeft gedeeld, met bronnen."
 
+#: src/workflows/binding-approvals.tsx
+msgid "Any event its webhook source sends of the types its contract admits"
+msgstr "Elke gebeurtenis die de webhookbron stuurt, van de typen die het contract toelaat"
+
 #: src/activity/audit-log.tsx
 msgid "Any type"
 msgstr "Elk type"
@@ -12972,10 +12976,6 @@ msgstr "De eerdere formulering blijft in de geschiedenis van het doel."
 #: src/workflows/binding-approvals.tsx
 msgid "The events its contract admits"
 msgstr "De gebeurtenissen die zijn contract toelaat"
-
-#: src/workflows/binding-approvals.tsx
-msgid "The events its contract admits, from a webhook source"
-msgstr "De gebeurtenissen die het contract toelaat, uit een webhookbron"
 
 #: src/chat/chat-more.tsx
 #: src/dashboard/report-dialog.tsx

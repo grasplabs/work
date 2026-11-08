@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2f38b9e3-0027-461f-ac33-cc2c37a4ae5c",
+  "id": "5e13cba0-dac4-4122-981b-8f3481221879",
   "prevId": "4bcb99e6-e345-4bcf-aa0d-176aab9dd224",
   "tables": {
     "access_revocations": {
@@ -5766,6 +5766,61 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "kept_event_takes": {
+      "name": "kept_event_takes",
+      "columns": {
+        "event_id": {
+          "name": "event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "step": {
+          "name": "step",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "taken_at": {
+          "name": "taken_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "kept_event_takes_wait": {
+          "name": "kept_event_takes_wait",
+          "columns": [
+            "run_id",
+            "step"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "kept_event_takes_event_id_run_id_pk": {
+          "columns": [
+            "event_id",
+            "run_id"
+          ],
+          "name": "kept_event_takes_event_id_run_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "kept_events": {
       "name": "kept_events",
       "columns": {
@@ -5794,7 +5849,7 @@
           "name": "data",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "received_at": {
@@ -5809,27 +5864,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "taken_run": {
-          "name": "taken_run",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "taken_step": {
-          "name": "taken_step",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "taken_at": {
-          "name": "taken_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         }
       },
@@ -5846,14 +5880,6 @@
           "name": "kept_events_expires",
           "columns": [
             "expires_at"
-          ],
-          "isUnique": false
-        },
-        "kept_events_taken": {
-          "name": "kept_events_taken",
-          "columns": [
-            "taken_run",
-            "taken_step"
           ],
           "isUnique": false
         }
