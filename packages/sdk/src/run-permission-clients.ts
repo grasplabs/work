@@ -25,8 +25,8 @@ import { isPlainObject } from "./value-descriptor.ts";
 //   directly reaches nothing more than these members do.
 // - An undeclared name isn't a member: undefined at run time (calling it
 //   throws a `TypeError` before anything is sent), and a type error. With
-//   no prototype, `constructor`, `toString` and `hasOwnProperty` are
-//   undefined too, unless declared; TypeScript still lists `Object`'s own
+//   no prototype, `constructor` and `hasOwnProperty` are undefined too,
+//   unless declared, and `toString` always; TypeScript still lists `Object`'s own
 //   members on every object type, a limit of the language, and calling one
 //   throws the same way.
 // - `__proto__` can't be declared (a name starts with a letter), and a
@@ -35,8 +35,11 @@ import { isPlainObject } from "./value-descriptor.ts";
 //   member-names.ts says; two names with the same member are refused when
 //   declared, so a member names exactly one action.
 // - Frozen: App code can't add, replace or remove a member.
-// - An action named `then` makes its client thenable. Nothing awaits a
-//   client, so this is left alone: it is the action's member like any.
+// - The runtime calls some members of a value unasked: `then` when it is
+//   awaited, `toJSON` when it is stringified, `toString` and `valueOf`
+//   when it becomes text or a number. An action whose member is one of
+//   them is refused when declared (`checkedActions`), so no client runs an
+//   action nobody called.
 // - An HTTP connection has `fetch` alone: its path and request are data,
 //   which the host checks against the connection's prefixes and methods,
 //   and its method picks `get` or `send`, whichever is declared.

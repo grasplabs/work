@@ -686,6 +686,19 @@ describe("the App's permissions in a function's context", () => {
     ).toContain("called alike");
   });
 
+  test("a connection can't list an action the runtime would call unasked", () => {
+    const refused = ["then", "toJSON", "toString", "valueOf", "to-JSON"].map(
+      (action) =>
+        refusal(() =>
+          permission.connection("tools", {
+            contract: "composio.tools@1",
+            actions: [action],
+          })
+        ).includes("run it unasked")
+    );
+    expect(refused).toStrictEqual([true, true, true, true, true]);
+  });
+
   test("a call names the App's function by its path, internal ones included, and the host decides it", async () => {
     const compose = server.action({
       args: {},

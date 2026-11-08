@@ -178,11 +178,33 @@ export const checkedList = (
 };
 
 /**
+ * Members the runtime calls on a value of its own accord: `await` reads
+ * `then`, `JSON.stringify` `toJSON`, and a template literal or `+`
+ * `toString` and `valueOf`. A client holding one would run an action
+ * nobody called.
+ */
+const implicitMembers: ReadonlySet<string> = new Set([
+  "then",
+  "toJSON",
+  "toString",
+  "valueOf",
+]);
+
+/**
  * A connection's actions (`checkedList`), each a member of its client of
- * its own (member-names.ts): two names with one member are refused.
+ * its own (member-names.ts): a member the runtime calls implicitly, and
+ * two names with one member, are refused.
  */
 export const checkedActions = (list: unknown): readonly string[] => {
   const actions = checkedList(list, "actions");
+  const implicit = actions.find((action) =>
+    implicitMembers.has(memberName(action))
+  );
+  if (implicit !== undefined) {
+    return refuse(
+      `A connection can't list \`${implicit}\`: its client would run it unasked, from \`await\`, \`JSON.stringify\` or turning it into text.`
+    );
+  }
   if (new Set(actions.map(memberName)).size !== actions.length) {
     return refuse(
       "A connection lists two actions that are called alike, such as `send-mail` and `sendMail`."

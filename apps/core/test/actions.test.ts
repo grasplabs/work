@@ -86,6 +86,8 @@ const brain = permission.brain({
 });
 // Guest chats it lists and reads, and never invites.
 const guests = permission.guests({ operations: ["list", "read"] });
+// The platform's functions, which serve only the paths they declare.
+const grasp = permission.grasp();
 
 /** A workflow the App declares, which no function here starts. */
 const followUp = permission.workflow("followUp", {
@@ -101,6 +103,7 @@ const config = defineApp({
     ai,
     brain,
     guests,
+    grasp,
     workflows: [followUp],
   },
 });
@@ -1269,6 +1272,12 @@ describe("resources", () => {
         async (channel) =>
           await channel.resource("followUp", "call", ["send", {}])
       ),
+      // A platform function the declaration doesn't serve, past the
+      // client, which has no member for it.
+      undeclaredFunction: await attempt(
+        async (channel) =>
+          await channel.resource("grasp", "call", ["statistics.write", {}])
+      ),
       reached,
       invite,
       invited,
@@ -1276,6 +1285,7 @@ describe("resources", () => {
       undeclaredAction: "resource.not_allowed",
       undeclaredAlias: "resource.not_allowed",
       workflowAsResource: "resource.not_allowed",
+      undeclaredFunction: "resource.not_allowed",
       reached: false,
       invite: "resource.not_allowed",
       invited: false,
