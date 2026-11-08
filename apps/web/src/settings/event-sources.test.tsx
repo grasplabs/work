@@ -15,6 +15,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import type { Loaded } from "../load-from-core.tsx";
 import { EventSourcesSettings } from "./event-sources.tsx";
 
 // Settings › Webhooks, against core's workflowResources.sources as the
@@ -45,10 +46,15 @@ const shop: EventSource = {
   delivery: { token: "token-0b7c", secret: "active" },
 };
 
-/** The page listing `listed`, its changes failing when `fails`: what core was asked. */
+/**
+ * The page listing `listed`, its changes failing when `fails`, and every
+ * read of the list after the first refused when `readsFail`, as its
+ * route reads it again after each change: what core was asked.
+ */
 const shown = async (
   listed: readonly EventSource[] = [shop],
-  fails = false
+  fails = false,
+  readsFail = false
 ): Promise<unknown[]> => {
   const asked: unknown[] = [];
   const answer = async <T,>(call: unknown, value: T): Promise<T> => {
@@ -80,12 +86,22 @@ const shown = async (
       }) => Promise<T>
     ): Promise<T> => await action({ workflowResources: { sources } }),
   };
+  let reads = 0;
+  const read = async (): Promise<Loaded<readonly EventSource[]>> => {
+    await Promise.resolve();
+    reads += 1;
+    return readsFail && reads > 1
+      ? { state: "refused", message: "Core refused the read." }
+      : { state: "ready", data: listed };
+  };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <EventSourcesSettings sources={listed} />,
+    loader: read,
   });
+  const Settings = () => <EventSourcesSettings page={page.useLoaderData()} />;
+  page.update({ component: Settings });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
     history: createMemoryHistory(),
@@ -197,6 +213,17 @@ describe("the Webhooks settings", () => {
       warned: true,
       afterClosing: undefined,
     });
+  });
+
+  it("keeps a new source's secret shown when reading the list again after it fails, and says why in the list's place", async () => {
+    await shown([], false, true);
+    await typeName("Stripe");
+    await submit();
+
+    expect({
+      secret: inputNamed("Secret"),
+      said: document.body.textContent.includes("Core refused the read."),
+    }).toStrictEqual({ secret, said: true });
   });
 
   it("rotates a secret only once confirmed, and shows the new one once", async () => {

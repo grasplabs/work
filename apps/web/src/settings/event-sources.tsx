@@ -12,6 +12,8 @@ import { useId, useState } from "react";
 import { Confirmed } from "../confirmed.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatList } from "../format.ts";
+import { NotLoadedState } from "../frame/page-states.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import { CopyButton, ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
@@ -21,8 +23,11 @@ import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
 // per sender ("Stripe", "Shop system"). Each has a URL, shown with a way
 // to copy it, and a secret shown once, as core answers it on create or
 // rotate, in a dialog kept above the list so reading it again never takes
-// it away. Rotating, revoking and deleting ask first. Builders start
-// workflows on a source's events from a workflow's Triggers tab.
+// it away. The section stays mounted whatever its list's read came to, so
+// a read after a change that fails (offline, refused) says so in place of
+// the list and never takes away a secret not yet copied. Rotating,
+// revoking and deleting ask first. Builders start workflows on a source's
+// events from a workflow's Triggers tab.
 
 /**
  * Where source `token` takes deliveries: on this page's own origin, as
@@ -214,11 +219,14 @@ const AddSource = ({
   );
 };
 
-/** The organization's event sources, for an admin. */
+/**
+ * The organization's event sources, for an admin, as their list's read
+ * came to (`page`): the list, or why it couldn't be read, in its place.
+ */
 export const EventSourcesSettings = ({
-  sources,
+  page,
 }: {
-  sources: readonly EventSource[];
+  page: Loaded<readonly EventSource[]>;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
@@ -255,13 +263,19 @@ export const EventSourcesSettings = ({
       <SettingsBody>
         <SigningNote />
       </SettingsBody>
-      {sources.length === 0 ? (
+      {page.state !== "ready" && (
+        <div className="border-t">
+          <NotLoadedState heading="h3" page={page} />
+        </div>
+      )}
+      {page.state === "ready" && page.data.length === 0 && (
         <p className="text-muted-foreground border-t px-5 py-4">
           <Trans>No source yet.</Trans>
         </p>
-      ) : (
+      )}
+      {page.state === "ready" && page.data.length > 0 && (
         <ul className="flex flex-col divide-y border-t">
-          {sources.map((source) => (
+          {page.data.map((source) => (
             <SourceRow
               key={source.id}
               onChanged={changed}
