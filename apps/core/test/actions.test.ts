@@ -2255,11 +2255,18 @@ describe("evidence of a refused use", () => {
     const request = await kept(
       async (channel) => await channel.resource("mail", "call", ["delete", {}])
     );
+    // The platform's functions, asked for one they don't serve: declared,
+    // so refused as the request, never as a missing alias.
+    const platform = await kept(
+      async (channel) =>
+        await channel.resource("grasp", "call", ["statistics.write", {}])
+    );
     expect({
       loop,
       noFunction: noFunction.heard,
       workflow: workflow.heard,
       request: request.heard,
+      platform: platform.heard,
     }).toStrictEqual({
       loop: {
         result: "ok",
@@ -2294,6 +2301,14 @@ describe("evidence of a refused use", () => {
         {
           function: "actions.sendMail",
           use: { kind: "resource", name: "mail" },
+          reason: "request_not_allowed",
+          errorCode: "resource.not_allowed",
+        },
+      ],
+      platform: [
+        {
+          function: "actions.sendMail",
+          use: { kind: "resource", name: "grasp" },
           reason: "request_not_allowed",
           errorCode: "resource.not_allowed",
         },
