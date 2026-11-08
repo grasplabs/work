@@ -4,6 +4,7 @@ import { messageOf } from "@grasp-os/shared/errors";
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
+import { refuser } from "./declaration.ts";
 import type {
   AnyWorkflowReference,
   ArgsOf,
@@ -278,9 +279,7 @@ export class TestDefinitionError extends Error {
   override name = "TestDefinitionError";
 }
 
-const refuseSuite: (message: string) => never = (message) => {
-  throw new TestDefinitionError(message);
-};
+const refuseSuite: (message: string) => never = refuser(TestDefinitionError);
 
 /** The suite `definition` declares, as `kind`, checked and frozen. */
 const readSuite = <Test extends AppTestFunction | WorkflowTestFunction>(
