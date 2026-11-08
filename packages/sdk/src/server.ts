@@ -93,7 +93,6 @@ export type {
 const managedShape = <TableName extends string>(table: TableName) => ({
   _id: v.id(table),
   _ownerId: v.string().min(1),
-  _rev: v.number().integer().min(1),
   _createdAt: v.timestamp(),
   _updatedAt: v.timestamp(),
 });

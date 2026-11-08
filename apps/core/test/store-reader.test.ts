@@ -3,7 +3,6 @@ import type { Id } from "@grasp-os/sdk";
 import { databaseReader } from "@grasp-os/sdk/database";
 import { manifestText } from "@grasp-os/sdk/host";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
-import { commitMaxGuards } from "@grasp-os/shared/stores";
 import type { Commit, StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -253,7 +252,6 @@ describe("a query's reads", () => {
         table: "notes",
         id,
         fields: { title: "same" },
-        expectedRevision: 1,
       },
     ]);
     const current = await reader.isCurrent();
@@ -263,64 +261,11 @@ describe("a query's reads", () => {
         table: "notes",
         id,
         fields: { title: "changed" },
-        expectedRevision: 1,
       },
     ]);
     expect({ current, afterChange: await reader.isCurrent() }).toStrictEqual({
       current: true,
       afterChange: false,
-    });
-  });
-});
-
-describe("a reader's guards", () => {
-  it("record the revisions a get asserted on records it found, for a commit to check", async () => {
-    const fixture = await storeWithNotes();
-    const id = await insertNote(fixture);
-    const reader = new StoreReader(fixture.store, fixture.scope);
-    const db = dbOver(reader);
-    await db.get("notes", noteId(id), { expectedRevision: 1 });
-    await db.get("notes", noteId(id));
-    await db.get("notes", noteId("missing"), { expectedRevision: 1 });
-    expect(reader.guards()).toStrictEqual([
-      { table: "notes", id, expectedRevision: 1 },
-    ]);
-  });
-
-  it("refuse a mutation's guard past what its commit holds, at the read, and leave a plain query's uncapped", async () => {
-    const fixture = await storeWithNotes();
-    const ids = [
-      ...(await commit(
-        fixture,
-        Array.from({ length: commitMaxGuards }, (_, index) => ({
-          op: "insert" as const,
-          id: newRecordId(),
-          table: "notes",
-          fields: { title: `n${index}` },
-        }))
-      )),
-      await insertNote(fixture, { title: "one more" }),
-    ];
-    const assertAll = async (reader: StoreReader) => {
-      const db = dbOver(reader);
-      for (const id of ids) {
-        // oxlint-disable-next-line no-await-in-loop -- one read after the other
-        await db.get("notes", noteId(id), { expectedRevision: 1 });
-      }
-      return reader.guards().length;
-    };
-    // A mutation's reader stages writes (none yet); a query's doesn't.
-    const mutation = new StoreReader(fixture.store, fixture.scope, () => {});
-    const query = new StoreReader(fixture.store, fixture.scope);
-
-    expect({
-      mutation: await failureOf(assertAll(mutation)),
-      mutationGuards: mutation.guards().length,
-      query: await assertAll(query),
-    }).toStrictEqual({
-      mutation: { code: "data.guard_limit", details: undefined },
-      mutationGuards: commitMaxGuards,
-      query: commitMaxGuards + 1,
     });
   });
 });
@@ -382,9 +327,7 @@ describe("a query that fails", () => {
         const db = dbOver(reader);
         const count = await db.query("notes").count();
         if (runs === 1) {
-          await commit(fixture, [
-            { op: "delete", table: "notes", id, expectedRevision: 1 },
-          ]);
+          await commit(fixture, [{ op: "delete", table: "notes", id }]);
         }
         const found = await db.get("notes", noteId(id));
         if (found === null && count > 0) {
@@ -410,9 +353,7 @@ describe("generations", () => {
       return reader;
     };
     const deleted = await readerOf("notes");
-    await commit(fixture, [
-      { op: "delete", table: "notes", id, expectedRevision: 1 },
-    ]);
+    await commit(fixture, [{ op: "delete", table: "notes", id }]);
     const notes = await readerOf("notes");
     const people = await readerOf("people");
     await commit(fixture, [
@@ -453,22 +394,6 @@ describe("generations", () => {
   });
 });
 
-describe("guards, once per record", () => {
-  it("record a record read again and again once", async () => {
-    const fixture = await storeWithNotes();
-    const id = await insertNote(fixture);
-    const reader = new StoreReader(fixture.store, fixture.scope);
-    const db = dbOver(reader);
-    for (let read = 0; read < 150; read += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one read after another
-      await db.get("notes", noteId(id), { expectedRevision: 1 });
-    }
-    expect(reader.guards()).toStrictEqual([
-      { table: "notes", id, expectedRevision: 1 },
-    ]);
-  });
-});
-
 describe("a read that fails after reading", () => {
   it("still counts what it read: a caught failure and a later read across a commit rerun", async () => {
     const fixture = await storeWithNotes();
@@ -492,9 +417,7 @@ describe("a read that fails after reading", () => {
           // Two twins: not unique, caught by the handler.
         }
         if (runs === 1) {
-          await commit(fixture, [
-            { op: "delete", table: "notes", id: first, expectedRevision: 1 },
-          ]);
+          await commit(fixture, [{ op: "delete", table: "notes", id: first }]);
         }
         const count = await db.query("notes").count();
         return { unique: unique !== null, count };

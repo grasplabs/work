@@ -14,7 +14,6 @@ import { storeMaxTables } from "@grasp-os/shared/store-limits";
 import {
   cascadeJobMaxRecords,
   commitMaxCascade,
-  commitMaxGuards,
   commitMaxInputBytes,
   commitMaxWrites,
   documentMaxBytes,
@@ -187,7 +186,6 @@ describe("stores", () => {
             table: "notes",
             id,
             fields: { title: "Taken" },
-            expectedRevision: 1,
           },
         ],
       })
@@ -538,9 +536,7 @@ describe("managed fields", () => {
           commitIn(store, {
             principal: ada,
             schemaHash,
-            writes: [
-              { op: "patch", table: "notes", id, fields, expectedRevision: 1 },
-            ],
+            writes: [{ op: "patch", table: "notes", id, fields }],
           })
         ).rejects.toMatchObject({ code: "data.invalid" });
       })
@@ -556,7 +552,6 @@ describe("managed fields", () => {
             id,
             fields: {},
             unset: ["_ownerId"],
-            expectedRevision: 1,
           },
         ],
       })
@@ -581,14 +576,12 @@ describe("managed fields", () => {
           table: "notes",
           id,
           fields: { title: "Launch day" },
-          expectedRevision: 1,
         },
         {
           op: "patch",
           table: "notes",
           id,
           fields: { body: "Agenda" },
-          expectedRevision: 1,
         },
       ],
     });
@@ -625,7 +618,6 @@ describe("managed fields", () => {
           table: "notes",
           id: first,
           fields: { title: "First" },
-          expectedRevision: 1,
         },
       ],
     });
@@ -652,7 +644,6 @@ describe("managed fields", () => {
           table: "notes",
           id,
           fields: { tags: ["a", "b"], title: "Launch" },
-          expectedRevision: 1,
         },
       ],
     });
@@ -661,21 +652,14 @@ describe("managed fields", () => {
 });
 
 describe("commits", () => {
-  it("refuses a write at a stale revision, and writes nothing of its commit", async () => {
+  it("refuses a write to a record that is gone, and writes nothing of its commit", async () => {
     const store = await newStore();
-    const id = await insertNote(store);
+    const id = await insertNote(store, { title: "Edited" });
+    const gone = await insertNote(store);
     await commitIn(store, {
       principal: ada,
       schemaHash,
-      writes: [
-        {
-          op: "patch",
-          table: "notes",
-          id,
-          fields: { title: "Edited" },
-          expectedRevision: 1,
-        },
-      ],
+      writes: [{ op: "delete", table: "notes", id: gone }],
     });
 
     await expect(
@@ -693,20 +677,25 @@ describe("commits", () => {
             op: "patch",
             table: "notes",
             id,
-            fields: { title: "Stale" },
-            expectedRevision: 1,
+            fields: { title: "Kept?" },
+          },
+          {
+            op: "patch",
+            table: "notes",
+            id: gone,
+            fields: { title: "Back" },
           },
         ],
       })
     ).rejects.toMatchObject({ code: "data.conflict" });
     await expect(store.get("notes", id)).resolves.toMatchObject({
-      revision: 2,
+      revision: 1,
       fields: { title: "Edited" },
     });
     await expect(recordCount(store)).resolves.toBe(1);
   });
 
-  it("lets one of two edits from the same revision in", async () => {
+  it("lets both of two edits of one record in, each moving its revision on", async () => {
     const store = await newStore();
     const id = await insertNote(store);
     const edit = async (title: string) =>
@@ -719,59 +708,14 @@ describe("commits", () => {
             table: "notes",
             id,
             fields: { title },
-            expectedRevision: 1,
           },
         ],
       });
 
-    const results = await Promise.allSettled([edit("One"), edit("Other")]);
-    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(
-      1
-    );
-    expect(
-      results.find(
-        (result): result is PromiseRejectedResult =>
-          result.status === "rejected"
-      )?.reason
-    ).toMatchObject({ code: "data.conflict" });
+    await Promise.all([edit("One"), edit("Other")]);
     await expect(store.get("notes", id)).resolves.toMatchObject({
-      revision: 2,
+      revision: 3,
     });
-  });
-
-  it("refuses a commit whose read went stale, though it writes elsewhere", async () => {
-    const store = await newStore();
-    const read = await insertNote(store, { title: "Rate" });
-    await commitIn(store, {
-      principal: ada,
-      schemaHash,
-      writes: [
-        {
-          op: "patch",
-          table: "notes",
-          id: read,
-          fields: { title: "New rate" },
-          expectedRevision: 1,
-        },
-      ],
-    });
-
-    await expect(
-      commitIn(store, {
-        principal: ada,
-        schemaHash,
-        guards: [{ table: "notes", id: read, expectedRevision: 1 }],
-        writes: [
-          {
-            op: "insert",
-            id: newRecordId(),
-            table: "notes",
-            fields: { title: "At old rate" },
-          },
-        ],
-      })
-    ).rejects.toMatchObject({ code: "data.conflict" });
-    await expect(recordCount(store)).resolves.toBe(1);
   });
 
   it("refuses to change or delete a record that is gone", async () => {
@@ -780,20 +724,19 @@ describe("commits", () => {
     await commitIn(store, {
       principal: ada,
       schemaHash,
-      writes: [{ op: "delete", table: "notes", id, expectedRevision: 1 }],
+      writes: [{ op: "delete", table: "notes", id }],
     });
     await expect(store.get("notes", id)).resolves.toBeNull();
 
     await Promise.all(
       (
         [
-          { op: "delete", table: "notes", id, expectedRevision: 1 },
+          { op: "delete", table: "notes", id },
           {
             op: "replace",
             table: "notes",
             id,
             fields: { title: "Back" },
-            expectedRevision: 1,
           },
         ] as const
       ).map(async (write) => {
@@ -823,7 +766,6 @@ describe("commits", () => {
           id,
           fields: { title: "Launch day" },
           unset: ["summary"],
-          expectedRevision: 1,
         },
       ],
     });
@@ -842,7 +784,6 @@ describe("commits", () => {
           table: "notes",
           id,
           fields: { title: "Only" },
-          expectedRevision: 2,
         },
       ],
     });
@@ -862,7 +803,6 @@ describe("commits", () => {
             id,
             fields: { title: "Both" },
             unset: ["title"],
-            expectedRevision: 3,
           },
         ],
       })
@@ -907,7 +847,7 @@ describe("commits", () => {
     await expect(recordCount(store)).resolves.toBe(0);
   });
 
-  it(`carries at most ${commitMaxWrites} writes and ${commitMaxGuards} guards`, async () => {
+  it(`carries at most ${commitMaxWrites} writes`, async () => {
     const store = await newStore();
     const { inserted } = await commitIn(store, {
       principal: ada,
@@ -920,23 +860,6 @@ describe("commits", () => {
         principal: ada,
         schemaHash,
         writes: inserts(commitMaxWrites + 1),
-      })
-    ).rejects.toMatchObject({ code: "data.invalid" });
-
-    const guards = inserted.map((id) => ({
-      table: "notes",
-      id,
-      expectedRevision: 1,
-    }));
-    await expect(
-      commitIn(store, { principal: ada, schemaHash, guards, writes: [] })
-    ).resolves.toMatchObject({ inserted: [] });
-    await expect(
-      commitIn(store, {
-        principal: ada,
-        schemaHash,
-        guards: [...guards, ...guards.slice(0, 1)],
-        writes: [],
       })
     ).rejects.toMatchObject({ code: "data.invalid" });
     await expect(recordCount(store)).resolves.toBe(commitMaxWrites);
@@ -1013,7 +936,6 @@ describe("document size", () => {
           table: "notes",
           id,
           fields: { b: "y".repeat(b) },
-          expectedRevision: 1,
         },
       ],
     });
@@ -1048,7 +970,6 @@ describe("document size", () => {
             table: "notes",
             id,
             fields: { c: "" },
-            expectedRevision: 2,
           },
         ],
       })
@@ -1071,14 +992,12 @@ describe("document size", () => {
             table: "notes",
             id,
             fields: { b: "y".repeat(40_000) },
-            expectedRevision: 1,
           },
           {
             op: "patch",
             table: "notes",
             id,
             fields: { c: "z".repeat(40_000) },
-            expectedRevision: 1,
           },
         ],
       })
@@ -1112,7 +1031,6 @@ describe("document size", () => {
             table: "notes",
             id: full,
             fields: { c: "over" },
-            expectedRevision: 2,
           },
         ],
       })
@@ -1232,13 +1150,11 @@ describe("writes under the pinned schema's access", () => {
       table: "owned",
       id: write.id,
       fields: { title: "b" },
-      expectedRevision: 1,
     };
     const remove = {
       op: "delete" as const,
       table: "owned",
       id: write.id,
-      expectedRevision: 1,
     };
     const missing = { ...remove, id: newRecordId() };
     expect({
@@ -1330,7 +1246,6 @@ describe("a staged read", () => {
           op: "delete" as const,
           table: "notes",
           id: kept,
-          expectedRevision: 1,
         },
       ],
     };
@@ -1361,7 +1276,6 @@ describe("a staged read", () => {
         {
           _id: id,
           _ownerId: "ada",
-          _rev: 1,
           _createdAt: stagedAt,
           _updatedAt: stagedAt,
           title: "New",
@@ -1480,7 +1394,7 @@ const deleteFrom = async (
   await commitIn(store, {
     ...writer,
     schemaHash: linksHash,
-    writes: [{ op: "delete", table, id, expectedRevision: 1 }],
+    writes: [{ op: "delete", table, id }],
   });
 
 /** A schema of `notes` and `links` with fields `links`, read and written by members. */
@@ -1538,8 +1452,8 @@ describe("a store's references", () => {
       principal: ada,
       schemaHash: linksHash,
       writes: [
-        { op: "delete", table: "notes", id: second, expectedRevision: 1 },
-        { op: "delete", table: "links", id: secondLink, expectedRevision: 1 },
+        { op: "delete", table: "notes", id: second },
+        { op: "delete", table: "links", id: secondLink },
       ],
     });
     await expect(store.get("notes", second)).resolves.toBeNull();
@@ -1559,7 +1473,6 @@ describe("a store's references", () => {
           table: "links",
           id: link,
           fields: { note: second },
-          expectedRevision: 1,
         },
       ],
     });
@@ -1732,7 +1645,6 @@ describe("a store's references", () => {
           table: "links",
           id: link,
           fields: { label: "Seen" },
-          expectedRevision: 1,
         },
       ],
     });
@@ -1756,9 +1668,8 @@ describe("a store's references", () => {
             table: "links",
             id: link,
             fields,
-            expectedRevision: 1,
           },
-          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+          { op: "delete", table: "notes", id: note },
         ],
       });
     // Still referring after the rewrite: refused.
@@ -1826,7 +1737,6 @@ describe("a store's references", () => {
           table: "links",
           id: link,
           fields: { label: "Patched" },
-          expectedRevision: 1,
         },
       ],
     });
@@ -1839,7 +1749,6 @@ describe("a store's references", () => {
           table: "links",
           id: link,
           fields: { label: "Replaced" },
-          expectedRevision: 2,
         },
       ],
     });
@@ -1863,7 +1772,6 @@ describe("a store's references", () => {
                   op: "delete",
                   table: "notes",
                   id: note,
-                  expectedRevision: 1,
                 },
               ],
             })
@@ -1939,7 +1847,7 @@ const deleteNote = async (store: OpenStore, id: string): Promise<Committed> =>
     principal: ada,
     schemaHash: cascadeHash,
     roles: { appMember: true, appBuilder: false },
-    writes: [{ op: "delete", table: "notes", id, expectedRevision: 1 }],
+    writes: [{ op: "delete", table: "notes", id }],
   });
 
 /** The fields of `count` links to `note`. */
@@ -1979,14 +1887,13 @@ describe("a store's cascades", () => {
           table: "links",
           id: link,
           fields: { label: "Rolled back" },
-          expectedRevision: 1,
         },
       ],
     });
     const committed = await commitIn(store, {
       principal: ada,
       schemaHash: olderHash,
-      writes: [{ op: "delete", table: "notes", id: note, expectedRevision: 1 }],
+      writes: [{ op: "delete", table: "notes", id: note }],
     });
     expect(committed.cascaded).toStrictEqual([
       { table: "links", id: link, owner: ada.userId },
@@ -2069,8 +1976,8 @@ describe("a store's cascades", () => {
       principal: ada,
       schemaHash: cascadeHash,
       writes: [
-        { op: "delete", table: "links", id: link, expectedRevision: 1 },
-        { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+        { op: "delete", table: "links", id: link },
+        { op: "delete", table: "notes", id: note },
       ],
     });
     await expect(recordCount(store)).resolves.toBe(0);
@@ -2137,43 +2044,29 @@ describe("a store's cascades", () => {
       op: "delete",
       table: "notes",
       id: note,
-      expectedRevision: 1,
     } as const;
     await expect(
-      Promise.all([
-        // Rewritten by the commit, still referring to the note.
-        refusalOf(
-          async () =>
-            await commitIn(store, {
-              principal: ada,
-              schemaHash: cascadeHash,
-              writes: [
-                {
-                  op: "patch",
-                  table: "links",
-                  id: link,
-                  fields: { kept: note },
-                  expectedRevision: 1,
-                },
-                deleting,
-              ],
-            })
-        ),
-        // Asserted by the commit to be there at its revision.
-        refusalOf(
-          async () =>
-            await commitIn(store, {
-              principal: ada,
-              schemaHash: cascadeHash,
-              guards: [{ table: "links", id: link, expectedRevision: 1 }],
-              writes: [deleting],
-            })
-        ),
-      ])
-    ).resolves.toStrictEqual([
-      { code: "data.referenced", details: { table: "notes", id: note } },
-      { code: "data.referenced", details: { table: "notes", id: note } },
-    ]);
+      // Rewritten by the commit, still referring to the note.
+      refusalOf(
+        async () =>
+          await commitIn(store, {
+            principal: ada,
+            schemaHash: cascadeHash,
+            writes: [
+              {
+                op: "patch",
+                table: "links",
+                id: link,
+                fields: { kept: note },
+              },
+              deleting,
+            ],
+          })
+      )
+    ).resolves.toStrictEqual({
+      code: "data.referenced",
+      details: { table: "notes", id: note },
+    });
     await expect(recordCount(store)).resolves.toBe(2);
   });
 
@@ -2200,9 +2093,8 @@ describe("a store's cascades", () => {
           op: "delete" as const,
           table: "links",
           id,
-          expectedRevision: 1,
         })),
-        { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+        { op: "delete", table: "notes", id: note },
       ],
     });
     await expect(recordCount(store)).resolves.toBe(0);
@@ -2252,12 +2144,10 @@ describe("a store's cascades", () => {
         appBuilder: false,
         consumer: { resourceId: "notes-app", resourceVersion: 1 },
       },
-      { kind: "get", table: "links", id: link, expectedRevision: null },
+      { kind: "get", table: "links", id: link },
       {
         stagedAt: Date.now(),
-        writes: [
-          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
-        ],
+        writes: [{ op: "delete", table: "notes", id: note }],
       }
     );
     expect(value).toBeNull();
@@ -2503,9 +2393,7 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
         principal: ada,
         actor: { type: "person", userId: ada.userId },
         schemaHash: cascadeHash,
-        writes: [
-          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
-        ],
+        writes: [{ op: "delete", table: "notes", id: note }],
         receipt: claimed.held,
       });
     };
@@ -2568,13 +2456,10 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
           op: "patch",
           table: "links",
           id: link,
-          expectedRevision: 1,
           fields: { kept: other },
         },
       ]),
-      delete: await tried([
-        { op: "delete", table: "links", id: link, expectedRevision: 1 },
-      ]),
+      delete: await tried([{ op: "delete", table: "links", id: link }]),
       refer: await tried([
         { op: "insert", table: "links", id: newRecordId(), fields: { note } },
       ]),
@@ -2660,7 +2545,6 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
           op: "patch" as const,
           table: "subs",
           id,
-          expectedRevision: 1,
           fields: { parent: subs[(at + offset + 1) % size] ?? "" },
         })),
       });
@@ -2800,27 +2684,12 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
     const [first] = await cascadeJobsOf(store);
     // The index holds no reference to a record already gone, midway too.
     const midwayDangling = await danglingReferences(store);
-    // A sub still deleting whose parent the job deleted already, read as a
-    // guard by a commit that writes elsewhere: the commit goes through.
-    const survivor = await runInDurableObject(
-      objectOf(store.id),
-      (_instance, state) =>
-        state.storage.sql
-          .exec<{ id: string }>(
-            `SELECT r.record_id AS id FROM sdk_records r
-             JOIN sdk_tables t ON t.table_id = r.table_id AND t.name = 'subs'
-             WHERE NOT EXISTS (SELECT 1 FROM sdk_records p
-               WHERE p.record_id = json_extract(r.value_json, '$.parent'))
-             LIMIT 1`
-          )
-          .one().id
-    );
+    // A commit that writes elsewhere while the job is midway goes through.
     const guarded = await failure(
       async () =>
         await commitIn(store, {
           principal: ada,
           schemaHash: cascadeHash,
-          guards: [{ table: "subs", id: survivor, expectedRevision: 1 }],
           writes: [
             {
               op: "insert",
@@ -2957,7 +2826,6 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
               op: "patch",
               table: "links",
               id: stuckLinks[0] ?? "",
-              expectedRevision: 1,
               fields: { kept: stuck },
             },
           ],
@@ -3043,7 +2911,7 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
     const committed = await commitIn(store, {
       principal: ada,
       schemaHash: ownedHash,
-      writes: [{ op: "delete", table: "notes", id: note, expectedRevision: 1 }],
+      writes: [{ op: "delete", table: "notes", id: note }],
     });
     await cascadeDone(store);
     const logged = await allEvents();
@@ -3093,12 +2961,10 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
     // still, as its commit leaves it until the job deletes it.
     const { value: staged } = await store.read(
       reader,
-      { kind: "get", table: "links", id: link, expectedRevision: null },
+      { kind: "get", table: "links", id: link },
       {
         stagedAt: Date.now(),
-        writes: [
-          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
-        ],
+        writes: [{ op: "delete", table: "notes", id: note }],
       }
     );
     const jobsAfterPreview = await cascadeJobsOf(store);
@@ -3107,12 +2973,10 @@ describe("a store's cascade jobs", { timeout: 180_000 }, () => {
       async () =>
         await store.read(
           reader,
-          { kind: "get", table: "notes", id: other, expectedRevision: null },
+          { kind: "get", table: "notes", id: other },
           {
             stagedAt: Date.now(),
-            writes: [
-              { op: "delete", table: "notes", id: other, expectedRevision: 1 },
-            ],
+            writes: [{ op: "delete", table: "notes", id: other }],
           }
         )
     );

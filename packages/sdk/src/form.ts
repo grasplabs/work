@@ -37,10 +37,11 @@ import { readDescriptor } from "./value-read.ts";
 //   public mutation or action: its fields are its input, checked by the
 //   argument descriptor its reference carries, built with the App's server
 //   code. Core checks the submission again with the function's own
-//   validator, and what it refuses shows by the fields it names. Editing a
-//   record is this form too: `defaultValues` from the record, with its
-//   `expectedRevision` among them, so a stale save fails as `data.conflict`
-//   at the form's level.
+//   validator, and what it refuses shows by the fields it names. It sends
+//   the fields the function requires, and of its optional fields only
+//   those the person changed since the form opened or last saved, so a
+//   mutation that patches what it is sent keeps everyone else's changes
+//   to the record's other fields.
 // - `useForm(schema, { defaultValues, onSubmit })` is a local form: a
 //   native schema validates, `onSubmit` gets its normalized output (a
 //   decision's answer, which no App function takes).
@@ -394,6 +395,14 @@ export class FormBinding {
    * (no `resetOnSuccess`): saved, so not edits to guard.
    */
   #savedValues: Record<string, unknown> | undefined;
+  /**
+   * The values its last successful submission sent, whatever became of
+   * the fields after (a `reset` to the defaults included): what the
+   * record holds as far as this form knows, which an edit's optional
+   * fields are compared with. None after a submission that reset the
+   * form: the next one starts anew.
+   */
+  #lastSent: Record<string, unknown> | undefined;
 
   constructor(
     target: Target,
@@ -680,7 +689,35 @@ export class FormBinding {
       });
       return { issues: issueDetails(checked.issues) };
     }
-    return { input: checked.value };
+    return { input: this.#changed(checked.value, values) };
+  }
+
+  /**
+   * What a submission of an operation sends of `input`, normalized from
+   * `values`: every field its arguments require or fill in with a
+   * default, and an optional field only when it differs from what the
+   * last save sent (or, before one, the form's defaults), so an edit sends
+   * a patch, and one after `reset` sends what the reset put back. A local form's callback gets its whole output.
+   */
+  #changed(input: unknown, values: Record<string, unknown>): unknown {
+    const target = this.#target;
+    if (
+      target.kind !== "operation" ||
+      target.args.kind !== "object" ||
+      !isPlainObject(input)
+    ) {
+      return input;
+    }
+    const { fields } = target.args;
+    const before = this.#lastSent ?? this.initialValues;
+    return Object.fromEntries(
+      Object.entries(input).filter(
+        ([name]) =>
+          !Object.hasOwn(fields, name) ||
+          fields[name]?.presence !== "optional" ||
+          !same(values[name], before[name])
+      )
+    );
   }
 
   async #submitOnce(): Promise<unknown> {
@@ -804,6 +841,7 @@ export class FormBinding {
     // Set first: the guard `#set` tells reads it.
     this.#savedValues =
       this.#options.resetOnSuccess === true ? undefined : sentValues;
+    this.#lastSent = this.#savedValues;
     this.#set({ phase: "idle", attempted: false });
     if (this.#options.resetOnSuccess === true) {
       this.#formOf().reset(this.initialValues, { keepDefaultValues: true });

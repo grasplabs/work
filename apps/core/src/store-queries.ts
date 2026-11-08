@@ -141,7 +141,6 @@ export type ReadDocument = Record<string, unknown>;
 const managedBases: Readonly<Record<string, IndexBase>> = {
   _id: "string",
   _ownerId: "string",
-  _rev: "number",
   _createdAt: "number",
   _updatedAt: "number",
 };
@@ -525,7 +524,6 @@ const documentOf = (
 ): ReadDocument => ({
   _id: row.record_id,
   _ownerId: row.owner_id,
-  _rev: row.revision,
   _createdAt: row.created_at,
   _updatedAt: row.updated_at,
   ...projectedFields(
@@ -555,7 +553,7 @@ const scanned = (scan: Scan, bytes: number): void => {
 /**
  * Answers `request`, a record by ID, for `scope` from `pinned`: the record
  * as the pinned table has it, or null when there is none the caller may
- * see. A different `expectedRevision` on one it may see is a conflict.
+ * see.
  */
 export const readRecord = (
   sql: ReadSql,
@@ -577,18 +575,7 @@ export const readRecord = (
   if (row === undefined) {
     return null;
   }
-  // Answered even when its revision conflicts: the failure says the
-  // record is there.
   sql.answered(table.name, 1);
-  if (
-    request.expectedRevision !== null &&
-    row.revision !== request.expectedRevision
-  ) {
-    throw dataErrors.create("data.conflict", {
-      table: table.name,
-      id: request.id,
-    });
-  }
   return documentOf(table, row, row.value_json);
 };
 

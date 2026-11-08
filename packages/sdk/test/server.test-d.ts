@@ -114,24 +114,19 @@ const create = mutation({
 const update = mutation({
   args: {
     id: v.id("notes"),
-    expectedRevision: v.number().integer().min(1),
     title: noteFields.title,
     body: v.string().max(100_000),
   },
   returns: doc("notes"),
   handler: async (ctx, args) => {
-    const previous = await ctx.db.get("notes", args.id, {
-      expectedRevision: args.expectedRevision,
-    });
+    const previous = await ctx.db.get("notes", args.id);
     if (!previous) {
       throw new AppError("note.not_found", "The note is unavailable.");
     }
-    await ctx.db.patch(
-      "notes",
-      args.id,
-      { title: args.title, body: args.body },
-      { expectedRevision: args.expectedRevision }
-    );
+    await ctx.db.patch("notes", args.id, {
+      title: args.title,
+      body: args.body,
+    });
     const updated = await ctx.db.get("notes", args.id);
     if (!updated) {
       throw new AppError("note.not_found", "The note is unavailable.");
@@ -141,12 +136,10 @@ const update = mutation({
 });
 
 const remove = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  args: { id: v.id("notes") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.delete("notes", args.id, {
-      expectedRevision: args.expectedRevision,
-    });
+    await ctx.db.delete("notes", args.id);
     return null;
   },
 });
@@ -248,17 +241,16 @@ mutation({
     // @ts-expect-error -- a managed field can't be written
     await ctx.db.insert("notes", { title: "a", _ownerId: "u" });
     // @ts-expect-error -- a person's ID isn't a note's
-    await ctx.db.patch("notes", args.person, {}, { expectedRevision: 1 });
-    // @ts-expect-error -- a patch asserts the revision it expects
+    await ctx.db.patch("notes", args.person, {});
+    // A patch sets the fields it names, and nothing else.
     await ctx.db.patch("notes", args.id, { title: "b" });
     // @ts-expect-error -- a patch sets a field to its stored type
-    await ctx.db.patch("notes", args.id, { title: 1 }, { expectedRevision: 1 });
+    await ctx.db.patch("notes", args.id, { title: 1 });
     await ctx.db.patch(
       "notes",
       args.id,
       {},
       {
-        expectedRevision: 1,
         unset: ["rank"],
       }
     );
@@ -267,13 +259,12 @@ mutation({
       args.id,
       {},
       {
-        expectedRevision: 1,
         // @ts-expect-error -- only an optional field can be unset
         unset: ["body"],
       }
     );
     // @ts-expect-error -- a replacement is the whole record
-    await ctx.db.replace("notes", args.id, {}, { expectedRevision: 1 });
+    await ctx.db.replace("notes", args.id, {});
     // The App's queries run in its staged state.
     expectTypeOf(ctx.runQuery(get, { id: args.id })).resolves.toExtend<{
       title: string;
@@ -463,7 +454,6 @@ expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("notifyPeople");
 expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("workflows");
 
 // `doc` is a whole record of the pinned schema.
-expectTypeOf(doc("notes").shape._rev).toExtend<unknown>();
 // @ts-expect-error -- the schema has no such table
 doc("missing");
 

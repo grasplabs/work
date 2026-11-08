@@ -83,11 +83,7 @@ const Contact = () => {
             field: "stage",
             cell: (deal) => stages[deal.stage],
             edit: async (deal, stage) =>
-              await setStage({
-                id: deal._id,
-                expectedRevision: deal._rev,
-                stage,
-              }),
+              await setStage({ id: deal._id, stage }),
           },
           { field: "_createdAt", label: "Opened", day: true },
         ]}

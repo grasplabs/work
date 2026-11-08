@@ -73,7 +73,6 @@ const idSchema = z.string().min(1);
 const draftSchema = z
   .object({
     _id: z.string(),
-    _rev: z.number(),
     origin: z.string(),
     source: z.record(z.string(), z.unknown()),
     statements: z.array(z.record(z.string(), z.unknown())),
@@ -82,7 +81,6 @@ const draftSchema = z
 
 const summarySchema = z.object({
   id: z.string(),
-  revision: z.number(),
   origin: z.string(),
   title: z.string(),
   date: z.string(),
@@ -158,10 +156,10 @@ const draftOf = async (person: Person, app: AppId, id: string) =>
     .nullable()
     .parse(valueOf(await call(person, app, "drafts.get", "query", { id })));
 
-/** The revision of a draft as `person` opens it; undefined once it's gone. */
-const revisionOf = async (person: Person, app: AppId, id: string) => {
+/** The ID of a draft as `person` opens it; undefined once it's gone. */
+const stillThere = async (person: Person, app: AppId, id: string) => {
   const found = await draftOf(person, app, id);
-  return found?._rev;
+  return found?._id;
 };
 
 /** The sources `person` sees saved, newest first. */
@@ -300,15 +298,13 @@ describe("the intake", { timeout: 60_000 }, () => {
     const kept = valueOf(
       await call(admin, app, "drafts.keep", "mutation", {
         id,
-        expectedRevision: 1,
         ...edited,
       })
     );
-    // Kept again unchanged: still that revision, which a save asserts.
+    // Kept again, unchanged.
     const keptAgain = valueOf(
       await call(admin, app, "drafts.keep", "mutation", {
         id,
-        expectedRevision: 2,
         ...edited,
       })
     );
@@ -317,7 +313,6 @@ describe("the intake", { timeout: 60_000 }, () => {
       valueOf(
         await call(admin, app, "drafts.save", "mutation", {
           id,
-          expectedRevision: 2,
           ...edited,
         })
       )
@@ -326,11 +321,10 @@ describe("the intake", { timeout: 60_000 }, () => {
     const source = await sourceOf(admin, app, saved.source);
 
     expect({
-      listed: listed.map(({ title: shown, origin, statements, revision }) => ({
+      listed: listed.map(({ title: shown, origin, statements }) => ({
         title: shown,
         origin,
         statements,
-        revision,
       })),
       opened: opened && {
         origin: opened.origin,
@@ -358,7 +352,7 @@ describe("the intake", { timeout: 60_000 }, () => {
       draft: await draftOf(admin, app, id),
       waiting: await draftsOf(admin, app),
     }).toStrictEqual({
-      listed: [{ title, origin: "manual", statements: 2, revision: 1 }],
+      listed: [{ title, origin: "manual", statements: 2 }],
       opened: {
         origin: "manual",
         // Trimmed, as the schema keeps text.
@@ -373,8 +367,8 @@ describe("the intake", { timeout: 60_000 }, () => {
           },
         ],
       },
-      kept: 2,
-      keptAgain: 2,
+      kept: null,
+      keptAgain: null,
       // Nothing is saved before someone saves it.
       before: [],
       saved: 1,
@@ -414,7 +408,6 @@ describe("the intake", { timeout: 60_000 }, () => {
       codeOf(
         await call(admin, app, "drafts.keep", "mutation", {
           id,
-          expectedRevision: 1,
           ...draft,
           ...changed,
         })
@@ -453,13 +446,12 @@ describe("the intake", { timeout: 60_000 }, () => {
       empty: codeOf(
         await call(admin, app, "drafts.save", "mutation", {
           id,
-          expectedRevision: 1,
           ...draft,
           statements: [],
         })
       ),
       // Still there, as it was.
-      draft: await revisionOf(admin, app, id),
+      draft: await stillThere(admin, app, id),
       sources: await sourcesOf(admin, app),
     }).toStrictEqual({
       created: "intake.invalid",
@@ -470,74 +462,55 @@ describe("the intake", { timeout: 60_000 }, () => {
       untagged: "contract.invalid_args",
       tooMany: "contract.invalid_args",
       empty: "intake.no_statements",
-      draft: 1,
+      draft: id,
       sources: [],
     });
   });
 
-  it("never writes over someone else's edits, and saves a draft whole or not at all", async () => {
+  it("keeps the later of two edits of a draft, and saves or keeps nothing of one someone discarded", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await copyOf(admin);
     const draft = interview(`Raced ${unique()}`);
     const id = await created(admin, app, draft);
-    // Someone else keeps their edits first: revision 2.
-    valueOf(
+    // Someone else keeps their edits first; the later keep, from the same
+    // draft, is the one that stays.
+    const theirs = codeOf(
       await call(admin, app, "drafts.keep", "mutation", {
         id,
-        expectedRevision: 1,
         ...draft,
         statements: [draft.statements[0]],
       })
     );
-    const stale = { id, expectedRevision: 1, ...draft };
-    const kept = codeOf(
-      await call(admin, app, "drafts.keep", "mutation", stale)
+    const mine = codeOf(
+      await call(admin, app, "drafts.keep", "mutation", { id, ...draft })
     );
-    // Its source and statements are staged before the draft's delete finds
-    // the draft changed: none of them is committed.
-    const saved = codeOf(
-      await call(admin, app, "drafts.save", "mutation", stale)
-    );
+    const kept = await draftOf(admin, app, id);
+    // Someone discards it: a keep or a save of it then finds it gone.
     const discarded = codeOf(
-      await call(admin, app, "drafts.discard", "mutation", {
-        id,
-        expectedRevision: 1,
-      })
+      await call(admin, app, "drafts.discard", "mutation", { id })
     );
-    const found = await draftOf(admin, app, id);
     expect({
-      kept,
-      saved,
+      theirs,
+      mine,
+      statements: kept?.statements.length,
       discarded,
-      sources: await sourcesOf(admin, app),
-      draft: { revision: found?._rev, statements: found?.statements.length },
-    }).toStrictEqual({
-      kept: "data.conflict",
-      saved: "data.conflict",
-      discarded: "data.conflict",
-      sources: [],
-      draft: { revision: 2, statements: 1 },
-    });
-    // At its revision, it is discarded, and then there's nothing to save.
-    const discardedNow = codeOf(
-      await call(admin, app, "drafts.discard", "mutation", {
-        id,
-        expectedRevision: 2,
-      })
-    );
-    expect({
-      discarded: discardedNow,
-      draft: await draftOf(admin, app, id),
-      saved: codeOf(
-        await call(admin, app, "drafts.save", "mutation", {
-          ...stale,
-          expectedRevision: 2,
-        })
+      keptAfter: codeOf(
+        await call(admin, app, "drafts.keep", "mutation", { id, ...draft })
       ),
+      savedAfter: codeOf(
+        await call(admin, app, "drafts.save", "mutation", { id, ...draft })
+      ),
+      draft: await draftOf(admin, app, id),
+      sources: await sourcesOf(admin, app),
     }).toStrictEqual({
+      theirs: "ok",
+      mine: "ok",
+      statements: 2,
       discarded: "ok",
+      keptAfter: "data.conflict",
+      savedAfter: "intake.not_found",
       draft: null,
-      saved: "intake.not_found",
+      sources: [],
     });
   });
 
@@ -568,16 +541,13 @@ describe("the intake", { timeout: 60_000 }, () => {
         }),
         keep: await by("drafts.keep", "mutation", {
           id,
-          expectedRevision: 1,
           ...draft,
         }),
         discard: await by("drafts.discard", "mutation", {
           id,
-          expectedRevision: 1,
         }),
         save: await by("drafts.save", "mutation", {
           id,
-          expectedRevision: 1,
           ...draft,
         }),
         overview: await overviewOf(member),
@@ -594,7 +564,7 @@ describe("the intake", { timeout: 60_000 }, () => {
         ),
       },
       // Their draft, untouched.
-      draft: await revisionOf(admin, app, id),
+      draft: await stillThere(admin, app, id),
     }).toStrictEqual({
       member: {
         list: "data.access_denied",
@@ -613,7 +583,7 @@ describe("the intake", { timeout: 60_000 }, () => {
       },
       chats: { writable: true, chats: [] },
       builder: { overview: { writable: true, chats: [] }, drafts: [id] },
-      draft: 1,
+      draft: id,
     });
   });
 
@@ -628,7 +598,6 @@ describe("the intake", { timeout: 60_000 }, () => {
       valueOf(
         await call(admin, app, "drafts.save", "mutation", {
           id,
-          expectedRevision: 1,
           ...draft,
           source: long,
         })
@@ -667,17 +636,15 @@ describe("the intake", { timeout: 60_000 }, () => {
     valueOf(
       await call(admin, app, "drafts.keep", "mutation", {
         id: theirs,
-        expectedRevision: 1,
         ...draft,
         source: { ...draft.source, medium: "chat" },
       })
     );
-    const savedOf = async (id: string, expectedRevision: number) =>
+    const savedOf = async (id: string) =>
       savedSchema.parse(
         valueOf(
           await call(admin, app, "drafts.save", "mutation", {
             id,
-            expectedRevision,
             ...draft,
           })
         )
@@ -691,8 +658,8 @@ describe("the intake", { timeout: 60_000 }, () => {
         ),
       };
     };
-    const savedTheirs = await savedOf(theirs, 2);
-    const savedOurs = await savedOf(ours, 1);
+    const savedTheirs = await savedOf(theirs);
+    const savedOurs = await savedOf(ours);
     expect({
       theirs: await marks(savedTheirs),
       ours: await marks(savedOurs),
@@ -848,7 +815,6 @@ describe("reading notes", { timeout: 60_000 }, () => {
       valueOf(
         await call(admin, app, "drafts.save", "mutation", {
           id: draft,
-          expectedRevision: 1,
           source: opened?.source,
           // Reviewed: the second statement loses its blocker tag.
           statements: [
@@ -1020,7 +986,6 @@ describe("stakeholder chats", { timeout: 90_000 }, () => {
       valueOf(
         await call(admin, app, "drafts.save", "mutation", {
           id: draftId,
-          expectedRevision: 1,
           source: opened?.source,
           statements: opened?.statements,
         })

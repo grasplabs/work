@@ -67,51 +67,34 @@ describe("the session client", { timeout: 120_000 }, () => {
       _id: id,
       title: "Launch",
       body: "",
-      _rev: 1,
     });
     const edited = await client.mutation(api.update, {
       id,
-      expectedRevision: 1,
       title: "Launch plan",
       body: "Ship it",
     });
     expect(edited).toMatchObject({
       title: "Launch plan",
       body: "Ship it",
-      _rev: 2,
     });
     await expect(titles(client, api)).resolves.toStrictEqual(["Launch plan"]);
-    await expect(
-      client.mutation(api.remove, { id, expectedRevision: 2 })
-    ).resolves.toBeNull();
+    await expect(client.mutation(api.remove, { id })).resolves.toBeNull();
     // Null is the query's own answer for a note that isn't there.
     await expect(client.query(api.get, { id })).resolves.toBeNull();
   });
 
-  it("rejects a stale revision with data.conflict, and an App's own failure as it threw it", async () => {
+  it("rejects a change of a record that is gone with data.conflict", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const { client } = clientFor(opened);
     const id = await client.mutation(api.create, { title: "Draft" });
-    await client.mutation(api.update, {
-      id,
-      expectedRevision: 1,
-      title: "Theirs",
-      body: "",
-    });
+    await client.mutation(api.remove, { id });
     await expect(
-      failureOf(
-        client.mutation(api.update, {
-          id,
-          expectedRevision: 1,
-          title: "Mine",
-          body: "",
-        })
-      )
+      failureOf(client.mutation(api.remove, { id }))
     ).resolves.toMatchObject({ code: "data.conflict", category: "domain" });
-    await expect(client.query(api.get, { id })).resolves.toMatchObject({
-      title: "Theirs",
-    });
+    await expect(
+      failureOf(client.mutation(api.update, { id, title: "Mine", body: "" }))
+    ).resolves.toMatchObject({ code: "data.conflict", category: "domain" });
   });
 
   it("recovers a mutation whose answer was lost from its receipt, saving it once", async () => {
@@ -821,7 +804,7 @@ const searchSchema = v.object({ search: v.string().trim().min(1) });
 export function Editor({ note }: { note: Note }) {
   const create = useForm(api.notes.create, { defaultValues: { title: "", body: "" }, resetOnSuccess: true });
   const edit = useForm(api.notes.update, {
-    defaultValues: { id: note._id, expectedRevision: note._rev, title: note.title, body: note.body },
+    defaultValues: { id: note._id, title: note.title, body: note.body },
   });
   const search = useForm(searchSchema, { defaultValues: { search: "" }, onSubmit: (values) => values.search });
   return (

@@ -68,7 +68,6 @@ const stored: WorkflowRecord = {
 
 const workflow: Workflow = {
   id: idOf<"workflows">("workflow-1"),
-  revision: 3,
   version: 3,
   record: stored,
   body: "Pay what we owe.",

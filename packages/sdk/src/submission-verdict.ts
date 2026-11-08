@@ -71,14 +71,16 @@ const ranNothing = (settled: Settled, isAction: boolean): boolean =>
  * Whether, after `settled`, what the App's queries show may be out of
  * date: a confirmed change; an action's failure after a step, or its lost
  * answer, which undoes none of what it committed (its queries are read
- * again, the action itself is never run again); or records that moved on since this
- * client read them (`data.conflict`), so a form edited from them gets the
- * record as it is now.
+ * again, the action itself is never run again); or a record that is gone since this
+ * client read it (`data.conflict`), or preferences someone changed since
+ * (`data.preferences_changed`), so a page shows them as they are now.
  */
 export const showsStale = (settled: Settled, isAction: boolean): boolean =>
   settled.kind === "value" ||
   (isAction && !ranNothing(settled, isAction)) ||
-  (settled.kind === "failed" && settled.error.code === "data.conflict");
+  (settled.kind === "failed" &&
+    (settled.error.code === "data.conflict" ||
+      settled.error.code === "data.preferences_changed"));
 
 /**
  * Where a key left unknown is remembered: by function and key, as the

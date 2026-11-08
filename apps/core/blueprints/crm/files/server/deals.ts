@@ -58,17 +58,11 @@ export const add = mutation({
 export const setStage = mutation({
   args: {
     id: v.id("deals"),
-    expectedRevision: v.number().integer().min(1),
     stage,
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.patch(
-      "deals",
-      args.id,
-      { stage: args.stage },
-      { expectedRevision: args.expectedRevision }
-    );
+    await ctx.db.patch("deals", args.id, { stage: args.stage });
     return null;
   },
 });

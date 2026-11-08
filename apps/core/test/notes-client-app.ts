@@ -58,13 +58,12 @@ export const create = mutation({
 export const update = mutation({
   args: {
     id: v.id("notes"),
-    expectedRevision: v.number().integer().min(1),
     title: noteFields.title,
     body: v.string().max(100_000),
   },
   returns: doc("notes"),
   handler: async (ctx, args) => {
-    await ctx.db.patch("notes", args.id, { title: args.title, body: args.body }, { expectedRevision: args.expectedRevision });
+    await ctx.db.patch("notes", args.id, { title: args.title, body: args.body });
     const updated = await ctx.db.get("notes", args.id);
     if (!updated) {
       throw new AppError("note.not_found", "The note is unavailable.");
@@ -74,10 +73,10 @@ export const update = mutation({
 });
 
 export const remove = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  args: { id: v.id("notes") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.delete("notes", args.id, { expectedRevision: args.expectedRevision });
+    await ctx.db.delete("notes", args.id);
     return null;
   },
 });
@@ -218,7 +217,6 @@ export const noteFields = {
 /** A note as the App's queries return it. */
 export interface Note {
   _id: Id<"notes">;
-  _rev: number;
   _createdAt: number;
   _updatedAt: number;
   _ownerId: string;
@@ -276,15 +274,14 @@ export const apiOf = (release: Release) => ({
     "mutation"
   >(release, "notes.create"),
   update: referenceTo<
-    { id: Id<"notes">; expectedRevision: number; title: string; body: string },
+    { id: Id<"notes">; title: string; body: string },
     Note,
     "mutation"
   >(release, "notes.update"),
-  remove: referenceTo<
-    { id: Id<"notes">; expectedRevision: number },
-    null,
-    "mutation"
-  >(release, "notes.remove"),
+  remove: referenceTo<{ id: Id<"notes"> }, null, "mutation">(
+    release,
+    "notes.remove"
+  ),
   echo: referenceTo<{ word?: string }, string, "action">(release, "notes.echo"),
   stamp: referenceTo<
     { title: string; pauseMs?: number; untilRevoked?: boolean },

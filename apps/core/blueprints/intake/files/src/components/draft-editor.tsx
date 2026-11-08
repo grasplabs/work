@@ -127,7 +127,7 @@ export interface Saved {
 
 /** What an action ends in, for the page that holds the editor. */
 export type EditorResult =
-  /** Kept, at its new revision; `problem` when saving it then failed. */
+  /** Kept; `problem` when saving it then failed. */
   | { kind: "kept"; opened: OpenedDraft; problem?: string }
   | { kind: "saved"; saved: Saved }
   | { kind: "discarded" };
@@ -136,9 +136,8 @@ export type EditorResult =
  * A draft, reviewed and edited before it is saved: a new one (`opened`
  * null) or one kept earlier. Saving writes its source and statements and
  * drops the draft, in one commit; keeping stores the edits for later;
- * discarding drops it. Each sends the revision it was opened at, so
- * nobody's edits are written over (`data.conflict`). Nothing can be
- * edited while an action is on its way, so none is lost when it ends.
+ * discarding drops it. Nothing can be edited while an action is on its
+ * way, so none is lost when it ends.
  */
 export const DraftEditor = ({
   opened,
@@ -182,7 +181,7 @@ export const DraftEditor = ({
         (id) => {
           onResult({
             kind: "kept",
-            opened: { id, revision: 1, origin: "manual", draft },
+            opened: { id, origin: "manual", draft },
           });
         }
       );
@@ -190,16 +189,9 @@ export const DraftEditor = ({
     }
     await run(
       async () =>
-        await settle(
-          async () =>
-            await keepDraft({
-              id: opened.id,
-              expectedRevision: opened.revision,
-              ...draft,
-            })
-        ),
-      (revision) => {
-        onResult({ kind: "kept", opened: { ...opened, revision, draft } });
+        await settle(async () => await keepDraft({ id: opened.id, ...draft })),
+      () => {
+        onResult({ kind: "kept", opened: { ...opened, draft } });
       }
     );
   };
@@ -209,12 +201,7 @@ export const DraftEditor = ({
       await run(
         async () =>
           await settle(
-            async () =>
-              await saveDraft({
-                id: opened.id,
-                expectedRevision: opened.revision,
-                ...draft,
-              })
+            async () => await saveDraft({ id: opened.id, ...draft })
           ),
         (saved) => {
           onResult({ kind: "saved", saved });
@@ -227,13 +214,11 @@ export const DraftEditor = ({
     await run(
       async () => await settle(async () => await create(draft)),
       async (id) => {
-        const kept: OpenedDraft = { id, revision: 1, origin: "manual", draft };
+        const kept: OpenedDraft = { id, origin: "manual", draft };
         const answer = await whilePending(
           setBusy,
           async () =>
-            await settle(
-              async () => await saveDraft({ id, expectedRevision: 1, ...draft })
-            )
+            await settle(async () => await saveDraft({ id, ...draft }))
         );
         if ("error" in answer) {
           onResult({
@@ -255,13 +240,7 @@ export const DraftEditor = ({
     }
     await run(
       async () =>
-        await settle(
-          async () =>
-            await discardDraft({
-              id: opened.id,
-              expectedRevision: opened.revision,
-            })
-        ),
+        await settle(async () => await discardDraft({ id: opened.id })),
       () => {
         onResult({ kind: "discarded" });
       }

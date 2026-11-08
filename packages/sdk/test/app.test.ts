@@ -926,7 +926,7 @@ describe("ctx.db for writing", () => {
     ]);
   });
 
-  test("a write without its expected revision is refused before the host", async () => {
+  test("a write with options it doesn't take is refused before the host", async () => {
     const db = databaseWriter(
       schema,
       async () => await Promise.resolve(null),
@@ -934,13 +934,19 @@ describe("ctx.db for writing", () => {
     );
     // SAFETY: deliberately ill-typed views, for calls the types refuse.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const loosePatch = db.patch as (...args: unknown[]) => Promise<void>;
+    // SAFETY: as above.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     const looseDelete = db.delete as (...args: unknown[]) => Promise<void>;
     // SAFETY: as above.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     const looseInsert = db.insert as (...args: unknown[]) => Promise<unknown>;
-    await expect(looseDelete("notes", "n", {})).rejects.toThrow(
-      "expectedRevision"
-    );
+    await expect(
+      loosePatch("notes", "n", {}, { expectedRevision: 1 })
+    ).rejects.toThrow("{ unset }");
+    await expect(
+      looseDelete("notes", "n", { expectedRevision: 1 })
+    ).rejects.toThrow("takes no options");
     await expect(looseInsert("missing", { title: "a" })).rejects.toThrow(
       "no such table"
     );

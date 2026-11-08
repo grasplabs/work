@@ -308,9 +308,9 @@ describe("receipts", () => {
           {
             op: "patch",
             table: "notes",
-            id,
+            // A record that isn't there: the commit conflicts.
+            id: newRecordId(),
             fields: { title: "X" },
-            expectedRevision: 2,
           },
         ],
       })
@@ -326,6 +326,7 @@ describe("receipts", () => {
     const {
       inserted: [id = ""],
     } = await store.commit(insertOf(setup, "Rate"));
+    const read = await store.generations(["notes"]);
     const check = async (key: string) =>
       await store.commit({
         principal: { userId: "ada" },
@@ -334,7 +335,7 @@ describe("receipts", () => {
         stagedAt: Date.now(),
         schemaHash,
         receipt: heldBy(await store.claim(await claimOf(key, { id }))),
-        guards: [{ table: "notes", id, expectedRevision: 1 }],
+        readSet: read,
         writes: [],
       });
 
@@ -358,12 +359,11 @@ describe("receipts", () => {
           table: "notes",
           id,
           fields: { title: "New" },
-          expectedRevision: 1,
         },
       ],
     });
     await expect(check("stale")).rejects.toMatchObject({
-      code: "data.conflict",
+      code: "data.reads_changed",
     });
   });
 
@@ -498,7 +498,15 @@ describe("outbox", () => {
         store,
         insertOf(failing, "Lost", {
           intents: [{ kind: "workflow.start", data: { run: "r3" } }],
-          guards: [{ table: "notes", id: "gone", expectedRevision: 1 }],
+          writes: [
+            {
+              op: "insert",
+              id: newRecordId(),
+              table: "notes",
+              fields: { title: "Lost" },
+            },
+            { op: "delete", table: "notes", id: newRecordId() },
+          ],
         }),
         consumers
       )

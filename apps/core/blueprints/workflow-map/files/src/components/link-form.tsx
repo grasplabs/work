@@ -44,7 +44,6 @@ export const LinkForm = ({
       async () =>
         await linkWorkflow({
           id: workflow.id,
-          expectedRevision: workflow.revision,
           app: { appId: appId.trim(), workflowId: workflowId.trim() },
         })
     );

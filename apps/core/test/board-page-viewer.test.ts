@@ -12,15 +12,15 @@ import { viewer } from "../blueprints/workflow-map/files/src/components/viewer.t
 // store's answers released in the order each test needs. What can go
 // wrong: a late answer shows a snapshot the person moved away from; a
 // failed open leaves the page acting on a snapshot it doesn't show, so a
-// save no longer refreshes the one shown and the next save conflicts.
+// save no longer refreshes the one shown.
 
-const snapshot = (id: string, revision: number): Snapshot => ({
+const snapshot = (id: string, version: number): Snapshot => ({
   // SAFETY: a test's ID; the viewer only compares it.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   id: id as Id<"snapshots">,
-  revision,
   record: {},
-  body: "",
+  // Which save of it this is, for the test to tell them apart.
+  body: String(version),
 });
 
 /** A server whose answers wait until the test releases them. */
@@ -50,8 +50,8 @@ const server = () => {
 const watched = (load: (id: string) => Promise<Outcome<Snapshot>>) => {
   const seen: string[] = [];
   const to = {
-    show: ({ id, revision }: Snapshot) => {
-      seen.push(`${id}@${revision}`);
+    show: ({ id, body }: Snapshot) => {
+      seen.push(`${id}@${body}`);
     },
     refuse: (code: string) => {
       seen.push(code);

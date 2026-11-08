@@ -90,7 +90,7 @@ export const rename = mutation({
   args: { id: v.id("deals"), title: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.patch("deals", args.id, { title: args.title }, { expectedRevision: 1 });
+    await ctx.db.patch("deals", args.id, { title: args.title });
     return null;
   },
 });

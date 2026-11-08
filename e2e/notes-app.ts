@@ -51,17 +51,17 @@ export const create = mutation({
   handler: async (ctx, args) => await ctx.db.insert("notes", args),
 });
 
+/** Saves what someone changed of a note, and only that. */
 export const update = mutation({
   args: {
     id: v.id("notes"),
-    expectedRevision: v.number().integer().min(1),
-    title: noteFields.title,
-    body: v.string().max(100_000),
+    title: noteFields.title.optional(),
+    body: v.string().max(100_000).optional(),
   },
   returns: doc("notes"),
-  handler: async (ctx, args) => {
-    await ctx.db.patch("notes", args.id, { title: args.title, body: args.body }, { expectedRevision: args.expectedRevision });
-    const updated = await ctx.db.get("notes", args.id);
+  handler: async (ctx, { id, ...changed }) => {
+    await ctx.db.patch("notes", id, changed);
+    const updated = await ctx.db.get("notes", id);
     if (!updated) {
       throw new AppError("note.not_found", "The note is unavailable.");
     }
@@ -90,27 +90,27 @@ export const importHalfway = action({
 });
 
 export const remove = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  args: { id: v.id("notes") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.delete("notes", args.id, { expectedRevision: args.expectedRevision });
+    await ctx.db.delete("notes", args.id);
     return null;
   },
 });
 
-/** Attaches an uploaded file to a note, at the revision it was read (spec 32.5). */
+/** Attaches an uploaded file to a note (spec 32.5). */
 export const attachFile = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1), file: v.file() },
+  args: { id: v.id("notes"), file: v.file() },
   returns: doc("notes"),
   handler: async (ctx, args) => {
-    const note = await ctx.db.get("notes", args.id, { expectedRevision: args.expectedRevision });
+    const note = await ctx.db.get("notes", args.id);
     if (!note) {
       throw new AppError("note.not_found", "The note is unavailable.");
     }
     if (note.attachments.some((file) => file.id === args.file.id)) {
       return note;
     }
-    await ctx.db.patch("notes", args.id, { attachments: [...note.attachments, args.file] }, { expectedRevision: args.expectedRevision });
+    await ctx.db.patch("notes", args.id, { attachments: [...note.attachments, args.file] });
     const updated = await ctx.db.get("notes", args.id);
     if (!updated) {
       throw new AppError("note.not_found", "The note is unavailable.");
@@ -119,16 +119,16 @@ export const attachFile = mutation({
   },
 });
 
-/** Takes a file off a note, at the revision it was read. */
+/** Takes a file off a note. */
 export const detachFile = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1), file: v.file() },
+  args: { id: v.id("notes"), file: v.file() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const note = await ctx.db.get("notes", args.id, { expectedRevision: args.expectedRevision });
+    const note = await ctx.db.get("notes", args.id);
     if (!note) {
       throw new AppError("note.not_found", "The note is unavailable.");
     }
-    await ctx.db.patch("notes", args.id, { attachments: note.attachments.filter((file) => file.id !== args.file.id) }, { expectedRevision: args.expectedRevision });
+    await ctx.db.patch("notes", args.id, { attachments: note.attachments.filter((file) => file.id !== args.file.id) });
     return null;
   },
 });
@@ -165,7 +165,7 @@ function Attachment({
   }
   const remove = async () => {
     try {
-      await detach({ id: note._id, expectedRevision: note._rev, file });
+      await detach({ id: note._id, file });
     } catch (error) {
       onOutcome(\`Not removed: \${error instanceof GraspError ? error.message : "it failed"}\`);
       return;
@@ -205,8 +205,8 @@ function Attachment({
 }
 
 /**
- * A note's files: one uploaded at a time, then attached at the revision
- * the note was read, each shown with its preview.
+ * A note's files: one uploaded at a time, then attached, each shown with
+ * its preview.
  */
 export function Attachments({ note }: { note: Note }) {
   const upload = useUpload(permissions.files);
@@ -215,7 +215,7 @@ export function Attachments({ note }: { note: Note }) {
   const send = async (picked: File) => {
     try {
       const file = await upload.upload(picked);
-      await attach({ id: note._id, expectedRevision: note._rev, file });
+      await attach({ id: note._id, file });
       setOutcome(\`Attached \${picked.name}.\`);
     } catch (error) {
       setOutcome(error instanceof GraspError ? error.message : "The file couldn't be attached.");
@@ -274,82 +274,33 @@ export function CreateNote() {
 
 const noteEditor = `import type { ReturnOf } from "@grasp-os/sdk";
 import { useForm } from "@grasp-os/sdk/react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@grasp-os/ui/components/alert-dialog";
-import { Button } from "@grasp-os/ui/components/button";
 import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
-import { useState } from "react";
 import { api } from "@server/_generated/api";
 
 export type Note = NonNullable<ReturnOf<typeof api.notes.get>>;
 
 /**
- * One note, edited with explicit Save from the version it opened at: its
- * revision goes with the save, so a save someone else's overtook fails as
- * \`data.conflict\` and keeps what the person typed until they choose to
- * load the latest version. Saved, it opens again on the note it saved.
+ * One note, edited with explicit Save: the form sends only the fields the
+ * person changed, so someone else's save of the note's other field stays.
+ * Saved, it opens again on the note it saved.
  */
 export function NoteEditor({
   note,
   onSaved,
-  onReload,
 }: {
   note: Note;
   onSaved: (saved: Note) => void;
-  onReload: () => void;
 }) {
   const form = useForm(api.notes.update, {
-    defaultValues: {
-      id: note._id,
-      expectedRevision: note._rev,
-      title: note.title,
-      body: note.body,
-    },
+    defaultValues: { id: note._id, title: note.title, body: note.body },
     onSuccess: onSaved,
   });
-  const [confirming, setConfirming] = useState(false);
   return (
     <Form aria-label="Edit note" form={form}>
       <TextField form={form} label="Title" name="title" />
       <TextareaField form={form} label="Body" name="body" />
       <FormError form={form} />
-      <div className="flex gap-2">
-        <SubmitButton form={form}>Save changes</SubmitButton>
-        <AlertDialog onOpenChange={setConfirming} open={confirming}>
-          <AlertDialogTrigger render={<Button variant="outline" />}>
-            Load the latest version
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Discard your changes?</AlertDialogTitle>
-              <AlertDialogDescription>
-                What you changed in this note and haven't saved is lost, and its latest version shows instead.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Keep editing</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={() => {
-                  setConfirming(false);
-                  onReload();
-                }}
-                variant="destructive"
-              >
-                Discard and load
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
+      <SubmitButton form={form}>Save changes</SubmitButton>
     </Form>
   );
 }
@@ -370,9 +321,9 @@ import type { Note } from "../components/note-editor.tsx";
 /** The note chosen, loaded live; null is a note that is gone. */
 function SelectedNote({ id }: { id: Id<"notes"> }) {
   const note = useQuery(api.notes.get, { id });
-  // Saving, or loading the latest version, opens the editor afresh: from
-  // the note it saved, or the note as it is now, whichever is newer, as the
-  // live note may not have caught up with a save yet.
+  // Saving opens the editor afresh: from the note it saved, or the note as
+  // it is now, whichever is newer, as the live note may not have caught up
+  // with a save yet.
   const [opened, setOpened] = useState<{ loads: number; saved: Note | null }>({
     loads: 0,
     saved: null,
@@ -384,14 +335,13 @@ function SelectedNote({ id }: { id: Id<"notes"> }) {
     return <p>This note is gone.</p>;
   }
   const { saved } = opened;
-  const from = saved !== null && saved._rev > note._rev ? saved : note;
+  const from = saved !== null && saved._updatedAt > note._updatedAt ? saved : note;
   // A note chosen anew is a new editor: what was typed never carries over.
   return (
     <>
       <NoteEditor
         key={\`\${note._id}:\${opened.loads}\`}
         note={from}
-        onReload={() => setOpened(({ loads }) => ({ loads: loads + 1, saved: null }))}
         onSaved={(next) => setOpened(({ loads }) => ({ loads: loads + 1, saved: next }))}
       />
       <Attachments note={note} />
@@ -429,7 +379,7 @@ function Notes() {
                 Edit {note.title}
               </Button>
               <Button
-                onClick={() => void remove({ id: note._id, expectedRevision: note._rev })}
+                onClick={() => void remove({ id: note._id })}
                 variant="outline"
               >
                 Delete {note.title}

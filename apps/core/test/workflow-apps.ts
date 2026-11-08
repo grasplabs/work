@@ -80,7 +80,7 @@ export const bump = mutation({
       await ctx.db.insert("counters", { name: args.name, count: 1 });
       return 1;
     }
-    await ctx.db.patch("counters", row._id, { count: row.count + 1 }, { expectedRevision: row._rev });
+    await ctx.db.patch("counters", row._id, { count: row.count + 1 });
     return row.count + 1;
   },
 });

@@ -89,24 +89,19 @@ const create = mutation({
 const update = mutation({
   args: {
     id: v.id("notes"),
-    expectedRevision: v.number().integer().min(1),
     title: noteFields.title,
     body: v.string().max(100_000),
   },
   returns: doc("notes"),
   handler: async (ctx, args) => {
-    const previous = await ctx.db.get("notes", args.id, {
-      expectedRevision: args.expectedRevision,
-    });
+    const previous = await ctx.db.get("notes", args.id);
     if (!previous) {
       throw new AppError("note.not_found", "The note is unavailable.");
     }
-    await ctx.db.patch(
-      "notes",
-      args.id,
-      { title: args.title, body: args.body },
-      { expectedRevision: args.expectedRevision }
-    );
+    await ctx.db.patch("notes", args.id, {
+      title: args.title,
+      body: args.body,
+    });
     const updated = await ctx.db.get("notes", args.id);
     if (!updated) {
       throw new AppError("note.not_found", "The note is unavailable.");
@@ -116,12 +111,10 @@ const update = mutation({
 });
 
 const remove = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  args: { id: v.id("notes") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.delete("notes", args.id, {
-      expectedRevision: args.expectedRevision,
-    });
+    await ctx.db.delete("notes", args.id);
     return null;
   },
 });
@@ -206,17 +199,6 @@ const stress = mutation({
   },
 });
 
-/** Inserts a note, then reads it asserting the revision a new one has. */
-const insertThenGuard = mutation({
-  args: { title: noteFields.title },
-  returns: v.number(),
-  handler: async (ctx, args) => {
-    const id = await ctx.db.insert("notes", args);
-    const note = await ctx.db.get("notes", id, { expectedRevision: 1 });
-    return note?._rev ?? 0;
-  },
-});
-
 /** Returns a string of `size` characters. */
 const echo = mutation({
   args: { size: v.number().integer().min(0).max(1_000_000) },
@@ -234,31 +216,6 @@ const repeated = query({
   handler: (_ctx, args) => args.unit.repeat(args.count),
 });
 
-/**
- * Patches a note, reads it back (at the revision its staged change shows),
- * and patches it again at that revision: one commit, one revision more.
- */
-const editTwice = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
-  returns: v.number(),
-  handler: async (ctx, args) => {
-    await ctx.db.patch(
-      "notes",
-      args.id,
-      { title: "first" },
-      { expectedRevision: args.expectedRevision }
-    );
-    const staged = await ctx.db.get("notes", args.id);
-    await ctx.db.patch(
-      "notes",
-      args.id,
-      { body: "second" },
-      { expectedRevision: staged?._rev ?? 0 }
-    );
-    return staged?._rev ?? 0;
-  },
-});
-
 /** Takes the first title off its arguments, then inserts a note of it. */
 const takeFirst = mutation({
   args: { titles: v.array(noteFields.title).min(1) },
@@ -268,27 +225,6 @@ const takeFirst = mutation({
     await ctx.db.insert("notes", { title });
     await ctx.db.query("notes").first();
     return title;
-  },
-});
-
-/**
- * Reads note `id` asserting its revision, falling back to inserting
- * another note when the assertion fails.
- */
-const guardedOrFallback = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
-  returns: v.string(),
-  handler: async (ctx, args) => {
-    try {
-      await ctx.db.get("notes", args.id, {
-        expectedRevision: args.expectedRevision,
-      });
-    } catch {
-      await ctx.db.insert("notes", { title: "fallback" });
-      return "fallback";
-    }
-    await ctx.db.query("notes").first();
-    return "guarded";
   },
 });
 
@@ -327,7 +263,7 @@ const assertMany = mutation({
   handler: async (ctx, args) => {
     for (const id of args.ids) {
       // oxlint-disable-next-line no-await-in-loop -- one read after the other
-      await ctx.db.get("notes", id, { expectedRevision: 1 });
+      await ctx.db.get("notes", id);
     }
     return args.ids.length;
   },
@@ -359,12 +295,9 @@ const notesFunctions = {
   ledgerSize,
   stress,
   readPastThenWrite,
-  insertThenGuard,
   echo,
   repeated,
-  editTwice,
   takeFirst,
-  guardedOrFallback,
   readTimes,
   floatingBadWrite,
   assertMany,
@@ -616,7 +549,6 @@ describe("the Notes operations", () => {
     expect(created).toMatchObject({
       _id: id,
       _ownerId: owner.userId,
-      _rev: 1,
       title: "Launch",
       body: "",
       summary: null,
@@ -625,7 +557,6 @@ describe("the Notes operations", () => {
     const updated = valueOf(
       await call(fixture, owner, "mutation", "notes.update", {
         id,
-        expectedRevision: 1,
         title: "Launch day",
         body: "Agenda",
       })
@@ -636,7 +567,6 @@ describe("the Notes operations", () => {
     );
     expect(updated).toStrictEqual(read);
     expect(read).toMatchObject({
-      _rev: 2,
       title: "Launch day",
       body: "Agenda",
     });
@@ -663,7 +593,6 @@ describe("the Notes operations", () => {
     const removed = valueOf(
       await call(fixture, owner, "mutation", "notes.remove", {
         id,
-        expectedRevision: 2,
       })
     );
     expect({
@@ -675,7 +604,7 @@ describe("the Notes operations", () => {
     }).toStrictEqual({ listed: [second, id], removed: null, afterwards: null });
   });
 
-  it("refuses a stale edit, and a missing note, as domain failures that change nothing", async () => {
+  it("refuses an edit of a missing note as a domain failure that changes nothing", async () => {
     const fixture = await notes();
     const { owner } = fixture;
     const id = idOf(
@@ -685,23 +614,11 @@ describe("the Notes operations", () => {
         })
       )
     );
-    const stale = await call(fixture, owner, "mutation", "notes.update", {
-      id,
-      expectedRevision: 3,
-      title: "X",
-      body: "",
-    });
-    expect(stale).toMatchObject({
-      ok: false,
-      error: { code: "data.conflict", category: "domain", retryable: false },
-    });
     await call(fixture, owner, "mutation", "notes.remove", {
       id,
-      expectedRevision: 1,
     });
     const missing = await call(fixture, owner, "mutation", "notes.update", {
       id,
-      expectedRevision: 1,
       title: "X",
       body: "",
     });
@@ -788,7 +705,7 @@ describe("a mutation's commit", () => {
         owner,
         "mutation",
         "notes.update",
-        { id, expectedRevision: 1, title: "b", body: "" },
+        { id, title: "b", body: "" },
         { run }
       )
     );
@@ -1064,29 +981,6 @@ describe("contracts", () => {
 });
 
 describe("a mutation's own staged state", () => {
-  it("lets a later write assert the revision an earlier one's staged read showed", async () => {
-    const fixture = await notes();
-    const { owner } = fixture;
-    const id = idOf(
-      valueOf(
-        await call(fixture, owner, "mutation", "notes.create", { title: "t" })
-      )
-    );
-    const shown = valueOf(
-      await call(fixture, owner, "mutation", "notes.editTwice", {
-        id,
-        expectedRevision: 1,
-      })
-    );
-    expect({
-      shown,
-      stored: valueOf(await call(fixture, owner, "query", "notes.get", { id })),
-    }).toMatchObject({
-      shown: 2,
-      stored: { _rev: 2, title: "first", body: "second" },
-    });
-  });
-
   it("gives every run its arguments as admitted, whatever an earlier run did to them", async () => {
     const fixture = await notes();
     const { owner } = fixture;
@@ -1128,51 +1022,6 @@ describe("a mutation's own staged state", () => {
       runs: 2,
       taken: "first",
       titles: ["first", "meanwhile"],
-    });
-  });
-
-  it("refuses a stale guard at once, never running again to a fallback", async () => {
-    const fixture = await notes();
-    const { owner } = fixture;
-    const id = idOf(
-      valueOf(
-        await call(fixture, owner, "mutation", "notes.create", { title: "t" })
-      )
-    );
-    let runs = 0;
-    // Another caller changes the guarded record after the first run read it.
-    const run: Runner = async (path, args, channel) => {
-      runs += 1;
-      const answer = await runFunction(notesApp, path, args, channel);
-      if (runs === 1) {
-        await call(fixture, owner, "mutation", "notes.update", {
-          id,
-          expectedRevision: 1,
-          title: "changed",
-          body: "",
-        });
-      }
-      return answer;
-    };
-    const result = await call(
-      fixture,
-      owner,
-      "mutation",
-      "notes.guardedOrFallback",
-      { id, expectedRevision: 1 },
-      { run }
-    );
-    const page = valueOf(
-      await call(fixture, owner, "query", "notes.list", { pagination: {} })
-    );
-    expect({
-      code: codeOf(result),
-      runs,
-      stored: idsOf(page).length,
-    }).toStrictEqual({
-      code: "data.conflict",
-      runs: 1,
-      stored: 1,
     });
   });
 });
@@ -1260,9 +1109,7 @@ describe("audit follow-ups", () => {
     });
   });
 
-  // The guard limit itself is held at the read (store-reader.test.ts): a
-  // mutation's host calls end before a commit's guards would.
-  it("lets a mutation assert as many revisions as a commit holds, and its host calls end there", async () => {
+  it("ends a mutation's reads by ID at its host call bound", async () => {
     const fixture = await notes();
     const { owner } = fixture;
     const ids = await Promise.all(
@@ -1399,23 +1246,6 @@ describe("bounds on one mutation", () => {
     });
   });
 
-  it("reads back a record it inserted with the revision a new record has", async () => {
-    const fixture = await notes();
-    expect(
-      valueOf(
-        await call(
-          fixture,
-          fixture.owner,
-          "mutation",
-          "notes.insertThenGuard",
-          {
-            title: "New",
-          }
-        )
-      )
-    ).toBe(1);
-  });
-
   it("answers a retry across App upgrades with the original outcome, whether or not they changed the function's contract", async () => {
     const fixture = await notes();
     const { owner } = fixture;
@@ -1481,7 +1311,7 @@ describe("App code misusing its channel", () => {
       owner,
       "mutation",
       "notes.remove",
-      { id: "0190a0a0-0000-7000-8000-000000000000", expectedRevision: 1 },
+      { id: "0190a0a0-0000-7000-8000-000000000000" },
       {
         run: misusing(
           async (channel) =>
@@ -1535,7 +1365,7 @@ describe("App code misusing its channel", () => {
       );
     };
     const forged = await thrown(
-      Object.assign(new Error("The record changed"), { code: "data.conflict" })
+      Object.assign(new Error("The record is gone"), { code: "data.conflict" })
     );
     const sql = await thrown(
       new Error("SQLITE_ERROR: no such column: secret_token near SELECT")
@@ -1565,14 +1395,13 @@ describe("App code misusing its channel", () => {
       owner,
       "mutation",
       "notes.remove",
-      { id: "0190a0a0-0000-7000-8000-000000000000", expectedRevision: 1 },
+      { id: "0190a0a0-0000-7000-8000-000000000000" },
       {
         run: async (_path, _args, channel) =>
           await channel.read({
             kind: "get",
             table: "missing",
             id: "x",
-            expectedRevision: null,
           }),
       }
     );
@@ -1587,7 +1416,7 @@ describe("App code misusing its channel", () => {
     const { owner } = fixture;
     const named = Object.defineProperty(new Error("x"), "name", {
       get: () => {
-        throw Object.assign(new Error("The record changed"), {
+        throw Object.assign(new Error("The record is gone"), {
           code: "data.conflict",
         });
       },
@@ -1657,7 +1486,6 @@ describe("App code misusing its channel", () => {
       kind: "get",
       table: "missing",
       id: "x",
-      expectedRevision: null,
     } as const;
     const rewriting: Runner = async (_path, _args, channel) => {
       try {
@@ -1692,7 +1520,7 @@ describe("App code misusing its channel", () => {
           owner,
           "mutation",
           "notes.remove",
-          { id: "0190a0a0-0000-7000-8000-000000000000", expectedRevision: 1 },
+          { id: "0190a0a0-0000-7000-8000-000000000000" },
           { run: runner }
         )
       );

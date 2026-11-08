@@ -71,8 +71,8 @@ const fieldSchema = z
   .string()
   .max(storeNameMaxLength)
   .regex(
-    /^(?:_id|_ownerId|_rev|_createdAt|_updatedAt|[A-Za-z][A-Za-z0-9_]*)$/u,
-    "A declared field, or `_id`, `_ownerId`, `_rev`, `_createdAt` or `_updatedAt`"
+    /^(?:_id|_ownerId|_createdAt|_updatedAt|[A-Za-z][A-Za-z0-9_]*)$/u,
+    "A declared field, or `_id`, `_ownerId`, `_createdAt` or `_updatedAt`"
   );
 
 /** A table or index name, as the App's schema gives it. */
@@ -242,12 +242,6 @@ export const queryRequestSchema = z
 export const getRequestSchema = z.strictObject({
   table: nameSchema,
   id: identifierSchema,
-  expectedRevision: z
-    .number()
-    .int()
-    .min(1)
-    .max(Number.MAX_SAFE_INTEGER)
-    .nullable(),
 }) satisfies z.ZodType<GetRequest>;
 
 /** One read, as its request crosses RPC: checked again by the store. */
@@ -277,9 +271,6 @@ export const readScopeSchema = z.strictObject({
   }),
 });
 export type ReadScope = z.infer<typeof readScopeSchema>;
-
-/** A record's revision, as a write asserts it. */
-const revisionSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 
 /**
  * A write's fields: an object, whose names and values the operation host
@@ -312,19 +303,16 @@ export const writeRequestSchema = z.discriminatedUnion("kind", [
     id: identifierSchema,
     fields: writeFieldsSchema,
     unset: z.array(nameSchema).max(64),
-    expectedRevision: revisionSchema,
   }),
   z.strictObject({
     kind: z.literal("replace"),
     table: nameSchema,
     id: identifierSchema,
     fields: writeFieldsSchema,
-    expectedRevision: revisionSchema,
   }),
   z.strictObject({
     kind: z.literal("delete"),
     table: nameSchema,
     id: identifierSchema,
-    expectedRevision: revisionSchema,
   }),
 ]) satisfies z.ZodType<WriteRequest>;

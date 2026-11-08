@@ -264,7 +264,7 @@ const assign = mutation({
   args: { id: v.id("requests"), assignee: v.string() },
   returns: v.null(),
   handler: async (ctx, { id, assignee }) => {
-    await ctx.db.patch("requests", id, { assignee }, { expectedRevision: 1 });
+    await ctx.db.patch("requests", id, { assignee });
     return null;
   },
 });
@@ -273,7 +273,7 @@ const retitle = mutation({
   args: { id: v.id("requests"), title: v.string() },
   returns: v.null(),
   handler: async (ctx, { id, title }) => {
-    await ctx.db.patch("requests", id, { title }, { expectedRevision: 1 });
+    await ctx.db.patch("requests", id, { title });
     return null;
   },
 });
@@ -282,7 +282,7 @@ const replaceRequest = mutation({
   args: { id: v.id("requests"), ...requestFields },
   returns: v.null(),
   handler: async (ctx, { id, ...fields }) => {
-    await ctx.db.replace("requests", id, fields, { expectedRevision: 1 });
+    await ctx.db.replace("requests", id, fields);
     return null;
   },
 });
@@ -291,7 +291,7 @@ const removeRequest = mutation({
   args: { id: v.id("requests") },
   returns: v.null(),
   handler: async (ctx, { id }) => {
-    await ctx.db.delete("requests", id, { expectedRevision: 1 });
+    await ctx.db.delete("requests", id);
     return null;
   },
 });
@@ -306,7 +306,7 @@ const renameAccount = mutation({
   args: { id: v.id("accounts"), name: v.string() },
   returns: v.null(),
   handler: async (ctx, { id, name }) => {
-    await ctx.db.patch("accounts", id, { name }, { expectedRevision: 1 });
+    await ctx.db.patch("accounts", id, { name });
     return null;
   },
 });
@@ -333,7 +333,7 @@ const moveTicket = mutation({
   args: { id: v.id("tickets"), team: v.string() },
   returns: v.null(),
   handler: async (ctx, { id, team }) => {
-    await ctx.db.patch("tickets", id, { team }, { expectedRevision: 1 });
+    await ctx.db.patch("tickets", id, { team });
     return null;
   },
 });
@@ -342,7 +342,7 @@ const replaceTicket = mutation({
   args: { id: v.id("tickets"), title: v.string(), team: v.string() },
   returns: v.null(),
   handler: async (ctx, { id, ...fields }) => {
-    await ctx.db.replace("tickets", id, fields, { expectedRevision: 1 });
+    await ctx.db.replace("tickets", id, fields);
     return null;
   },
 });
@@ -351,7 +351,7 @@ const removeTicket = mutation({
   args: { id: v.id("tickets") },
   returns: v.null(),
   handler: async (ctx, { id }) => {
-    await ctx.db.delete("tickets", id, { expectedRevision: 1 });
+    await ctx.db.delete("tickets", id);
     return null;
   },
 });
@@ -1171,7 +1171,7 @@ export const move = mutation({
   handler: async (ctx, args) => {
     const found = await ctx.db.get("requests", args.id);
     if (found !== null) {
-      await ctx.db.patch("requests", args.id, { team: args.team }, { expectedRevision: found._rev });
+      await ctx.db.patch("requests", args.id, { team: args.team });
     }
     return null;
   },
@@ -1183,7 +1183,7 @@ export const retitle = mutation({
   handler: async (ctx, args) => {
     const found = await ctx.db.get("requests", args.id);
     if (found !== null) {
-      await ctx.db.patch("requests", args.id, { title: args.title }, { expectedRevision: found._rev });
+      await ctx.db.patch("requests", args.id, { title: args.title });
     }
     return null;
   },
@@ -1650,7 +1650,6 @@ describe("a migration of a table with row rules", () => {
                 table: "tickets",
                 id: ticket?.id ?? "",
                 fields: { team: "triage" },
-                expectedRevision: ticket?.revision ?? 0,
               },
             ],
             "bob",
@@ -1719,7 +1718,6 @@ describe("a record's history across a migration", () => {
           id,
           fields: { title: "Sales' ticket" },
           unset: [],
-          expectedRevision: 1,
         },
       ],
       "ada",
@@ -1779,7 +1777,6 @@ describe("a record's history across a rename of the field a row rule reads", () 
           id,
           fields: { team: "sales" },
           unset: [],
-          expectedRevision: 1,
         },
       ],
       "carol",
@@ -1848,7 +1845,6 @@ describe("a record's long history, read by row rules", () => {
             id,
             fields,
             unset: [],
-            expectedRevision: revision,
           },
         ],
         by,
@@ -2187,7 +2183,7 @@ describe("deleting a record a row the rules hide refers to", () => {
         await commitAs(
           store,
           schemaHash,
-          [{ op: "delete", table: "plans", id: plan, expectedRevision: 1 }],
+          [{ op: "delete", table: "plans", id: plan }],
           "ada",
           ["sales"]
         )

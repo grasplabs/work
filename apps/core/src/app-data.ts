@@ -258,7 +258,6 @@ const recordOf = (document: unknown): AppDataRecord => {
   const {
     _id: id,
     _ownerId: owner,
-    _rev: revision,
     _createdAt: createdAt,
     _updatedAt: updatedAt,
     ...fields
@@ -266,7 +265,6 @@ const recordOf = (document: unknown): AppDataRecord => {
   return {
     id: String(id),
     owner: String(owner),
-    revision: Number(revision),
     createdAt: new Date(Number(createdAt)).toISOString(),
     updatedAt: new Date(Number(updatedAt)).toISOString(),
     fields,
@@ -1019,11 +1017,7 @@ export class AppDataRpc extends CoreRpcTarget implements AppDataApi {
       const reached: Reached = new Map();
       let value: QueryAnswer;
       try {
-        value = await readCounted(
-          open,
-          { kind: "get", table, id, expectedRevision: null },
-          reached
-        );
+        value = await readCounted(open, { kind: "get", table, id }, reached);
       } finally {
         await keepPageReads(this.#env, by, open, "browser", reached);
       }

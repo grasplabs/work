@@ -54,7 +54,7 @@ import type { StoredPreferences } from "./store-host.ts";
 //   document is always whole.
 // - Lost updates: `update` names the revision it read; the store writes
 //   the next one only while that is still the current one, in one
-//   transaction (`data.conflict` otherwise). A patch that changes nothing
+//   transaction (`data.preferences_changed` otherwise). A patch that changes nothing
 //   writes nothing and keeps the revision.
 // - A save whose answer was lost, sent again: an `update` under an
 //   idempotency key keeps the key, its input's hash and its answer with
@@ -373,7 +373,7 @@ export const answerPreferences = async (
     return { ok: true, value: keptAnswer(stored.lastAnswerJson) };
   }
   if (expectedRevision !== stored.revision) {
-    throw dataErrors.create("data.conflict");
+    throw dataErrors.create("data.preferences_changed");
   }
   // Only the fields the patch names: one it leaves out stays as it was.
   const changed = definedFields(patch);
@@ -414,7 +414,7 @@ export const answerPreferences = async (
   }
   // Another write landed since this one read: the caller reads again.
   if ("conflict" in written) {
-    throw dataErrors.create("data.conflict");
+    throw dataErrors.create("data.preferences_changed");
   }
   return { ok: true, value: answer };
 };

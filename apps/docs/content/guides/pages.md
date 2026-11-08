@@ -56,9 +56,7 @@ const Task = () => {
         <PageHeaderActions>
           <Button
             disabled={task.done}
-            onClick={async () =>
-              await complete({ id: task._id, expectedRevision: task._rev })
-            }
+            onClick={async () => await complete({ id: task._id })}
           >
             Complete
           </Button>

@@ -124,7 +124,6 @@ export interface AppDataTables {
 export interface AppDataRecord {
   id: string;
   owner: string;
-  revision: number;
   createdAt: string;
   updatedAt: string;
   /** Its fields; typed loosely, as RPC types can't carry JSON deeply. */

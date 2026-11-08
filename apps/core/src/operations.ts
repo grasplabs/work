@@ -158,11 +158,12 @@ import type {
 //   authorized again just before its commit, and the commit carries the
 //   roles found then, which the store enforces in the commit's
 //   transaction.
-// - A mutation commits on stale reads: its commit carries its guards
-//   (revisions it asserted) and its read set (the generation of every
-//   table it read); the store refuses either moved on. A read set moved
-//   on runs the mutation again (`queryMaxReruns` times, then the
-//   retryable `mutation.concurrent_change`); a guard never does.
+// - A mutation commits on stale reads: its commit carries its read set
+//   (the generation of every table it read), and the store refuses it
+//   once any moved on, which runs the mutation again (`queryMaxReruns`
+//   times, then the retryable `mutation.concurrent_change`). Writes to a
+//   record it never read take no such fence: of two, the later commit
+//   wins, and the record's history keeps the earlier.
 // - A submission is repeated or forged: its receipt is claimed under a
 //   key core makes from the caller's idempotency key and a scope it
 //   resolved (the store derives the receipt's ID; nobody names one), and
@@ -1475,17 +1476,11 @@ const stagingFor = (
         table: write.table,
         id: write.id,
         fields: validFields(table.whole, write.table, write.fields),
-        expectedRevision: write.expectedRevision,
       });
       return null;
     }
     if (write.kind === "delete") {
-      push({
-        op: "delete",
-        table: write.table,
-        id: write.id,
-        expectedRevision: write.expectedRevision,
-      });
+      push({ op: "delete", table: write.table, id: write.id });
       return null;
     }
     const named: Record<string, unknown> = {};
@@ -1528,7 +1523,6 @@ const stagingFor = (
       id: write.id,
       fields,
       unset,
-      expectedRevision: write.expectedRevision,
     });
     return null;
   };
@@ -3058,8 +3052,8 @@ const runHandler = async (
 
 /**
  * A query a mutation runs: its handler over the mutation's own reader, so
- * it sees the staged writes and its reads count in the mutation's guards
- * and read set, as the same caller under the same access and row rules.
+ * it sees the staged writes and its reads count in the mutation's read
+ * set, as the same caller under the same access and row rules.
  */
 const stagedQuery = async (
   run: Run,
@@ -3273,8 +3267,8 @@ const resourcesDeclaring = (
 /**
  * Runs a mutation under its receipt (`key`): claimed first (a submission
  * that committed already answers its outcome), run, its return checked,
- * the caller authorized again, then committed with its guards and read
- * set; run again when a commit finds its reads stale.
+ * the caller authorized again, then committed with its read set; run
+ * again when a commit finds its reads stale.
  */
 const runMutation = async (
   run: Run,
@@ -3533,7 +3527,6 @@ const runMutation = async (
             schemaHash: scope.schemaHash,
             receipt: claimed.held,
             stagedAt: staging.stagedAt,
-            guards: [...reader.guards()],
             readSet: reader.readSet(),
             writes: staging.writes(),
             intents:

@@ -255,12 +255,10 @@ const listGuests = action({
 });
 
 const remove = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  args: { id: v.id("notes") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.delete("notes", args.id, {
-      expectedRevision: args.expectedRevision,
-    });
+    await ctx.db.delete("notes", args.id);
     return null;
   },
 });
@@ -1038,7 +1036,6 @@ describe("an action's channel", () => {
             kind: "get",
             table: "notes",
             id: "x",
-            expectedRevision: null,
           })
       ),
       write: await attempt(
@@ -1905,7 +1902,6 @@ describe("derived keys", () => {
     );
     await call(fixture, "mutation", "notes.remove", {
       id: target,
-      expectedRevision: 1,
     });
     // Now one query: the same call, under the same key, is answered again.
     const again = valueOf(

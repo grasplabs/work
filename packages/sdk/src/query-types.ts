@@ -8,7 +8,6 @@ export type Simplify<Value> = { [Key in keyof Value]: Value[Key] } & {};
 interface ManagedDoc<TableName extends string> {
   readonly _id: Id<TableName>;
   readonly _ownerId: string;
-  readonly _rev: number;
   readonly _createdAt: number;
   readonly _updatedAt: number;
 }

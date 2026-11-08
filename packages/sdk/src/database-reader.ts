@@ -20,7 +20,6 @@ import type {
   IndexRange,
   IndexRangeBuilder,
 } from "./query-types.ts";
-import { hasOnly } from "./query-values.ts";
 import type { AnyTable, SchemaDefinition, TableState } from "./schema-types.ts";
 import type { Id } from "./value-types.ts";
 
@@ -55,15 +54,6 @@ type SearchableTable<Tables extends AnyTables> = {
     : never;
 }[keyof Tables & string];
 
-/** What `get` may assert. */
-interface GetOptions {
-  /**
-   * The revision the caller expects the record at: a different one fails
-   * with `data.conflict`. Applies only to a record the caller may see.
-   */
-  readonly expectedRevision?: number;
-}
-
 /** `ctx.db` for reading, typed by a schema's tables. */
 export interface DatabaseReader<Tables extends AnyTables> {
   /**
@@ -72,8 +62,7 @@ export interface DatabaseReader<Tables extends AnyTables> {
    */
   readonly get: <TableName extends keyof Tables & string>(
     table: TableName,
-    id: Id<NoInfer<TableName>>,
-    options?: GetOptions
+    id: Id<NoInfer<TableName>>
   ) => Promise<Doc<Tables[TableName], TableName> | null>;
   /** A query of `table`; nothing is read until a terminal is called. */
   readonly query: <TableName extends keyof Tables & string>(
@@ -112,41 +101,13 @@ interface RuntimeReader {
   readonly get: (
     table: unknown,
     id: unknown,
-    options?: unknown
+    ...rest: unknown[]
   ) => Promise<unknown>;
   readonly query: (table: unknown) => RuntimeQuery & {
     readonly withIndex: (index: unknown, build?: unknown) => RuntimeQuery;
   };
   readonly search: (table: unknown, text: unknown) => RuntimeQuery;
 }
-
-/** The revision `get`'s options assert, or null; refused unless valid. */
-export const expectedRevisionOf = (options: unknown): number | null => {
-  if (options === undefined) {
-    return null;
-  }
-  if (!hasOnly(options, ["expectedRevision"])) {
-    return refuse(
-      "query.invalid_terminal",
-      "`get` takes `{ expectedRevision }`, or no options."
-    );
-  }
-  const { expectedRevision } = options;
-  if (expectedRevision === undefined) {
-    return null;
-  }
-  if (
-    typeof expectedRevision !== "number" ||
-    !Number.isSafeInteger(expectedRevision) ||
-    expectedRevision < 1
-  ) {
-    return refuse(
-      "query.invalid_terminal",
-      "`expectedRevision` is a whole number of at least 1."
-    );
-  }
-  return expectedRevision;
-};
 
 /**
  * `ctx.db` for reading `schema`'s tables, each read run by `execute`. The
@@ -168,8 +129,14 @@ export const databaseReader = <Tables extends AnyTables>(
     return { name: table, state };
   };
   const reader: RuntimeReader = {
-    get: async (table: unknown, id: unknown, options?: unknown) => {
+    get: async (table: unknown, id: unknown, ...rest: unknown[]) => {
       const { name } = stateOf(table);
+      if (rest.length > 0) {
+        return refuse(
+          "query.invalid_terminal",
+          "`get` takes a table and a record ID, and nothing else."
+        );
+      }
       if (
         typeof id !== "string" ||
         id === "" ||
@@ -181,7 +148,6 @@ export const databaseReader = <Tables extends AnyTables>(
         kind: "get",
         table: name,
         id,
-        expectedRevision: expectedRevisionOf(options),
       });
     },
     query: (table: unknown) => {

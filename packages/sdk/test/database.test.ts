@@ -345,19 +345,16 @@ describe("a record by ID", () => {
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     const id = "r1" as Id<"notes">;
     await db.get("notes", id);
-    await db.get("notes", id, { expectedRevision: 3 });
+    await db.get("notes", id);
     expect(requests).toStrictEqual([
-      { kind: "get", table: "notes", id: "r1", expectedRevision: null },
-      { kind: "get", table: "notes", id: "r1", expectedRevision: 3 },
+      { kind: "get", table: "notes", id: "r1" },
+      { kind: "get", table: "notes", id: "r1" },
     ]);
   });
 
-  test("refuses a revision that isn't a whole number of at least 1", async () => {
+  test("refuses a get of no record ID", async () => {
     const { db, requests } = recording(null);
     const loose = looseOf(db);
-    await refusedWith("query.invalid_terminal", () =>
-      loose.get("notes", "r1", { expectedRevision: 0 })
-    );
     await refusedWith("query.invalid_terminal", () => loose.get("notes", ""));
     expect(requests).toHaveLength(0);
   });

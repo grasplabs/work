@@ -9,8 +9,6 @@ import type { SignalFigure, SnapshotRecord, WorkflowFigures } from "./board";
 /** A snapshot, with its figures. */
 export interface Snapshot {
   id: Id<"snapshots">;
-  /** The revision it was read at, which a save of its narrative asserts. */
-  revision: number;
   record: SnapshotRecord;
   /** Its narrative. */
   body: string;
@@ -24,7 +22,6 @@ type Basis = "estimated" | "observed";
 /** A snapshot as the store keeps it. */
 interface StoredSnapshot {
   _id: Id<"snapshots">;
-  _rev: number;
   title: string;
   date: string;
   maturity: number;
@@ -69,7 +66,6 @@ export const snapshotFrom = (
   figures: readonly StoredFigure[]
 ): Snapshot => ({
   id: stored._id,
-  revision: stored._rev,
   record: {
     title: stored.title,
     date: stored.date,
@@ -116,9 +112,8 @@ export const settle = async <T>(run: () => Promise<T>): Promise<Outcome<T>> => {
 /** What a refusal means to the person using the page. */
 export const refusal = (code: string): string => {
   switch (code) {
-    case "data.conflict":
-    case "data.reads_changed": {
-      return "Someone saved this snapshot since you opened it. Open it again to see their changes.";
+    case "data.conflict": {
+      return "This snapshot is gone: someone removed it.";
     }
     case "board.builders_only":
     case "data.access_denied":

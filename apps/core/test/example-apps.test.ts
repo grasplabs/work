@@ -70,7 +70,7 @@ const memberOf = async (
   return person;
 };
 
-const record = z.looseObject({ _id: z.string(), _rev: z.number() });
+const record = z.looseObject({ _id: z.string() });
 const page = <T extends z.ZodType>(item: T) =>
   z.looseObject({ items: z.array(item) });
 
@@ -98,29 +98,28 @@ describe("the example Apps", { timeout: 60_000 }, () => {
     const first = await add("Write the brief");
     await add("Book the room");
     await add("Send invites");
-    const todo = await column("todo");
-    const card = todo.find(({ _id }) => _id === first);
     valueOf(
       await call(admin, app, "cards.move", "mutation", {
         id: first,
-        expectedRevision: card?._rev,
         column: "doing",
       })
     );
-    const stale = await call(admin, app, "cards.move", "mutation", {
-      id: first,
-      expectedRevision: card?._rev,
-      column: "done",
-    });
+    const doing = await column("doing");
+    valueOf(
+      await call(admin, app, "cards.move", "mutation", {
+        id: first,
+        column: "done",
+      })
+    );
 
     expect({
       todo: await column("todo"),
-      doing: await column("doing"),
-      stale: codeOf(stale),
+      doing,
+      done: await column("done"),
     }).toMatchObject({
       todo: [{ title: "Book the room" }, { title: "Send invites" }],
       doing: [{ title: "Write the brief" }],
-      stale: "data.conflict",
+      done: [{ title: "Write the brief" }],
     });
   });
 
@@ -140,14 +139,12 @@ describe("the example Apps", { timeout: 60_000 }, () => {
     valueOf(
       await call(admin, app, "cards.move", "mutation", {
         id: first,
-        expectedRevision: 1,
         column: "doing",
       })
     );
     valueOf(await add("Takes its place"));
     const refusedMove = await call(admin, app, "cards.move", "mutation", {
       id: first,
-      expectedRevision: 2,
       column: "todo",
     });
 
@@ -203,7 +200,6 @@ describe("the example Apps", { timeout: 60_000 }, () => {
     valueOf(
       await call(admin, app, "deals.setStage", "mutation", {
         id: deal,
-        expectedRevision: licence?._rev,
         stage: "won",
       })
     );
@@ -264,11 +260,9 @@ describe("the example Apps", { timeout: 60_000 }, () => {
       colleague: await pending(colleague),
       approver: await pending(admin),
     };
-    const [request] = seen.approver;
     const decide = async (person: Person) =>
       await call(person, app, "requests.decide", "mutation", {
         id,
-        expectedRevision: request?._rev,
         outcome: "approved",
         note: "Go ahead.",
       });
@@ -324,13 +318,11 @@ describe("the example Apps", { timeout: 60_000 }, () => {
     );
     const own = await call(admin, app, "requests.decide", "mutation", {
       id,
-      expectedRevision: 1,
       outcome: "approved",
       note: "",
     });
     const withdrawn = await call(admin, app, "requests.withdraw", "mutation", {
       id,
-      expectedRevision: 1,
     });
     expect({ own: codeOf(own), withdrawn: codeOf(withdrawn) }).toStrictEqual({
       own: "requests.own",
@@ -361,7 +353,6 @@ describe("the example Apps", { timeout: 60_000 }, () => {
     valueOf(
       await call(admin, app, "sales.remove", "mutation", {
         id: removed,
-        expectedRevision: 1,
       })
     );
     const latest = page(z.looseObject({ customer: z.string() })).parse(

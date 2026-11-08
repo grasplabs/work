@@ -13,8 +13,9 @@ import { requireIdentifier, requireWorkflowText } from "./text.ts";
 // The map's workflows: listed, opened beside the version of them last
 // drawn, saved and linked to the App workflow built from them. Each save
 // and link writes the workflow's next version and a copy of it
-// (`workflowVersions`) in one commit, pinned to the revision it was read
-// at, so no one's edits are written over and no version is lost. What only
+// (`workflowVersions`) in one commit, so no version is lost: of two saves
+// from the same version, the later is the current one, and the earlier
+// stays among the versions. What only
 // the map sets, it sets here: a designed workflow's `drawnVersion` (save)
 // and its `app` (link). Whatever a save is sent of them is not taken.
 
@@ -34,7 +35,6 @@ const encoder = new TextEncoder();
 /** A workflow as the list shows it: everything but its notes. */
 const summary = v.object({
   id: v.id("workflows"),
-  revision: v.number().integer().min(1),
   version: v.number().integer().min(1),
   title: editedFields.title,
   state: v.enum(workflowStates),
@@ -47,7 +47,6 @@ const summary = v.object({
 
 const summaryOf = (workflow: Doc<"workflows">) => ({
   id: workflow._id,
-  revision: workflow._rev,
   version: workflow.version,
   title: workflow.title,
   state: workflow.state,
@@ -73,14 +72,10 @@ const requireListable = (fields: Record<string, unknown>): void => {
 const writeVersion = async (
   ctx: MutationCtx,
   id: Id<"workflows">,
-  expectedRevision: number,
-  next: Omit<
-    Doc<"workflows">,
-    "_id" | "_rev" | "_ownerId" | "_createdAt" | "_updatedAt"
-  >
+  next: Omit<Doc<"workflows">, "_id" | "_ownerId" | "_createdAt" | "_updatedAt">
 ): Promise<void> => {
   requireListable(next);
-  await ctx.db.patch("workflows", id, next, { expectedRevision });
+  await ctx.db.patch("workflows", id, next);
   await ctx.db.insert("workflowVersions", { ...next, workflow: id });
 };
 
@@ -177,8 +172,8 @@ export const version = query({
 });
 
 /**
- * Saves a workflow: a new one (`id` null), or the next version of one
- * read at `expectedRevision`. A designed workflow keeps the version of it
+ * Saves a workflow: a new one (`id` null), or the next version of one. A
+ * designed workflow keeps the version of it
  * last drawn: the version saved before, when that one was drawn,
  * otherwise the one it kept. Its link to an App workflow is kept as it is,
  * and a linked one stays designed (`map.linked_drawn`).
@@ -186,7 +181,6 @@ export const version = query({
 export const save = mutation({
   args: {
     id: v.id("workflows").nullable(),
-    expectedRevision: v.number().integer().min(1).nullable(),
     ...editedFields,
   },
   returns: v.object({
@@ -194,7 +188,7 @@ export const save = mutation({
     version: v.number().integer().min(1),
   }),
   handler: async (ctx, args) => {
-    const { id, expectedRevision, ...edited } = args;
+    const { id, ...edited } = args;
     requireWorkflowText(edited);
     if (id === null) {
       if (edited.state === "designed") {
@@ -210,7 +204,7 @@ export const save = mutation({
       return { id: created, version: 1 };
     }
     const stored = await ctx.db.get("workflows", id);
-    if (stored === null || expectedRevision === null) {
+    if (stored === null) {
       throw new AppError("map.not_found", "This workflow is gone.");
     }
     if (edited.state === "drawn" && stored.app !== null) {
@@ -227,13 +221,13 @@ export const save = mutation({
       drawnVersion: edited.state === "designed" ? drawnBefore : null,
       app: stored.app,
     };
-    await writeVersion(ctx, id, expectedRevision, next);
+    await writeVersion(ctx, id, next);
     return { id, version: next.version };
   },
 });
 
 /**
- * Links a designed workflow, read at `expectedRevision`, to the App
+ * Links a designed workflow to the App
  * workflow built from it, by the App's and the workflow's IDs, as its next
  * version: the one function that sets `app`. A drawn workflow is refused
  * (`map.not_designed`).
@@ -241,7 +235,6 @@ export const save = mutation({
 export const link = mutation({
   args: {
     id: v.id("workflows"),
-    expectedRevision: v.number().integer().min(1),
     app: appLink,
   },
   returns: v.object({ version: v.number().integer().min(1) }),
@@ -260,14 +253,13 @@ export const link = mutation({
     }
     const {
       _id: _kept,
-      _rev: _revision,
       _ownerId: _owner,
       _createdAt: _created,
       _updatedAt: _updated,
       ...fields
     } = stored;
     const next = { ...fields, version: stored.version + 1, app: args.app };
-    await writeVersion(ctx, args.id, args.expectedRevision, next);
+    await writeVersion(ctx, args.id, next);
     return { version: next.version };
   },
 });

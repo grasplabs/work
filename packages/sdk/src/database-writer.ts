@@ -1,7 +1,7 @@
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import type { WriteRequest } from "@grasp-os/shared/store-reads";
 
-import { databaseReader, expectedRevisionOf } from "./database-reader.ts";
+import { databaseReader } from "./database-reader.ts";
 import type { DatabaseReader } from "./database-reader.ts";
 import { tablesOf } from "./define-schema.ts";
 import type { ReadExecutor } from "./query-builder.ts";
@@ -38,18 +38,10 @@ type PatchFields<Table extends AnyTable> = {
   readonly [Key in keyof Stored<Table>]?: Present<Stored<Table>[Key]>;
 };
 
-/** What `patch` asserts, and the optional fields it removes. */
+/** The optional fields `patch` removes. */
 interface PatchOptions<Table extends AnyTable> {
-  /** The revision the record must be at, or the commit fails. */
-  readonly expectedRevision: number;
   /** Optional fields to remove; never one the patch also sets. */
   readonly unset?: readonly OptionalField<Table>[];
-}
-
-/** What `replace` and `delete` assert. */
-interface WriteOptions {
-  /** The revision the record must be at, or the commit fails. */
-  readonly expectedRevision: number;
 }
 
 /** `ctx.db` for a mutation: reading, and staging writes. */
@@ -65,35 +57,30 @@ export interface DatabaseWriter<
     fields: ObjectInput<Tables[TableName]["fields"]>
   ) => Promise<Id<TableName>>;
   /**
-   * Stages setting some fields of record `id`, at `expectedRevision`. A
-   * record the table's row rules keep from the caller (for reading or
-   * writing) fails the commit as a missing one does (`data.conflict`); a
-   * change that would move it out of their rules, `data.write_denied`.
+   * Stages setting some fields of record `id`, leaving the others as they
+   * are when it commits: of two mutations that change the same field,
+   * the one that commits last wins, and the record's history keeps the
+   * earlier value. A record that is gone, or one the table's row rules
+   * keep from the caller (for reading or writing), fails the commit
+   * (`data.conflict`); a change that would move it out of their rules,
+   * `data.write_denied`.
    */
   readonly patch: <TableName extends keyof Tables & string>(
     table: TableName,
     id: Id<NoInfer<TableName>>,
     fields: PatchFields<Tables[TableName]>,
-    options: PatchOptions<Tables[TableName]>
+    options?: PatchOptions<Tables[TableName]>
   ) => Promise<void>;
-  /**
-   * Stages replacing every field of record `id`, at `expectedRevision`,
-   * refused under row rules as `patch` is.
-   */
+  /** Stages replacing every field of record `id`, refused as `patch` is. */
   readonly replace: <TableName extends keyof Tables & string>(
     table: TableName,
     id: Id<NoInfer<TableName>>,
-    fields: ObjectInput<Tables[TableName]["fields"]>,
-    options: WriteOptions
+    fields: ObjectInput<Tables[TableName]["fields"]>
   ) => Promise<void>;
-  /**
-   * Stages deleting record `id`, at `expectedRevision`: one the table's
-   * row rules keep from the caller fails as a missing one does.
-   */
+  /** Stages deleting record `id`, refused as `patch` is. */
   readonly delete: <TableName extends keyof Tables & string>(
     table: TableName,
-    id: Id<NoInfer<TableName>>,
-    options: WriteOptions
+    id: Id<NoInfer<TableName>>
   ) => Promise<void>;
 }
 
@@ -103,27 +90,35 @@ export interface DatabaseWriter<
  */
 type WriteExecutor = (request: WriteRequest) => Promise<unknown>;
 
-/** The revision write options assert; refused unless valid. */
-const requiredRevisionOf = (
-  options: unknown,
-  extra: readonly string[] = []
-): number => {
-  if (!hasOnly(options, ["expectedRevision", ...extra])) {
+/** The fields `patch`'s options remove; refused unless valid. */
+const unsetOf = (options: unknown): string[] => {
+  if (options === undefined) {
+    return [];
+  }
+  if (!hasOnly(options, ["unset"])) {
     return refuse(
       "query.invalid_terminal",
-      "A write takes `{ expectedRevision }` as its options."
+      "`patch` takes `{ unset }` as its options, or none."
     );
   }
-  const revision = expectedRevisionOf({
-    expectedRevision: options.expectedRevision,
-  });
-  return (
-    revision ??
-    refuse(
-      "query.invalid_terminal",
-      "A write's `expectedRevision` is a whole number of at least 1."
-    )
-  );
+  const { unset } = options;
+  if (unset === undefined) {
+    return [];
+  }
+  if (
+    !Array.isArray(unset) ||
+    !unset.every((field): field is string => typeof field === "string")
+  ) {
+    return refuse("query.invalid_terminal", "`unset` lists field names.");
+  }
+  return [...unset];
+};
+
+/** Refuses arguments past the ones `method` takes: it has no options. */
+const onlyArguments = (method: string, rest: readonly unknown[]): void => {
+  if (rest.length > 0) {
+    refuse("query.invalid_terminal", `\`${method}\` takes no options.`);
+  }
 };
 
 /** The fields a write sets: a plain object. */
@@ -165,48 +160,33 @@ export const databaseWriter = <Tables extends AnyTables>(
       table: unknown,
       id: unknown,
       fields: unknown,
-      options: unknown
+      options?: unknown
     ) => {
-      const name = tableOf(table);
-      const expectedRevision = requiredRevisionOf(options, ["unset"]);
-      const unset: unknown = isPlainRecord(options) ? options.unset : undefined;
-      if (
-        unset !== undefined &&
-        (!Array.isArray(unset) ||
-          !unset.every((field) => typeof field === "string"))
-      ) {
-        refuse("query.invalid_terminal", "`unset` lists field names.");
-      }
       await write({
         kind: "patch",
-        table: name,
+        table: tableOf(table),
         id: idOf(id),
         fields: fieldsOf(fields),
-        unset: Array.isArray(unset) ? unset.map(String) : [],
-        expectedRevision,
+        unset: unsetOf(options),
       });
     },
     replace: async (
       table: unknown,
       id: unknown,
       fields: unknown,
-      options: unknown
+      ...rest: unknown[]
     ) => {
+      onlyArguments("replace", rest);
       await write({
         kind: "replace",
         table: tableOf(table),
         id: idOf(id),
         fields: fieldsOf(fields),
-        expectedRevision: requiredRevisionOf(options),
       });
     },
-    delete: async (table: unknown, id: unknown, options: unknown) => {
-      await write({
-        kind: "delete",
-        table: tableOf(table),
-        id: idOf(id),
-        expectedRevision: requiredRevisionOf(options),
-      });
+    delete: async (table: unknown, id: unknown, ...rest: unknown[]) => {
+      onlyArguments("delete", rest);
+      await write({ kind: "delete", table: tableOf(table), id: idOf(id) });
     },
   };
   // SAFETY: each method checks at run time what `DatabaseWriter` types

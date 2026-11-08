@@ -8,7 +8,6 @@ import type { TableState } from "./schema-types.ts";
 const managedBases: Readonly<Record<string, IndexBase>> = {
   _id: "string",
   _ownerId: "string",
-  _rev: "number",
   _createdAt: "number",
   _updatedAt: "number",
 };

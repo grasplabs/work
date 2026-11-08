@@ -51,7 +51,6 @@ const tableOf = (name: string, fields: string[]): AppDataTable => ({
 const recordOf = (app: string, table: string): AppDataRecord => ({
   id: `${app}-${table}-1`,
   owner: "builder",
-  revision: 1,
   createdAt: "2026-11-03T10:00:00.000Z",
   updatedAt: "2026-11-03T10:00:00.000Z",
   fields: { title: `${app}'s ${table}` },

@@ -36,7 +36,6 @@ type Note = Doc<(typeof schema)["tables"]["notes"], "notes">;
 
 // A record has its managed fields and its declared fields, normalized.
 expectTypeOf<Note["_id"]>().toEqualTypeOf<Id<"notes">>();
-expectTypeOf<Note["_rev"]>().toEqualTypeOf<number>();
 expectTypeOf<Note["body"]>().toEqualTypeOf<string>();
 expectTypeOf<Note["summary"]>().toEqualTypeOf<string | null>();
 expectTypeOf(db.get("notes", noteId)).resolves.toEqualTypeOf<Note | null>();

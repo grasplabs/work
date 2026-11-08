@@ -38,15 +38,10 @@ import { v } from "@grasp-os/sdk";
 import { action, mutation } from "@server/_generated/server";
 
 export const finish = mutation({
-  args: { id: v.id("tasks"), expectedRevision: v.number().integer().min(1) },
+  args: { id: v.id("tasks") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.patch(
-      "tasks",
-      args.id,
-      { done: true },
-      { expectedRevision: args.expectedRevision }
-    );
+    await ctx.db.patch("tasks", args.id, { done: true });
     await ctx.workflows.review.start({ task: args.id });
     return null;
   },

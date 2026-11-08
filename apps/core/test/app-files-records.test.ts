@@ -443,12 +443,10 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const note = await client.mutation(api.create, { title: "Old" });
     await client.mutation(api.attachFile, {
       id: note,
-      expectedRevision: 1,
       file: { id },
     });
     const renewed = await client.mutation(api.renew, {
       id: note,
-      expectedRevision: 2,
       file: { id },
     });
     expect({
@@ -529,12 +527,10 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const note = await client.mutation(api.create, { title: "Shared" });
     await client.mutation(api.attachFile, {
       id: note,
-      expectedRevision: 1,
       file: { id: image },
     });
     await client.mutation(api.attachFile, {
       id: note,
-      expectedRevision: 2,
       file: { id: text },
     });
     const previewed = await colleague.page.channel.preview("files", image);
@@ -567,7 +563,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const note = await client.mutation(api.create, { title: "Shared" });
     await client.mutation(api.attachFile, {
       id: note,
-      expectedRevision: 1,
       file: { id: kept },
     });
     await colleague.client.files.download(permissions.files, { id: kept });
@@ -592,7 +587,6 @@ describe("an App's files", { timeout: 120_000 }, () => {
     const note = await client.mutation(api.create, { title: "Shared" });
     await client.mutation(api.attachFile, {
       id: note,
-      expectedRevision: 1,
       file: { id: kept },
     });
     // Downloaded twice by a colleague, once by its uploader.

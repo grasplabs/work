@@ -183,8 +183,7 @@ const WorkflowMap = () => {
       kind: "open",
       opened: {
         current: workflowFrom(current._id, current),
-        drawn:
-          drawn === null ? null : drawnFrom(current._id, current._rev, drawn),
+        drawn: drawn === null ? null : drawnFrom(current._id, drawn),
       },
     });
   };
@@ -226,7 +225,7 @@ const WorkflowMap = () => {
           key={
             view.kind === "new"
               ? `new:${view.draw}`
-              : `${view.opened.current.id}@${view.opened.current.revision}`
+              : `${view.opened.current.id}@${view.opened.current.version}`
           }
           opened={view.kind === "new" ? null : view.opened}
           teams={teams}

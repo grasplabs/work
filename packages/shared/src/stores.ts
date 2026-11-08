@@ -45,7 +45,7 @@ const fieldNameSchema = tableNameSchema;
 export const documentMaxBytes = platformLimits.persistedRowBytes;
 
 /**
- * The most bytes of one commit's writes, guards and intents, as UTF-8 JSON: the
+ * The most bytes of one commit's writes and intents, as UTF-8 JSON: the
  * host's own bound on one store transaction, the size spec 18.1 gives a
  * workflow step's input and result. A public operation's own input limit
  * is checked where operations are called, not here.
@@ -55,8 +55,8 @@ export const commitMaxInputBytes = platformLimits.stepPayloadBytes;
 /**
  * The most bytes of writes one mutation may stage, as UTF-8 JSON: what is
  * left of a commit's bound after its result (at most a public operation's
- * output, `operationResultMaxBytes`) and its guards and read set (at most
- * 100 and 64, well within 64 KiB), so a mutation that stages within it
+ * output, `operationResultMaxBytes`) and its read set (at most 64
+ * tables, well within 64 KiB), so a mutation that stages within it
  * always fits its commit. The operation host refuses the write that
  * passes it.
  */
@@ -103,17 +103,11 @@ export const commitMaxCascade = 100;
  */
 export const cascadeJobMaxRecords = 10_000;
 
-/** The most revision guards (records read) one commit may carry. */
-export const commitMaxGuards = 100;
-
 /** The most fields one patch may unset. */
 export const patchMaxUnset = 64;
 
 /** A record's ID: minted by the store, opaque to everyone else. */
 export const recordIdSchema = identifierSchema;
-
-/** A record's revision: 1 when inserted, one more for each change. */
-const revisionSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 
 /** The SHA-256 of the schema a commit was checked against, in hex. */
 const schemaHashSchema = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -182,13 +176,6 @@ export type StoreFields = Record<string, Json>;
 /** Fields a store already holds, read back from its own JSON. */
 export const storedFieldsSchema = z.record(z.string(), fieldValueSchema);
 
-/** A record a commit's outcome depends on, still at the revision it read. */
-const revisionGuardSchema = z.strictObject({
-  table: tableNameSchema,
-  id: recordIdSchema,
-  expectedRevision: revisionSchema,
-});
-
 /** One write a commit stages: an insert, a patch, a replacement or a delete. */
 const storeWriteSchema = z.discriminatedUnion("op", [
   z.strictObject({
@@ -211,7 +198,6 @@ const storeWriteSchema = z.discriminatedUnion("op", [
       fields: fieldsSchema,
       /** Optional fields to remove; never one the patch also sets. */
       unset: z.array(fieldNameSchema).max(patchMaxUnset).optional(),
-      expectedRevision: revisionSchema,
     })
     .refine(
       ({ fields, unset = [] }) =>
@@ -224,13 +210,11 @@ const storeWriteSchema = z.discriminatedUnion("op", [
     table: tableNameSchema,
     id: recordIdSchema,
     fields: fieldsSchema,
-    expectedRevision: revisionSchema,
   }),
   z.strictObject({
     op: z.literal("delete"),
     table: tableNameSchema,
     id: recordIdSchema,
-    expectedRevision: revisionSchema,
   }),
 ]);
 
@@ -377,7 +361,7 @@ export type StagedWrites = z.input<typeof stagedWritesSchema>;
 
 /**
  * One commit: the writes a mutation staged (at `stagedAt`) and what it
- * read (its guards and read set), for whom (`principal`, who owns what it
+ * read (its read set), for whom (`principal`, who owns what it
  * inserts, with the `roles` core resolved for them just before), under
  * which schema, whose access the store enforces on every write, by the
  * attempt holding its receipt (`receipt`), with what it returned
@@ -403,7 +387,6 @@ export const commitSchema = z
       fence: z.number().int().min(1),
     }),
     stagedAt: z.number().int().min(0),
-    guards: z.array(revisionGuardSchema).max(commitMaxGuards).default([]),
     readSet: readSetSchema.default({}),
     writes: z.array(storeWriteSchema).max(commitMaxWrites),
     // What App code stages, and the one form a page's call adds.
@@ -423,12 +406,11 @@ export const commitSchema = z
       .default([]),
   })
   .refine(
-    ({ guards, readSet, writes, intents, result }) =>
-      encoder.encode(
-        JSON.stringify({ guards, readSet, writes, intents, result })
-      ).byteLength <= commitMaxInputBytes,
+    ({ readSet, writes, intents, result }) =>
+      encoder.encode(JSON.stringify({ readSet, writes, intents, result }))
+        .byteLength <= commitMaxInputBytes,
     {
-      message: `At most ${commitMaxInputBytes} bytes of writes, guards, intents and result`,
+      message: `At most ${commitMaxInputBytes} bytes of writes, intents and result`,
     }
   );
 export type Commit = z.input<typeof commitSchema>;
@@ -490,7 +472,9 @@ export const dataErrors = defineErrorFamily({
   "data.too_many_tables": `A store holds at most ${storeMaxTables} tables.`,
   "data.too_many_indexes": `A store holds at most ${storeMaxIndexes} indexes, those kept for older versions included.`,
   "data.conflict":
-    "The record changed since it was read. Read it again, then retry.",
+    "This record is gone, isn't yours to change, or its ID is already in use.",
+  "data.preferences_changed":
+    "Your preferences changed since they were read. Read them again, then retry.",
   "data.store_unavailable": "This store doesn't exist or was deleted.",
   "data.fixture_discarded": "This fixture store was discarded.",
   "data.receipt_invalid":
@@ -499,7 +483,6 @@ export const dataErrors = defineErrorFamily({
   "data.unknown_index": "That table has no such index.",
   "data.access_denied": "You can't read this table.",
   "data.write_denied": "You can't change records of this table.",
-  "data.guard_limit": `A mutation asserts the revisions of at most ${commitMaxGuards} records.`,
   "data.reads_changed":
     "The records this change read changed before it committed. Try again.",
   "data.invalid_query": "That query isn't valid for this table.",

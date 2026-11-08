@@ -167,6 +167,7 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "resource.limit_reached": "operational",
   "data.write_denied": "authorization",
   "data.conflict": "domain",
+  "data.preferences_changed": "domain",
   "data.referenced": "domain",
   "data.reference_invalid": "domain",
   "data.cascade_limit": "domain",
@@ -243,7 +244,6 @@ export const categoryOf = (code: string): ErrorCategory => {
     code === "data.unknown_table" ||
     code === "data.unknown_index" ||
     code === "data.invalid_cursor" ||
-    code === "data.guard_limit" ||
     code === "submission.key_conflict" ||
     code === "submission.key_invalid"
   ) {

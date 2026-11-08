@@ -221,7 +221,7 @@ describe("a schema change by stable ID", { timeout: 120_000 }, () => {
       // The reference still holds it: deleting it is refused.
       deleted: await codeOf(
         commit(store, renamed.schemaHash, [
-          { op: "delete", table: "memos", id: note, expectedRevision: 1 },
+          { op: "delete", table: "memos", id: note },
         ])
       ),
     }).toMatchObject({
@@ -289,7 +289,6 @@ describe("a schema change by stable ID", { timeout: 120_000 }, () => {
           table: "people",
           id: person,
           fields: { name: "Ada Lovelace" },
-          expectedRevision: 1,
         },
       ])
     );
@@ -305,7 +304,7 @@ describe("a schema change by stable ID", { timeout: 120_000 }, () => {
       // The reference still holds the memo: deleting it is refused.
       deleted: await codeOf(
         commit(store, back.schemaHash, [
-          { op: "delete", table: "memos", id: note, expectedRevision: 1 },
+          { op: "delete", table: "memos", id: note },
         ])
       ),
     }).toMatchObject({
@@ -348,7 +347,7 @@ describe("a schema change by stable ID", { timeout: 120_000 }, () => {
     await expect(
       codeOf(
         commit(store, restricted.schemaHash, [
-          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+          { op: "delete", table: "notes", id: note },
         ])
       )
     ).resolves.toBe("data.referenced");
@@ -711,7 +710,6 @@ describe(
               table: "notes",
               id: ids[0] ?? "",
               fields: { title: "Late" },
-              expectedRevision: 1,
             },
           ])
         ),
@@ -763,7 +761,6 @@ describe("a schema change's migration", { timeout: 120_000 }, () => {
         table: "notes",
         id: ids[0] ?? "",
         fields: { category: "press" },
-        expectedRevision: 1,
       },
     ]);
     const before = await heldBy(store);
@@ -916,7 +913,6 @@ describe("a schema change's migration", { timeout: 120_000 }, () => {
         table: "notes",
         id: note,
         fields: { title: "Linked" },
-        expectedRevision: 1,
       },
     ]);
     const before = await schemaHashOf(store);

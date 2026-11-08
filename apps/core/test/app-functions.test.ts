@@ -92,21 +92,19 @@ export const create = mutation({
 export const update = mutation({
   args: {
     id: v.id("notes"),
-    expectedRevision: v.number().integer().min(1),
     title: noteFields.title,
     body: v.string().max(100_000),
   },
   returns: doc("notes"),
   handler: async (ctx, args) => {
-    const previous = await ctx.db.get("notes", args.id, { expectedRevision: args.expectedRevision });
+    const previous = await ctx.db.get("notes", args.id);
     if (!previous) {
       throw new AppError("note.not_found", "The note is unavailable.");
     }
     await ctx.db.patch(
       "notes",
       args.id,
-      { title: args.title, body: args.body },
-      { expectedRevision: args.expectedRevision }
+      { title: args.title, body: args.body }
     );
     const updated = await ctx.db.get("notes", args.id);
     if (!updated) {
@@ -117,10 +115,10 @@ export const update = mutation({
 });
 
 export const remove = mutation({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+  args: { id: v.id("notes") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.delete("notes", args.id, { expectedRevision: args.expectedRevision });
+    await ctx.db.delete("notes", args.id);
     return null;
   },
 });
@@ -196,16 +194,17 @@ export const closed = query({
 });
 
 /** Reads a note at a revision it hasn't, and handles the conflict itself. */
-export const checkRevision = query({
-  args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
+/** Reads a page the store refuses, and branches on its code. */
+export const tryBadCursor = query({
+  args: {},
   returns: v.string(),
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     try {
-      await ctx.db.get("notes", args.id, { expectedRevision: args.expectedRevision });
-      return "current";
+      await ctx.db.query("notes").paginate({ pageSize: 1, cursor: "not-a-cursor" });
+      return "read";
     } catch (error) {
-      if (error instanceof Error && Reflect.get(error, "code") === "data.conflict") {
-        return "changed";
+      if (error instanceof Error && Reflect.get(error, "code") === "data.invalid_cursor") {
+        return "refused";
       }
       throw error;
     }
@@ -395,12 +394,10 @@ describe("an App's functions", { timeout: 120_000 }, () => {
       _id: id,
       title: "Launch",
       body: "",
-      _rev: 1,
     });
     const updated = valueOf(
       await call(notes, notes.owner, "notes.update", {
         id,
-        expectedRevision: 1,
         title: "Launch day",
         body: "Ship it",
       })
@@ -408,7 +405,6 @@ describe("an App's functions", { timeout: 120_000 }, () => {
     expect(updated).toMatchObject({
       title: "Launch day",
       body: "Ship it",
-      _rev: 2,
     });
     const page = valueOf(
       await call(notes, notes.owner, "notes.list", { pagination: {} })
@@ -418,7 +414,6 @@ describe("an App's functions", { timeout: 120_000 }, () => {
       valueOf(
         await call(notes, notes.owner, "notes.remove", {
           id,
-          expectedRevision: 2,
         })
       )
     ).toBeNull();
@@ -432,14 +427,10 @@ describe("an App's functions", { timeout: 120_000 }, () => {
     const id = valueOf(
       await call(notes, notes.owner, "notes.create", { title: "Launch" })
     );
-    // A stale revision: the store's refusal crosses the isolate whole.
-    const stale = await call(notes, notes.owner, "notes.update", {
-      id,
-      expectedRevision: 5,
-      title: "Launch day",
-      body: "",
-    });
-    expect(stale.result).toMatchObject({
+    // A record that is gone: the store's refusal crosses the isolate whole.
+    await call(notes, notes.owner, "notes.remove", { id });
+    const gone = await call(notes, notes.owner, "notes.remove", { id });
+    expect(gone.result).toMatchObject({
       ok: false,
       error: { code: "data.conflict", category: "domain" },
     });
@@ -457,18 +448,10 @@ describe("an App's functions", { timeout: 120_000 }, () => {
 
   it("hand App code the host's failures whole, to branch on and recover from", async () => {
     const notes = await sealedNotes();
-    const id = valueOf(
-      await call(notes, notes.owner, "notes.create", { title: "Launch" })
-    );
     // A store refusal, caught in the isolate by its code.
     expect(
-      valueOf(
-        await call(notes, notes.owner, "notes.checkRevision", {
-          id,
-          expectedRevision: 7,
-        })
-      )
-    ).toBe("changed");
+      valueOf(await call(notes, notes.owner, "notes.tryBadCursor", {}))
+    ).toBe("refused");
     // A nested domain failure, caught as the SDK's own AppError.
     expect(valueOf(await call(notes, notes.owner, "notes.recover", {}))).toBe(
       "recovered from notes.closed"

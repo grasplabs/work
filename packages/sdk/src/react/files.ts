@@ -59,7 +59,7 @@ type UploadHandle = UploadView & {
  * const attach = useMutation(api.notes.attachFile);
  * // In a handler:
  * const file = await upload.upload(picked);
- * await attach({ id: note._id, expectedRevision: note._rev, file });
+ * await attach({ id: note._id, file });
  * ```
  */
 export const useUpload = <Reference extends FilesReference>(

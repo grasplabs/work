@@ -36,7 +36,6 @@ import type { Answer, Sent } from "./test-host.tsx";
 
 const person = v.object({
   _id: v.id("people"),
-  _rev: v.number(),
   name: v.string(),
   team: v.enum(["sales", "support"]),
   active: v.boolean(),
@@ -112,7 +111,6 @@ const renews = Date.UTC(2026, 11, 1);
 const people = ["Ada", "Grace", "Linus", "Margaret", "Ken"].map(
   (name, index) => ({
     _id: idOf(index),
-    _rev: 1,
     name,
     team: index % 2 === 0 ? ("sales" as const) : ("support" as const),
     active: index !== 2,

@@ -196,7 +196,7 @@ export interface MutationCtx<
  * mutation on what the query read, so a record can change between them,
  * and a mutation that committed stays committed if the action fails
  * later. Read and change together in one mutation when the change depends
- * on the read (a mutation's `expectedRevision` and read set fence it).
+ * on the read (a mutation's read set fences it).
  *
  * Called again under the same idempotency key with the same input, an
  * action gets the earlier outcomes of the mutations and resource requests

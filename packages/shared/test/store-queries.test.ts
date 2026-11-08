@@ -241,7 +241,6 @@ describe("a read request", () => {
         kind: "get",
         table: "notes",
         id: "r1",
-        expectedRevision: null,
       }).success
     ).toBeTruthy();
     expect(
@@ -252,7 +251,8 @@ describe("a read request", () => {
         kind: "get",
         table: "notes",
         id: "r1",
-        expectedRevision: 0,
+        // A read asserts nothing of the record.
+        expectedRevision: 1,
       }).success
     ).toBeFalsy();
     expect(

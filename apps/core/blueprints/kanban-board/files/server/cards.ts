@@ -48,28 +48,23 @@ export const add = mutation({
 export const move = mutation({
   args: {
     id: v.id("cards"),
-    expectedRevision: v.number().integer().min(1),
     column,
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.patch(
-      "cards",
-      args.id,
-      { column: args.column, rank: await bottomOf(ctx, args.column) },
-      { expectedRevision: args.expectedRevision }
-    );
+    await ctx.db.patch("cards", args.id, {
+      column: args.column,
+      rank: await bottomOf(ctx, args.column),
+    });
     return null;
   },
 });
 
 export const remove = mutation({
-  args: { id: v.id("cards"), expectedRevision: v.number().integer().min(1) },
+  args: { id: v.id("cards") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.db.delete("cards", args.id, {
-      expectedRevision: args.expectedRevision,
-    });
+    await ctx.db.delete("cards", args.id);
     return null;
   },
 });

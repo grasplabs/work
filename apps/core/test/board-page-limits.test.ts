@@ -10,7 +10,6 @@ import {
   idSchema,
   listed,
   longId,
-  revisionOf,
   saveWorkflow,
   snapshotSchema,
   take,
@@ -64,16 +63,10 @@ describe("the board page", { timeout: 90_000 }, () => {
         ...fields,
         state: "drawn",
       });
-      await saveWorkflow(
-        admin,
-        map,
-        { ...fields, state: "designed" },
-        { id, revision: await revisionOf(admin, map, id) }
-      );
+      await saveWorkflow(admin, map, { ...fields, state: "designed" }, { id });
       valueOf(
         await call(admin, map, "map.link", "mutation", {
           id,
-          expectedRevision: await revisionOf(admin, map, id),
           app: { appId: longId(`app${index}-`), workflowId: longId("w-") },
         })
       );
