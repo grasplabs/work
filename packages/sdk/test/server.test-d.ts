@@ -18,6 +18,7 @@ import type {
   QueryCtx,
   RunHandle,
 } from "../src/server.ts";
+import type { Id } from "../src/value-types.ts";
 import {
   defineSchema,
   defineTable,
@@ -25,7 +26,6 @@ import {
   paginationResultValidator,
   v,
 } from "../src/values.ts";
-import type { Id } from "../src/values.ts";
 import { summarizeNote } from "./notes/grasp.config.ts";
 import { workflows } from "./notes/server/_generated/api.ts";
 import type { invoiceWorkflow } from "./workflows/invoice-approval.ts";

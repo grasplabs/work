@@ -3,8 +3,8 @@
 // must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
+import type { Id } from "../src/value-types.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
-import type { Id } from "../src/values.ts";
 
 const noteFields = {
   title: v.string().trim().min(1).max(200),

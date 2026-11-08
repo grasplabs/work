@@ -1,7 +1,7 @@
 import { AppDefinitionError } from "./app-definition-error.ts";
 import { refuser } from "./declaration.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
-import { descriptorOf } from "./value-schema.ts";
 
 const refuse: (message: string) => never = refuser(AppDefinitionError);
 

@@ -8,15 +8,15 @@ import {
   refuser,
   sha256Pattern,
 } from "./declaration.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject, unsafeKeys } from "./value-descriptor.ts";
 import type {
   FrozenJson,
   JsonValue,
   ValueDescriptor,
 } from "./value-descriptor.ts";
-import { descriptorOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
-import type { Infer, InferInput } from "./values.ts";
+import type { Infer, InferInput } from "./value-types.ts";
 
 // `migration`: an explicit, typed transform of one table's records from
 // one schema to another (spec 17.2), for a change the host can't make on

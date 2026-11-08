@@ -11,7 +11,7 @@ import type {
   QueryFilter,
   Simplify,
 } from "./query-types.ts";
-import type { Id } from "./values.ts";
+import type { Id } from "./value-types.ts";
 
 /** The whole numbers 0 to `Max`, as a union. */
 type UpTo<

@@ -28,7 +28,7 @@ import type {
 } from "./permission-types.ts";
 import type { ValueSchema } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
-import type { Infer, ObjectInput, ValueShape } from "./values.ts";
+import type { Infer, ObjectInput, ValueShape } from "./value-types.ts";
 
 /** One search result from the Brain: a title and an excerpt of it. */
 export interface BrainHit {

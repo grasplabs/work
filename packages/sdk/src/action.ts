@@ -1,12 +1,17 @@
 import type { MemoryPack, RecallInput } from "./brain.ts";
 import { dataReader, namePattern, refuser } from "./declaration.ts";
 import { actionHandlers, isActionHandler } from "./handlers.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 import { isPlainObject } from "./value-descriptor.ts";
-import { descriptorOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
+import type {
+  Infer,
+  InferInput,
+  ObjectSchema,
+  ValueShape,
+} from "./value-types.ts";
 import { v } from "./values.ts";
-import type { Infer, InferInput, ObjectSchema, ValueShape } from "./values.ts";
 
 // `action`: a workflow's own action (platform specification 13.6), which a
 // JSON workflow calls through a `grasp.operation` binding to
@@ -54,7 +59,7 @@ import type { Infer, InferInput, ObjectSchema, ValueShape } from "./values.ts";
 // way to start a workflow.
 
 export { v } from "./values.ts";
-export type { Infer, InferInput } from "./values.ts";
+export type { Infer, InferInput } from "./value-types.ts";
 
 /** The kinds of binding an action may use in this release. */
 export type UseKind =

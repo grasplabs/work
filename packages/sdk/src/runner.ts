@@ -19,10 +19,10 @@ import type { PeopleOperationName } from "./people.ts";
 import type { AnyPermission, AppPermission } from "./permission-types.ts";
 import { eventReferenceData, referenceName } from "./references.ts";
 import type { EventReferenceData } from "./references.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
 import type { FunctionKind } from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { JsonValue } from "./value-descriptor.ts";
-import { descriptorOf } from "./value-schema.ts";
 
 // How an App's server functions run where its code runs: the runner looks
 // a registered function up by path, builds the context of its kind over

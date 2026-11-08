@@ -1,10 +1,10 @@
 import { dataReader, refuser } from "./declaration.ts";
 import { computeHandlers } from "./handlers.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
-import { descriptorOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
-import type { Infer, InferInput } from "./values.ts";
+import type { Infer, InferInput } from "./value-types.ts";
 
 // `compute`: a pure calculation a JSON workflow calls through
 // `grasp.compute` (platform specification 13.6, 32.4). It lives in the
@@ -30,7 +30,7 @@ import type { Infer, InferInput } from "./values.ts";
 // has nothing to wait for, so it can hide no effect behind a promise.
 
 export { v } from "./values.ts";
-export type { Infer, InferInput } from "./values.ts";
+export type { Infer, InferInput } from "./value-types.ts";
 
 /** What `compute` is declared with. */
 interface ComputeDefinition<Input extends AnySchema, Output extends AnySchema> {

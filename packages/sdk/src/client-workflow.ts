@@ -34,11 +34,11 @@ import type {
   WorkflowEventReference,
   WorkflowWait,
 } from "./references.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
 import { readDescriptor } from "./value-read.ts";
-import { descriptorOf } from "./value-schema.ts";
 import { v } from "./values.ts";
 
 // Workflow runs on a page (spec 10.4–10.4.7, 10.7.2, 10.7.3): what

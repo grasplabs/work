@@ -5,8 +5,8 @@ import type {
 } from "@grasp-os/shared/platform-measures";
 
 import type { AnySchema } from "./value-schema.ts";
+import type { ValueShape } from "./value-types.ts";
 import { v } from "./values.ts";
-import type { ValueShape } from "./values.ts";
 
 /**
  * One of the platform's read-only functions (`graspFunctions`): a query,

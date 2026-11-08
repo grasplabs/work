@@ -36,10 +36,10 @@ import type {
   WorkflowPermission,
 } from "./permission-types.ts";
 import type { FilesOperation } from "./references.ts";
-import { descriptorOf } from "./value-schema.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
 import type { AnySchema } from "./value-schema.ts";
+import type { Infer, InferInput } from "./value-types.ts";
 import { v } from "./values.ts";
-import type { Infer, InferInput } from "./values.ts";
 
 // `permission`: how an App says what it can reach outside itself (spec 12,
 // 32.3), as an admin thinks of it. Eight permissions, each listed under

@@ -1,10 +1,10 @@
+import { seal } from "./descriptor-seal.ts";
 import {
   isPlainObject,
   ValueDefinitionError,
   valueLimits,
 } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
-import { seal } from "./value-schema.ts";
 
 // Reading a descriptor of unknown origin back into a sealed one: a stored
 // manifest's, a browser's, another version's. Only the host does this

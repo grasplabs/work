@@ -7,7 +7,7 @@ import { clientError, GraspError, readRejection } from "./client-error.ts";
 import { namePattern } from "./declaration.ts";
 import type { FilesOperation, FilesReference } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
-import type { FileValue } from "./values.ts";
+import type { FileValue } from "./value-types.ts";
 
 // The session client's files (spec 10.7.5): what `useUpload`, `useFile`
 // and `client.files` do with a files resource the App declared, over the

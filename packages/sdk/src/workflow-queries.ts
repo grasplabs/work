@@ -1,9 +1,10 @@
 import type { OperationManifest } from "./app-types.ts";
 import type { BoundWorkflow } from "./bound-workflows.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
 import { ValueDefinitionError } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
-import { descriptorOf, schemaOf } from "./value-schema.ts";
+import { schemaOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
 import {
   paginationOptionsValidator,

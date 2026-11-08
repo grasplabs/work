@@ -16,7 +16,7 @@ import {
   readDefinition,
 } from "../src/definition.ts";
 import type { AppDefinition } from "../src/definition.ts";
-import { descriptorOf } from "../src/value-schema.ts";
+import { descriptorOf } from "../src/sealed-descriptors.ts";
 import { v } from "../src/values.ts";
 
 // An App's definition (definition.ts): the operations that change it, the

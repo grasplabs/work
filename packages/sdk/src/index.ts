@@ -5,6 +5,7 @@
 // module.
 
 export * from "./values.ts";
+export type * from "./value-types.ts";
 export { defineApp } from "./app.ts";
 export type { App, AppConfig, AppPermissions } from "./app-types.ts";
 

@@ -1,6 +1,6 @@
 import type { WorkflowBindingExtras } from "../src/host.ts";
 import { v } from "../src/index.ts";
-import { descriptorOf } from "../src/value-schema.ts";
+import { descriptorOf } from "../src/sealed-descriptors.ts";
 
 // What the host resolves of the workflows the Notes fixture declares
 // (test/notes/grasp.config.ts), against the approved records of its bindings: what

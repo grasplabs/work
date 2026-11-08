@@ -1,8 +1,8 @@
 import type { OperationManifest } from "./app-types.ts";
 import type { OperationReference } from "./references.ts";
-import { descriptorOf } from "./value-schema.ts";
+import { descriptorOf } from "./sealed-descriptors.ts";
+import type { Infer, InferInput } from "./value-types.ts";
 import { v } from "./values.ts";
-import type { Infer, InferInput } from "./values.ts";
 
 // Who calls an App, and the organization's people (GRA-1474): what an
 // App's server functions read as `ctx.auth.getUser()` and `ctx.people`,

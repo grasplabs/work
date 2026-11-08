@@ -4,6 +4,7 @@ import { describe, expect, test } from "vite-plus/test";
 
 import { databaseReader, QueryDefinitionError } from "../src/database.ts";
 import type { QueryDefinitionCode } from "../src/database.ts";
+import type { Id } from "../src/value-types.ts";
 import {
   defineSchema,
   defineTable,
@@ -11,7 +12,6 @@ import {
   paginationResultValidator,
   v,
 } from "../src/values.ts";
-import type { Id } from "../src/values.ts";
 
 // `ctx.db` for reading, as App code builds its reads: each read becomes one
 // request to the host, which these tests capture instead of a store. What

@@ -22,7 +22,7 @@ import type {
 } from "./query-types.ts";
 import { hasOnly } from "./query-values.ts";
 import type { AnyTable, SchemaDefinition, TableState } from "./schema-types.ts";
-import type { Id } from "./values.ts";
+import type { Id } from "./value-types.ts";
 
 /** A query of one table, before an index is chosen. */
 type QueryInitializer<
