@@ -2,13 +2,9 @@ import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 import { appMaxOperations } from "@grasp-os/shared/function-limits";
 import { canonicalText } from "@grasp-os/shared/json";
 
-import {
-  AppDefinitionError,
-  defineApp,
-  inspectApp,
-  registerApp,
-} from "./app.ts";
-import type { AppConfig, AppManifest } from "./app.ts";
+import { AppDefinitionError } from "./app-definition-error.ts";
+import type { AppConfig, AppManifest } from "./app-types.ts";
+import { defineApp, inspectApp, registerApp } from "./app.ts";
 import { hasExactly, isOverBytes, refuser } from "./declaration.ts";
 import { migration } from "./migration.ts";
 import type { Migration } from "./migration.ts";

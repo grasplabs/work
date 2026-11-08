@@ -15,26 +15,27 @@ import { engineStepPattern } from "./steps.ts";
 import type { WorkflowDefinition } from "./workflow.ts";
 
 // An App's tests (`appTest`), which core's test runner runs against the
-// real host: app-test.ts.
-export {
-  appTest,
-  appTestTimeoutMs,
-  maxAppTestName,
-  maxAppTests,
-  runAppSuite,
-  TestDefinitionError,
-  testNamePattern,
-  workflowTest,
-} from "./app-test.ts";
+// real host: app-test-suite.ts and app-test-runner.ts.
+export { appTestTimeoutMs, runAppSuite } from "./app-test-runner.ts";
 export type {
-  AppTestContext,
-  AppTestDefinition,
-  AppTestFunction,
   AppTestHost,
   AppTestReport,
   AppTestResult,
   AppTestSession,
   AppTestSubscription,
+} from "./app-test-session.ts";
+export {
+  appTest,
+  maxAppTestName,
+  maxAppTests,
+  TestDefinitionError,
+  testNamePattern,
+  workflowTest,
+} from "./app-test-suite.ts";
+export type {
+  AppTestContext,
+  AppTestDefinition,
+  AppTestFunction,
   AppTestSuite,
   LiveQuery,
   PublicReference,
@@ -48,7 +49,7 @@ export type {
   WorkflowTestFunction,
   WorkflowTestRun,
   WorkflowTestSuite,
-} from "./app-test.ts";
+} from "./app-test-types.ts";
 
 /**
  * Test harness for workflows. Runs a workflow in memory, with

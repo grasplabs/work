@@ -2,9 +2,10 @@ import { peopleAlias } from "@grasp-os/shared/notifications";
 import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 
 import { AppError } from "./app-error.ts";
-import { inspectApp, isActionPermission } from "./app.ts";
+import { inspectApp } from "./app.ts";
 import { databaseReader, databaseWriter } from "./database.ts";
 import { isThenable, refusals } from "./lockdown.ts";
+import { isActionPermission } from "./manifest-permissions.ts";
 import {
   impureMessage,
   migrationHandler,

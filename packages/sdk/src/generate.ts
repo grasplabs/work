@@ -3,9 +3,12 @@ import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { isEventType, sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 
-import { declaredPermission, declaredPermissions } from "./app.ts";
-import type { AppManifest, OperationManifest } from "./app.ts";
+import type { AppManifest, OperationManifest } from "./app-types.ts";
 import { namePattern } from "./declaration.ts";
+import {
+  declaredPermission,
+  declaredPermissions,
+} from "./manifest-permissions.ts";
 import { preferenceOperations } from "./preference-operations.ts";
 import { workflowReferenceLimits } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";

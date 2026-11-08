@@ -1,4 +1,4 @@
-import type { OperationManifest } from "./app.ts";
+import type { OperationManifest } from "./app-types.ts";
 import type { OperationReference } from "./references.ts";
 import { descriptorOf } from "./value-schema.ts";
 import { v } from "./values.ts";

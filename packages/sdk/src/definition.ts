@@ -1,13 +1,9 @@
 import { stableIdPattern } from "@grasp-os/shared/store-limits";
 import { z } from "zod";
 
-import {
-  AppDefinitionError,
-  defineApp,
-  inspectApp,
-  registerApp,
-} from "./app.ts";
-import type { App, AppManifest, AppPermissions } from "./app.ts";
+import { AppDefinitionError } from "./app-definition-error.ts";
+import type { App, AppManifest, AppPermissions } from "./app-types.ts";
+import { defineApp, inspectApp, registerApp } from "./app.ts";
 import { isOverBytes, refuser } from "./declaration.ts";
 import { readPermissionDeclaration } from "./permissions.ts";
 import { defineSchema, defineTable } from "./schema.ts";

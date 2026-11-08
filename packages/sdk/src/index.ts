@@ -6,7 +6,7 @@
 
 export * from "./values.ts";
 export { defineApp } from "./app.ts";
-export type { App, AppConfig, AppPermissions } from "./app.ts";
+export type { App, AppConfig, AppPermissions } from "./app-types.ts";
 
 export { AppError } from "./app-error.ts";
 export { migration } from "./migration.ts";

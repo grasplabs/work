@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 
-import { AppDefinitionError } from "../src/app.ts";
+import { AppDefinitionError } from "../src/app-definition-error.ts";
 import { evaluateExpression } from "../src/definition-expression.ts";
 import { applyOperation } from "../src/definition-operations.ts";
 import type { DefinitionOperation } from "../src/definition-operations.ts";
