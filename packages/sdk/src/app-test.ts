@@ -1,7 +1,7 @@
 // oxlint-disable max-classes-per-file -- a suite's own definition error, and the two failures a test can have, each a few lines
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { messageOf } from "@grasp-os/shared/errors";
-import { canonicalText, isRecord } from "@grasp-os/shared/json";
+import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 import type {
@@ -542,9 +542,18 @@ const requestFor = (
 };
 
 // Values as they cross from the host (JSON), in canonical JSON, so equal
-// values compare equal whatever order their keys are in.
-const canonical = (value: unknown): string =>
-  JSON.stringify(value) === undefined ? "undefined" : canonicalText(value);
+// values compare equal whatever order their keys are in. Serialised once:
+// a getter or `toJSON` is read a single time.
+const canonical = (value: unknown): string => {
+  const text = JSON.stringify(value);
+  if (text === undefined) {
+    return "undefined";
+  }
+  // SAFETY: what JSON.parse answers is JSON.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const json = JSON.parse(text) as Json;
+  return canonicalJson(json);
+};
 
 /**
  * Releases `stub`, an RPC stub core returned (a session, a subscription),
