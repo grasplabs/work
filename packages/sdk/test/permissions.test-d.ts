@@ -5,27 +5,28 @@
 // arguments and answer from the contract alone, without a cast or a
 // generic argument; the platform's functions are typed by what
 // `permission.grasp()` declares of them; `ctx.ai`, `ctx.brain`,
-// `ctx.grasp` and `ctx.guests` are there only for an action that lists
-// them. This file is type-checked by
+// `ctx.grasp` and `ctx.guests` are there only for an action of an App
+// that declares them. This file is type-checked by
 // `vp check` and never run: every `@ts-expect-error` below must stay an
 // error.
 import { expectTypeOf } from "vite-plus/test";
 
-import { permission } from "../src/index.ts";
+import { defineApp, permission } from "../src/index.ts";
 import type { ConnectorAction, ConnectorContract } from "../src/index.ts";
 import { serverModule } from "../src/server.ts";
 import type { ActionCtx } from "../src/server.ts";
 import type { JsonValue } from "../src/value-descriptor.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
 
-const { action } = serverModule(
-  defineSchema({ notes: defineTable({ title: v.string() }) })
-);
-
 const mail = permission.connection("mail", {
   contract: "microsoft-365.mail@1",
   actions: ["send", "list"],
 });
+
+const { action } = serverModule(
+  defineSchema({ notes: defineTable({ title: v.string() }) }),
+  defineApp({ name: "Mail", permissions: { connections: [mail] } })
+);
 const gmail = permission.connection("gmail", {
   contract: "google-workspace.mail@1",
   actions: ["send", "labels"],
@@ -48,7 +49,7 @@ expectTypeOf<ConnectorAction<"microsoft-365.mail@1">>().toEqualTypeOf<
   | "thread"
 >();
 
-declare const ctx: ActionCtx<readonly [typeof mail, typeof gmail]>;
+declare const ctx: ActionCtx<typeof mail | typeof gmail>;
 
 // Arguments as the contract takes them: optional fields may be left out.
 const sent = await ctx.connections.mail.call("send", {
@@ -91,11 +92,11 @@ expectTypeOf(
   mailbox: string;
 }>();
 
-// The same through an action's `uses`: its handler's answer is typed by it.
+// The same through an action of an App that declares it: its handler's
+// answer is typed by it.
 action({
   args: { to: v.string().email() },
   returns: v.string(),
-  uses: [mail],
   handler: async (context, args) => {
     const answer = await context.connections.mail.call("send", {
       mailbox: "team@acme.test",
@@ -196,7 +197,7 @@ const crm = permission.connection("crm", {
 });
 expectTypeOf<"composio.hubspot@1">().toExtend<ConnectorContract>();
 expectTypeOf<ConnectorAction<"composio.hubspot@1">>().toEqualTypeOf<string>();
-declare const crmCtx: ActionCtx<readonly [typeof crm]>;
+declare const crmCtx: ActionCtx<typeof crm>;
 const contacts = await crmCtx.connections.crm.call("HUBSPOT_LIST_CONTACTS", {
   limit: 5,
 });
@@ -222,7 +223,7 @@ expectTypeOf(permission).not.toHaveProperty("app");
 
 // The platform's own read-only functions, under `grasp`.
 const grasp = permission.grasp();
-declare const graspCtx: ActionCtx<readonly [typeof grasp]>;
+declare const graspCtx: ActionCtx<typeof grasp>;
 const runs = await graspCtx.grasp.call("statistics.read", {
   measure: "platform.workflow_runs",
   days: 30,
@@ -239,7 +240,7 @@ await graspCtx.grasp.call("statistics.read", {
 
 // AI: text, or the value of the `output` a request asks for.
 const ai = permission.ai({ maxOutputTokens: 500 });
-declare const aiCtx: ActionCtx<readonly [typeof ai]>;
+declare const aiCtx: ActionCtx<typeof ai>;
 expectTypeOf(
   aiCtx.ai.generate({ prompt: "Hi" })
 ).resolves.toEqualTypeOf<string>();
@@ -256,7 +257,7 @@ const brain = permission.brain({
   collections: ["handbook"],
 });
 const guests = permission.guests({ operations: ["list", "revoke"] });
-declare const brainCtx: ActionCtx<readonly [typeof brain, typeof guests]>;
+declare const brainCtx: ActionCtx<typeof brain | typeof guests>;
 expectTypeOf(brainCtx.brain.search({ text: "leave" })).resolves.toEqualTypeOf<
   { title: string; excerpt: string }[]
 >();

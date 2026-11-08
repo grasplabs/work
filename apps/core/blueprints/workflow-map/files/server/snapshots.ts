@@ -12,7 +12,6 @@ import {
   query,
 } from "@server/_generated/server";
 
-import { permissions } from "../grasp.config.ts";
 import {
   decisionMax,
   figureFields,
@@ -35,9 +34,6 @@ import type { MapFigure } from "./freeze.ts";
 // workflow's figures first, then the snapshot, which lists them, so a
 // snapshot is never seen with part of them. What it froze, only `take`
 // writes; `write` changes the narrative and the decision alone.
-
-// The platform's counts of runs and improvement signals.
-const { grasp } = permissions;
 
 /** Workflows one page of the map holds: as many as it gives. */
 const mapPage = 50;
@@ -169,7 +165,6 @@ export const take = action({
     decisionNeeded: v.string().trim().max(decisionMax).default(""),
   },
   returns: v.id("snapshots"),
-  uses: [addFigures, finish, mapFigures, grasp],
   handler: async (ctx, args) => {
     await requireBuilder(ctx);
     const read: MapFigure[] = [];

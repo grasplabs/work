@@ -13,33 +13,27 @@ import {
   isBrowserPermission,
   isPermission,
   isWorkflowPermission,
+  peopleDeclaration,
   permissionAliases,
 } from "./permissions.ts";
 import type {
   AiPermission,
   AnyPermission,
+  AppPermission,
   BrainPermission,
-  BrowserPermission,
   ConnectionPermission,
   FilesPermission,
   GraspPermission,
   GuestsPermission,
   LinksPermission,
-  PermissionKind,
   WorkflowPermission,
 } from "./permissions.ts";
-import { eventReferenceData, referenceName } from "./references.ts";
 import { readSchemaAnswers } from "./schema-answer.ts";
 import type { SchemaAnswer } from "./schema-answer.ts";
 import { schemaManifest } from "./schema-manifest.ts";
 import type { SchemaManifest } from "./schema-manifest.ts";
-import type { AccessMode, SchemaDefinition } from "./schema.ts";
-import type {
-  AnyFunction,
-  FunctionKind,
-  TableVerbs,
-  Visibility,
-} from "./server.ts";
+import type { SchemaDefinition } from "./schema.ts";
+import type { AnyFunction, FunctionKind, Grant, Visibility } from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { descriptorOf } from "./value-schema.ts";
@@ -64,7 +58,11 @@ import type { AnySchema } from "./value-schema.ts";
 // Registering grants nothing: every requirement here becomes usable only
 // once the host authorizes it, and the host intersects it with the
 // caller, the App's grants and current revocations on every read, commit
-// and call.
+// and call. The App's `permissions` are its one list, as in Convex, where
+// every function of an app may use what the app may: any of its
+// functions may use any of them, as its kind allows (server.ts), and what
+// it reads and writes is decided by its tables' access and row rules for
+// whoever calls, by the store.
 //
 // The registration is checked whole, so one that exists is coherent:
 // - paths come from the server modules' paths and their exports' names
@@ -75,19 +73,9 @@ import type { AnySchema } from "./value-schema.ts";
 // - a function's kind says whether it is public (`query`, `mutation`,
 //   `action`) or internal (`internalQuery`, …), and no function is
 //   exported at two paths;
-// - every function was declared for the App's schema, and what it `uses`
-//   is registered here too: a mutation only the App's queries and the
-//   workflows its `permissions` list, an action any of its functions and
-//   any permission the App lists in its own `permissions`;
+// - every function was declared for the App's schema;
 // - `permissions` lists each kind under its own key, each declaration of
 //   that kind, under an alias no other of the App's permissions has;
-// - a function's `tables` only narrows what its tables' access and its
-//   kind give it: a verb its table's access doesn't allow, or one a
-//   function of its kind can't use (a query writing), is refused here;
-// - a function's `uses` may name another by its generated reference
-//   (spec 8), resolved here by its path: one whose visibility or kind
-//   doesn't match what is registered there is refused, so a stale or
-//   forged reference names nothing;
 // - `preferences` (spec 10.7.7), when declared, is a strict object; the
 //   top-level path segments `preferences`, `workflows` and `people` are
 //   the platform's, so no function registers under them;
@@ -96,8 +84,8 @@ import type { AnySchema } from "./value-schema.ts";
 //   `output` declares exactly that table's fields.
 //
 // What the host runs from is `inspectApp` of what `registerApp` answered:
-// the registration as data (descriptors, paths, the access each function
-// may use), and the handlers by path, which only the runner calls.
+// the registration as data (descriptors, paths, the App's permissions by
+// alias), and the handlers by path, which only the runner calls.
 
 /**
  * An App's server modules, by their path under `server/` without `.ts`
@@ -108,14 +96,17 @@ export type ServerModules = Readonly<
 >;
 
 /** What an App's config (`grasp.config.ts`) declares. */
-export interface AppConfig {
+export interface AppConfig<
+  Permissions extends AppPermissions = AppPermissions,
+> {
   /** What people call the App, 1 to 100 characters. */
   readonly name: string;
   /**
    * Everything it can reach outside itself, by kind; none unless listed.
    * Each needs an admin's binding or grant before it serves anything.
+   * Every function of the App may use them, as its kind allows.
    */
-  readonly permissions?: AppPermissions;
+  readonly permissions?: Permissions;
   /** Its people's preferences (spec 10.7.7): a strict object, when declared. */
   readonly preferences?: AnySchema;
   /**
@@ -131,9 +122,9 @@ export interface AppConfig {
 
 /**
  * An App's permissions, by kind (permissions.ts): what its actions reach
- * through `ctx`, the workflows its functions start, what its pages may
- * do with files and link to, and whether it reads the organization's
- * people.
+ * through `ctx`, the workflows its actions and mutations start, what its
+ * pages may do with files and link to, and whether it reads the
+ * organization's people.
  */
 export interface AppPermissions {
   /** Answers from the workspace's model (`ctx.ai`). */
@@ -162,13 +153,34 @@ export interface AppPermissions {
   readonly links?: LinksPermission;
 }
 
+/** A list's entries, or the value itself when it isn't one. */
+type Entries<Value> = Value extends readonly (infer Entry)[] ? Entry : Value;
+
+/**
+ * What `Permissions` grant the App's functions (`Grant`), as one union:
+ * each declaration its keys hold, but the pages' and `people`.
+ */
+export type GrantsOf<Permissions extends AppPermissions> = Extract<
+  {
+    readonly [Key in keyof Permissions]-?: Entries<
+      NonNullable<Permissions[Key]>
+    >;
+  }[keyof Permissions],
+  Grant
+>;
+
 /**
  * An App by its name: its config, as `defineApp` answers it, and the App
  * registered whole, as `registerApp` does. Each is what `registerApp` and
  * `inspectApp` take, and nothing else is.
  */
-export interface App {
+export interface App<Grants extends Grant = Grant> {
   readonly name: string;
+  /**
+   * What its permissions grant its functions, for types only: never set.
+   * The generated `server/_generated/server` reads it (`serverModule`).
+   */
+  readonly "~grants"?: Grants;
 }
 
 /** The parts of an App the host's entry hands `registerApp`. */
@@ -183,37 +195,6 @@ interface AppParts {
   readonly migrations: readonly unknown[];
 }
 
-/** What one entry of a function's `uses` is, as data. */
-type UseManifest =
-  | {
-      readonly type: "function";
-      readonly path: string;
-      readonly kind: FunctionKind;
-    }
-  | {
-      readonly type: "resource";
-      readonly kind: PermissionKind;
-      readonly alias: string;
-    }
-  | {
-      /** A workflow it starts (an action) or stages a start of (a mutation). */
-      readonly type: "workflow";
-      readonly alias: string;
-    }
-  | {
-      /**
-       * An event of one of the App's workflows a mutation notifies runs
-       * of (spec 10.7.4): the workflow's alias, the event binding's, and
-       * the type and fingerprint its reference was generated with, which
-       * the host checks against the release it runs.
-       */
-      readonly type: "workflowEvent";
-      readonly workflow: string;
-      readonly alias: string;
-      readonly eventType: string;
-      readonly fingerprint: string;
-    };
-
 /** One registered function, as data: what the host checks a call against. */
 export interface OperationManifest {
   readonly path: string;
@@ -223,12 +204,6 @@ export interface OperationManifest {
   /** What it answers, checked by the host; null where it declares no `returns`. */
   readonly returns: ValueDescriptor | null;
   readonly stream: ValueDescriptor | null;
-  readonly uses: readonly UseManifest[];
-  /**
-   * The verbs it may use on each of the schema's tables: their access,
-   * narrowed by its kind and its `tables`. Every table is listed.
-   */
-  readonly tables: Readonly<Record<string, TableVerbs>>;
 }
 
 /** A registered App, as data. */
@@ -238,16 +213,15 @@ export interface AppManifest {
   readonly schema: SchemaManifest;
   /** Every function, public and internal, by path. */
   readonly operations: Readonly<Record<string, OperationManifest>>;
-  /** The permissions its actions reach, by alias. */
-  readonly resources: Readonly<Record<string, AnyPermission>>;
-  /** The permissions its pages use (files, links), by alias. */
-  readonly browserResources: Readonly<Record<string, BrowserPermission>>;
-  /** The workflows its functions start, by alias. */
-  readonly workflows: Readonly<Record<string, WorkflowPermission>>;
+  /**
+   * Every permission it declares, by alias, each with its kind
+   * (`~permission`): what its actions reach, the workflows it starts,
+   * what its pages use (files, links), and `people` when it reads the
+   * organization's people. What the host checks every use against.
+   */
+  readonly permissions: Readonly<Record<string, AppPermission>>;
   /** Its preferences' strict object, or null when it declares none. */
   readonly preferences: ValueDescriptor | null;
-  /** Present when it reads the organization's people (`permissions.people`). */
-  readonly people?: true;
   /** Its migrations, by name, in the order declared. */
   readonly migrations: Readonly<Record<string, MigrationManifest>>;
   /** Its answers for a schema change, when it declares any. */
@@ -299,10 +273,7 @@ const inspections = new WeakMap<object, AppInspection>();
 /** What `defineApp` checked of a config, for `registerApp`. */
 interface CheckedConfig {
   readonly config: AppConfig;
-  readonly resources: ReadonlyMap<string, AnyPermission>;
-  readonly browser: ReadonlyMap<string, BrowserPermission>;
-  readonly workflows: ReadonlyMap<string, WorkflowPermission>;
-  readonly people: boolean;
+  readonly permissions: ReadonlyMap<string, AppPermission>;
   readonly preferences: ValueDescriptor | null;
 }
 
@@ -436,14 +407,6 @@ const permissionKeys: ReadonlyMap<string, string> = new Map([
 /** The keys of an App's `permissions` that hold a list. */
 const listedKeys: ReadonlySet<string> = new Set(["connections", "workflows"]);
 
-/** The App's permissions, by what reaches them and by alias, each once. */
-interface PermissionsOf {
-  readonly actions: Map<string, AnyPermission>;
-  readonly browser: Map<string, BrowserPermission>;
-  readonly workflows: Map<string, WorkflowPermission>;
-  readonly people: boolean;
-}
-
 /** The declarations `permissions[key]` holds: one, or a list. */
 const declarationsUnder = (
   permissions: Readonly<Record<string, unknown>>,
@@ -502,27 +465,25 @@ const checkedKeys = (
  * Refuses a fixed alias held by another kind: no connection or
  * workflow takes one, so the host never mistakes `ai` for a connection.
  */
-const requireFixedAliases = ({
-  actions,
-  browser,
-  workflows,
-}: Omit<PermissionsOf, "people">): void => {
+const requireFixedAliases = (
+  permissions: ReadonlyMap<string, AppPermission>
+): void => {
   for (const [kind, alias] of Object.entries(permissionAliases)) {
-    const held =
-      actions.get(alias) ?? browser.get(alias) ?? workflows.get(alias);
+    const held = permissions.get(alias);
     if (held !== undefined && held["~permission"] !== kind) {
       refuse(`\`${alias}\` is the alias of the App's \`${kind}\` permission.`);
     }
   }
 };
 
-/** The App's permissions (see `PermissionsOf`), each kind under its key. */
-const permissionsOf = (given: unknown): PermissionsOf => {
-  const actions = new Map<string, AnyPermission>();
-  const browser = new Map<string, BrowserPermission>();
-  const workflows = new Map<string, WorkflowPermission>();
+/**
+ * The App's permissions, each kind under its key, as one map by alias,
+ * each alias once: `people: true` as the `people` permission.
+ */
+const permissionsOf = (given: unknown): Map<string, AppPermission> => {
+  const declared = new Map<string, AppPermission>();
   if (given === undefined) {
-    return { actions, browser, workflows, people: false };
+    return declared;
   }
   const permissions = checkedKeys(given);
   for (const key of permissionKeys.keys()) {
@@ -530,26 +491,30 @@ const permissionsOf = (given: unknown): PermissionsOf => {
       ? []
       : declarationsUnder(permissions, key)) {
       const alias = aliasUnder(declaration, key);
-      if (alias === undefined) {
+      if (
+        alias === undefined ||
+        !(
+          isWorkflowPermission(declaration) ||
+          isPermission(declaration) ||
+          isBrowserPermission(declaration)
+        )
+      ) {
         refuse(
           `An App's \`permissions.${key}\` is ${permissionKeys.get(key) ?? "a permission"}.`
         );
         continue;
       }
-      if (actions.has(alias) || browser.has(alias) || workflows.has(alias)) {
+      if (declared.has(alias)) {
         refuse(`Two of the App's permissions have alias \`${alias}\`.`);
       }
-      if (isWorkflowPermission(declaration)) {
-        workflows.set(alias, declaration);
-      } else if (isPermission(declaration)) {
-        actions.set(alias, declaration);
-      } else if (isBrowserPermission(declaration)) {
-        browser.set(alias, declaration);
-      }
+      declared.set(alias, declaration);
     }
   }
-  requireFixedAliases({ actions, browser, workflows });
-  return { actions, browser, workflows, people: permissions.people === true };
+  requireFixedAliases(declared);
+  if (permissions.people === true) {
+    declared.set(peopleDeclaration.alias, peopleDeclaration);
+  }
+  return declared;
 };
 
 /** The App's preferences' descriptor, or null: a strict required object. */
@@ -657,173 +622,14 @@ const migrationsOf = (
   return { manifests, byName };
 };
 
-/** Whether `mode` lets anyone at all use the table. */
-const allows = (mode: AccessMode): boolean => mode !== "none";
-
-/** What `kind` may do to a table with access `read` and `write`. */
-const baseVerbs = (
-  kind: FunctionKind,
-  read: AccessMode,
-  write: AccessMode
-): TableVerbs => ({
-  read: kind !== "action" && allows(read),
-  insert: kind === "mutation" && allows(write),
-  update: kind === "mutation" && allows(write),
-  delete: kind === "mutation" && allows(write),
-});
-
 /**
- * The verbs of each table for function `fn`, registered at `path`: its
- * base verbs, narrowed by its `tables` when it declares them, in which a
- * table or verb left out is denied. A verb `tables` sets that the base
- * doesn't allow is a widening, and refused.
- */
-const verbsOf = (
-  schema: SchemaManifest,
-  path: string,
-  fn: AnyFunction
-): Record<string, TableVerbs> => {
-  const verbs: Record<string, TableVerbs> = {};
-  const narrowing = fn.tables;
-  for (const [table, { access }] of Object.entries(schema.tables)) {
-    const base = baseVerbs(fn.kind, access.read, access.write);
-    if (narrowing === null) {
-      verbs[table] = base;
-      continue;
-    }
-    const declared = Object.hasOwn(narrowing, table) ? narrowing[table] : {};
-    const narrowed = (verb: keyof TableVerbs): boolean => {
-      const wanted = declared?.[verb] === true;
-      if (wanted && !base[verb]) {
-        refuse(
-          `\`${path}\`'s \`tables.${table}.${verb}\` widens access: ${fn.kind === "query" && verb !== "read" ? "a query only reads" : `\`${table}\`'s \`${verb === "read" ? "read" : "write"}\` access is \`none\``}.`
-        );
-      }
-      return wanted;
-    };
-    verbs[table] = {
-      read: narrowed("read"),
-      insert: narrowed("insert"),
-      update: narrowed("update"),
-      delete: narrowed("delete"),
-    };
-  }
-  return verbs;
-};
-
-/**
- * The registered path and kind `use` names: a definition by the path it is
- * registered at, a reference by its path, if what is registered there has
- * its visibility and, for a generated reference, its kind.
- */
-const usedFunction = (
-  use: unknown,
-  path: string,
-  paths: ReadonlyMap<unknown, string>,
-  functions: ReadonlyMap<string, AnyFunction>
-): { target: string; kind: FunctionKind } => {
-  const registered = paths.get(use);
-  if (registered !== undefined) {
-    const fn = functions.get(registered);
-    if (fn !== undefined) {
-      return { target: registered, kind: fn.kind };
-    }
-  }
-  const name = referenceName(use);
-  const target = name === undefined ? undefined : functions.get(name);
-  if (name === undefined || target === undefined) {
-    return refuse(`\`${path}\` uses a function the App doesn't register.`);
-  }
-  return { target: name, kind: target.kind };
-};
-
-/** What `fn`, registered at `path`, uses, as data, checked against the App. */
-const usesOf = (
-  fn: AnyFunction,
-  path: string,
-  paths: ReadonlyMap<unknown, string>,
-  functions: ReadonlyMap<string, AnyFunction>,
-  resources: ReadonlyMap<string, AnyPermission>,
-  workflows: ReadonlyMap<string, WorkflowPermission>
-): UseManifest[] => {
-  const seen = new Set<unknown>();
-  return fn.uses.map((use): UseManifest => {
-    if (seen.has(use)) {
-      refuse(`\`${path}\` lists the same reference twice in \`uses\`.`);
-    }
-    seen.add(use);
-    if (isPermission(use)) {
-      // Every permission an action reaches goes outside the App: AI, a
-      // connection, the Brain, another App, guest chats. Only an action
-      // may.
-      if (fn.kind !== "action") {
-        refuse(
-          `\`${path}\` is a ${fn.kind}: only an action reaches \`${use["~permission"]}\`, and queries and mutations never call AI, connections, the Brain, other Apps or guests.`
-        );
-      }
-      if (resources.get(use.alias) !== use) {
-        refuse(
-          `\`${path}\` uses permission \`${use.alias}\`, which the App's \`permissions\` don't list.`
-        );
-      }
-      return { type: "resource", kind: use["~permission"], alias: use.alias };
-    }
-    if (isWorkflowPermission(use)) {
-      // A start is a change, never a read: an action makes one, a mutation
-      // stages one with its commit. A query lists nothing.
-      if (fn.kind === "query") {
-        refuse(`\`${path}\` is a query: it starts no workflow.`);
-      }
-      if (workflows.get(use.alias) !== use) {
-        refuse(
-          `\`${path}\` starts workflow \`${use.alias}\`, which the App's \`permissions.workflows\` don't list.`
-        );
-      }
-      return { type: "workflow", alias: use.alias };
-    }
-    const event = eventReferenceData(use);
-    if (event !== undefined) {
-      // A notification is a change staged with a commit: only a mutation
-      // stages one. An action calls a mutation that does.
-      if (fn.kind !== "mutation") {
-        refuse(
-          `\`${path}\` is a ${fn.kind}: only a mutation notifies a workflow's run, staged with its commit.`
-        );
-      }
-      if (!workflows.has(event.workflow)) {
-        refuse(
-          `\`${path}\` notifies workflow \`${event.workflow}\`, which the App's \`permissions.workflows\` don't list.`
-        );
-      }
-      return {
-        type: "workflowEvent",
-        workflow: event.workflow,
-        alias: event.alias,
-        eventType: event.type,
-        fingerprint: event.fingerprint,
-      };
-    }
-    const { target, kind } = usedFunction(use, path, paths, functions);
-    if (fn.kind === "mutation" && kind !== "query") {
-      refuse(
-        `\`${path}\` is a mutation: it may run the App's queries, never \`${target}\`, a ${kind}.`
-      );
-    }
-    return { type: "function", path: target, kind };
-  });
-};
-
-/**
- * The functions `found` holds, by path, and the path of each: every one
- * declared for `schema`, exported at one path only.
+ * The functions `found` holds, by path: every one declared for `schema`,
+ * exported at one path only.
  */
 const registeredFunctions = (
   schema: unknown,
   found: ReadonlyMap<string, unknown>
-): {
-  functions: Map<string, AnyFunction>;
-  paths: Map<unknown, string>;
-} => {
+): Map<string, AnyFunction> => {
   const functions = new Map<string, AnyFunction>();
   const paths = new Map<unknown, string>();
   for (const [path, value] of found) {
@@ -844,7 +650,7 @@ const registeredFunctions = (
     functions.set(path, value);
     paths.set(value, path);
   }
-  return { functions, paths };
+  return functions;
 };
 
 /** Refuses a config with keys it can't have, or without a name. */
@@ -868,23 +674,19 @@ const checkConfig = (config: unknown): void => {
  * An App's config (`grasp.config.ts`), checked: its name, its
  * permissions and its preferences. Throws `AppDefinitionError` for one
  * that isn't coherent; what needs its schema (`answers`) is checked as it
- * registers (`registerApp`).
+ * registers (`registerApp`). What it answers carries its permissions'
+ * types, which type its functions' contexts (`serverModule`).
  */
-export const defineApp = (config: AppConfig): App => {
+export const defineApp = <
+  const Permissions extends AppPermissions = Record<never, never>,
+>(
+  config: AppConfig<Permissions>
+): App<GrantsOf<Permissions>> => {
   checkConfig(config);
-  const {
-    actions: resources,
-    browser,
-    workflows,
-    people,
-  } = permissionsOf(config.permissions);
-  const made: App = Object.freeze({ name: config.name });
+  const made: App<GrantsOf<Permissions>> = Object.freeze({ name: config.name });
   configs.set(made, {
     config,
-    resources,
-    browser,
-    workflows,
-    people,
+    permissions: permissionsOf(config.permissions),
     preferences: preferencesOf(config.preferences),
   });
   return made;
@@ -910,7 +712,7 @@ export const registerApp = (parts: AppParts): App => {
       "grasp.config.ts's default export isn't a config `defineApp` made."
     );
   }
-  const { config, resources, workflows } = checked;
+  const { config, permissions } = checked;
   // Throws for a schema `defineSchema` didn't make.
   const manifest = schemaManifest(parts.schema);
   const { manifests: migrations, byName: migrationsByName } = migrationsOf(
@@ -918,7 +720,7 @@ export const registerApp = (parts: AppParts): App => {
     manifest
   );
   const answers = readSchemaAnswers(config.answers, manifest, refuse);
-  const { functions, paths } = registeredFunctions(
+  const functions = registeredFunctions(
     parts.schema,
     exportedFunctions(parts.modules)
   );
@@ -934,10 +736,6 @@ export const registerApp = (parts: AppParts): App => {
         args: fn.args.descriptor,
         returns: fn.returns === null ? null : fn.returns.descriptor,
         stream: fn.stream === null ? null : fn.stream.descriptor,
-        uses: Object.freeze(
-          usesOf(fn, path, paths, functions, resources, workflows)
-        ),
-        tables: Object.freeze(verbsOf(manifest, path, fn)),
       }),
     });
   }
@@ -948,11 +746,8 @@ export const registerApp = (parts: AppParts): App => {
       name: config.name,
       schema: manifest,
       operations,
-      resources: Object.fromEntries(resources),
-      browserResources: Object.fromEntries(checked.browser),
-      workflows: Object.fromEntries(workflows),
+      permissions: Object.fromEntries(permissions),
       preferences: checked.preferences,
-      ...(checked.people ? { people: true } : {}),
       migrations,
       ...(answers.length > 0 ? { answers } : {}),
     }),
@@ -983,3 +778,86 @@ export const inspectApp = (registered: unknown): AppInspection => {
     migrations: new Map(inspection.migrations),
   });
 };
+
+/** A permission's kind, as a manifest files it (`~permission`). */
+export type AppPermissionKind = AppPermission["~permission"];
+
+/** The permission of kind `Kind`. */
+export type PermissionOfKind<Kind extends AppPermissionKind> = Extract<
+  AppPermission,
+  { readonly "~permission": Kind }
+>;
+
+/** Whether `declared` is of kind `kind`. */
+const isOfKind = <Kind extends AppPermissionKind>(
+  declared: AppPermission,
+  kind: Kind
+): declared is PermissionOfKind<Kind> => declared["~permission"] === kind;
+
+/**
+ * The permission `manifest` declares under `alias`, if it is of kind
+ * `kind`: what the host checks a use against, so an alias of another kind
+ * (a workflow named where a connection is asked for) is none.
+ */
+export const declaredPermission = <Kind extends AppPermissionKind>(
+  manifest: Pick<AppManifest, "permissions">,
+  alias: unknown,
+  kind: Kind
+): PermissionOfKind<Kind> | undefined => {
+  const declared =
+    typeof alias === "string" && Object.hasOwn(manifest.permissions, alias)
+      ? manifest.permissions[alias]
+      : undefined;
+  return declared !== undefined && isOfKind(declared, kind)
+    ? declared
+    : undefined;
+};
+
+/** The permissions of kind `kind` that `manifest` declares, in alias order. */
+export const declaredPermissions = <Kind extends AppPermissionKind>(
+  manifest: Pick<AppManifest, "permissions">,
+  kind: Kind
+): PermissionOfKind<Kind>[] =>
+  Object.keys(manifest.permissions)
+    .toSorted()
+    .flatMap((alias) => declaredPermission(manifest, alias, kind) ?? []);
+
+/** The kinds of permission an action reaches through `ctx`. */
+const reachedKinds: ReadonlySet<AppPermissionKind> = new Set([
+  "ai",
+  "connections",
+  "brain",
+  "grasp",
+  "guests",
+]);
+
+/** Whether `declared` is one an action reaches through `ctx`. */
+export const isActionPermission = (
+  declared: AppPermission
+): declared is AnyPermission => reachedKinds.has(declared["~permission"]);
+
+/**
+ * The permission an action reaches under `alias` (`ctx.ai`,
+ * `ctx.connections.<alias>`, …) that `manifest` declares, if any: never a
+ * workflow, a pages' permission or `people`.
+ */
+export const actionPermission = (
+  manifest: Pick<AppManifest, "permissions">,
+  alias: unknown
+): AnyPermission | undefined => {
+  const declared =
+    typeof alias === "string" && Object.hasOwn(manifest.permissions, alias)
+      ? manifest.permissions[alias]
+      : undefined;
+  return declared !== undefined && isActionPermission(declared)
+    ? declared
+    : undefined;
+};
+
+/** The permissions an action reaches that `manifest` declares, in alias order. */
+export const actionPermissions = (
+  manifest: Pick<AppManifest, "permissions">
+): AnyPermission[] =>
+  Object.keys(manifest.permissions)
+    .toSorted()
+    .flatMap((alias) => actionPermission(manifest, alias) ?? []);

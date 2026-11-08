@@ -1,7 +1,6 @@
 import { AppError, v } from "@grasp-os/sdk";
 import { action } from "@server/_generated/server";
 
-import { permissions } from "../grasp.config.ts";
 import { notesMax, shortTextMax, sourceFields } from "../values.ts";
 import { reviewer } from "./drafts.ts";
 
@@ -19,8 +18,6 @@ import { reviewer } from "./drafts.ts";
 // the store refuses anyone else, so no one else invites, lists, reads or
 // revokes a chat. The workflow reads no chat itself: only what the page
 // read here and gave it.
-
-const { guests } = permissions;
 
 /** The skill a stakeholder's chat follows. */
 export const interviewSkill = "interview-a-stakeholder";
@@ -96,7 +93,6 @@ export const overview = action({
     writable: v.boolean(),
     chats: v.array(chat).nullable(),
   }),
-  uses: [reviewer, guests],
   handler: async (ctx) => {
     try {
       await ctx.runQuery(reviewer, {});
@@ -125,7 +121,6 @@ export const invite = action({
     days: v.number().integer().min(1).max(daysMax).default(daysDefault),
   },
   returns: v.object({ chat, link: v.string() }),
-  uses: [reviewer, guests],
   handler: async (ctx, args) => {
     await ctx.runQuery(reviewer, {});
     const invited = await ctx.guests.invite({
@@ -141,7 +136,6 @@ export const invite = action({
 export const revoke = action({
   args: { id: v.string().min(1).max(100) },
   returns: chat,
-  uses: [reviewer, guests],
   handler: async (ctx, args) => {
     await ctx.runQuery(reviewer, {});
     return listed(await ctx.guests.revoke(args.id));
@@ -167,7 +161,6 @@ export const notes = action({
     notes: v.string().max(notesMax),
     lines: v.array(line),
   }),
-  uses: [reviewer, guests],
   handler: async (ctx, args) => {
     await ctx.runQuery(reviewer, {});
     const read: Transcript = await ctx.guests.read(args.chat);

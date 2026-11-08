@@ -1,4 +1,4 @@
-import { schemaHash } from "@grasp-os/sdk/host";
+import { declaredPermissions, schemaHash } from "@grasp-os/sdk/host";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -56,12 +56,9 @@ export const appStartFiles = (
   return {
     read: async (fileId) => {
       const { app: declared, store } = await releaseOf();
-      const readable = Object.entries(declared.browserResources).flatMap(
-        ([alias, resource]) =>
-          resource["~permission"] === "files" &&
-          resource.operations.includes("read")
-            ? [alias]
-            : []
+      const readable = declaredPermissions(declared, "files").flatMap(
+        (resource) =>
+          resource.operations.includes("read") ? [resource.alias] : []
       );
       if (store === null || readable.length === 0) {
         throw fileErrors.create("file.not_found");

@@ -56,7 +56,6 @@ export const hold = action({
 export const createAndCount = action({
   args: { title: v.string().min(1).max(200) },
   returns: v.number(),
-  uses: [create, count],
   handler: async (ctx, args) => {
     await ctx.runMutation(create, args);
     return await ctx.runQuery(count, {});

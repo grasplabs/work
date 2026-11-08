@@ -110,7 +110,6 @@ export const count = internalQuery({
 export const tally = action({
   args: {},
   returns: v.number(),
-  uses: [internal.notes.count],
   handler: async (ctx) => await ctx.runQuery(internal.notes.count, {}),
 });
 `,
@@ -1588,13 +1587,14 @@ describe("App code that a seal refuses", { timeout: 120_000 }, () => {
   });
 
   it("can't hand the host a manifest it didn't declare", async () => {
-    // The App's code makes the SDK in its isolate answer a query that
-    // writes: no declaration makes that, so the host refuses it.
+    // The App's code makes the SDK in its isolate answer a function with
+    // a list of its own, as if it narrowed or widened what the App holds:
+    // no declaration makes that, so the host refuses it.
     const forging = `const stringify = JSON.stringify;
 JSON.stringify = (value, ...rest) => {
   const text = stringify(value, ...rest);
   return typeof value === "object" && value !== null && "operations" in value
-    ? text.replace('"insert":false', '"insert":true')
+    ? text.replace('"stream":null', '"stream":null,"uses":[{"type":"resource","kind":"ai","alias":"ai"}]')
     : text;
 };
 `;
@@ -1754,7 +1754,6 @@ export const defaults = query({
 export const reach = action({
   args: {},
   returns: v.boolean(),
-  uses: [api.extra.defaults],
   handler: async (ctx) => await ctx.runQuery(api.extra.defaults, {}),
 });
 `,
@@ -1766,11 +1765,8 @@ export const reach = action({
     const release = await seal(fixture);
     expect([
       release.app.preferences !== null,
-      release.app.operations["extra.reach"]?.uses,
-    ]).toStrictEqual([
-      true,
-      [{ type: "function", path: "extra.defaults", kind: "query" }],
-    ]);
+      release.app.operations["extra.reach"]?.kind,
+    ]).toStrictEqual([true, "action"]);
   });
 
   it("makes its App's one store when it first declares tables, keyed by the App and audited", async () => {

@@ -14120,7 +14120,6 @@ msgstr "Usó una herramienta conectada"
 msgid "Used an App's function as a visitor"
 msgstr "Usó una función de una aplicación como visitante"
 
-#: src/apps/resource-bindings.tsx
 #: src/knowledge/document.tsx
 msgid "Used by"
 msgstr "Usado por"

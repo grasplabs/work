@@ -31,18 +31,15 @@ export default defineApp({
 });
 ```
 
-A function that starts it lists it in its `uses`:
+Then any of the App's actions and mutations can start it:
 
 ```ts server/reviews.ts
 import { v } from "@grasp-os/sdk";
 import { action, mutation } from "@server/_generated/server";
 
-import { permissions } from "../grasp.config.ts";
-
 export const finish = mutation({
   args: { id: v.id("tasks"), expectedRevision: v.number().integer().min(1) },
   returns: v.null(),
-  uses: [permissions.review],
   handler: async (ctx, args) => {
     await ctx.db.patch(
       "tasks",
@@ -58,7 +55,6 @@ export const finish = mutation({
 export const reviewNow = action({
   args: { id: v.id("tasks") },
   returns: v.string(),
-  uses: [permissions.review],
   handler: async (ctx, args) => {
     const run = await ctx.workflows.review.start({ task: args.id });
     return run.runId;
@@ -68,7 +64,7 @@ export const reviewNow = action({
 
 ## Starting a run
 
-A function starts a workflow its `uses` lists:
+A function starts one of the App's workflows by its alias:
 
 - A mutation starts it with `ctx.afterCommit.workflows.<alias>.start(input)`, which happens only once the mutation's writes commit. If the mutation fails, nothing starts. `finish` above saves the task and starts its review as one change.
 - An action starts it with `ctx.workflows.<alias>.start(input)`, which resolves once Grasp has accepted the start, durably: with its `startId`, the workflow `version` it started and the `runId` of its run. The run goes on after the action returns; a Page follows it by that ID.

@@ -2,7 +2,7 @@ import { peopleAlias } from "@grasp-os/shared/notifications";
 import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 
 import { AppError } from "./app-error.ts";
-import { inspectApp } from "./app.ts";
+import { inspectApp, isActionPermission } from "./app.ts";
 import { databaseReader, databaseWriter } from "./database.ts";
 import {
   impureMessage,
@@ -12,15 +12,11 @@ import {
 import type { MigrationContext } from "./migration.ts";
 import { peopleDirectory } from "./people.ts";
 import type { PeopleOperationName } from "./people.ts";
-import {
-  httpContract,
-  isPermission,
-  isWorkflowPermission,
-} from "./permissions.ts";
-import type { AnyPermission } from "./permissions.ts";
+import { httpContract } from "./permissions.ts";
+import type { AnyPermission, AppPermission } from "./permissions.ts";
 import { eventReferenceData, referenceName } from "./references.ts";
 import type { EventReferenceData } from "./references.ts";
-import type { AnyFunction, FunctionKind } from "./server.ts";
+import type { FunctionKind } from "./server.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { JsonValue } from "./value-descriptor.ts";
 import { descriptorOf } from "./value-schema.ts";
@@ -57,7 +53,7 @@ export interface OperationChannel {
     args: unknown
   ) => Promise<unknown>;
   /**
-   * One call of a resource the function uses: an action's only, but a
+   * One call of one of the App's permissions: an action's only, but a
    * mutation's staged start (`start`) or notification (`notify`) of one
    * of the App's workflows, and either's send to people (`peopleAlias`).
    */
@@ -115,37 +111,33 @@ const asAppError = (error: unknown): unknown => {
 };
 
 /**
- * The path of `reference` among `fn`'s `uses`, or a refusal: a definition
- * by the path it is registered at, a generated reference by its own,
- * which the App's inspection already matched to what is registered there.
+ * The path `reference` names, or a refusal: a definition by the path it
+ * is registered at, a generated reference (`api.…`, `internal.…`) by its
+ * own. Which function it is, and whether the caller's kind may call it,
+ * is the host's to decide.
  */
-const usedPath = (
+const calledPath = (
   paths: ReadonlyMap<unknown, string>,
-  fn: AnyFunction,
   reference: unknown
 ): string => {
-  const used = fn.uses.find((use) => use === reference);
-  const path =
-    used === undefined ? undefined : (paths.get(used) ?? referenceName(used));
+  const path = paths.get(reference) ?? referenceName(reference);
   if (path === undefined) {
     throw Object.assign(
-      new Error("A function calls only what it lists in `uses`."),
+      new Error("A function calls the App's functions by their references."),
       { code: "function.not_found" }
     );
   }
   return path;
 };
 
-/**
- * The event reference `event` is among `fn`'s `uses`, read as data, or a
- * refusal: only one it lists, by identity.
- */
-const usedEvent = (fn: AnyFunction, event: unknown): EventReferenceData => {
-  const used = fn.uses.find((use) => use === event);
-  const read = used === undefined ? undefined : eventReferenceData(used);
+/** The generated event reference `event`, read as data, or a refusal. */
+const notifiedEvent = (event: unknown): EventReferenceData => {
+  const read = eventReferenceData(event);
   if (read === undefined) {
     throw Object.assign(
-      new Error("A mutation notifies only with the events it lists in `uses`."),
+      new Error(
+        "A mutation notifies with its workflows' generated event references."
+      ),
       { code: "function.not_found" }
     );
   }
@@ -154,8 +146,7 @@ const usedEvent = (fn: AnyFunction, event: unknown): EventReferenceData => {
 
 /** A notification a mutation's handler staged, sent once it returns. */
 interface StagedNotification {
-  readonly workflow: string;
-  readonly alias: string;
+  readonly event: EventReferenceData;
   readonly runId: unknown;
   readonly data: unknown;
 }
@@ -167,7 +158,7 @@ interface StagedNotification {
  * among the commit's intents; nothing for a handler that throws, whose
  * mutation commits nothing. The host checks each again as it stages it.
  */
-const notificationsOf = (fn: AnyFunction, channel: OperationChannel) => {
+const notificationsOf = (channel: OperationChannel) => {
   const staged: StagedNotification[] = [];
   let open = true;
   return {
@@ -178,38 +169,49 @@ const notificationsOf = (fn: AnyFunction, channel: OperationChannel) => {
           { code: "function.ended" }
         );
       }
-      const { workflow, alias } = usedEvent(fn, event);
       const given = isPlainObject(notification) ? notification : {};
-      staged.push({ workflow, alias, runId: given.runId, data: given.data });
+      staged.push({
+        event: notifiedEvent(event),
+        runId: given.runId,
+        data: given.data,
+      });
     },
     flush: async (): Promise<void> => {
       open = false;
-      for (const { workflow, alias, runId, data } of staged) {
-        // In order: each one's place among the commit's intents.
+      for (const { event, runId, data } of staged) {
+        // In order: each one's place among the commit's intents. The type
+        // and fingerprint pin the contract the reference was generated
+        // for, which the host checks against the release it runs.
         // oxlint-disable-next-line no-await-in-loop -- see above
-        await channel.resource(workflow, "notify", [alias, runId, data]);
+        await channel.resource(event.workflow, "notify", [
+          event.alias,
+          runId,
+          data,
+          event.type,
+          event.fingerprint,
+        ]);
       }
     },
   };
 };
 
 /**
- * `ctx.workflows`: each workflow `fn` uses, by alias, whose `start` is,
- * over `channel`, for an action the start itself and for a mutation its
- * start staged with the commit. The host tells them apart by the function
- * it runs, never by this call.
+ * `ctx.workflows`: each of the App's workflows, by alias, whose `start`
+ * is, over `channel`, for an action the start itself and for a mutation
+ * its start staged with the commit. The host tells them apart by the
+ * function it runs, never by this call.
  */
 const workflowsOf = (
-  fn: AnyFunction,
+  permissions: readonly AppPermission[],
   channel: OperationChannel
 ): Readonly<Record<string, unknown>> => {
   const workflows: Record<string, unknown> = {};
-  for (const use of fn.uses) {
-    if (isWorkflowPermission(use)) {
-      workflows[use.alias] = Object.freeze({
+  for (const declared of permissions) {
+    if (declared["~permission"] === "workflows") {
+      workflows[declared.alias] = Object.freeze({
         start: async (input?: unknown): Promise<unknown> =>
           await channel.resource(
-            use.alias,
+            declared.alias,
             "start",
             // No input travels as no argument, which JSON can carry: the
             // host applies the workflow's declared default.
@@ -330,23 +332,24 @@ const clientOf = (
 };
 
 /**
- * The permissions `fn` uses, as its context holds them: `ai`, `brain` and
- * `grasp` and `guests` when listed, and the connections by alias.
+ * The App's permissions as an action's context holds them: `ai`,
+ * `brain`, `grasp` and `guests` when declared, and the connections by
+ * alias.
  */
 const permissionsOf = (
-  fn: AnyFunction,
+  permissions: readonly AppPermission[],
   channel: OperationChannel
 ): Record<string, unknown> => {
   const connections: Record<string, unknown> = {};
   const clients: Record<string, unknown> = {};
-  for (const use of fn.uses) {
-    if (!isPermission(use)) {
+  for (const declared of permissions) {
+    if (!isActionPermission(declared)) {
       continue;
     }
-    const kind = use["~permission"];
-    const client = clientOf(use, channel);
+    const kind = declared["~permission"];
+    const client = clientOf(declared, channel);
     if (kind === "connections") {
-      connections[use.alias] = client;
+      connections[declared.alias] = client;
     } else {
       clients[kind] = client;
     }
@@ -390,15 +393,12 @@ export const runFunction = async (
     paths.set(registeredFn, registeredPath);
   }
   const { schema } = inspection;
+  const permissions = Object.values(inspection.manifest.permissions);
   const read = async (request: ReadRequest) => await channel.read(request);
   const caller =
     (kind: FunctionKind) => async (reference: unknown, callArgs: unknown) => {
       try {
-        return await channel.call(
-          kind,
-          usedPath(paths, fn, reference),
-          callArgs
-        );
+        return await channel.call(kind, calledPath(paths, reference), callArgs);
       } catch (error) {
         throw asAppError(error);
       }
@@ -414,7 +414,7 @@ export const runFunction = async (
   if (fn.kind === "query") {
     ctx = { ...common, db: databaseReader(schema, read) };
   } else if (fn.kind === "mutation") {
-    notifications = notificationsOf(fn, channel);
+    notifications = notificationsOf(channel);
     ctx = {
       ...common,
       db: databaseWriter(
@@ -424,7 +424,7 @@ export const runFunction = async (
       ),
       runQuery: caller("query"),
       afterCommit: Object.freeze({
-        workflows: workflowsOf(fn, channel),
+        workflows: workflowsOf(permissions, channel),
         notifyPeople: async (
           to: unknown,
           notification: unknown
@@ -440,8 +440,8 @@ export const runFunction = async (
       runQuery: caller("query"),
       runMutation: caller("mutation"),
       runAction: caller("action"),
-      ...permissionsOf(fn, channel),
-      workflows: workflowsOf(fn, channel),
+      ...permissionsOf(permissions, channel),
+      workflows: workflowsOf(permissions, channel),
       // Only a streaming action has `emit`; the host refuses any other's
       // use of the channel's `emit` all the same (`function.no_stream`).
       ...(fn.stream === null

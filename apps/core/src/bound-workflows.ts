@@ -1,4 +1,8 @@
-import { descriptorFromText } from "@grasp-os/sdk/host";
+import {
+  declaredPermission,
+  declaredPermissions,
+  descriptorFromText,
+} from "@grasp-os/sdk/host";
 import type {
   AppManifest,
   BoundWorkflowDecision,
@@ -134,7 +138,7 @@ export const boundWorkflowsOf = async (
   app: AppId,
   manifest: AppManifest
 ): Promise<WorkflowBindingExtras[]> => {
-  if (Object.keys(manifest.workflows).length === 0) {
+  if (declaredPermissions(manifest, "workflows").length === 0) {
     return [];
   }
   const db = drizzle(env.DB);
@@ -152,8 +156,9 @@ export const boundWorkflowsOf = async (
       )
     )
     .orderBy(asc(appWorkflowBindings.alias));
-  const bindings = active.filter(({ alias }) =>
-    Object.hasOwn(manifest.workflows, alias)
+  const bindings = active.filter(
+    ({ alias }) =>
+      declaredPermission(manifest, alias, "workflows") !== undefined
   );
   if (bindings.length === 0) {
     return [];

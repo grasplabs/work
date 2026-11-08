@@ -441,7 +441,7 @@ const Revoke = ({
 
 /** What `resource` declares, as a list of terms. */
 const Declared = ({ resource }: { resource: DeclaredResource }) => {
-  const { contract, actions, operations, collections, usedBy } = resource;
+  const { contract, actions, operations, collections } = resource;
   const tokens = resource.maxOutputTokens;
   return (
     <dl className="flex flex-col gap-1">
@@ -464,9 +464,6 @@ const Declared = ({ resource }: { resource: DeclaredResource }) => {
           <Trans>At most {tokens} tokens an answer</Trans>
         </Term>
       )}
-      <Term term={<Trans>Used by</Trans>}>
-        <span className="font-mono">{formatList(usedBy)}</span>
-      </Term>
     </dl>
   );
 };

@@ -715,7 +715,7 @@ const definitions = (known: Set<string>) => [
     name: "setAccess",
     label: "Set a table's access",
     api: "build",
-    description: `Sets who reaches a table's records: its \`read\` and \`write\` access, and its row rules. The store enforces them on every read and write; a server function only narrows them (\`tables\`). \`sensitive\` keeps the table's values out of its change history and records every read of it in the audit log. ${definitionAnswer}`,
+    description: `Sets who reaches a table's records: its \`read\` and \`write\` access, and its row rules. The store enforces them on every read and write, whichever server function reads or writes. \`sensitive\` keeps the table's values out of its change history and records every read of it in the audit log. ${definitionAnswer}`,
     parameters: Type.Object(
       {
         app: appParameter,
@@ -760,7 +760,7 @@ const definitions = (known: Set<string>) => [
     name: "addPermission",
     label: "Add a permission",
     api: "build",
-    description: `Adds something the App reaches outside itself, written as code declares it: \`permission.ai({ maxOutputTokens: 2000 })\`, \`permission.connection("mail", { contract: "microsoft-365.mail@1", actions: ["send"] })\`, \`permission.workflow("triage", { input: v.object({...}), output: v.object({...}) })\`, \`permission.grasp()\` (the platform's statistics), \`permission.brain({...})\`, \`permission.guests({...})\`, \`permission.files({ operations: [...] })\`, \`permission.links({ origins: [...] })\`, or \`people\` (reading the organization's people). Server code imports it as \`permissions.<alias>\` from grasp.config.ts and lists it in a function's \`uses\`. It grants nothing: an admin binds or grants each. ${definitionAnswer}`,
+    description: `Adds something the App reaches outside itself, written as code declares it: \`permission.ai({ maxOutputTokens: 2000 })\`, \`permission.connection("mail", { contract: "microsoft-365.mail@1", actions: ["send"] })\`, \`permission.workflow("triage", { input: v.object({...}), output: v.object({...}) })\`, \`permission.grasp()\` (the platform's statistics), \`permission.brain({...})\`, \`permission.guests({...})\`, \`permission.files({ operations: [...] })\`, \`permission.links({ origins: [...] })\`, or \`people\` (reading the organization's people). Every server function may then use it, as its kind allows (\`ctx.connections.<alias>\`, \`ctx.ai\`, \`ctx.workflows.<alias>\`). It grants nothing: an admin binds or grants each. ${definitionAnswer}`,
     parameters: Type.Object(
       {
         app: appParameter,
@@ -833,7 +833,7 @@ const definitions = (known: Set<string>) => [
     name: "removePermission",
     label: "Remove a permission",
     api: "build",
-    description: `Removes a permission the App declares, by its alias (\`people\` for reading the organization's people). Server code that still lists it in \`uses\` stops building. ${definitionAnswer}`,
+    description: `Removes a permission the App declares, by its alias (\`people\` for reading the organization's people). Server code that still uses it stops building. ${definitionAnswer}`,
     parameters: Type.Object(
       {
         app: appParameter,

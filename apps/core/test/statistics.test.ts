@@ -85,7 +85,6 @@ const many = { json: v.string(), count: v.number() };
 export const platformRead = action({
   args: json,
   returns: v.string(),
-  uses: [grasp],
   handler: async (ctx, args) =>
     await outcome(async () => await loose(ctx.grasp).call("statistics.read", JSON.parse(args.json))),
 });
@@ -94,7 +93,6 @@ export const platformRead = action({
 export const platformWrite = action({
   args: json,
   returns: v.string(),
-  uses: [grasp],
   handler: async (ctx, args) =>
     await outcome(async () => await loose(ctx.grasp).call("statistics.write", JSON.parse(args.json))),
 });
@@ -102,7 +100,6 @@ export const platformWrite = action({
 export const platformReadMany = action({
   args: many,
   returns: v.string(),
-  uses: [grasp],
   handler: async (ctx, args) =>
     await outcome(async () => {
       for (let read = 0; read < args.count; read += 1) {
@@ -115,7 +112,6 @@ export const platformReadMany = action({
 export const platformReadBurst = action({
   args: many,
   returns: v.string(),
-  uses: [grasp],
   handler: async (ctx, args) =>
     await outcome(async () => {
       await Promise.all(

@@ -73,7 +73,7 @@ A mutation may run more than once: again when what it read changed before it com
 
 ## Actions
 
-An action has no `ctx.db`. It composes the App's queries and mutations, each its own call, and reaches outside the App only through what its `uses` lists: the App's functions, and permissions such as a workflow it starts.
+An action has no `ctx.db`. It composes the App's queries and mutations, each its own call, and reaches outside the App only through the permissions your App declares in `grasp.config.ts`, such as a connection or a workflow it starts.
 
 ```ts server/imports.ts
 import { v } from "@grasp-os/sdk";
@@ -84,7 +84,6 @@ import { add } from "./tasks.ts";
 export const addAll = action({
   args: { titles: v.array(v.string().trim().min(1).max(200)).max(20) },
   returns: v.number().integer(),
-  uses: [add],
   handler: async (ctx, args) => {
     for (const title of args.titles) {
       await ctx.runMutation(add, { title });
@@ -95,6 +94,10 @@ export const addAll = action({
 ```
 
 An action isn't atomic: each mutation it runs commits on its own. When a change depends on what you read, read and write in one mutation instead.
+
+## What a function may use
+
+Every function of your App may use what the App's permissions declare, as its kind allows: an action reaches connections, AI and the Brain and starts workflows, a mutation starts workflows once it commits, and a query only reads. Functions call each other by reference, internal ones included. What each caller reads and writes is decided by the tables' access and row rules, whichever function reads or writes.
 
 ## Internal functions
 

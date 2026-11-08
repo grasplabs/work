@@ -101,28 +101,24 @@ const outcome = async (run: () => Promise<unknown>): Promise<string> => {
 export const invite = action({
   args: { json: v.string() },
   returns: v.string(),
-  uses: [guests],
   handler: async (ctx, args) => await outcome(async () => await loose(ctx.guests).invite(JSON.parse(args.json))),
 });
 
 export const list = action({
   args: {},
   returns: v.string(),
-  uses: [guests],
   handler: async (ctx) => await outcome(async () => await loose(ctx.guests).list()),
 });
 
 export const read = action({
   args: { id: v.string() },
   returns: v.string(),
-  uses: [guests],
   handler: async (ctx, args) => await outcome(async () => await loose(ctx.guests).read(args.id)),
 });
 
 export const revoke = action({
   args: { id: v.string() },
   returns: v.string(),
-  uses: [guests],
   handler: async (ctx, args) => await outcome(async () => await loose(ctx.guests).revoke(args.id)),
 });
 `,

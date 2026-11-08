@@ -11,16 +11,19 @@ import type {
   ActionCtx as SdkActionCtx,
   MutationCtx as SdkMutationCtx,
   QueryCtx as SdkQueryCtx,
-  Use,
 } from "@grasp-os/sdk/server";
 
+import config from "./files/grasp.config.ts";
 import schema from "./files/server/schema.ts";
 
 export type { CallerCtx } from "@grasp-os/sdk/server";
 
 type DataModel = (typeof schema)["tables"];
 
-const server = serverModule(schema);
+const server = serverModule(schema, config);
+
+/** What the App's permissions grant its functions. */
+type Grants = NonNullable<(typeof config)["~grants"]>;
 
 export const {
   query,
@@ -39,7 +42,5 @@ export type Id<Table extends TableName> = SdkId<Table>;
 /** A record of table `Table`, as a read returns it. */
 export type Doc<Table extends TableName> = SdkDoc<DataModel[Table], Table>;
 export type QueryCtx = SdkQueryCtx<DataModel>;
-export type MutationCtx<Uses extends readonly Use[] = readonly []> =
-  SdkMutationCtx<DataModel, Uses>;
-export type ActionCtx<Uses extends readonly Use[] = readonly []> =
-  SdkActionCtx<Uses>;
+export type MutationCtx = SdkMutationCtx<DataModel, Grants>;
+export type ActionCtx = SdkActionCtx<Grants>;

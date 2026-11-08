@@ -84,7 +84,6 @@ export const ai = permissions.ai;
 export const label = action({
   args: { text: v.string().min(1) },
   returns: v.object({ label: v.string(), status: v.string() }),
-  uses: [ai],
   handler: async (ctx, args) =>
     await ctx.ai.generate({
       prompt: args.text,
@@ -95,7 +94,6 @@ export const label = action({
 export const draft = action({
   args: { prompt: v.string().min(1) },
   returns: v.string(),
-  uses: [ai],
   handler: async (ctx, args) =>
     await ctx.ai.generate({ prompt: args.prompt, instructions: "Be brief." }),
 });
@@ -103,7 +101,6 @@ export const draft = action({
 export const tag = action({
   args: { text: v.string().min(1) },
   returns: v.object({ tags: v.array(v.string()) }),
-  uses: [ai],
   handler: async (ctx, args) =>
     await ctx.ai.generate({
       prompt: args.text,
@@ -115,7 +112,6 @@ export const tag = action({
 export const probe = action({
   args: {},
   returns: v.string(),
-  uses: [ai],
   handler: async (ctx) => {
     const client = ctx.ai;
     const answer = await client.generate({ prompt: "Hi" });
@@ -135,7 +131,6 @@ export const probe = action({
 export const twice = action({
   args: {},
   returns: v.string(),
-  uses: [ai],
   handler: async (ctx) => {
     const first = await ctx.ai.generate({ prompt: "one" });
     try {
@@ -152,7 +147,6 @@ export const twice = action({
 export const attempt = action({
   args: { prompt: v.string().min(1) },
   returns: v.string(),
-  uses: [ai],
   handler: async (ctx) => {
     try {
       return await ctx.ai.generate({ prompt: "Hi" });
@@ -318,14 +312,12 @@ export const brain = permissions.brain;
 export const find = action({
   args: { text: v.string().min(1) },
   returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
-  uses: [brain],
   handler: async (ctx, args) => await ctx.brain.search({ text: args.text, limit: 5 }),
 });
 
 export const open = action({
   args: { id: v.string().min(1) },
   returns: v.object({ title: v.string(), text: v.string() }),
-  uses: [brain],
   handler: async (ctx, args) => await ctx.brain.read({ id: args.id }),
 });
 
@@ -335,7 +327,6 @@ export const ai = permissions.ai;
 export const summarize = action({
   args: { id: v.string().min(1) },
   returns: v.string(),
-  uses: [brain, ai],
   handler: async (ctx, args) => {
     const document = await ctx.brain.read({ id: args.id });
     return await ctx.ai.generate({ prompt: document.text });
@@ -1513,7 +1504,6 @@ ${
 export const find = action({
   args: { text: v.string().min(1) },
   returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
-  uses: [brain],
   handler: async (ctx, args) => await ctx.brain.search({ text: args.text }),
 });`
     : ""
@@ -1524,7 +1514,6 @@ ${
     ? `export const draft = action({
   args: { prompt: v.string().min(1) },
   returns: v.string(),
-  uses: [ai],
   handler: async (ctx, args) => await ctx.ai.generate({ prompt: args.prompt }),
 });`
     : ""
@@ -1628,7 +1617,6 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
           operations: [],
           collections: [],
           maxOutputTokens: 300,
-          usedBy: ["desk.draft"],
           state: "unbound",
           binding: null,
           choices: {
@@ -1645,7 +1633,6 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
           operations: ["search"],
           collections: ["handbook", "salaries"],
           maxOutputTokens: null,
-          usedBy: ["desk.find"],
           state: "unbound",
           binding: null,
           // The App's own grant to read, and no other collection.

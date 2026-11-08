@@ -84,7 +84,6 @@ export const streamed = action({
 export const single = action({
   args: {},
   returns: v.null(),
-  uses: [streamed],
   handler: async (ctx) => {
     // Only a streaming action emits.
     expectTypeOf(ctx).not.toHaveProperty("emit");

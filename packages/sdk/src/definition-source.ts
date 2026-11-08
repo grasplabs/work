@@ -9,11 +9,7 @@ import {
 } from "./definition.ts";
 import type { AppDefinition, DefinedField } from "./definition.ts";
 import { readPermissionDeclaration } from "./permissions.ts";
-import type {
-  AnyPermission,
-  BrowserPermission,
-  WorkflowPermission,
-} from "./permissions.ts";
+import type { AppPermission, PeoplePermission } from "./permissions.ts";
 import type { RowRule } from "./schema.ts";
 import { isSemanticKind } from "./value-descriptor.ts";
 import type { SemanticKind, ValueDescriptor } from "./value-descriptor.ts";
@@ -221,7 +217,7 @@ const permission = identifier("permission");
 
 /** The `permission.*` call that declares `declared`. */
 const permissionOf = (
-  declared: AnyPermission | BrowserPermission | WorkflowPermission
+  declared: Exclude<AppPermission, PeoplePermission>
 ): Code => {
   const alias = string(declared.alias);
   switch (declared["~permission"]) {
@@ -305,15 +301,21 @@ const permissionKinds = [
 
 /**
  * `grasp.config.ts`: the App's permissions, exported by alias
- * (`permissions.<alias>`, what a function's `uses` lists), and its config.
+ * (`permissions.<alias>`), and its config.
  */
 const configSource = (definition: AppDefinition): string => {
   const people = definition.permissions.some(
     (data) => data["~permission"] === peoplePermission
   );
-  const declarations = definition.permissions
-    .filter((data) => data["~permission"] !== peoplePermission)
-    .map((data) => readPermissionDeclaration(data));
+  // `people` is a flag, held with or without an alias: never read as a
+  // declaration.
+  const declarations = definition.permissions.flatMap((data) => {
+    if (data["~permission"] === peoplePermission) {
+      return [];
+    }
+    const declared = readPermissionDeclaration(data);
+    return declared["~permission"] === "people" ? [] : [declared];
+  });
   const byKind: [string, Code][] = [];
   for (const [kind, listed] of permissionKinds) {
     const references = declarations

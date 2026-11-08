@@ -66,7 +66,6 @@ export const kickOff = action({
     runId: v.string().nullable(),
     version: v.number().integer(),
   }),
-  uses: [followUp],
   handler: async (ctx, args) => await ctx.workflows.followUp.start({ who: args.who }),
 });
 `,

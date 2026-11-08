@@ -4,7 +4,11 @@ import { AppDefinitionError } from "../src/app.ts";
 import { evaluateExpression } from "../src/definition-expression.ts";
 import { applyOperation } from "../src/definition-operations.ts";
 import type { DefinitionOperation } from "../src/definition-operations.ts";
-import { schemaSource, validatorSource } from "../src/definition-source.ts";
+import {
+  definitionSources,
+  schemaSource,
+  validatorSource,
+} from "../src/definition-source.ts";
 import {
   definitionManifest,
   definitionText,
@@ -412,6 +416,22 @@ describe("operations", () => {
       tables: [],
       tableAnswers: [],
     });
+  });
+
+  test("regenerate the config of an App that reads people, however its definition holds the permission", () => {
+    const base = definitionText(tasks());
+    const withPeople = (people: object) =>
+      readDefinition(
+        JSON.stringify({ ...JSON.parse(base), permissions: [people] })
+      );
+    const configs = [
+      // As `addPermission` writes it, and as a definition may hold it.
+      withPeople({ "~permission": "people", alias: "people" }),
+      withPeople({ "~permission": "people" }),
+    ].map((definition) => definitionSources(definition)["grasp.config.ts"]);
+    expect(
+      configs.map((config) => config?.includes("people: true"))
+    ).toStrictEqual([true, true]);
   });
 
   test("refuse a removal that would leave something pointing at nothing", () => {

@@ -67,7 +67,7 @@ import { isStaleRefusal, receiptOf } from "./workflow-starts.ts";
 //   settles the entry. Decisions that all went stale answer nothing: the
 //   entry is handed over again later (`isStaleRefusal`).
 // - An undeclared workflow: the operation host starts only an alias the
-//   function lists and the App declares (operations.ts); an alias the App
+//   App declares (operations.ts); an alias the App
 //   doesn't bind is `workflow.app_binding_unavailable`.
 // - A rolled-back, failed or superseded mutation that still starts: its
 //   starts are outbox entries written in its commit's transaction, so a

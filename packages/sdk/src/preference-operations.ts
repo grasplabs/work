@@ -100,8 +100,6 @@ export const preferenceOperations = (
     args,
     returns: answer,
     stream: null,
-    uses: [],
-    tables: {},
   });
   return {
     get: described("get", "query", objectOf({})),

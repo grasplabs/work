@@ -327,8 +327,6 @@ export const workflowQueries = (
       args: descriptorOf(schemas.args),
       returns: descriptorOf(schemas.returns),
       stream: null,
-      uses: [],
-      tables: {},
     };
   }
   return queries;

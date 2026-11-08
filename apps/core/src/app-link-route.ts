@@ -1,3 +1,4 @@
+import { declaredPermission } from "@grasp-os/sdk/host";
 import { appLinksPath, linkTargetOf } from "@grasp-os/shared/app-link-limits";
 import type { LinkIntent } from "@grasp-os/shared/app-link-limits";
 import {
@@ -213,10 +214,8 @@ const decided = async (
   }
   const release = await loadRelease(env, found.id, found.currentVersion);
   await requireNotRevoked(env, found.id, found.currentVersion);
-  const declared = Object.hasOwn(release.app.browserResources, resource)
-    ? release.app.browserResources[resource]
-    : undefined;
-  if (declared?.["~permission"] !== "links") {
+  const declared = declaredPermission(release.app, resource, "links");
+  if (declared === undefined) {
     throw linkErrors.create("link.not_allowed");
   }
   const target = linkTargetOf(url, declared.origins);

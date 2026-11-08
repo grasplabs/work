@@ -61,10 +61,11 @@ import type { Infer, InferInput, ObjectInput, ValueShape } from "./values.ts";
 // A declaration is a requirement, never a grant: it names an adapter
 // contract and an alias, and the host binds it to an approved target,
 // under the App's grants, or refuses. It holds no ID, key or token, and
-// building one reaches nothing. Only an action reaches one, and only one
-// it lists in its `uses`; queries and mutations never reach the network
-// (inspection refuses a permission in their `uses`, app.ts). A mutation
-// lists the workflows it starts after it commits.
+// building one reaches nothing. The App's permissions are the only list:
+// any of its functions may use what they declare, as its kind allows
+// (server.ts), and the host checks every call against them. Only an
+// action reaches the network; a mutation stages starts of the App's
+// workflows for after it commits; a query reaches nothing.
 
 /** The kinds of permission an action reaches through `ctx`. */
 export type PermissionKind =
@@ -85,6 +86,7 @@ export const permissionAliases = Object.freeze({
   guests: "guests",
   files: "files",
   links: "links",
+  people: "people",
 } as const);
 
 /** What an `ai` permission may say. */
@@ -325,7 +327,7 @@ export interface GraspPermission extends DeclarationBase<"grasp", "grasp"> {
 
 /**
  * A `files` permission (spec 10.7.5, 32.3): what the App's pages may do
- * with files, through the host. Browser-facing: no function lists it.
+ * with files, through the host. Browser-facing: no function reaches it.
  */
 export interface FilesPermission<
   Operations extends readonly FilesOperation[] = readonly FilesOperation[],
@@ -347,11 +349,24 @@ export interface LinksPermission<
 export type BrowserPermission = FilesPermission | LinksPermission;
 
 /**
+ * The organization's people (`ctx.people`, `usePeople`), as a manifest
+ * holds `permissions.people: true`: a flag in a config, never a
+ * declaration App code makes.
+ */
+export type PeoplePermission = DeclarationBase<"people", "people">;
+
+/** The one `people` permission, as a manifest holds it. */
+export const peopleDeclaration: PeoplePermission = Object.freeze({
+  "~permission": "people",
+  alias: permissionAliases.people,
+});
+
+/**
  * A workflow permission (spec 7.4, 9.5): an independent workflow the App
  * starts, by an alias of its own. An action starts it
  * (`ctx.workflows.<alias>.start`), and a mutation stages its start for
- * after it commits (`ctx.afterCommit.workflows.<alias>.start`), each only
- * one it lists in its `uses`. Like every permission it grants nothing: the
+ * after it commits (`ctx.afterCommit.workflows.<alias>.start`). Like
+ * every permission it grants nothing: the
  * host starts the version the App's builders bound under the alias,
  * through the App's own `start` permission on that workflow, acting for
  * the person the call acts for, and checks both again as each start is
@@ -400,6 +415,13 @@ export type AnyPermission =
   | BrainPermission
   | GuestsPermission
   | GraspPermission;
+
+/** Any permission an App declares, as its manifest holds it by alias. */
+export type AppPermission =
+  | AnyPermission
+  | BrowserPermission
+  | WorkflowPermission
+  | PeoplePermission;
 
 /** One search result from the Brain: a title and an excerpt of it. */
 export interface BrainHit {
@@ -898,8 +920,7 @@ export type GraspFunctions = typeof graspFunctions;
 
 /**
  * Permission declarations (spec 32.3). Each answers a frozen declaration
- * to list under its key of the App's `permissions`, and in the `uses` of
- * each function that reaches it; the host binds it.
+ * to list under its key of the App's `permissions`; the host binds it.
  */
 export const permission = Object.freeze({
   /**
@@ -971,8 +992,8 @@ export const permission = Object.freeze({
   },
   /**
    * An independent workflow the App starts, with input of `input`: listed
-   * in the App's `permissions.workflows`, and in the `uses` of each action
-   * that starts it and each mutation that stages its start. Only ever what
+   * in the App's `permissions.workflows`, started by its actions and
+   * staged by its mutations. Only ever what
    * the App's builders bind under the alias, started through the App's
    * own permission; never the engine.
    */
@@ -1109,9 +1130,7 @@ const fixedAlias = (alias: unknown, fixed: string): void => {
  * bounds) throws `PermissionDefinitionError` or `ValueDefinitionError`.
  * Only the host reads declarations back (host.ts).
  */
-export const readPermissionDeclaration = (
-  data: unknown
-): AnyPermission | BrowserPermission | WorkflowPermission => {
+export const readPermissionDeclaration = (data: unknown): AppPermission => {
   if (!isPlainObject(data)) {
     return refuse("A permission declaration is an object.");
   }
@@ -1146,6 +1165,13 @@ export const readPermissionDeclaration = (
   }
   if (kind === "connections") {
     return permission.connection(alias, loose);
+  }
+  if (kind === "people") {
+    fixedAlias(alias, permissionAliases.people);
+    if (Object.keys(config).length > 0) {
+      return refuse("`people` declares nothing but itself.");
+    }
+    return peopleDeclaration;
   }
   if (kind === "grasp") {
     // The platform's own, exactly: a manifest whose `grasp` declares

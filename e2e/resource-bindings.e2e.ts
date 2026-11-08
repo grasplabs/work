@@ -35,7 +35,6 @@ export const ai = permissions.ai;
 export const draft = action({
   args: {},
   returns: v.string(),
-  uses: [ai],
   handler: async (ctx) => await ctx.ai.generate({ prompt: "Draft a greeting." }),
 });
 `,
@@ -81,7 +80,6 @@ test("an admin binds an App's AI to a model, with no budget of its own, and revo
   const deciding = await pageOf(admin);
   const ai = await resourceOn(deciding, app, "ai");
   await expect(ai).toContainText(unbound);
-  await expect(ai).toContainText("desk.draft");
   const form = ai.getByRole("form", { name: "Bind ai" });
   // A model binding is the model alone: no cap or alert to set.
   await expect(form.getByLabel(/US dollars|percent/u)).toHaveCount(0);

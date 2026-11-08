@@ -137,7 +137,6 @@ export const count = internalQuery({
 export const tally = action({
   args: {},
   returns: v.number(),
-  uses: [internal.notes.count],
   handler: async (ctx) => await ctx.runQuery(internal.notes.count, {}),
 });
 
@@ -231,7 +230,6 @@ export const holey = query({
 export const lateWrite = action({
   args: {},
   returns: v.null(),
-  uses: [create],
   handler: async (ctx) => {
     await new Promise((resolve) => setTimeout(resolve, 3000));
     await ctx.runMutation(create, { title: "Too late", body: "" });
@@ -246,34 +244,25 @@ export const sdkMark = query({
   handler: () => String(Reflect.get(globalThis, "sealedSdkMark") ?? "unmarked"),
 });
 
-let reads = 0;
+/** References made by hand: a path the App doesn't register, and a query's. */
+const missing = { name: "notes.missing", visibility: "internal" };
+const misnamed = { name: "notes.count", visibility: "internal" };
 
-/**
- * A reference that names one function to the registration (its two
- * reads in an isolate: the constructor's and the App's) and another to
- * everything after: the runner asks for a mutation the action never
- * listed.
- */
-const shifty = {
-  get name() {
-    reads += 1;
-    return reads <= 2 ? "notes.count" : "notes.create";
-  },
-  visibility: "internal",
-};
-
-/** Runs what its reference names now, and says how that ended. */
+/** Runs each as a mutation, and says how each ended. */
 export const sneak = action({
   args: {},
   returns: v.string(),
-  uses: [shifty as never],
   handler: async (ctx) => {
-    try {
-      await ctx.runMutation(shifty as never, { title: "Sneaked" } as never);
-      return "ran";
-    } catch (error) {
-      return \`caught \${String(Reflect.get(Object(error), "code"))}\`;
+    const ended: string[] = [];
+    for (const reference of [missing, misnamed]) {
+      try {
+        await ctx.runMutation(reference as never, { title: "Sneaked" } as never);
+        ended.push("ran");
+      } catch (error) {
+        ended.push(String(Reflect.get(Object(error), "code")));
+      }
     }
+    return ended.join(" ");
   },
 });
 
@@ -295,7 +284,6 @@ export const peekEnv = query({
 export const recover = action({
   args: {},
   returns: v.string(),
-  uses: [closed],
   handler: async (ctx) => {
     try {
       await ctx.runQuery(closed, {});
@@ -507,15 +495,12 @@ describe("an App's functions", { timeout: 120_000 }, () => {
     ).toBe("");
   });
 
-  it("are held to what was sealed, whatever their registration says at run time", async () => {
+  it("call only what the sealed App registers, of the kind asked, whatever a reference names at run time", async () => {
     const notes = await sealedNotes();
-    // Sealed, the action uses an internal query; run, its reference names
-    // a mutation it never listed, which the host refuses.
-    expect(notes.release.app.operations["notes.sneak"]?.uses).toStrictEqual([
-      { type: "function", path: "notes.count", kind: "query" },
-    ]);
+    // A path the release doesn't register, and a query run as a mutation:
+    // the host refuses both, and nothing is written.
     expect(valueOf(await call(notes, notes.owner, "notes.sneak", {}))).toBe(
-      "caught function.not_found"
+      "function.not_found function.kind_mismatch"
     );
     const page = valueOf(
       await call(notes, notes.owner, "notes.list", { pagination: {} })
@@ -910,7 +895,6 @@ export const create = mutation({
 
 export const greetTwice = action({
   args: {},
-  uses: [greet],
   handler: async (ctx) => ({
     greetings: [
       await ctx.runQuery(greet, { who: "one" }),
@@ -1033,7 +1017,6 @@ const keyRefused = async () => {
 
 export const roll = mutation({
   args: {},
-  uses: [sample],
   handler: async (ctx) => {
     await ctx.db.query("rolls").take(1);
     const read = await twice();

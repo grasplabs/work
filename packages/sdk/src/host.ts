@@ -24,7 +24,15 @@ export type {
 export { descriptorVersion } from "./value-descriptor.ts";
 
 // An App as the host runs it: its registration as data, and its handlers.
-export { inspectApp, registerApp } from "./app.ts";
+export {
+  actionPermission,
+  actionPermissions,
+  declaredPermission,
+  declaredPermissions,
+  inspectApp,
+  isActionPermission,
+  registerApp,
+} from "./app.ts";
 export type { AppManifest, OperationManifest, ServerModules } from "./app.ts";
 export { appErrorDetailsOf } from "./app-error.ts";
 export { migrationPlatformMessages } from "./migration.ts";

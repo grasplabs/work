@@ -222,7 +222,15 @@ describe("generated modules", () => {
   test("name functions the same whatever release or version they are generated for", async () => {
     // Without workflows, whose references still carry the release they
     // were bound in: every reference here is a name.
-    const manifest = { ...notesManifest(), workflows: {} };
+    const fixture = notesManifest();
+    const manifest = {
+      ...fixture,
+      permissions: Object.fromEntries(
+        Object.entries(fixture.permissions).filter(
+          ([, declared]) => declared["~permission"] !== "workflows"
+        )
+      ),
+    };
     const [one, other] = await Promise.all([
       generateModules(manifest, identity),
       generateModules(manifest, {
@@ -326,8 +334,16 @@ describe("generated modules", () => {
   });
 
   test("export no workflows for an App that declares none", async () => {
+    const manifest = notesManifest();
     const files = await generateModules(
-      { ...notesManifest(), workflows: {} },
+      {
+        ...manifest,
+        permissions: Object.fromEntries(
+          Object.entries(manifest.permissions).filter(
+            ([, declared]) => declared["~permission"] !== "workflows"
+          )
+        ),
+      },
       identity
     );
     expect(files["server/_generated/api.ts"]).toContain(
@@ -373,8 +389,8 @@ describe("workflow references", () => {
         ? manifest
         : {
             ...manifest,
-            workflows: {
-              ...manifest.workflows,
+            permissions: {
+              ...manifest.permissions,
               summarizeNote: { ...summarizeNote, ...declared },
             },
           },
@@ -1011,9 +1027,6 @@ const looseDefineApp = defineApp as (
 const looseAction = server.action as (declaration: unknown) => unknown;
 // SAFETY: as above.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-const looseMutation = server.mutation as (declaration: unknown) => unknown;
-// SAFETY: as above.
-// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
 const loosePermission = permission as Record<
   "files" | "links",
   (config: unknown) => unknown
@@ -1037,55 +1050,7 @@ const small = (
     migrations: [],
   });
 
-describe("references in uses", () => {
-  test("name a registered function by its path, matching its visibility and kind", () => {
-    // A reference is data: one written by hand names what a generated one
-    // would.
-    const tally = looseAction({
-      args: {},
-      returns: v.number(),
-      uses: [{ name: "notes.secret", visibility: "internal", kind: "query" }],
-      handler: () => 1,
-    });
-    const { manifest } = inspectApp(
-      small({}, { notes: { list, send, tally, secret } })
-    );
-    expect(manifest.operations["notes.tally"]?.uses).toStrictEqual([
-      { type: "function", path: "notes.secret", kind: "query" },
-    ]);
-  });
-
-  test.each([
-    [
-      "a path nothing is registered at",
-      { name: "notes.missing", visibility: "internal", kind: "query" },
-      "doesn't register",
-    ],
-  ])("with %s are refused", (_case, reference, message) => {
-    const tally = looseAction({
-      args: {},
-      returns: v.number(),
-      uses: [reference],
-      handler: () => 1,
-    });
-    expect(
-      refusal(() => small({}, { notes: { list, send, tally, secret } }))
-    ).toContain(message);
-  });
-
-  test("let a symbolic reference take its kind from the registration, and hold a mutation to queries", () => {
-    const symbolic = { name: "notes.send", visibility: "public" };
-    const change = looseMutation({
-      args: {},
-      returns: v.null(),
-      uses: [symbolic],
-      handler: () => null,
-    });
-    expect(
-      refusal(() => small({}, { notes: { list, send, change, secret } }))
-    ).toContain("it may run the App's queries, never `notes.send`, a action");
-  });
-
+describe("references a function calls", () => {
   test("reach the runner as the path they name", async () => {
     const reference = internal.notes.count;
     const calls: unknown[] = [];
@@ -1242,7 +1207,7 @@ describe("browser permissions", () => {
     ).toContain("Two of the App's permissions have alias `files`");
   });
 
-  test("are never listed by a function", () => {
+  test("are the App's, never listed by a function", () => {
     const files = permission.files({ operations: ["read"] });
     expect(() =>
       looseAction({
@@ -1251,7 +1216,7 @@ describe("browser permissions", () => {
         uses: [files],
         handler: () => null,
       })
-    ).toThrow(/never IDs or names/u);
+    ).toThrow("An action's declaration has no `uses`.");
   });
 });
 
@@ -1263,77 +1228,31 @@ describe("reading a manifest back", () => {
 
   test.each([
     [
-      "a verb past the App's mode",
+      "a function's own uses",
       (data: unknown) => {
-        setAt(data, ["schema", "tables", "notes", "access", "write"], "none");
+        setAt(data, ["operations", "notes.tally", "uses"], []);
       },
-      "widens access",
+      "isn't a function as a manifest holds one",
     ],
     [
-      "an action given tables",
+      "a function's own table verbs",
       (data: unknown) => {
-        setAt(
-          data,
-          ["operations", "notes.tally", "tables", "notes", "read"],
-          true
-        );
-      },
-      "An action's declaration has no `tables`",
-    ],
-    [
-      "a query that writes",
-      (data: unknown) => {
-        setAt(
-          data,
-          ["operations", "notes.get", "tables", "notes", "insert"],
-          true
-        );
-      },
-      "a query only reads",
-    ],
-    [
-      "a mutation running an action",
-      (data: unknown) => {
-        setAt(
-          data,
-          ["operations", "notes.create", "uses"],
-          [{ type: "function", path: "notes.tally", kind: "action" }]
-        );
-      },
-      "it may run the App's queries",
-    ],
-    [
-      "a use whose kind isn't the registered one",
-      (data: unknown) => {
-        setAt(
-          data,
-          ["operations", "notes.tally", "uses", 0, "kind"],
-          "mutation"
-        );
-      },
-      "isn't what its declaration makes",
-    ],
-    [
-      "a use of something unregistered",
-      (data: unknown) => {
-        setAt(
-          data,
-          ["operations", "notes.tally", "uses", 0, "path"],
-          "notes.missing"
-        );
-      },
-      "doesn't register",
-    ],
-    [
-      "a resource a function uses that the App doesn't declare",
-      (data: unknown) => {
-        setAt(data, ["operations", "notes.tally", "uses", 1], {
-          type: "resource",
-          kind: "model",
-          alias: "writer",
+        setAt(data, ["operations", "notes.get", "tables"], {
+          notes: { read: true, insert: true, update: true, delete: true },
         });
       },
-      "doesn't declare",
+      "isn't a function as a manifest holds one",
+    ],
+    [
+      "a query that streams",
+      (data: unknown) => {
+        setAt(
+          data,
+          ["operations", "notes.get", "stream"],
+          v.object({}).descriptor
+        );
+      },
+      "A query's declaration has no `stream`.",
     ],
     [
       "a key no manifest has",
@@ -1375,26 +1294,26 @@ describe("reading a manifest back", () => {
       "clashes with another registered path",
     ],
     [
-      "an action's permission filed as a pages' one",
+      "a connection under the alias of the pages' links",
       (data: unknown) => {
-        setAt(
-          data,
-          ["resources", "links"],
-          at(data, ["browserResources", "links"])
-        );
-        removeAt(data, ["browserResources", "links"]);
+        setAt(data, ["permissions", "links"], {
+          "~permission": "connections",
+          alias: "links",
+          contract: "microsoft-365.mail@1",
+          actions: ["send"],
+        });
       },
-      "isn't an action's permission",
+      "is the alias of the App's `links` permission",
     ],
     [
       "a permission filed under another alias",
       (data: unknown) => {
         setAt(
           data,
-          ["browserResources", "manual"],
-          at(data, ["browserResources", "links"])
+          ["permissions", "manual"],
+          at(data, ["permissions", "links"])
         );
-        removeAt(data, ["browserResources", "links"]);
+        removeAt(data, ["permissions", "links"]);
       },
       "filed under its alias",
     ],
@@ -1403,7 +1322,7 @@ describe("reading a manifest back", () => {
       (data: unknown) => {
         setAt(
           data,
-          ["browserResources", "links", "origins"],
+          ["permissions", "links", "origins"],
           ["https://example.com/a"]
         );
       },

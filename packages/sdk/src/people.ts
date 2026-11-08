@@ -137,8 +137,6 @@ const described = (read: PeopleOperationName): OperationManifest =>
     args: descriptorOf(contracts[read].args),
     returns: descriptorOf(contracts[read].returns),
     stream: null,
-    uses: [],
-    tables: {},
   });
 
 /** Each read, as an App's public query is described. */

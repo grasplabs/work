@@ -66,7 +66,6 @@ export const followUp = permissions.followUp;
 export const submit = mutation({
   args: { who: v.string() },
   returns: v.id("requests"),
-  uses: [followUp],
   handler: async (ctx, args) => {
     const id = await ctx.db.insert("requests", { who: args.who });
     await ctx.afterCommit.workflows.followUp.start({ who: args.who });
@@ -81,7 +80,6 @@ export const kickOff = action({
     runId: v.string().nullable(),
     version: v.number().integer(),
   }),
-  uses: [followUp],
   handler: async (ctx, args) => await ctx.workflows.followUp.start({ who: args.who }),
 });
 `,

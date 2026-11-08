@@ -1,5 +1,5 @@
 import type { FilesOperation } from "@grasp-os/sdk";
-import { schemaHash } from "@grasp-os/sdk/host";
+import { declaredPermission, schemaHash } from "@grasp-os/sdk/host";
 import {
   appFilesPath,
   downloadNameOf,
@@ -413,13 +413,8 @@ const resolved = async (
     found.currentVersion
   );
   await requireNotRevoked(env, found.id, found.currentVersion);
-  const declared = Object.hasOwn(release.app.browserResources, resource)
-    ? release.app.browserResources[resource]
-    : undefined;
-  if (
-    declared?.["~permission"] !== "files" ||
-    !declared.operations.includes(operation)
-  ) {
+  const declared = declaredPermission(release.app, resource, "files");
+  if (declared === undefined || !declared.operations.includes(operation)) {
     throw fileErrors.create("file.operation_denied");
   }
   if (release.store === null) {

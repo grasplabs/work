@@ -99,7 +99,6 @@ export const draft = action({
   args: { topic: v.string().min(1), pauseMs: v.number().integer().min(0).default(50) },
   returns: v.object({ text: v.string() }),
   stream: v.object({ text: v.string() }),
-  uses: [create],
   handler: async (ctx, args) => {
     let text = "";
     for (const word of ["Draft", "about", args.topic]) {
@@ -116,7 +115,6 @@ export const slow = action({
   args: { title: v.string() },
   returns: v.null(),
   stream: v.object({ step: v.number() }),
-  uses: [create],
   handler: async (ctx, args) => {
     await ctx.runMutation(create, { title: args.title });
     for (let step = 1; step <= 400; step += 1) {
@@ -132,7 +130,6 @@ export const quiet = action({
   args: { title: v.string(), pauseMs: v.number().integer().min(0) },
   returns: v.null(),
   stream: v.object({ step: v.number() }),
-  uses: [create],
   handler: async (ctx, args) => {
     await ctx.emit({ step: 0 });
     await pause(args.pauseMs);
@@ -145,7 +142,6 @@ export const counts = action({
   args: {},
   returns: v.number(),
   stream: v.object({ step: v.number() }),
-  uses: [list, create],
   handler: async (ctx) => {
     const before = (await ctx.runQuery(list, { pagination: { pageSize: 50 } })).items.length;
     await ctx.emit({ step: before });

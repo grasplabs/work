@@ -7,7 +7,7 @@
 export * from "./values.ts";
 export { defineApp } from "./app.ts";
 export type { App, AppConfig, AppPermissions } from "./app.ts";
-export type { TableNarrowing, TableVerbs } from "./server.ts";
+
 export { AppError } from "./app-error.ts";
 export { migration } from "./migration.ts";
 export type {
@@ -20,6 +20,7 @@ export type {
   AiClient,
   AiPermission,
   AnyPermission,
+  AppPermission,
   BrainClient,
   BrainHit,
   BrainOperation,

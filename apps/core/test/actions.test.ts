@@ -20,6 +20,7 @@ import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import { keepsReceipt } from "../src/action-invocation.ts";
@@ -30,6 +31,7 @@ import type { Acting } from "../src/auth/identity.ts";
 import { callMaxNested } from "../src/call-limits.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { appMembers } from "../src/db/core/schema.ts";
 import {
   callMaxDepth,
   callMaxResourceRequests,
@@ -53,7 +55,7 @@ import { applied } from "./store-schemas.ts";
 
 // Actions (spec 7.4, 12): server functions with no database, which
 // compose the App's queries and mutations, each its own invocation, and
-// reach outside only through the resources they declare. Run through
+// reach outside only through the permissions the App declares. Run through
 // core's operation host against a real store and the App's real roles.
 // The resource adapters below stand for the outside providers (connect's
 // connectors, the model gateway): the only thing mocked.
@@ -65,7 +67,48 @@ const schema = defineSchema({
   }),
 });
 
-const { query, mutation, action, internalQuery, doc } = serverModule(schema);
+const mail = permission.connection("mail", {
+  contract: "microsoft-365.mail@1",
+  actions: ["send"],
+});
+
+/** A mail to `to`, as the contract's `send` takes it. */
+const mailTo = (to: string) => ({
+  mailbox: "team@acme.test",
+  subject: "Hello",
+  body: "Hi.",
+  to: [to],
+});
+const ai = permission.ai({ maxOutputTokens: 200 });
+const brain = permission.brain({
+  operations: ["search"],
+  collections: ["handbook"],
+});
+// Guest chats it lists and reads, and never invites.
+const guests = permission.guests({ operations: ["list", "read"] });
+
+/** A workflow the App declares, which no function here starts. */
+const followUp = permission.workflow("followUp", {
+  input: v.object({ who: v.string() }),
+  output: v.object({ status: v.string() }),
+});
+
+/** The App's config: its permissions, which every function may use. */
+const config = defineApp({
+  name: "Notes",
+  permissions: {
+    connections: [mail],
+    ai,
+    brain,
+    guests,
+    workflows: [followUp],
+  },
+});
+
+const { query, mutation, action, internalQuery, doc } = serverModule(
+  schema,
+  config
+);
 
 const get = query({
   args: { id: v.id("notes") },
@@ -97,26 +140,15 @@ const reject = mutation({
 const createAndCount = mutation({
   args: { title: v.string() },
   returns: v.number(),
-  uses: [count],
   handler: async (ctx, args) => {
     await ctx.db.insert("notes", args);
     return await ctx.runQuery(count, {});
   },
 });
 
-/** Narrowed to inserting: the queries it runs can't read for it. */
-const blindCount = mutation({
-  tables: { notes: { insert: true } },
-  args: {},
-  returns: v.number(),
-  uses: [count],
-  handler: async (ctx) => await ctx.runQuery(count, {}),
-});
-
 const compose = action({
   args: { title: v.string() },
   returns: v.object({ title: v.string(), count: v.number() }),
-  uses: [create, get, count],
   handler: async (ctx, args) => {
     const id = await ctx.runMutation(create, { title: args.title });
     const note = await ctx.runQuery(get, { id });
@@ -130,7 +162,6 @@ const compose = action({
 const createThenFail = action({
   args: { title: v.string() },
   returns: v.null(),
-  uses: [create],
   handler: async (ctx, args) => {
     await ctx.runMutation(create, { title: args.title });
     throw new AppError("note.after_create", "Created, then failed.");
@@ -140,14 +171,12 @@ const createThenFail = action({
 const rethrow = action({
   args: {},
   returns: v.null(),
-  uses: [reject],
   handler: async (ctx) => await ctx.runMutation(reject, {}),
 });
 
 const recover = action({
   args: {},
   returns: v.string(),
-  uses: [reject],
   handler: async (ctx) => {
     try {
       await ctx.runMutation(reject, {});
@@ -170,58 +199,27 @@ const level4 = action({
 const level3 = action({
   args: {},
   returns: v.string(),
-  uses: [level4],
   handler: async (ctx) => await ctx.runAction(level4, {}),
 });
 const level2 = action({
   args: {},
   returns: v.string(),
-  uses: [level3],
   handler: async (ctx) => await ctx.runAction(level3, {}),
 });
 const level1 = action({
   args: {},
   returns: v.string(),
-  uses: [level2],
   handler: async (ctx) => await ctx.runAction(level2, {}),
 });
 const level0 = action({
   args: {},
   returns: v.string(),
-  uses: [level1],
   handler: async (ctx) => await ctx.runAction(level1, {}),
-});
-
-const mail = permission.connection("mail", {
-  contract: "microsoft-365.mail@1",
-  actions: ["send"],
-});
-
-/** A mail to `to`, as the contract's `send` takes it. */
-const mailTo = (to: string) => ({
-  mailbox: "team@acme.test",
-  subject: "Hello",
-  body: "Hi.",
-  to: [to],
-});
-const ai = permission.ai({ maxOutputTokens: 200 });
-const brain = permission.brain({
-  operations: ["search"],
-  collections: ["handbook"],
-});
-// Guest chats it lists and reads, and never invites.
-const guests = permission.guests({ operations: ["list", "read"] });
-
-/** A workflow the App declares, which no function here lists. */
-const followUp = permission.workflow("followUp", {
-  input: v.object({ who: v.string() }),
-  output: v.object({ status: v.string() }),
 });
 
 const sendMail = action({
   args: { to: v.string().email() },
   returns: v.object({ mailbox: v.string() }),
-  uses: [mail],
   handler: async (ctx, args) => {
     const sent = await ctx.connections.mail.call("send", mailTo(args.to));
     return { mailbox: sent.mailbox };
@@ -231,7 +229,6 @@ const sendMail = action({
 const summarize = action({
   args: { text: v.string() },
   returns: v.object({ summary: v.string() }),
-  uses: [ai],
   handler: async (ctx, args) =>
     await ctx.ai.generate({
       prompt: args.text,
@@ -244,7 +241,6 @@ const searchHelp = action({
   returns: v
     .array(v.object({ title: v.string(), excerpt: v.string() }))
     .max(20),
-  uses: [brain],
   handler: async (ctx, args) =>
     await ctx.brain.search({ text: args.text, limit: 5 }),
 });
@@ -252,7 +248,6 @@ const searchHelp = action({
 const listGuests = action({
   args: {},
   returns: v.number(),
-  uses: [guests],
   handler: async (ctx) => {
     const chats = await ctx.guests.list();
     return chats.length;
@@ -290,7 +285,6 @@ const fanOut = action({
     reads: v.number().integer().min(0).max(1000),
   },
   returns: v.number(),
-  uses: [readMany],
   handler: async (ctx, args) => {
     for (let index = 0; index < args.calls; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one call after the other
@@ -304,7 +298,6 @@ const fanOut = action({
 const sendMany = action({
   args: { count: v.number().integer().min(0).max(1000) },
   returns: v.number(),
-  uses: [mail],
   handler: async (ctx, args) => {
     for (let index = 0; index < args.count; index += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one request after the other
@@ -318,7 +311,6 @@ const sendMany = action({
 const sendMailToo = action({
   args: { to: v.string().email() },
   returns: v.null(),
-  uses: [mail],
   handler: async (ctx, args) => {
     await ctx.connections.mail.call("send", mailTo(args.to));
     return null;
@@ -329,7 +321,6 @@ const sendMailToo = action({
 const createOnly = action({
   args: { title: v.string() },
   returns: v.id("notes"),
-  uses: [create],
   handler: async (ctx, args) =>
     await ctx.runMutation(create, { title: args.title }),
 });
@@ -341,7 +332,6 @@ const createOnly = action({
 const conditional = action({
   args: { id: v.id("notes") },
   returns: v.id("notes"),
-  uses: [get, count, create],
   handler: async (ctx, args) => {
     const note = await ctx.runQuery(get, { id: args.id });
     if (note) {
@@ -355,7 +345,6 @@ const conditional = action({
 const recoverByClass = action({
   args: {},
   returns: v.string(),
-  uses: [reject],
   handler: async (ctx) => {
     try {
       await ctx.runMutation(reject, {});
@@ -370,7 +359,6 @@ const recoverByClass = action({
 const fireAndForget = action({
   args: { title: v.string() },
   returns: v.null(),
-  uses: [create],
   handler: (ctx, args) => {
     void ctx.runMutation(create, { title: args.title });
     return null;
@@ -381,7 +369,6 @@ const fireAndForget = action({
 const raced = action({
   args: { title: v.string() },
   returns: v.string(),
-  uses: [create],
   handler: async (ctx, args) =>
     await Promise.race([
       ctx.runMutation(create, { title: args.title }).then(() => "mutation"),
@@ -393,7 +380,6 @@ const raced = action({
 const racedFailure = action({
   args: {},
   returns: v.string(),
-  uses: [reject],
   handler: async (ctx) => {
     const rejected = ctx.runMutation(reject, {});
     rejected.catch(() => null);
@@ -408,7 +394,6 @@ const racedFailure = action({
 const startLater = action({
   args: { title: v.string() },
   returns: v.null(),
-  uses: [create],
   handler: (ctx, args) => {
     setTimeout(() => {
       ctx.runMutation(create, { title: args.title }).catch(() => null);
@@ -421,7 +406,6 @@ const startLater = action({
 const fireAndForgetCaught = action({
   args: { title: v.string() },
   returns: v.null(),
-  uses: [create],
   handler: (ctx, args) => {
     ctx.runMutation(create, { title: args.title }).catch(() => null);
     return null;
@@ -446,7 +430,6 @@ const consistentPair = internalQuery({
 const checkLater = mutation({
   args: {},
   returns: v.string(),
-  uses: [consistentPair],
   handler: (ctx) => {
     ctx.runQuery(consistentPair, {}).catch(() => null);
     return "done";
@@ -468,7 +451,6 @@ const streaming = action({
 const nestsStreaming = action({
   args: {},
   returns: v.string(),
-  uses: [streaming],
   handler: async (ctx) => {
     try {
       // @ts-expect-error -- a streaming action isn't run nested
@@ -487,7 +469,6 @@ const savesWhileStreaming = action({
   args: { title: v.string() },
   returns: v.null(),
   stream: v.object({ done: v.number() }),
-  uses: [create],
   handler: async (ctx, args) => {
     await ctx.emit({ done: 0 });
     await ctx.runMutation(create, { title: args.title });
@@ -500,7 +481,6 @@ const sendsWhileStreaming = action({
   args: { to: v.string().email() },
   returns: v.null(),
   stream: v.object({ done: v.number() }),
-  uses: [mail],
   handler: async (ctx, args) => {
     await ctx.emit({ done: 0 });
     await ctx.connections.mail.call("send", mailTo(args.to));
@@ -513,7 +493,6 @@ const sendsAndLeaves = action({
   args: { to: v.string().email() },
   returns: v.null(),
   stream: v.object({ done: v.number() }),
-  uses: [mail],
   handler: async (ctx, args) => {
     await ctx.emit({ done: 0 });
     void ctx.connections.mail.call("send", mailTo(args.to));
@@ -526,7 +505,6 @@ const savesAndLeaves = action({
   args: { title: v.string() },
   returns: v.null(),
   stream: v.object({ done: v.number() }),
-  uses: [create],
   handler: async (ctx, args) => {
     await ctx.emit({ done: 0 });
     void ctx.runMutation(create, { title: args.title });
@@ -552,7 +530,6 @@ const emitsMany = action({
 const savesThenSends = action({
   args: { title: v.string(), to: v.string().email() },
   returns: v.null(),
-  uses: [create, mail],
   handler: async (ctx, args) => {
     await ctx.runMutation(create, { title: args.title });
     await ctx.connections.mail.call("send", mailTo(args.to));
@@ -568,16 +545,7 @@ const emitsAnyway = action({
 });
 
 const notesApp = registerApp({
-  config: defineApp({
-    name: "Notes",
-    permissions: {
-      connections: [mail],
-      ai,
-      brain,
-      guests,
-      workflows: [followUp],
-    },
-  }),
+  config,
   schema,
   modules: {
     notes: {
@@ -585,7 +553,6 @@ const notesApp = registerApp({
       create,
       reject,
       createAndCount,
-      blindCount,
       remove,
       checkLater,
     },
@@ -935,14 +902,56 @@ describe("composing the App's functions", () => {
     });
   });
 
-  it("lets a mutation run a query in its staged state, reading only what both may read", async () => {
+  it("lets a mutation run a query in its staged state", async () => {
     const fixture = await notes();
-    expect({
-      staged: valueOf(
+    expect(
+      valueOf(
         await call(fixture, "mutation", "notes.createAndCount", { title: "a" })
+      )
+    ).toBe(1);
+  });
+
+  it("runs what a function calls for the same caller, under the tables' access and row rules, internal functions included", async () => {
+    const fixture = await notes();
+    // Another builder the App is shared with, who owns none of its notes.
+    const other: Fixture = { ...fixture, owner: await person() };
+    await drizzle(env.DB).insert(appMembers).values({
+      appId: fixture.appId,
+      memberType: "person",
+      memberId: other.owner.userId,
+      role: "builder",
+      addedBy: fixture.owner.userId,
+      addedAt: new Date(),
+    });
+    const id = valueOf(
+      await call(fixture, "action", "actions.createOnly", { title: "mine" })
+    );
+    expect({
+      // An action's internal query counts only the caller's own notes:
+      // the table's access is `owner`, whichever function reads it.
+      composed: valueOf(
+        await call(other, "action", "actions.compose", { title: "theirs" })
       ),
-      narrowed: codeOf(await call(fixture, "mutation", "notes.blindCount", {})),
-    }).toStrictEqual({ staged: 1, narrowed: "data.access_denied" });
+      // A mutation's query, in its staged state, likewise.
+      staged: valueOf(
+        await call(other, "mutation", "notes.createAndCount", {
+          title: "again",
+        })
+      ),
+      // Another's note is none of theirs, whichever function asks.
+      read: valueOf(await call(other, "query", "notes.get", { id })),
+      // And the owner still counts only their own.
+      own: valueOf(
+        await call(fixture, "mutation", "notes.createAndCount", {
+          title: "more",
+        })
+      ),
+    }).toStrictEqual({
+      composed: { title: "theirs", count: 1 },
+      staged: 2,
+      read: null,
+      own: 2,
+    });
   });
 
   it("runs a streaming action only where its progress has somewhere to go", async () => {
@@ -1006,7 +1015,7 @@ describe("composing the App's functions", () => {
 });
 
 describe("an action's channel", () => {
-  it("has no database, and calls only what the action uses, as the kind it is", async () => {
+  it("has no database, and calls only what the App registers and declares, as the kind it is", async () => {
     const fixture = await notes();
     const attempt = async (
       misuse: (channel: OperationChannel) => Promise<unknown>
@@ -1040,22 +1049,33 @@ describe("an action's channel", () => {
             fields: { title: "x" },
           })
       ),
-      unused: await attempt(
-        async (channel) => await channel.call("mutation", "notes.reject", {})
+      unregistered: await attempt(
+        async (channel) => await channel.call("mutation", "notes.missing", {})
       ),
       wrongKind: await attempt(
         async (channel) =>
           await channel.call("mutation", "notes.get", { id: "x" })
       ),
-      resource: await attempt(
-        async (channel) => await channel.resource("mail", "call", ["send", {}])
+      undeclared: await attempt(
+        async (channel) =>
+          await channel.resource("calendar", "call", ["list", {}])
+      ),
+      // Declared, but bound to nothing: the App's permission alone reaches
+      // nothing until an admin binds it.
+      unbound: await attempt(
+        async (channel) =>
+          await channel.resource("mail", "call", [
+            "send",
+            mailTo("a@acme.test"),
+          ])
       ),
     }).toStrictEqual({
       read: "function.no_database",
       write: "function.no_database",
-      unused: "function.not_found",
+      unregistered: "function.not_found",
       wrongKind: "function.kind_mismatch",
-      resource: "resource.not_allowed",
+      undeclared: "resource.not_allowed",
+      unbound: "resource.unavailable",
     });
   });
 });
@@ -1245,7 +1265,12 @@ describe("resources", () => {
       ),
       undeclaredAlias: await attempt(
         async (channel) =>
-          await channel.resource("brain", "search", [{ text: "a" }])
+          await channel.resource("calendar", "call", ["list", {}])
+      ),
+      // The App's workflow is no resource: a start, never a call.
+      workflowAsResource: await attempt(
+        async (channel) =>
+          await channel.resource("followUp", "call", ["send", {}])
       ),
       reached,
       invite,
@@ -1253,6 +1278,7 @@ describe("resources", () => {
     }).toStrictEqual({
       undeclaredAction: "resource.not_allowed",
       undeclaredAlias: "resource.not_allowed",
+      workflowAsResource: "resource.not_allowed",
       reached: false,
       invite: "resource.not_allowed",
       invited: false,
@@ -2204,30 +2230,20 @@ describe("evidence of a refused use", () => {
       );
       return { result: codeOf(result), heard, order };
     };
-    // An alias the App doesn't have, then one it has that sendMail doesn't
-    // list: only the first is kept, as App code's text it is named by no
-    // one.
+    // Two aliases the App doesn't have: only the first is kept, as App
+    // code's text it is named by no one.
     const loop = await kept(
       async (channel) => await channel.resource("nope", "search", [{}]),
-      async (channel) =>
-        await channel.resource("brain", "search", [{ text: "a" }])
+      async (channel) => await channel.resource("other", "search", [{}])
     );
-    const appResource = await kept(
-      async (channel) =>
-        await channel.resource("brain", "search", [{ text: "a" }])
-    );
-    // A function sendMail doesn't list, and one the App doesn't have.
-    const fn = await kept(
-      async (channel) =>
-        await channel.call("mutation", "notes.create", { title: "x" })
-    );
+    // A function the App doesn't register.
     const noFunction = await kept(
       async (channel) => await channel.call("query", "notes.nothing", {})
     );
-    // A workflow the App declares that sendMail doesn't list.
+    // The App's workflow, asked for what a start isn't.
     const workflow = await kept(
       async (channel) =>
-        await channel.resource("followUp", "start", [{ who: "Ada" }])
+        await channel.resource("followUp", "call", ["send", {}])
     );
     // A declared resource asked for an action it doesn't declare.
     const request = await kept(
@@ -2235,8 +2251,6 @@ describe("evidence of a refused use", () => {
     );
     expect({
       loop,
-      appResource: appResource.heard,
-      function: fn.heard,
       noFunction: noFunction.heard,
       workflow: workflow.heard,
       request: request.heard,
@@ -2254,22 +2268,6 @@ describe("evidence of a refused use", () => {
         // Kept before App code heard of the refusal.
         order: ["kept", "refused", "refused"],
       },
-      appResource: [
-        {
-          function: "actions.sendMail",
-          use: { kind: "resource", name: "brain" },
-          reason: "use_undeclared",
-          errorCode: "resource.not_allowed",
-        },
-      ],
-      function: [
-        {
-          function: "actions.sendMail",
-          use: { kind: "function", name: "notes.create" },
-          reason: "use_undeclared",
-          errorCode: "function.not_found",
-        },
-      ],
       noFunction: [
         {
           function: "actions.sendMail",
@@ -2282,7 +2280,7 @@ describe("evidence of a refused use", () => {
         {
           function: "actions.sendMail",
           use: { kind: "workflow", name: "followUp" },
-          reason: "use_undeclared",
+          reason: "request_not_allowed",
           errorCode: "resource.not_allowed",
         },
       ],
@@ -2317,7 +2315,7 @@ describe("evidence of a refused use", () => {
         ),
       }
     );
-    // A workflow the App declares that the mutation doesn't list.
+    // A workflow the App doesn't declare.
     const workflowHeard: UseRefusal[] = [];
     const startsUnlisted = await call(
       fixture,
@@ -2332,7 +2330,7 @@ describe("evidence of a refused use", () => {
         run: misusing(
           "notes.create",
           async (channel) =>
-            await channel.resource("followUp", "start", [{ who: "Ada" }])
+            await channel.resource("archive", "start", [{ who: "Ada" }])
         ),
       }
     );
@@ -2403,7 +2401,7 @@ describe("evidence of a refused use", () => {
       workflowHeard: [
         {
           function: "notes.create",
-          use: { kind: "workflow", name: "followUp" },
+          use: { kind: "resource", name: null },
           reason: "use_undeclared",
           errorCode: "function.no_resources",
         },
@@ -2411,6 +2409,132 @@ describe("evidence of a refused use", () => {
       hung: "ok",
       heldNoLonger: true,
       failing: "function.no_resources",
+    });
+  });
+
+  it("is kept for a mutation notifying a connection's alias, named as the connection it is", async () => {
+    const fixture = await notes();
+    const heard: UseRefusal[] = [];
+    const notified = await call(
+      fixture,
+      "mutation",
+      "notes.create",
+      { title: "x" },
+      {
+        refusedUse: async (refusal) => {
+          heard.push(refusal);
+          await Promise.resolve();
+        },
+        run: misusing(
+          "notes.create",
+          async (channel) =>
+            await channel.resource("mail", "notify", [
+              "sent",
+              "run-1",
+              {},
+              "mail.sent",
+              "0".repeat(64),
+            ])
+        ),
+      }
+    );
+    expect({ notified: codeOf(notified), heard }).toStrictEqual({
+      notified: "resource.not_allowed",
+      heard: [
+        {
+          function: "notes.create",
+          use: { kind: "resource", name: "mail" },
+          reason: "use_undeclared",
+          errorCode: "resource.not_allowed",
+        },
+      ],
+    });
+  });
+
+  it("is kept by core for a table its access denies, once a call however often its code asks", async () => {
+    const fixture = await appWith({
+      ...appDefinition({
+        name: "Vault",
+        tables: {
+          vault: {
+            fields: { secret: "v.string()" },
+            access: { read: "none", write: "none" },
+          },
+        },
+      }),
+      "server/vault.ts": `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "@server/_generated/server";
+export const peek = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => await ctx.db.query("vault").count(),
+});
+export const stamp = mutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    let refused = 0;
+    for (let index = 0; index < 5; index += 1) {
+      try {
+        await ctx.db.insert("vault", { secret: "s" });
+      } catch {
+        refused += 1;
+      }
+    }
+    return refused;
+  },
+});
+`,
+    });
+    const release = await seal(fixture);
+    const appId = appIdSchema.parse(fixture.app);
+    const run = async (path: string, kind: "query" | "mutation") => {
+      const requestId = crypto.randomUUID();
+      const result = await callOperation(
+        { manifest: release.app, run: hostedRelease(env, release).run },
+        await invocationFor(env, release, {
+          by: fixture.owner,
+          requestId,
+          deadline: Date.now() + 30_000,
+        }),
+        { path, kind },
+        {}
+      );
+      const events = await allEvents();
+      const kept = events
+        .filter(
+          (event) =>
+            event.action === "app.use.refused" &&
+            event.target?.id === appId &&
+            event.requestId === requestId
+        )
+        .map(({ detail }) => detail);
+      return { result: result.ok ? result.value : result.error.code, kept };
+    };
+    const kept = (table: string, errorCode: string, fn: string) => ({
+      version: 1,
+      person: fixture.owner.userId,
+      runId: null,
+      function: fn,
+      useKind: "table",
+      useName: table,
+      reason: "request_not_allowed",
+      errorCode,
+    });
+    expect({
+      read: await run("vault.peek", "query"),
+      // Five refused writes in one call, each caught: kept once, and the
+      // mutation fails all the same, its refused write not passed off.
+      write: await run("vault.stamp", "mutation"),
+    }).toStrictEqual({
+      read: {
+        result: "data.access_denied",
+        kept: [kept("vault", "data.access_denied", "vault.peek")],
+      },
+      write: {
+        result: "data.write_denied",
+        kept: [kept("vault", "data.write_denied", "vault.stamp")],
+      },
     });
   });
 
@@ -2433,14 +2557,15 @@ export const probe = action({ args: {}, returns: v.null(), handler: async () => 
     });
     const release = await seal(fixture);
     const hosted = hostedRelease(env, release);
-    // Code that goes around its SDK: it asks the host for a function its
-    // uses don't list, swallowing the refusal, and answers all the same.
+    // Code that goes around its SDK: it asks the host for a function the
+    // App doesn't register, swallowing the refusal, and answers all the
+    // same.
     const run: Runner = async (path, args, channel) => {
       if (path !== "notes.probe") {
         return await hosted.run(path, args, channel);
       }
       try {
-        await channel.call("query", "notes.label", {});
+        await channel.call("query", "notes.missing", {});
       } catch {
         // Swallowed.
       }
@@ -2479,7 +2604,7 @@ export const probe = action({ args: {}, returns: v.null(), handler: async () => 
             runId: null,
             function: "notes.probe",
             useKind: "function",
-            useName: "notes.label",
+            useName: null,
             reason: "use_undeclared",
             errorCode: "function.not_found",
           },
