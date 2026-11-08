@@ -45,7 +45,7 @@ export const useQuery = <Reference extends QueryReference>(
 /**
  * The record a query of pages answers each of: `any` for a query whose
  * answer is `any` (core's stand-ins while an App's server code doesn't
- * register, generate.ts `symbolicModules`), as its other answers are,
+ * register, codegen-stand-ins.ts `symbolicModules`), as its other answers are,
  * where inferring from `any` would make it `unknown`.
  */
 export type PageItemOf<Reference> = 0 extends 1 & ReturnOf<Reference>
@@ -77,7 +77,7 @@ interface PaginatedQueryOptions {
 }
 
 /**
- * A live paginated list of the query `reference` names (spec 10.6): one
+ * A live paginated list of the query `reference` names: one
  * that takes the reserved `pagination` argument and answers pages, read
  * with `args` (its other arguments, or `"skip"`). It shows `items`, the
  * ordered records loaded so far, kept up to date as records are saved,

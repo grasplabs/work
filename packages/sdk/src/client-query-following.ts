@@ -71,7 +71,7 @@ export class QueryFollower {
 
   /**
    * Follows `entry`'s query: subscribes, and shows each push of core's
-   * in order (see the header). `failures` is how often in a row it was
+   * in order (see client-core.ts). `failures` is how often in a row it was
    * lost before.
    */
   follow(entry: QueryEntry, failures: number): void {

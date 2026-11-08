@@ -31,8 +31,8 @@ import type { WorkflowEventReference } from "./workflow-events.ts";
 import type { ReadWorkflow } from "./workflow-reference-read.ts";
 import type { RunHandle } from "./workflow-runs.ts";
 
-// Workflow runs on a page (spec 10.4–10.4.7, 10.7.2, 10.7.3): what
-// `useWorkflow` (react.ts) shows and does, on the session client's own
+// Workflow runs on a page: what
+// `useWorkflow` (react/workflow.ts) shows and does, on the session client's own
 // transport. One channel per client follows runs and bindings, shared by
 // every hook that shows them; one store per hook keeps that hook's
 // selection, its starts and its controls, and derives its view.

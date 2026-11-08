@@ -184,7 +184,7 @@ export interface MutationCtx<
   readonly afterCommit: AfterCommit<Grants>;
   /**
    * Notifies run `runId` of one of the App's workflows with one of its
-   * events (spec 10.7.4): staged with the mutation's writes, in the
+   * events: staged with the mutation's writes, in the
    * same transaction, and delivered to the run's inbox from the store's
    * outbox after the commit, once. The host checks the run, the data and
    * the App's grant to send as the mutation runs, and fails the mutation
@@ -250,7 +250,7 @@ export type ActionCtx<Grants extends Grant = never> = ActionBaseCtx<Grants> &
   PermissionClients<Grants>;
 
 /**
- * What a streaming action's handler has (spec 10.7.6): an action's
+ * What a streaming action's handler has: an action's
  * context, and `emit`.
  */
 export type StreamActionCtx<

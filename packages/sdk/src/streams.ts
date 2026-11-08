@@ -29,7 +29,7 @@ import type { Followed } from "./stream-connection.ts";
 import { withKey } from "./submission-verdict.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
-// A streaming action (spec 10.7.6, `stream`) is followed rather than
+// A streaming action (`stream`) is followed rather than
 // answered: its progress snapshots, then its result, over the transport's
 // `stream`. More ways it can fail:
 // - A reference of the wrong mode runs anyway: `action` takes only a
@@ -138,7 +138,7 @@ export class Streams {
         onProgress?.(value);
       } catch {
         // Its failure is its own: it isn't called again, and the action
-        // goes on (spec 10.7.6).
+        // goes on.
         listening = false;
       }
     };

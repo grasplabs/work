@@ -46,7 +46,7 @@ export type Theme = "light" | "dark";
  */
 export interface PageBridge {
   /**
-   * Calls one of the App's functions (spec 32.6), for the person using the
+   * Calls one of the App's functions, for the person using the
    * page: `request` is the call as JSON text (its reference, input and
    * idempotency key), passed to core as it is; the answer is core's
    * `{ result, fingerprint, manifestHash }`, the last null for an action
@@ -55,7 +55,7 @@ export interface PageBridge {
    */
   callFunction: (request: string) => Promise<unknown>;
   /**
-   * Follows one of the App's streaming actions (spec 10.7.6): `what` is
+   * Follows one of the App's streaming actions: `what` is
    * `stream` (start it, or join it under the same key) or `attach` (read
    * it again, never starting it), `request` as for `callFunction`.
    * `onFrame` gets each frame core sent, one at a time, the next only once
@@ -77,7 +77,7 @@ export interface PageBridge {
   /** Answers the decision `decision` of one of the runs the App started. */
   decide: (run: string, decision: string, answer: unknown) => Promise<unknown>;
   /**
-   * Follows one of the App's queries (spec 11): `request` is the call as
+   * Follows one of the App's queries: `request` is the call as
    * `callFunction` sends it; `onSnapshot` gets each result core pushes
    * (`{ revision, result }`), until the subscription it answers is
    * released (`release()`) or core lets go of `onSnapshot`. The transport
@@ -487,7 +487,7 @@ interface BoundaryState {
 }
 
 /**
- * The platform's error boundary around the App (spec 10.1), for what
+ * The platform's error boundary around the App, for what
  * fails outside a route's own (`defaultErrorComponent`): a query that
  * fails throws while rendering, and lands here instead of blanking the
  * frame. React offers no hook for this, so it is the runtime's one class
@@ -576,7 +576,7 @@ export const runPage = async (
     hooks.loaded?.();
     // One client for the App session this frame runs, over the page's
     // bridge: every page in it reads through the same queries and
-    // submissions, and none makes its own (spec 10.7.1).
+    // submissions, and none makes its own.
     const client = new GraspClient({
       ...bridgeTransport(bridge),
       files: portFileTransport(filePort),

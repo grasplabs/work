@@ -9,7 +9,7 @@ import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 /** A JSON Schema, as plain data. */
 export type JsonSchema = Record<string, JsonValue>;
 
-/** One semantic kind's single wire form (spec 32.1). */
+/** One semantic kind's single wire form. */
 const semanticSchema = (kind: string): JsonSchema => {
   if (kind === "timestamp") {
     return { type: "integer" };

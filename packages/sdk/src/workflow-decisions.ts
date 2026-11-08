@@ -5,7 +5,7 @@ import type { WorkflowDecisionWait } from "./workflow-runs.ts";
 declare const outputType: unique symbol;
 
 /**
- * A value schema as a generated module holds it (spec 10.7.2): a browser
+ * A value schema as a generated module holds it: a browser
  * descriptor and nothing callable, with the types of what a person
  * answers and what it normalizes to in phantom members. `v.object` takes
  * it as a field, so a form's schema is built from it.
@@ -28,8 +28,8 @@ export type DescriptorOutputOf<Schema> =
   Schema extends DescriptorSchema<unknown, infer Output> ? Output : never;
 
 /**
- * A generated reference to one decision a workflow the App binds declares
- * (spec 10.4.5, 10.7.2): `workflows.<workflow>.decisions.<key>`, read-only
+ * A generated reference to one decision a workflow the App binds declares:
+ * `workflows.<workflow>.decisions.<key>`, read-only
  * schema metadata. It names the workflow binding and pinned contract it
  * belongs to and the decision binding's `key`, and holds the schema of
  * the value a response carries (`valueSchema`) and the descriptor of the

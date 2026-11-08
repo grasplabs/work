@@ -1,6 +1,6 @@
 /**
  * What a workflow expression's generated code runs through (`code` of
- * `checkExpression`, expression-lowering.ts): the run-time half of the
+ * `checkExpression`, expression-check.ts): the run-time half of the
  * boundary, which stops an expression calling anything but the allowed
  * built-ins, whatever names its data's fields have.
  *
@@ -95,8 +95,7 @@ const maxNameInMessage = 64;
 /**
  * Why an expression failed as it ran: `expression.failed`, the code the
  * run host keeps. The host shows its own words for the code ("The
- * expression failed.") in place of this message for now; it is to keep
- * the message too, capped, as display text only. The message is built
+ * expression failed.") in place of this message. The message is built
  * from the expression's own text alone,
  * the field or method name it wrote, never from a value it read: a key is
  * always a literal of the expression (expression-check.ts,

@@ -39,7 +39,7 @@ export const manifestVersion = 1;
 
 /**
  * The most bytes of a manifest's text, as UTF-8: checked before it is
- * parsed. The host's own bound until the runtime policy module sets one.
+ * parsed: a fixed bound of the host's.
  */
 export const manifestMaxBytes = 1024 * 1024;
 

@@ -4,7 +4,7 @@ import { descriptorOf } from "./sealed-descriptors.ts";
 import type { Infer, InferInput } from "./value-types.ts";
 import { v } from "./values.ts";
 
-// Who calls an App, and the organization's people (GRA-1474): what an
+// Who calls an App, and the organization's people: what an
 // App's server functions read as `ctx.auth.getUser()` and `ctx.people`,
 // and its pages as `useUser()` and `usePeople()`, as Convex's read
 // `ctx.auth`. Core answers both itself, from its own record of who is

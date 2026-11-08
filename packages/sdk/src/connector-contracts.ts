@@ -12,7 +12,7 @@ import type { JsonValue } from "./value-descriptor.ts";
 export type ComposioContract = `composio.${string}@1`;
 
 /**
- * An outside API an admin approved as an HTTP connection (GRA-1478): its
+ * An outside API an admin approved as an HTTP connection: its
  * one origin, the paths and methods it allows, and its credential, which
  * connect adds and nobody else sees. Its actions are `get` (a read: GET or
  * HEAD) and `send` (POST, PUT, PATCH or DELETE, a change a person confirms
@@ -67,7 +67,7 @@ export interface HttpRequestInit {
 }
 
 /**
- * A generated connector contract (spec 12): a native connector's tools of
+ * A generated connector contract: a native connector's tools of
  * one family, such as `microsoft-365.mail@1`, from this release's catalog;
  * a Composio toolkit's (`ComposioContract`); or an HTTP connection's
  * (`HttpContract`).

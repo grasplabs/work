@@ -14,7 +14,7 @@ const byName = <Value>(map: ReadonlyMap<string, Value>): [string, Value][] =>
 
 /**
  * The SDK's connector catalog (`connector-catalog.gen.ts`): the type of
- * each generated connector contract of a Grasp release (spec 12), each
+ * each generated connector contract of a Grasp release, each
  * action's arguments as a caller passes them and its answer as it comes
  * back, from the descriptors core checks calls against. Types only: what
  * a binding serves is still decided, and checked both ways, at run time.

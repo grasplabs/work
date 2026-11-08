@@ -12,8 +12,8 @@ import {
   v,
 } from "./values.ts";
 
-// The ordinary queries a generated workflow reference exposes (spec
-// 10.7.2): `workflows.<wf>.queries.runs`, `.history`, `.decisions` and
+// The ordinary queries a generated workflow reference exposes:
+// `workflows.<wf>.queries.runs`, `.history`, `.decisions` and
 // `.decision`. Public query references like any of the App's, for
 // `useQuery` and `usePaginatedQuery`: never commands, and never aliases
 // for `useWorkflow`. Their arguments and answers are declared here once,
@@ -63,7 +63,7 @@ const runFields = {
   canWatch: v.boolean(),
 };
 
-/** One run in a list: no output, error or input (spec 10.7.2). */
+/** One run in a list: no output, error or input. */
 const runRow = v.union(
   v.object({ ...runFields, status: settledStatus }),
   v.object({ ...runFields, ...compensation })
@@ -101,7 +101,7 @@ const enumOf = (names: readonly string[]): AnySchema | undefined => {
 };
 
 /**
- * One row of a run's history (spec 10.7.2): metadata only, never input,
+ * One row of a run's history: metadata only, never input,
  * output, reviewers or review bodies.
  */
 const historyRow = (workflow: BoundWorkflow): AnySchema => {

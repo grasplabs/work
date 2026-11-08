@@ -11,8 +11,8 @@ import type { WorkflowWait } from "./workflow-runs.ts";
 declare const waitType: unique symbol;
 
 /**
- * A generated reference to one of the workflows an App binds (spec 10.4.1,
- * 10.4.6): the App and release it belongs to, the binding's alias, the
+ * A generated reference to one of the workflows an App binds: the App
+ * and release it belongs to, the binding's alias, the
  * contract it pins (its ID and fingerprint, over its input and output;
  * each event and decision has its own), the descriptors of its input and
  * output, its event references under `events` and its decisions' schemas
@@ -53,7 +53,7 @@ export interface WorkflowReference<
   /** Its decisions, by their binding's alias in the workflow. */
   readonly decisions: Decisions;
   /**
-   * Its ordinary queries (spec 10.7.2): `runs` and `history`, and, when it
+   * Its ordinary queries: `runs` and `history`, and, when it
    * declares decisions, `decisions` and `decision`; for `useQuery` and
    * `usePaginatedQuery`.
    */

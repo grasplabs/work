@@ -31,7 +31,7 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
 import { readDescriptor } from "./value-read.ts";
 
-// Forms (spec 10.2.1–10.2.4): one `useForm`, two ways in.
+// Forms: one `useForm`, two ways in.
 //
 // - `useForm(ref, { defaultValues, onSuccess?, resetOnSuccess? })` binds a
 //   public mutation or action: its fields are its input, checked by the
@@ -183,7 +183,7 @@ export interface GraspForm<Values, Result> {
   readonly discard: () => void;
 }
 
-/** An operation-bound form's options (spec 10.2.1). */
+/** An operation-bound form's options. */
 export interface OperationFormOptions<Reference> {
   /** The editable input, as the operation takes it. */
   readonly defaultValues: ArgsOf<Reference>;
@@ -193,7 +193,7 @@ export interface OperationFormOptions<Reference> {
   readonly resetOnSuccess?: boolean;
 }
 
-/** A local form's options (spec 10.2.4). */
+/** A local form's options. */
 export interface SchemaFormOptions<Schema extends StandardSchemaV1, Result> {
   readonly defaultValues: StandardSchemaV1.InferInput<Schema>;
   /** Gets the schema's normalized output; owns what it does with it. */
@@ -746,7 +746,7 @@ export class FormBinding {
     // under it (see `SubmitPhase`), or the person discards it. A local
     // form's callback has no identity to keep, so its failure is a plain
     // one, unless it failed with a call's own (`receiptLinkOf`: a
-    // decision's answer, spec 10.7.2): then that call is kept, the fields
+    // decision's answer): then that call is kept, the fields
     // locked, and the next submit sends it again, never the callback.
     const key = isPlainObject(error.details)
       ? error.details.idempotencyKey
@@ -916,7 +916,7 @@ export const bindForm = (
   );
 
 /**
- * The form hook, untyped: what `useForm` in react.ts types by its two
+ * The form hook, untyped: what `useForm` in react/form.ts types by its two
  * ways in. `client` is the session client.
  */
 export const useGraspForm = (

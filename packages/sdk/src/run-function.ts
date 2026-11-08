@@ -102,7 +102,7 @@ interface StagedNotification {
 }
 
 /**
- * A mutation's `ctx.notify` (spec 10.7.4), over `channel`: each call kept
+ * A mutation's `ctx.notify`, over `channel`: each call kept
  * in order while the handler runs, synchronously, and sent to the host by
  * `flush` once it has returned, in that order, which is each one's place
  * among the commit's intents; nothing for a handler that throws, whose

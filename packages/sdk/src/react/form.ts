@@ -26,7 +26,7 @@ interface UseForm {
 }
 
 /**
- * A form (spec 10.2.1–10.2.4), one hook with two ways in:
+ * A form, one hook with two ways in:
  *
  * - `useForm(ref, { defaultValues, onSuccess?, resetOnSuccess? })`: a
  *   public mutation or action, its input the fields, the argument

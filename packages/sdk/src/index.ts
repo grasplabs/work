@@ -54,7 +54,7 @@ export type {
   WorkflowConfig,
   WorkflowPermission,
 } from "./permission-types.ts";
-// References (spec 8, 32.1): what the generated `@server/_generated/api` modules hold.
+// References: what the generated `@server/_generated/api` modules hold.
 export type {
   FilesOperation,
   FilesReference,

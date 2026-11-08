@@ -25,7 +25,7 @@ export type AnyTables = Readonly<Record<string, AnyTable>>;
 /**
  * A function as callers type it: its kind, visibility, arguments (as a
  * caller passes them and as the handler gets them) and return. A
- * definition is one, and so is the reference generated for it (spec 8):
+ * definition is one, and so is the reference generated for it:
  * the phantom members carry inference only and are never set.
  */
 export type FunctionReference<
@@ -39,7 +39,7 @@ export type FunctionReference<
 /**
  * What a handler may answer, `Returns` the schema its declaration gives
  * (`undefined` where it gives none): what the schema infers, or anything,
- * which the host checks as JSON only (spec 32.6). One signature for both,
+ * which the host checks as JSON only. One signature for both,
  * as Convex's: a wrong answer is then reported where it is, not as no
  * overload matching.
  */
@@ -76,7 +76,7 @@ export interface ServerFunction<
   readonly args: ObjectSchema<Shape>;
   /** Its `returns` schema, which the host checks its answers against; null where it declares none. */
   readonly returns: AnySchema | null;
-  /** An action's progress snapshots (spec 10.7.6), or null. */
+  /** An action's progress snapshots, or null. */
   readonly stream: Stream;
   readonly handler: (ctx: Ctx, args: ObjectOutput<Shape>) => unknown;
 }

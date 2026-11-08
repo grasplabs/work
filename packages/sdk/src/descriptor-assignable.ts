@@ -2,7 +2,7 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
 
 // Whether every value one descriptor normalizes to is one another accepts:
-// how a surface's input is checked against its page's (spec 34.1). It is
+// how a surface's input is checked against its page's. It is
 // conservative on purpose: a pair it can't prove is refused, never let
 // through. What it proves, it proves structurally, from the descriptors
 // alone, without running anything.

@@ -26,7 +26,7 @@ export interface BoundWorkflowDecision {
 }
 
 /**
- * A workflow the App declares (spec 3, 10.4.1, 10.4.5, 10.4.6), as its
+ * A workflow the App declares, as its
  * reference is generated: the App's alias for it and the input and output
  * the App declared (`permission.workflow`), the contract its reference pins;
  * and, as the host resolved the App's binding against the approved

@@ -193,7 +193,7 @@ export const v = Object.freeze({
     schema({ ...required, kind: "union", members: members.map(descriptorOf) }),
 });
 
-// The page contract of spec 9.2, as schemas an operation declares for its
+// The page contract, as schemas an operation declares for its
 // arguments and return: `{ pageSize, cursor }` in, `{ items, nextCursor,
 // hasMore }` out. A page's two shapes are two strict objects, so a page
 // with a cursor always says there is more, and the last page never carries

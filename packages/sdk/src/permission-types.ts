@@ -130,7 +130,7 @@ export interface GraspPermission extends DeclarationBase<"grasp", "grasp"> {
 }
 
 /**
- * A `files` permission (spec 10.7.5, 32.3): what the App's pages may do
+ * A `files` permission: what the App's pages may do
  * with files, through the host. Browser-facing: no function reaches it.
  */
 export interface FilesPermission<
@@ -140,7 +140,7 @@ export interface FilesPermission<
 }
 
 /**
- * A `links` permission (spec 10.7.7, 32.3): the exact HTTPS origins the
+ * A `links` permission: the exact HTTPS origins the
  * App's pages may link to. It grants no network access at all.
  */
 export interface LinksPermission<
@@ -166,7 +166,7 @@ export const peopleDeclaration: PeoplePermission = Object.freeze({
 });
 
 /**
- * A workflow permission (spec 7.4, 9.5): an independent workflow the App
+ * A workflow permission: an independent workflow the App
  * starts, by an alias of its own. An action starts it
  * (`ctx.workflows.<alias>.start`), and a mutation stages its start for
  * after it commits (`ctx.afterCommit.workflows.<alias>.start`). Like

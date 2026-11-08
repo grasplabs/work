@@ -99,7 +99,7 @@ interface EngineStepOptions {
 /**
  * What a durable runtime implements to run workflows written with
  * `@grasp-os/sdk/workflow`. Workflow code never sees it, so the engine
- * underneath (the cloud runtime now, on-prem later) can change without
+ * underneath (the cloud runtime, or an on-prem one) can change without
  * touching a single workflow. It stays close to the common durable-execution
  * primitives (a named step whose result is recorded, a durable sleep, a
  * durable wait for a decision), so any durable runtime maps onto it directly.

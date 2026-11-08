@@ -29,8 +29,8 @@ export const fences = (code: string): boolean =>
 
 /**
  * Host failures of a query or a mutation that changed nothing and may be
- * sent again unchanged: the host ran nothing, or committed nothing (spec
- * 32.1); a mutation commits all of itself or nothing. An action commits
+ * sent again unchanged: the host ran nothing, or committed nothing; a
+ * mutation commits all of itself or nothing. An action commits
  * what it runs step by step, so of these only a refusal before it reached
  * the App (`refusedBeforeCallCodes`) means it ran nothing.
  */

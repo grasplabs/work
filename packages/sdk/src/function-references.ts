@@ -1,7 +1,7 @@
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 
-// References (spec 8, 32.1): how code names one of an App's functions or
+// References: how code names one of an App's functions or
 // a browser-facing resource, without holding any of them. A
 // function's reference is its name and kind, nothing more: core resolves
 // the name in the release that answers the call (the App's current one,
@@ -59,7 +59,7 @@ export interface Callable<
 }
 
 /**
- * A generated reference to one of an App's functions (spec 32.1): its
+ * A generated reference to one of an App's functions: its
  * name, its path (`tasks.list`), and what the page needs of it, built with
  * the App's server code (`_generated`): a mutation's or an action's kind
  * and argument descriptor, which `useForm` sends and checks a form with,
@@ -97,7 +97,7 @@ interface SubmissionFields<Kind extends ReferenceKind> {
 }
 
 /**
- * A streaming action (spec 10.7.6), as App code declares it (its
+ * A streaming action, as App code declares it (its
  * progress schema in `stream`). It runs only for a page following it
  * (`useStream`, `client.stream`): wherever a call answers once
  * (`client.action`, `ctx.runAction`, a test's `action`), its type is

@@ -8,7 +8,7 @@ import type {
   PageStart,
 } from "./page-runtime.ts";
 /**
- * What runs a chat's preview of a draft in its frame (spec 22.7): the
+ * What runs a chat's preview of a draft in its frame: the
  * page runtime (page-runtime.ts) with React Fast Refresh. The preview
  * frame's document loads this in place of the page runtime; published
  * Apps never do, and only the preview kit has it.

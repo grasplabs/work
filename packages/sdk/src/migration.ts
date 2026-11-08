@@ -19,7 +19,7 @@ import type { AnySchema } from "./value-schema.ts";
 import type { Infer, InferInput } from "./value-types.ts";
 
 // `migration`: an explicit, typed transform of one table's records from
-// one schema to another (spec 17.2), for a change the host can't make on
+// one schema to another, for a change the host can't make on
 // its own: deriving a value, a type change, a required field without a
 // default. A safe addition (a new table, an optional or defaulted field)
 // never needs one: the host plans and backfills it itself.
@@ -35,8 +35,8 @@ import type { Infer, InferInput } from "./value-types.ts";
 // declare exactly), and keeps the record's managed fields itself.
 //
 // A migration carries fixtures: records it is run on as its release is
-// sealed, before it touches the store (spec 17.2's representative
-// fixtures). Each fixture's output must fit the target table, and match
+// sealed, before it touches the store, as representative fixtures.
+// Each fixture's output must fit the target table, and match
 // what it `expect`s when it says. The release is sealed either way, with
 // what the run found; a migration with a fixture that failed runs on no
 // records, and its release can't be made current. They are data the

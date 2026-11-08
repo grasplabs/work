@@ -42,7 +42,7 @@ export interface AppConfig<
    * Every function of the App may use them, as its kind allows.
    */
   readonly permissions?: Permissions;
-  /** Its people's preferences (spec 10.7.7): a strict object, when declared. */
+  /** Its people's preferences: a strict object, when declared. */
   readonly preferences?: AnySchema;
   /**
    * Its answers for the records that lack a field a change of its schema
@@ -56,7 +56,7 @@ export interface AppConfig<
 }
 
 /**
- * An App's permissions, by kind (permissions.ts): what its actions reach
+ * An App's permissions, by kind (permission.ts): what its actions reach
  * through `ctx`, the workflows its actions and mutations start, what its
  * pages may do with files and link to, and whether it reads the
  * organization's people.

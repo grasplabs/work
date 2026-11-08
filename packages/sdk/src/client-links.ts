@@ -4,7 +4,7 @@ import { namePattern } from "./declaration.ts";
 import type { LinksReference } from "./file-link-references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
-// The session client's links (spec 10.7.7, 32.3): `client.links.open`,
+// The session client's links: `client.links.open`,
 // which asks the trusted host to open a URL through a links resource the
 // App declared, over the transport the platform gives the client
 // (`LinkTransport`). The host decides whether the URL may open, asks the
@@ -75,7 +75,7 @@ const linkFailure = (error: unknown): GraspError => {
     : clientError("function.unreachable");
 };
 
-/** `client.links` (spec 10.7.7): opening a links resource's URLs. */
+/** `client.links`: opening a links resource's URLs. */
 export class ClientLinks {
   readonly #transport: LinkTransport | undefined;
 

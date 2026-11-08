@@ -5,7 +5,7 @@ import type { ClientFiles } from "./client-files.ts";
 import type { ClientInternals } from "./client-internals.ts";
 import type { FileRef } from "./file-references.ts";
 
-// One `useUpload` hook's transfer (spec 10.7.5): at most one upload at a
+// One `useUpload` hook's transfer: at most one upload at a
 // time, its view kept as an external store the hook reads. The view says
 // only what core confirmed: completed once core published the file,
 // cancelled once core acknowledged the cancellation, and completed after
@@ -14,7 +14,7 @@ import type { FileRef } from "./file-references.ts";
 // running upload and shows its refusal, and an upload that settles after
 // one is never shown completed, its file no use to the page now.
 
-/** An upload's view, as `useUpload` shows it (spec 10.7.5). */
+/** An upload's view, as `useUpload` shows it. */
 export type UploadView =
   | { readonly status: "idle" }
   | {

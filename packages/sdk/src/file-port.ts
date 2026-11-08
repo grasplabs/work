@@ -6,7 +6,7 @@ import type {
 
 import type { FileTransport, TransferProgress } from "./file-transport.ts";
 
-// The frame's side of its file port (spec 10.7.5): how the session client
+// The frame's side of its file port: how the session client
 // in a page's frame moves files, through the page, which alone reaches
 // core. The frame hands over the file a person picked as it is (a `Blob`,
 // cloned by the browser without the frame reading it) and gets back only

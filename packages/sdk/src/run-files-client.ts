@@ -1,4 +1,4 @@
-// The client of a files binding (the run's own files, GRA-724) in an
+// The client of a files binding (the run's own files) in an
 // action's isolate: `write` and `read` as one call each to the action, in
 // as many host calls as the file needs, each moving at most
 // `callBytes`. A convenience, never the boundary: the host checks every
