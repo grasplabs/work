@@ -47,7 +47,7 @@ export const finish = mutation({
       { done: true },
       { expectedRevision: args.expectedRevision }
     );
-    await ctx.afterCommit.workflows.review.start({ task: args.id });
+    await ctx.workflows.review.start({ task: args.id });
     return null;
   },
 });
@@ -66,8 +66,10 @@ export const reviewNow = action({
 
 A function starts one of the App's workflows by its alias:
 
-- A mutation starts it with `ctx.afterCommit.workflows.<alias>.start(input)`, which happens only once the mutation's writes commit. If the mutation fails, nothing starts. `finish` above saves the task and starts its review as one change.
-- An action starts it with `ctx.workflows.<alias>.start(input)`, which resolves once Grasp has accepted the start, durably: with its `startId`, the workflow `version` it started and the `runId` of its run. The run goes on after the action returns; a Page follows it by that ID.
+A mutation and an action both start it with `ctx.workflows.<alias>.start(input)`:
+
+- In a mutation, the start happens only once the mutation's writes commit. If the mutation fails, nothing starts. `finish` above saves the task and starts its review as one change.
+- In an action, the start happens right away. It resolves once Grasp has accepted the start, durably: with its `startId`, the workflow `version` it started and the `runId` of its run. The run goes on after the action returns; a Page follows it by that ID.
 
 Grasp checks every start's input against the workflow's, so a start the workflow can't take fails at once.
 

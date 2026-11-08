@@ -571,7 +571,7 @@ describe("the App's permissions in a function's context", () => {
       args: {},
       returns: v.array(v.string()),
       handler: (ctx) => [
-        ...Object.keys(ctx.afterCommit.workflows),
+        ...Object.keys(ctx.workflows),
         ...("connections" in ctx ? ["connections"] : []),
       ],
     });
@@ -579,7 +579,7 @@ describe("the App's permissions in a function's context", () => {
       args: {},
       returns: v.array(v.string()),
       handler: (ctx) =>
-        ["workflows", "afterCommit", "connections", "runQuery"].filter(
+        ["workflows", "notifyPeople", "connections", "runQuery"].filter(
           (key) => key in ctx
         ),
     });

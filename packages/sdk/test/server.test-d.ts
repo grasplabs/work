@@ -282,7 +282,6 @@ mutation({
     // event of a workflow the App doesn't declare.
     expectTypeOf(ctx).not.toHaveProperty("connections");
     expectTypeOf(ctx).not.toHaveProperty("ai");
-    expectTypeOf(ctx).not.toHaveProperty("workflows");
     expectTypeOf(ctx).not.toHaveProperty("runMutation");
     expectTypeOf(ctx).not.toHaveProperty("runAction");
     expectTypeOf(ctx).not.toHaveProperty("data");
@@ -409,7 +408,6 @@ granted.action({
     // A workflow is no connection, and there is no engine.
     expectTypeOf(ctx.connections).not.toHaveProperty("followUp");
     expectTypeOf(ctx).not.toHaveProperty("engine");
-    expectTypeOf(ctx).not.toHaveProperty("afterCommit");
     return null;
   },
 });
@@ -435,14 +433,12 @@ granted.mutation({
     const id = await ctx.db.insert("notes", { title: args.title });
     // Staged with the insert, started once both have committed.
     expectTypeOf(
-      ctx.afterCommit.workflows.followUp.start({ noteId: id })
+      ctx.workflows.followUp.start({ noteId: id })
     ).resolves.toBeVoid();
     // @ts-expect-error -- input the declaration doesn't take
-    await ctx.afterCommit.workflows.followUp.start({ noteId: 1 });
+    await ctx.workflows.followUp.start({ noteId: 1 });
     // Only the App's.
-    expectTypeOf(ctx.afterCommit.workflows).not.toHaveProperty("unlisted");
-    // A mutation never starts anything while it runs.
-    expectTypeOf(ctx).not.toHaveProperty("workflows");
+    expectTypeOf(ctx.workflows).not.toHaveProperty("unlisted");
     return id;
   },
 });
@@ -451,17 +447,19 @@ mutation({
   returns: v.null(),
   handler: async (ctx) => {
     // The App declares no workflow.
-    expectTypeOf(ctx.afterCommit.workflows).not.toHaveProperty("followUp");
+    expectTypeOf(ctx.workflows).not.toHaveProperty("followUp");
     // Tells people once it commits, whatever the App declares.
-    await ctx.afterCommit.notifyPeople("person", { title: "Done" });
+    expectTypeOf(
+      ctx.notifyPeople("person", { title: "Done" })
+    ).resolves.toBeVoid();
     // @ts-expect-error -- a title is required
-    await ctx.afterCommit.notifyPeople("person", { body: "Done" });
+    await ctx.notifyPeople("person", { body: "Done" });
     return null;
   },
 });
 
 // A query starts nothing, now or after.
-expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("afterCommit");
+expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("notifyPeople");
 expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("workflows");
 
 // `doc` is a whole record of the pinned schema.

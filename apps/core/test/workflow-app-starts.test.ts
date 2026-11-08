@@ -87,8 +87,8 @@ import { applied } from "./store-schemas.ts";
 
 // Starting independent workflows from an App's server functions
 // (operations.ts, workflow-start-intents.ts): an action's
-// `ctx.workflows.<alias>.start` and a mutation's
-// `ctx.afterCommit.workflows.<alias>.start`, from
+// `ctx.workflows.<alias>.start` and a mutation's, staged with its commit,
+// from
 // their threat model. App code runs as the SDK's runner runs it, against
 // a real business store, its real outbox and the real start path; a
 // "rogue" runner stands for App code talking to its channel directly.
@@ -136,7 +136,7 @@ const submit = mutation({
   returns: v.id("requests"),
   handler: async (ctx, args) => {
     const id = await ctx.db.insert("requests", { title: args.who });
-    await ctx.afterCommit.workflows.followUp.start({ who: args.who });
+    await ctx.workflows.followUp.start({ who: args.who });
     if (args.fail) {
       throw new AppError("desk.refused", "The request was refused.");
     }
@@ -149,7 +149,7 @@ const guarded = mutation({
   args: { id: v.id("requests") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.afterCommit.workflows.followUp.start({ who: "Guarded" });
+    await ctx.workflows.followUp.start({ who: "Guarded" });
     await ctx.db.patch(
       "requests",
       args.id,
@@ -180,7 +180,7 @@ const retrying = mutation({
     for (let index = 0; index < 40; index += 1) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- one start after the other
-        await ctx.afterCommit.workflows.followUp.start({
+        await ctx.workflows.followUp.start({
           who: `${index}`.padEnd(120 * 1024, "x"),
         });
       } catch {
@@ -203,7 +203,7 @@ const submitPlain = mutation({
   args: {},
   returns: v.null(),
   handler: async (ctx) => {
-    await ctx.afterCommit.workflows.followUp.start();
+    await ctx.workflows.followUp.start();
     return null;
   },
 });
@@ -223,7 +223,7 @@ const flood = mutation({
     for (let index = 0; index < 40; index += 1) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- one start after the other
-        await ctx.afterCommit.workflows.followUp.start({ who: `n${index}` });
+        await ctx.workflows.followUp.start({ who: `n${index}` });
       } catch {
         refused += 1;
       }
@@ -244,7 +244,7 @@ const bulky = mutation({
     for (let index = 0; index < 9; index += 1) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- one start after the other
-        await ctx.afterCommit.workflows.followUp.start({
+        await ctx.workflows.followUp.start({
           who: `${index}`.padEnd(120 * 1024, "x"),
         });
       } catch {

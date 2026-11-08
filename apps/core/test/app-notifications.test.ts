@@ -46,7 +46,7 @@ import { allEvents } from "./audit-events.ts";
 import { applied } from "./store-schemas.ts";
 
 // Apps telling people (app-notifications.ts): an action's
-// `ctx.notifyPeople` and a mutation's `ctx.afterCommit.notifyPeople`, through the real operation host,
+// `ctx.notifyPeople` and a mutation's, staged with its commit, through the real operation host,
 // a real business store and its outbox, into the person's notifications
 // as their inbox lists them. App code runs as the SDK's runner runs it.
 
@@ -78,7 +78,7 @@ const place = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     await ctx.db.insert("orders", { title: "Order" });
-    await ctx.afterCommit.notifyPeople(args.to, {
+    await ctx.notifyPeople(args.to, {
       title: "An order was placed",
     });
     if (args.fail) {
@@ -93,7 +93,7 @@ const ping = mutation({
   args: { to: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.afterCommit.notifyPeople(args.to, { title: "Ping" });
+    await ctx.notifyPeople(args.to, { title: "Ping" });
     return null;
   },
 });
@@ -639,7 +639,7 @@ describe("an action's ctx.notifyPeople", () => {
   });
 });
 
-describe("a mutation's ctx.afterCommit.notifyPeople", () => {
+describe("a mutation's ctx.notifyPeople", () => {
   it("tells a member once the commit lands and its outbox hands it over, audited", async () => {
     const fx = await fixture();
     const placed = await call(fx, fx.bob, "orders.place", {

@@ -322,8 +322,8 @@ export interface Invocation {
    */
   readonly notifications?: WorkflowNotifications;
   /**
-   * How core tells people for this call (`ctx.notifyPeople` of an action,
-   * `ctx.afterCommit.notifyPeople` of a mutation, app-notifications.ts); none
+   * How core tells people for this call (`ctx.notifyPeople`, of an action
+   * or a mutation, app-notifications.ts); none
    * told without it: a visitor's call and a workflow run's have none.
    */
   readonly notifyPeople?: PeopleNotifications;

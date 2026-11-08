@@ -20,9 +20,8 @@ import type {
 import type { AnyTables, FunctionReference } from "./server-function.ts";
 
 /**
- * What App code tells people (`ctx.notifyPeople`,
- * `ctx.afterCommit.notifyPeople`): a
- * notification in their Grasp inbox that opens the App.
+ * What App code tells people (`ctx.notifyPeople`): a notification in
+ * their Grasp inbox that opens the App.
  */
 export interface PeopleNotification {
   /** At most 120 characters. */
@@ -54,31 +53,6 @@ type NotifyPeople<Told> = (
   to: string,
   notification: PeopleNotification
 ) => Promise<Told>;
-
-/**
- * `ctx.afterCommit`: what a mutation hands on once it commits, as part of
- * its commit, so nothing is handed on for a mutation that doesn't.
- */
-interface AfterCommit<Grants extends Grant> {
-  /**
-   * Each of the App's workflows, by alias: `start(input)` starts it once
-   * the mutation has committed, staged with its writes, in the same
-   * transaction, and started from the store's outbox exactly once. A
-   * mutation that fails, is rolled back or is superseded starts nothing.
-   */
-  readonly workflows: Workflows<Grants, void>;
-  /**
-   * Tells people about what the mutation did, once it has committed
-   * (`NotifyPeople`): checked as it is staged (`resource.invalid_args`
-   * for a title or body past its limit), staged with its writes and sent
-   * from the store's outbox exactly once. Whom it reaches, and the App's
-   * hourly limit, are decided as it is sent: one past the limit then is
-   * dropped, and audited. A mutation that fails, is rolled back or is
-   * superseded tells nobody. Not `ctx.notify`, which sends a workflow's
-   * run an event.
-   */
-  readonly notifyPeople: NotifyPeople<void>;
-}
 
 /**
  * `ctx.runQuery`: one of the App's queries, public or internal, by its
@@ -181,7 +155,24 @@ export interface MutationCtx<
 > extends CallerCtx {
   readonly db: DatabaseWriter<Tables>;
   readonly runQuery: RunQuery;
-  readonly afterCommit: AfterCommit<Grants>;
+  /**
+   * Each of the App's workflows, by alias: `start(input)` starts it once
+   * the mutation has committed, staged with its writes, in the same
+   * transaction, and started from the store's outbox exactly once. A
+   * mutation that fails, is rolled back or is superseded starts nothing.
+   */
+  readonly workflows: Workflows<Grants, void>;
+  /**
+   * Tells people about what the mutation did, once it has committed
+   * (`NotifyPeople`): checked as it is staged (`resource.invalid_args`
+   * for a title or body past its limit), staged with its writes and sent
+   * from the store's outbox exactly once. Whom it reaches, and the App's
+   * hourly limit, are decided as it is sent: one past the limit then is
+   * dropped, and audited. A mutation that fails, is rolled back or is
+   * superseded tells nobody. Not `ctx.notify`, which sends a workflow's
+   * run an event.
+   */
+  readonly notifyPeople: NotifyPeople<void>;
   /**
    * Notifies run `runId` of one of the App's workflows with one of its
    * events: staged with the mutation's writes, in the

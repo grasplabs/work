@@ -1809,10 +1809,9 @@ const buildDeclaration = `/**
  * function registers there.
  *
  * To tell people about something in the App (a request to approve, an
- * order shipped), an action calls
+ * order shipped), an action or a mutation calls
  * \`ctx.notifyPeople(to, { title, body })\` (await sends one at a
- * time) and a mutation \`ctx.afterCommit.notifyPeople(to, { ... })\`,
- * sent once it commits: \`to\` is a person's or a team's ID. It reaches
+ * time); a mutation's is sent once it commits: \`to\` is a person's or a team's ID. It reaches
  * their Grasp notifications, which open the App; only members who can open the App are told
  * (anyone else is skipped), at most 50 people a send and 200 notifications
  * an App an hour, a title of 120 characters and a body of 1000. A
