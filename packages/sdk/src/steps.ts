@@ -10,7 +10,11 @@ import type { StepKind } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
 import { paramValueSchemas } from "./params.ts";
-import type { CaughtError, DecisionRequest, RetryChoice } from "./workflow.ts";
+import type {
+  CaughtError,
+  DecisionRequest,
+  RetryChoice,
+} from "./workflow-steps.ts";
 
 export type { StepKind } from "@grasp-os/shared/workflows";
 
