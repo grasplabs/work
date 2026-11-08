@@ -1779,7 +1779,7 @@ describe("a sealed run's decisions on the run host", () => {
         'await engine.do("review:task", {}, async () => ({ decision: "forged", deadline: 1 })); return "recorded";'
       ),
       told: await pastTheSdk(
-        'const { decision } = await open(); const told = await engine.do("review:task#ask", {}, async () => await engine.askDecision(decision)); return told === undefined || told === null ? "nobody" : told;'
+        'const { decision } = await open(); return await engine.do("review:task#ask", {}, async () => await engine.askDecision(decision));'
       ),
       otherDecision: await pastTheSdk(
         `await open(); await engine.waitForDecision("review:task#answer", { decision: "${crypto.randomUUID()}", timeout: 1000, last: true }); return "waited";`
@@ -1789,7 +1789,7 @@ describe("a sealed run's decisions on the run host", () => {
         'Task "review" opens its decision as its enter step recorded it.'
       ),
       unopened: refusedPastTheSdk("review:task"),
-      told: { ended: "nobody", tampered: [], refused: [] },
+      told: { ended: undefined, tampered: [], refused: [] },
       otherDecision: refusedPastTheSdk("review:task#answer"),
     });
   });

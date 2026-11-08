@@ -686,20 +686,12 @@ export interface WorkflowRun {
 export const paramsStep = "$params";
 
 /**
- * How the host is asked to run a step, by the SDK only in these ways for
- * each kind (workflow.ts): `do` its function (an exact step, an AI step,
- * a decision's opening, and its parts `name#…`); `sleep` (a wait);
- * `waitForDecision` (a decision's `name#answer…`); and, inside a step's
- * attempt, `model` (an AI step), `decision` (opening one) and
- * `recipients` (who a decision asks, in its `#ask` part).
+ * How the host is asked to run a step, by the SDK only in these ways
+ * (workflow.ts): `do` its function (a plain step, a decision's opening,
+ * and its parts `name#…`); `sleep` (a wait); and `waitForDecision` (a
+ * decision's `name#answer`).
  */
-export type StepUse =
-  | "do"
-  | "sleep"
-  | "waitForDecision"
-  | "model"
-  | "decision"
-  | "recipients";
+export type StepUse = "do" | "sleep" | "waitForDecision";
 
 /** Which runs `WorkflowsApi.runs` lists. */
 export interface RunFilter {

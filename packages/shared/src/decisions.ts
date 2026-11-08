@@ -57,8 +57,6 @@ export const decisionErrors = defineErrorFamily({
     "You aren't one of the people who answer this decision.",
   "decision.closed":
     "This decision has been answered, has timed out, or its run has ended.",
-  "decision.too_many_deciders":
-    "A decision asks at most 50 people: ask a smaller team or a role with fewer people.",
   "decision.unconfirmed":
     "This answer wasn't confirmed in Grasp, so it wasn't recorded. Answer again and confirm it.",
   "decision.conflict":
