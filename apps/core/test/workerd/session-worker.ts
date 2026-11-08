@@ -425,7 +425,7 @@ const runHostCase = async (env: StandInEnv, name: string) => {
       ),
     openDecision: async () =>
       await answer("openDecision", { decision: "d", deadline: 1 }),
-    decisionRecipients: async () => await answer("decisionRecipients", []),
+    askDecision: async () => await answer("askDecision", null),
   };
   // The attempt still holds its lease, whenever it's asked: no refusal.
   const refusals = new Map<string, Settled<never>>();
@@ -566,8 +566,7 @@ const attemptLiveness = async () => {
           ok: true,
           value: { decision: "d", deadline: 1 },
         }),
-      decisionRecipients: async () =>
-        await Promise.resolve({ ok: true, value: [] }),
+      askDecision: async () => await Promise.resolve({ ok: true, value: null }),
     },
     async (call: string) =>
       await Promise.resolve(new Map<string, Settled<never>>().get(call)),

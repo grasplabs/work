@@ -19,15 +19,6 @@ export type EngineDecision =
   | { answered: true; approved: boolean; by: string; payload: Json | null }
   | { answered: false };
 
-/** A person a decision asks, and where they answer it. */
-export interface DecisionRecipient {
-  userId: string;
-  name: string;
-  email: string;
-  /** Leads them, once signed in, to the decision: `/decisions/<id>`. */
-  link: string;
-}
-
 /**
  * A method of a binding: it takes JSON and answers with it. The answer is
  * typed `unknown`, as a binding's name doesn't say what it is (a
@@ -85,7 +76,7 @@ interface EngineStepOptions {
  * from the start at any time: every method that takes a step name must return
  * the recorded outcome when that name already completed in this run.
  *
- * The SDK reads `params` and calls `openDecision` and `decisionRecipients`
+ * The SDK reads `params` and calls `openDecision` and `askDecision`
  * only inside `do`, so they need not be durable themselves.
  *
  * Engines may keep only a failed step's error name and message (Cloudflare
@@ -173,10 +164,9 @@ export interface WorkflowEngine {
   /**
    * Tells the people an open decision asks, each with the decision's
    * link: nobody once it's answered. Called inside the step that asks
-   * them. What it answers isn't the run's to read (a sealed build's run
-   * host answers nobody).
+   * them; the run learns nobody's address.
    */
-  decisionRecipients: (decision: string) => Promise<DecisionRecipient[]>;
+  askDecision: (decision: string) => Promise<void>;
   /**
    * Durably waits up to `timeout` milliseconds (0: not at all) for an
    * answer to a decision, and returns how it stands then. With `last`, a

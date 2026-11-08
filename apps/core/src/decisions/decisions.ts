@@ -171,14 +171,6 @@ const tellRunPages = async (env: Env, run: DecisionRun): Promise<void> => {
   }
 };
 
-/** A person a decision asks, and the link that leads them to it. */
-export interface DecisionRecipient {
-  userId: string;
-  name: string;
-  email: string;
-  link: string;
-}
-
 /** How a decision stands for the run waiting on it. */
 export type DecisionOutcome =
   | { answered: true; approved: boolean; by: string; payload: Json | null }
@@ -759,15 +751,13 @@ const recordAsk = async (
 
 /**
  * Tells each of `userIds` who has a chat with Stephen in a chat app of
- * decision `decisionId`, once, and once more for its reminder, with its
- * link (channels/reach.ts); the rest find it in their inbox alone. Never
- * fails the ask.
+ * decision `decisionId`, once, with its link (channels/reach.ts); the
+ * rest find it in their inbox alone. Never fails the ask.
  */
 const tellInTheirChats = async (
   env: Env,
   decisionId: string,
-  userIds: readonly string[],
-  reminder: boolean
+  userIds: readonly string[]
 ): Promise<void> => {
   const origin = signInConfig(env)?.origin;
   if (origin === undefined) {
@@ -778,11 +768,8 @@ const tellInTheirChats = async (
   await Promise.all(
     userIds.map(
       async (userId) =>
-        await tellInChat(
-          env,
-          userId,
-          `decision:${decisionId}${reminder ? ":reminder" : ""}`,
-          (locale) => say("decisionWaiting", locale, { link })
+        await tellInChat(env, userId, `decision:${decisionId}`, (locale) =>
+          say("decisionWaiting", locale, { link })
         )
     )
   );
@@ -793,17 +780,14 @@ const tellInTheirChats = async (
  * in their inbox (`waitingDecisions`), and, up to {@link maxDeciders}, in
  * their chat with Stephen where they have one (`tellInTheirChats`): it
  * never fails for how many they are. Up to {@link maxDeciders}, the ask is
- * audited with whom, by ID, as
- * `decisionRecipients` audits it; past that, with how many alone
- * (`listed: false`), a list too long for the log. Its `reminder` asks
- * again whoever may answer it then. How many were asked; none once it was
- * answered, closed or past its deadline.
+ * audited with whom, by ID; past that, with how many alone
+ * (`listed: false`), a list too long for the log. How many were asked;
+ * none once it was answered, closed or past its deadline.
  */
 export const askDecision = async (
   env: Env,
   run: DecisionRun,
-  decision: string,
-  reminder = false
+  decision: string
 ): Promise<number> => {
   const row = await runDecision(env, run, decision);
   if (row.status !== "open" || row.expiresAt.getTime() <= Date.now()) {
@@ -823,10 +807,10 @@ export const askDecision = async (
       env,
       run,
       row,
-      { recipients: people.length, reminder, listed: true },
+      { recipients: people.length, listed: true },
       whom
     );
-    await tellInTheirChats(env, row.id, whom, reminder);
+    await tellInTheirChats(env, row.id, whom);
     return people.length;
   }
   const [counted] = await db
@@ -836,65 +820,9 @@ export const askDecision = async (
   const recipients = counted?.count ?? people.length;
   await recordAsk(env, run, row, {
     recipients,
-    reminder,
     listed: false,
   });
   return recipients;
-};
-
-/**
- * The people an open decision asks now, each with the decision's link:
- * the members who may answer it at this moment (`eligibleMembers`). An
- * answered or closed decision asks nobody, and nor does one past its
- * deadline. More than {@link maxDeciders} of them is refused; the run's
- * starter counts only when the decision names exactly them, as only then
- * may they answer. Who was asked is audited: their IDs, never their
- * emails.
- */
-export const decisionRecipients = async (
-  env: Env,
-  run: DecisionRun,
-  decision: string,
-  reminder: boolean,
-  stillAsking: () => Promise<void> = async () => {
-    await Promise.resolve();
-  }
-): Promise<DecisionRecipient[]> => {
-  const row = await runDecision(env, run, decision);
-  // Past its deadline, nobody can answer it, so nobody is asked: a link
-  // sent then would lead to a decision that takes no answer.
-  if (row.status !== "open" || row.expiresAt.getTime() <= Date.now()) {
-    return [];
-  }
-  const origin = signInConfig(env)?.origin;
-  if (origin === undefined) {
-    throw new Error("Sign-in isn't set up, so nobody can answer a decision");
-  }
-  const db = drizzle(env.DB);
-  const people = await db
-    .select({ userId: users.id, name: users.name, email: users.email })
-    .from(members)
-    .innerJoin(users, eq(users.id, members.userId))
-    .where(eligibleMembers(row.deciders, row, row.starterExcluded))
-    .orderBy(users.name, users.id)
-    .limit(maxDeciders + 1);
-  if (people.length > maxDeciders) {
-    throw decisionErrors.create("decision.too_many_deciders");
-  }
-  // Last before the ask is recorded: the step asking may have been let go
-  // of while the people were read (the caller's check, `stillAsking`), and
-  // its run cancelled or ended, which the write itself checks, so an ask
-  // of a run that was cancelled meanwhile is never recorded.
-  await stillAsking();
-  await recordAsk(
-    env,
-    run,
-    row,
-    { recipients: people.length, reminder },
-    people.map(({ userId }) => userId)
-  );
-  const link = new URL(`/decisions/${encodeURIComponent(row.id)}`, origin);
-  return people.map((person) => ({ ...person, link: link.href }));
 };
 
 /**

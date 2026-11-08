@@ -74,8 +74,7 @@ export interface TestEngineOptions {
   failures?: Readonly<Record<string, string>>;
   /**
    * Answers to decisions by the decision's name (as for mocks). A decision
-   * without an answer times out. Each decision asks one stand-in person,
-   * `test-person`.
+   * without an answer times out.
    */
   decisions?: Readonly<Record<string, DecisionAnswer>>;
   /**
@@ -276,15 +275,10 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
         deadline: opened.deadline,
       });
     },
-    decisionRecipients: async (decision) =>
-      await Promise.resolve([
-        {
-          userId: "test-person",
-          name: "Test Person",
-          email: "test-person@grasp.test",
-          link: `https://grasp.test/decisions/${decision}`,
-        },
-      ]),
+    // Nobody to tell in memory: a test answers decisions up front.
+    askDecision: async () => {
+      await Promise.resolve();
+    },
     waitForDecision: async (name, { decision, timeout }) => {
       const replayed = recorded.get(name);
       if (replayed !== undefined) {

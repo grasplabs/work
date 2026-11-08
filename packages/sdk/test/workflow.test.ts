@@ -438,9 +438,9 @@ type Engine = ReturnType<typeof createTestEngine>["engine"];
 /** `engine`, counting each time it tells a decision's people in `asked`. */
 const counting = (engine: Engine, asked: string[]): Engine => ({
   ...engine,
-  decisionRecipients: async (decision) => {
+  askDecision: async (decision) => {
     asked.push(decision);
-    return await engine.decisionRecipients(decision);
+    await engine.askDecision(decision);
   },
 });
 
@@ -455,10 +455,10 @@ describe("step.decision", () => {
     const { engine, steps } = createTestEngine();
     const slow: Engine = {
       ...engine,
-      decisionRecipients: async (decision) => {
+      askDecision: async (decision) => {
         asked.push(decision);
         vi.setSystemTime(Date.now() + 2 * 86_400_000);
-        return await engine.decisionRecipients(decision);
+        await engine.askDecision(decision);
       },
     };
 

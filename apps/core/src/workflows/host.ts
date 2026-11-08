@@ -3185,8 +3185,7 @@ export class RunHost extends RpcTarget {
       // The SDK worked `timeout` out from when it asked, but a pause or a
       // restart may have outlasted that: so never wait past the decision's
       // deadline, as its row has it, from when the wait was first reached.
-      // Once that has passed, the decision is closed as timed out at once,
-      // so a reminder that follows asks nobody.
+      // Once that has passed, the decision is closed as timed out at once.
       const kept = this.#kind.decisionsKept;
       const deadline =
         kept === undefined

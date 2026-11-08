@@ -132,7 +132,7 @@ export const createRunner = (
         // when that finished is a step of its own again, so a replay waits
         // from the same time.
         await engine.do(`${step}#ask`, { input: { from } }, async () => {
-          await engine.decisionRecipients(decision);
+          await engine.askDecision(decision);
         });
         const askedAt = await engine.do(
           `${step}#asked`,

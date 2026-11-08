@@ -304,45 +304,13 @@ export type InboundEmail = z.infer<typeof inboundEmailSchema>;
 /** An event's type, e.g. `m365.mail.received`. */
 export const eventTypeSchema = z.string().min(1).max(200);
 
-/** Most fields an event trigger's filter names. */
-const maxFilterFields = 20;
-
-/**
- * An event trigger's filter: each field it names must hold that value at
- * the top of the event's payload, compared as is.
- */
-export const eventFilterSchema = z
-  .record(
-    z.string().min(1).max(64),
-    z.union([z.string().max(200), z.number(), z.boolean(), z.null()])
-  )
-  .refine((filter) => Object.keys(filter).length <= maxFilterFields, {
-    message: `At most ${maxFilterFields} fields`,
-  });
-
-/** An event trigger's filter. */
-export type EventFilter = z.infer<typeof eventFilterSchema>;
-
-/** Whether `payload` holds every value `filter` names, at its top. */
-export const matchesFilter = (
-  filter: EventFilter | null | undefined,
-  payload: Json
-): boolean => {
-  const isObject =
-    typeof payload === "object" && payload !== null && !Array.isArray(payload);
-  const fields = new Map(isObject ? Object.entries(payload) : []);
-  return Object.entries(filter ?? {}).every(
-    ([field, value]) => fields.has(field) && fields.get(field) === value
-  );
-};
-
 /** The most JSON text an event's payload takes. */
 const maxEventPayloadLength = 64 * 1024;
 
 /**
  * An event a connection reported, as core takes it from connect and
- * delivers it, and as the run an event trigger starts gets it as input (the SDK's
- * `connectorEvent`). `id` is the source's own ID of the event, the same
+ * delivers it, and as the run an event trigger starts gets it as input.
+ * `id` is the source's own ID of the event, the same
  * for the same event delivered again; for an ID longer than 200
  * characters it is `sha256:` and the ID's SHA-256 instead, and the payload
  * has the ID in full. `resource` narrows it to a part of
@@ -723,7 +691,7 @@ export const paramsStep = "$params";
  * a decision's opening, and its parts `name#…`); `sleep` (a wait);
  * `waitForDecision` (a decision's `name#answer…`); and, inside a step's
  * attempt, `model` (an AI step), `decision` (opening one) and
- * `recipients` (who a decision asks, in its `#ask` or `#remind` part).
+ * `recipients` (who a decision asks, in its `#ask` part).
  */
 export type StepUse =
   | "do"

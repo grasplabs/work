@@ -1779,7 +1779,7 @@ describe("a sealed run's decisions on the run host", () => {
         'await engine.do("review:task", {}, async () => ({ decision: "forged", deadline: 1 })); return "recorded";'
       ),
       told: await pastTheSdk(
-        'const { decision } = await open(); return await engine.do("review:task#ask", {}, async () => await engine.decisionRecipients(decision));'
+        'const { decision } = await open(); const told = await engine.do("review:task#ask", {}, async () => await engine.askDecision(decision)); return told === undefined || told === null ? "nobody" : told;'
       ),
       otherDecision: await pastTheSdk(
         `await open(); await engine.waitForDecision("review:task#answer", { decision: "${crypto.randomUUID()}", timeout: 1000, last: true }); return "waited";`
@@ -1789,7 +1789,7 @@ describe("a sealed run's decisions on the run host", () => {
         'Task "review" opens its decision as its enter step recorded it.'
       ),
       unopened: refusedPastTheSdk("review:task"),
-      told: { ended: [], tampered: [], refused: [] },
+      told: { ended: "nobody", tampered: [], refused: [] },
       otherDecision: refusedPastTheSdk("review:task#answer"),
     });
   });
@@ -1934,7 +1934,7 @@ describe("a sealed run's decisions on the run host", () => {
       `export default { run: async (engine, input) => {
   await engine.do("review:enter", {}, async () => ({ recipients: [input.reviewer], prompt: "Approve the invoice", input: { invoice: input.invoice } }));
   const { decision } = await engine.do("review:task", {}, async () => await engine.openDecision({ step: "review:task", from: input.reviewer, description: "Approve the invoice", timeout: 1000 }));
-  await engine.do("review:task#ask", {}, async () => { await engine.decisionRecipients(decision); throw new Error("The mail server is down"); });
+  await engine.do("review:task#ask", {}, async () => { await engine.askDecision(decision); throw new Error("The mail server is down"); });
 } };`,
       { engine: retryingEngine() }
     );
