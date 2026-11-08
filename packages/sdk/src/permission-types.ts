@@ -2,7 +2,7 @@ import type {
   ConnectorAction,
   ConnectorContract,
 } from "./connector-contracts.ts";
-import type { FilesOperation } from "./references.ts";
+import type { FilesOperation } from "./file-link-references.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
 

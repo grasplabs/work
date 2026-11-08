@@ -1,8 +1,8 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
-import type { DescriptorSchema } from "./references.ts";
 import type { ValueSchema } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
+import type { DescriptorSchema } from "./workflow-decisions.ts";
 
 // The input and output inference below (which keys of an object may be left
 // out by a caller, and which a handler can rely on) is adapted from

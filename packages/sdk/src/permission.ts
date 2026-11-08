@@ -2,6 +2,7 @@ import type {
   ConnectorAction,
   ConnectorContract,
 } from "./connector-contracts.ts";
+import type { FilesOperation } from "./file-link-references.ts";
 import { graspFunctions } from "./grasp-functions.ts";
 import {
   brainOperations,
@@ -35,7 +36,6 @@ import type {
   WorkflowConfig,
   WorkflowPermission,
 } from "./permission-types.ts";
-import type { FilesOperation } from "./references.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type { Infer, InferInput } from "./value-types.ts";

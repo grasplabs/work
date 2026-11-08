@@ -5,7 +5,7 @@ import type {
 
 import { clientError, GraspError, readRejection } from "./client-error.ts";
 import { namePattern } from "./declaration.ts";
-import type { FilesOperation, FilesReference } from "./references.ts";
+import type { FilesOperation, FilesReference } from "./file-link-references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { FileValue } from "./value-types.ts";
 

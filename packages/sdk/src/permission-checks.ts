@@ -3,6 +3,7 @@ import { resourceAliasPattern } from "@grasp-os/shared/function-limits";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 
 import { deepFreeze, refuser } from "./declaration.ts";
+import type { FilesOperation } from "./file-link-references.ts";
 import type {
   AnyPermission,
   BrainOperation,
@@ -10,7 +11,6 @@ import type {
   GuestsOperation,
   WorkflowPermission,
 } from "./permission-types.ts";
-import type { FilesOperation } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
 /** Why a permission's declaration was refused. */

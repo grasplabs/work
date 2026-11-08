@@ -2,7 +2,7 @@
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
-import type { ReferenceKind } from "./references.ts";
+import type { ReferenceKind } from "./function-references.ts";
 
 /**
  * One test's session with core's test runner: a fresh fixture store, which

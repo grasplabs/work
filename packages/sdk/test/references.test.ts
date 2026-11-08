@@ -24,7 +24,6 @@ import type {
 } from "../src/host.ts";
 import type { AnyOperationReference } from "../src/index.ts";
 import { defineApp, permission, v } from "../src/index.ts";
-import { workflowReferenceLimits } from "../src/references.ts";
 import { runFunction } from "../src/runner.ts";
 import type { OperationChannel } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
@@ -32,6 +31,7 @@ import { valueLimits } from "../src/value-descriptor.ts";
 import { schemaOf } from "../src/value-schema.ts";
 import type { AnySchema } from "../src/value-schema.ts";
 import { defineSchema, defineTable } from "../src/values.ts";
+import { workflowReferenceLimits } from "../src/workflow-references.ts";
 import { notesWorkflows } from "./notes-workflows.ts";
 import notes from "./notes/.grasp/app.ts";
 import contractsText from "./notes/.grasp/contracts.json?raw";

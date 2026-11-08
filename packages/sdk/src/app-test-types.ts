@@ -1,15 +1,17 @@
 import type { Json } from "@grasp-os/shared/json";
 
 import type {
-  AnyWorkflowReference,
   ArgsOf,
   Callable,
   ReferenceKind,
   ReturnOf,
   SingleAnswer,
+} from "./function-references.ts";
+import type {
+  AnyWorkflowReference,
   WorkflowInputOf,
   WorkflowOutputOf,
-} from "./references.ts";
+} from "./workflow-references.ts";
 
 /** A public function of the App, as `@server/_generated/api` generates its reference. */
 export type PublicReference<Kind extends ReferenceKind> = Callable<

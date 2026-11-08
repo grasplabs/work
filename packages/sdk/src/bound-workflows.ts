@@ -6,8 +6,8 @@ import {
   declaredPermission,
   declaredPermissions,
 } from "./manifest-permissions.ts";
-import { workflowReferenceLimits } from "./references.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
+import { workflowReferenceLimits } from "./workflow-references.ts";
 
 /** One event a bound workflow declares, as the host resolved it. */
 export interface BoundWorkflowEvent {

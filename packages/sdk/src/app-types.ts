@@ -1,3 +1,4 @@
+import type { Grant } from "./ctx-workflows.ts";
 import type { Migration, MigrationManifest } from "./migration.ts";
 import type {
   AiPermission,
@@ -13,7 +14,11 @@ import type {
 import type { SchemaAnswer } from "./schema-answer.ts";
 import type { SchemaManifest } from "./schema-manifest.ts";
 import type { SchemaDefinition } from "./schema-types.ts";
-import type { AnyFunction, FunctionKind, Grant, Visibility } from "./server.ts";
+import type {
+  AnyFunction,
+  FunctionKind,
+  Visibility,
+} from "./server-function.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import type { AnySchema } from "./value-schema.ts";
 
