@@ -1,5 +1,4 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { requestErrors } from "@grasp-os/shared/errors";
 import { eventSourcePath } from "@grasp-os/shared/event-source-path";
 import {
   eventSourceErrors,
@@ -62,7 +61,10 @@ import type { Outcome, Taker } from "./connector-triggers.ts";
 //   the statement that admits it): one that changed meanwhile starts
 //   nothing and is answered 401, settling nothing, so the sender's retry
 //   signed with the new secret starts it. A deleted source's token is
-//   cleared, so its URL answers 404 at once.
+//   cleared, so its URL takes nothing at once.
+// - Learning which tokens exist. A token no live source has (never made,
+//   or its source deleted) is answered as a revoked secret is, 401, with
+//   the same body: a response never tells a guessed URL from a real one.
 // - An event reaching a workflow nobody approved. Only live, enabled
 //   webhook triggers whose current version names this source and type
 //   take it, each start needing `start` on its workflow, a grant of its
@@ -78,8 +80,9 @@ import type { Outcome, Taker } from "./connector-triggers.ts";
 //   in it is evaluated; one refused is refused for good, audited
 //   (`workflow.webhook.refused`).
 // - Floods. Before core reads a byte, the router counts every request to
-//   a source's URL per client address and per URL (`WEBHOOK_RATE_LIMIT`,
-//   apps/router), and answers 429 past either. A trigger starts at most
+//   a source's URL per client address (`WEBHOOK_RATE_LIMIT`) and per URL
+//   (`WEBHOOK_SOURCE_RATE_LIMIT`, larger: one source takes all its
+//   sender's events), apps/router, and answers 429 past either. A trigger starts at most
 //   `triggeredRunsPerHour` runs an hour, counted as each is admitted
 //   (`startOnce`); past it the sender is told to try again later (503,
 //   `retry-after`), holding nothing back: its retry under the same
@@ -367,9 +370,9 @@ const answerOf = (
 
 /**
  * Answers a POST to a source's URL (see the header): 202 once the event
- * was taken (the same `webhook-id` again too), 401 unsigned, 404 for no
- * live source there, 413 or 400 for a body that isn't an event within the
- * limit, 503 to try again later.
+ * was taken (the same `webhook-id` again too), 401 unsigned or for no
+ * live source there, alike, 413 or 400 for a body that isn't an event
+ * within the limit, 503 to try again later.
  */
 export const sourceEventResponse = async (
   request: Request,
@@ -383,17 +386,10 @@ export const sourceEventResponse = async (
   const source = tokenPattern.test(token)
     ? await sourceAt(env, token)
     : undefined;
-  if (source === undefined) {
+  // No source there answers as a revoked secret: the same status and body.
+  if (source === undefined || source.revokedAt !== null) {
     await request.body?.cancel();
-    return errorResponse(
-      404,
-      requestErrors.create("request.not_found"),
-      requestId
-    );
-  }
-  if (source.revokedAt !== null) {
-    await request.body?.cancel();
-    return unsigned("revoked", requestId);
+    return unsigned(source === undefined ? "unknown" : "revoked", requestId);
   }
   const signed = signedOf(request.headers);
   if (signed === undefined) {

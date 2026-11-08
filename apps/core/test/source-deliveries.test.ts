@@ -380,7 +380,8 @@ describe("an event source", () => {
         unsigned: 401,
         stale: 401,
         future: 401,
-        unknown: 404,
+        // As a revoked secret: a response never says a token exists.
+        unknown: 401,
         notPost: 405,
         oversized: 413,
         notJson: 400,
@@ -609,7 +610,7 @@ describe("an event source", () => {
         .filter(({ target }) => target?.id === source.id)
         .map(({ action }) => action),
     }).toStrictEqual({
-      statuses: [401, 404],
+      statuses: [401, 401],
       inputs: [],
       source: { id: source.id, name: source.name, deleted: true },
       listed: false,

@@ -205,11 +205,19 @@ const withinLimit = async (
  * The budget a request counts against besides its client address's, if
  * any: an event source's own (its URL's token), so a URL someone learned
  * can't be flooded from many addresses either, each delivery costing core
- * a body read and a signature check before it is refused unsigned.
+ * a body read and a signature check before it is refused unsigned. One
+ * source takes every event of its sender (a payment provider's, a
+ * shop's), so its budget is its own limiter's, larger than an address's
+ * (`WEBHOOK_SOURCE_RATE_LIMIT`, wrangler.jsonc).
  */
-const ownBudgetOf = (pathname: string): string | undefined =>
+const ownBudgetOf = (
+  pathname: string
+): { limit: LimitBinding; key: string } | undefined =>
   pathname.startsWith(`${eventSourcePath}/`)
-    ? `webhook:${pathname.slice(eventSourcePath.length + 1)}`
+    ? {
+        limit: "WEBHOOK_SOURCE_RATE_LIMIT",
+        key: `webhook:${pathname.slice(eventSourcePath.length + 1)}`,
+      }
     : undefined;
 
 /** Core's sign-out route, which the limit leaves alone. */
@@ -262,7 +270,8 @@ type LimitBinding =
   | "VISITOR_RATE_LIMIT"
   | "CHANNELS_RATE_LIMIT"
   | "INTERVIEW_RATE_LIMIT"
-  | "WEBHOOK_RATE_LIMIT";
+  | "WEBHOOK_RATE_LIMIT"
+  | "WEBHOOK_SOURCE_RATE_LIMIT";
 
 /**
  * The limit a request to `pathname` counts against, if any: the public
@@ -302,6 +311,48 @@ const limitFor = (pathname: string): LimitBinding | undefined => {
   // core looks the URL up or reads a byte of the body.
   if (pathname.startsWith(`${eventSourcePath}/`)) {
     return "WEBHOOK_RATE_LIMIT";
+  }
+  return undefined;
+};
+
+/**
+ * The answer refusing a request to a public endpoint core reaches without
+ * a session, past its limit (`limitFor`) or its own budget's
+ * (`ownBudgetOf`); none when it is within both, or limits nothing.
+ */
+const limitRefusal = async (
+  env: Env,
+  request: Request,
+  url: URL,
+  host: string
+): Promise<Response | undefined> => {
+  const { pathname } = url;
+  const limit = limitFor(pathname);
+  if (limit === undefined) {
+    return undefined;
+  }
+  // Read as the stage may have it: an env's `ratelimits` replace the
+  // top level's, so one left out there is missing at run time. Such
+  // an endpoint is refused, never let through unlimited.
+  const limiter: RateLimit | undefined = env[limit];
+  if (limiter === undefined) {
+    log.error("router.rate_limit_unbound", { host, limit });
+    return new Response("Service unavailable", { status: 503 });
+  }
+  const own = ownBudgetOf(pathname);
+  const ownLimiter: RateLimit | undefined =
+    own === undefined ? undefined : env[own.limit];
+  if (own !== undefined && ownLimiter === undefined) {
+    log.error("router.rate_limit_unbound", { host, limit: own.limit });
+    return new Response("Service unavailable", { status: 503 });
+  }
+  if (
+    !(await withinLimit(limiter, request, host)) ||
+    (own !== undefined &&
+      ownLimiter !== undefined &&
+      !(await withinLimitOf(ownLimiter, `${host}|${own.key}`, host)))
+  ) {
+    return rateLimited(url, host);
   }
   return undefined;
 };
@@ -488,24 +539,9 @@ export default {
     if (pathname === mailIngressPath) {
       return new Response("Not found", { status: 404 });
     }
-    const limit = limitFor(pathname);
-    if (limit !== undefined) {
-      // Read as the stage may have it: an env's `ratelimits` replace the
-      // top level's, so one left out there is missing at run time. Such
-      // an endpoint is refused, never let through unlimited.
-      const limiter: RateLimit | undefined = env[limit];
-      if (limiter === undefined) {
-        log.error("router.rate_limit_unbound", { host, limit });
-        return new Response("Service unavailable", { status: 503 });
-      }
-      const own = ownBudgetOf(pathname);
-      if (
-        !(await withinLimit(limiter, request, host)) ||
-        (own !== undefined &&
-          !(await withinLimitOf(limiter, `${host}|${own}`, host)))
-      ) {
-        return rateLimited(url, host);
-      }
+    const limited = await limitRefusal(env, request, url, host);
+    if (limited !== undefined) {
+      return limited;
     }
 
     // Any copy the caller sent is replaced (threat model RT3): the secret
