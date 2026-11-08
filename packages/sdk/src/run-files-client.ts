@@ -72,7 +72,7 @@ export const textTypes: ReadonlySet<string> = new Set([
 type CallHost = (alias: string, call: unknown) => Promise<unknown>;
 
 /** A files use's client, its requests as the action passes them. */
-export interface FilesClient {
+interface FilesClient {
   readonly write: (request: unknown) => Promise<unknown>;
   readonly read: (request: unknown) => Promise<unknown>;
   readonly list: () => Promise<unknown>;

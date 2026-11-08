@@ -32,16 +32,16 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 export type PreferencesContract = Readonly<Record<string, ValueDescriptor>>;
 
 /** Why a preference change is refused. */
-export type PreferenceRefusalReason = "preference_changed";
+type PreferenceRefusalReason = "preference_changed";
 
 /** One preference refused, and why. */
-export interface PreferenceRefusal {
+interface PreferenceRefusal {
   readonly preference: string;
   readonly reason: PreferenceRefusalReason;
 }
 
 /** An accepted change: the contract after it. */
-export interface AcceptedPreferencePlan {
+interface AcceptedPreferencePlan {
   readonly accepted: true;
   readonly contract: PreferencesContract;
   /** Whether the contract differs from the one before. */
@@ -49,7 +49,7 @@ export interface AcceptedPreferencePlan {
 }
 
 /** A refused change: every preference it changes. */
-export interface RefusedPreferencePlan {
+interface RefusedPreferencePlan {
   readonly accepted: false;
   readonly refused: readonly PreferenceRefusal[];
 }

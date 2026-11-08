@@ -24,7 +24,7 @@ import { filesResource } from "./run-files-client.ts";
 // what either answers, against its own bounds and the sealed contract.
 
 /** A module's exports, by its path (`code/<file>.ts`). */
-export type ComputeModules = Readonly<Record<string, unknown>>;
+type ComputeModules = Readonly<Record<string, unknown>>;
 
 /**
  * `JSON.stringify` as it was when the runner loaded, before any of the
@@ -127,14 +127,14 @@ export const computeManifestOf = (modules: ComputeModules): string => {
 };
 
 /** One calculation to run: its module and export, and its input. */
-export interface ComputeRequest {
+interface ComputeRequest {
   readonly module: string;
   readonly export: string;
   readonly input: unknown;
 }
 
 /** What a run answered: its output as JSON text, or why it failed. */
-export type ComputeAnswer =
+type ComputeAnswer =
   | { readonly ok: true; readonly output: string }
   | { readonly ok: false; readonly message: string };
 
@@ -199,7 +199,7 @@ export interface ActionHost {
 }
 
 /** One action to run: its module and export, and its arguments. */
-export interface ActionRequest {
+interface ActionRequest {
   readonly module: string;
   readonly export: string;
   readonly input: unknown;

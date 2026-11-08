@@ -179,7 +179,7 @@ export const useClient = (): GraspClient => {
 };
 
 /** A mutation or action as a function: its arguments, then its options. */
-export type OperationCallable<Reference> = (
+type OperationCallable<Reference> = (
   ...args: CallArguments<Reference, SubmitOptions>
 ) => Promise<ReturnOf<Reference>>;
 
@@ -256,7 +256,7 @@ export type PaginatedArgsOf<Reference> =
     : never;
 
 /** How a paginated list starts. */
-export interface PaginatedQueryOptions {
+interface PaginatedQueryOptions {
   /**
    * How many records it shows first, and loads more by unless a Load More
    * says: a whole number from 1 to 100.
@@ -376,7 +376,7 @@ export const useAction = <Reference extends ActionReference>(
 };
 
 /** What `useUpload` answers: its transfer's view, flat, and its two commands. */
-export type UploadHandle = UploadView & {
+type UploadHandle = UploadView & {
   /**
    * Uploads `file` through the resource, resolving with its reference once
    * core checked and published it. One at a time: another call while one
@@ -660,7 +660,7 @@ export const useForm = ((target: unknown, options: FormOptionsInput) =>
  * progress (null before the first); then `completed` with its output,
  * `failed` with its error, or `cancelled`, each with its last progress.
  */
-export type StreamView<Progress, Output> =
+type StreamView<Progress, Output> =
   | { readonly status: "idle" }
   | {
       readonly status: "running" | "recovering";
@@ -679,7 +679,7 @@ export type StreamView<Progress, Output> =
   | { readonly status: "cancelled"; readonly progress: Progress | null };
 
 /** What `useStream` answers: the view, and how to run and cancel it. */
-export type StreamHandle<Reference> = StreamView<
+type StreamHandle<Reference> = StreamView<
   ProgressOf<Reference>,
   ReturnOf<Reference>
 > & {

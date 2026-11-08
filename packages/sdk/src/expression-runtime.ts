@@ -226,7 +226,7 @@ export const optionalChain = (
  * What an expression evaluates to: JSON, with `undefined` wherever it
  * read a missing field, in a list or object it wrote among them.
  */
-export type ExpressionValue =
+type ExpressionValue =
   | Json
   | undefined
   | readonly ExpressionValue[]

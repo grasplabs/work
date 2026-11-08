@@ -199,7 +199,7 @@ const clientErrors = {
 >;
 
 /** A failure the client itself decides on. */
-export type ClientErrorCode = keyof typeof clientErrors;
+type ClientErrorCode = keyof typeof clientErrors;
 
 /**
  * The client's own failure `code`, with its `details`; and `message` in
@@ -509,7 +509,7 @@ export const retryAfterOf = (details: unknown): number | undefined => {
  * `internal.unexpected` is the page's word for a request that may or may
  * not have arrived: a lost response.
  */
-export const readRefusal = (
+const readRefusal = (
   code: string,
   message: string,
   details?: unknown

@@ -37,7 +37,6 @@ import type { AnySchema } from "./value-schema.ts";
 import { v } from "./values.ts";
 import type {
   Infer,
-  InferInput,
   ObjectInput,
   ObjectOutput,
   ObjectSchema,
@@ -125,7 +124,7 @@ export type FunctionReference<
 > = Callable<Kind, Vis, ArgsIn, Return, Progress>;
 
 /** Any function reference: its phantom members are only ever read. */
-export type AnyReference = FunctionReference;
+type AnyReference = FunctionReference;
 
 export type { ArgsOf, ReturnOf } from "./references.ts";
 
@@ -138,7 +137,7 @@ export type { ArgsOf, ReturnOf } from "./references.ts";
 export type Use = AnyReference | AnyPermission | AnyWorkflow | AnyWorkflowEvent;
 
 /** Any generated event reference, whatever its data. */
-export type AnyWorkflowEvent = WorkflowEventReference<
+type AnyWorkflowEvent = WorkflowEventReference<
   string,
   string,
   string,
@@ -167,7 +166,7 @@ type Notify<Uses extends readonly Use[]> = <Event extends UsedEvent<Uses>>(
 
 /** Any workflow declaration, whatever its input. */
 // oxlint-disable-next-line typescript/no-explicit-any -- the input is only read, by `WorkflowInput`
-export type AnyWorkflow = WorkflowPermission<string, any>;
+type AnyWorkflow = WorkflowPermission<string, any>;
 
 /** The workflows among `Uses`. */
 type UsedWorkflow<Uses extends readonly Use[]> = Extract<
@@ -176,7 +175,7 @@ type UsedWorkflow<Uses extends readonly Use[]> = Extract<
 >;
 
 /** The input a caller starts workflow `Workflow` with. */
-export type WorkflowInput<Workflow> =
+type WorkflowInput<Workflow> =
   Workflow extends WorkflowPermission<string, infer Input> ? Input : never;
 
 /**
@@ -255,7 +254,7 @@ type NotifyPeople<Told> = (
  * `ctx.afterCommit`: what a mutation hands on once it commits, as part of
  * its commit, so nothing is handed on for a mutation that doesn't.
  */
-export interface AfterCommit<Uses extends readonly Use[]> {
+interface AfterCommit<Uses extends readonly Use[]> {
   /**
    * Each workflow `Uses` lists, by alias: `start(input)` starts it once
    * the mutation has committed, staged with its writes, in the same
@@ -326,7 +325,7 @@ type AiOf<Uses extends readonly Use[]> = [
  * only when listed: `ai`, `brain`, `grasp` (the platform's own functions)
  * and `guests`, and the connections by alias.
  */
-export type PermissionClients<Uses extends readonly Use[]> = {
+type PermissionClients<Uses extends readonly Use[]> = {
   /** Each connection `Uses` lists, by alias. */
   readonly connections: {
     readonly [
@@ -426,7 +425,7 @@ export interface MutationCtx<
  * anew. Keep what an action changes, and in what order, a function of its
  * input.
  */
-export interface ActionBaseCtx<
+interface ActionBaseCtx<
   Uses extends readonly Use[] = readonly [],
 > extends CallerCtx {
   readonly runQuery: RunQuery<Uses>;
@@ -465,13 +464,13 @@ export type ActionCtx<Uses extends readonly Use[] = readonly []> =
  * What a streaming action's handler has (spec 10.7.6): an action's
  * context, and `emit`.
  */
-export type StreamActionCtx<
+type StreamActionCtx<
   Uses extends readonly Use[] = readonly [],
   Progress = unknown,
 > = ActionCtx<Uses> & StreamEmit<Progress>;
 
 /** A streaming action's `emit`. */
-export interface StreamEmit<Progress> {
+interface StreamEmit<Progress> {
   /**
    * Publishes `progress` as the action's latest snapshot, for the page
    * that runs it: validated against the action's `stream` schema, and no
@@ -506,7 +505,7 @@ type Declared<
  * it answers: what its `returns` schema infers, or, where it declares
  * none, what its handler answers.
  */
-export interface ServerFunction<
+interface ServerFunction<
   Kind extends FunctionKind,
   Vis extends Visibility,
   Shape extends ValueShape,
@@ -549,7 +548,7 @@ export interface AnyFunction extends FunctionReference {
 }
 
 /** A query's declaration. */
-export interface QueryDefinition<
+interface QueryDefinition<
   Tables extends AnyTables,
   Shape extends ValueShape,
   Returns extends AnySchema | undefined,
@@ -567,7 +566,7 @@ export interface QueryDefinition<
 }
 
 /** A mutation's declaration. */
-export interface MutationDefinition<
+interface MutationDefinition<
   Tables extends AnyTables,
   Shape extends ValueShape,
   Returns extends AnySchema | undefined,
@@ -615,7 +614,7 @@ export interface ActionDefinition<
  * schema of the progress snapshots its handler emits (`ctx.emit`). It
  * runs only in the foreground, for a page following it (`useStream`).
  */
-export interface StreamActionDefinition<
+interface StreamActionDefinition<
   Shape extends ValueShape,
   Returns extends AnySchema | undefined,
   Result,
@@ -636,7 +635,7 @@ export interface StreamActionDefinition<
 }
 
 /** Why a server function's declaration was refused. */
-export class FunctionDefinitionError extends Error {
+class FunctionDefinitionError extends Error {
   readonly code = "function.invalid_definition";
 
   constructor(message: string) {
@@ -654,19 +653,6 @@ const declarationKeys: Readonly<Record<FunctionKind, readonly string[]>> = {
   query: ["args", "returns", "tables", "handler"],
   mutation: ["args", "returns", "uses", "tables", "handler"],
   action: ["args", "returns", "uses", "stream", "handler"],
-};
-
-/** Hints for the superseded shapes spec 7 refuses rather than aliases. */
-const supersededHints: Readonly<Record<string, string>> = {
-  input: "Declare `args`, a map of field schemas, not `input`.",
-  output: "Declare `returns`, not `output`.",
-  reads:
-    "There is no `reads` list: a table's access is on the table, and `tables` narrows it.",
-  writes:
-    "There is no `writes` list: a table's access is on the table, and `tables` narrows it.",
-  uses: "A query uses nothing: it only reads.",
-  stream: "Only an action streams.",
-  tables: "An action has no tables: it runs the App's queries and mutations.",
 };
 
 const tableVerbNames: ReadonlySet<string> = new Set([
@@ -757,9 +743,8 @@ const defineFunction = (
   }
   for (const key of Object.keys(declaration)) {
     if (!declarationKeys[kind].includes(key)) {
-      refuse(
-        supersededHints[key] ?? `A ${kind}'s declaration has no \`${key}\`.`
-      );
+      const article = kind === "action" ? "An" : "A";
+      refuse(`${article} ${kind}'s declaration has no \`${key}\`.`);
     }
   }
   const { args, returns, handler, uses, stream, tables } = declaration;
@@ -819,7 +804,7 @@ type ManagedShape<TableName extends string> = ReturnType<
  * `action` and `internalAction`: a streaming action when the declaration
  * has `stream` (its handler's context has `emit`), any other otherwise.
  */
-export interface ActionConstructor<Vis extends Visibility> {
+interface ActionConstructor<Vis extends Visibility> {
   <
     const Shape extends ValueShape,
     Stream extends AnySchema,
@@ -853,10 +838,7 @@ export interface ActionConstructor<Vis extends Visibility> {
 }
 
 /** `query` and `internalQuery`. */
-export type QueryConstructor<
-  Tables extends AnyTables,
-  Vis extends Visibility,
-> = <
+type QueryConstructor<Tables extends AnyTables, Vis extends Visibility> = <
   const Shape extends ValueShape,
   Returns extends AnySchema | undefined = undefined,
   Result extends ResultFor<Returns> = ResultFor<Returns>,
@@ -871,10 +853,7 @@ export type QueryConstructor<
 >;
 
 /** `mutation` and `internalMutation`. */
-export type MutationConstructor<
-  Tables extends AnyTables,
-  Vis extends Visibility,
-> = <
+type MutationConstructor<Tables extends AnyTables, Vis extends Visibility> = <
   const Shape extends ValueShape,
   Returns extends AnySchema | undefined = undefined,
   Result extends ResultFor<Returns> = ResultFor<Returns>,
@@ -890,7 +869,7 @@ export type MutationConstructor<
 >;
 
 /** The server constructors and `doc`, specialized to one schema. */
-export interface ServerModule<Tables extends AnyTables> {
+interface ServerModule<Tables extends AnyTables> {
   readonly query: QueryConstructor<Tables, "public">;
   readonly internalQuery: QueryConstructor<Tables, "internal">;
   readonly mutation: MutationConstructor<Tables, "public">;
@@ -943,9 +922,3 @@ export const serverModule = <Tables extends AnyTables>(
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   return Object.freeze(module) as ServerModule<Tables>;
 };
-
-/** The arguments a caller passes to function `Fn`, as `InferInput` has them. */
-export type FunctionArgs<Fn extends AnyFunction> = InferInput<Fn["args"]>;
-
-/** What function `Fn` returns: its `returns` schema's, or its handler's. */
-export type FunctionReturn<Fn extends AnyFunction> = ReturnOf<Fn>;

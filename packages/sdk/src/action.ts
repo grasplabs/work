@@ -316,7 +316,7 @@ export interface ActionCtx<Uses extends readonly AnyUse[]> {
 const aliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 
 /** Why an action's declaration was refused. */
-export class ActionDefinitionError extends Error {
+class ActionDefinitionError extends Error {
   readonly code = "action.invalid_definition";
 
   constructor(message: string) {

@@ -102,13 +102,8 @@ export {
   connectorEventSchema as connectorEvent,
   inboundEmailSchema as emailMessage,
   type ConnectorEvent,
-  type InboundEmail as EmailMessage,
 } from "@grasp-os/shared/workflows";
-export type {
-  BindingMethod,
-  DecisionRecipient,
-  WorkflowEnv,
-} from "./engine.ts";
+export type { DecisionRecipient } from "./engine.ts";
 
 /**
  * The runtime's `Object.freeze`, kept as this module loads: a run's main
@@ -135,7 +130,7 @@ const workflowErrorCodes = [
   "workflow.invalid_param",
   "workflow.invalid_model_output",
 ] as const;
-export type WorkflowErrorCode = (typeof workflowErrorCodes)[number];
+type WorkflowErrorCode = (typeof workflowErrorCodes)[number];
 
 const isWorkflowErrorCode = (code: unknown): code is WorkflowErrorCode =>
   workflowErrorCodes.some((known) => known === code);
@@ -285,7 +280,7 @@ export const template = param("template");
 type Params = Record<string, Param>;
 
 /** Parameter values as workflow code reads them: `params.threshold`. */
-export type ParamValues<P extends Params> = {
+type ParamValues<P extends Params> = {
   readonly [Name in keyof P]: ParamValue<P[Name]["kind"]>;
 };
 
@@ -301,7 +296,7 @@ export type Duration =
 
 /** What a step returns: JSON, which the engine records, or nothing. */
 // oxlint-disable-next-line typescript/no-invalid-void-type -- a step may return nothing
-export type StepResult = Json | undefined | void;
+type StepResult = Json | undefined | void;
 
 /** Options every step takes. */
 interface StepOptions {
@@ -345,7 +340,7 @@ interface AttemptOptions {
 }
 
 /** What a step works on: JSON, or nothing. */
-export type StepInput = Json | undefined;
+type StepInput = Json | undefined;
 
 export interface DoOptions<Input extends StepInput = StepInput>
   extends StepOptions, AttemptOptions {
@@ -528,7 +523,7 @@ const eventWaitSchema = z.union([
 ]);
 
 /** A sleep until a deadline an earlier step recorded, in ms since the epoch. */
-export interface SleepUntilOptions extends StepOptions {
+interface SleepUntilOptions extends StepOptions {
   until: number;
 }
 
@@ -786,7 +781,7 @@ export interface ParamMetadata {
 }
 
 /** What the UI shows about a workflow besides its steps, as plain JSON. */
-export interface WorkflowMetadata {
+interface WorkflowMetadata {
   id: WorkflowId;
   params: ParamMetadata[];
   triggers: Trigger[];

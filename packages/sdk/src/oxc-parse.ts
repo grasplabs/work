@@ -74,7 +74,7 @@ const errorSchema = z.object({
 });
 
 /** Why a text doesn't parse, and where: 0-based, in UTF-16 code units. */
-export interface ParseError {
+interface ParseError {
   message: string;
   offset: number;
 }
@@ -87,7 +87,7 @@ const errorOf = (text: string): ParseError => {
 };
 
 /** A parsed expression: its tree, and which of its nodes stood in parentheses. */
-export interface ParsedExpression {
+interface ParsedExpression {
   ok: true;
   /**
    * The expression as oxc's ESTree has it, with no

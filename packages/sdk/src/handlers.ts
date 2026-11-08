@@ -50,7 +50,7 @@ const registry = <Held>(isHeld: (value: unknown) => value is Held) => {
 };
 
 /** A calculation's handler, as the runner calls it. */
-export type ComputeHandler = (input: unknown) => unknown;
+type ComputeHandler = (input: unknown) => unknown;
 
 const isComputeHandler = (value: unknown): value is ComputeHandler =>
   typeof value === "function";

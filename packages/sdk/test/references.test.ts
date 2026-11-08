@@ -1278,7 +1278,7 @@ describe("reading a manifest back", () => {
           true
         );
       },
-      "An action has no tables",
+      "An action's declaration has no `tables`",
     ],
     [
       "a query that writes",
@@ -1454,7 +1454,7 @@ describe("reading a manifest back", () => {
       (data: unknown) => {
         setAt(data, ["operations", "notes.get", "stream"], v.null().descriptor);
       },
-      "Only an action streams",
+      "A query's declaration has no `stream`",
     ],
     [
       "a name too long",

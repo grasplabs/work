@@ -43,7 +43,7 @@ export const managedFields = Object.freeze([
 ] as const);
 
 /** The managed fields an index may name: the commit times. */
-export type IndexableManagedField = "_createdAt" | "_updatedAt";
+type IndexableManagedField = "_createdAt" | "_updatedAt";
 
 const indexableManaged: ReadonlySet<unknown> = new Set<IndexableManagedField>([
   "_createdAt",
@@ -139,7 +139,7 @@ export type RowRule<Field extends string = string> =
   | { readonly kind: "role"; readonly role: RowRole };
 
 /** At least one rule, as a table's `.access` takes them. */
-export type RowRuleList<Field extends string = string> = readonly [
+type RowRuleList<Field extends string = string> = readonly [
   RowRule<Field>,
   ...RowRule<Field>[],
 ];
@@ -156,7 +156,7 @@ export interface RowRules<Field extends string = string> {
  */
 export type AccessMode = "owner" | "appMembers" | "appBuilders" | "none";
 
-export const accessModes: ReadonlySet<unknown> = new Set<AccessMode>([
+const accessModes: ReadonlySet<unknown> = new Set<AccessMode>([
   "owner",
   "appMembers",
   "appBuilders",
@@ -180,7 +180,7 @@ export interface AccessModes {
 }
 
 /** The most rules one direction of a table holds. */
-export const rowRuleMax = 8;
+const rowRuleMax = 8;
 
 /**
  * The rules a table's `.access` takes:
@@ -245,10 +245,10 @@ export type SearchField<Fields extends ValueShape> = {
 }[keyof Fields & string];
 
 /** Names a table's indexes by the fields they order by. */
-export type IndexMap = Readonly<Record<string, readonly string[]>>;
+type IndexMap = Readonly<Record<string, readonly string[]>>;
 
 /** A table with no indexes yet. */
-export type NoIndexes = Readonly<Record<never, readonly string[]>>;
+type NoIndexes = Readonly<Record<never, readonly string[]>>;
 
 /**
  * A table: its fields, its indexes and its search index, immutable.

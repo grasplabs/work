@@ -105,7 +105,7 @@ const fileIdPattern =
  * a malformed one, or one that doesn't declare it, is refused before
  * anything is sent (core checks the App's declaration again).
  */
-export const readFilesReference = (
+const readFilesReference = (
   value: unknown,
   operation: FilesOperation
 ): ReadFilesReference => {

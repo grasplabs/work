@@ -40,7 +40,7 @@ import type { WorkflowQueryName } from "./workflow-queries.ts";
 // reused by their hashes.
 
 /** The release a reference belongs to. */
-export interface ReleaseIdentity {
+interface ReleaseIdentity {
   readonly resourceId: string;
   readonly resourceVersion: number;
 }

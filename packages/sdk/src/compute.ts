@@ -32,10 +32,7 @@ export { v } from "./values.ts";
 export type { Infer, InferInput } from "./values.ts";
 
 /** What `compute` is declared with. */
-export interface ComputeDefinition<
-  Input extends AnySchema,
-  Output extends AnySchema,
-> {
+interface ComputeDefinition<Input extends AnySchema, Output extends AnySchema> {
   /** What a call passes: the host checks each call's arguments against it. */
   readonly input: Input;
   /** What the handler answers: the host checks each answer against it. */
@@ -58,7 +55,7 @@ export interface Compute<Input extends AnySchema, Output extends AnySchema> {
 }
 
 /** Why a calculation's declaration was refused. */
-export class ComputeDefinitionError extends Error {
+class ComputeDefinitionError extends Error {
   readonly code = "compute.invalid_definition";
 
   constructor(message: string) {

@@ -36,7 +36,7 @@ import { isPlainObject } from "./value-descriptor.ts";
 export type CoreFetch = (path: string, init: RequestInit) => Promise<Response>;
 
 /** One App's page's file channel, under its lease. */
-export interface FileChannelOptions {
+interface FileChannelOptions {
   readonly app: string;
   readonly lease: string;
   /**

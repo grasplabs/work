@@ -39,7 +39,7 @@ const notCode =
   "Write it as code would: a builder's calls, with literals, arrays and objects as their arguments.";
 
 /** The longest expression read, in characters. */
-export const expressionMaxLength = 20_000;
+const expressionMaxLength = 20_000;
 
 /** An object literal's value, its keys defined, never assigned. */
 const objectOf = (
