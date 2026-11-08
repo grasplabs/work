@@ -2,8 +2,9 @@ import { queryRequestSchema } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-queries";
 import { describe, expect, test } from "vite-plus/test";
 
-import { databaseReader, QueryDefinitionError } from "../src/database.ts";
-import type { QueryDefinitionCode } from "../src/database.ts";
+import { databaseReader } from "../src/host.ts";
+import { QueryDefinitionError } from "../src/server.ts";
+import type { QueryDefinitionCode } from "../src/server.ts";
 import type { Id } from "../src/value-types.ts";
 import {
   defineSchema,

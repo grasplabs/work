@@ -27,8 +27,26 @@ import type { Infer, ObjectSchema, ValueShape } from "./value-types.ts";
 import { v } from "./values.ts";
 
 export type { Grant, RunHandle, Workflows } from "./ctx-workflows.ts";
+export type { DatabaseReader } from "./database-reader.ts";
+export type { DatabaseWriter } from "./database-writer.ts";
+export { QueryDefinitionError } from "./query-error.ts";
+export type { QueryDefinitionCode } from "./query-error.ts";
+export type {
+  Group,
+  PaginationResult,
+  Query,
+  Related,
+  SearchQuery,
+  Withheld,
+} from "./query-reads.ts";
+export type { Doc } from "./query-types.ts";
 export type { ActionDefinition } from "./define-function.ts";
-export type { ArgsOf, ReturnOf } from "./function-references.ts";
+export type {
+  AnyFunctionReference,
+  FunctionArgs,
+  FunctionReference,
+  FunctionReturn,
+} from "./function-references.ts";
 export type {
   ActionCtx,
   Auth,
@@ -41,7 +59,6 @@ export type {
 export type {
   AnyFunction,
   FunctionKind,
-  FunctionReference,
   Visibility,
 } from "./server-function.ts";
 
@@ -65,7 +82,7 @@ export type {
 //   only thing it starts is one of the App's workflows, after it commits
 //   (`ctx.workflows`), as part of that commit, and the only
 //   event it sends is one of the App's workflows', to a run of the App's
-//   own, likewise (`ctx.notify`); it tells people only once
+//   own, likewise (`ctx.sendEvent`); it tells people only once
 //   it commits, likewise (`ctx.notifyPeople`);
 // - an action has no `db` at all: it composes the App's functions
 //   (`runQuery`, `runMutation`, `runAction`), each its own invocation,

@@ -1,6 +1,6 @@
 import { inspectApp } from "./app.ts";
 
-export type { OperationChannel } from "./operation-channel.ts";
+export type { FunctionChannel } from "./function-channel.ts";
 export { runFunction } from "./run-function.ts";
 export { runMigration } from "./run-migration.ts";
 export type { MigrationRow } from "./run-migration.ts";

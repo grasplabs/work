@@ -10,7 +10,7 @@ export { defineApp } from "./app.ts";
 export type { App, AppConfig, AppPermissions } from "./app-types.ts";
 
 export { AppError } from "./app-error.ts";
-export { migration } from "./migration.ts";
+export { defineMigration } from "./migration.ts";
 export type {
   Migration,
   MigrationContext,
@@ -61,13 +61,13 @@ export type {
   LinksReference,
 } from "./file-link-references.ts";
 export type {
-  AnyOperationReference,
-  ArgsOf,
-  OperationReference,
+  AnyFunctionReference,
+  FunctionArgs,
+  FunctionReference,
   ProgressOf,
   ReferenceKind,
   ReferenceVisibility,
-  ReturnOf,
+  FunctionReturn,
 } from "./function-references.ts";
 export type {
   DecisionContextOf,
@@ -87,8 +87,8 @@ export type {
   WorkflowReference,
   WorkflowWaitOf,
 } from "./workflow-references.ts";
+export type { ErrorCategory } from "./client-error.ts";
 export type {
-  AppErrorCategory,
   AppErrorPayload,
   RunHandle,
   WorkflowDecisionDetail,

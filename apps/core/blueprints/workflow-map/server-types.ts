@@ -5,13 +5,13 @@
 // schema.ts. Never part of the App: its seal generates the real one, and
 // type-checks its server code against it.
 import type { Id as SdkId } from "@grasp-os/sdk";
-import type { Doc as SdkDoc } from "@grasp-os/sdk/database";
-import { serverModule } from "@grasp-os/sdk/server";
 import type {
+  Doc as SdkDoc,
   ActionCtx as SdkActionCtx,
   MutationCtx as SdkMutationCtx,
   QueryCtx as SdkQueryCtx,
 } from "@grasp-os/sdk/server";
+import { serverModule } from "@grasp-os/sdk/server";
 
 import config from "./files/grasp.config.ts";
 import schema from "./files/server/schema.ts";

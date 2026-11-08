@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vite-plus/test";
 
 import { inspectApp, readAppManifest, registerApp } from "../src/host.ts";
-import { defineApp, migration } from "../src/index.ts";
+import { defineApp, defineMigration } from "../src/index.ts";
 import { runMigration } from "../src/runner.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
 
@@ -24,7 +24,7 @@ const schema = defineSchema({
   notes: defineTable(noteFields).access({ read: "owner", write: "owner" }),
 });
 
-const deriveCategory = migration({
+const deriveCategory = defineMigration({
   name: "derive-note-category",
   fromSchema,
   toSchema,
@@ -57,7 +57,7 @@ const notes = (migrations: readonly unknown[]): unknown =>
 
 // SAFETY: deliberately loose, for declarations the types refuse.
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-const looseMigration = migration as (definition: unknown) => unknown;
+const looseMigration = defineMigration as (definition: unknown) => unknown;
 
 const declaration = {
   name: "derive-note-category",

@@ -36,7 +36,7 @@ import { appSendHoldsSql } from "./workflow-starts.ts";
 import { admitRunEvent, unlessAccepted } from "./workflows/run-events.ts";
 import type { RunEventDelivery } from "./workflows/run-events.ts";
 
-// A mutation's workflow notifications (spec 10.7.4): `ctx.notify(event,
+// A mutation's workflow notifications (spec 10.7.4): `ctx.sendEvent(event,
 // { runId, data })`, staged as an intent of its commit in its store's
 // outbox (operations.ts) and delivered from there, after the commit, into
 // the run's inbox (workflows/run-events.ts), the inbox a page's send
@@ -111,7 +111,7 @@ const notifyIntentSchema = z.strictObject({
 type NotifyIntent = z.infer<typeof notifyIntentSchema>;
 
 /**
- * The event a mutation's generated reference names (`ctx.notify`): what
+ * The event a mutation's generated reference names (`ctx.sendEvent`): what
  * App code sent, which counts only as the release resolves exactly it.
  */
 export interface ListedEvent {

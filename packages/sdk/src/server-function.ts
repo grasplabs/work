@@ -23,20 +23,6 @@ export type Visibility = ReferenceVisibility;
 export type AnyTables = Readonly<Record<string, AnyTable>>;
 
 /**
- * A function as callers type it: its kind, visibility, arguments (as a
- * caller passes them and as the handler gets them) and return. A
- * definition is one, and so is the reference generated for it:
- * the phantom members carry inference only and are never set.
- */
-export type FunctionReference<
-  Kind extends FunctionKind = FunctionKind,
-  Vis extends Visibility = Visibility,
-  ArgsIn = unknown,
-  Return = unknown,
-  Progress = unknown,
-> = Callable<Kind, Vis, ArgsIn, Return, Progress>;
-
-/**
  * What a handler may answer, `Returns` the schema its declaration gives
  * (`undefined` where it gives none): what the schema infers, or anything,
  * which the host checks as JSON only. One signature for both,
@@ -84,8 +70,15 @@ export interface ServerFunction<
 /**
  * Any declared server function. Its handler takes nothing it could be
  * called with: only the runner calls it, with the context of its kind.
+ * What it streams is anything: a streaming action is one too.
  */
-export interface AnyFunction extends FunctionReference {
+export interface AnyFunction extends Callable<
+  FunctionKind,
+  Visibility,
+  unknown,
+  unknown,
+  unknown
+> {
   readonly kind: FunctionKind;
   readonly visibility: Visibility;
   readonly args: AnySchema;

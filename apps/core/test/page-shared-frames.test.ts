@@ -1,4 +1,4 @@
-import type { OperationReference, ReferenceKind } from "@grasp-os/sdk";
+import type { FunctionReference, ReferenceKind } from "@grasp-os/sdk";
 import { GraspClient } from "@grasp-os/sdk/host";
 import type { ClientTransport } from "@grasp-os/sdk/host";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
@@ -158,7 +158,7 @@ const follower = () => {
 
 /** A query's call as the client sends it. */
 const requestOf = (
-  reference: OperationReference<unknown, unknown, ReferenceKind>,
+  reference: FunctionReference<ReferenceKind>,
   input: unknown,
   kind: ReferenceKind = "query"
 ): string =>

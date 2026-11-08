@@ -1,4 +1,4 @@
-import type { OperationManifest } from "./app-types.ts";
+import type { FunctionManifest } from "./app-types.ts";
 import type { BoundWorkflow } from "./bound-workflows.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import { ValueDefinitionError } from "./value-descriptor.ts";
@@ -301,7 +301,7 @@ const querySchemas = (
  */
 export const workflowQueries = (
   workflow: BoundWorkflow
-): Partial<Record<WorkflowQueryName, OperationManifest>> => {
+): Partial<Record<WorkflowQueryName, FunctionManifest>> => {
   let declared: ReturnType<typeof querySchemas>;
   try {
     declared = querySchemas(workflow);
@@ -317,7 +317,7 @@ export const workflowQueries = (
     }
     throw error;
   }
-  const queries: Partial<Record<WorkflowQueryName, OperationManifest>> = {};
+  const queries: Partial<Record<WorkflowQueryName, FunctionManifest>> = {};
   for (const [name, schemas] of Object.entries(declared)) {
     // SAFETY: the keys of `querySchemas`' own answer are query names.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY

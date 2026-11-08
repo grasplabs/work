@@ -43,14 +43,13 @@ const inlineHashesFile = "inline-hashes.json";
 
 /**
  * The SDK's modules App code imports, one reference page each: the root
- * (values, schemas, `app`, permissions), what server functions get
- * (`@server/_generated/server` re-exports its types), the database, the
+ * (values, schemas, `defineApp`, permissions), what server functions get
+ * (`@server/_generated/server` re-exports its types) with the database, the
  * Pages' hooks, and what an App's tests run on.
  */
 const modules: Readonly<Record<string, string>> = {
   index: "@grasp-os/sdk",
   server: "@grasp-os/sdk/server",
-  database: "@grasp-os/sdk/database",
   react: "@grasp-os/sdk/react",
   testing: "@grasp-os/sdk/testing",
 };

@@ -1,8 +1,12 @@
 import { canonicalText } from "@grasp-os/shared/json";
 import { describe, expect, test } from "vite-plus/test";
 
-import { databaseWriter } from "../src/database.ts";
-import { inspectApp, readAppManifest, registerApp } from "../src/host.ts";
+import {
+  databaseWriter,
+  inspectApp,
+  readAppManifest,
+  registerApp,
+} from "../src/host.ts";
 import type { ServerModules } from "../src/host.ts";
 import { AppError, defineApp, permission } from "../src/index.ts";
 import type { AppConfig, WorkflowEventReference } from "../src/index.ts";
@@ -648,7 +652,7 @@ describe("the App's permissions in a function's context", () => {
       args: {},
       returns: v.null(),
       handler: (ctx) => {
-        ctx.notify(edited, { runId: "run1", data: { title: "a" } });
+        ctx.sendEvent(edited, { runId: "run1", data: { title: "a" } });
         return null;
       },
     });
@@ -656,7 +660,7 @@ describe("the App's permissions in a function's context", () => {
       args: {},
       returns: v.null(),
       handler: (ctx) => {
-        Reflect.apply(ctx.notify, ctx, [
+        Reflect.apply(ctx.sendEvent, ctx, [
           { ...edited, fingerprint: "not a fingerprint" },
           { runId: "run1", data: {} },
         ]);

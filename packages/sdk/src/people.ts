@@ -1,5 +1,5 @@
-import type { OperationManifest } from "./app-types.ts";
-import type { OperationReference } from "./function-references.ts";
+import type { FunctionManifest } from "./app-types.ts";
+import type { FunctionReference } from "./function-references.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import type { Infer, InferInput } from "./value-types.ts";
 import { v } from "./values.ts";
@@ -120,16 +120,16 @@ const contracts = {
 } as const;
 
 /** The names of the reads: who calls (`user`), and the directory's three. */
-export type PeopleOperationName = keyof typeof contracts;
+export type PeopleFunctionName = keyof typeof contracts;
 
 /** Whether `read` is one of the reads. */
-export const isPeopleOperationName = (
+export const isPeopleFunctionName = (
   read: unknown
-): read is PeopleOperationName =>
+): read is PeopleFunctionName =>
   typeof read === "string" && Object.hasOwn(contracts, read);
 
 /** Read `read`, as an App's public query is described. */
-const described = (read: PeopleOperationName): OperationManifest =>
+const described = (read: PeopleFunctionName): FunctionManifest =>
   Object.freeze({
     path: `people.${read}`,
     kind: "query",
@@ -140,8 +140,8 @@ const described = (read: PeopleOperationName): OperationManifest =>
   });
 
 /** Each read, as an App's public query is described. */
-export const peopleOperations: Readonly<
-  Record<PeopleOperationName, OperationManifest>
+export const peopleFunctions: Readonly<
+  Record<PeopleFunctionName, FunctionManifest>
 > = Object.freeze({
   user: described("user"),
   find: described("find"),
@@ -150,17 +150,17 @@ export const peopleOperations: Readonly<
 });
 
 /** The reference a page reads `Name` through. */
-type PeopleReference<Name extends PeopleOperationName> = OperationReference<
+type PeopleReference<Name extends PeopleFunctionName> = FunctionReference<
+  "query",
+  "public",
   InferInput<(typeof contracts)[Name]["args"]>,
-  Infer<(typeof contracts)[Name]["returns"]>,
-  "query"
+  Infer<(typeof contracts)[Name]["returns"]>
 >;
 
 /** The reference to read `read`. */
-const referenceTo = <Name extends PeopleOperationName>(
+const referenceTo = <Name extends PeopleFunctionName>(
   read: Name
-): PeopleReference<Name> =>
-  Object.freeze({ name: peopleOperations[read].path });
+): PeopleReference<Name> => Object.freeze({ name: peopleFunctions[read].path });
 
 /**
  * The references a page reads through (`useUser`, `usePeople`). They
@@ -213,7 +213,7 @@ const paged = (options: PageOptions | undefined) => ({
  * as core checked it against the read's declared return.
  */
 export const peopleDirectory = (
-  read: (operation: PeopleOperationName, args: object) => Promise<unknown>
+  read: (fn: PeopleFunctionName, args: object) => Promise<unknown>
 ): PeopleDirectory => {
   const directory: PeopleDirectory = {
     find: async (ids) => {

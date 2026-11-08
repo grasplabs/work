@@ -5,8 +5,8 @@ import { AppError } from "./app-error.ts";
 import { inspectApp } from "./app.ts";
 import { databaseReader } from "./database-reader.ts";
 import { databaseWriter } from "./database-writer.ts";
+import type { FunctionChannel } from "./function-channel.ts";
 import { referenceName } from "./function-references.ts";
-import type { OperationChannel } from "./operation-channel.ts";
 import { peopleDirectory } from "./people.ts";
 import type { AppPermission } from "./permission-types.ts";
 import { permissionsOf } from "./run-permission-clients.ts";
@@ -102,20 +102,20 @@ interface StagedNotification {
 }
 
 /**
- * A mutation's `ctx.notify`, over `channel`: each call kept
+ * A mutation's `ctx.sendEvent`, over `channel`: each call kept
  * in order while the handler runs, synchronously, and sent to the host by
  * `flush` once it has returned, in that order, which is each one's place
  * among the commit's intents; nothing for a handler that throws, whose
  * mutation commits nothing. The host checks each again as it stages it.
  */
-const notificationsOf = (channel: OperationChannel) => {
+const notificationsOf = (channel: FunctionChannel) => {
   const staged: StagedNotification[] = [];
   let open = true;
   return {
-    notify: (event: unknown, notification: unknown): void => {
+    sendEvent: (event: unknown, notification: unknown): void => {
       if (!open) {
         throw Object.assign(
-          new Error("A mutation notifies only while its handler runs."),
+          new Error("A mutation sends events only while its handler runs."),
           { code: "function.ended" }
         );
       }
@@ -153,7 +153,7 @@ const notificationsOf = (channel: OperationChannel) => {
  */
 const workflowsOf = (
   permissions: readonly AppPermission[],
-  channel: OperationChannel
+  channel: FunctionChannel
 ): Readonly<Record<string, unknown>> => {
   const workflows: Record<string, unknown> = {};
   for (const declared of permissions) {
@@ -179,7 +179,7 @@ const workflowsOf = (
  * it runs, as it does starts.
  */
 const notifyPeopleOf =
-  (channel: OperationChannel) =>
+  (channel: FunctionChannel) =>
   async (to: unknown, notification: unknown): Promise<unknown> =>
     await channel.resource(peopleAlias, "notify", [to, notification]);
 
@@ -203,7 +203,7 @@ export const runFunction = async (
   registered: unknown,
   path: string,
   args: unknown,
-  channel: OperationChannel
+  channel: FunctionChannel
 ): Promise<unknown> => {
   const inspection = inspectApp(registered);
   const fn =
@@ -255,7 +255,7 @@ export const runFunction = async (
       ): Promise<void> => {
         await notifyPeopleOf(channel)(to, notification);
       },
-      notify: notifications.notify,
+      sendEvent: notifications.sendEvent,
     };
   } else {
     ctx = {

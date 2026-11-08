@@ -14,10 +14,10 @@ import {
 import { waitFor } from "./client-retry.ts";
 import type { ClientTransport } from "./client-transport.ts";
 import type {
-  ArgsOf,
-  OperationReference,
+  FunctionArgs,
+  FunctionReference,
   ProgressOf,
-  ReturnOf,
+  FunctionReturn,
   Streaming,
 } from "./function-references.ts";
 import { Pagers } from "./paginated-query.ts";
@@ -117,21 +117,17 @@ export interface SubmitOptions {
 }
 
 /** A public query reference. */
-export type QueryReference = OperationReference<unknown, unknown, "query">;
+export type QueryReference = FunctionReference<"query">;
 /** A public mutation reference. */
-export type MutationReference = OperationReference<
-  unknown,
-  unknown,
-  "mutation"
->;
+export type MutationReference = FunctionReference<"mutation">;
 /** A public action reference that answers once (not a stream). */
-export type ActionReference = OperationReference<unknown, unknown, "action">;
+export type ActionReference = FunctionReference<"action">;
 /** A public reference to an action that streams its progress. */
-export type StreamReference = OperationReference<
-  unknown,
-  unknown,
+export type StreamReference = FunctionReference<
   "action",
   "public",
+  unknown,
+  unknown,
   unknown
 >;
 
@@ -146,7 +142,7 @@ export interface StreamOptions<Progress> extends SubmitOptions {
 
 /** The arguments of `client.stream`: its input, then its options. */
 export type StreamArguments<Reference> = [
-  args: ArgsOf<Reference>,
+  args: FunctionArgs<Reference>,
   options: StreamOptions<ProgressOf<Reference>>,
 ];
 
@@ -156,9 +152,9 @@ export type StreamArguments<Reference> = [
  * defaulted; to pass options then, write `call({}, options)`.
  */
 export type CallArguments<Reference, Options> =
-  Record<never, never> extends ArgsOf<Reference>
-    ? [args?: ArgsOf<Reference>, options?: Options]
-    : [args: ArgsOf<Reference>, options?: Options];
+  Record<never, never> extends FunctionArgs<Reference>
+    ? [args?: FunctionArgs<Reference>, options?: Options]
+    : [args: FunctionArgs<Reference>, options?: Options];
 
 // Set by `GraspClient`'s static block, which alone reaches its private
 // members, before any client exists.
@@ -334,7 +330,7 @@ export class GraspClient {
   async query<Reference extends QueryReference>(
     reference: Reference,
     ...[args, options]: CallArguments<Reference, QueryOptions>
-  ): Promise<ReturnOf<Reference>> {
+  ): Promise<FunctionReturn<Reference>> {
     const { signal } = readOptions(options, queryOptionKeys);
     const entry = this.#queries.entry(reference, args);
     if (signal?.aborted === true) {
@@ -350,7 +346,7 @@ export class GraspClient {
       // SAFETY: the host validated the answer against the reference's
       // declared return, which `Reference` carries as its type.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      return value as ReturnOf<Reference>;
+      return value as FunctionReturn<Reference>;
     } finally {
       entry.interest -= 1;
       this.#queries.release(entry);
@@ -365,7 +361,7 @@ export class GraspClient {
   async mutation<Reference extends MutationReference>(
     reference: Reference,
     ...[args, options]: CallArguments<Reference, SubmitOptions>
-  ): Promise<ReturnOf<Reference>> {
+  ): Promise<FunctionReturn<Reference>> {
     const value = await this.#submissions.submit(
       readReference(reference, "mutation"),
       args,
@@ -373,7 +369,7 @@ export class GraspClient {
     );
     // SAFETY: as in `query`.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return value as ReturnOf<Reference>;
+    return value as FunctionReturn<Reference>;
   }
 
   /**
@@ -385,7 +381,7 @@ export class GraspClient {
   async action<Reference extends ActionReference>(
     reference: Reference,
     ...[args, options]: CallArguments<Reference, SubmitOptions>
-  ): Promise<ReturnOf<Reference>> {
+  ): Promise<FunctionReturn<Reference>> {
     const value = await this.#submissions.submit(
       readReference(reference, "action"),
       args,
@@ -393,7 +389,7 @@ export class GraspClient {
     );
     // SAFETY: as in `query`.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return value as ReturnOf<Reference>;
+    return value as FunctionReturn<Reference>;
   }
 
   /**
@@ -408,11 +404,11 @@ export class GraspClient {
   async stream<Reference extends StreamReference>(
     reference: Streaming<Reference>,
     ...[args, options]: StreamArguments<Reference>
-  ): Promise<ReturnOf<Reference>> {
+  ): Promise<FunctionReturn<Reference>> {
     const value = await this.#streams.stream(reference, args, options);
     // SAFETY: as in `query`.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return value as ReturnOf<Reference>;
+    return value as FunctionReturn<Reference>;
   }
 
   /** See `ClientInternals.retryFailed`. */

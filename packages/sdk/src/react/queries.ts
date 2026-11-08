@@ -4,7 +4,7 @@ import { clientInternals } from "../client-core.ts";
 import type { QueryReference } from "../client-core.ts";
 import { loading } from "../client-query-entry.ts";
 import type { QuerySnapshot } from "../client-query-entry.ts";
-import type { ArgsOf, ReturnOf } from "../function-references.ts";
+import type { FunctionArgs, FunctionReturn } from "../function-references.ts";
 import { skippedPage } from "../pager.ts";
 import type { PaginatedQueryView, PagerSnapshot } from "../pager.ts";
 import type { PaginationResult } from "../query-reads.ts";
@@ -22,8 +22,8 @@ export const noSubscription = (): (() => void) => () => {
  */
 export const useQuery = <Reference extends QueryReference>(
   reference: Reference,
-  args: ArgsOf<Reference> | "skip"
-): ReturnOf<Reference> | undefined => {
+  args: FunctionArgs<Reference> | "skip"
+): FunctionReturn<Reference> | undefined => {
   const internals = clientInternals(useClient());
   const entry = args === "skip" ? undefined : internals.entry(reference, args);
   const snapshot: QuerySnapshot = useSyncExternalStore(
@@ -39,7 +39,7 @@ export const useQuery = <Reference extends QueryReference>(
   // SAFETY: the host validated the value against the reference's declared
   // return, which `Reference` carries as its type.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return snapshot.value as ReturnOf<Reference> | undefined;
+  return snapshot.value as FunctionReturn<Reference> | undefined;
 };
 
 /**
@@ -48,10 +48,10 @@ export const useQuery = <Reference extends QueryReference>(
  * register, codegen-stand-ins.ts `symbolicModules`), as its other answers are,
  * where inferring from `any` would make it `unknown`.
  */
-export type PageItemOf<Reference> = 0 extends 1 & ReturnOf<Reference>
+export type PageItemOf<Reference> = 0 extends 1 & FunctionReturn<Reference>
   ? // oxlint-disable-next-line typescript/no-explicit-any -- as its answer is
     any
-  : ReturnOf<Reference> extends PaginationResult<infer Item>
+  : FunctionReturn<Reference> extends PaginationResult<infer Item>
     ? Item
     : never;
 
@@ -61,9 +61,11 @@ export type PageItemOf<Reference> = 0 extends 1 & ReturnOf<Reference>
  * for a query that doesn't take `pagination` and answer pages.
  */
 export type PaginatedArgsOf<Reference> =
-  "pagination" extends keyof ArgsOf<Reference>
-    ? ReturnOf<Reference> extends PaginationResult<unknown>
-      ? Omit<ArgsOf<Reference>, "pagination"> & { readonly pagination?: never }
+  "pagination" extends keyof FunctionArgs<Reference>
+    ? FunctionReturn<Reference> extends PaginationResult<unknown>
+      ? Omit<FunctionArgs<Reference>, "pagination"> & {
+          readonly pagination?: never;
+        }
       : never
     : never;
 

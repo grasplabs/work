@@ -3,7 +3,7 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import { GraspClient } from "../src/client-core.ts";
-import { peopleOperations, peopleReferences } from "../src/people.ts";
+import { peopleFunctions, peopleReferences } from "../src/people.ts";
 import type { PeopleDirectory } from "../src/people.ts";
 import { GraspProvider, usePeople } from "../src/react.ts";
 
@@ -23,9 +23,9 @@ describe("the people reads' references", () => {
       )
     ).toStrictEqual(
       Object.fromEntries(
-        Object.entries(peopleOperations).map(([read, operation]) => [
+        Object.entries(peopleFunctions).map(([read, fn]) => [
           read,
-          { name: operation.path },
+          { name: fn.path },
         ])
       )
     );

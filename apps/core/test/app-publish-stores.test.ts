@@ -775,11 +775,11 @@ const teamRenamedMigration = async (
   );
   const second = await nextVersion(owner, app, {
     ...renamed,
-    "server/migrations/title.ts": `import { migration, v } from "@grasp-os/sdk";
+    "server/migrations/title.ts": `import { defineMigration, v } from "@grasp-os/sdk";
 
 ${prelude}
 
-export default migration({
+export default defineMigration({
   name: "title",
   table: "tickets",
   fromSchema: ${JSON.stringify(await schemaOf(first))},
@@ -820,9 +820,9 @@ const migratedFiles = async (
   const files = evolvingFiles({ category: "v.number()" });
   return {
     ...files,
-    "server/migrations/category.ts": `import { migration, v } from "@grasp-os/sdk";
+    "server/migrations/category.ts": `import { defineMigration, v } from "@grasp-os/sdk";
 
-export default migration({
+export default defineMigration({
   name: "category",
   table: "notes",
   fromSchema: ${JSON.stringify(await schemaOf(from))},

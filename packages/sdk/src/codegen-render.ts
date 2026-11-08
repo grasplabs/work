@@ -1,7 +1,7 @@
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
-import type { OperationManifest } from "./app-types.ts";
+import type { FunctionManifest } from "./app-types.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 
 const identifier = /^[A-Za-z_$][\w$]*$/u;
@@ -198,13 +198,13 @@ export const dataOf = (value: unknown, depth: number): string => {
  * that answers the call, and checks the call with the function's own
  * validator.
  */
-export const referenceOf = (operation: OperationManifest) => {
-  if (operation.kind !== "query") {
-    return { name: operation.path, kind: operation.kind, args: operation.args };
+export const referenceOf = (fn: FunctionManifest) => {
+  if (fn.kind !== "query") {
+    return { name: fn.path, kind: fn.kind, args: fn.args };
   }
-  return operation.returns === null
-    ? { name: operation.path }
-    : { name: operation.path, returns: operation.returns };
+  return fn.returns === null
+    ? { name: fn.path }
+    : { name: fn.path, returns: fn.returns };
 };
 
 /**
@@ -213,19 +213,17 @@ export const referenceOf = (operation: OperationManifest) => {
  * streaming action, what it streams. The same for every release that
  * declares the function alike.
  */
-export const referenceTypeOf = (operation: OperationManifest): string => {
+export const referenceTypeOf = (fn: FunctionManifest): string => {
   const parts = [
-    valueTypeOf(operation.args, "input"),
-    operation.returns === null
-      ? "unknown"
-      : valueTypeOf(operation.returns, "output"),
-    JSON.stringify(operation.kind),
-    JSON.stringify(operation.visibility),
+    JSON.stringify(fn.kind),
+    JSON.stringify(fn.visibility),
+    valueTypeOf(fn.args, "input"),
+    fn.returns === null ? "unknown" : valueTypeOf(fn.returns, "output"),
   ];
-  if (operation.stream !== null) {
-    parts.push(valueTypeOf(operation.stream, "output"));
+  if (fn.stream !== null) {
+    parts.push(valueTypeOf(fn.stream, "output"));
   }
-  return `OperationReference<${parts.join(", ")}>`;
+  return `FunctionReference<${parts.join(", ")}>`;
 };
 
 export const banner =

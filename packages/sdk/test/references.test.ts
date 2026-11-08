@@ -21,10 +21,10 @@ import type {
   WorkflowBindingExtras,
   ServerModules,
 } from "../src/host.ts";
-import type { AnyOperationReference } from "../src/index.ts";
+import type { AnyFunctionReference } from "../src/index.ts";
 import { defineApp, permission, v } from "../src/index.ts";
 import { runFunction } from "../src/runner.ts";
-import type { OperationChannel } from "../src/runner.ts";
+import type { FunctionChannel } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
 import { valueLimits } from "../src/value-descriptor.ts";
 import { schemaOf } from "../src/value-schema.ts";
@@ -493,7 +493,7 @@ describe("workflow references", () => {
 
   test("expose runs, history, the decision inbox and a decision as public query references, by name", async () => {
     const queries = Object.entries(workflows).flatMap(([alias, reference]) =>
-      Object.entries<AnyOperationReference>(reference.queries).map(
+      Object.entries<AnyFunctionReference>(reference.queries).map(
         ([name, query]) => ({
           path: `workflows.${alias}.queries.${name}`,
           query,
@@ -1005,7 +1005,7 @@ describe("references a function calls", () => {
   test("reach the runner as the path they name", async () => {
     const reference = internal.notes.count;
     const calls: unknown[] = [];
-    const channel: OperationChannel = {
+    const channel: FunctionChannel = {
       read: async () => await Promise.reject(new Error("no reads")),
       write: async () => await Promise.reject(new Error("no writes")),
       call: async (...args) => {

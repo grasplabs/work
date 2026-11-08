@@ -792,12 +792,12 @@ export const Route = createFileRoute("/")({ component: Notes });
   it("builds forms of the operations, a record's edit and a native schema, typed by what they bind", async () => {
     const formPage = `import { createFileRoute } from "@tanstack/react-router";
 import { v } from "@grasp-os/sdk";
-import type { ReturnOf } from "@grasp-os/sdk";
+import type { FunctionReturn } from "@grasp-os/sdk";
 import { useForm } from "@grasp-os/sdk/react";
 import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
 import { api } from "@server/_generated/api";
 
-type Note = NonNullable<ReturnOf<typeof api.notes.get>>;
+type Note = NonNullable<FunctionReturn<typeof api.notes.get>>;
 
 const searchSchema = v.object({ search: v.string().trim().min(1) });
 

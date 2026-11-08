@@ -8,7 +8,7 @@ import type {
   Doc,
   PaginationResult,
   Withheld,
-} from "../src/database.ts";
+} from "../src/server.ts";
 import type { Id, Infer } from "../src/value-types.ts";
 import { defineSchema, defineTable, v } from "../src/values.ts";
 import type { paginationOptionsValidator } from "../src/values.ts";

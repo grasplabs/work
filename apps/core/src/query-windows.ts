@@ -14,7 +14,7 @@ import { callOperation, sharedBudget } from "./operations.ts";
 import type {
   HostedApp,
   Invocation,
-  OperationReference,
+  CalledFunction,
   SharedBudget,
 } from "./operations.ts";
 
@@ -193,7 +193,7 @@ type WindowRead =
 export interface WindowRequest {
   readonly app: HostedApp;
   readonly invocation: Invocation;
-  readonly reference: OperationReference;
+  readonly reference: CalledFunction;
   /** The operation's argument descriptor, as the release declares it. */
   readonly args: unknown;
   /** The caller's input, without `pagination`. */

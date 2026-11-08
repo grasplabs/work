@@ -6,7 +6,7 @@
 // `@ts-expect-error` below must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import { migration, v } from "../src/index.ts";
+import { defineMigration, v } from "../src/index.ts";
 import type { JsonValue } from "../src/index.ts";
 
 const noteFields = {
@@ -17,7 +17,7 @@ const noteFields = {
 
 const hashes = { fromSchema: "a".repeat(64), toSchema: "b".repeat(64) };
 
-migration({
+defineMigration({
   name: "derive-category",
   table: "notes",
   ...hashes,
@@ -40,7 +40,7 @@ migration({
   },
 });
 
-migration({
+defineMigration({
   name: "untyped",
   table: "notes",
   ...hashes,
@@ -53,7 +53,7 @@ migration({
   },
 });
 
-migration({
+defineMigration({
   name: "wrong-output",
   table: "notes",
   ...hashes,
@@ -63,7 +63,7 @@ migration({
   handler: () => ({ title: "Note", category: "other" }),
 });
 
-migration({
+defineMigration({
   name: "fixture-off-input",
   table: "notes",
   ...hashes,
@@ -74,7 +74,7 @@ migration({
   handler: (_ctx, row) => ({ title: row.title, category: "general" }),
 });
 
-migration({
+defineMigration({
   name: "fixture-off-output",
   table: "notes",
   ...hashes,
@@ -90,7 +90,7 @@ migration({
 });
 
 // @ts-expect-error -- a migration without fixtures
-migration({
+defineMigration({
   name: "unchecked",
   table: "notes",
   ...hashes,

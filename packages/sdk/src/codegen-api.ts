@@ -1,4 +1,4 @@
-import type { AppManifest, OperationManifest } from "./app-types.ts";
+import type { AppManifest, FunctionManifest } from "./app-types.ts";
 import type { BoundWorkflow } from "./bound-workflows.ts";
 import type { ReleaseIdentity } from "./codegen-contracts.ts";
 import {
@@ -19,7 +19,7 @@ import { declaredPermissions } from "./manifest-permissions.ts";
 /** A tree of function references as a module's typed, frozen export. */
 const referenceExport = (
   name: string,
-  operations: readonly OperationManifest[]
+  operations: readonly FunctionManifest[]
 ): string => {
   const tree = treeOf(
     operations.map((operation) => [operation.path, operation])
@@ -46,7 +46,7 @@ const referenceExport = (
 const operationsOf = (
   manifest: AppManifest,
   visibility: "public" | "internal"
-): OperationManifest[] =>
+): FunctionManifest[] =>
   Object.values(manifest.operations)
     .filter((operation) => operation.visibility === visibility)
     .toSorted((a, b) => (a.path < b.path ? -1 : 1));
@@ -54,7 +54,7 @@ const operationsOf = (
 /** `@server/_generated/internal`: the internal tree. */
 export const serverReferencesText = (manifest: AppManifest): string => {
   const body = referenceExport("internal", operationsOf(manifest, "internal"));
-  return `${banner}${typeImports(body, ["OperationReference", ...valueTypes])}\n${freezer}\n${body}`;
+  return `${banner}${typeImports(body, ["FunctionReference", ...valueTypes])}\n${freezer}\n${body}`;
 };
 /** `@server/_generated/api`: the public api and everything else a browser may hold. */
 export const referencesText = async (
@@ -106,7 +106,7 @@ export const referencesText = async (
   return `${banner}${typeImports(body, [
     "FilesReference",
     "LinksReference",
-    "OperationReference",
+    "FunctionReference",
     "WorkflowDecisionDetail",
     "WorkflowDecisionInboxItem",
     "WorkflowDecisionReference",

@@ -1,4 +1,4 @@
-import type { OperationReference, ReferenceKind } from "@grasp-os/sdk";
+import type { FunctionReference, ReferenceKind } from "@grasp-os/sdk";
 import { GraspError } from "@grasp-os/sdk/client";
 import { GraspClient } from "@grasp-os/sdk/host";
 import type { ClientTransport, StreamLink } from "@grasp-os/sdk/host";
@@ -203,14 +203,14 @@ const singleTo = <Args, Return, Kind extends ReferenceKind>(
   release: Release,
   path: string,
   _kind: Kind
-): OperationReference<Args, Return, Kind> =>
+): FunctionReference<Kind, "public", Args, Return> =>
   referenceTo<Args, Return, Kind>(release, path);
 
 /** A reference to a streaming action of `release`. */
 const streamTo = <Args, Return, Progress>(
   release: Release,
   path: string
-): OperationReference<Args, Return, "action", "public", Progress> => {
+): FunctionReference<"action", "public", Args, Return, Progress> => {
   if (operationAt(release, path).stream === null) {
     throw new Error(`${path} doesn't stream`);
   }

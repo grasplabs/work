@@ -8,7 +8,7 @@ import {
 } from "@grasp-os/sdk";
 import { inspectApp, manifestText, registerApp } from "@grasp-os/sdk/host";
 import { runFunction } from "@grasp-os/sdk/runner";
-import type { OperationChannel } from "@grasp-os/sdk/runner";
+import type { FunctionChannel } from "@grasp-os/sdk/runner";
 import { serverModule } from "@grasp-os/sdk/server";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { streamMaxEmits } from "@grasp-os/shared/function-limits";
@@ -720,7 +720,7 @@ const noteCount = async (fixture: Fixture): Promise<Json> =>
  */
 const misusing = (
   path: string,
-  misuse: (channel: OperationChannel) => Promise<unknown>
+  misuse: (channel: FunctionChannel) => Promise<unknown>
 ): Runner => {
   const run: Runner = async (called, args, channel) =>
     called === path
@@ -1016,7 +1016,7 @@ describe("an action's channel", () => {
   it("has no database, and calls only what the App registers and declares, as the kind it is", async () => {
     const fixture = await notes();
     const attempt = async (
-      misuse: (channel: OperationChannel) => Promise<unknown>
+      misuse: (channel: FunctionChannel) => Promise<unknown>
     ) =>
       codeOf(
         await call(
@@ -1213,7 +1213,7 @@ describe("resources", () => {
       return await Promise.resolve({ mailbox: "m", sent: true });
     });
     const attempt = async (
-      misuse: (channel: OperationChannel) => Promise<unknown>
+      misuse: (channel: FunctionChannel) => Promise<unknown>
     ) =>
       codeOf(
         await call(
@@ -2155,7 +2155,7 @@ describe("an action's nested calls", () => {
         return await defaultRun(path, args, channel);
       }
       let reads = 0;
-      const tearing: OperationChannel = {
+      const tearing: FunctionChannel = {
         read: async (request) => {
           const answer = await channel.read(request);
           reads += 1;
@@ -2193,7 +2193,7 @@ describe("evidence of a refused use", () => {
     });
     /** What a call of sendMail kept, its code asking `asks` and swallowing each refusal. */
     const kept = async (
-      ...asks: ((channel: OperationChannel) => Promise<unknown>)[]
+      ...asks: ((channel: FunctionChannel) => Promise<unknown>)[]
     ) => {
       const order: string[] = [];
       const heard: UseRefusal[] = [];

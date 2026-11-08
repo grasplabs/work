@@ -18,14 +18,15 @@ import type {
 import type { AnySchema } from "./value-schema.ts";
 import type { Infer, InferInput } from "./value-types.ts";
 
-// `migration`: an explicit, typed transform of one table's records from
+// `defineMigration`: an explicit, typed transform of one table's records from
 // one schema to another, for a change the host can't make on
 // its own: deriving a value, a type change, a required field without a
 // default. A safe addition (a new table, an optional or defaulted field)
 // never needs one: the host plans and backfills it itself.
 //
 // A definition is a value, like a server function: it runs nothing and
-// changes nothing. The App registers it (`app({ migrations })`), the seal
+// changes nothing. The App registers it as the default export of a module
+// under `server/migrations/`, the seal
 // records it in the App's manifest, so approving the release reviews it,
 // and the host runs it, a bounded batch of rows at a time, in an isolate
 // with no env, no network and no store: its context is deterministic
@@ -86,7 +87,7 @@ const migrationMaxFixtures = 16;
 /** The most bytes a migration's fixtures take as canonical JSON. */
 const migrationFixturesMaxBytes = 64 * 1024;
 
-/** What `migration` is declared with. */
+/** What `defineMigration` is declared with. */
 export interface MigrationDefinition<
   Input extends AnySchema | undefined,
   Output extends AnySchema,
@@ -142,7 +143,7 @@ interface MigrationFixtureManifest {
   readonly expect: Readonly<Record<string, FrozenJson>> | null;
 }
 
-/** A declared migration, as `migration` answers it. */
+/** A declared migration, as `defineMigration` answers it. */
 export interface Migration {
   readonly "~migration": MigrationManifest;
 }
@@ -298,7 +299,7 @@ const fixturesOf = (fixtures: unknown): MigrationFixtureManifest[] => {
  * output fit the App is checked where the App registers it and where the
  * host seals it.
  */
-export const migration = <
+export const defineMigration = <
   const Output extends AnySchema,
   const Input extends AnySchema | undefined = undefined,
 >(

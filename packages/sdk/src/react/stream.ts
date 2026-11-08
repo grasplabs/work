@@ -10,7 +10,7 @@ import type {
 import { clientError, GraspError } from "../client-error.ts";
 import type {
   ProgressOf,
-  ReturnOf,
+  FunctionReturn,
   Streaming,
 } from "../function-references.ts";
 import { useClient } from "./provider.ts";
@@ -43,7 +43,7 @@ type StreamView<Progress, Output> =
 /** What `useStream` answers: the view, and how to run and cancel it. */
 type StreamHandle<Reference> = StreamView<
   ProgressOf<Reference>,
-  ReturnOf<Reference>
+  FunctionReturn<Reference>
 > & {
   /**
    * Runs it, once at a time (`stream.active` while a run is under way):
@@ -51,7 +51,7 @@ type StreamHandle<Reference> = StreamView<
    */
   readonly run: (
     ...args: CallArguments<Reference, SubmitOptions>
-  ) => Promise<ReturnOf<Reference>>;
+  ) => Promise<FunctionReturn<Reference>>;
   /**
    * Cancels the run under way for everyone following it; its view then
    * shows `cancelled` (or `completed`, when it finished first).
@@ -234,12 +234,12 @@ export const useStream = <Reference extends StreamReference>(
   );
   const run = async (
     ...[args, options]: CallArguments<Reference, SubmitOptions>
-  ): Promise<ReturnOf<Reference>> => {
+  ): Promise<FunctionReturn<Reference>> => {
     const output = await stream.run(client, reference, args, options);
     // SAFETY: the host validated the output against the reference's
     // declared return, which `Reference` carries as its type.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return output as ReturnOf<Reference>;
+    return output as FunctionReturn<Reference>;
   };
   const cancel = async (): Promise<void> => {
     await stream.cancel();
@@ -247,6 +247,9 @@ export const useStream = <Reference extends StreamReference>(
   // SAFETY: the view holds what the host validated against the
   // reference's `stream` and `returns`, which `Reference` carries.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const typed = view as StreamView<ProgressOf<Reference>, ReturnOf<Reference>>;
+  const typed = view as StreamView<
+    ProgressOf<Reference>,
+    FunctionReturn<Reference>
+  >;
   return { ...typed, run, cancel };
 };

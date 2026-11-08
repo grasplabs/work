@@ -1,8 +1,8 @@
 import type {
-  ArgsOf,
+  FunctionArgs,
   FilesReference,
-  OperationReference,
-  ReturnOf,
+  FunctionReference,
+  FunctionReturn,
 } from "@grasp-os/sdk";
 import { bindingOf } from "@grasp-os/sdk/form-binding";
 import type { ValueDescriptor } from "@grasp-os/sdk/form-binding";
@@ -947,13 +947,15 @@ const SwitchField = <Values,>({
 );
 
 /** A query, as a relation field reads its records with. */
-type AnyQuery = OperationReference<unknown, unknown, "query">;
+type AnyQuery = FunctionReference<"query">;
 
 /** The records `Reference` answers: a list of them, or a page of them. */
 type RecordOf<Reference> =
-  ReturnOf<Reference> extends readonly (infer Item)[]
+  FunctionReturn<Reference> extends readonly (infer Item)[]
     ? Item
-    : ReturnOf<Reference> extends { readonly items: readonly (infer Item)[] }
+    : FunctionReturn<Reference> extends {
+          readonly items: readonly (infer Item)[];
+        }
       ? Item
       : never;
 
@@ -1001,7 +1003,7 @@ const searchSettleMs = 250;
  */
 interface RelationLookup<Reference, Lookup extends AnyQuery> {
   readonly query: Lookup;
-  readonly args: (id: IdOf<Reference>) => ArgsOf<Lookup>;
+  readonly args: (id: IdOf<Reference>) => FunctionArgs<Lookup>;
 }
 
 /** What a relation field's picker takes. */
@@ -1012,7 +1014,7 @@ interface RelationProps<
   /** The query that answers the records to choose from: a list, or a page. */
   query: Reference;
   /** The query's arguments for what the person typed (empty at first). */
-  args: (search: string) => ArgsOf<Reference>;
+  args: (search: string) => FunctionArgs<Reference>;
   /**
    * How the field reads the record it holds by its ID, to name a value it
    * started with, which a search needn't list: without it, that value

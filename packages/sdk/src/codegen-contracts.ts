@@ -1,7 +1,7 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalText } from "@grasp-os/shared/json";
 
-import type { AppManifest, OperationManifest } from "./app-types.ts";
+import type { AppManifest, FunctionManifest } from "./app-types.ts";
 import type {
   BoundWorkflow,
   BoundWorkflowDecision,
@@ -37,7 +37,7 @@ export const contractsFormatVersion = 4;
  * change to any of them changes it.
  */
 export const contractFingerprint = async (
-  operation: OperationManifest
+  operation: FunctionManifest
 ): Promise<string> =>
   await sha256Hex(
     canonicalText({

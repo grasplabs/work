@@ -24,7 +24,7 @@ import {
 // builder's App of spec 8's layout, sealed and current, its page in its
 // sandboxed frame reading and writing the App's store through the session
 // client the platform mounts, with the generated `@server/_generated/api` references, an
-// operation-bound create form and a record editor with explicit Save.
+// function-bound create form and a record editor with explicit Save.
 // What a lost answer, a cancelled save or a reused key does is core's
 // own test, through the same client (apps/core/test/page-client*.test.ts).
 // A page whose page connects again as someone else, or calls core once

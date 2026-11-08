@@ -6,7 +6,7 @@ import { AppDefinitionError } from "./app-definition-error.ts";
 import type { AppConfig, AppManifest } from "./app-types.ts";
 import { defineApp, inspectApp, registerApp } from "./app.ts";
 import { hasExactly, isOverBytes, refuser } from "./declaration.ts";
-import { migration } from "./migration.ts";
+import { defineMigration } from "./migration.ts";
 import type { Migration } from "./migration.ts";
 import { readPermissionDeclaration } from "./permission-read.ts";
 import type { AppPermission } from "./permission-types.ts";
@@ -28,7 +28,7 @@ import type { AnySchema } from "./value-schema.ts";
 // again, through the same constructors App code uses: its schema through
 // `readSchemaManifest`, each function through `serverModule(schema)` with
 // schemas rebuilt from its descriptors and a handler that runs nothing,
-// each permission through `permission`, each migration through `migration`
+// each permission through `permission`, each migration through `defineMigration`
 // (its handler running nothing too), and the App through `defineApp` and
 // `registerApp`. What that
 // registration's inspection makes must then be exactly the manifest read,
@@ -172,7 +172,7 @@ const place = (
 /**
  * A manifest's fixtures as a declaration lists them: `expect` left out
  * where the manifest records null. Anything else is passed on as it is,
- * for `migration` to refuse.
+ * for `defineMigration` to refuse.
  */
 const fixturesFrom = (fixtures: unknown): unknown =>
   Array.isArray(fixtures)
@@ -206,10 +206,10 @@ const migrationsFrom = (input: unknown): Migration[] =>
     if (declared.name !== name) {
       return refuse(`Migration \`${name}\` is filed under another name.`);
     }
-    // SAFETY: `migration` checks each part as it checks a declaration's,
+    // SAFETY: `defineMigration` checks each part as it checks a declaration's,
     // and `registerApp` checks it against the schema.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return migration({
+    return defineMigration({
       name,
       table: declared.table,
       fromSchema: declared.fromSchema,
@@ -218,7 +218,7 @@ const migrationsFrom = (input: unknown): Migration[] =>
       output: schemaFrom(declared.output),
       fixtures: fixturesFrom(declared.fixtures),
       handler: inert,
-    } as Parameters<typeof migration>[0]);
+    } as Parameters<typeof defineMigration>[0]);
   });
 
 /**

@@ -1,10 +1,10 @@
 import type { Json } from "@grasp-os/shared/json";
 
 import type {
-  ArgsOf,
+  FunctionArgs,
   Callable,
   ReferenceKind,
-  ReturnOf,
+  FunctionReturn,
   SingleAnswer,
 } from "./function-references.ts";
 import type {
@@ -48,13 +48,13 @@ export interface TestPrincipal {
   /** Calls one of the App's public queries. */
   query: <Reference extends PublicReference<"query">>(
     reference: Reference,
-    args: ArgsOf<Reference>
-  ) => Promise<ReturnOf<Reference>>;
+    args: FunctionArgs<Reference>
+  ) => Promise<FunctionReturn<Reference>>;
   /** Calls one of the App's public mutations. */
   mutation: <Reference extends PublicReference<"mutation">>(
     reference: Reference,
-    args: ArgsOf<Reference>
-  ) => Promise<ReturnOf<Reference>>;
+    args: FunctionArgs<Reference>
+  ) => Promise<FunctionReturn<Reference>>;
   /**
    * Calls one of the App's public actions. A fixture binds no resources,
    * so an action that reaches one is refused (`resource.unavailable`):
@@ -66,8 +66,8 @@ export interface TestPrincipal {
     // refused here, as the host refuses it (`function.mode_mismatch`),
     // and so is a union any member of which streams (not distributed).
     reference: SingleAnswer<Reference>,
-    args: ArgsOf<Reference>
-  ) => Promise<ReturnOf<Reference>>;
+    args: FunctionArgs<Reference>
+  ) => Promise<FunctionReturn<Reference>>;
   /**
    * Follows one of the App's public queries, through the realtime
    * subscription a page follows one through. A test that doesn't
@@ -75,8 +75,8 @@ export interface TestPrincipal {
    */
   subscribe: <Reference extends PublicReference<"query">>(
     reference: Reference,
-    args: ArgsOf<Reference>
-  ) => Promise<LiveQuery<ReturnOf<Reference>>>;
+    args: FunctionArgs<Reference>
+  ) => Promise<LiveQuery<FunctionReturn<Reference>>>;
   /**
    * Starts a run of one of the workflows the App binds (`workflows` from
    * `@server/_generated/api`), as a page's `useWorkflow` starts one: the same version,

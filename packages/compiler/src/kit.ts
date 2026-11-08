@@ -123,7 +123,7 @@ export const pageSdk = "@grasp-os/sdk/react";
 
 /**
  * The SDK's root module: its types, which the generated `@server/_generated/api`
- * references import (`OperationReference`, `Id`, …), and its native
+ * references import (`FunctionReference`, `Id`, …), and its native
  * values (`v`), which a page's local form validates with (spec 10.2.4).
  * Nothing else of it: the rest is server code (`pageRootNames`).
  */

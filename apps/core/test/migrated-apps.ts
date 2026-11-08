@@ -65,10 +65,10 @@ export const migrationFile = (
   toSchema: string,
   handler: string,
   fixtures = passingFixtures
-): string => `import { migration, v } from "@grasp-os/sdk";
+): string => `import { defineMigration, v } from "@grasp-os/sdk";
 import { noteFields } from "../../values.ts";
 
-export default migration({
+export default defineMigration({
   name: "derive-category",
   table: "notes",
   fromSchema: ${JSON.stringify(fromSchema)},

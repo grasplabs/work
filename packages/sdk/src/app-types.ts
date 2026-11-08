@@ -128,7 +128,7 @@ export interface AppParts {
 }
 
 /** One registered function, as data: what the host checks a call against. */
-export interface OperationManifest {
+export interface FunctionManifest {
   readonly path: string;
   readonly kind: FunctionKind;
   readonly visibility: Visibility;
@@ -144,7 +144,7 @@ export interface AppManifest {
   /** Its schema's canonical manifest, with its tables' access. */
   readonly schema: SchemaManifest;
   /** Every function, public and internal, by path. */
-  readonly operations: Readonly<Record<string, OperationManifest>>;
+  readonly operations: Readonly<Record<string, FunctionManifest>>;
   /**
    * Every permission it declares, by alias, each with its kind
    * (`~permission`): what its actions reach, the workflows it starts,

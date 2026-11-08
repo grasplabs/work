@@ -1771,7 +1771,6 @@ const buildAppCompiler = async (
     // An App's server code is type-checked against what it and its
     // generated modules import (app-code.ts).
     ...serverSdkImports,
-    "@grasp-os/sdk/database",
     // And its tests, against the SDK's testing module (app-code.ts).
     "@grasp-os/sdk/testing",
   ];

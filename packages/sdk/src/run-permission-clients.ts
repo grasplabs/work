@@ -1,6 +1,6 @@
 import { httpContract } from "./connector-contracts.ts";
+import type { FunctionChannel } from "./function-channel.ts";
 import { isActionPermission } from "./manifest-permissions.ts";
-import type { OperationChannel } from "./operation-channel.ts";
 import type { AnyPermission, AppPermission } from "./permission-types.ts";
 import { descriptorOf } from "./sealed-descriptors.ts";
 import { isPlainObject } from "./value-descriptor.ts";
@@ -77,7 +77,7 @@ const httpFetchOf =
 /** The client of `permission`, over `channel`. */
 const clientOf = (
   permission: AnyPermission,
-  channel: OperationChannel
+  channel: FunctionChannel
 ): Readonly<Record<string, unknown>> => {
   const call =
     (method: string) =>
@@ -110,7 +110,7 @@ const clientOf = (
  */
 export const permissionsOf = (
   permissions: readonly AppPermission[],
-  channel: OperationChannel
+  channel: FunctionChannel
 ): Record<string, unknown> => {
   const connections: Record<string, unknown> = {};
   const clients: Record<string, unknown> = {};

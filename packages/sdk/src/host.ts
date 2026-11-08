@@ -18,11 +18,15 @@ export type {
 // The descriptor format a manifest names, for a host that writes one.
 export { descriptorVersion } from "./value-descriptor.ts";
 
+// `ctx.db` over a host's own read and write executors.
+export { databaseReader } from "./database-reader.ts";
+export { databaseWriter } from "./database-writer.ts";
+
 // An App as the host runs it: its registration as data, and its handlers.
 export { inspectApp, registerApp } from "./app.ts";
 export type {
   AppManifest,
-  OperationManifest,
+  FunctionManifest,
   ServerModules,
 } from "./app-types.ts";
 export {
@@ -88,13 +92,13 @@ export type { WorkflowQueryName } from "./workflow-queries.ts";
 // Who calls an App, and the organization's people, which core answers
 // itself (people.ts).
 export {
-  isPeopleOperationName,
+  isPeopleFunctionName,
   peopleLimits,
-  peopleOperations,
+  peopleFunctions,
   peopleReferences,
 } from "./people.ts";
 export type {
-  PeopleOperationName,
+  PeopleFunctionName,
   PeoplePage,
   Person,
   TeamRef,

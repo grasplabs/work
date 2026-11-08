@@ -1,13 +1,13 @@
 import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 
-import type { PeopleOperationName } from "./people.ts";
+import type { PeopleFunctionName } from "./people.ts";
 import type { FunctionKind } from "./server-function.ts";
 
 /**
  * What the host hands the runner for one invocation: methods only, so it
  * can be an RPC stub, and it stops working once the invocation ends.
  */
-export interface OperationChannel {
+export interface FunctionChannel {
   /** One read of the App's store. */
   readonly read: (request: ReadRequest) => Promise<unknown>;
   /** One staged write: a mutation's only. Answers an insert's minted ID. */
@@ -42,8 +42,5 @@ export interface OperationChannel {
    * (people.ts), which the host answers from its own record of the
    * caller, whatever the arguments say about anyone.
    */
-  readonly people: (
-    name: PeopleOperationName,
-    args: object
-  ) => Promise<unknown>;
+  readonly people: (name: PeopleFunctionName, args: object) => Promise<unknown>;
 }
